@@ -286,6 +286,19 @@ class OrgDbtGitHub(Schema):
     gitrepoAccessToken: Optional[str]
 
 
+class OrgDbtConnectGitRemote(Schema):
+    """Schema for connecting an existing local git repo to a remote GitHub URL"""
+
+    gitrepoUrl: str
+    gitrepoAccessToken: str  # Required - PAT is mandatory for this endpoint
+
+
+class OrgDbtChangesPublish(Schema):
+    """Schema for publishing local changes to remote git repo"""
+
+    commit_message: str
+
+
 class OrgDbtTarget(Schema):
     """Docstring"""
 

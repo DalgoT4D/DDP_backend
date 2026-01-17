@@ -12,11 +12,11 @@ class dbtProject:  # pylint:disable=invalid-name
         """constructor"""
         self.project_dir = project_dir
 
-    def sources_filename(self, schema: str) -> str:
+    def sources_filename(self, schema: str) -> Path:
         """returns the pathname of the sources.yml in the folder for the given schema"""
         return Path(self.project_dir) / "models" / schema / "sources.yml"
 
-    def models_dir(self, schema: str, subdir="") -> str:
+    def models_dir(self, schema: str, subdir="") -> Path:
         """returns the path of the models folder for the given schema"""
         return Path(self.project_dir) / "models" / schema / subdir
 
@@ -32,14 +32,25 @@ class dbtProject:  # pylint:disable=invalid-name
 
     def write_model(self, schema: str, modelname: str, model_sql: str, **kwargs) -> None:
         """writes a .sql model"""
-        self.ensure_models_dir(schema, kwargs.get("subdir", ""))
+        rel_dir_to_models = kwargs.get("rel_dir_to_models")
+
+        if rel_dir_to_models is not None:
+            self.ensure_models_dir(rel_dir_to_models)
+        else:
+            self.ensure_models_dir(schema, kwargs.get("subdir", ""))
+
         model_sql = (
             "--DBT AUTOMATION has generated this model, please DO NOT EDIT \n--Please make sure you dont change the model name \n\n"
             + model_sql
         )
-        model_filename = Path(self.models_dir(schema, kwargs.get("subdir", ""))) / (
-            modelname + ".sql"
-        )
+
+        if rel_dir_to_models is not None:
+            model_filename = Path(self.models_dir(rel_dir_to_models)) / (modelname + ".sql")
+        else:
+            model_filename = Path(self.models_dir(schema, kwargs.get("subdir", ""))) / (
+                modelname + ".sql"
+            )
+
         with open(model_filename, "w", encoding="utf-8") as outfile:
             if kwargs.get("logger"):
                 kwargs["logger"].info("[write_model] %s", model_filename)

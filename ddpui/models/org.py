@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional
 from pydantic import HttpUrl
 from enum import Enum
@@ -52,6 +53,19 @@ class OrgDbt(models.Model):
     target_type = models.CharField(max_length=10)
     default_schema = models.CharField(max_length=50)
     transform_type = models.CharField(max_length=10, null=True)
+    branch_name = models.CharField(max_length=256, null=True)
+    is_default_branch = models.BooleanField(null=True)
+    cli_profile_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+    dbtcloud_creds_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="dbtcloud_creds_block",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

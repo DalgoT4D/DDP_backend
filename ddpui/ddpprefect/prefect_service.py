@@ -716,7 +716,7 @@ def create_or_update_dbt_cloud_creds_block(
     api_key: str,
 ) -> OrgPrefectBlockv1:
     """Create a dbt cli profile block in that has the warehouse information"""
-    cloud_creds_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLOUDCREDS).first()
+    cloud_creds_block = org.dbt.dbtcloud_creds_block if org.dbt else None
     block_name = None
 
     if not cloud_creds_block:
@@ -734,6 +734,11 @@ def create_or_update_dbt_cloud_creds_block(
     cloud_creds_block.block_id = result["block_id"]
     cloud_creds_block.block_name = result["block_name"]
     cloud_creds_block.save()
+
+    # Update the orgdbt relationship if it exists and doesn't already have a dbtcloud_creds_block
+    if org.dbt and not org.dbt.dbtcloud_creds_block:
+        org.dbt.dbtcloud_creds_block = cloud_creds_block
+        org.dbt.save()
 
     return cloud_creds_block
 

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
-from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskLockStatus, DataflowOrgTask
+from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskLockStatus, DataflowOrgTask, TaskType
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     AIRBYTESERVER,
@@ -84,7 +84,7 @@ def generate_sync_org_tasks(seed_master_tasks, org_with_server_block):
 
 @pytest.fixture()
 def generate_transform_org_tasks(seed_master_tasks, org_with_server_block):
-    for task in Task.objects.filter(type__in=["dbt", "git"], is_system=True):
+    for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT], is_system=True):
         OrgTask.objects.create(task=task, org=org_with_server_block)
 
 

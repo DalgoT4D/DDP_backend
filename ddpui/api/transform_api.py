@@ -1,32 +1,27 @@
 import uuid
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from ninja import Router
 from ninja.errors import HttpError
 
 from django.db.models import Q
-from django.utils.text import slugify
 from django.db import transaction
-from django.forms import model_to_dict
+from django.utils import timezone
 
 from ddpui.datainsights import warehouse
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
-from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge, OrgDbtOperation, OrgDbtModelType
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge, CanvasNodeType
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
-    CreateDbtModelPayload,
-    CompleteDbtModelPayload,
     CreateOperationNodePayload,
-    EditDbtOperationPayload,
-    LockCanvasRequestSchema,
     LockCanvasResponseSchema,
     EditOperationNodePayload,
     ModelSrcInputsForMultiInputOp,
@@ -35,23 +30,22 @@ from ddpui.schemas.dbt_workflow_schema import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.core.transformfunctions import validate_operation_config, check_canvas_locked
-from ddpui.api.warehouse_api import get_warehouse_data
-from ddpui.models.tasks import TaskProgressHashPrefix
+from ddpui.models.tasks import TaskProgressHashPrefix, TaskProgressStatus
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.dbtautomation_service import (
     create_or_update_dbt_model_in_project_v2,
-    sync_sources_for_warehouse,
+    sync_sources_for_warehouse_v2,
     convert_canvas_node_to_frontend_format,
     tranverse_graph_and_return_operations_list,
     validate_and_return_inputs_for_multi_input_op,
 )
 from ddpui.auth import has_permission
+from ddpui.core.git_manager import GitManager
+from ddpui.ddpdbt import dbt_service
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.transform_workflow_helpers import (
-    from_orgdbtoperation,
     from_orgdbtmodel,
 )
 
@@ -122,7 +116,7 @@ def sync_sources(request):
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
 
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = OrgDbt.objects.filter(org=org).first()
     if not orgdbt:
         raise HttpError(404, "DBT workspace not set up")
 
@@ -137,291 +131,16 @@ def sync_sources(request):
     taskprogress.add(
         {
             "message": "Started syncing sources",
-            "status": "runnning",
+            "status": TaskProgressStatus.RUNNING,
         }
     )
 
-    sync_sources_for_warehouse.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
+    sync_sources_for_warehouse_v2.delay(orgdbt.id, org_warehouse.id, task_id, hashkey)
 
     return {"task_id": task_id, "hashkey": hashkey}
 
 
 ########################## Models & Sources #############################################
-
-
-@transform_router.post("/dbt_project/model/")
-@has_permission(["can_create_dbt_model"])
-def post_construct_dbt_model_operation(request, payload: CreateDbtModelPayload):
-    """
-    Construct a model or chain operations on a under construction target model
-    """
-
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    check_canvas_locked(orguser, payload.canvas_lock_id)
-
-    if payload.op_type not in dbtautomation_service.OPERATIONS_DICT.keys():
-        raise HttpError(422, "Operation not supported")
-
-    is_multi_input_op = payload.op_type in ["join", "unionall"]
-
-    target_model = None
-    if payload.target_model_uuid:
-        target_model = OrgDbtModel.objects.filter(uuid=payload.target_model_uuid).first()
-
-    if not target_model:
-        target_model = OrgDbtModel.objects.create(
-            uuid=uuid.uuid4(),
-            orgdbt=orgdbt,
-            under_construction=True,
-        )
-
-    # only under construction models can be modified
-    if not target_model.under_construction:
-        raise HttpError(422, "model is locked")
-
-    current_operations_chained = OrgDbtOperation.objects.filter(dbtmodel=target_model).count()
-
-    final_config, all_input_models = validate_operation_config(
-        payload, target_model, is_multi_input_op, current_operations_chained
-    )
-
-    # we create edges only with tables/models
-    for source in all_input_models:
-        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
-        if not edge:
-            DbtEdge.objects.create(
-                from_node=source,
-                to_node=target_model,
-            )
-
-    output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse,
-        payload.op_type,
-        final_config["config"].copy(),
-    )
-    logger.info("creating operation")
-
-    dbt_op = OrgDbtOperation.objects.create(
-        dbtmodel=target_model,
-        uuid=uuid.uuid4(),
-        seq=current_operations_chained + 1,
-        config=final_config,
-        output_cols=output_cols,
-    )
-
-    logger.info("created operation")
-
-    # save the output cols of the latest operation to the dbt model
-    target_model.output_cols = dbt_op.output_cols
-    target_model.save()
-
-    logger.info("updated output cols for the model")
-
-    return from_orgdbtoperation(dbt_op, chain_length=dbt_op.seq)
-
-
-@transform_router.put("/dbt_project/model/operations/{operation_uuid}/")
-@has_permission(["can_edit_dbt_operation"])
-def put_operation(request, operation_uuid: str, payload: EditDbtOperationPayload):
-    """
-    Update operation config
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    is_multi_input_op = payload.op_type in ["join", "unionall"]
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    check_canvas_locked(orguser, payload.canvas_lock_id)
-
-    try:
-        uuid.UUID(str(operation_uuid))
-    except ValueError:
-        raise HttpError(400, "operation not found")
-
-    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
-    if not dbt_operation:
-        raise HttpError(404, "operation not found")
-
-    # if dbt_operation.dbtmodel.under_construction is False:
-    #     raise HttpError(403, "model is locked")
-
-    # allow edit of only leaf operation nodes - disabled for now
-    # if (
-    #     OrgDbtOperation.objects.filter(
-    #         dbtmodel=dbt_operation.dbtmodel, seq__gt=dbt_operation.seq
-    #     ).count()
-    #     >= 1
-    # ):
-    #     raise HttpError(403, "operation is locked; cannot edit")
-
-    target_model = dbt_operation.dbtmodel
-
-    all_ops = OrgDbtOperation.objects.filter(dbtmodel=target_model).all()
-    operation_chained_before = sum(1 for op in all_ops if op.seq < dbt_operation.seq)
-
-    final_config, all_input_models = validate_operation_config(
-        payload, target_model, is_multi_input_op, operation_chained_before, edit=True
-    )
-
-    # create edges only with tables/models if not present
-    for source in all_input_models:
-        edge = DbtEdge.objects.filter(from_node=source, to_node=target_model).first()
-        if not edge:
-            DbtEdge.objects.create(
-                from_node=source,
-                to_node=target_model,
-            )
-
-    output_cols = dbtautomation_service.get_output_cols_for_operation(
-        org_warehouse, payload.op_type, final_config["config"].copy()
-    )
-
-    dbt_operation.config = final_config
-    dbt_operation.output_cols = output_cols
-    dbt_operation.save()
-
-    logger.info("updated operation")
-
-    # save the output cols of the latest operation to the dbt model
-    target_model.output_cols = dbt_operation.output_cols
-    target_model.save()
-
-    if not target_model.under_construction:
-        dbtautomation_service.update_dbt_model_in_project(org_warehouse, target_model)
-
-    # propogate the udpates down the chain
-    dbtautomation_service.propagate_changes_to_downstream_operations(
-        target_model, dbt_operation, depth=1
-    )
-
-    logger.info("updated output cols for the target model")
-
-    return from_orgdbtoperation(dbt_operation, chain_length=len(all_ops))
-
-
-@transform_router.get("/dbt_project/model/operations/{operation_uuid}/")
-@has_permission(["can_view_dbt_operation"])
-def get_operation(request, operation_uuid: str):
-    """
-    Fetch config of operation
-    """
-
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    try:
-        uuid.UUID(str(operation_uuid))
-    except ValueError:
-        raise HttpError(400, "operation not found")
-
-    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
-    if not dbt_operation:
-        raise HttpError(404, "operation not found")
-
-    prev_source_columns = []
-    if dbt_operation.seq > 1:
-        prev_dbt_op = OrgDbtOperation.objects.filter(
-            dbtmodel=dbt_operation.dbtmodel, seq=dbt_operation.seq - 1
-        ).first()
-        prev_source_columns = prev_dbt_op.output_cols
-    else:
-        config = dbt_operation.config
-        if "input_models" in config and len(config["input_models"]) >= 1:
-            model = OrgDbtModel.objects.filter(uuid=config["input_models"][0]["uuid"]).first()
-            if model:
-                for col_data in get_warehouse_data(
-                    request,
-                    "table_columns",
-                    schema_name=model.schema,
-                    table_name=model.name,
-                ):
-                    prev_source_columns.append(col_data["name"])
-
-    return from_orgdbtoperation(dbt_operation, prev_source_columns=prev_source_columns)
-
-
-@transform_router.post("/dbt_project/model/{model_uuid}/save/")
-@has_permission(["can_edit_dbt_model"])
-def post_save_model(request, model_uuid: str, payload: CompleteDbtModelPayload):
-    """Complete the model; create the dbt model on disk"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
-    if not orgdbt_model:
-        raise HttpError(404, "model not found")
-
-    # prevent duplicate models
-    if (
-        OrgDbtModel.objects.filter(orgdbt=orgdbt, name=payload.name)
-        .exclude(uuid=orgdbt_model.uuid)
-        .exists()
-    ):
-        raise HttpError(422, "model with this name already exists")
-
-    # when you are overwriting the existing model with same name but different schema; which again leads to duplicate models
-    if (
-        payload.name == orgdbt_model.name
-        and payload.dest_schema != orgdbt_model.schema
-        and not orgdbt_model.under_construction
-    ):
-        raise HttpError(422, "model with this name already exists in the schema")
-
-    check_canvas_locked(orguser, payload.canvas_lock_id)
-
-    payload.name = slugify(payload.name)
-
-    model_sql_path, output_cols = dbtautomation_service.create_dbt_model_in_project(
-        org_warehouse, orgdbt_model, payload
-    )
-
-    orgdbt_model.output_cols = output_cols
-    orgdbt_model.sql_path = str(model_sql_path)
-    orgdbt_model.under_construction = False
-    orgdbt_model.name = payload.name
-    orgdbt_model.display_name = payload.display_name
-    orgdbt_model.schema = payload.dest_schema
-    orgdbt_model.save()
-
-    return from_orgdbtmodel(orgdbt_model)
 
 
 @transform_router.get("/dbt_project/sources_models/")
@@ -455,225 +174,6 @@ def get_input_sources_and_models(request, schema_name: str = None):
     return res
 
 
-@transform_router.get("/dbt_project/graph/")
-@has_permission(["can_view_dbt_workspace"])
-def get_dbt_project_DAG(request):
-    """
-    Returns the DAG of the dbt project; including the nodes and edges
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    model_nodes: list[OrgDbtModel] = []
-    operation_nodes: list[OrgDbtOperation] = []
-    res_edges = []  # will go directly in the res
-
-    edges = DbtEdge.objects.filter(
-        Q(from_node__orgdbt=orgdbt) | Q(to_node__orgdbt=orgdbt)
-    ).select_related("from_node", "to_node")
-
-    seen_model_node_ids = set()
-    for edge in edges:
-        if edge.from_node.id not in seen_model_node_ids:
-            model_nodes.append(edge.from_node)
-        seen_model_node_ids.add(edge.from_node.id)
-        if edge.to_node.id not in seen_model_node_ids:
-            model_nodes.append(edge.to_node)
-        seen_model_node_ids.add(edge.to_node.id)
-
-    all_operations = OrgDbtOperation.objects.filter(dbtmodel_id__in=list(seen_model_node_ids)).all()
-
-    # fetch all the source nodes that can be in the operation.config["input_models"]
-    uuids = []
-    for operation in all_operations:
-        if "input_models" in operation.config and len(operation.config["input_models"]) > 0:
-            uuids.extend([model["uuid"] for model in operation.config["input_models"]])
-    op_src_nodes = OrgDbtModel.objects.filter(uuid__in=uuids).all()
-
-    # push operation nodes and edges if any
-    for target_node in model_nodes:
-        # src_node -> op1 -> op2 -> op3 -> op4
-        # start building edges from the source
-        prev_op = None
-        operations = [op for op in all_operations if op.dbtmodel.id == target_node.id]
-        sorted_operations = sorted(operations, key=lambda op: op.seq)
-        for operation in sorted_operations:
-            operation_nodes.append(operation)
-            if "input_models" in operation.config and len(operation.config["input_models"]) > 0:
-                input_models = operation.config["input_models"]
-                src_uuids = [model["uuid"] for model in input_models]
-                # edge(s) between the node(s) and other sources involved that are tables (OrgDbtModel)
-                for op_src_node in [
-                    src_node for src_node in op_src_nodes if str(src_node.uuid) in src_uuids
-                ]:
-                    model_nodes.append(op_src_node)
-                    res_edges.append(
-                        {
-                            "id": str(op_src_node.uuid) + "_" + str(operation.uuid),
-                            "source": op_src_node.uuid,
-                            "target": operation.uuid,
-                        }
-                    )
-            if operation.seq >= 2:
-                # for chained operations for seq >= 2
-                res_edges.append(
-                    {
-                        "id": str(prev_op.uuid) + "_" + str(operation.uuid),
-                        "source": prev_op.uuid,
-                        "target": operation.uuid,
-                    }
-                )
-
-            prev_op = operation
-
-        # -> op4 -> target_model
-        if not target_node.under_construction and prev_op:
-            # edge between the last operation and the target model
-            res_edges.append(
-                {
-                    "id": str(prev_op.uuid) + "_" + str(target_node.uuid),
-                    "source": prev_op.uuid,
-                    "target": target_node.uuid,
-                }
-            )
-
-    res_nodes = []
-    for node in model_nodes:
-        if not node.under_construction:
-            res_nodes.append(from_orgdbtmodel(node))
-
-    for node in operation_nodes:
-        res_nodes.append(from_orgdbtoperation(node))
-
-    # set to remove duplicates
-    seen = set()
-    res = {}
-    res["nodes"] = [nn for nn in res_nodes if not (nn["id"] in seen or seen.add(nn["id"]))]
-    seen = set()
-    res["edges"] = [edg for edg in res_edges if not (edg["id"] in seen or seen.add(edg["id"]))]
-
-    return res
-
-
-@transform_router.delete("/dbt_project/model/{model_uuid}/")
-@has_permission(["can_delete_dbt_model"])
-def delete_model(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
-    """
-    Delete a model if it does not have any operations chained
-    Convert the model to "under_construction if its has atleast 1 operation chained"
-    Cascade will be implemented when we re-haul the ui4t architecture
-    """
-    if cascade:
-        raise NotImplementedError()
-
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    check_canvas_locked(orguser, canvas_lock_id)
-
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.MODEL).first()
-    if not orgdbt_model:
-        raise HttpError(404, "model not found")
-
-    if orgdbt_model.type == OrgDbtModelType.SOURCE:
-        raise HttpError(422, "Cannot delete source model")
-
-    dbtautomation_service.delete_org_dbt_model(orgdbt_model, cascade)
-
-    return {"success": 1}
-
-
-@transform_router.delete("/dbt_project/source/{model_uuid}/")
-@has_permission(["can_delete_dbt_model"])
-def delete_source(request, model_uuid, canvas_lock_id: str = None, cascade: bool = False):
-    """
-    Delete a source from dbt project
-    Cascade will be implemented when we re-haul the ui4t architecture
-    """
-    if cascade:
-        raise NotImplementedError()
-
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    check_canvas_locked(orguser, canvas_lock_id)
-
-    orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid, type=OrgDbtModelType.SOURCE).first()
-    if not orgdbt_model:
-        raise HttpError(404, "source not found")
-
-    if DbtEdge.objects.filter(Q(from_node=orgdbt_model) | Q(to_node=orgdbt_model)).count() > 0:
-        raise HttpError(422, "Cannot delete source model as it is connected to other models")
-
-    dbtautomation_service.delete_org_dbt_source(orgdbt_model, cascade)
-
-    return {"success": 1}
-
-
-@transform_router.delete("/dbt_project/model/operations/{operation_uuid}/")
-@has_permission(["can_delete_dbt_operation"])
-def delete_operation(request, operation_uuid, canvas_lock_id: str = None):
-    """
-    Delete an operation;
-    Delete the model if its the last operation left in the chain
-    """
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(404, "please setup your warehouse first")
-
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
-    if not orgdbt:
-        raise HttpError(404, "dbt workspace not setup")
-
-    check_canvas_locked(orguser, canvas_lock_id)
-
-    dbt_operation = OrgDbtOperation.objects.filter(uuid=operation_uuid).first()
-    if not dbt_operation:
-        raise HttpError(404, "operation not found")
-
-    if OrgDbtOperation.objects.filter(dbtmodel=dbt_operation.dbtmodel).count() == 1:
-        # delete the model file
-        dbt_operation.dbtmodel.delete()
-    else:
-        dbt_operation.delete()
-
-    # delete the model file is present
-    dbtautomation_service.delete_dbt_model_in_project(dbt_operation.dbtmodel)
-
-    return {"success": 1}
-
-
 @transform_router.get("/dbt_project/data_type/")
 @has_permission(["can_view_warehouse_data"])
 def get_warehouse_datatypes(request):
@@ -689,78 +189,141 @@ def get_warehouse_datatypes(request):
     return data_types
 
 
-@transform_router.post(
-    "/dbt_project/canvas/lock/",
-    response=LockCanvasResponseSchema,
-)
+# Canvas Lock endpoints (matching dashboard pattern)
+@transform_router.post("/dbt_project/canvas/lock/", response=LockCanvasResponseSchema)
 @has_permission(["can_edit_dbt_model"])
-def post_lock_canvas(request, payload: LockCanvasRequestSchema):
-    """
-    Lock the canvas for the org
-    """
+def lock_canvas(request):
+    """Lock canvas for editing"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    # Get the dbt project via org.dbt relationship
+    orgdbt = getattr(org, "dbt", None)
+    if orgdbt is None:
+        raise HttpError(404, "dbt workspace not setup")
 
-    if canvas_lock:
-        # locked, but not by the requestor
-        if canvas_lock.locked_by != orguser:
-            # no lock_id => didn't acquire the lock
-            return LockCanvasResponseSchema(
-                locked_by=canvas_lock.locked_by.user.email,
-                locked_at=canvas_lock.locked_at.isoformat(),
-            )
-
-        # locked by the requestor
-        else:
-            # only if this is the right session do we refresh the lock
-            if payload.lock_id == canvas_lock.lock_id:
-                canvas_lock.locked_at = datetime.now()
-                canvas_lock.save()
-            else:
-                # no lock_id => didn't acquire the lock
+    # Check if already locked
+    try:
+        lock: CanvasLock = orgdbt.canvas_lock
+        if not lock.is_expired():
+            if lock.locked_by == orguser:
+                # Refresh lock with 2-minute duration
+                lock.expires_at = timezone.now() + timedelta(minutes=2)
+                lock.save()
                 return LockCanvasResponseSchema(
-                    locked_by=canvas_lock.locked_by.user.email,
-                    locked_at=canvas_lock.locked_at.isoformat(),
+                    lock_token=lock.lock_token,
+                    expires_at=lock.expires_at.isoformat(),
+                    locked_by=lock.locked_by.user.email,
                 )
+            else:
+                raise HttpError(423, f"Canvas is already locked by {lock.locked_by.user.email}")
+        else:
+            # Delete expired lock
+            lock.delete()
+    except CanvasLock.DoesNotExist:
+        pass
 
-    # no lock, acquire
-    else:
-        canvas_lock = CanvasLock.objects.create(
-            locked_by=orguser, locked_at=datetime.now(), lock_id=uuid.uuid4()
-        )
+    # Create new lock with 2-minute duration
+    lock = CanvasLock.objects.create(
+        dbt=orgdbt,
+        locked_by=orguser,
+        lock_token=str(uuid.uuid4()),
+        expires_at=timezone.now() + timedelta(minutes=2),
+    )
 
     return LockCanvasResponseSchema(
-        locked_by=canvas_lock.locked_by.user.email,
-        locked_at=canvas_lock.locked_at.isoformat(),
-        lock_id=str(canvas_lock.lock_id),
+        lock_token=lock.lock_token,
+        expires_at=lock.expires_at.isoformat(),
+        locked_by=lock.locked_by.user.email,
     )
 
 
-@transform_router.post("/dbt_project/canvas/unlock/")
+@transform_router.put("/dbt_project/canvas/lock/refresh/")
 @has_permission(["can_edit_dbt_model"])
-def post_unlock_canvas(request, payload: LockCanvasRequestSchema):
-    """
-    Unlock the canvas for the org
-    """
+def refresh_canvas_lock(request):
+    """Refresh canvas lock to extend expiry"""
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    canvas_lock = CanvasLock.objects.filter(locked_by__org=org).first()
+    # Get the dbt project via org.dbt relationship
+    orgdbt = org.dbt
+    if orgdbt is None:
+        raise HttpError(404, "dbt workspace not setup")
 
-    if canvas_lock is None:
-        raise HttpError(404, "no lock found")
+    try:
+        lock: CanvasLock = orgdbt.canvas_lock
+        if lock.is_expired():
+            raise HttpError(410, "Lock has expired")
+        if lock.locked_by != orguser:
+            raise HttpError(403, "You can only refresh your own locks")
 
-    if canvas_lock.locked_by != orguser:
-        raise HttpError(403, "not allowed")
+        # Refresh lock with 2-minute duration
+        lock.expires_at = timezone.now() + timedelta(minutes=2)
+        lock.save()
 
-    if str(canvas_lock.lock_id) != payload.lock_id:
-        raise HttpError(422, "wrong lock id")
+        logger.info(f"Refreshed lock for canvas")
 
-    canvas_lock.delete()
+        return LockCanvasResponseSchema(
+            lock_token=lock.lock_token,
+            expires_at=lock.expires_at.isoformat(),
+            locked_by=lock.locked_by.user.email,
+        )
+    except CanvasLock.DoesNotExist:
+        raise HttpError(404, "No active lock found")
 
-    return {"success": 1}
+
+@transform_router.delete("/dbt_project/canvas/lock/")
+@has_permission(["can_edit_dbt_model"])
+def unlock_canvas(request):
+    """Unlock canvas"""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Get the dbt project via org.dbt relationship
+    orgdbt = getattr(org, "dbt", None)
+    if orgdbt is None:
+        raise HttpError(404, "dbt workspace not setup")
+
+    try:
+        lock = orgdbt.canvas_lock
+        if lock.locked_by != orguser:
+            raise HttpError(403, "You can only unlock your own locks")
+        lock.delete()
+    except CanvasLock.DoesNotExist:
+        pass  # Already unlocked
+
+    return {"success": True}
+
+
+# Canvas Lock Helper Function
+def validate_canvas_lock(orguser: OrgUser, orgdbt):
+    """
+    Validate that the canvas is properly locked by the requesting user.
+    Similar to dashboard lock validation but for canvas operations.
+    Also refreshes the lock expiry on successful validation.
+
+    Args:
+        orguser: The user making the request
+        orgdbt: The OrgDbt object to check lock for
+
+    Raises:
+        HttpError: 423 if canvas is locked by another user
+        HttpError: 410 if canvas lock has expired
+    """
+    # Check canvas lock status
+    try:
+        lock: CanvasLock = orgdbt.canvas_lock
+        if lock.is_expired():
+            # Clean up expired lock
+            lock.delete()
+            raise HttpError(410, "Canvas lock has expired. Please acquire a new lock.")
+        elif lock.locked_by != orguser:
+            raise HttpError(423, f"Canvas is locked by {lock.locked_by.user.email}")
+        # Lock is valid and owned by the user - refresh expiry and proceed
+        lock.expires_at = timezone.now() + timedelta(minutes=2)
+        lock.save()
+    except CanvasLock.DoesNotExist:
+        raise HttpError(423, "Canvas is not locked. Please acquire a lock before making changes.")
 
 
 # ==============================================================================
@@ -782,7 +345,7 @@ def get_input_sources_and_models_v2(request, schema_name: str = None):
         raise HttpError(404, "please setup your warehouse first")
 
     # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
@@ -827,21 +390,31 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
     if not org_warehouse:
         raise HttpError(404, "please setup your warehouse first")
 
-    # make sure the orgdbt here is the one we create locally
-    orgdbt = OrgDbt.objects.filter(org=org, transform_type=TransformType.UI).first()
+    orgdbt = org.dbt
     if not orgdbt:
         raise HttpError(404, "dbt workspace not setup")
 
-    check_canvas_locked(orguser, canvas_lock_id)
+    validate_canvas_lock(orguser, orgdbt)
 
     orgdbt_model = OrgDbtModel.objects.filter(uuid=model_uuid).first()
     if not orgdbt_model:
         raise HttpError(404, "model not found")
 
-    if orgdbt_model.type == OrgDbtModelType.SOURCE:
-        raise HttpError(422, "Cannot delete source model")
+    # Check if the model is being used in any canvas nodes
+    canvas_nodes = CanvasNode.objects.filter(dbtmodel=orgdbt_model, orgdbt=orgdbt)
+    if canvas_nodes.exists():
+        node_names = [node.name for node in canvas_nodes[:3]]  # Show first 3
+        raise HttpError(422, f"Cannot delete: being used in the workflow ({', '.join(node_names)})")
 
-    dbtautomation_service.delete_org_dbt_model_v2(orgdbt_model, cascade)
+    if orgdbt_model.type == OrgDbtModelType.SOURCE:
+        # For sources, ensure that the source definition is removed from the project files
+        dbtautomation_service.delete_dbt_source_in_project(orgdbt_model)
+    elif orgdbt_model.type == OrgDbtModelType.MODEL:
+        # Delete the model file from disk
+        dbtautomation_service.delete_dbt_model_in_project(orgdbt_model)
+
+    # Delete the database record
+    orgdbt_model.delete()
 
     return {"success": 1}
 
@@ -856,8 +429,6 @@ def get_dbt_project_DAG_v2(request):
     1. Get all canvas nodes for the org
     2. Get all canvas edges for the org
     3. Convert to frontend format
-
-    Returns same format as v1 API for backward compatibility.
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -868,7 +439,7 @@ def get_dbt_project_DAG_v2(request):
         raise HttpError(422, "please setup your warehouse first")
 
     # Validate org has dbt workspace
-    orgdbt = OrgDbt.objects.filter(org=org, gitrepo_url=None).first()
+    orgdbt = OrgDbt.objects.filter(org=org).first()
     if not orgdbt:
         raise HttpError(422, "dbt workspace not setup")
 
@@ -881,10 +452,25 @@ def get_dbt_project_DAG_v2(request):
             "from_node", "to_node"
         )
 
+        # Get changed files list using GitManager (if git is initialized)
+        project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        if not project_dir.exists():
+            raise HttpError(500, "dbt project directory does not exist")
+
+        changed_files = []
+        if orgdbt.gitrepo_url:
+            try:
+                git_manager = GitManager(repo_local_path=project_dir)
+                if git_manager.is_git_initialized():
+                    changed_files = git_manager.get_changed_files_list()
+            except Exception as e:
+                # Log the error but continue without git status
+                logger.warning(f"Failed to get git status for org {org.slug}: {e}")
+
         # Convert nodes to frontend format (backward compatible)
         nodes = []
         for canvas_node in canvas_nodes:
-            frontend_node = convert_canvas_node_to_frontend_format(canvas_node)
+            frontend_node = convert_canvas_node_to_frontend_format(canvas_node, changed_files)
             nodes.append(frontend_node)
 
         # Convert edges to frontend format (same as before)
@@ -937,6 +523,21 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
         org_dbt_model = OrgDbtModel.objects.filter(uuid=dbtmodel_uuid, orgdbt=orgdbt).first()
         if not org_dbt_model:
             raise HttpError(404, "model not found")
+
+        # handle source definitions better
+        # if its a source that we are adding to the canvas; make sure it exists in the yml deifnition
+        # then update the sql_path to point to the source definition file
+        if org_dbt_model.type == OrgDbtModelType.SOURCE:
+            source_yml_def: dbtautomation_service.SourceYmlDefinition = (
+                dbtautomation_service.ensure_source_yml_definition_in_project(
+                    orgdbt, org_dbt_model.schema, org_dbt_model.name
+                )
+            )
+            org_dbt_model.sql_path = source_yml_def.sql_path
+            org_dbt_model.source_name = source_yml_def.source_name
+            org_dbt_model.name = source_yml_def.table
+            org_dbt_model.schema = source_yml_def.source_schema
+            org_dbt_model.save()
 
         # create only if the canvas node for the model doesn't already exist
         existing_node = CanvasNode.objects.filter(dbtmodel=org_dbt_model, orgdbt=orgdbt).first()
@@ -1267,6 +868,7 @@ def post_terminate_operation_node(
             "operations": operations_list,
             "dest_schema": payload.dest_schema,
             "output_name": payload.name,
+            "rel_dir_to_models": payload.rel_dir_to_models,
         }
 
         # create the dbt model on disk by merging all the operations
@@ -1352,9 +954,13 @@ def delete_canvas_node(request, node_uuid: str):
 
     try:
         canvas_node = CanvasNode.objects.get(uuid=node_uuid, orgdbt=orgdbt)
+        dbtmodel = canvas_node.dbtmodel
 
-        if canvas_node.dbtmodel:
-            dbtautomation_service.delete_dbt_model_in_project(canvas_node.dbtmodel)
+        if dbtmodel:
+            if dbtmodel.type == OrgDbtModelType.MODEL:
+                dbtautomation_service.delete_dbt_model_in_project(dbtmodel)
+            elif dbtmodel.type == OrgDbtModelType.SOURCE:
+                dbtautomation_service.delete_dbt_source_in_project(dbtmodel)
 
         canvas_node.delete()
 
@@ -1420,3 +1026,72 @@ def get_canvas_node(request, node_uuid: str):
     except Exception as e:
         logger.error(f"Failed to fetch canvas node {node_uuid}: {str(e)}")
         raise HttpError(500, f"Failed to fetch canvas node: {str(e)}")
+
+
+@transform_router.post("/v2/dbt_project/sync_remote_dbtproject_to_canvas/")
+@has_permission(["can_create_dbt_model"])
+def sync_remote_dbtproject_to_canvas(request):
+    """
+    Sync a remote dbt project to canvas (create/update CanvasNodes and CanvasEdges)
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+
+    if not orgdbt:
+        raise HttpError(400, "Organization does not have a dbt workspace configured")
+
+    if orgdbt.transform_type != TransformType.GIT:
+        logger.info(f"Org {org.slug} dbt workspace is not of GIT type, skipping sync to canvas")
+        return {
+            "success": True,
+            "message": "dbt workspace is not of GIT type, skipping sync to canvas",
+        }
+
+    # Get warehouse
+    try:
+        warehouse_obj = OrgWarehouse.objects.get(org=org)
+    except OrgWarehouse.DoesNotExist:
+        raise HttpError(400, "Organization does not have a warehouse configured")
+
+    return dbt_service.sync_remote_dbtproject_to_canvas(org, orgdbt, warehouse_obj)
+
+
+@transform_router.get("/v2/dbt_project/models_directories/")
+@has_permission(["can_view_dbt_workspace"])
+def get_models_directories(request):
+    """
+    Get all directories (and subdirectories) under the models folder
+    """
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    orgdbt = org.dbt
+    if not orgdbt:
+        raise HttpError(400, "Organization does not have a dbt workspace configured")
+
+    try:
+        project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        if not project_dir.exists():
+            raise HttpError(500, "dbt project directory does not exist")
+
+        models_dir = project_dir / "models"
+        if not models_dir.exists():
+            return {"directories": []}
+
+        # Get all directories under models
+        directories = []
+        for item in models_dir.rglob("*"):
+            if item.is_dir():
+                # Get relative path from models directory
+                relative_path = item.relative_to(models_dir)
+                directories.append(str(relative_path))
+
+        # Add root models directory and sort
+        directories.insert(0, "")  # Empty string represents models root
+        directories.sort(key=lambda x: (x.count("/"), x))  # Sort by depth then alphabetically
+
+        return {"directories": directories}
+
+    except Exception as e:
+        logger.exception(f"Error getting models directories for org {org.slug}: {str(e)}")
+        raise HttpError(500, f"Failed to get models directories: {str(e)}")

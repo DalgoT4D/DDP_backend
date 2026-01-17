@@ -11,6 +11,12 @@ class UserPreferences(models.Model):
     discord_webhook = models.URLField(blank=True, null=True)  # deprecated
     enable_email_notifications = models.BooleanField(default=False)
     disclaimer_shown = models.BooleanField(default=False)
+    last_visited_transform_tab = models.CharField(
+        max_length=10,
+        choices=[("ui", "UI Transform"), ("github", "DBT Transform")],
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -19,4 +25,5 @@ class UserPreferences(models.Model):
         return {
             "enable_email_notifications": self.enable_email_notifications,
             "disclaimer_shown": self.disclaimer_shown,
+            "last_visited_transform_tab": self.last_visited_transform_tab,
         }
