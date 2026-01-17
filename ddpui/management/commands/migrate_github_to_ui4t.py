@@ -294,17 +294,8 @@ class Command(BaseCommand):
 
             self.stdout.write(self.style.SUCCESS("  Manifest generated successfully"))
 
-            # Step 2: Parse manifest to canvas
-            self.stdout.write("  Parsing manifest and creating canvas nodes/edges...")
-            stats = dbt_service.parse_dbt_manifest_to_canvas(
-                org=org,
-                orgdbt=orgdbt,
-                org_warehouse=warehouse,
-                manifest_json=manifest_json,
-                refresh=False,  # Don't regenerate, we just did
-            )
-
-            # Step 2.5: Clean up unused sources for UI4T organizations only
+            # Step 1.5: Clean up unused sources for UI4T organizations only (before canvas creation)
+            cleanup_stats = {"sources_removed": [], "sources_with_edges_skipped": [], "errors": []}
             if orgdbt.transform_type == TransformType.UI.value:
                 self.stdout.write("  Cleaning up unused sources for UI4T org...")
                 cleanup_stats = cleanup_unused_sources(org, orgdbt, manifest_json)
@@ -333,15 +324,25 @@ class Command(BaseCommand):
                     and not cleanup_stats["sources_with_edges_skipped"]
                 ):
                     self.stdout.write("    No unused sources found to clean up")
-
-                # Add cleanup stats to overall stats
-                stats["cleanup_sources_removed"] = len(cleanup_stats["sources_removed"])
-                stats["cleanup_sources_skipped"] = len(cleanup_stats["sources_with_edges_skipped"])
-                stats["cleanup_errors"] = len(cleanup_stats["errors"])
             else:
                 self.stdout.write(
                     f"  Skipping cleanup - not a UI4T org (transform_type: {orgdbt.transform_type})"
                 )
+
+            # Step 2: Parse manifest to canvas
+            self.stdout.write("  Parsing manifest and creating canvas nodes/edges...")
+            stats = dbt_service.parse_dbt_manifest_to_canvas(
+                org=org,
+                orgdbt=orgdbt,
+                org_warehouse=warehouse,
+                manifest_json=manifest_json,
+                refresh=False,  # Don't regenerate, we just did
+            )
+
+            # Add cleanup stats to overall stats
+            stats["cleanup_sources_removed"] = len(cleanup_stats["sources_removed"])
+            stats["cleanup_sources_skipped"] = len(cleanup_stats["sources_with_edges_skipped"])
+            stats["cleanup_errors"] = len(cleanup_stats["errors"])
 
             # Step 3: Determine user tab preference from original transform_type
             # If transform_type is 'github' or 'dbtcloud' → preference = 'github'
