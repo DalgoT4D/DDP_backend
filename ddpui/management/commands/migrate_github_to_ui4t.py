@@ -285,18 +285,16 @@ class Command(BaseCommand):
         Uses existing parse_dbt_manifest_to_canvas() function.
         """
         try:
-            # Step 1: Generate manifest.json
-            self.stdout.write("  Generating manifest.json (dbt deps + dbt compile)...")
-            manifest_json = dbt_service.generate_manifest_json_for_dbt_project(org, orgdbt)
-
-            if not manifest_json:
-                raise Exception("Failed to generate manifest.json")
-
-            self.stdout.write(self.style.SUCCESS("  Manifest generated successfully"))
-
-            # Step 1.5: Clean up unused sources for UI4T organizations only (before canvas creation)
+            # Step 1: Clean up unused sources for UI4T organizations only (before canvas creation)
             cleanup_stats = {"sources_removed": [], "sources_with_edges_skipped": [], "errors": []}
             if orgdbt.transform_type == TransformType.UI.value:
+                self.stdout.write("  Generating manifest.json (dbt deps + dbt compile)...")
+                manifest_json = dbt_service.generate_manifest_json_for_dbt_project(org, orgdbt)
+
+                if not manifest_json:
+                    raise Exception("Failed to generate manifest.json")
+
+                self.stdout.write(self.style.SUCCESS("  Manifest generated successfully"))
                 self.stdout.write("  Cleaning up unused sources for UI4T org...")
                 cleanup_stats = cleanup_unused_sources(org, orgdbt, manifest_json)
 
