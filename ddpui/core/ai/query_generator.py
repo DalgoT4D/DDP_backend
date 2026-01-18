@@ -252,6 +252,7 @@ class QuerySecurityValidator:
         for table_ref in referenced_tables:
             normalized_ref = table_ref.strip('"').strip("'")
             normalized_ref_lower = normalized_ref.lower()
+            found_match = False
 
             for allowed_table in available_tables:
                 allowed_lower = allowed_table.lower()

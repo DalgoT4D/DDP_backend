@@ -118,8 +118,17 @@ class DynamicQueryExecutor:
                 )
 
             # Generate query plan from natural language
+            data_catalog = None
+            try:
+                data_catalog = self.data_intelligence.get_org_data_catalog(org)
+            except Exception as catalog_error:
+                self.logger.error(f"Error retrieving data catalog: {catalog_error}")
+
             query_plan = self.query_generator.generate_query_from_question(
-                question=question, org=org, dashboard_id=dashboard_id
+                question=question,
+                org=org,
+                dashboard_id=dashboard_id,
+                data_catalog=data_catalog,
             )
 
             # Early exit if query generation failed
@@ -192,6 +201,8 @@ class DynamicQueryExecutor:
             )
 
             execution_time_ms = int((time.time() - query_start) * 1000)
+            if execution_time_ms == 0:
+                execution_time_ms = 1
 
             # Process and format results
             formatted_data, columns = self._format_query_results(results)
@@ -492,7 +503,7 @@ class DynamicQueryExecutor:
         error_counts = {}
 
         for execution in executions:
-            if not execution["execution_success"] and execution["error_message"]:
+            if not execution.get("execution_success") and execution.get("error_message"):
                 error_type = (
                     execution["error_message"].split(":")[0]
                     if ":" in execution["error_message"]

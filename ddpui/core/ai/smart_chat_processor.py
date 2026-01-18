@@ -93,15 +93,15 @@ class SmartChatProcessor:
         ]
 
         self.temporal_patterns = [
-            r"\b(\d{4})\b",  # Years like 2021, 2023
+            r"\b(Q1|Q2|Q3|Q4)\s*(\d{4})?\b",
             r"\b(last|this|next)\s+(year|month|week|quarter)\b",
             r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
-            r"\b(Q1|Q2|Q3|Q4)\s*(\d{4})?\b",
+            r"\b(\d{4})\b",  # Years like 2021, 2023
         ]
 
         self.geographic_patterns = [
-            r"\bin\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b",  # "in Maharashtra", "in New York"
-            r"\bfrom\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b",
+            r"\bin\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b(?=\s+(?:in|for|during|from|between|on|at)\b|$)",  # "in Maharashtra", "in New York"
+            r"\bfrom\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b(?=\s+(?:in|for|during|from|between|on|at)\b|$)",
         ]
 
         self.metric_patterns = [
@@ -135,7 +135,7 @@ class SmartChatProcessor:
             if re.search(pattern, message_lower, re.IGNORECASE)
         )
 
-        data_query_confidence = min(data_query_matches / len(self.data_query_patterns), 1.0)
+        data_query_confidence = min(data_query_matches / 3, 1.0)
 
         # Extract entities
         temporal_context = self._extract_temporal_context(message)
@@ -395,11 +395,11 @@ class SmartChatProcessor:
         if "rate limit" in error_msg.lower():
             content = "I'm receiving many requests right now. Please wait a moment before asking data questions again."
         elif "no data" in error_msg.lower():
-            content = f"I couldn't find data to answer '{message}'. This might be because:\n• The requested data doesn't exist in your dashboard\n• The question needs to be more specific\n• Data sharing needs to be enabled in settings"
+            content = f"I hit an error while trying to find data to answer '{message}'. This might be because:\n• The requested data doesn't exist in your dashboard\n• The question needs to be more specific\n• Data sharing needs to be enabled in settings"
         elif "validation failed" in error_msg.lower():
             content = f"I had trouble understanding how to query your data for '{message}'. Could you rephrase your question more specifically?"
         else:
-            content = f"I couldn't execute a data query for your question. Let me help you understand what data is available in this dashboard instead."
+            content = "I hit an error while trying to execute a data query for your question. Let me help you understand what data is available in this dashboard instead."
 
         # Add suggestions for better queries
         suggestions = self._generate_query_improvement_suggestions(
@@ -778,13 +778,14 @@ class SmartChatProcessor:
                 return MessageIntent.DASHBOARD_EXPLANATION, 0.9
 
         # Strong data query indicators
-        if data_query_confidence > 0.4:
+        if data_query_confidence > 0.3:
             return MessageIntent.DATA_QUERY, min(data_query_confidence + 0.2, 0.9)
 
         # Dashboard explanation patterns
         explanation_patterns = [
             r"\b(?:what is|what does|explain|describe|tell me about)\b.*\b(?:chart|dashboard|graph|visualization)\b",
             r"\b(?:how does|how do|what happens)\b.*\b(?:this|dashboard|chart)\b",
+            r"\b(?:help me|help)\s+(?:understand|explain)\b.*\b(?:chart|dashboard|graph|visualization)\b",
             r"\b(?:what can|what should|how can)\s+i\s+(?:see|view|analyze|use)\b",
         ]
 
@@ -1198,6 +1199,15 @@ Be concise, business-focused, and always grounded ONLY in the dashboard data whe
             for title in chart_titles:
                 if title:
                     suggestions.append(f"Ask about: '{title} data breakdown'")
+
+        if not suggestions:
+            suggestions.extend(
+                [
+                    "Try asking: 'How many records were added last month?'",
+                    "You can ask: 'What is the total by category?'",
+                    "Ask about: 'Top 10 items by metric'",
+                ]
+            )
 
         return suggestions[:3]  # Limit to 3 suggestions
 

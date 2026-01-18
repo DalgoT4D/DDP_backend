@@ -310,10 +310,8 @@ class EnhancedDynamicExecutor(DynamicQueryExecutor):
             # Check if result is cache-eligible
             optimization.cache_eligible = (
                 result.success
-                and result.execution_time_ms >= 1000
-                and result.row_count <= 1000  # Queries over 1 second benefit from caching
-                and "error"  # Don't cache very large results
-                not in question.lower()  # Don't cache error-testing queries
+                and result.row_count <= 1000  # Avoid caching very large results
+                and "error" not in question.lower()  # Don't cache error-testing queries
             )
 
             # Estimate performance gains

@@ -7,6 +7,7 @@ Tests the complete flow from natural language question to executed query results
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from django.test import TestCase
+from django.contrib.auth.models import User
 
 from ddpui.core.ai.query_generator import (
     NaturalLanguageQueryService,
@@ -21,6 +22,7 @@ from ddpui.core.ai.data_intelligence import (
     DataColumnInfo,
 )
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
 
 
@@ -31,22 +33,23 @@ class TestLayer2Integration(TestCase):
         """Set up test fixtures"""
         # Create test org
         self.org = Org.objects.create(name="Test Education Org", slug="test-edu-org")
+        self.user = User.objects.create_user(
+            username="testuser", email="testuser@example.com", password="password"
+        )
+        self.org_user = OrgUser.objects.create(user=self.user, org=self.org)
 
         # Create test warehouse
         self.warehouse = OrgWarehouse.objects.create(
             org=self.org,
             wtype="postgres",
             name="test_warehouse",
-            host="localhost",
-            port=5432,
-            username="test_user",
-            password="test_pass",
-            database="test_db",
+            credentials="{}",
         )
 
         # Create test charts
         self.chart1 = Chart.objects.create(
             org=self.org,
+            created_by=self.org_user,
             title="Student Enrollment by State",
             chart_type="bar",
             schema_name="education",
@@ -59,6 +62,7 @@ class TestLayer2Integration(TestCase):
 
         self.chart2 = Chart.objects.create(
             org=self.org,
+            created_by=self.org_user,
             title="School Performance",
             chart_type="line",
             schema_name="education",

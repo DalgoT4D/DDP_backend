@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from django.test import TestCase
 from django.utils import timezone
+from django.contrib.auth.models import User
 
 from ddpui.core.ai.data_intelligence import (
     DataIntelligenceService,
@@ -23,6 +24,7 @@ from ddpui.core.ai.query_generator import NaturalLanguageQueryService, QueryPlan
 from ddpui.core.ai.enhanced_executor import EnhancedDynamicExecutor
 from ddpui.core.ai.smart_chat_processor import SmartChatProcessor, MessageIntent, MessageAnalysis
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org_user import OrgUser
 from ddpui.models.org_settings import OrgSettings
 from ddpui.models.visualization import Chart
 
@@ -34,10 +36,14 @@ class TestEndToEndAIDataAccess(TestCase):
         """Set up test fixtures for full integration testing"""
         # Create test org with AI settings
         self.org = Org.objects.create(name="Test Education Analytics", slug="test-edu-analytics")
+        self.user = User.objects.create_user(
+            username="testuser", email="testuser@example.com", password="password"
+        )
+        self.org_user = OrgUser.objects.create(user=self.user, org=self.org)
 
         # Create org settings with AI enabled
         self.org_settings = OrgSettings.objects.create(
-            org=self.org, ai_consent=True, ai_data_sharing_enabled=True
+            org=self.org, ai_logging_acknowledged=True, ai_data_sharing_enabled=True
         )
 
         # Create test warehouse
@@ -45,16 +51,13 @@ class TestEndToEndAIDataAccess(TestCase):
             org=self.org,
             wtype="postgres",
             name="education_warehouse",
-            host="localhost",
-            port=5432,
-            username="test_user",
-            password="test_pass",
-            database="education_db",
+            credentials="{}",
         )
 
         # Create realistic test charts
         self.enrollment_chart = Chart.objects.create(
             org=self.org,
+            created_by=self.org_user,
             title="Student Enrollment by State and Year",
             chart_type="bar",
             schema_name="education",
@@ -68,6 +71,7 @@ class TestEndToEndAIDataAccess(TestCase):
 
         self.performance_chart = Chart.objects.create(
             org=self.org,
+            created_by=self.org_user,
             title="School Performance Trends",
             chart_type="line",
             schema_name="education",
@@ -77,6 +81,7 @@ class TestEndToEndAIDataAccess(TestCase):
 
         self.revenue_chart = Chart.objects.create(
             org=self.org,
+            created_by=self.org_user,
             title="Revenue by Region",
             chart_type="pie",
             schema_name="finance",
