@@ -38,7 +38,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
 )
-from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER, CONNECTION_SYNC_QUEUE
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
@@ -206,9 +206,7 @@ def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPref
                 }
             },
         ),
-        org.get_queue_config()[
-            CONNECTION_SYNC_QUEUE
-        ],  # manual airbyte syncs use queue (ddp - for old orgs and bootcamp-ddp for new orgs).
+        org.get_queue_config().connection_sync_queue,  # manual airbyte syncs use this queue
     )
 
     existing_dataflow = OrgDataFlowv1.objects.filter(

@@ -55,26 +55,6 @@ MAP_FLOW_RUN_STATE_NAME_TO_TYPE = {
 # Prefect worker related - Queue names
 DDP_WORK_QUEUE = "ddp"
 MANUL_DBT_WORK_QUEUE = "manual-dbt"
-BOOTCAMP_DDP_QUEUE = "bootcamp-ddp"
-
-# Queue config keys
-SCHEDULED_PIPELINE_QUEUE = "scheduled_pipeline_queue"
-CONNECTION_SYNC_QUEUE = "connection_sync_queue"
-TRANSFORM_TASK_QUEUE = "transform_task_queue"
-
-# Toggle for bootcamp queue (set USE_BOOTCAMP_QUEUE=true to enable)
-# If true, new orgs use BOOTCAMP_DDP_QUEUE; otherwise use DDP_WORK_QUEUE
-USE_BOOTCAMP_QUEUE = os.getenv("USE_BOOTCAMP_QUEUE", "false").lower() == "true"
-
-
-def default_queue_config():
-    """Default queue configuration for new organizations"""
-    return {
-        SCHEDULED_PIPELINE_QUEUE: DDP_WORK_QUEUE,
-        CONNECTION_SYNC_QUEUE: BOOTCAMP_DDP_QUEUE if USE_BOOTCAMP_QUEUE else DDP_WORK_QUEUE,
-        TRANSFORM_TASK_QUEUE: MANUL_DBT_WORK_QUEUE,
-    }
-
 
 # Kind
 FLOW_RUN_KIND = "flow-run"
