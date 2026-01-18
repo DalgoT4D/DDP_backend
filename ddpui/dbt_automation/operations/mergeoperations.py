@@ -230,8 +230,22 @@ def merge_operations_v2(
     dbt_sql += select_statement
 
     dbt_project = dbtProject(project_dir)
-    dbt_project.ensure_models_dir(config["dest_schema"])
+    rel_dir_to_models = None
+    if (
+        config.get("rel_dir_to_models") and config.get("rel_dir_to_models") == "/"
+    ):  # edge case where root is given
+        rel_dir_to_models = ""
 
-    model_sql_path = dbt_project.write_model(config["dest_schema"], config["output_name"], dbt_sql)
+    if rel_dir_to_models is not None:
+        dbt_project.ensure_models_dir(rel_dir_to_models)
+    else:
+        dbt_project.ensure_models_dir(config["dest_schema"])
+
+    model_sql_path = dbt_project.write_model(
+        config["dest_schema"],
+        config["output_name"],
+        dbt_sql,
+        rel_dir_to_models=rel_dir_to_models,
+    )
 
     return model_sql_path, output_cols

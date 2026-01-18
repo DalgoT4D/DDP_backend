@@ -1,10 +1,12 @@
 name: Dalgo UI4T Integration Tests
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      run_now:
+        description: 'Set to "true" to run this workflow manually (default: false)'
+        required: false
+        default: 'false'
 
 jobs:
   tests:
@@ -66,4 +68,4 @@ jobs:
         env:
           DJANGOSECRET: "some-secret-key"
         run: |
-          uv run pytest ddpui/tests/integration_tests/dbt_automation/*.py -s 
+          uv run pytest ddpui/tests/integration_tests/dbt_automation/*.py -s

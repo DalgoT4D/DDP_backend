@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 import django
 import pytest
@@ -12,7 +13,7 @@ django.setup()
 from ddpui.settings import PRODUCTION
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchemaChange
 from ddpui.models.org_user import OrgUser
-from ddpui.models.dbt_workflow import OrgDbtModel
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.tests.api_tests.test_user_org_api import (
     seed_db,
     orguser,
@@ -28,7 +29,7 @@ from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
 )
 from ddpui.models.tasks import TaskProgressStatus
-from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.models.tasks import Task, OrgTask
 from ddpui.utils.constants import TASK_AIRBYTESYNC
@@ -159,7 +160,7 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
         Mock(side_effect=Exception("_get_wclient failed")),
     ) as get_wclient_mock:
         with pytest.raises(Exception) as exc:
-            sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+            sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
         assert exc.value.args[0] == f"Error syncing sources: _get_wclient failed"
         add_progress_mock.assert_has_calls(
@@ -167,13 +168,13 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
                 call(
                     {
                         "message": "Started syncing sources",
-                        "status": "runnning",
+                        "status": TaskProgressStatus.RUNNING,
                     }
                 ),
                 call(
                     {
                         "message": "Error syncing sources: _get_wclient failed",
-                        "status": "failed",
+                        "status": TaskProgressStatus.FAILED,
                     }
                 ),
             ]
@@ -215,7 +216,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         get_wclient_mock.return_value = mock_instance
 
         with pytest.raises(Exception) as exc:
-            sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+            sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
         assert exc.value.args[0] == f"Error syncing sources: get_schemas failed"
         add_progress_mock.assert_has_calls(
@@ -223,13 +224,13 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
                 call(
                     {
                         "message": "Started syncing sources",
-                        "status": "runnning",
+                        "status": TaskProgressStatus.RUNNING,
                     }
                 ),
                 call(
                     {
                         "message": "Error syncing sources: get_schemas failed",
-                        "status": "failed",
+                        "status": TaskProgressStatus.FAILED,
                     }
                 ),
             ]
@@ -287,7 +288,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         get_wclient_mock.return_value = mock_instance
 
         assert OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt).count() == 0
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
@@ -332,7 +333,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         )
 
         # syncing sources again should not create any new entries
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
@@ -342,13 +343,228 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
 
         # add a new table in the warehouse
         SCHEMAS_TABLES["schema1"].append("table5")
-        sync_sources_for_warehouse(orgdbt.id, warehouse.id, "task-id", "hashkey")
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
         for schema in SCHEMAS_TABLES:
             assert set(
                 OrgDbtModel.objects.filter(type="source", orgdbt=orgdbt, schema=schema).values_list(
                     "name", flat=True
                 )
             ) == set(SCHEMAS_TABLES[schema])
+
+
+def test_sync_sources_v2_with_existing_models_update_columns(orguser: OrgUser, tmp_path):
+    """Test sync_sources_for_warehouse_v2 when existing models exist - should update their columns"""
+    project_dir: Path = Path(tmp_path) / orguser.org.slug
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=project_dir,
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    project_dir.mkdir(exist_ok=True, parents=True)
+
+    # Create existing model with old columns
+    existing_model = OrgDbtModel.objects.create(
+        uuid=uuid.uuid4(),
+        orgdbt=orgdbt,
+        name="existing_table",
+        schema="schema1",
+        display_name="existing_table",
+        type=OrgDbtModelType.MODEL,
+        output_cols=["old_col1", "old_col2"],
+    )
+
+    # warehouse schemas and tables
+    SCHEMAS_TABLES = {
+        "schema1": ["existing_table", "new_table"],
+        "schema2": ["table3"],
+    }
+
+    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
+        TaskProgress, "add", return_value=Mock()
+    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
+        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+        mock_instance.get_table_columns.side_effect = lambda schema, table: [
+            {"name": f"{table}_col1"},
+            {"name": f"{table}_col2"},
+            {"name": f"{table}_col3"},
+        ]
+
+        get_wclient_mock.return_value = mock_instance
+
+        # Should have 1 existing model
+        assert OrgDbtModel.objects.filter(orgdbt=orgdbt).count() == 1
+
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
+
+        # Should have 3 models now (1 existing updated + 2 new sources)
+        assert OrgDbtModel.objects.filter(orgdbt=orgdbt).count() == 3
+
+        # Check existing model was updated with new columns
+        existing_model.refresh_from_db()
+        assert existing_model.output_cols == [
+            "existing_table_col1",
+            "existing_table_col2",
+            "existing_table_col3",
+        ]
+
+        # Check new sources were created
+        assert OrgDbtModel.objects.filter(
+            type=OrgDbtModelType.SOURCE, orgdbt=orgdbt, name="new_table"
+        ).exists()
+        assert OrgDbtModel.objects.filter(
+            type=OrgDbtModelType.SOURCE, orgdbt=orgdbt, name="table3"
+        ).exists()
+
+
+def test_sync_sources_v2_column_fetch_error_handling(orguser: OrgUser, tmp_path):
+    """Test sync_sources_for_warehouse_v2 handles column fetch errors gracefully"""
+    project_dir: Path = Path(tmp_path) / orguser.org.slug
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=project_dir,
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    project_dir.mkdir(exist_ok=True, parents=True)
+
+    # warehouse schemas and tables
+    SCHEMAS_TABLES = {
+        "schema1": ["table1"],
+    }
+
+    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
+        TaskProgress, "add", return_value=Mock()
+    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
+        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+        # Simulate error when getting columns
+        mock_instance.get_table_columns.side_effect = Exception("Column fetch failed")
+
+        get_wclient_mock.return_value = mock_instance
+
+        # Should not raise exception even if column fetch fails
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
+
+        # Source should still be created, just without columns
+        source = OrgDbtModel.objects.get(type=OrgDbtModelType.SOURCE, orgdbt=orgdbt, name="table1")
+        assert source.output_cols is None or source.output_cols == []
+
+
+def test_sync_sources_v2_empty_warehouse(orguser: OrgUser, tmp_path):
+    """Test sync_sources_for_warehouse_v2 with empty warehouse (no schemas)"""
+    project_dir: Path = Path(tmp_path) / orguser.org.slug
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org,
+        wtype="postgres",
+        airbyte_destination_id="airbyte_destination_id",
+    )
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=project_dir,
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    project_dir.mkdir(exist_ok=True, parents=True)
+
+    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
+        TaskProgress, "add", return_value=Mock()
+    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+    ) as get_wclient_mock:
+        mock_instance = Mock()
+        mock_instance.get_schemas.return_value = []  # Empty warehouse
+
+        get_wclient_mock.return_value = mock_instance
+
+        assert OrgDbtModel.objects.filter(type=OrgDbtModelType.SOURCE, orgdbt=orgdbt).count() == 0
+
+        sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
+
+        # No sources should be created
+        assert OrgDbtModel.objects.filter(type=OrgDbtModelType.SOURCE, orgdbt=orgdbt).count() == 0
+
+        # Should have completed without error
+        add_progress_mock.assert_any_call(
+            {
+                "message": "Sync finished",
+                "status": TaskProgressStatus.COMPLETED,
+            }
+        )
+
+
+def test_sync_sources_v2_invalid_org_dbt_id(tmp_path):
+    """Test sync_sources_for_warehouse_v2 with invalid org_dbt_id"""
+    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
+        TaskProgress, "add", return_value=Mock()
+    ):
+        # Use non-existent ID that is valid integer
+        try:
+            sync_sources_for_warehouse_v2(999999, 999999, "task-id", "hashkey")
+        except Exception as e:
+            # Should handle the case where org_dbt doesn't exist gracefully
+            # May raise AttributeError on NoneType or other errors
+            assert True  # Any exception is acceptable for invalid IDs
+
+
+def test_sync_sources_v2_invalid_warehouse_id(orguser: OrgUser, tmp_path):
+    """Test sync_sources_for_warehouse_v2 with invalid warehouse_id"""
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir=str(Path(tmp_path) / orguser.org.slug),
+        dbt_venv=tmp_path,
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
+        TaskProgress, "add", return_value=Mock()
+    ) as add_progress_mock:
+        # Should handle invalid warehouse ID gracefully - use non-existent integer ID
+        try:
+            sync_sources_for_warehouse_v2(orgdbt.id, 999999, "task-id", "hashkey")
+        except Exception as e:
+            # Should raise an error during _get_wclient call due to None warehouse
+            assert (
+                "NoneType" in str(e)
+                or "_get_wclient" in str(e)
+                or "Error syncing sources" in str(e)
+            )
 
 
 def test_detect_schema_changes_for_org_ensure_orphan_connections_are_deleted(

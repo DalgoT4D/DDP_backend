@@ -54,6 +54,12 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     dbt_creds.pop("ssl_mode", None)
     dbt_creds.pop("ssl", None)
 
+    orgdbt = org.dbt
+
+    if not orgdbt:
+        logger.error("Org %s does not have a dbt workspace setup", org.slug)
+        return (None, None), "dbt workspace not setup for the org"
+
     # set defaults to target and profile
     # cant create a cli profile without these two
     # idea is these should be updated when we setup transformation or update the warehouse
@@ -64,7 +70,7 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
         target = "default"
 
     logger.info("Found org=%s profile_name=%s target=%s", org.slug, profile_name, target)
-    cli_profile_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
+    cli_profile_block: OrgPrefectBlockv1 = orgdbt.cli_profile_block
     if cli_profile_block:
         logger.info(
             f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
@@ -115,11 +121,18 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
             return (None, None), "Failed to create the cli profile block"
 
         # save the cli profile block in django db
-        cli_profile_block = OrgPrefectBlockv1.objects.create(
+        cli_profile_block, created = OrgPrefectBlockv1.objects.get_or_create(
             org=org,
             block_type=DBTCLIPROFILE,
             block_id=cli_block_response["block_id"],
             block_name=cli_block_response["block_name"],
         )
+
+        if created:
+            logger.info(
+                f"Successfully created the cli profile block : {cli_profile_block.block_name}"
+            )
+            orgdbt.cli_profile_block = cli_profile_block
+            orgdbt.save()
 
     return (cli_profile_block, dbt_project_params), None

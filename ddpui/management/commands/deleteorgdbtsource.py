@@ -8,7 +8,7 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.dbt_workflow import OrgDbtModel, DbtEdge
 from ddpui.models.tasks import TaskProgressHashPrefix
-from ddpui.core.dbtautomation_service import sync_sources_for_warehouse
+from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 
 logger = CustomLogger("ddpui")
 load_dotenv()
@@ -79,4 +79,4 @@ class Command(BaseCommand):
         )
 
         print("Syncing sources")
-        sync_sources_for_warehouse(org.dbt.id, org_warehouse.id, task_id, hashkey)
+        sync_sources_for_warehouse_v2(org.dbt.id, org_warehouse.id, task_id, hashkey)

@@ -3,7 +3,7 @@
 import json
 from django.core.management.base import BaseCommand
 
-from ddpui.models.tasks import DataflowOrgTask
+from ddpui.models.tasks import DataflowOrgTask, TaskType
 from ddpui.ddpprefect.prefect_service import prefect_put, prefect_get
 
 
@@ -23,7 +23,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # Your code to remove the --target parameter from dbt commands goes here
-        for dforgtask in DataflowOrgTask.objects.filter(orgtask__task__type="dbt"):
+        for dforgtask in DataflowOrgTask.objects.filter(orgtask__task__type=TaskType.DBT).all():
             is_modified = False
             dataflow = dforgtask.dataflow
 
