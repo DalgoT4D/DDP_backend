@@ -95,7 +95,7 @@ class Command(BaseCommand):
 
         elif queue_type == "connection_sync_queue":
             # Get manual dataflows with airbyte tasks
-            airbyte_org_tasks = OrgTask.objects.filter(org=org, task__task_type=TaskType.AIRBYTE)
+            airbyte_org_tasks = OrgTask.objects.filter(org=org, task__type=TaskType.AIRBYTE)
 
             dataflow_ids: Set[str] = set()
             for org_task in airbyte_org_tasks:
@@ -109,7 +109,7 @@ class Command(BaseCommand):
         elif queue_type == "transform_task_queue":
             # Get manual dataflows with dbt, github, or dbtcloud tasks
             transform_org_tasks = OrgTask.objects.filter(
-                org=org, task__task_type__in=[TaskType.DBT, TaskType.GIT, TaskType.DBTCLOUD]
+                org=org, task__type__in=[TaskType.DBT, TaskType.GIT, TaskType.DBTCLOUD]
             )
 
             dataflow_ids: Set[str] = set()
