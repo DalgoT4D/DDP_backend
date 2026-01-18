@@ -1,3 +1,5 @@
+import os
+
 # prefect block names (they come from prefect's block_type table)
 AIRBYTESERVER = "Airbyte Server"
 AIRBYTECONNECTION = "Airbyte Connection"
@@ -50,7 +52,7 @@ MAP_FLOW_RUN_STATE_NAME_TO_TYPE = {
 }
 
 
-# Prefect worker related
+# Prefect worker related - Queue names
 DDP_WORK_QUEUE = "ddp"
 MANUL_DBT_WORK_QUEUE = "manual-dbt"
 
