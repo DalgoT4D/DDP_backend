@@ -73,10 +73,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Dry run completed. No changes made."))
             return
 
-        if not dataflows:
-            self.stdout.write(self.style.WARNING("No dataflows found to migrate."))
-            return
-
         # Confirm before proceeding
         confirm = input(f"Migrate {org_slug} {queue_type} to queue '{new_queue}'? (y/N): ")
         if confirm.lower() != "y":
