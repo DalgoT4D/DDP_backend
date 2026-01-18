@@ -151,7 +151,6 @@ class Command(BaseCommand):
         else:
             self.stdout.write("No relevant dataflows found for this queue type")
 
-    @transaction.atomic
     def perform_migration(
         self,
         org: Org,
