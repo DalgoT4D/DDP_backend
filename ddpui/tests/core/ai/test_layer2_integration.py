@@ -450,6 +450,7 @@ class TestLayer2Integration(TestCase):
             self.assertIn("Failed to generate query", query_plan.explanation)
             self.assertEqual(query_plan.confidence_score, 0.0)
 
+    @patch("ddpui.core.ai.query_generator.get_default_ai_provider")
     def test_empty_data_catalog_handling(self):
         """Test handling when no data catalog is available"""
         service = NaturalLanguageQueryService()
