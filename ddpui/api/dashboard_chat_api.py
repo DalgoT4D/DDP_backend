@@ -1165,6 +1165,33 @@ def dashboard_chat(request, dashboard_id: int, payload: DashboardChatRequest):
                 "Based on the data available in this dashboard, I cannot answer that question because the necessary information is not present in the dashboard data."
             )
 
+            if user_message:
+                response_time = timezone.now()
+                log_ai_chat_conversation(
+                    org=orguser_obj.org,
+                    user=orguser_obj.user,
+                    user_prompt=user_message,
+                    ai_response=safe_content,
+                    request_timestamp=request_time,
+                    response_timestamp=response_time,
+                    dashboard_id=dashboard_id,
+                    chart_id=payload.selected_chart_id,
+                    session_id=session_id,
+                )
+                log_ai_chat_metering(
+                    org=orguser_obj.org,
+                    user=orguser_obj.user,
+                    model_used="smart_chat_processor",
+                    prompt_tokens=int(len(user_message.split()) * 1.3),
+                    completion_tokens=int(len(safe_content.split()) * 1.3),
+                    response_time_ms=int((response_time - request_time).total_seconds() * 1000),
+                    include_data=payload.include_data,
+                    max_rows=payload.max_rows if payload.include_data else None,
+                    dashboard_id=dashboard_id,
+                    chart_id=payload.selected_chart_id,
+                    session_id=session_id,
+                )
+
             return JsonResponse(
                 {
                     "content": safe_content,

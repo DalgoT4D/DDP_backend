@@ -340,19 +340,33 @@ class SmartChatProcessor:
     ) -> EnhancedChatResponse:
         """Handle general conversation messages"""
         try:
+            if not dashboard_context:
+                return EnhancedChatResponse(
+                    content=(
+                        "Based on the data available in this dashboard, I cannot answer that question because the necessary information is not present in the dashboard data."
+                    ),
+                    intent_detected=MessageIntent.GENERAL_CONVERSATION,
+                    fallback_used=True,
+                )
+
             # Use standard AI chat with light context
             if not self.ai_provider:
                 self.ai_provider = get_default_ai_provider()
 
             system_prompt = self._build_general_chat_prompt(dashboard_context)
+            dashboard_summary = self._build_dashboard_summary_from_context(dashboard_context)
 
             ai_messages = [
                 AIMessage(role="system", content=system_prompt),
+                AIMessage(
+                    role="system",
+                    content=f"DASHBOARD CONTEXT (ONLY SOURCE OF TRUTH):\n{dashboard_summary}",
+                ),
                 AIMessage(role="user", content=message),
             ]
 
             response = self.ai_provider.chat_completion(
-                messages=ai_messages, temperature=0.7, max_tokens=800
+                messages=ai_messages, temperature=0.2, max_tokens=800
             )
 
             # Add helpful suggestions for data queries if appropriate
@@ -400,6 +414,9 @@ class SmartChatProcessor:
             content = f"I had trouble understanding how to query your data for '{message}'. Could you rephrase your question more specifically?"
         else:
             content = "I hit an error while trying to execute a data query for your question. Let me help you understand what data is available in this dashboard instead."
+
+        if error_msg and error_msg != "Unknown error":
+            content += f"\n\nError details: {error_msg}"
 
         # Add suggestions for better queries
         suggestions = self._generate_query_improvement_suggestions(
