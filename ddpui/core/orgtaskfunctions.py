@@ -20,7 +20,6 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
 from ddpui.ddpprefect import (
-    MANUL_DBT_WORK_QUEUE,
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
@@ -162,7 +161,7 @@ def create_prefect_deployment_for_dbtcore_task(
                 }
             },
         ),
-        MANUL_DBT_WORK_QUEUE,
+        org_task.org.get_queue_config().transform_task_queue,  # manual dbt tasks queue
     )
 
     # store deployment record in django db
