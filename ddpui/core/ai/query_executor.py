@@ -188,7 +188,9 @@ class DynamicQueryExecutor:
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
             # Apply final safety modifications to query
-            safe_query, modifications = self._apply_safety_modifications(query_plan.generated_sql)
+            safe_query, modifications = self._apply_safety_modifications(
+                query_plan.generated_sql, org_warehouse
+            )
 
             # Set execution timeout
             query_start = time.time()
@@ -284,10 +286,36 @@ class DynamicQueryExecutor:
                 execution_time_ms=int((time.time() - execution_start) * 1000),
             )
 
-    def _apply_safety_modifications(self, query: str) -> Tuple[str, List[str]]:
+    def _apply_safety_modifications(
+        self, query: str, org_warehouse: Optional[OrgWarehouse] = None
+    ) -> Tuple[str, List[str]]:
         """Apply final safety modifications to the query"""
         modifications = []
         safe_query = query.strip()
+
+        # Normalize unsupported date functions for specific warehouses
+        if org_warehouse and str(getattr(org_warehouse, "wtype", "")).lower() in (
+            "postgres",
+            "postgresql",
+        ):
+            import re
+
+            function_mappings = {
+                "QUARTER": "EXTRACT(QUARTER FROM {arg})",
+                "YEAR": "EXTRACT(YEAR FROM {arg})",
+                "MONTH": "EXTRACT(MONTH FROM {arg})",
+                "DAY": "EXTRACT(DAY FROM {arg})",
+            }
+
+            for func, replacement in function_mappings.items():
+                pattern = re.compile(rf"\b{func}\s*\(\s*([^)]+?)\s*\)", re.IGNORECASE)
+                if pattern.search(safe_query):
+                    safe_query = pattern.sub(
+                        lambda m: replacement.format(arg=m.group(1)), safe_query
+                    )
+                    modifications.append(
+                        f"Rewrote {func}() to {replacement.split('(')[0]}() for Postgres"
+                    )
 
         # Ensure LIMIT clause exists and is within bounds
         if "LIMIT" not in safe_query.upper():
