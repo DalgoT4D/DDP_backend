@@ -292,10 +292,11 @@ class QuerySecurityValidator:
         ]
 
         tables = []
-        query_upper = query.upper()
+        # Strip EXTRACT(...) so "FROM <date>" inside it isn't treated as a table.
+        sanitized_query = re.sub(r"EXTRACT\s*\([^)]*\)", "", query, flags=re.IGNORECASE)
 
         for pattern in table_patterns:
-            matches = re.findall(pattern, query_upper, re.IGNORECASE)
+            matches = re.findall(pattern, sanitized_query, re.IGNORECASE)
             tables.extend(matches)
 
         return tables
