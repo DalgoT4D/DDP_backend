@@ -698,8 +698,8 @@ QUERY GENERATION RULES:
 4. Include appropriate WHERE, GROUP BY, ORDER BY as needed
 5. Use standard SQL aggregation functions when answering quantitative questions
 6. For Postgres-style SQL, use EXTRACT(<part> FROM <date>) instead of YEAR(), MONTH(), DAY(), QUARTER()
-6. Handle case-insensitive string matching with UPPER() or ILIKE when appropriate
-7. Format queries for readability with proper indentation
+7. Handle case-insensitive string matching with UPPER() or ILIKE when appropriate
+8. Format queries for readability with proper indentation
 
 SECURITY REQUIREMENTS:
 - No subqueries unless absolutely necessary

@@ -99,15 +99,6 @@ def ensure_org_settings_table_exists():
             return False
 
 
-@router.get("/test")
-def test_org_settings_route(request):
-    """Test endpoint to verify org settings routing is working"""
-    return {
-        "message": "Org settings API is working",
-        "user_id": request.user.id if hasattr(request, "user") else None,
-    }
-
-
 def _build_org_settings_response(org_settings):
     """Build the organization settings response schema"""
     return OrgSettingsSchema(
@@ -247,16 +238,7 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
 
         logger.info(f"Updated org settings for org {orguser.org.slug} by user {orguser.user.email}")
 
-        update_org_data = OrgSettingsSchema(
-            ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
-            ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-            ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-            if org_settings.ai_settings_accepted_by
-            else None,
-            ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-            if org_settings.ai_settings_accepted_at
-            else None,
-        )
+        update_org_data = _build_org_settings_response(org_settings)
 
         return {"success": True, "res": update_org_data.dict()}
 

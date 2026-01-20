@@ -34,7 +34,7 @@ class TestLayer2Integration(TestCase):
         # Create test org
         self.org = Org.objects.create(name="Test Education Org", slug="test-edu-org")
         self.user = User.objects.create_user(
-            username="testuser", email="testuser@example.com", password="password"
+            username="testuser", email="testuser@example.com", password=None
         )
         self.org_user = OrgUser.objects.create(user=self.user, org=self.org)
 
@@ -349,7 +349,7 @@ class TestLayer2Integration(TestCase):
         self.assertTrue(any("Reduced LIMIT" in mod for mod in modifications))
 
     @patch("ddpui.core.ai.query_generator.get_default_ai_provider")
-    def test_table_relevance_scoring(self, mock_ai_provider):
+    def test_table_relevance_scoring(self, _mock_ai_provider):
         """Test that the system correctly identifies relevant tables for questions"""
         service = NaturalLanguageQueryService()
         catalog = self._create_mock_data_catalog()
@@ -451,7 +451,7 @@ class TestLayer2Integration(TestCase):
             self.assertEqual(query_plan.confidence_score, 0.0)
 
     @patch("ddpui.core.ai.query_generator.get_default_ai_provider")
-    def test_empty_data_catalog_handling(self):
+    def test_empty_data_catalog_handling(self, mock_ai_provider):
         """Test handling when no data catalog is available"""
         service = NaturalLanguageQueryService()
 

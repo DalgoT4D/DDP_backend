@@ -548,8 +548,12 @@ class SmartChatProcessor:
                         source_line = f"\n\nSource: {schema_name}.{table_name}"
 
                     # Build a concise, user-friendly answer
+                    if float(total_value).is_integer():
+                        formatted_total = f"{int(total_value):,}"
+                    else:
+                        formatted_total = f"{total_value:,.2f}"
                     answer_text = (
-                        f"Based on your dashboard data, the total {preferred_numeric_col} for {ent} is **{int(total_value):,}**."
+                        f"Based on your dashboard data, the total {preferred_numeric_col} for {ent} is **{formatted_total}**."
                         f"{source_line}"
                     )
 
