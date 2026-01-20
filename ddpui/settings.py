@@ -21,8 +21,8 @@ from datetime import timedelta
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
-from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
-from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+
+# Legacy loggers removed - now using unified logging
 
 load_dotenv()
 
@@ -265,9 +265,7 @@ AIRBYTE_CUSTOM_SOURCES = {
 
 AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 
-# finally set up the loggers
-setup_ddp_logger()
-setup_ab_logger()
+# Legacy logger setup removed - unified logging is now automatic
 
 # Fixtures to seed data
 # python3 manage.py loaddata seed/tasks.json
