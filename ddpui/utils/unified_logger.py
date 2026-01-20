@@ -9,6 +9,7 @@ import traceback
 import uuid
 import inspect
 import threading
+import os
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextvars import ContextVar
@@ -141,14 +142,16 @@ class DalgoLogger:
         """Setup console and file handlers with structured formatting"""
         formatter = StructuredFormatter()
 
-        # Console handler for development
+        # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
 
-        # File handler for production logs
-        if hasattr(settings, "BASE_DIR"):
+        # File handler - controlled by ENABLE_FILE_LOGGING env var
+        file_logging_enabled = os.getenv("ENABLE_FILE_LOGGING", "True") == "True"
+
+        if file_logging_enabled and hasattr(settings, "BASE_DIR"):
             log_dir = settings.BASE_DIR / "ddpui/logs"
             log_dir.mkdir(exist_ok=True)
 
