@@ -265,7 +265,38 @@ AIRBYTE_CUSTOM_SOURCES = {
 
 AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 
-# Legacy logger setup removed - unified logging is now automatic
+# Unified logging configuration
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "structured": {
+            "()": "ddpui.utils.unified_logger.StructuredFormatter",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "structured",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "uvicorn.access": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "uvicorn.error": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 
 # Fixtures to seed data
 # python3 manage.py loaddata seed/tasks.json
