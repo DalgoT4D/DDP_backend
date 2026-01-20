@@ -244,6 +244,32 @@ class DalgoLogger:
         """Log critical message with context"""
         self._log(logging.CRITICAL, message, *args, **kwargs)
 
+    def get_slug(self) -> str:
+        """Get the current organization slug"""
+        # First try to get from context
+        context_slug = org_slug_context.get(None)
+        if context_slug:
+            return context_slug
+
+        # Try to auto-detect from stack frames (similar to _get_caller_info)
+        try:
+            stack = inspect.stack()
+            for frame_info in stack:
+                frame = frame_info.frame
+                # Check for orguser object
+                if orguser := frame.f_locals.get("orguser"):
+                    if hasattr(orguser, "org") and hasattr(orguser.org, "slug"):
+                        return orguser.org.slug
+                # Check for standalone org object
+                elif org := frame.f_locals.get("org"):
+                    if hasattr(org, "slug"):
+                        return org.slug
+        except Exception:
+            pass
+
+        # Default to empty string
+        return ""
+
 
 # Context managers for setting correlation context
 class LogContext:
