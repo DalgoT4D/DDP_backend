@@ -5,10 +5,8 @@ Organization Settings API endpoints - Account Manager only access
 from ninja import Router, File, UploadedFile
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
-from django.db import transaction, connection
+from django.db import transaction
 from django.db.utils import ProgrammingError
-from django.core.management.color import no_style
-from django.db import models
 from django.http import HttpResponse
 from django.utils import timezone
 from functools import wraps
@@ -80,23 +78,8 @@ def ensure_org_settings_table_exists():
         OrgSettings.objects.exists()
         return True
     except ProgrammingError:
-        try:
-            # Create the table using Django's schema generation
-            from django.db import connection
-            from django.core.management.sql import sql_create_index
-            from django.core.management.color import no_style
-
-            style = no_style()
-
-            # Get the SQL to create the table
-            with connection.schema_editor() as schema_editor:
-                schema_editor.create_model(OrgSettings)
-
-            logger.info("Created org_settings table successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to create org_settings table: {e}")
-            return False
+        logger.error("OrgSettings table does not exist. Please run migrations.")
+        return False
 
 
 def _build_org_settings_response(org_settings):
@@ -147,28 +130,8 @@ def get_org_settings(request):
 
     except ProgrammingError as e:
         if 'relation "ddpui_org_settings" does not exist' in str(e):
-            logger.info("OrgSettings table does not exist. Attempting to create it...")
-            if ensure_org_settings_table_exists():
-                # Table created successfully, retry the operation
-                try:
-                    org_settings, created = OrgSettings.objects.get_or_create(
-                        org=orguser.org,
-                        defaults={
-                            "ai_data_sharing_enabled": False,
-                            "ai_logging_acknowledged": False,
-                        },
-                    )
-
-                    retry_org_data = _build_org_settings_response(org_settings)
-
-                    return {"success": True, "res": retry_org_data.dict()}
-                except Exception as retry_error:
-                    logger.error(f"Error after creating table: {retry_error}")
-                    raise HttpError(500, f"Failed after table creation: {str(retry_error)}")
-            else:
-                raise HttpError(
-                    500, "Unable to create required database table. Please contact administrator."
-                )
+            ensure_org_settings_table_exists()
+            raise HttpError(500, "OrgSettings table does not exist. Please run migrations.")
         else:
             logger.error(f"Database error retrieving org settings: {e}")
             logger.exception("Full traceback for database error:")
@@ -244,52 +207,8 @@ def update_org_settings(request, payload: UpdateOrgSettingsSchema):
 
     except ProgrammingError as e:
         if 'relation "ddpui_org_settings" does not exist' in str(e):
-            logger.info("OrgSettings table does not exist. Attempting to create it...")
-            if ensure_org_settings_table_exists():
-                # Table created successfully, retry the operation
-                try:
-                    # Retry the update operation
-                    org_settings, created = OrgSettings.objects.get_or_create(
-                        org=orguser.org,
-                        defaults={
-                            "ai_data_sharing_enabled": False,
-                            "ai_logging_acknowledged": False,
-                        },
-                    )
-
-                    # Apply the updates
-                    ai_settings_changed, ai_chat_being_enabled = _apply_org_settings_updates(
-                        org_settings, payload, orguser
-                    )
-
-                    org_settings.save()
-
-                    # Send notification if AI chat feature was enabled
-                    if ai_chat_being_enabled:
-                        send_ai_chat_enabled_notification(orguser.org, orguser.user.email)
-                        logger.info(
-                            f"Sent AI chat enabled notification for org {orguser.org.slug} (retry path)"
-                        )
-
-                    retry_update_org_data = OrgSettingsSchema(
-                        ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
-                        ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-                        ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-                        if org_settings.ai_settings_accepted_by
-                        else None,
-                        ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-                        if org_settings.ai_settings_accepted_at
-                        else None,
-                    )
-
-                    return {"success": True, "res": retry_update_org_data.dict()}
-                except Exception as retry_error:
-                    logger.error(f"Error after creating table: {retry_error}")
-                    raise HttpError(500, f"Failed after table creation: {str(retry_error)}")
-            else:
-                raise HttpError(
-                    500, "Unable to create required database table. Please contact administrator."
-                )
+            ensure_org_settings_table_exists()
+            raise HttpError(500, "OrgSettings table does not exist. Please run migrations.")
         else:
             logger.error(f"Database error updating org settings: {e}")
             logger.exception("Full traceback for database error:")
