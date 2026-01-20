@@ -31,6 +31,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
     OrgWarehouse,
     OrgSchemaChange,
+    OrgDbt,
 )
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, User
@@ -632,6 +633,12 @@ def test_update_destination_name(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
     mock_update_destination.return_value = {
@@ -690,6 +697,12 @@ def test_update_destination_postgres_config(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
     mock_update_destination.return_value = {
@@ -754,6 +767,12 @@ def test_update_destination_bigquery_config(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="bigquery", name="name")
 
     mock_update_destination.return_value = {
@@ -823,6 +842,12 @@ def test_update_destination_snowflake_config(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
 
     mock_update_destination.return_value = {
@@ -904,6 +929,12 @@ def test_update_destination_cliprofile(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
 
     mock_update_destination.return_value = {
