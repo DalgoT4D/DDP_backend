@@ -1387,3 +1387,62 @@ def test_fetch_and_update_org_schema_changes_api_error(
     _, error = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
 
     assert "Something went wrong" in error
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.update_destination",
+    mock_update_destination=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+    mock_retrieve_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.update_warehouse_credentials",
+    mock_update_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
+def test_update_destination_no_dbt_workspace(
+    mock_create_or_update_org_cli_block: Mock,
+    mock_update_warehouse_credentials: Mock,
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_update_destination: Mock,
+):
+    """test update_destination when dbt workspace is not setup (org.dbt is None)"""
+    # Create org without dbt workspace
+    org = Org.objects.create(name="org", slug="org", dbt=None)
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
+
+    mock_update_destination.return_value = {
+        "destinationId": "DESTINATION_ID",
+    }
+    mock_retrieve_warehouse_credentials.return_value = {"host": "localhost", "port": "5432"}
+    mock_update_warehouse_credentials.return_value = None
+
+    payload = AirbyteDestinationUpdate(
+        name="new-name",
+        destinationDefId="destinationDefId",
+        config={"host": "newhost", "port": "5433"},
+    )
+
+    response, error = update_destination(org, "destination_id", payload)
+
+    # Should complete successfully
+    assert error is None
+    assert response == {"destinationId": "DESTINATION_ID"}
+
+    # Verify warehouse name was updated
+    warehouse.refresh_from_db()
+    assert warehouse.name == "new-name"
+
+    # Verify warehouse credentials were updated
+    mock_update_warehouse_credentials.assert_called_once_with(
+        warehouse,
+        {"host": "newhost", "port": "5433"},
+    )
+
+    # Verify create_or_update_org_cli_block was NOT called since dbt workspace is not setup
+    mock_create_or_update_org_cli_block.assert_not_called()
