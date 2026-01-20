@@ -138,6 +138,7 @@ def test_get_user_preferences_success(orguser, user_preferences):
     assert response["res"] == {
         "enable_email_notifications": user_preferences.enable_email_notifications,
         "disclaimer_shown": user_preferences.disclaimer_shown,
+        "last_visited_transform_tab": user_preferences.last_visited_transform_tab,
         "is_llm_active": False,
         "enable_llm_requested": False,
     }
@@ -154,7 +155,55 @@ def test_get_user_preferences_success_if_not_exist(orguser):
     assert response["res"] == {
         "enable_email_notifications": False,
         "disclaimer_shown": False,
+        "last_visited_transform_tab": None,
         "is_llm_active": False,
         "enable_llm_requested": False,
     }
     assert UserPreferences.objects.filter(orguser=orguser).exists()
+
+
+def test_create_user_preferences_with_transform_tab(orguser):
+    """tests creating user preferences with last_visited_transform_tab"""
+    request = mock_request(orguser)
+    payload = CreateUserPreferencesSchema(
+        enable_email_notifications=True, disclaimer_shown=True, last_visited_transform_tab="ui"
+    )
+
+    response = create_user_preferences(request, payload)
+
+    # Assertions
+    assert response["success"] is True
+    preferences = response["res"]
+    assert preferences["last_visited_transform_tab"] == "ui"
+
+
+def test_update_transform_tab_preference(orguser, user_preferences):
+    """tests updating last_visited_transform_tab preference"""
+    request = mock_request(orguser)
+
+    # Update to 'github'
+    payload = UpdateUserPreferencesSchema(last_visited_transform_tab="github")
+    response = update_user_preferences(request, payload)
+    assert response["success"] is True
+    updated_preferences = UserPreferences.objects.get(orguser=user_preferences.orguser)
+    assert updated_preferences.last_visited_transform_tab == "github"
+
+    # Update to 'ui'
+    payload = UpdateUserPreferencesSchema(last_visited_transform_tab="ui")
+    response = update_user_preferences(request, payload)
+    assert response["success"] is True
+    updated_preferences = UserPreferences.objects.get(orguser=user_preferences.orguser)
+    assert updated_preferences.last_visited_transform_tab == "ui"
+
+
+def test_get_user_preferences_with_transform_tab(orguser):
+    """tests fetching user preferences with transform tab preference set"""
+    # Create preferences with transform tab
+    UserPreferences.objects.create(
+        orguser=orguser, enable_email_notifications=True, last_visited_transform_tab="github"
+    )
+
+    request = mock_request(orguser)
+    response = get_user_preferences(request)
+    assert response["success"] is True
+    assert response["res"]["last_visited_transform_tab"] == "github"

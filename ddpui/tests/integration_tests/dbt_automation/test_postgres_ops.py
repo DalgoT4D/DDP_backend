@@ -12,7 +12,7 @@ from ddpui.dbt_automation.operations.mergeoperations import merge_operations
 from ddpui.dbt_automation.operations.rawsql import generic_sql_function
 from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.operations.scaffold import scaffold
-from ddpui.dbt_automation.operations.syncsources import sync_sources
+from ddpui.core.dbtautomation_service import upsert_multiple_sources_to_a_yaml
 from ddpui.dbt_automation.operations.flattenairbyte import flatten_operation
 from ddpui.dbt_automation.operations.coalescecolumns import coalesce_columns
 from ddpui.dbt_automation.operations.concatcolumns import concat_columns

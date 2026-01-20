@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from ddpui import settings
 from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix, TaskType
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
@@ -62,7 +62,7 @@ def orguser(org, authuser):
 @pytest.fixture
 def task():
     """task of type generate-edr"""
-    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    edrtask = Task.objects.create(type=TaskType.EDR, slug=TASK_GENERATE_EDR, label="EDR generate")
     yield edrtask
     edrtask.delete()
 
@@ -78,7 +78,7 @@ def orgtask(org, task):
 @pytest.fixture
 def edr_deployment_org():
     """org task of type generate-edr"""
-    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    edrtask = Task.objects.create(type=TaskType.EDR, slug=TASK_GENERATE_EDR, label="EDR generate")
     dbt = OrgDbt.objects.create(
         project_dir="test-project-dir",
         target_type="tgt_type",
@@ -500,7 +500,7 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
 
 @patch("ddpui.ddpdbt.elementary_service.TaskProgress")
 @patch("ddpui.ddpdbt.elementary_service.uuid4")
-@patch("ddpui.ddpdbt.elementary_service.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
 def test_create_elementary_tracking_tables(
     mock_run_dbt_commands, mock_uuid4, mock_task_progress, org
 ):
@@ -518,6 +518,7 @@ def test_create_elementary_tracking_tables(
     mock_task_progress.assert_called_once_with("test-uuid", "run-dbt-commands-" + org.slug)
     mock_run_dbt_commands.delay.assert_called_once_with(
         org.id,
+        org.dbt.id,
         "test-uuid",
         {
             # run parameters
@@ -790,9 +791,12 @@ def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
 ):
     """tests create_elementary_profile when profiles.yml doesn't exist, fetches from Prefect blocks"""
     # Create Prefect block
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org, block_type=DBTCLIPROFILE, block_name="test-cli-profile"
     )
+    # Link it to the org's dbt
+    org.dbt.cli_profile_block = cli_block
+    org.dbt.save()
 
     # Create temporary project directory (no profiles.yml)
     project_dir = tmp_path / "project"

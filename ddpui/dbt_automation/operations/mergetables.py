@@ -77,7 +77,8 @@ def union_tables_sql(config, warehouse: WarehouseInterface):
     dbt_code += "{{ dbt_utils.union_relations("
     dbt_code += (
         f"relations={relations} , "
-        + f"include=[{','.join([quote_constvalue(col, 'postgres') for col in list(output_cols)])}]"
+        + f"include=[{','.join([quote_constvalue(col, 'postgres') for col in list(output_cols)])}] , "
+        + f"source_column_name=None"
     )
     dbt_code += ")}}"
 

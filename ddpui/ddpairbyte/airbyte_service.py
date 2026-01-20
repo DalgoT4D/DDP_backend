@@ -72,7 +72,6 @@ def abreq(endpoint, req=None, **kwargs):
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.info("here2222")
         logger.exception(error.args)
         raise HttpError(res.status_code, res.text) from error
 

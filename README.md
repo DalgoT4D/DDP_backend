@@ -192,12 +192,25 @@ DJANGOSECRET=
 
 ### Step11: Running celery
 
+We use two separate Celery workers for better task isolation:
+
+#### Default Worker (for general tasks)
 - In your virtual environment run:<br>
- `celery -A ddpui worker -n ddpui`
+ `celery -A ddpui worker -Q default -n ddpui`
 - For windows run:<br>
-`celery -A ddpui worker -n ddpui -P solo`
+`celery -A ddpui worker -Q default -n ddpui -P solo`
+
+#### Canvas DBT Worker (for canvas DBT operations)
+- In another terminal with the same virtual environment:<br>
+ `celery -A ddpui worker -Q canvas_dbt -n canvas_dbt --concurrency=2`
+- For windows run:<br>
+`celery -A ddpui worker -Q canvas_dbt -n canvas_dbt --concurrency=2 -P solo`
+
+#### Celery Beat (for periodic tasks)
 - To start celery beat run:<br>
 `celery -A ddpui beat`
+
+**Note**: The Canvas DBT worker handles resource-intensive DBT operations from the canvas, while the default worker handles other background tasks like notifications and maintenance.
 
 ## Using Docker
 Follow the steps below:

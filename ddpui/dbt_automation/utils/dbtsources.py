@@ -70,6 +70,34 @@ def merge_sourcedefinitions(filedefs: dict, dbdefs: dict) -> dict:
     return outputdefs
 
 
+def merge_sourcedefinitions_v2(filedefs: dict, newdefs: dict) -> dict:
+    """
+    merge the source definitions intelligently
+    1. Merge filedefs under the source name
+    2. Then make sure under the same source name, we have all the tables from newdefs
+    3. Make sure there are no duplicate tables under the same source name
+    """
+    outputdefs = {}
+    outputdefs = filedefs
+
+    for new_source in newdefs["sources"]:
+        # check if source name exists
+        existing_source = next(
+            (src for src in outputdefs["sources"] if src["name"] == new_source["name"]), None
+        )
+        if existing_source:
+            # source exists, merge tables
+            existing_table_ids = {table["identifier"] for table in existing_source["tables"]}
+            for new_table in new_source["tables"]:
+                if new_table["identifier"] not in existing_table_ids:
+                    existing_source["tables"].append(new_table)
+        else:
+            # source does not exist, add it
+            outputdefs["sources"].append(new_source)
+
+    return outputdefs
+
+
 # ================================================================================
 def read_sources(project_dir) -> list[dict]:
     """parse all yaml files inside models dir and read sources"""

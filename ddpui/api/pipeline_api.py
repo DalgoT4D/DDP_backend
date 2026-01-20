@@ -11,9 +11,9 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
 from ddpui.ddpprefect import DBTCLIPROFILE, AIRBYTESERVER, DBTCLOUDCREDS
-from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1
+from ddpui.models.org import OrgDataFlowv1, OrgPrefectBlockv1, Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus
+from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskLockStatus, TaskType
 from ddpui.models.llm import LogsSummarizationType
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect.schema import (
@@ -55,7 +55,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     """Create a prefect deployment i.e. a ddp dataflow"""
     orguser: OrgUser = request.orguser
 
-    if orguser.org is None:
+    org: Org = orguser.org
+
+    if org is None:
         raise HttpError(400, "register an organization first")
 
     if payload.name in [None, ""]:
@@ -68,7 +70,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     sync_orgtasks = []
     if len(payload.connections) > 0:
         org_server_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=AIRBYTESERVER
+            org=org, block_type=AIRBYTESERVER
         ).first()
         if not org_server_block:
             raise HttpError(400, "airbyte server block not found")
@@ -80,7 +82,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         for connection in payload.connections:
             logger.info(connection)
             org_task = OrgTask.objects.filter(
-                org=orguser.org,
+                org=org,
                 connection_id=connection.id,
                 task__slug=TASK_AIRBYTESYNC,
             ).first()
@@ -94,7 +96,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
 
         # get the deployment task configs
         task_configs, error = pipeline_with_orgtasks(
-            orguser.org,
+            org,
             sync_orgtasks,
             server_block=org_server_block,
         )
@@ -109,14 +111,14 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     dbt_project_params: DbtProjectParams = None
     dbt_git_orgtasks = []
     dbt_cloud_orgtasks = []
-    orgdbt = orguser.org.dbt
+    orgdbt = org.dbt
     if (
         payload.transformTasks and len(payload.transformTasks) > 0  ## For dbt cli & dbt cloud
     ):  # dont modify this block as its of rlocal
         logger.info("Dbt tasks being pushed to the pipeline")
 
         # dbt params
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(orguser.org, orgdbt)
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
 
         payload.transformTasks.sort(key=lambda task: task.seq)  # sort the tasks by seq
 
@@ -126,9 +128,9 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
                 logger.error(f"org task with {transform_task.uuid} not found")
                 continue
 
-            if org_task.task.type in ["dbt", "git"]:
+            if org_task.task.type in [TaskType.DBT, TaskType.GIT]:
                 dbt_git_orgtasks.append(org_task)
-            elif org_task.task.type == "dbtcloud":
+            elif org_task.task.type == TaskType.DBTCLOUD:
                 dbt_cloud_orgtasks.append(org_task)
 
         logger.info(f"{len(dbt_git_orgtasks)} Git/Dbt cli tasks being pushed to the pipeline")
@@ -137,24 +139,20 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
         # dbt cli profile block
         cli_block = None
         if len(dbt_git_orgtasks) > 0:
-            cli_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLIPROFILE
-            ).first()
+            cli_block = orgdbt.cli_profile_block if orgdbt else None
             if not cli_block:
                 raise HttpError(400, "dbt cli profile not found")
 
         # dbt cloud creds block
         dbt_cloud_creds_block = None
         if len(dbt_cloud_orgtasks) > 0:
-            dbt_cloud_creds_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLOUDCREDS
-            ).first()
+            dbt_cloud_creds_block = orgdbt.dbtcloud_creds_block if orgdbt else None
             if not dbt_cloud_creds_block:
                 raise HttpError(400, "dbt cloud creds block not found")
 
         # get the deployment task configs
         task_configs, error = pipeline_with_orgtasks(
-            orguser.org,
+            org,
             dbt_git_orgtasks + dbt_cloud_orgtasks,
             cli_block=cli_block,
             dbt_project_params=dbt_project_params,
@@ -171,22 +169,23 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
     # create deployment
     try:
         hash_code = generate_hash_id(8)
-        deployment_name = f"pipeline-{orguser.org.slug}-{hash_code}"
+        deployment_name = f"pipeline-{org.slug}-{hash_code}"
         dataflow = prefect_service.create_dataflow_v1(
             PrefectDataFlowCreateSchema3(
                 deployment_name=deployment_name,
                 flow_name=deployment_name,
-                orgslug=orguser.org.slug,
-                deployment_params={"config": {"tasks": tasks, "org_slug": orguser.org.slug}},
+                orgslug=org.slug,
+                deployment_params={"config": {"tasks": tasks, "org_slug": org.slug}},
                 cron=payload.cron,
-            )
+            ),
+            org.get_queue_config().scheduled_pipeline_queue,  # queue for running scheduled pipelines
         )
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to create a pipeline") from error
 
     org_dataflow = OrgDataFlowv1.objects.create(
-        org=orguser.org,
+        org=org,
         name=payload.name,
         deployment_name=dataflow["deployment"]["name"],
         deployment_id=dataflow["deployment"]["id"],
@@ -326,7 +325,8 @@ def get_prefect_dataflow_v1(request, deployment_id):
     transform_tasks = [
         {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
         for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            dataflow=org_data_flow, orgtask__task__type__in=["git", "dbt", "dbtcloud"]
+            dataflow=org_data_flow,
+            orgtask__task__type__in=[TaskType.GIT, TaskType.DBT, TaskType.DBTCLOUD],
         )
         .all()
         .order_by("seq")
@@ -454,26 +454,22 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
                 logger.error(f"org task with {transform_task.uuid} not found")
                 continue
 
-            if org_task.task.type in ["dbt", "git"]:
+            if org_task.task.type in [TaskType.DBT, TaskType.GIT]:
                 dbt_git_orgtasks.append(org_task)
-            elif org_task.task.type == "dbtcloud":
+            elif org_task.task.type == TaskType.DBTCLOUD:
                 dbt_cloud_orgtasks.append(org_task)
 
         # dbt cli profile block
         cli_block = None
         if len(dbt_git_orgtasks) > 0:
-            cli_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLIPROFILE
-            ).first()
+            cli_block = orgdbt.cli_profile_block if orgdbt else None
             if not cli_block:
                 raise HttpError(400, "dbt cli profile not found")
 
         # dbt cloud creds block
         dbt_cloud_creds_block = None
         if len(dbt_cloud_orgtasks) > 0:
-            dbt_cloud_creds_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLOUDCREDS
-            ).first()
+            dbt_cloud_creds_block = orgdbt.dbtcloud_creds_block if orgdbt else None
             if not dbt_cloud_creds_block:
                 raise HttpError(400, "dbt cloud creds block not found")
 
@@ -590,9 +586,7 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
             orgtask.parameters = dict(payload)
 
             # fetch cli block
-            cli_profile_block = OrgPrefectBlockv1.objects.filter(
-                org=orguser.org, block_type=DBTCLIPROFILE
-            ).first()
+            cli_profile_block = orgdbt.cli_profile_block if orgdbt else None
             dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
                 orguser.org, orgdbt
             )
