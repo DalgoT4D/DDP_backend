@@ -130,8 +130,8 @@ def delete_dbt_project(request, project_name: str, force_delete: bool = False):
 
         orgdbt.delete()
 
-    logger.warning(f"DELETING DIRECTORY: {project_dir}")
-    shutil.rmtree(project_dir)
+        logger.warning(f"DELETING DIRECTORY: {project_dir}")
+        shutil.rmtree(project_dir)
 
     logger.warning(f"DELETION COMPLETED: org={org.slug}, project={project_name}")
     return {"message": f"Project {project_name} deleted successfully"}

@@ -601,6 +601,35 @@ def test_delete_dbt_project_allowed_when_no_canvas_nodes(seed_db, orguser: OrgUs
     assert OrgDbt.objects.filter(org=orguser.org).count() == 0
 
 
+def test_delete_dbt_project_when_orgdbt_is_none(seed_db, orguser: OrgUser, tmp_path):
+    """Test delete_dbt_project behavior when org.dbt is None (no dbt workspace setup)"""
+    request = mock_request(orguser)
+    project_name = "dummy-project"
+
+    # Create project directory structure but no OrgDbt object
+    project_dir = Path(tmp_path) / orguser.org.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    dbtrepo_dir = project_dir / project_name
+    dbtrepo_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure org.dbt is None (no dbt workspace setup)
+    orguser.org.dbt = None
+    orguser.org.save()
+
+    # Verify setup - no OrgDbt object
+    assert orguser.org.dbt is None
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 0
+
+    # Delete should succeed but directory should remain (due to your change)
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_org_dir", return_value=project_dir):
+        result = delete_dbt_project(request, project_name, force_delete=False)
+
+    # Verify deletion "succeeded" but directory remains because orgdbt was None
+    assert result["message"] == f"Project {project_name} deleted successfully"
+    assert dbtrepo_dir.exists()  # Directory should still exist since orgdbt was None
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 0
+
+
 def test_sync_sources_failed_warehouse_not_present(orguser: OrgUser):
     """a failure test for sync sources when warehouse is not present"""
     request = mock_request(orguser)
