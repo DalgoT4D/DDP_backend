@@ -15,6 +15,14 @@
 11. [Code Examples](#code-examples)
 12. [Checklist](#checklist)
 
+
+1. api and core should use schema to validate before hitting to dbt
+2. api response wrapper needed
+3. all the features we will move to core 
+4. we will remove the service folder and we will merge into core
+5. we need to move all the schema and models into their respective folders
+6. we will create files inside core for exceptions for each feature
+7. 
 ---
 
 ## Overview
@@ -40,11 +48,8 @@ ddpui/
 ├── api/
 │   └── {module}_api.py          # HTTP request/response handling
 │
-├── services/
-│   └── {module}_service.py      # Business logic & orchestration
-│
 ├── core/
-│   └── {module}/                # Domain operations (optional)
+│   └── {module}/                # Business logic and Domain operations (optional)
 │       └── {module}_operations.py
 │
 ├── models/
@@ -59,7 +64,6 @@ ddpui/
 | Layer | Responsibility | Should NOT |
 |-------|---------------|------------|
 | **API** | HTTP handling, validation, permissions, error conversion | Business logic, database queries, external calls |
-| **Service** | Business logic, transactions, orchestration, custom exceptions | HTTP concerns, direct API responses |
 | **Core** | Domain operations, algorithms, external integrations | Business logic, CRUD operations |
 | **Model** | Database schema, relationships, basic methods | Business logic, API concerns |
 | **Schema** | Request/response validation, API contracts | Business logic, database operations |
@@ -464,16 +468,16 @@ class {Module}(models.Model):
     
     def __str__(self):
         return f"{self.title} ({self.id})"
-    
-    def to_json(self):
-        """Return JSON representation"""
-        return {
-            "id": self.id,
-            "title": self.title,
-            "description": self.description,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
+# we dont need this we will use schema here    
+    # def to_json(self):
+    #     """Return JSON representation"""
+    #     return {
+    #         "id": self.id,
+    #         "title": self.title,
+    #         "description": self.description,
+    #         "created_at": self.created_at.isoformat() if self.created_at else None,
+    #         "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    #     }
     
     def clean(self):
         """Model-level validation"""
