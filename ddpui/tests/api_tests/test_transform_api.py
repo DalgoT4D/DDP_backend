@@ -464,6 +464,143 @@ def test_delete_dbt_project_success(orguser: OrgUser, tmp_path):
     assert OrgDbt.objects.filter(org=orguser.org).count() == 0
 
 
+def test_delete_dbt_project_blocked_by_canvas_nodes(seed_db, orguser: OrgUser, tmp_path):
+    """Test that delete_dbt_project is blocked when canvas nodes exist and force_delete=False"""
+    request = mock_request(orguser)
+    project_name = "dummy-project"
+
+    # Create project directory structure
+    project_dir = Path(tmp_path) / orguser.org.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    dbtrepo_dir = project_dir / project_name
+    dbtrepo_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create OrgDbt
+    dbt = OrgDbt.objects.create(
+        project_dir=str(project_dir),
+        dbt_venv="some/venv/bin/dbt",
+        target_type="postgres",
+        default_schema="default",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = dbt
+    orguser.org.save()
+
+    # Create canvas nodes (simulating active workflow)
+    CanvasNode.objects.create(
+        orgdbt=dbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="test_source",
+        output_cols=["col1", "col2"],
+    )
+    CanvasNode.objects.create(
+        orgdbt=dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="test_operation",
+        operation_config={"operation_type": "select"},
+        output_cols=["col1"],
+    )
+
+    # Verify setup
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 1
+    assert CanvasNode.objects.filter(orgdbt=dbt).count() == 2
+
+    # Attempt to delete with force_delete=False should be blocked
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_org_dir", return_value=project_dir):
+        with pytest.raises(HttpError) as excinfo:
+            delete_dbt_project(request, project_name, force_delete=False)
+
+    # Verify the error
+    assert excinfo.value.status_code == 422
+    assert "Cannot delete dbt workspace: 2 active workflow elements found" in str(excinfo.value)
+
+    # Verify nothing was deleted
+    assert dbtrepo_dir.exists()
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 1
+    assert CanvasNode.objects.filter(orgdbt=dbt).count() == 2
+    assert orguser.org.dbt is not None
+
+
+def test_delete_dbt_project_force_delete_bypasses_canvas_check(seed_db, orguser: OrgUser, tmp_path):
+    """Test that delete_dbt_project with force_delete=True bypasses canvas node check"""
+    request = mock_request(orguser)
+    project_name = "dummy-project"
+
+    # Create project directory structure
+    project_dir = Path(tmp_path) / orguser.org.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    dbtrepo_dir = project_dir / project_name
+    dbtrepo_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create OrgDbt
+    dbt = OrgDbt.objects.create(
+        project_dir=str(project_dir),
+        dbt_venv="some/venv/bin/dbt",
+        target_type="postgres",
+        default_schema="default",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = dbt
+    orguser.org.save()
+
+    # Create canvas nodes
+    CanvasNode.objects.create(
+        orgdbt=dbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="test_source",
+        output_cols=["col1", "col2"],
+    )
+
+    # Verify setup
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 1
+    assert CanvasNode.objects.filter(orgdbt=dbt).count() == 1
+
+    # Force delete should succeed despite canvas nodes
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_org_dir", return_value=project_dir):
+        result = delete_dbt_project(request, project_name, force_delete=True)
+
+    # Verify deletion succeeded
+    assert result["message"] == f"Project {project_name} deleted successfully"
+    assert not dbtrepo_dir.exists()
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 0
+
+
+def test_delete_dbt_project_allowed_when_no_canvas_nodes(seed_db, orguser: OrgUser, tmp_path):
+    """Test that delete_dbt_project is allowed when no canvas nodes exist"""
+    request = mock_request(orguser)
+    project_name = "dummy-project"
+
+    # Create project directory structure
+    project_dir = Path(tmp_path) / orguser.org.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    dbtrepo_dir = project_dir / project_name
+    dbtrepo_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create OrgDbt but no canvas nodes
+    dbt = OrgDbt.objects.create(
+        project_dir=str(project_dir),
+        dbt_venv="some/venv/bin/dbt",
+        target_type="postgres",
+        default_schema="default",
+        transform_type=TransformType.UI,
+    )
+    orguser.org.dbt = dbt
+    orguser.org.save()
+
+    # Verify setup - no canvas nodes
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 1
+    assert CanvasNode.objects.filter(orgdbt=dbt).count() == 0
+
+    # Delete should succeed even with force_delete=False
+    with patch("ddpui.api.transform_api.DbtProjectManager.get_org_dir", return_value=project_dir):
+        result = delete_dbt_project(request, project_name, force_delete=False)
+
+    # Verify deletion succeeded
+    assert result["message"] == f"Project {project_name} deleted successfully"
+    assert not dbtrepo_dir.exists()
+    assert OrgDbt.objects.filter(org=orguser.org).count() == 0
+
+
 def test_sync_sources_failed_warehouse_not_present(orguser: OrgUser):
     """a failure test for sync sources when warehouse is not present"""
     request = mock_request(orguser)
