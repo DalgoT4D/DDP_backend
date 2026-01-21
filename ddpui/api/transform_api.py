@@ -14,10 +14,11 @@ from django.utils import timezone
 from ddpui.datainsights import warehouse
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType
+from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType, OrgDataFlowv1
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge, CanvasNodeType
+from ddpui.models.tasks import DataflowOrgTask, OrgTask
 
 from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.schemas.dbt_workflow_schema import (
@@ -74,13 +75,20 @@ def create_dbt_project(request, payload: DbtProjectSchema):
 
 @transform_router.delete("/dbt_project/{project_name}")
 @has_permission(["can_delete_dbt_workspace"])
-def delete_dbt_project(request, project_name: str):
+def delete_dbt_project(request, project_name: str, force_delete: bool = False):
     """
     Delete a dbt project in this org
+
+    CRITICAL SAFETY CHECKS: This endpoint performs destructive operations.
+    It should only be called with explicit user confirmation.
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
     orgdbt = org.dbt
+
+    logger.warning(
+        f"DANGEROUS OPERATION: Delete dbt project requested by {orguser.user.email} for org {org.slug}, project {project_name}"
+    )
 
     org_dir = Path(DbtProjectManager.get_org_dir(org))
 
@@ -92,14 +100,40 @@ def delete_dbt_project(request, project_name: str):
     if not project_dir.exists():
         raise HttpError(422, f"Project {project_name} does not exist in organization {org.slug}")
 
+    # SAFETY CHECK: Prevent accidental deletion from canvas operations
+    if not force_delete and orgdbt:
+        # Check if there are active canvas nodes - prevent deletion if canvas is in use
+        active_canvas_nodes = CanvasNode.objects.filter(orgdbt=orgdbt).count()
+        if active_canvas_nodes > 0:
+            logger.error(
+                f"BLOCKED DELETION: {active_canvas_nodes} active canvas nodes found for org {org.slug}"
+            )
+            raise HttpError(
+                422,
+                f"Cannot delete dbt workspace: {active_canvas_nodes} active workflow elements found. "
+                f"This would result in data loss. Please contact support if you need to delete this workspace.",
+            )
+
+    # Log the deletion before performing it
+    logger.warning(
+        f"PROCEEDING WITH DELETION: org={org.slug}, project={project_name}, force_delete={force_delete}, user={orguser.user.email}"
+    )
+
     if orgdbt:
+        # Before deleting, log the current state for recovery
+        logger.warning(
+            f"DELETING ORGDBT: id={orgdbt.id}, cli_profile_block_id={orgdbt.cli_profile_block_id}, project_dir={orgdbt.project_dir}"
+        )
+
         org.dbt = None
         org.save()
 
         orgdbt.delete()
 
+    logger.warning(f"DELETING DIRECTORY: {project_dir}")
     shutil.rmtree(project_dir)
 
+    logger.warning(f"DELETION COMPLETED: org={org.slug}, project={project_name}")
     return {"message": f"Project {project_name} deleted successfully"}
 
 
