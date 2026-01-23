@@ -149,7 +149,7 @@ class DalgoLogger:
         self.logger.addHandler(console_handler)
 
         # File handler - controlled by ENABLE_FILE_LOGGING env var
-        file_logging_enabled = os.getenv("ENABLE_FILE_LOGGING", "True") == "True"
+        file_logging_enabled = os.getenv("ENABLE_FILE_LOGGING", "False") == "True"
 
         if file_logging_enabled and hasattr(settings, "BASE_DIR"):
             log_dir = settings.BASE_DIR / "ddpui/logs"
