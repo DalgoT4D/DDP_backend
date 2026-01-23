@@ -6,6 +6,8 @@ from django.db import models
 from django.utils import timezone
 from ninja import Schema
 
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
+
 
 class OrgType(str, Enum):
     """an enum representing the type of organization"""
@@ -37,6 +39,27 @@ class TransformType(str, Enum):
 
     UI = "ui"
     GIT = "github"
+
+
+class QueueConfigSchema(Schema):
+    """Queue configuration with automatic defaults"""
+
+    scheduled_pipeline_queue: str = DDP_WORK_QUEUE
+    connection_sync_queue: str = DDP_WORK_QUEUE
+    transform_task_queue: str = MANUL_DBT_WORK_QUEUE
+
+
+def get_default_queue_config():
+    """Callable to return default queue configuration from schema"""
+    return QueueConfigSchema().dict()
+
+
+class QueueConfigUpdateSchema(Schema):
+    """Schema for updating queue configuration - all fields optional"""
+
+    scheduled_pipeline_queue: Optional[str] = None
+    connection_sync_queue: Optional[str] = None
+    transform_task_queue: Optional[str] = None
 
 
 class OrgDbt(models.Model):
@@ -89,11 +112,44 @@ class Org(models.Model):
     ses_whitelisted_email = models.TextField(max_length=100, null=True)
     dalgouser_superset_creds_key = models.TextField(null=True)
     website = models.CharField(max_length=1000, null=True)
+    queue_config = models.JSONField(
+        default=get_default_queue_config,
+        help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue)",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
+
+    def get_queue_config(self) -> QueueConfigSchema:
+        """Returns validated queue config with automatic defaults"""
+        defaults = QueueConfigSchema()
+        stored = self.queue_config or {}
+
+        return QueueConfigSchema(
+            scheduled_pipeline_queue=stored.get(
+                "scheduled_pipeline_queue", defaults.scheduled_pipeline_queue
+            ),
+            connection_sync_queue=stored.get(
+                "connection_sync_queue", defaults.connection_sync_queue
+            ),
+            transform_task_queue=stored.get("transform_task_queue", defaults.transform_task_queue),
+        )
+
+    def update_queue_config(self, update_data: QueueConfigUpdateSchema):
+        """Update queue config with partial data"""
+        current = self.get_queue_config()
+
+        if update_data.scheduled_pipeline_queue is not None:
+            current.scheduled_pipeline_queue = update_data.scheduled_pipeline_queue
+        if update_data.connection_sync_queue is not None:
+            current.connection_sync_queue = update_data.connection_sync_queue
+        if update_data.transform_task_queue is not None:
+            current.transform_task_queue = update_data.transform_task_queue
+
+        self.queue_config = current.dict()
+        self.save()
 
     def base_plan(self):
         """returns the base plan of the organization"""

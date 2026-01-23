@@ -29,7 +29,7 @@ from ddpui.utils.helpers import generate_hash_id, compare_semver
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
+from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -464,7 +464,7 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
             },
             cron=cron,
         ),
-        MANUL_DBT_WORK_QUEUE,
+        org.get_queue_config().transform_task_queue,
     )
 
     logger.info(
