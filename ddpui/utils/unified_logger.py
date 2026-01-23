@@ -152,7 +152,7 @@ class MaxLevelFilter(logging.Filter):
 
 
 class DalgoLogger:
-    """Unified logger for Dalgo with context awareness and structured output"""
+    """Unified logger for Dalgo with context awareness and structured output."""
 
     def __init__(self, name: str, base_level: int = None):
         # Determine default level from Django settings.DEBUG if not provided
