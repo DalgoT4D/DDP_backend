@@ -63,10 +63,11 @@ class ChartDataPayload(Schema):
     y_axis: Optional[str] = None
 
     # For aggregated data
-    dimension_col: Optional[str] = None
-    extra_dimension: Optional[str] = None
+    dimension_col: Optional[str] = None  #later we need to still merge dimension and extra dimension into dimensions list
+    extra_dimension: Optional[str] = None  
+    dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
-    # Multiple metrics for bar/line charts
+    # Multiple metrics for bar/line charts (optional for table charts)
     metrics: Optional[List[ChartMetric]] = None
 
     # Map-specific fields
@@ -101,6 +102,9 @@ class DataPreviewResponse(Schema):
     columns: List
     column_types: dict
     data: List[dict]
+    page: Optional[int] = 0
+    page_size: Optional[int] = 100
+    total_rows: Optional[int] = 0
 
 
 class ExecuteChartQuery(Schema):
@@ -109,6 +113,7 @@ class ExecuteChartQuery(Schema):
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
     extra_dimension: Optional[str] = None
+    dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
     # Metrics for aggregated charts
     metrics: Optional[List[ChartMetric]] = None
@@ -122,6 +127,7 @@ class TransformDataForChart(Schema):
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
     extra_dimension: Optional[str] = None
+    dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
     # Metrics for aggregated charts
     metrics: Optional[List[ChartMetric]] = None
