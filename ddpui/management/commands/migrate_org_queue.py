@@ -11,9 +11,9 @@ from ddpui.models.org import Org, QueueConfigUpdateSchema
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
-from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.unified_logger import get_logger
 
-logger = CustomLogger("migrate_org_queue")
+logger = get_logger()
 
 
 class Command(BaseCommand):
