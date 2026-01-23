@@ -44,7 +44,7 @@ def validate_column_name(col_name: str) -> bool:
 
     # SQL identifier pattern: starts with letter or underscore,
     # followed by letters, digits, or underscores
-    pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+    pattern = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
     return bool(re.match(pattern, col_name.strip()))
 
 
@@ -65,7 +65,10 @@ def validate_dimension_names(dimensions: List[str]) -> Tuple[bool, Optional[str]
 
     for dim in dimensions:
         if not validate_column_name(dim):
-            return False, f"Invalid column name: '{dim}'. Column names must start with a letter or underscore and contain only alphanumeric characters and underscores."
+            return (
+                False,
+                f"Invalid column name: '{dim}'. Column names must start with a letter or underscore and contain only alphanumeric characters and underscores.",
+            )
 
     return True, None
 
