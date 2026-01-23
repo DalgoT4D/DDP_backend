@@ -10,6 +10,7 @@ import uuid
 import inspect
 import threading
 import os
+import sys
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextvars import ContextVar
@@ -126,13 +127,48 @@ class StructuredFormatter(logging.Formatter):
         return {}
 
 
+class MaxLevelFilter(logging.Filter):
+    """Allow log records with levelno <= configured max_level (int or name).
+
+    Intended for routing lower-severity records (e.g. DEBUG/INFO/WARNING)
+    to a specific handler (like stdout).
+    """
+
+    def __init__(self, max_level=logging.WARNING):
+        super().__init__()
+        # accept int or named level
+        if isinstance(max_level, str):
+            try:
+                self.max_level = int(logging.getLevelName(max_level))
+            except Exception:
+                self.max_level = logging.WARNING
+        elif isinstance(max_level, int):
+            self.max_level = max_level
+        else:
+            self.max_level = logging.WARNING
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= self.max_level
+
+
 class DalgoLogger:
     """Unified logger for Dalgo with context awareness and structured output"""
 
-    def __init__(self, name: str, level: int = logging.INFO):
+    def __init__(self, name: str, base_level: int = None):
+        # Determine default level from Django settings.DEBUG if not provided
+        if base_level is None:
+            try:
+                if getattr(settings, "DEBUG", False):
+                    base_level = logging.DEBUG
+                else:
+                    base_level = logging.INFO
+            except Exception:
+                base_level = logging.INFO
+
         self.name = name
+        self.base_level = base_level
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(level)
+        self.logger.setLevel(self.base_level)
 
         # Ensure we don't add duplicate handlers
         if not self.logger.handlers:
@@ -142,11 +178,22 @@ class DalgoLogger:
         """Setup console and file handlers with structured formatting"""
         formatter = StructuredFormatter()
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.DEBUG)
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        # stdout handler: logs at configured base level up to and including WARNING
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(self.base_level)
+
+        stdout_handler.addFilter(MaxLevelFilter(logging.WARNING))
+        stdout_handler.setFormatter(formatter)
+        self.logger.addHandler(stdout_handler)
+
+        # stderr handler: errors and above
+        stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setLevel(logging.ERROR)
+        stderr_handler.setFormatter(formatter)
+        self.logger.addHandler(stderr_handler)
+
+        # Prevent propagation to root logger (avoid duplicate logs)
+        self.logger.propagate = False
 
         # File handler - controlled by ENABLE_FILE_LOGGING env var
         file_logging_enabled = os.getenv("ENABLE_FILE_LOGGING", "False") == "True"
@@ -160,7 +207,8 @@ class DalgoLogger:
                 maxBytes=10 * 1024 * 1024,  # 10MB
                 backupCount=5,
             )
-            file_handler.setLevel(logging.INFO)
+            # Use configured base level for file logging as well
+            file_handler.setLevel(self.base_level)
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
 
