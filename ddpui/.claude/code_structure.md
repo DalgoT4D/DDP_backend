@@ -5,37 +5,39 @@
 1. [Overview](#overview)
 2. [Layer Architecture](#layer-architecture)
 3. [API Layer Design](#api-layer-design)
-4. [Schema Layer Design](#schema-layer-design)
-5. [Model Layer Design](#model-layer-design)
-6. [Business Logic Layer Design](#business-logic-layer-design)
-7. [Request-Response Flow](#request-response-flow)
-8. [Error Handling](#error-handling)
-9. [Current Structure Analysis](#current-structure-analysis)
-10. [Improvement Recommendations](#improvement-recommendations)
+4. [Core Layer Design](#core-layer-design)
+5. [Schema Design](#schema-design)
+6. [Model Design](#model-design)
+7. [Exception Handling](#exception-handling)
+8. [API Response Wrapper](#api-response-wrapper)
+9. [Request-Response Flow](#request-response-flow)
+10. [Migration Guide](#migration-guide)
 11. [Code Examples](#code-examples)
 12. [Checklist](#checklist)
 
-
-1. api and core should use schema to validate before hitting to dbt
-2. api response wrapper needed
-3. all the features we will move to core 
-4. we will remove the service folder and we will merge into core
-5. we need to move all the schema and models into their respective folders
-6. we will create files inside core for exceptions for each feature
-7. 
 ---
 
 ## Overview
 
-This document establishes best practices for API design in the Dalgo platform, focusing on proper separation of concerns across API, Schema, Model, and Business Logic layers. These practices ensure maintainability, testability, and consistency across the codebase.
+This document establishes best practices for API design in the Dalgo platform, focusing on proper separation of concerns across API, Core, Schema, and Model layers. These practices ensure maintainability, testability, and consistency across the codebase.
 
 ### Core Principles
 
 1. **Separation of Concerns**: Each layer has a single, well-defined responsibility
-2. **Dependency Direction**: API → Service → Core → Models (one-way dependency)
+2. **Dependency Direction**: API → Core → Models (one-way dependency)
 3. **Testability**: Business logic is isolated and easily testable
 4. **Consistency**: All modules follow the same patterns
 5. **Maintainability**: Clear structure makes code easier to understand and modify
+6. **Schema Validation**: Validate data using schemas before any database/external operations
+
+### Key Architectural Decisions
+
+1. **API and Core use schemas** to validate data before hitting DBT or any external service
+2. **API Response Wrapper** provides consistent response format across all endpoints
+3. **All features consolidated in Core** - business logic, services, and domain operations
+4. **Services folder removed** - merged into core with feature-based organization
+5. **Schemas and Models in feature folders** - co-located with related core logic
+6. **Exceptions in Core** - each feature has its own exceptions file
 
 ---
 
@@ -46,27 +48,33 @@ This document establishes best practices for API design in the Dalgo platform, f
 ```
 ddpui/
 ├── api/
-│   └── {module}_api.py          # HTTP request/response handling
+│   └── {module}_api.py              # HTTP request/response handling
 │
 ├── core/
-│   └── {module}/                # Business logic and Domain operations (optional)
-│       └── {module}_operations.py
+│   └── {module}/                    # Feature module (all business logic here)
+│       ├── __init__.py
+│       ├── {module}_service.py      # Business logic and orchestration
+│       ├── {module}_operations.py   # Domain operations (optional)
+│       ├── schemas.py               # Request/response validation (Pydantic)
+│       ├── exceptions.py            # Custom exceptions for this feature
+│       └── models.py                # Database models (Django ORM) - optional, can stay in models/
 │
 ├── models/
-│   └── {module}.py              # Database schema (Django ORM)
+│   └── {module}.py                  # Shared/legacy models (migrate to core/{module}/)
 │
-└── schemas/
-    └── {module}_schema.py       # Request/response validation (Pydantic)
+└── utils/
+    └── response_wrapper.py          # API response wrapper utility
 ```
 
 ### Layer Responsibilities Matrix
 
 | Layer | Responsibility | Should NOT |
 |-------|---------------|------------|
-| **API** | HTTP handling, validation, permissions, error conversion | Business logic, database queries, external calls |
-| **Core** | Domain operations, algorithms, external integrations | Business logic, CRUD operations |
+| **API** | HTTP handling, schema validation, permissions, error conversion, response wrapping | Business logic, database queries, external calls |
+| **Core** | Business logic, domain operations, service orchestration, schema validation before external calls | HTTP concerns, direct API responses |
+| **Schema** | Request/response validation, API contracts, data transformation | Business logic, database operations |
 | **Model** | Database schema, relationships, basic methods | Business logic, API concerns |
-| **Schema** | Request/response validation, API contracts | Business logic, database operations |
+| **Exceptions** | Feature-specific error definitions | Business logic, HTTP status codes |
 
 ---
 
@@ -79,10 +87,10 @@ ddpui/
 
 ✅ **DO**:
 - Handle HTTP requests and responses
-- Validate request data using schemas
+- Validate request data using schemas from `core/{module}/schemas.py`
 - Check permissions (`@has_permission`)
-- Convert service exceptions to HTTP errors
-- Serialize responses using schemas
+- Convert core exceptions to HTTP errors
+- Use response wrapper for consistent API responses
 - Handle HTTP-specific concerns (status codes, headers)
 
 ❌ **DON'T**:
@@ -104,17 +112,20 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.services.{module}_service import (
-    {Module}Service,
-    {Module}Data,
-    {Module}NotFoundError,
-    {Module}ValidationError,
-    {Module}PermissionError,
-)
-from ddpui.schemas.{module}_schema import (
+from ddpui.utils.response_wrapper import api_response, ApiResponse
+
+# Import from core module
+from ddpui.core.{module}.{module}_service import {Module}Service
+from ddpui.core.{module}.schemas import (
     {Module}Create,
     {Module}Update,
     {Module}Response,
+    {Module}ListResponse,
+)
+from ddpui.core.{module}.exceptions import (
+    {Module}NotFoundError,
+    {Module}ValidationError,
+    {Module}PermissionError,
 )
 
 logger = CustomLogger("ddpui.{module}_api")
@@ -122,7 +133,7 @@ logger = CustomLogger("ddpui.{module}_api")
 {module}_router = Router()
 
 
-@{module}_router.get("/", response=List[{Module}Response])
+@{module}_router.get("/", response=ApiResponse[{Module}ListResponse])
 @has_permission(["can_view_{module}s"])
 def list_{module}s(request, page: int = 1, page_size: int = 10):
     """List {module}s with pagination"""
@@ -134,13 +145,18 @@ def list_{module}s(request, page: int = 1, page_size: int = 10):
         page_size=page_size,
     )
     
-    return [
-        {Module}Response(**{module}.to_dict())
-        for {module} in {module}s
-    ]
+    return api_response(
+        success=True,
+        data={Module}ListResponse(
+            data=[{Module}Response.from_model(m) for m in {module}s],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
 
 
-@{module}_router.get("/{{id}}/", response={Module}Response)
+@{module}_router.get("/{{id}}/", response=ApiResponse[{Module}Response])
 @has_permission(["can_view_{module}s"])
 def get_{module}(request, id: int):
     """Get a specific {module}"""
@@ -148,24 +164,28 @@ def get_{module}(request, id: int):
     
     try:
         {module} = {Module}Service.get_{module}(id, orguser.org)
-        return {Module}Response(**{module}.to_dict())
+        return api_response(
+            success=True,
+            data={Module}Response.from_model({module})
+        )
     except {Module}NotFoundError as err:
-        raise HttpError(404, "{Module} not found") from err
+        raise HttpError(404, str(err)) from err
 
 
-@{module}_router.post("/", response={Module}Response)
+@{module}_router.post("/", response=ApiResponse[{Module}Response])
 @has_permission(["can_create_{module}s"])
 def create_{module}(request, payload: {Module}Create):
     """Create a new {module}"""
     orguser: OrgUser = request.orguser
     
     try:
-        {module}_data = {Module}Data(
-            title=payload.title,
-            # ... map payload to data class
+        # Schema validation happens automatically via Pydantic
+        {module} = {Module}Service.create_{module}(payload, orguser)
+        return api_response(
+            success=True,
+            data={Module}Response.from_model({module}),
+            message="{Module} created successfully"
         )
-        {module} = {Module}Service.create_{module}({module}_data, orguser)
-        return {Module}Response(**{module}.to_dict())
     except {Module}ValidationError as err:
         raise HttpError(400, str(err)) from err
     except Exception as e:
@@ -173,7 +193,7 @@ def create_{module}(request, payload: {Module}Create):
         raise HttpError(500, "Failed to create {module}") from e
 
 
-@{module}_router.put("/{{id}}/", response={Module}Response)
+@{module}_router.put("/{{id}}/", response=ApiResponse[{Module}Response])
 @has_permission(["can_edit_{module}s"])
 def update_{module}(request, id: int, payload: {Module}Update):
     """Update a {module}"""
@@ -181,19 +201,23 @@ def update_{module}(request, id: int, payload: {Module}Update):
     
     try:
         {module} = {Module}Service.update_{module}(
-            id=id,
+            {module}_id=id,
             org=orguser.org,
             orguser=orguser,
             data=payload,
         )
-        return {Module}Response(**{module}.to_dict())
+        return api_response(
+            success=True,
+            data={Module}Response.from_model({module}),
+            message="{Module} updated successfully"
+        )
     except {Module}NotFoundError as err:
-        raise HttpError(404, "{Module} not found") from err
+        raise HttpError(404, str(err)) from err
     except {Module}ValidationError as err:
         raise HttpError(400, str(err)) from err
 
 
-@{module}_router.delete("/{{id}}/")
+@{module}_router.delete("/{{id}}/", response=ApiResponse)
 @has_permission(["can_delete_{module}s"])
 def delete_{module}(request, id: int):
     """Delete a {module}"""
@@ -201,9 +225,9 @@ def delete_{module}(request, id: int):
     
     try:
         {Module}Service.delete_{module}(id, orguser.org, orguser)
-        return {"success": True}
+        return api_response(success=True, message="{Module} deleted successfully")
     except {Module}NotFoundError as err:
-        raise HttpError(404, "{Module} not found") from err
+        raise HttpError(404, str(err)) from err
     except {Module}PermissionError as err:
         raise HttpError(403, str(err)) from err
 ```
@@ -214,7 +238,7 @@ def delete_{module}(request, id: int):
    ```python
    # ✅ GOOD
    charts_router = Router()
-   dashboard_native_router = Router()
+   dashboard_router = Router()
    
    # ❌ BAD
    router = Router()  # Too generic
@@ -229,25 +253,28 @@ def delete_{module}(request, id: int):
        pass
    ```
 
-3. **Error Handling**: Convert service exceptions to HTTP errors
+3. **Use Response Wrapper**: Always wrap responses
    ```python
    # ✅ GOOD
-   try:
-       chart = ChartService.get_chart(chart_id, orguser.org)
-   except ChartNotFoundError as err:
-       raise HttpError(404, "Chart not found") from err
-   ```
-
-4. **Response Serialization**: Always use response schemas
-   ```python
-   # ✅ GOOD
-   return ChartResponse(**chart.to_dict())
+   return api_response(success=True, data=result)
    
    # ❌ BAD
-   return chart.to_dict()  # No schema validation
+   return {"success": True, "data": result}  # Manual dict
    ```
 
-5. **Keep API Layer Thin**: Delegate to service layer
+4. **Schema Validation**: Let Pydantic handle validation
+   ```python
+   # ✅ GOOD - Pydantic validates automatically
+   def create_chart(request, payload: ChartCreate):
+       chart = ChartService.create_chart(payload, orguser)
+   
+   # ❌ BAD - Manual validation in API
+   def create_chart(request, payload: dict):
+       if not payload.get("title"):
+           raise HttpError(400, "Title required")
+   ```
+
+5. **Keep API Layer Thin**: Delegate everything to core
    ```python
    # ✅ GOOD
    chart = ChartService.get_chart(chart_id, orguser.org)
@@ -258,306 +285,40 @@ def delete_{module}(request, id: int):
 
 ---
 
-## Schema Layer Design
+## Core Layer Design
 
 ### Location
-`ddpui/schemas/{module}_schema.py`
+`ddpui/core/{module}/`
 
-### Responsibilities
+### Structure
 
-✅ **DO**:
-- Define request/response contracts
-- Validate input data
-- Transform data for API responses
-- Document API structure
-- Provide type safety
-
-❌ **DON'T**:
-- Contain business logic
-- Perform database operations
-- Make external service calls
-
-### Structure Template
-
-```python
-"""{Module} API schemas"""
-
-from typing import Optional, List, Dict, Any
-from datetime import datetime
-from ninja import Schema, Field
-
-
-# Request Schemas
-class {Module}Create(Schema):
-    """Schema for creating a {module}"""
-    title: str = Field(..., min_length=1, max_length=255, description="Title of the {module}")
-    description: Optional[str] = Field(None, max_length=1000, description="Description")
-    # ... other fields with validation
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "title": "Example {Module}",
-                "description": "Example description",
-            }
-        }
-
-
-class {Module}Update(Schema):
-    """Schema for updating a {module}"""
-    title: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = Field(None, max_length=1000)
-    # ... other optional fields
-
-
-class {Module}ListQuery(Schema):
-    """Schema for list query parameters"""
-    page: int = Field(1, ge=1, description="Page number (1-indexed)")
-    page_size: int = Field(10, ge=1, le=100, description="Items per page")
-    search: Optional[str] = Field(None, description="Search term")
-    filter_type: Optional[str] = Field(None, description="Filter by type")
-
-
-# Response Schemas
-class {Module}Response(Schema):
-    """Schema for {module} response"""
-    id: int
-    title: str
-    description: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-    # ... other fields
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "id": 1,
-                "title": "Example {Module}",
-                "description": "Example description",
-                "created_at": "2025-01-22T10:00:00Z",
-                "updated_at": "2025-01-22T10:00:00Z",
-            }
-        }
-
-
-class {Module}ListResponse(Schema):
-    """Schema for paginated {module} list response"""
-    data: List[{Module}Response]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
 ```
-
-### Best Practices
-
-1. **Separate Request/Response Schemas**: Don't reuse models directly
-   ```python
-   # ✅ GOOD
-   class ChartCreate(Schema):
-       title: str
-   
-   class ChartResponse(Schema):
-       id: int
-       title: str
-   
-   # ❌ BAD
-   class ChartCreate(Chart):  # Don't inherit from model
-       pass
-   ```
-
-2. **Use Field Validation**: Leverage Pydantic's validation
-   ```python
-   # ✅ GOOD
-   title: str = Field(..., min_length=1, max_length=255)
-   page: int = Field(1, ge=1, le=100)
-   
-   # ❌ BAD
-   title: str  # No validation
-   ```
-
-3. **Document Schemas**: Add descriptions and examples
-   ```python
-   # ✅ GOOD
-   title: str = Field(..., description="Chart title", example="Sales Overview")
-   
-   class Config:
-       json_schema_extra = {
-           "example": {"title": "Sales Overview"}
-       }
-   ```
-
-4. **Keep Schemas Focused**: One schema file per module
-   ```python
-   # ✅ GOOD
-   # schemas/chart_schema.py - all chart schemas
-   
-   # ❌ BAD
-   # schemas/chart_create_schema.py
-   # schemas/chart_response_schema.py  # Too fragmented
-   ```
-
----
-
-## Model Layer Design
-
-### Location
-`ddpui/models/{module}.py`
-
-### Responsibilities
-
-✅ **DO**:
-- Define database schema (Django ORM)
-- Define model relationships
-- Provide basic model methods (`to_json()`, `__str__()`)
-- Model-level validations (using `clean()` method)
-
-❌ **DON'T**:
-- Contain business logic
-- Make API calls
-- Perform complex operations
-- Access external services
-
-### Structure Template
-
-```python
-"""{Module} model for Dalgo platform"""
-
-from django.db import models
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
-from ddpui.utils.custom_logger import CustomLogger
-
-logger = CustomLogger("ddpui.models.{module}")
-
-
-class {Module}(models.Model):
-    """{Module} configuration model"""
-    
-    id = models.BigAutoField(primary_key=True)
-    title = models.CharField(max_length=255)
-    description = models.TextField(blank=True, null=True)
-    
-    # Relationships
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    created_by = models.ForeignKey(
-        OrgUser,
-        on_delete=models.CASCADE,
-        db_column="created_by",
-        related_name="{module}s_created"
-    )
-    last_modified_by = models.ForeignKey(
-        OrgUser,
-        on_delete=models.CASCADE,
-        db_column="last_modified_by",
-        null=True,
-        related_name="{module}s_modified"
-    )
-    
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    # Metadata
-    class Meta:
-        db_table = "{module}"
-        ordering = ["-updated_at"]
-        indexes = [
-            models.Index(fields=["org", "created_at"]),
-        ]
-    
-    def __str__(self):
-        return f"{self.title} ({self.id})"
-# we dont need this we will use schema here    
-    # def to_json(self):
-    #     """Return JSON representation"""
-    #     return {
-    #         "id": self.id,
-    #         "title": self.title,
-    #         "description": self.description,
-    #         "created_at": self.created_at.isoformat() if self.created_at else None,
-    #         "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-    #     }
-    
-    def clean(self):
-        """Model-level validation"""
-        from django.core.exceptions import ValidationError
-        
-        if not self.title or not self.title.strip():
-            raise ValidationError({"title": "Title cannot be empty"})
+ddpui/core/{module}/
+├── __init__.py              # Export public interfaces
+├── {module}_service.py      # Business logic and orchestration
+├── {module}_operations.py   # Domain-specific operations (optional)
+├── schemas.py               # Pydantic schemas for this feature
+├── exceptions.py            # Custom exceptions
+└── models.py                # Django models (optional - can stay in models/)
 ```
-
-### Best Practices
-
-1. **Use Proper Field Types**: Choose appropriate Django field types
-   ```python
-   # ✅ GOOD
-   title = models.CharField(max_length=255)
-   description = models.TextField(blank=True, null=True)
-   is_active = models.BooleanField(default=True)
-   created_at = models.DateTimeField(auto_now_add=True)
-   
-   # ❌ BAD
-   title = models.TextField()  # Use CharField for short text
-   ```
-
-2. **Define Relationships Properly**: Use appropriate `on_delete` behavior
-   ```python
-   # ✅ GOOD
-   org = models.ForeignKey(Org, on_delete=models.CASCADE)
-   created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
-   
-   # ❌ BAD
-   org = models.ForeignKey(Org)  # Missing on_delete
-   ```
-
-3. **Add Meta Information**: Include ordering, indexes, constraints
-   ```python
-   # ✅ GOOD
-   class Meta:
-       db_table = "chart"
-       ordering = ["-updated_at"]
-       indexes = [
-           models.Index(fields=["org", "created_at"]),
-       ]
-   ```
-
-4. **Keep Models Simple**: No business logic
-   ```python
-   # ✅ GOOD
-   def to_json(self):
-       return {"id": self.id, "title": self.title}
-   
-   # ❌ BAD
-   def validate_and_save(self):  # Business logic in model
-       if self.needs_validation:
-           validate(self)
-       self.save()
-   ```
-
----
-
-## Business Logic Layer Design
-
-### Location
-`ddpui/services/{module}_service.py`
 
 ### Responsibilities
 
 ✅ **DO**:
 - Implement business logic and rules
+- Validate data using schemas before external operations (DBT, Airbyte, etc.)
 - Manage transactions
 - Orchestrate multiple operations
 - Handle cross-cutting concerns (caching, logging)
-- Define custom exceptions
-- Coordinate between models and core operations
+- Coordinate between models and external services
+- Domain operations and algorithms
 
 ❌ **DON'T**:
 - Handle HTTP concerns
 - Make direct API responses
-- Contain domain algorithms (use core layer)
+- Access request objects
 
-### Structure Template
+### Service Template (`{module}_service.py`)
 
 ```python
 """{Module} service for business logic
@@ -566,69 +327,29 @@ This module encapsulates all {module}-related business logic,
 separating it from the API layer for better testability and maintainability.
 """
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
 from django.db.models import Q
 from django.db import transaction
 
-from ddpui.models.{module} import {Module}
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 
-logger = CustomLogger("ddpui.{module}_service")
+# Import from same core module
+from .schemas import {Module}Create, {Module}Update
+from .exceptions import (
+    {Module}NotFoundError,
+    {Module}ValidationError,
+    {Module}PermissionError,
+)
 
+# Import model (can be from models/ or from .models)
+from ddpui.models.{module} import {Module}
 
-# =============================================================================
-# Custom Exceptions
-# =============================================================================
+logger = CustomLogger("ddpui.core.{module}")
 
-class {Module}ServiceError(Exception):
-    """Base exception for {module} service errors"""
-    def __init__(self, message: str, error_code: str = "{MODULE}_ERROR"):
-        self.message = message
-        self.error_code = error_code
-        super().__init__(self.message)
-
-
-class {Module}NotFoundError({Module}ServiceError):
-    """Raised when {module} is not found"""
-    def __init__(self, {module}_id: int):
-        super().__init__(
-            f"{Module} with id {module}_id not found",
-            "{MODULE}_NOT_FOUND"
-        )
-        self.{module}_id = {module}_id
-
-
-class {Module}ValidationError({Module}ServiceError):
-    """Raised when {module} validation fails"""
-    def __init__(self, message: str):
-        super().__init__(message, "VALIDATION_ERROR")
-
-
-class {Module}PermissionError({Module}ServiceError):
-    """Raised when user doesn't have permission"""
-    def __init__(self, message: str = "Permission denied"):
-        super().__init__(message, "PERMISSION_DENIED")
-
-
-# =============================================================================
-# Data Classes
-# =============================================================================
-
-@dataclass
-class {Module}Data:
-    """Data class for {module} creation/update"""
-    title: str
-    description: Optional[str] = None
-    # ... other fields
-
-
-# =============================================================================
-# Service Class
-# =============================================================================
 
 class {Module}Service:
     """Service class for {module}-related operations"""
@@ -685,11 +406,11 @@ class {Module}Service:
     
     @staticmethod
     @transaction.atomic
-    def create_{module}(data: {Module}Data, orguser: OrgUser) -> {Module}:
+    def create_{module}(data: {Module}Create, orguser: OrgUser) -> {Module}:
         """Create a new {module}.
         
         Args:
-            data: {Module} creation data
+            data: {Module} creation data (already validated by Pydantic)
             orguser: The user creating the {module}
             
         Returns:
@@ -698,9 +419,8 @@ class {Module}Service:
         Raises:
             {Module}ValidationError: If {module} configuration is invalid
         """
-        # Business logic validation
-        if not data.title or not data.title.strip():
-            raise {Module}ValidationError("Title is required")
+        # Additional business logic validation
+        {Module}Service._validate_business_rules(data, orguser.org)
         
         # Create {module}
         {module} = {Module}.objects.create(
@@ -711,7 +431,7 @@ class {Module}Service:
             org=orguser.org,
         )
         
-        logger.info(f"Created {module} {module}.id for org {orguser.org.id}")
+        logger.info(f"Created {module} {{{module}.id}} for org {{{orguser.org.id}}}")
         return {module}
     
     @staticmethod
@@ -720,7 +440,7 @@ class {Module}Service:
         {module}_id: int,
         org: Org,
         orguser: OrgUser,
-        data: {Module}Data,
+        data: {Module}Update,
     ) -> {Module}:
         """Update an existing {module}.
         
@@ -728,7 +448,7 @@ class {Module}Service:
             {module}_id: The {module} ID
             org: The organization
             orguser: The user making the update
-            data: Update data
+            data: Update data (already validated by Pydantic)
             
         Returns:
             Updated {Module} instance
@@ -739,11 +459,7 @@ class {Module}Service:
         """
         {module} = {Module}Service.get_{module}({module}_id, org)
         
-        # Business logic validation
-        if data.title and not data.title.strip():
-            raise {Module}ValidationError("Title cannot be empty")
-        
-        # Apply updates
+        # Apply updates only for provided fields
         if data.title is not None:
             {module}.title = data.title
         if data.description is not None:
@@ -752,7 +468,7 @@ class {Module}Service:
         {module}.last_modified_by = orguser
         {module}.save()
         
-        logger.info(f"Updated {module} {module}.id")
+        logger.info(f"Updated {module} {{{module}.id}}")
         return {module}
     
     @staticmethod
@@ -774,56 +490,542 @@ class {Module}Service:
         """
         {module} = {Module}Service.get_{module}({module}_id, org)
         
-        # Permission check
+        # Permission check (example: only creator can delete)
         if {module}.created_by != orguser:
             raise {Module}PermissionError("You can only delete {module}s you created.")
         
         {module}_title = {module}.title
         {module}.delete()
         
-        logger.info(f"Deleted {module} '{module}_title' (id={module}_id) by {orguser.user.email}")
+        logger.info(f"Deleted {module} '{{{module}_title}}' (id={{{module}_id}}) by {{{orguser.user.email}}}")
         return True
+    
+    @staticmethod
+    def _validate_business_rules(data: {Module}Create, org: Org) -> None:
+        """Validate business rules before creating {module}.
+        
+        This is where you add domain-specific validation that goes beyond
+        schema validation.
+        
+        Raises:
+            {Module}ValidationError: If validation fails
+        """
+        # Example: Check for duplicate titles
+        if {Module}.objects.filter(org=org, title=data.title).exists():
+            raise {Module}ValidationError(f"{Module} with title '{data.title}' already exists")
+```
+
+### Schema Validation Before External Operations
+
+When calling DBT, Airbyte, or any external service, **always validate using schemas first**:
+
+```python
+# ✅ GOOD: Validate before calling DBT
+from .schemas import DBTOperationPayload
+
+class DBTService:
+    @staticmethod
+    def run_operation(payload: dict, org: Org) -> dict:
+        # Validate using schema before hitting DBT
+        validated_payload = DBTOperationPayload(**payload)
+        
+        # Now safe to call DBT
+        result = dbt_client.run(validated_payload.dict())
+        return result
+
+# ❌ BAD: Calling DBT without validation
+class DBTService:
+    @staticmethod
+    def run_operation(payload: dict, org: Org) -> dict:
+        # Directly calling DBT without validation
+        result = dbt_client.run(payload)  # Dangerous!
+        return result
+```
+
+---
+
+## Schema Design
+
+### Location
+`ddpui/core/{module}/schemas.py`
+
+### Responsibilities
+
+✅ **DO**:
+- Define request/response contracts
+- Validate input data
+- Transform data for API responses
+- Document API structure
+- Provide type safety
+- Include `from_model()` class methods for easy conversion
+
+❌ **DON'T**:
+- Contain business logic
+- Perform database operations
+- Make external service calls
+
+### Structure Template
+
+```python
+"""{Module} schemas for request/response validation"""
+
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from ninja import Schema, Field
+
+
+# =============================================================================
+# Request Schemas
+# =============================================================================
+
+class {Module}Create(Schema):
+    """Schema for creating a {module}"""
+    title: str = Field(..., min_length=1, max_length=255, description="Title of the {module}")
+    description: Optional[str] = Field(None, max_length=1000, description="Description")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Example {Module}",
+                "description": "Example description",
+            }
+        }
+
+
+class {Module}Update(Schema):
+    """Schema for updating a {module} (all fields optional)"""
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=1000)
+
+
+class {Module}ListQuery(Schema):
+    """Schema for list query parameters"""
+    page: int = Field(1, ge=1, description="Page number (1-indexed)")
+    page_size: int = Field(10, ge=1, le=100, description="Items per page")
+    search: Optional[str] = Field(None, description="Search term")
+
+
+# =============================================================================
+# Response Schemas
+# =============================================================================
+
+class {Module}Response(Schema):
+    """Schema for {module} response"""
+    id: int
+    title: str
+    description: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    
+    @classmethod
+    def from_model(cls, model) -> "{Module}Response":
+        """Create response from Django model instance"""
+        return cls(
+            id=model.id,
+            title=model.title,
+            description=model.description,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
+        )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "title": "Example {Module}",
+                "description": "Example description",
+                "created_at": "2025-01-22T10:00:00Z",
+                "updated_at": "2025-01-22T10:00:00Z",
+            }
+        }
+
+
+class {Module}ListResponse(Schema):
+    """Schema for paginated {module} list response"""
+    data: List[{Module}Response]
+    total: int
+    page: int
+    page_size: int
+    
+    @property
+    def total_pages(self) -> int:
+        return (self.total + self.page_size - 1) // self.page_size
+
+
+# =============================================================================
+# Internal/Operation Schemas (for validating before external calls)
+# =============================================================================
+
+class {Module}DBTPayload(Schema):
+    """Schema for validating payload before sending to DBT"""
+    operation: str
+    config: Dict[str, Any]
+    
+    class Config:
+        extra = "forbid"  # Strict validation - no extra fields allowed
 ```
 
 ### Best Practices
 
-1. **Use Custom Exceptions**: Define service-specific exceptions
+1. **Separate Request/Response Schemas**: Don't reuse models directly
    ```python
    # ✅ GOOD
-   class ChartServiceError(Exception):
-       pass
-   
-   class ChartNotFoundError(ChartServiceError):
-       pass
-   ```
-
-2. **Use Data Classes**: For structured data transfer
-   ```python
-   # ✅ GOOD
-   @dataclass
-   class ChartData:
+   class ChartCreate(Schema):
        title: str
-       chart_type: str
+   
+   class ChartResponse(Schema):
+       id: int
+       title: str
+       
+       @classmethod
+       def from_model(cls, chart):
+           return cls(id=chart.id, title=chart.title)
    ```
 
-3. **Use Transactions**: For operations that modify data
+2. **Use Field Validation**: Leverage Pydantic's validation
    ```python
    # ✅ GOOD
-   @transaction.atomic
-   def create_chart(data, orguser):
-       # Multiple database operations
-       pass
+   title: str = Field(..., min_length=1, max_length=255)
+   page: int = Field(1, ge=1, le=100)
    ```
 
-4. **Keep Business Logic Here**: Not in API or models
+3. **Add `from_model()` Method**: For easy model-to-schema conversion
    ```python
    # ✅ GOOD
-   def create_chart(data, orguser):
-       # Business logic here
-       if data.needs_validation:
-           validate_chart_data(data)
-       return Chart.objects.create(...)
+   @classmethod
+   def from_model(cls, model):
+       return cls(id=model.id, title=model.title)
    ```
+
+4. **Use Strict Validation for External Payloads**:
+   ```python
+   # ✅ GOOD - Strict for external service payloads
+   class DBTPayload(Schema):
+       class Config:
+           extra = "forbid"  # Reject unknown fields
+   ```
+
+---
+
+## Model Design
+
+### Location
+- **Preferred**: `ddpui/core/{module}/models.py` (co-located with feature)
+- **Legacy/Shared**: `ddpui/models/{module}.py`
+
+### Responsibilities
+
+✅ **DO**:
+- Define database schema (Django ORM)
+- Define model relationships
+- Provide basic model methods (`__str__()`)
+- Model-level validations (using `clean()` method)
+
+❌ **DON'T**:
+- Contain business logic
+- Make API calls
+- Perform complex operations
+- Access external services
+- Include `to_json()` or `to_dict()` methods (use schemas instead)
+
+### Structure Template
+
+```python
+"""{Module} model for Dalgo platform"""
+
+from django.db import models
+from ddpui.models.org import Org
+from ddpui.models.org_user import OrgUser
+
+
+class {Module}(models.Model):
+    """{Module} configuration model"""
+    
+    id = models.BigAutoField(primary_key=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    
+    # Relationships
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    created_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.CASCADE,
+        db_column="created_by",
+        related_name="{module}s_created"
+    )
+    last_modified_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.CASCADE,
+        db_column="last_modified_by",
+        null=True,
+        related_name="{module}s_modified"
+    )
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = "{module}"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["org", "created_at"]),
+        ]
+    
+    def __str__(self):
+        return f"{self.title} ({self.id})"
+    
+    def clean(self):
+        """Model-level validation"""
+        from django.core.exceptions import ValidationError
+        
+        if not self.title or not self.title.strip():
+            raise ValidationError({"title": "Title cannot be empty"})
+```
+
+### Key Point: No `to_json()` or `to_dict()`
+
+Use schemas for serialization instead:
+
+```python
+# ❌ BAD - to_json in model
+class Chart(models.Model):
+    def to_json(self):
+        return {"id": self.id, "title": self.title}
+
+# ✅ GOOD - Use schema
+from ddpui.core.charts.schemas import ChartResponse
+
+chart = Chart.objects.get(id=1)
+response = ChartResponse.from_model(chart)
+```
+
+---
+
+## Exception Handling
+
+### Location
+`ddpui/core/{module}/exceptions.py`
+
+### Structure Template
+
+```python
+"""{Module} exceptions
+
+Custom exceptions for {module} feature.
+"""
+
+
+class {Module}Error(Exception):
+    """Base exception for {module} errors"""
+    
+    def __init__(self, message: str, error_code: str = "{MODULE}_ERROR"):
+        self.message = message
+        self.error_code = error_code
+        super().__init__(self.message)
+
+
+class {Module}NotFoundError({Module}Error):
+    """Raised when {module} is not found"""
+    
+    def __init__(self, {module}_id: int):
+        super().__init__(
+            f"{Module} with id {{{module}_id}} not found",
+            "{MODULE}_NOT_FOUND"
+        )
+        self.{module}_id = {module}_id
+
+
+class {Module}ValidationError({Module}Error):
+    """Raised when {module} validation fails"""
+    
+    def __init__(self, message: str):
+        super().__init__(message, "{MODULE}_VALIDATION_ERROR")
+
+
+class {Module}PermissionError({Module}Error):
+    """Raised when user doesn't have permission"""
+    
+    def __init__(self, message: str = "Permission denied"):
+        super().__init__(message, "{MODULE}_PERMISSION_DENIED")
+
+
+class {Module}ExternalServiceError({Module}Error):
+    """Raised when external service (DBT, Airbyte) call fails"""
+    
+    def __init__(self, service: str, message: str):
+        super().__init__(
+            f"{service} error: {message}",
+            "{MODULE}_EXTERNAL_ERROR"
+        )
+        self.service = service
+```
+
+### Exception Hierarchy and HTTP Mapping
+
+```
+{Module}Error (base)
+  ├── {Module}NotFoundError      → 404 Not Found
+  ├── {Module}ValidationError    → 400 Bad Request
+  ├── {Module}PermissionError    → 403 Forbidden
+  ├── {Module}ExternalServiceError → 502 Bad Gateway
+  └── {Module}Error (generic)    → 500 Internal Server Error
+```
+
+### Usage in API Layer
+
+```python
+from ddpui.core.{module}.exceptions import (
+    {Module}NotFoundError,
+    {Module}ValidationError,
+    {Module}PermissionError,
+    {Module}ExternalServiceError,
+)
+
+@{module}_router.get("/{{id}}/")
+@has_permission(["can_view_{module}s"])
+def get_{module}(request, id: int):
+    try:
+        {module} = {Module}Service.get_{module}(id, request.orguser.org)
+        return api_response(success=True, data={Module}Response.from_model({module}))
+    except {Module}NotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except {Module}ValidationError as err:
+        raise HttpError(400, str(err)) from err
+    except {Module}PermissionError as err:
+        raise HttpError(403, str(err)) from err
+    except {Module}ExternalServiceError as err:
+        raise HttpError(502, str(err)) from err
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HttpError(500, "Internal server error") from e
+```
+
+---
+
+## API Response Wrapper
+
+### Location
+`ddpui/utils/response_wrapper.py`
+
+### Implementation
+
+```python
+"""API Response Wrapper
+
+Provides consistent response format across all API endpoints.
+"""
+
+from typing import TypeVar, Generic, Optional, Any
+from ninja import Schema
+
+
+T = TypeVar("T")
+
+
+class ApiResponse(Schema, Generic[T]):
+    """Standard API response wrapper"""
+    success: bool
+    message: Optional[str] = None
+    data: Optional[T] = None
+    error_code: Optional[str] = None
+
+
+def api_response(
+    success: bool,
+    data: Any = None,
+    message: Optional[str] = None,
+    error_code: Optional[str] = None,
+) -> dict:
+    """Create a standardized API response.
+    
+    Args:
+        success: Whether the operation was successful
+        data: Response data (can be schema instance or dict)
+        message: Optional message
+        error_code: Optional error code for failures
+        
+    Returns:
+        Dict with standard response structure
+    """
+    response = {"success": success}
+    
+    if message is not None:
+        response["message"] = message
+    
+    if data is not None:
+        if hasattr(data, "dict"):
+            response["data"] = data.dict()
+        else:
+            response["data"] = data
+    
+    if error_code is not None:
+        response["error_code"] = error_code
+    
+    return response
+```
+
+### Response Format
+
+**Success Response:**
+```json
+{
+    "success": true,
+    "message": "Chart created successfully",
+    "data": {
+        "id": 1,
+        "title": "Sales Overview",
+        "created_at": "2025-01-22T10:00:00Z"
+    }
+}
+```
+
+**Error Response:**
+```json
+{
+    "success": false,
+    "message": "Chart not found",
+    "error_code": "CHART_NOT_FOUND"
+}
+```
+
+**List Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "data": [...],
+        "total": 100,
+        "page": 1,
+        "page_size": 10
+    }
+}
+```
+
+### Usage Examples
+
+```python
+# Simple success
+return api_response(success=True, message="Operation completed")
+
+# Success with data
+return api_response(
+    success=True,
+    data=ChartResponse.from_model(chart),
+    message="Chart created"
+)
+
+# List response
+return api_response(
+    success=True,
+    data=ChartListResponse(
+        data=[ChartResponse.from_model(c) for c in charts],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+)
+```
 
 ---
 
@@ -835,32 +1037,33 @@ class {Module}Service:
 1. Client Request
    ↓
 2. API Layer (api/{module}_api.py)
-   ├── Validate request (Pydantic schema)
+   ├── Validate request (Pydantic schema - automatic)
    ├── Check permissions (@has_permission)
    ├── Extract orguser from request
-   └── Call service method
+   └── Call core service method
    ↓
-3. Service Layer (services/{module}_service.py)
+3. Core Layer (core/{module}/{module}_service.py)
    ├── Business logic validation
+   ├── Validate payloads before external calls (using schemas)
    ├── Transaction management
-   ├── Call core operations (if needed)
+   ├── Call operations (if needed)
    ├── Database operations (via models)
-   └── Return model/data class
+   └── Return model instance
    ↓
-4. Core Layer (core/{module}/) - Optional
+4. Core Operations (core/{module}/{module}_operations.py) - Optional
    ├── Domain operations
-   ├── Query building
-   ├── Data transformations
-   └── External service calls
+   ├── External service calls (DBT, Airbyte)
+   └── Data transformations
    ↓
-5. Model Layer (models/{module}.py)
+5. Model Layer (models/ or core/{module}/models.py)
    └── Database operations
    ↓
-6. Service Layer (return)
-   └── Return model/data class
+6. Core Layer (return)
+   └── Return model instance
    ↓
 7. API Layer (serialize)
    ├── Convert model to response schema
+   ├── Wrap with api_response()
    └── Return HTTP response
    ↓
 8. Client Response
@@ -878,529 +1081,381 @@ class {Module}Service:
 }
 
 # 2. API Layer (api/charts_api.py)
-@charts_router.post("/", response=ChartResponse)
+@charts_router.post("/", response=ApiResponse[ChartResponse])
 @has_permission(["can_create_charts"])
 def create_chart(request, payload: ChartCreate):
     orguser = request.orguser
+    # Schema validation happens automatically
     
-    # Validate payload (automatic via Pydantic)
-    # Check permissions (automatic via decorator)
-    
-    chart_data = ChartData(
-        title=payload.title,
-        chart_type=payload.chart_type,
-        # ...
+    chart = ChartService.create_chart(payload, orguser)
+    return api_response(
+        success=True,
+        data=ChartResponse.from_model(chart),
+        message="Chart created successfully"
     )
-    
-    chart = ChartService.create_chart(chart_data, orguser)
-    return ChartResponse(**chart.to_dict())
 
-# 3. Service Layer (services/chart_service.py)
-@staticmethod
-@transaction.atomic
-def create_chart(data: ChartData, orguser: OrgUser) -> Chart:
-    # Business logic validation
-    is_valid, error = ChartValidator.validate_chart_config(...)
-    if not is_valid:
-        raise ChartValidationError(error)
-    
-    # Create chart
-    chart = Chart.objects.create(
-        title=data.title,
-        chart_type=data.chart_type,
-        created_by=orguser,
-        org=orguser.org,
-        # ...
-    )
-    
-    return chart
+# 3. Core Service Layer (core/charts/chart_service.py)
+class ChartService:
+    @staticmethod
+    @transaction.atomic
+    def create_chart(data: ChartCreate, orguser: OrgUser) -> Chart:
+        # Business validation
+        ChartService._validate_business_rules(data, orguser.org)
+        
+        # Validate before calling external service (if needed)
+        dbt_payload = ChartDBTPayload(
+            operation="validate_table",
+            schema=data.schema_name,
+            table=data.table_name,
+        )
+        # Schema ensures payload is valid before DBT call
+        
+        chart = Chart.objects.create(
+            title=data.title,
+            chart_type=data.chart_type,
+            schema_name=data.schema_name,
+            table_name=data.table_name,
+            created_by=orguser,
+            org=orguser.org,
+        )
+        
+        return chart
 
-# 4. Model Layer (models/visualization.py)
-class Chart(models.Model):
-    title = models.CharField(max_length=255)
-    # ... fields
+# 4. Response Schema (core/charts/schemas.py)
+class ChartResponse(Schema):
+    id: int
+    title: str
+    chart_type: str
     
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "title": self.title,
-            # ...
-        }
+    @classmethod
+    def from_model(cls, chart):
+        return cls(
+            id=chart.id,
+            title=chart.title,
+            chart_type=chart.chart_type,
+        )
 
-# 5. Response
+# 5. Final Response
 {
-    "id": 1,
-    "title": "Sales Overview",
-    "chart_type": "bar",
-    "created_at": "2025-01-22T10:00:00Z"
+    "success": true,
+    "message": "Chart created successfully",
+    "data": {
+        "id": 1,
+        "title": "Sales Overview",
+        "chart_type": "bar"
+    }
 }
 ```
 
 ---
 
-## Error Handling
+## Migration Guide
 
-### Error Handling Flow
+### Migrating from `services/` to `core/`
 
-```
-Service Layer Exception
-  ↓
-API Layer catches exception
-  ↓
-Convert to HttpError
-  ↓
-Return HTTP response with appropriate status code
-```
+1. **Create feature folder in core:**
+   ```bash
+   mkdir -p ddpui/core/{module}
+   touch ddpui/core/{module}/__init__.py
+   ```
 
-### Exception Hierarchy
+2. **Move service file:**
+   ```bash
+   mv ddpui/services/{module}_service.py ddpui/core/{module}/{module}_service.py
+   ```
 
-```python
-# Service Layer Exceptions
-{Module}ServiceError (base)
-  ├── {Module}NotFoundError → 404 Not Found
-  ├── {Module}ValidationError → 400 Bad Request
-  ├── {Module}PermissionError → 403 Forbidden
-  └── {Module}ServiceError → 500 Internal Server Error
-```
+3. **Create exceptions file:**
+   ```bash
+   # Extract exceptions from service file to:
+   ddpui/core/{module}/exceptions.py
+   ```
 
-### Error Handling Pattern
+4. **Move schemas:**
+   ```bash
+   mv ddpui/schemas/{module}_schema.py ddpui/core/{module}/schemas.py
+   ```
 
-```python
-# ✅ GOOD: Service Layer
-class ChartService:
-    @staticmethod
-    def get_chart(chart_id: int, org: Org) -> Chart:
-        try:
-            return Chart.objects.get(id=chart_id, org=org)
-        except Chart.DoesNotExist:
-            raise ChartNotFoundError(chart_id)
+5. **Update imports in API:**
+   ```python
+   # Before
+   from ddpui.services.{module}_service import {Module}Service
+   from ddpui.schemas.{module}_schema import {Module}Create
+   
+   # After
+   from ddpui.core.{module}.{module}_service import {Module}Service
+   from ddpui.core.{module}.schemas import {Module}Create
+   from ddpui.core.{module}.exceptions import {Module}NotFoundError
+   ```
 
-# ✅ GOOD: API Layer
-@charts_router.get("/{chart_id}/")
-@has_permission(["can_view_charts"])
-def get_chart(request, chart_id: int):
-    try:
-        chart = ChartService.get_chart(chart_id, request.orguser.org)
-        return ChartResponse(**chart.to_dict())
-    except ChartNotFoundError as err:
-        raise HttpError(404, "Chart not found") from err
-    except ChartValidationError as err:
-        raise HttpError(400, str(err)) from err
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        raise HttpError(500, "Internal server error") from e
+6. **Update `core/{module}/__init__.py`:**
+   ```python
+   from .{module}_service import {Module}Service
+   from .schemas import {Module}Create, {Module}Response
+   from .exceptions import {Module}Error, {Module}NotFoundError
+   
+   __all__ = [
+       "{Module}Service",
+       "{Module}Create",
+       "{Module}Response",
+       "{Module}Error",
+       "{Module}NotFoundError",
+   ]
+   ```
 
-# ❌ BAD: Direct exception in API
-@charts_router.get("/{chart_id}/")
-def get_chart(request, chart_id: int):
-    chart = Chart.objects.get(id=chart_id)  # No error handling
-    return chart.to_dict()
-```
+### Adding Response Wrapper to Existing API
 
----
+1. **Import wrapper:**
+   ```python
+   from ddpui.utils.response_wrapper import api_response, ApiResponse
+   ```
 
-## Current Structure Analysis
+2. **Update endpoint signature:**
+   ```python
+   # Before
+   @router.get("/", response=List[ChartResponse])
+   
+   # After
+   @router.get("/", response=ApiResponse[ChartListResponse])
+   ```
 
-### ✅ Well-Structured Modules
-
-#### Charts Module
-- ✅ API: `api/charts_api.py` - Thin layer
-- ✅ Service: `services/chart_service.py` - Business logic
-- ✅ Core: `core/charts/` - Domain operations
-- ✅ Models: `models/visualization.py` - Clean models
-- ✅ Schemas: `schemas/chart_schema.py` - Complete schemas
-
-#### Dashboard Module
-- ✅ API: `api/dashboard_native_api.py` - Thin layer
-- ✅ Service: `services/dashboard_service.py` - Business logic
-- ✅ Models: `models/dashboard.py` - Clean models
-- ✅ Schemas: `schemas/dashboard_schema.py` - Complete schemas
-
-### ⚠️ Partially Structured Modules
-
-#### Warehouse Module
-- ✅ API: `api/warehouse_api.py`
-- ⚠️ Service: `services/warehouse_service.py` - Minimal implementation
-- ⚠️ Core: `core/warehousefunctions.py` - Mixed patterns
-- ✅ Models: `models/org.py` (OrgWarehouse)
-- ✅ Schemas: `schemas/warehouse_api_schemas.py`
-
-**Issues**:
-- Business logic scattered between API and core
-- Service layer is minimal
-- Unclear separation between core and service
-
-#### DBT Module
-- ✅ API: `api/dbt_api.py`
-- ❌ Service: Missing
-- ⚠️ Core: `core/dbtfunctions.py` - Contains business logic
-- ✅ Models: `models/dbt_workflow.py`
-- ⚠️ Schemas: Partial
-
-**Issues**:
-- No service layer
-- Business logic in core layer
-- Some logic in API layer
-
-### ❌ Unstructured Modules
-
-#### AI Module
-- ✅ API: `api/ai_api.py`
-- ❌ Service: Missing
-- ✅ Core: `core/ai/` - Well-organized
-- ✅ Models: `models/ai_chat_logging.py`
-- ❌ Schemas: Embedded in API file
-
-**Issues**:
-- Business logic in API layer
-- No service layer
-- Schemas in API file instead of separate file
-
-#### Org Settings Module
-- ✅ API: `api/org_settings_api.py`
-- ❌ Service: Missing
-- ❌ Core: Not needed
-- ✅ Models: `models/org_settings.py`
-- ⚠️ Schemas: In models file
-
-**Issues**:
-- Business logic directly in API
-- No service layer
-- Schemas in models file instead of schemas/
-
-#### Dashboard Chat Module
-- ✅ API: `api/dashboard_chat_api.py`
-- ❌ Service: Missing
-- ✅ Core: `core/ai/` - Uses AI core
-- ✅ Models: `models/ai_chat_logging.py`
-- ❌ Schemas: Missing
-
-**Issues**:
-- No service layer
-- Business logic in API
-- Missing schemas
-
----
-
-## Improvement Recommendations
-
-### Priority 1: Create Missing Service Layers
-
-#### 1. AI Service (`services/ai_service.py`)
-
-**Current**: Business logic in `api/ai_api.py`
-
-**Recommended**:
-```python
-# services/ai_service.py
-class AIService:
-    @staticmethod
-    def ensure_org_ai_enabled(org_settings: OrgSettings) -> None:
-        """Ensure organization has AI features enabled"""
-        pass
-    
-    @staticmethod
-    def chat_completion(messages: List[AIMessage], **kwargs) -> AIResponse:
-        """Generate chat completion"""
-        pass
-```
-
-**Benefits**:
-- Testable business logic
-- Consistent with charts/dashboard pattern
-- Easier to maintain
-
-#### 2. Org Settings Service (`services/org_settings_service.py`)
-
-**Current**: Business logic in `api/org_settings_api.py`
-
-**Recommended**:
-```python
-# services/org_settings_service.py
-class OrgSettingsService:
-    @staticmethod
-    def get_settings(org: Org) -> OrgSettings:
-        """Get org settings"""
-        pass
-    
-    @staticmethod
-    def update_settings(org: Org, orguser: OrgUser, data: OrgSettingsUpdateData) -> OrgSettings:
-        """Update org settings with business logic"""
-        # Move notification logic here
-        pass
-```
-
-**Benefits**:
-- Remove business logic from API
-- Better testability
-- Consistent error handling
-
-#### 3. DBT Service (`services/dbt_service.py`)
-
-**Current**: Business logic in `core/dbtfunctions.py` and `api/dbt_api.py`
-
-**Recommended**:
-```python
-# services/dbt_service.py
-class DBTService:
-    @staticmethod
-    def setup_workspace(org: Org, data: DBTWorkspaceData) -> Task:
-        """Setup DBT workspace"""
-        pass
-    
-    @staticmethod
-    def update_github_config(org: Org, data: DBTGitHubData) -> None:
-        """Update GitHub configuration"""
-        pass
-```
-
-**Benefits**:
-- Clear separation of concerns
-- Business logic in one place
-- Easier to test
-
-### Priority 2: Extract Schemas
-
-#### Move Schemas from API Files
-
-**Current**:
-- AI schemas in `api/ai_api.py`
-- Org Settings schemas in `models/org_settings.py`
-
-**Recommended**:
-- `schemas/ai_schema.py` - All AI schemas
-- `schemas/org_settings_schema.py` - All org settings schemas
-
-### Priority 3: Standardize Patterns
-
-#### Router Naming
-```python
-# ✅ Standardize to:
-ai_router = Router()
-dashboard_chat_router = Router()
-org_settings_router = Router()
-```
-
-#### Error Handling
-```python
-# ✅ Standard pattern:
-try:
-    result = Service.method(...)
-except ServiceNotFoundError as err:
-    raise HttpError(404, "Not found") from err
-except ServiceValidationError as err:
-    raise HttpError(400, str(err)) from err
-```
-
-#### Import Patterns
-```python
-# ✅ Preferred:
-from ddpui.core.charts import charts_service
-charts_service.build_chart_query(...)
-
-# ⚠️ Acceptable but less preferred:
-from ddpui.core.charts.charts_service import build_chart_query
-build_chart_query(...)
-```
+3. **Wrap return value:**
+   ```python
+   # Before
+   return [ChartResponse(**c.to_dict()) for c in charts]
+   
+   # After
+   return api_response(
+       success=True,
+       data=ChartListResponse(
+           data=[ChartResponse.from_model(c) for c in charts],
+           total=total,
+           page=page,
+           page_size=page_size,
+       )
+   )
+   ```
 
 ---
 
 ## Code Examples
 
-### Complete Example: Org Settings Module
+### Complete Example: Charts Module Structure
 
-#### Current Implementation (❌ Bad)
-
-```python
-# api/org_settings_api.py
-@router.put("/", response=dict)
-def update_org_settings(request, payload: UpdateOrgSettingsSchema):
-    orguser = request.orguser
-    org_settings, created = OrgSettings.objects.get_or_create(...)
-    
-    # Business logic in API ❌
-    ai_settings_changed = False
-    if payload.ai_data_sharing_enabled is not None:
-        if not org_settings.ai_data_sharing_enabled and payload.ai_data_sharing_enabled:
-            ai_chat_being_enabled = True
-        # ...
-    
-    # Notification logic in API ❌
-    if ai_chat_being_enabled:
-        send_ai_chat_enabled_notification(...)
-    
-    return {"success": True, "res": org_settings.to_dict()}
+```
+ddpui/core/charts/
+├── __init__.py
+├── chart_service.py
+├── chart_operations.py      # Query building, data transformation
+├── chart_validator.py       # Validation logic
+├── schemas.py               # All chart schemas
+├── exceptions.py            # Chart-specific exceptions
+└── echarts_config_generator.py  # ECharts configuration
 ```
 
-#### Recommended Implementation (✅ Good)
-
+#### `__init__.py`
 ```python
-# schemas/org_settings_schema.py
-class UpdateOrgSettingsSchema(Schema):
-    ai_data_sharing_enabled: Optional[bool] = None
-    ai_logging_acknowledged: Optional[bool] = None
+from .chart_service import ChartService
+from .schemas import ChartCreate, ChartUpdate, ChartResponse, ChartListResponse
+from .exceptions import ChartError, ChartNotFoundError, ChartValidationError
 
-class OrgSettingsResponse(Schema):
-    organization_logo_filename: Optional[str]
-    ai_data_sharing_enabled: bool
-    ai_logging_acknowledged: bool
-    ai_settings_accepted_by_email: Optional[str]
-    ai_settings_accepted_at: Optional[datetime]
+__all__ = [
+    "ChartService",
+    "ChartCreate",
+    "ChartUpdate", 
+    "ChartResponse",
+    "ChartListResponse",
+    "ChartError",
+    "ChartNotFoundError",
+    "ChartValidationError",
+]
+```
 
-# services/org_settings_service.py
-@dataclass
-class OrgSettingsUpdateData:
-    ai_data_sharing_enabled: Optional[bool] = None
-    ai_logging_acknowledged: Optional[bool] = None
+#### `exceptions.py`
+```python
+"""Chart exceptions"""
 
-class OrgSettingsService:
-    @staticmethod
-    @transaction.atomic
-    def update_settings(
-        org: Org,
-        orguser: OrgUser,
-        data: OrgSettingsUpdateData
-    ) -> OrgSettings:
-        org_settings = OrgSettingsService.get_settings(org)
-        
-        # Business logic
-        ai_settings_changed = False
-        ai_chat_being_enabled = False
-        
-        if data.ai_data_sharing_enabled is not None:
-            if not org_settings.ai_data_sharing_enabled and data.ai_data_sharing_enabled:
-                ai_chat_being_enabled = True
-            if org_settings.ai_data_sharing_enabled != data.ai_data_sharing_enabled:
-                ai_settings_changed = True
-            org_settings.ai_data_sharing_enabled = data.ai_data_sharing_enabled
-        
-        if data.ai_logging_acknowledged is not None:
-            if org_settings.ai_logging_acknowledged != data.ai_logging_acknowledged:
-                ai_settings_changed = True
-            org_settings.ai_logging_acknowledged = data.ai_logging_acknowledged
-        
-        if ai_settings_changed:
-            org_settings.ai_settings_accepted_by = orguser.user
-            org_settings.ai_settings_accepted_at = timezone.now()
-        
-        org_settings.save()
-        
-        # Notification logic
-        if ai_chat_being_enabled:
-            OrgSettingsService._send_ai_enabled_notification(org, orguser.user.email)
-        
-        return org_settings
 
-# api/org_settings_api.py
-@org_settings_router.put("/", response=OrgSettingsResponse)
-@has_permission(["can_manage_org_settings"])
-def update_org_settings(request, payload: UpdateOrgSettingsSchema):
-    orguser: OrgUser = request.orguser
+class ChartError(Exception):
+    """Base exception for chart errors"""
     
-    try:
-        update_data = OrgSettingsUpdateData(
-            ai_data_sharing_enabled=payload.ai_data_sharing_enabled,
-            ai_logging_acknowledged=payload.ai_logging_acknowledged,
+    def __init__(self, message: str, error_code: str = "CHART_ERROR"):
+        self.message = message
+        self.error_code = error_code
+        super().__init__(self.message)
+
+
+class ChartNotFoundError(ChartError):
+    """Raised when chart is not found"""
+    
+    def __init__(self, chart_id: int):
+        super().__init__(f"Chart with id {chart_id} not found", "CHART_NOT_FOUND")
+        self.chart_id = chart_id
+
+
+class ChartValidationError(ChartError):
+    """Raised when chart validation fails"""
+    
+    def __init__(self, message: str):
+        super().__init__(message, "CHART_VALIDATION_ERROR")
+
+
+class ChartPermissionError(ChartError):
+    """Raised when user doesn't have permission"""
+    
+    def __init__(self, message: str = "Permission denied"):
+        super().__init__(message, "CHART_PERMISSION_DENIED")
+```
+
+#### `schemas.py`
+```python
+"""Chart schemas"""
+
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from ninja import Schema, Field
+
+
+class ChartCreate(Schema):
+    """Schema for creating a chart"""
+    title: str = Field(..., min_length=1, max_length=255)
+    chart_type: str = Field(..., description="Type of chart (bar, line, pie, etc.)")
+    schema_name: str = Field(..., description="Database schema name")
+    table_name: str = Field(..., description="Database table name")
+    description: Optional[str] = None
+    extra_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+class ChartUpdate(Schema):
+    """Schema for updating a chart"""
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    extra_config: Optional[Dict[str, Any]] = None
+
+
+class ChartResponse(Schema):
+    """Schema for chart response"""
+    id: int
+    title: str
+    chart_type: str
+    description: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    
+    @classmethod
+    def from_model(cls, chart) -> "ChartResponse":
+        return cls(
+            id=chart.id,
+            title=chart.title,
+            chart_type=chart.chart_type,
+            description=chart.description,
+            created_at=chart.created_at,
+            updated_at=chart.updated_at,
         )
-        
-        org_settings = OrgSettingsService.update_settings(
-            org=orguser.org,
-            orguser=orguser,
-            data=update_data
-        )
-        
-        return OrgSettingsResponse(**org_settings.to_dict())
-    except OrgSettingsServiceError as e:
-        raise HttpError(400, str(e)) from e
-    except Exception as e:
-        logger.error(f"Error updating org settings: {e}")
-        raise HttpError(500, "Failed to update org settings") from e
+
+
+class ChartListResponse(Schema):
+    """Schema for paginated chart list"""
+    data: List[ChartResponse]
+    total: int
+    page: int
+    page_size: int
 ```
 
 ---
 
 ## Checklist
 
-### When Creating a New Module
+### When Creating a New Feature Module
+
+- [ ] **Core Module Structure** (`core/{module}/`)
+  - [ ] `__init__.py` with public exports
+  - [ ] `{module}_service.py` with service class
+  - [ ] `schemas.py` with request/response schemas
+  - [ ] `exceptions.py` with custom exceptions
+  - [ ] Optional: `{module}_operations.py` for domain operations
 
 - [ ] **API Layer** (`api/{module}_api.py`)
   - [ ] Router named `{module}_router`
   - [ ] All endpoints have `@has_permission` decorator
-  - [ ] Request validation using schemas
-  - [ ] Service exceptions converted to HttpError
-  - [ ] Response serialization using schemas
+  - [ ] Request validation using schemas from core
+  - [ ] Exceptions converted to HttpError
+  - [ ] Response wrapped with `api_response()`
   - [ ] No business logic in API layer
 
-- [ ] **Service Layer** (`services/{module}_service.py`)
-  - [ ] Custom exceptions defined (`{Module}ServiceError`, etc.)
-  - [ ] Data classes for structured data (`@dataclass`)
-  - [ ] Service class with static methods
-  - [ ] Business logic implemented
-  - [ ] Transaction management where needed
-  - [ ] Proper logging
-
-- [ ] **Schema Layer** (`schemas/{module}_schema.py`)
+- [ ] **Schemas** (`core/{module}/schemas.py`)
   - [ ] Request schemas (Create, Update, Query)
-  - [ ] Response schemas (Response, ListResponse)
+  - [ ] Response schemas with `from_model()` method
   - [ ] Field validation and descriptions
-  - [ ] Examples in Config
+  - [ ] Strict validation for external service payloads
 
-- [ ] **Model Layer** (`models/{module}.py`)
-  - [ ] Django ORM model definition
-  - [ ] Proper field types and relationships
-  - [ ] Meta class with ordering, indexes
-  - [ ] `to_json()` or `to_dict()` method
-  - [ ] `__str__()` method
-  - [ ] No business logic
+- [ ] **Exceptions** (`core/{module}/exceptions.py`)
+  - [ ] Base exception: `{Module}Error`
+  - [ ] NotFound: `{Module}NotFoundError`
+  - [ ] Validation: `{Module}ValidationError`
+  - [ ] Permission: `{Module}PermissionError`
+  - [ ] External: `{Module}ExternalServiceError` (if needed)
 
-- [ ] **Core Layer** (`core/{module}/`) - Optional
-  - [ ] Domain operations only
-  - [ ] No business logic
-  - [ ] Reusable utilities
+- [ ] **Service** (`core/{module}/{module}_service.py`)
+  - [ ] Static methods for CRUD operations
+  - [ ] Transaction management where needed
+  - [ ] Schema validation before external calls
+  - [ ] Proper logging
+  - [ ] Business logic validation
 
 - [ ] **General**
-  - [ ] Module-specific logger names
+  - [ ] No `to_json()`/`to_dict()` in models
   - [ ] Consistent import patterns
   - [ ] Error handling follows patterns
   - [ ] Documentation/docstrings
 
-### When Reviewing Existing Code
+### When Reviewing/Migrating Existing Code
 
-- [ ] Business logic is in service layer, not API
-- [ ] Schemas are in `schemas/` directory, not embedded
-- [ ] Router naming follows `{module}_router` pattern
-- [ ] Error handling converts service exceptions to HttpError
-- [ ] Models don't contain business logic
-- [ ] Core layer only contains domain operations
+- [ ] Service moved from `services/` to `core/{module}/`
+- [ ] Schemas moved from `schemas/` to `core/{module}/schemas.py`
+- [ ] Exceptions extracted to `core/{module}/exceptions.py`
+- [ ] API uses response wrapper
+- [ ] Models don't contain `to_json()`/`to_dict()`
+- [ ] External service calls are validated with schemas first
 
 ---
 
 ## Summary
 
-### Key Takeaways
+### Key Changes from Previous Architecture
 
-1. **API Layer**: Thin layer for HTTP handling only
-2. **Service Layer**: Business logic and orchestration
-3. **Schema Layer**: Request/response validation
-4. **Model Layer**: Database schema only
-5. **Core Layer**: Domain operations (optional)
+| Before | After |
+|--------|-------|
+| `services/{module}_service.py` | `core/{module}/{module}_service.py` |
+| `schemas/{module}_schema.py` | `core/{module}/schemas.py` |
+| Exceptions in service file | `core/{module}/exceptions.py` |
+| `model.to_json()` | `Schema.from_model(model)` |
+| Direct response dict | `api_response()` wrapper |
+| No validation before DBT | Schema validation required |
 
-### Current Status
+### Module Dependencies
 
-- ✅ **Charts & Dashboard**: Excellent examples to follow
-- ⚠️ **Warehouse, DBT**: Need service layer improvements
-- ❌ **AI, Org Settings, Dashboard Chat**: Need service layers
+```
+API Layer
+    ↓ imports
+Core Layer (service, schemas, exceptions)
+    ↓ imports
+Model Layer
+    ↓ uses
+Database
+```
 
-### Next Steps
+### Current Status & Next Steps
 
-1. Create service layers for missing modules
-2. Extract schemas from API files
-3. Standardize router naming
-4. Refactor business logic from API to services
-5. Update documentation with patterns
+1. ✅ Create `ddpui/utils/response_wrapper.py`
+2. Migrate existing services to `core/{module}/`
+3. Move schemas to `core/{module}/schemas.py`
+4. Extract exceptions to `core/{module}/exceptions.py`
+5. Add `from_model()` to response schemas
+6. Remove `to_json()`/`to_dict()` from models
+7. Update all API endpoints to use response wrapper
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2025-01-22  
+**Document Version**: 2.0  
+**Last Updated**: 2025-01-23  
 **Maintained By**: Dalgo Platform Team
