@@ -28,7 +28,8 @@ The Dalgo platform consists of multiple interconnected services. Here's a one-li
 
 #### Dalgo Backend
 
-**Prerequisites: PostgreSQL, Redis & dbt Setup**
+##### Prerequisites 
+PostgreSQL, Redis & dbt Setup
 
 ```bash
 # 1. PostgreSQL & Redis Setup
@@ -64,7 +65,7 @@ mkdir -p /path/to/client-dbt-projects
 # You'll need this absolute path for CLIENTDBT_ROOT in .env
 ```
 
-**Required Environment Configuration (.env):**
+##### Required Environment Configuration (.env)
 
 The Dalgo Backend requires extensive configuration. Here are all the environment variables:
 
@@ -140,7 +141,7 @@ DBT_VENV=/path/to/dbt-folder
 CLIENTDBT_ROOT=/path/to/client-dbt-projects
 ```
 
-**Key Configuration Notes:**
+##### Key Configuration Notes
 
 1. **DJANGOSECRET**: Generate with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
 
@@ -160,7 +161,7 @@ CLIENTDBT_ROOT=/path/to/client-dbt-projects
 
 9. **CLIENTDBT_ROOT**: Absolute path to directory where organization dbt projects are stored
 
-**Main Setup**
+##### Main Setup
 
 ```bash
 # Clone and setup
@@ -207,7 +208,7 @@ uv run celery -A ddpui beat -l info
 
 #### Prefect Proxy
 
-**Required Environment Configuration (.env):**
+##### Required Environment Configuration (.env)
 
 ```bash
 # === CORE SETTINGS ===
@@ -226,7 +227,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 LOG_LEVEL=INFO
 ```
 
-**Setup**
+##### Setup
 
 ```bash
 # Clone repository
@@ -253,7 +254,7 @@ uv run uvicorn proxy.main:app --reload --port 8085
 
 #### Frontend Applications
 
-**Webapp v2 (Modern Dashboard):**
+##### Webapp v2 (Modern Dashboard)
 ```bash
 # Clone repository
 git clone https://github.com/DalgoT4D/webapp_v2.git
@@ -267,7 +268,7 @@ npm run dev
 # Available at http://localhost:3001
 ```
 
-**Webapp (Legacy Management Interface):**
+##### Webapp (Legacy Management Interface)
 ```bash
 # Clone repository
 git clone https://github.com/DalgoT4D/webapp.git
@@ -285,6 +286,8 @@ yarn dev
 
 #### Airbyte (Data Integration)
 
+##### Setup
+
 ```bash
 # Using Docker Compose
 git clone https://github.com/airbytehq/airbyte.git
@@ -295,54 +298,26 @@ cd airbyte
 # Available at http://localhost:8000
 ```
 
-#### Prefect Server (if not using prefect-proxy setup)
+#### Prefect Server & Workers
+
+##### Setup
 
 ```bash
-# Install Prefect
-pip install prefect
+# Navigate to prefect-proxy directory
+cd prefect-proxy
 
-# Start Prefect server
-prefect server start
+# Start Prefect server (in one terminal)
+uv run prefect server start
 # Available at http://localhost:4200
+
+# Start Prefect workers (in separate terminals)
+# DDP queue worker
+uv run prefect worker start -q ddp --pool dev_dalgo_work_pool
+
+# Manual DBT queue worker
+uv run prefect worker start -q manual-dbt --pool dev_dalgo_work_pool
 ```
 
-#### PostgreSQL & Redis
-
-**Option 1: Docker Compose**
-```yaml
-# docker-compose.dev.yml
-version: '3.8'
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: dalgo_dev
-      POSTGRES_USER: dalgo
-      POSTGRES_PASSWORD: dalgo
-    ports:
-      - "5432:5432"
-  
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-```
-
-```bash
-docker-compose -f docker-compose.dev.yml up -d
-```
-
-**Option 2: Local Installation**
-```bash
-# macOS
-brew install postgresql redis
-brew services start postgresql
-brew services start redis
-
-# Ubuntu/Debian
-sudo apt install postgresql postgresql-contrib redis-server
-sudo systemctl start postgresql redis
-```
 
 ## Development Workflow
 
