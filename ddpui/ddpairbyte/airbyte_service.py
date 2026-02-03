@@ -78,7 +78,7 @@ def abreq(endpoint, req=None, **kwargs):
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
 
-    logger.error(
+    logger.warning(
         "abreq result has content-type %s while hitting %s",
         res.headers.get("Content-Type", ""),
         endpoint,

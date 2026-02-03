@@ -188,10 +188,16 @@ def from_timestamp(timestamp: int) -> datetime:
     """
     Convert a Unix timestamp to a datetime object.
     :param timestamp: Unix timestamp in seconds.
-    :return: Corresponding datetime object.
+    :return: Corresponding datetime object or None if invalid.
     """
-    if timestamp > 0:
-        return datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    if timestamp is None:
+        return None
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return None
+    if ts > 0:
+        return datetime.fromtimestamp(ts, tz=pytz.UTC)
     return None
 
 
