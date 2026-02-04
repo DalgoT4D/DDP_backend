@@ -29,7 +29,6 @@ from ddpui.utils.constants import (
 )
 from ddpui.utils.helpers import find_all_values_for_key
 from ddpui.core.notifications.delivery import (
-    email_flowrun_logs_to_superadmins,
     notify_org_managers,
     notify_platform_admins,
 )
@@ -152,7 +151,7 @@ MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
 
 def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dict):
     """update flow run for deployment"""
-    send_failure_notifications = True
+    notify_failed_pipeline = True
     flow_run_id = flow_run["id"]
 
     if state in [
@@ -205,12 +204,10 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
     return send_failure_notifications
 
 
-def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
-    """send notification emails to org users"""
+def notify_users_about_failed_run(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
+    """send various notifications about the failed run"""
     flow_run_id = flow_run["id"]
 
-    if os.getenv("SEND_FLOWRUN_LOGS_TO_SUPERADMINS", "").lower() in ["true", "1", "yes"]:
-        email_flowrun_logs_to_superadmins(org, flow_run_id)
     if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
         notify_platform_admins(org, flow_run_id, state)
 
@@ -305,7 +302,7 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                 ):
                     # odf might be None!
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
-                    send_failure_emails(org, odf, flow_run, state)
+                    notify_users_about_failed_run(org, odf, flow_run, state)
 
     except Exception as err:
         logger.error(

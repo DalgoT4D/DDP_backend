@@ -32,26 +32,6 @@ Logs:
     return email_body
 
 
-def email_superadmins(org: Org, email_body: str):
-    """sends a notificationemail to all OrgUsers"""
-    tag = " [STAGING]" if not PRODUCTION else ""
-    subject = f"Dalgo notification for platform admins{tag}"
-    for orguser in OrgUser.objects.filter(
-        org=org,
-        new_role__slug=SUPER_ADMIN_ROLE,
-    ).all():
-        logger.info(f"sending prefect-notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, subject, email_body)
-
-
-def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
-    """retrieves logs for a flow-run and emails them to all users for the org"""
-    logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
-    logmessages = [x["message"] for x in logs_arr]
-    email_body = generate_notification_email(org.name, flow_run_id, logmessages)
-    email_superadmins(org, email_body)
-
-
 def notify_org_managers(org: Org, message: str, email_subject: str):
     """send a notification to all users in the org"""
     error, recipients = get_recipients(
