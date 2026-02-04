@@ -10,10 +10,7 @@ from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.tasks import OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.awsses import send_text_message
-from ddpui.models.tasks import (
-    TaskLock,
-)
+from ddpui.models.tasks import TaskLock
 from ddpui.ddpprefect import (
     prefect_service,
     MAP_FLOW_RUN_STATE_NAME_TO_TYPE,
@@ -24,23 +21,18 @@ from ddpui.ddpprefect import (
     FLOW_RUN_RUNNING_STATE_NAME,
     FLOW_RUN_PENDING_STATE_NAME,
 )
-
-from ddpui.settings import PRODUCTION
-from ddpui.auth import SUPER_ADMIN_ROLE
-from ddpui.core.notifications_service import (
-    create_notification,
-    get_recipients,
-    SentToEnum,
-    NotificationDataSchema,
-)
-from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.constants import (
     SYSTEM_USER_EMAIL,
     TASK_AIRBYTECLEAR,
     TASK_AIRBYTERESET,
     TASK_AIRBYTESYNC,
 )
-from ddpui.utils.discord import send_discord_notification
+from ddpui.utils.helpers import find_all_values_for_key
+from ddpui.core.notifications.delivery import (
+    email_flowrun_logs_to_superadmins,
+    notify_org_managers,
+    notify_platform_admins,
+)
 
 logger = CustomLogger("ddpui")
 
@@ -97,81 +89,6 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
     logger.error("didn't find the org slug inside the webhook function")
 
     return None
-
-
-def generate_notification_email(orgname: str, flow_run_id: str, logmessages: list) -> str:
-    """plantext notification email"""
-    tag = " [STAGING]" if not PRODUCTION else ""
-    email_body = f"""
-To the admins of {orgname}{tag},
-
-This is an automated notification from Dalgo{tag}.
-
-Flow run id: {flow_run_id}
-Logs:
-"""
-    email_body += "\n".join(logmessages)
-    return email_body
-
-
-def email_superadmins(org: Org, email_body: str):
-    """sends a notificationemail to all OrgUsers"""
-    tag = " [STAGING]" if not PRODUCTION else ""
-    subject = f"Dalgo notification for platform admins{tag}"
-    for orguser in OrgUser.objects.filter(
-        org=org,
-        new_role__slug=SUPER_ADMIN_ROLE,
-    ).all():
-        logger.info(f"sending prefect-notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, subject, email_body)
-
-
-def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
-    """retrieves logs for a flow-run and emails them to all users for the org"""
-    logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
-    logmessages = [x["message"] for x in logs_arr]
-    email_body = generate_notification_email(org.name, flow_run_id, logmessages)
-    email_superadmins(org, email_body)
-
-
-def notify_org_managers(org: Org, message: str, email_subject: str):
-    """send a notification to all users in the org"""
-    error, recipients = get_recipients(
-        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
-    )
-    if error:
-        logger.error(f"Error getting recipients: {error}")
-        return
-    error, response = create_notification(
-        NotificationDataSchema(
-            author="Dalgo", message=message, email_subject=email_subject, recipients=recipients
-        )
-    )
-    if error:
-        logger.error(f"Error creating notification: {error}")
-        return
-    logger.info(f"Notification created: {response}")
-
-
-def notify_platform_admins(org: Org, flow_run_id: str, state: str):
-    """send a notification to platform admins discord webhook"""
-    prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
-    airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
-    message = (
-        f"Flow run for {org.slug} has failed with state {state}"
-        "\n"
-        f"\nBase plan: {org.base_plan() if org.base_plan() else 'Unknown'}"
-        "\n"
-        f"\n{prefect_url}/flow-runs/flow-run/{flow_run_id}"
-        "\n"
-        f"\nAirbyte workspace URL: {airbyte_url}/workspaces/{org.airbyte_workspace_id}"
-    )
-    if os.getenv("ADMIN_EMAIL"):
-        send_text_message(
-            os.getenv("ADMIN_EMAIL"), "Dalgo notification for platform admins", message
-        )
-    if os.getenv("ADMIN_DISCORD_WEBHOOK"):
-        send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)
 
 
 def get_flow_run_times(flow_run: dict) -> tuple:
@@ -288,24 +205,6 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
     return send_failure_notifications
 
 
-def find_all_values_for_key(obj: dict, key: str) -> list:
-    """finds all occurences of the key in the object"""
-    results = []
-
-    def _search(o):
-        if isinstance(o, dict):
-            for k, v in o.items():
-                if k == key:
-                    results.append(v)
-                _search(v)
-        elif isinstance(o, list):
-            for item in o:
-                _search(item)
-
-    _search(obj)
-    return results
-
-
 def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
     """send notification emails to org users"""
     flow_run_id = flow_run["id"]
@@ -420,6 +319,9 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
             if task.get("slug", "") in [TASK_AIRBYTESYNC, TASK_AIRBYTERESET, TASK_AIRBYTECLEAR]:
                 connection_id = task.get("connection_id", None)
                 if connection_id:
+                    # Import here to avoid circular import
+                    from ddpui.ddpairbyte import airbytehelpers
+
                     # sync all jobs in all 6 hours
                     airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(
                         last_n_days=0, last_n_hours=6, connection_id=connection_id

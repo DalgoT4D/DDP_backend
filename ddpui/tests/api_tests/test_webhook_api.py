@@ -20,14 +20,16 @@ from ddpui.api.webhook_api import (
     get_flowrun_id_and_state,
     post_notification_v1,
 )
-from ddpui.utils.webhook_helpers import (
+from ddpui.core.webhooks.webhook_functions import (
     get_org_from_flow_run,
+    do_handle_prefect_webhook,
+    get_flow_run_times,
+)
+from ddpui.core.notifications.delivery import (
     generate_notification_email,
     email_superadmins,
     email_flowrun_logs_to_superadmins,
     notify_platform_admins,
-    do_handle_prefect_webhook,
-    get_flow_run_times,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
 from ddpui.models.org import Org, ConnectionMeta
@@ -124,7 +126,7 @@ def test_email_orgusers():
     new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
     UserAttributes.objects.create(user=user, is_platform_admin=True)
-    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
         email_superadmins(org, "hello")
         tag = " [STAGING]" if not PRODUCTION else ""
         subject = f"Dalgo notification for platform admins{tag}"
@@ -137,7 +139,7 @@ def test_email_orgusers_not_non_admins():
     user = User.objects.create(username="username", email="useremail")
     new_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
-    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
         email_superadmins(org, "hello")
         mock_send_text_message.assert_not_called()
 
@@ -148,7 +150,7 @@ def test_email_orgusers_not_to_report_viewers():
     user = User.objects.create(username="username", email="useremail")
     new_role = Role.objects.filter(slug=GUEST_ROLE).first()
     OrgUser.objects.create(org=org, new_role=new_role, user=user)
-    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
         email_superadmins(org, "hello")
         mock_send_text_message.assert_not_called()
 
@@ -169,7 +171,7 @@ def test_email_flowrun_logs_to_orgusers():
                 ]
             }
         }
-        with patch("ddpui.utils.webhook_helpers.email_superadmins") as mock_email_superadmins:
+        with patch("ddpui.core.notifications.delivery.email_superadmins") as mock_email_superadmins:
             email_flowrun_logs_to_superadmins(org, "flow-run-id")
             tag = " [STAGING]" if not PRODUCTION else ""
             mock_email_superadmins.assert_called_once_with(
@@ -217,11 +219,11 @@ def test_post_notification_v1_orchestrate():
     email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
     email_subject = f"{org.name}: Job failure for {odf.name}"
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.notify_platform_admins"
+        "ddpui.core.notifications.delivery.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
-        "ddpui.utils.webhook_helpers.notify_org_managers"
+        "ddpui.core.notifications.delivery.notify_org_managers"
     ) as mock_notify_org_managers:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
@@ -263,11 +265,11 @@ def test_post_notification_v1_manual_with_connection_id():
     )
     email_subject = f"{org.name}: Job failure for {odf.name}"
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.notify_platform_admins"
+        "ddpui.core.notifications.delivery.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
-        "ddpui.utils.webhook_helpers.notify_org_managers"
+        "ddpui.core.notifications.delivery.notify_org_managers"
     ) as mock_notify_org_managers:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
@@ -309,11 +311,11 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
     )
     email_subject = f"{org.name}: Job failure for {odf.name}"
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.notify_platform_admins"
+        "ddpui.core.notifications.delivery.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
-        "ddpui.utils.webhook_helpers.notify_org_managers"
+        "ddpui.core.notifications.delivery.notify_org_managers"
     ) as mock_notify_org_managers:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
@@ -350,11 +352,11 @@ def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_ta
         org=org, name=deployment_id, dataflow_type="manual", deployment_id=deployment_id
     )
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.notify_platform_admins"
+        "ddpui.core.notifications.delivery.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
-        "ddpui.utils.webhook_helpers.notify_org_managers"
+        "ddpui.core.notifications.delivery.notify_org_managers"
     ) as mock_notify_org_managers:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
@@ -386,11 +388,11 @@ def test_post_notification_v1_email_supersadmins():
         "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.notify_platform_admins"
+        "ddpui.core.notifications.delivery.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
-        "ddpui.utils.webhook_helpers.notify_org_managers"
+        "ddpui.core.notifications.delivery.notify_org_managers"
     ) as mock_notify_org_managers:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
@@ -481,11 +483,11 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
 
     # Failed (any terminal state); third message from prefect; deployment has failed
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.notify_platform_admins"
+        "ddpui.core.notifications.delivery.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
-        "ddpui.utils.webhook_helpers.notify_org_managers"
+        "ddpui.core.notifications.delivery.notify_org_managers"
     ) as mock_notify_org_managers:
         flow_run["status"] = FLOW_RUN_FAILED_STATE_TYPE
         flow_run["state_name"] = FLOW_RUN_FAILED_STATE_NAME
@@ -507,7 +509,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
 
     # Failed (crashed); with retry logic
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
+        "ddpui.core.notifications.delivery.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
         "ddpui.ddpprefect.prefect_service.retry_flow_run"
     ) as mock_retry_flow_run:
@@ -559,7 +561,7 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
 
 def test_email_superadmins():
     """tests email_superadmins"""
-    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
         org = Org.objects.create(name="temp", slug="temp")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(
@@ -574,11 +576,11 @@ def test_email_superadmins():
 def test_email_flowrun_logs_to_superadmins():
     """tests email_flowrun_logs_to_superadmins"""
     with patch(
-        "ddpui.utils.webhook_helpers.prefect_service.recurse_flow_run_logs"
+        "ddpui.ddpprefect.prefect_service.recurse_flow_run_logs"
     ) as mock_recurse_flow_run_logs, patch(
-        "ddpui.utils.webhook_helpers.generate_notification_email"
+        "ddpui.core.notifications.delivery.generate_notification_email"
     ) as mock_generate_notification_email, patch(
-        "ddpui.utils.webhook_helpers.email_superadmins"
+        "ddpui.core.notifications.delivery.email_superadmins"
     ) as mock_email_superadmins:
         org = Mock(slug="org", name="org")
         mock_recurse_flow_run_logs.return_value = [
@@ -598,9 +600,9 @@ def test_email_flowrun_logs_to_superadmins():
 def test_notify_platform_admins():
     """tests notify_platform_admins"""
     with patch(
-        "ddpui.utils.webhook_helpers.send_discord_notification"
+        "ddpui.utils.discord.send_discord_notification"
     ) as mock_send_discord_notification, patch(
-        "ddpui.utils.webhook_helpers.send_text_message"
+        "ddpui.utils.awsses.send_text_message"
     ) as mock_send_text_message:
         org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
