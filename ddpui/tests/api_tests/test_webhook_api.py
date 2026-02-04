@@ -495,14 +495,14 @@ def test_notify_platform_admins():
         os.environ["AIRBYTE_URL_FOR_NOTIFICATIONS"] = "airbyte-url-for-notifications"
         os.environ["SES_SENDER_EMAIL"] = "sender@example.com"
 
-        message = """**Pipeline Failure Alert**
+        message = """Pipeline Failure Alert\n       
 Organization: orgslug
 Failed Step: Test Step
 State: FAILED
 Base plan: baseplan
 
-[View Logs](prefect-url-for-notifications/flow-runs/flow-run/flow-run-id)
-[Airbyte Workspace](airbyte-url-for-notifications/workspaces/airbyte_workspace_id)"""
+Prefect flow run: prefect-url-for-notifications/flow-runs/flow-run/flow-run-id
+Airbyte workspace URL: airbyte-url-for-notifications/workspaces/airbyte_workspace_id"""
 
         notify_platform_admins(org, "flow-run-id", "FAILED", "Test Step")
         mock_send_discord_notification.assert_called_once_with(
