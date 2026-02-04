@@ -166,29 +166,21 @@ def test_post_notification_v1_orchestrate():
         "status": FLOW_RUN_FAILED_STATE_TYPE,
         "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
-    email_body = ["To the admins of temp,\n"]
     odf = OrgDataFlowv1.objects.create(
         org=org, name=deployment_id, dataflow_type="orchestrate", deployment_id=deployment_id
     )
-    email_body.append(f"The pipeline {odf.name} has failed")
-    email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
-    email_subject = f"{org.name}: Job failure for {odf.name}"
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers:
+        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
+    ) as mock_notify_users_about_failed_run:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_users_about_failed_run.assert_called_once_with(
+            org, odf, flow_run, FLOW_RUN_FAILED_STATE_NAME
+        )
 
 
 def test_post_notification_v1_manual_with_connection_id():
@@ -211,30 +203,21 @@ def test_post_notification_v1_manual_with_connection_id():
         "status": FLOW_RUN_FAILED_STATE_TYPE,
         "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
-    email_body = ["To the admins of temp,\n"]
-    email_body.append("A job has failed, the connection(s) involved were:")
-    email_body.append(f"- {connection_name}")
-    email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
     odf = OrgDataFlowv1.objects.create(
         org=org, name=deployment_id, dataflow_type="manual", deployment_id=deployment_id
     )
-    email_subject = f"{org.name}: Job failure for {odf.name}"
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers:
+        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
+    ) as mock_notify_users_about_failed_run:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_users_about_failed_run.assert_called_once_with(
+            org, odf, flow_run, FLOW_RUN_FAILED_STATE_NAME
+        )
 
 
 def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
@@ -257,30 +240,21 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         "status": FLOW_RUN_FAILED_STATE_TYPE,
         "state_name": FLOW_RUN_FAILED_STATE_NAME,
     }
-    email_body = ["To the admins of temp,\n"]
-    email_body.append("A job has failed, the tasks involved were")
-    email_body.append(f"- {orgtask.task.slug}")
-    email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
     odf = OrgDataFlowv1.objects.create(
         org=org, name=deployment_id, dataflow_type="manual", deployment_id=deployment_id
     )
-    email_subject = f"{org.name}: Job failure for {odf.name}"
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers:
+        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
+    ) as mock_notify_users_about_failed_run:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
+        mock_notify_users_about_failed_run.assert_called_once_with(
+            org, odf, flow_run, FLOW_RUN_FAILED_STATE_NAME
+        )
 
 
 def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_tasks):
@@ -307,21 +281,16 @@ def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_ta
         org=org, name=deployment_id, dataflow_type="manual", deployment_id=deployment_id
     )
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers:
+        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
+    ) as mock_notify_users_about_failed_run:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_org_managers.assert_not_called()
+        # For generate-edr tasks, notify_users_about_failed_run should not be called
+        mock_notify_users_about_failed_run.assert_not_called()
 
 
 def test_post_notification_v1_email_supersadmins():
@@ -344,11 +313,7 @@ def test_post_notification_v1_email_supersadmins():
     }
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers:
+    ) as mock_notify_platform_admins:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
@@ -358,15 +323,12 @@ def test_post_notification_v1_email_supersadmins():
         with patch.dict(
             os.environ,
             {
-                "SEND_FLOWRUN_LOGS_TO_SUPERADMINS": "True",
                 "NOTIFY_PLATFORM_ADMINS_OF_ERRORS": "True",
             },
         ):
             do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
             assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
             mock_notify_platform_admins.assert_called_once()
-            mock_notify_platform_admins.assert_called_once()
-            mock_notify_org_managers.assert_not_called()
 
 
 def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
@@ -438,12 +400,8 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
 
     # Failed (any terminal state); third message from prefect; deployment has failed
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.notifications.delivery.notify_org_managers"
-    ) as mock_notify_org_managers:
+        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
+    ) as mock_notify_users_about_failed_run:
         flow_run["status"] = FLOW_RUN_FAILED_STATE_TYPE
         flow_run["state_name"] = FLOW_RUN_FAILED_STATE_NAME
         mock_get_flow_run.return_value = flow_run
@@ -458,14 +416,12 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
             TaskLock.objects.filter(locking_dataflow=dataflow, flow_run_id=flow_run["id"]).count()
             == 0
         )
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_org_managers.assert_called_once()
+        mock_notify_users_about_failed_run.assert_called_once_with(
+            dataflow.org, dataflow, flow_run, FLOW_RUN_FAILED_STATE_NAME
+        )
 
     # Failed (crashed); with retry logic
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
         "ddpui.ddpprefect.prefect_service.retry_flow_run"
     ) as mock_retry_flow_run:
         flow_run["status"] = FLOW_RUN_CRASHED_STATE_TYPE
@@ -488,9 +444,6 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
             .retries
             == 1
         )
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_platform_admins.assert_not_called()
-        mock_notify_org_managers.assert_called_once()
 
     # or
     # Completed (any terminal state); third message from prefect; deployment has completed
@@ -527,18 +480,18 @@ def test_notify_platform_admins():
         os.environ["ADMIN_DISCORD_WEBHOOK"] = "admindiscordwebhook"
         os.environ["PREFECT_URL_FOR_NOTIFICATIONS"] = "prefect-url-for-notifications"
         os.environ["AIRBYTE_URL_FOR_NOTIFICATIONS"] = "airbyte-url-for-notifications"
+        os.environ["SES_SENDER_EMAIL"] = "sender@example.com"
 
-        message = (
-            "Flow run for orgslug has failed with state FAILED"
-            "\n"
-            "\nBase plan: baseplan"
-            "\n"
-            "\nprefect-url-for-notifications/flow-runs/flow-run/flow-run-id"
-            "\n"
-            "\nAirbyte workspace URL: airbyte-url-for-notifications/workspaces/airbyte_workspace_id"
-        )
+        message = """**Pipeline Failure Alert**
+Organization: orgslug
+Failed Step: Test Step
+State: FAILED
+Base plan: baseplan
 
-        notify_platform_admins(org, "flow-run-id", "FAILED")
+[View Logs](prefect-url-for-notifications/flow-runs/flow-run/flow-run-id)
+[Airbyte Workspace](airbyte-url-for-notifications/workspaces/airbyte_workspace_id)"""
+
+        notify_platform_admins(org, "flow-run-id", "FAILED", "Test Step")
         mock_send_discord_notification.assert_called_once_with("admindiscordwebhook", message)
         mock_send_text_message.assert_called_once_with(
             "adminemail", "Dalgo notification for platform admins", message

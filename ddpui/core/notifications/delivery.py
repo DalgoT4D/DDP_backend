@@ -59,7 +59,7 @@ def notify_platform_admins(
     airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
     base_plan = org.base_plan() if org.base_plan() else "Unknown"
 
-    message = f"""🚨 **Pipeline Failure Alert**
+    message = f"""**Pipeline Failure Alert**
 Organization: {org.slug}
 Failed Step: {failed_step}
 State: {state}
