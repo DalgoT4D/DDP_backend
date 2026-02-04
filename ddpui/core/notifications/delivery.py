@@ -57,14 +57,13 @@ def notify_platform_admins(
     airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
     base_plan = org.base_plan() if org.base_plan() else "Unknown"
 
-    message = f"""**Pipeline Failure Alert**
+    message = f"""Pipeline Failure Alert\n
 Organization: {org.slug}
-Failed Step: {failed_step}
+Failed step: {failed_step}
 State: {state}
-Base plan: {base_plan}
-
-[View Logs]({prefect_url}/flow-runs/flow-run/{flow_run_id})
-[Airbyte Workspace]({airbyte_url}/workspaces/{org.airbyte_workspace_id})"""
+Base plan: {base_plan}\n
+Prefect flow run: {prefect_url}/flow-runs/flow-run/{flow_run_id}
+Airbyte workspace URL: {airbyte_url}/workspaces/{org.airbyte_workspace_id}"""
 
     if os.getenv("ADMIN_EMAIL"):
         send_text_message(

@@ -21,6 +21,8 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_NAME,
     FLOW_RUN_RUNNING_STATE_NAME,
     FLOW_RUN_PENDING_STATE_NAME,
+    FLOW_RUN_CRASHED_STATE_TYPE,
+    FLOW_RUN_FAILED_STATE_TYPE,
 )
 from ddpui.utils.constants import (
     SYSTEM_USER_EMAIL,
@@ -221,6 +223,8 @@ def notify_users_about_failed_run(org: Org, odf: OrgDataFlowv1 | None, flow_run:
     try:
         if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
             failed_step = _detect_failed_step(flow_run_id)
+            logger.debug(f"Detected failed step for flow run {flow_run_id}: {failed_step}")
+
             notify_platform_admins(org, flow_run_id, state, failed_step)
             logger.info(f"Platform admin notifications sent for {flow_run_id}")
     except Exception as e:
@@ -308,22 +312,17 @@ def _detect_failed_step(flow_run_id: str) -> str:
         task_runs = prefect_service.get_flow_run_graphs(flow_run_id)
 
         if not task_runs:
+            logger.debug(f"No task runs found for flow run {flow_run_id}")
             return "Unknown Step"
 
-        # Get all step slugs
-        all_steps = [task.get("slug", "unknown") for task in task_runs if task.get("slug")]
-
         # Find the failed step
-        failed_step = None
+        failed_step = "Unknown Step"
         for task in task_runs:
-            if task.get("state_type") == "FAILED" or task.get("state_name") == "DBT_TEST_FAILED":
-                failed_step = task.get("slug", "Unknown Step")
+            if task.get("state_type") in [FLOW_RUN_FAILED_STATE_TYPE, FLOW_RUN_CRASHED_STATE_TYPE]:
+                failed_step = task.get("label", "label?")
                 break
 
-        if not failed_step:
-            return f"Steps: {', '.join(all_steps)} | Failed: Unknown Step"
-
-        return f"Steps: {', '.join(all_steps)} | Failed: {failed_step}"
+        return failed_step
 
     except Exception as e:
         logger.error(f"Error detecting failed step for {flow_run_id}: {e}")
