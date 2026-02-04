@@ -51,19 +51,23 @@ def notify_org_managers(org: Org, message: str, email_subject: str):
     logger.info(f"Notification created: {response}")
 
 
-def notify_platform_admins(org: Org, flow_run_id: str, state: str):
+def notify_platform_admins(
+    org: Org, flow_run_id: str, state: str, failed_step: str = "Unknown Step"
+):
     """send a notification to platform admins discord webhook"""
     prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
     airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
-    message = (
-        f"Flow run for {org.slug} has failed with state {state}"
-        "\n"
-        f"\nBase plan: {org.base_plan() if org.base_plan() else 'Unknown'}"
-        "\n"
-        f"\n{prefect_url}/flow-runs/flow-run/{flow_run_id}"
-        "\n"
-        f"\nAirbyte workspace URL: {airbyte_url}/workspaces/{org.airbyte_workspace_id}"
-    )
+    base_plan = org.base_plan() if org.base_plan() else "Unknown"
+
+    message = f"""🚨 **Pipeline Failure Alert**
+Organization: {org.slug}
+Failed Step: {failed_step}
+State: {state}
+Base plan: {base_plan}
+
+[View Logs]({prefect_url}/flow-runs/flow-run/{flow_run_id})
+[Airbyte Workspace]({airbyte_url}/workspaces/{org.airbyte_workspace_id})"""
+
     if os.getenv("ADMIN_EMAIL"):
         send_text_message(
             os.getenv("ADMIN_EMAIL"), "Dalgo notification for platform admins", message

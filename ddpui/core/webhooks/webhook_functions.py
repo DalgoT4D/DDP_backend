@@ -1,5 +1,6 @@
 import os
 import re
+from dataclasses import dataclass
 from ninja.errors import HttpError
 from django.db.models import F
 from django.utils.dateparse import parse_datetime
@@ -38,6 +39,14 @@ logger = CustomLogger("ddpui")
 FLOW_RUN = "flow-run"
 FLOW = "flow"
 DEPLOYMENT = "deployment"
+
+
+@dataclass
+class NotificationMessageInfo:
+    content: str = ""
+    subject: str = ""
+    should_send: bool = False
+    skip_reason: str = ""
 
 
 def get_message_type(message_object: dict) -> str | None:
@@ -205,67 +214,120 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
 
 
 def notify_users_about_failed_run(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
-    """send various notifications about the failed run"""
+    """Send failure notifications to platform admins and org users"""
     flow_run_id = flow_run["id"]
 
-    if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
-        notify_platform_admins(org, flow_run_id, state)
+    # Send platform admin notifications with error isolation
+    try:
+        if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
+            failed_step = _detect_failed_step(flow_run_id)
+            notify_platform_admins(org, flow_run_id, state, failed_step)
+            logger.info(f"Platform admin notifications sent for {flow_run_id}")
+    except Exception as e:
+        logger.error(f"Failed to send platform admin notifications for {flow_run_id}: {e}")
 
-    # Get failed task information
-    task_runs = prefect_service.get_flow_run_graphs(flow_run_id)
-
-    # Find the failed task
-    failed_task = None
-    for task in task_runs:
-        if task.get("state_type") == "FAILED" or task.get("state_name") == "DBT_TEST_FAILED":
-            failed_task = task
-            break
-
-    if not failed_task:
-        logger.warning(f"No failed task found in prefect for flow_run {flow_run_id}")
-
-    name_of_deployment = odf.name if odf else "[no deployment name]"
-
-    # start building the email, at any point if we decide we won't send it we just return
-    email_subject = f"{org.name}: Job failure for {name_of_deployment}"
-    email_body = [f"To the admins of {org.name},\n"]
-
-    if odf and odf.dataflow_type == "orchestrate":
-        email_body.append(f"The pipeline {odf.name} has failed")
-
-    elif odf and odf.dataflow_type == "manual":
-        connection_ids = find_all_values_for_key(flow_run.get("parameters", {}), "connection_id")
-        if len(connection_ids) > 0:
-            connection_names = ConnectionMeta.objects.filter(
-                connection_id__in=connection_ids
-            ).values_list("connection_name", flat=True)
-
-            email_body.append("A job has failed, the connection(s) involved were:")
-            for connection_name in connection_names:
-                email_body.append(f"- {connection_name}")
+    # Send org user notifications
+    try:
+        message_info = _build_failure_message_for_org_users(org, odf, flow_run)
+        if message_info.should_send:
+            notify_org_managers(org, message_info.content, message_info.subject)
+            logger.info(f"Org user notifications sent for {flow_run_id}")
         else:
-            orgtask_uuids = find_all_values_for_key(flow_run.get("parameters", {}), "orgtask_uuid")
-            task_slugs = OrgTask.objects.filter(uuid__in=orgtask_uuids).values_list(
-                "task__slug", flat=True
+            logger.info(f"Skipping org notifications for {flow_run_id}: {message_info.skip_reason}")
+    except Exception as e:
+        logger.error(f"Failed to send org notifications for {flow_run_id}: {e}")
+
+
+def _build_failure_message_for_org_users(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict):
+    """Build the failure message content for org users"""
+    deployment_name = odf.name if odf else "[no deployment name]"
+    subject = f"{org.name}: Job failure for {deployment_name}"
+
+    if not odf:
+        return NotificationMessageInfo(skip_reason="No deployment information available")
+
+    if odf.dataflow_type == "orchestrate":
+        content = f"""To the admins of {org.name},
+
+The pipeline {odf.name} has failed.
+
+Please visit {os.getenv('FRONTEND_URL')} for more details."""
+        return NotificationMessageInfo(content=content, subject=subject, should_send=True)
+
+    elif odf.dataflow_type == "manual":
+        # Check for connection-based jobs
+        connection_ids = find_all_values_for_key(flow_run.get("parameters", {}), "connection_id")
+        if connection_ids:
+            connection_names = list(
+                ConnectionMeta.objects.filter(connection_id__in=connection_ids).values_list(
+                    "connection_name", flat=True
+                )
             )
-            if task_slugs.count() == 1 and task_slugs[0] == "generate-edr":
-                # don't send any email
-                return
 
-            email_body.append("A job has failed, the tasks involved were")
-            for task_slug in task_slugs:
-                email_body.append(f"- {task_slug}")
+            connections_list = "\n".join(f"- {name}" for name in connection_names)
+            content = f"""To the admins of {org.name},
+
+A job has failed, the connection(s) involved were:
+{connections_list}
+
+Please visit {os.getenv('FRONTEND_URL')} for more details."""
+            return NotificationMessageInfo(content=content, subject=subject, should_send=True)
+
+        # Check for task-based jobs
+        orgtask_uuids = find_all_values_for_key(flow_run.get("parameters", {}), "orgtask_uuid")
+        task_slugs = list(
+            OrgTask.objects.filter(uuid__in=orgtask_uuids).values_list("task__slug", flat=True)
+        )
+
+        # Skip generate-edr tasks
+        if len(task_slugs) == 1 and task_slugs[0] == "generate-edr":
+            return NotificationMessageInfo(
+                skip_reason="generate-edr tasks don't send notifications"
+            )
+
+        if task_slugs:
+            tasks_list = "\n".join(f"- {slug}" for slug in task_slugs)
+            content = f"""To the admins of {org.name},
+
+A job has failed, the tasks involved were:
+{tasks_list}
+
+Please visit {os.getenv('FRONTEND_URL')} for more details."""
+            return NotificationMessageInfo(content=content, subject=subject, should_send=True)
+
+        # Fallback for unknown manual job types
+        return NotificationMessageInfo(skip_reason="No connection or task information found")
+
     else:
-        email_body.append("A job has failed")
-        # should we even bother to send this email???
-        return
+        return NotificationMessageInfo(skip_reason="Unknown dataflow type")
 
-    email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
-    notify_org_managers(
-        org,
-        "\n".join(email_body),
-        email_subject,
-    )
+
+def _detect_failed_step(flow_run_id: str) -> str:
+    """Detect which step failed in the flow run"""
+    try:
+        task_runs = prefect_service.get_flow_run_graphs(flow_run_id)
+
+        if not task_runs:
+            return "Unknown Step"
+
+        # Get all step slugs
+        all_steps = [task.get("slug", "unknown") for task in task_runs if task.get("slug")]
+
+        # Find the failed step
+        failed_step = None
+        for task in task_runs:
+            if task.get("state_type") == "FAILED" or task.get("state_name") == "DBT_TEST_FAILED":
+                failed_step = task.get("slug", "Unknown Step")
+                break
+
+        if not failed_step:
+            return f"Steps: {', '.join(all_steps)} | Failed: Unknown Step"
+
+        return f"Steps: {', '.join(all_steps)} | Failed: {failed_step}"
+
+    except Exception as e:
+        logger.error(f"Error detecting failed step for {flow_run_id}: {e}")
+        return "Unknown Step"
 
 
 def do_handle_prefect_webhook(flow_run_id: str, state: str):
