@@ -160,7 +160,7 @@ MAX_RETRIES_FOR_CRASHED_FLOW_RUNS = 1
 
 def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dict):
     """update flow run for deployment"""
-    notify_failed_pipeline = True
+    send_failure_notifications = True
     flow_run_id = flow_run["id"]
 
     if state in [
