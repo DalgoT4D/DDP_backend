@@ -495,9 +495,10 @@ def test_notify_platform_admins():
         os.environ["AIRBYTE_URL_FOR_NOTIFICATIONS"] = "airbyte-url-for-notifications"
         os.environ["SES_SENDER_EMAIL"] = "sender@example.com"
 
-        message = """Pipeline Failure Alert\n       
+        message = """Pipeline Failure Alert
+
 Organization: orgslug
-Failed Step: Test Step
+Failed step: Test Step
 State: FAILED
 Base plan: baseplan
 
