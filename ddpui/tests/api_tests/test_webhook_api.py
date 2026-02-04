@@ -321,12 +321,9 @@ def test_post_notification_v1_email_supersadmins():
         org=org, name=deployment_id, dataflow_type="orchestrate", deployment_id=deployment_id
     )
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins, patch(
-        "ddpui.core.webhooks.webhook_functions._detect_failed_step"
-    ) as mock_detect_failed_step:
+        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
+    ) as mock_notify_users_about_failed_run:
         mock_get_flow_run.return_value = flow_run
-        mock_detect_failed_step.return_value = "Test Step"
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
@@ -340,7 +337,9 @@ def test_post_notification_v1_email_supersadmins():
         ):
             do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
             assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-            mock_notify_platform_admins.assert_called_once()
+            mock_notify_users_about_failed_run.assert_called_once_with(
+                org, odf, flow_run, FLOW_RUN_FAILED_STATE_NAME
+            )
 
 
 def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
@@ -483,7 +482,9 @@ def test_notify_platform_admins():
     """tests notify_platform_admins"""
     with patch(
         "ddpui.utils.discord.send_discord_notification"
-    ) as mock_send_discord_notification, patch("ddpui.utils.awsses.ses") as mock_ses:
+    ) as mock_send_discord_notification, patch(
+        "ddpui.utils.awsses.send_text_message"
+    ) as mock_send_text_message:
         org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
@@ -505,7 +506,9 @@ Base plan: baseplan
         mock_send_discord_notification.assert_called_once_with(
             "https://discord.com/api/webhooks/test", message
         )
-        mock_ses.send_email.assert_called_once()
+        mock_send_text_message.assert_called_once_with(
+            "adminemail", "Dalgo notification for platform admins", message
+        )
 
 
 def test_get_flow_run_times():
