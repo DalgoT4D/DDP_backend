@@ -281,16 +281,20 @@ def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_ta
         org=org, name=deployment_id, dataflow_type="manual", deployment_id=deployment_id
     )
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
-        "ddpui.core.webhooks.webhook_functions.notify_users_about_failed_run"
-    ) as mock_notify_users_about_failed_run:
+        "ddpui.core.notifications.delivery.notify_org_managers"
+    ) as mock_notify_org_managers, patch(
+        "ddpui.core.notifications.delivery.notify_platform_admins"
+    ) as mock_notify_platform_admins:
         mock_get_flow_run.return_value = flow_run
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
         do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
-        # For generate-edr tasks, notify_users_about_failed_run should not be called
-        mock_notify_users_about_failed_run.assert_not_called()
+        # For generate-edr tasks, org managers should not be notified
+        mock_notify_org_managers.assert_not_called()
+        # Platform admins also should not be notified unless explicitly enabled
+        mock_notify_platform_admins.assert_not_called()
 
 
 def test_post_notification_v1_email_supersadmins():
@@ -318,8 +322,11 @@ def test_post_notification_v1_email_supersadmins():
     )
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.core.notifications.delivery.notify_platform_admins"
-    ) as mock_notify_platform_admins:
+    ) as mock_notify_platform_admins, patch(
+        "ddpui.core.webhooks.webhook_functions._detect_failed_step"
+    ) as mock_detect_failed_step:
         mock_get_flow_run.return_value = flow_run
+        mock_detect_failed_step.return_value = "Test Step"
         user = User.objects.create(email="email", username="username")
         new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
         OrgUser.objects.create(org=org, user=user, new_role=new_role)
@@ -480,7 +487,7 @@ def test_notify_platform_admins():
         org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
-        os.environ["ADMIN_DISCORD_WEBHOOK"] = "admindiscordwebhook"
+        os.environ["ADMIN_DISCORD_WEBHOOK"] = "https://discord.com/api/webhooks/test"
         os.environ["PREFECT_URL_FOR_NOTIFICATIONS"] = "prefect-url-for-notifications"
         os.environ["AIRBYTE_URL_FOR_NOTIFICATIONS"] = "airbyte-url-for-notifications"
         os.environ["SES_SENDER_EMAIL"] = "sender@example.com"
@@ -495,7 +502,9 @@ Base plan: baseplan
 [Airbyte Workspace](airbyte-url-for-notifications/workspaces/airbyte_workspace_id)"""
 
         notify_platform_admins(org, "flow-run-id", "FAILED", "Test Step")
-        mock_send_discord_notification.assert_called_once_with("admindiscordwebhook", message)
+        mock_send_discord_notification.assert_called_once_with(
+            "https://discord.com/api/webhooks/test", message
+        )
         mock_ses.send_email.assert_called_once()
 
 
