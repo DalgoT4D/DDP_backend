@@ -126,19 +126,6 @@ def email_superadmins(org: Org, email_body: str):
         send_text_message(orguser.user.email, subject, email_body)
 
 
-def email_orgusers_ses_whitelisted(org: Org, email_body: str):
-    """sends a notificationemail to all OrgUsers"""
-    if org.ses_whitelisted_email:
-        tag = " [STAGING]" if not PRODUCTION else ""
-        subject = f"Dalgo notification{tag}"
-        logger.info(f"sending email to {org.ses_whitelisted_email}")
-        send_text_message(
-            org.ses_whitelisted_email,
-            subject,
-            email_body,
-        )
-
-
 def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
     """retrieves logs for a flow-run and emails them to all users for the org"""
     logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
@@ -321,16 +308,27 @@ def find_all_values_for_key(obj: dict, key: str) -> list:
 
 def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
     """send notification emails to org users"""
+    flow_run_id = flow_run["id"]
+
     if os.getenv("SEND_FLOWRUN_LOGS_TO_SUPERADMINS", "").lower() in ["true", "1", "yes"]:
-        email_flowrun_logs_to_superadmins(org, flow_run["id"])
+        email_flowrun_logs_to_superadmins(org, flow_run_id)
     if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
-        notify_platform_admins(org, flow_run["id"], state)
+        notify_platform_admins(org, flow_run_id, state)
+
+    # Get failed task information
+    task_runs = prefect_service.get_flow_run_graphs(flow_run_id)
+
+    # Find the failed task
+    failed_task = None
+    for task in task_runs:
+        if task.get("state_type") == "FAILED" or task.get("state_name") == "DBT_TEST_FAILED":
+            failed_task = task
+            break
+
+    if not failed_task:
+        logger.warning(f"No failed task found in prefect for flow_run {flow_run_id}")
 
     name_of_deployment = odf.name if odf else "[no deployment name]"
-    email_orgusers_ses_whitelisted(
-        org,
-        f'There is a problem with the pipeline "{name_of_deployment}"; we are working on a fix',
-    )
 
     # start building the email, at any point if we decide we won't send it we just return
     email_subject = f"{org.name}: Job failure for {name_of_deployment}"
@@ -410,8 +408,6 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
                     send_failure_emails(org, odf, flow_run, state)
 
-                elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
-                    email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")
     except Exception as err:
         logger.error(
             "Error while handling prefect webhook for flow run %s: %s",

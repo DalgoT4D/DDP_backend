@@ -24,7 +24,6 @@ from ddpui.utils.webhook_helpers import (
     get_org_from_flow_run,
     generate_notification_email,
     email_superadmins,
-    email_orgusers_ses_whitelisted,
     email_flowrun_logs_to_superadmins,
     notify_platform_admins,
     do_handle_prefect_webhook,
@@ -220,8 +219,6 @@ def test_post_notification_v1_orchestrate():
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted, patch(
         "ddpui.utils.webhook_helpers.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
         "ddpui.utils.webhook_helpers.notify_org_managers"
@@ -234,7 +231,6 @@ def test_post_notification_v1_orchestrate():
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
         mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
 
 
@@ -269,8 +265,6 @@ def test_post_notification_v1_manual_with_connection_id():
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted, patch(
         "ddpui.utils.webhook_helpers.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
         "ddpui.utils.webhook_helpers.notify_org_managers"
@@ -283,7 +277,6 @@ def test_post_notification_v1_manual_with_connection_id():
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
         mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
 
 
@@ -318,8 +311,6 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted, patch(
         "ddpui.utils.webhook_helpers.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
         "ddpui.utils.webhook_helpers.notify_org_managers"
@@ -332,7 +323,6 @@ def test_post_notification_v1_manual_with_orgtask_id(seed_master_tasks):
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
         mock_notify_org_managers.assert_called_once_with(org, "\n".join(email_body), email_subject)
 
 
@@ -362,8 +352,6 @@ def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_ta
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted, patch(
         "ddpui.utils.webhook_helpers.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
         "ddpui.utils.webhook_helpers.notify_org_managers"
@@ -376,7 +364,6 @@ def test_post_notification_v1_manual_with_orgtask_id_generate_edr(seed_master_ta
         assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
         mock_notify_org_managers.assert_not_called()
 
 
@@ -401,8 +388,6 @@ def test_post_notification_v1_email_supersadmins():
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted, patch(
         "ddpui.utils.webhook_helpers.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
         "ddpui.utils.webhook_helpers.notify_org_managers"
@@ -424,7 +409,6 @@ def test_post_notification_v1_email_supersadmins():
             assert PrefectFlowRun.objects.filter(flow_run_id="test-run-id").count() == 1
             mock_email_flowrun_logs_to_superadmins_2.assert_called_once()
             mock_notify_platform_admins.assert_called_once()
-            mock_email_orgusers_ses_whitelisted.assert_called_once()
             mock_notify_org_managers.assert_not_called()
 
 
@@ -499,8 +483,6 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
     with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
         "ddpui.utils.webhook_helpers.email_flowrun_logs_to_superadmins"
     ) as mock_email_flowrun_logs_to_superadmins_2, patch(
-        "ddpui.utils.webhook_helpers.email_orgusers_ses_whitelisted"
-    ) as mock_email_orgusers_ses_whitelisted, patch(
         "ddpui.utils.webhook_helpers.notify_platform_admins"
     ) as mock_notify_platform_admins, patch(
         "ddpui.utils.webhook_helpers.notify_org_managers"
@@ -521,7 +503,6 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
         mock_notify_org_managers.assert_called_once()
 
     # Failed (crashed); with retry logic
@@ -552,7 +533,6 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
         mock_email_flowrun_logs_to_superadmins_2.assert_not_called()
         mock_notify_platform_admins.assert_not_called()
-        mock_email_orgusers_ses_whitelisted.assert_called_once()
         mock_notify_org_managers.assert_called_once()
 
     # or
@@ -589,16 +569,6 @@ def test_email_superadmins():
         tag = " [STAGING]" if not PRODUCTION else ""
         subject = f"Dalgo notification for platform admins{tag}"
         mock_send_text_message.assert_called_once_with("adminemail", subject, "hello")
-
-
-def test_email_orgusers_ses_whitelisted():
-    """tests email_orgusers_ses_whitelisted"""
-    with patch("ddpui.utils.webhook_helpers.send_text_message") as mock_send_text_message:
-        org = Org.objects.create(name="temp", slug="temp", ses_whitelisted_email="email")
-        email_orgusers_ses_whitelisted(org, "hello")
-        tag = " [STAGING]" if not PRODUCTION else ""
-        subject = f"Dalgo notification{tag}"
-        mock_send_text_message.assert_called_once_with("email", subject, "hello")
 
 
 def test_email_flowrun_logs_to_superadmins():
