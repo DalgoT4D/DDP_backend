@@ -1,9 +1,7 @@
 import os
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
 from ddpui.utils.awsses import send_text_message
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.ddpprefect import prefect_service
 from ddpui.auth import SUPER_ADMIN_ROLE
 from ddpui.settings import PRODUCTION
 from ddpui.core.notifications.notifications_functions import (

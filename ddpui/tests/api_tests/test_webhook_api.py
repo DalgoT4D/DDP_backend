@@ -36,8 +36,10 @@ from ddpui.models.org_user import OrgUser, User, OrgUserRole, UserAttributes
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
+
 from ddpui.settings import PRODUCTION
 from ddpui.tests.api_tests.test_user_org_api import seed_db
+
 from ddpui.ddpprefect import (
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
@@ -481,8 +483,10 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
 def test_notify_platform_admins():
     """tests notify_platform_admins"""
     with patch(
-        "ddpui.utils.discord.send_discord_notification"
-    ) as mock_send_discord_notification, patch("ddpui.utils.awsses.ses") as mock_ses:
+        "ddpui.core.notifications.delivery.send_discord_notification"
+    ) as mock_send_discord_notification, patch(
+        "ddpui.core.notifications.delivery.send_text_message"
+    ) as mock_send_text_message:
         org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
@@ -504,7 +508,7 @@ Base plan: baseplan
         mock_send_discord_notification.assert_called_once_with(
             "https://discord.com/api/webhooks/test", message
         )
-        mock_ses.send_email.assert_called_once()
+        mock_send_text_message.assert_called_once()
 
 
 def test_get_flow_run_times():
