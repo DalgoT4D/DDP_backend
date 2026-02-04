@@ -482,9 +482,7 @@ def test_notify_platform_admins():
     """tests notify_platform_admins"""
     with patch(
         "ddpui.utils.discord.send_discord_notification"
-    ) as mock_send_discord_notification, patch(
-        "ddpui.utils.awsses.send_text_message"
-    ) as mock_send_text_message:
+    ) as mock_send_discord_notification, patch("ddpui.utils.awsses.ses") as mock_ses:
         org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
@@ -506,9 +504,7 @@ Base plan: baseplan
         mock_send_discord_notification.assert_called_once_with(
             "https://discord.com/api/webhooks/test", message
         )
-        mock_send_text_message.assert_called_once_with(
-            "adminemail", "Dalgo notification for platform admins", message
-        )
+        mock_ses.send_email.assert_called_once()
 
 
 def test_get_flow_run_times():
