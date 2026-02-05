@@ -19,8 +19,9 @@ This document establishes best practices for API design in the Dalgo platform, f
 2. **API Response Wrapper** provides consistent response format across all endpoints
 3. **All features consolidated in Core** - business logic, services, and domain operations
 4. **Services folder removed** - merged into core with feature-based organization
-5. **Schemas and Models in feature folders** - co-located with related core logic
-6. **Exceptions in Core** - each feature has its own exceptions file
+5. **Schemas in `schemas/` folder** - separate from core, organized by module
+6. **Models in `models/` folder** - separate from core, organized by module
+7. **Exceptions in Core** - each feature has its own exceptions file
 
 ---
 
@@ -38,16 +39,19 @@ ddpui/
 │       ├── __init__.py
 │       ├── {module}_service.py      # Business logic and orchestration
 │       ├── {module}_operations.py   # Domain operations (optional)
-│       ├── schemas.py               # Request/response validation (Pydantic)
-│       ├── exceptions.py            # Custom exceptions for this feature
-│       └── models.py                # Database models (Django ORM) - optional, can stay in models/
+│       └── exceptions.py            # Custom exceptions for this feature
+│
+├── schemas/
+│   └── {module}_schema.py           # Request/response validation (Pydantic)
 │
 ├── models/
-│   └── {module}.py                  # Shared/legacy models (migrate to core/{module}/)
+│   └── {module}.py                  # Database models (Django ORM)
 │
 └── utils/
     └── response_wrapper.py          # API response wrapper utility
 ```
+
+**Note**: Models and schemas live in their own top-level folders (`models/` and `schemas/`), separate from `core/`. This keeps the codebase organized and avoids circular imports.
 
 ### Layer Responsibilities Matrix
 
@@ -99,16 +103,18 @@ from ddpui.utils.response_wrapper import api_response, ApiResponse
 
 # Import from core module
 from ddpui.core.{module}.{module}_service import {Module}Service
-from ddpui.core.{module}.schemas import (
-    {Module}Create,
-    {Module}Update,
-    {Module}Response,
-    {Module}ListResponse,
-)
 from ddpui.core.{module}.exceptions import (
     {Module}NotFoundError,
     {Module}ValidationError,
     {Module}PermissionError,
+)
+
+# Import schemas
+from ddpui.schemas.{module}_schema import (
+    {Module}Create,
+    {Module}Update,
+    {Module}Response,
+    {Module}ListResponse,
 )
 
 logger = CustomLogger("ddpui.{module}_api")
@@ -280,10 +286,10 @@ ddpui/core/{module}/
 ├── __init__.py              # Export public interfaces
 ├── {module}_service.py      # Business logic and orchestration
 ├── {module}_operations.py   # Domain-specific operations (optional)
-├── schemas.py               # Pydantic schemas for this feature
-├── exceptions.py            # Custom exceptions
-└── models.py                # Django models (optional - can stay in models/)
+└── exceptions.py            # Custom exceptions
 ```
+
+**Note**: Schemas live in `ddpui/schemas/{module}_schema.py` and models live in `ddpui/models/{module}.py`.
 
 ### Responsibilities
 
@@ -320,15 +326,17 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 
-# Import from same core module
-from .schemas import {Module}Create, {Module}Update
+# Import exceptions from same core module
 from .exceptions import (
     {Module}NotFoundError,
     {Module}ValidationError,
     {Module}PermissionError,
 )
 
-# Import model (can be from models/ or from .models)
+# Import schemas from schemas folder
+from ddpui.schemas.{module}_schema import {Module}Create, {Module}Update
+
+# Import model from models folder
 from ddpui.models.{module} import {Module}
 
 logger = CustomLogger("ddpui.core.{module}")
@@ -504,7 +512,7 @@ When calling DBT, Airbyte, or any external service, **always validate using sche
 
 ```python
 # ✅ GOOD: Validate before calling DBT
-from .schemas import DBTOperationPayload
+from ddpui.schemas.dbt_schema import DBTOperationPayload
 
 class DBTService:
     @staticmethod
@@ -530,7 +538,7 @@ class DBTService:
 ## Schema Design
 
 ### Location
-`ddpui/core/{module}/schemas.py`
+`ddpui/schemas/{module}_schema.py`
 
 ### Responsibilities
 
@@ -693,8 +701,7 @@ class {Module}DBTPayload(Schema):
 ## Model Design
 
 ### Location
-- **Preferred**: `ddpui/core/{module}/models.py` (co-located with feature)
-- **Legacy/Shared**: `ddpui/models/{module}.py`
+`ddpui/models/{module}.py`
 
 ### Responsibilities
 
@@ -777,7 +784,7 @@ class Chart(models.Model):
         return {"id": self.id, "title": self.title}
 
 # ✅ GOOD - Use schema
-from ddpui.core.charts.schemas import ChartResponse
+from ddpui.schemas.chart_schema import ChartResponse
 
 chart = Chart.objects.get(id=1)
 response = ChartResponse.from_model(chart)
@@ -864,6 +871,7 @@ from ddpui.core.{module}.exceptions import (
     {Module}PermissionError,
     {Module}ExternalServiceError,
 )
+from ddpui.schemas.{module}_schema import {Module}Response
 
 @{module}_router.get("/{{id}}/")
 @has_permission(["can_view_{module}s"])
@@ -1104,7 +1112,7 @@ class ChartService:
         
         return chart
 
-# 4. Response Schema (core/charts/schemas.py)
+# 4. Response Schema (schemas/chart_schema.py)
 class ChartResponse(Schema):
     id: int
     title: str
@@ -1153,12 +1161,19 @@ class ChartResponse(Schema):
    ddpui/core/{module}/exceptions.py
    ```
 
-4. **Move schemas:**
+4. **Keep schemas in `schemas/` folder:**
    ```bash
-   mv ddpui/schemas/{module}_schema.py ddpui/core/{module}/schemas.py
+   # Schemas stay in ddpui/schemas/{module}_schema.py
+   # No migration needed for schemas
    ```
 
-5. **Update imports in API:**
+5. **Keep models in `models/` folder:**
+   ```bash
+   # Models stay in ddpui/models/{module}.py
+   # No migration needed for models
+   ```
+
+6. **Update imports in API:**
    ```python
    # Before
    from ddpui.services.{module}_service import {Module}Service
@@ -1166,20 +1181,17 @@ class ChartResponse(Schema):
    
    # After
    from ddpui.core.{module}.{module}_service import {Module}Service
-   from ddpui.core.{module}.schemas import {Module}Create
    from ddpui.core.{module}.exceptions import {Module}NotFoundError
+   from ddpui.schemas.{module}_schema import {Module}Create  # unchanged
    ```
 
-6. **Update `core/{module}/__init__.py`:**
+7. **Update `core/{module}/__init__.py`:**
    ```python
    from .{module}_service import {Module}Service
-   from .schemas import {Module}Create, {Module}Response
    from .exceptions import {Module}Error, {Module}NotFoundError
    
    __all__ = [
        "{Module}Service",
-       "{Module}Create",
-       "{Module}Response",
        "{Module}Error",
        "{Module}NotFoundError",
    ]
@@ -1187,30 +1199,31 @@ class ChartResponse(Schema):
 
 ### Adding Response Wrapper to Existing API
 
-1. **Import wrapper:**
+1. **Import wrapper and schemas:**
    ```python
    from ddpui.utils.response_wrapper import api_response, ApiResponse
+   from ddpui.schemas.{module}_schema import {Module}Response, {Module}ListResponse
    ```
 
 2. **Update endpoint signature:**
    ```python
    # Before
-   @router.get("/", response=List[ChartResponse])
+   @router.get("/", response=List[{Module}Response])
    
    # After
-   @router.get("/", response=ApiResponse[ChartListResponse])
+   @router.get("/", response=ApiResponse[{Module}ListResponse])
    ```
 
 3. **Wrap return value:**
    ```python
    # Before
-   return [ChartResponse(**c.to_dict()) for c in charts]
+   return [{Module}Response(**m.to_dict()) for m in {module}s]
    
    # After
    return api_response(
        success=True,
-       data=ChartListResponse(
-           data=[ChartResponse.from_model(c) for c in charts],
+       data={Module}ListResponse(
+           data=[{Module}Response.from_model(m) for m in {module}s],
            total=total,
            page=page,
            page_size=page_size,
@@ -1225,28 +1238,30 @@ class ChartResponse(Schema):
 ### Complete Example: Charts Module Structure
 
 ```
-ddpui/core/charts/
-├── __init__.py
-├── chart_service.py
-├── chart_operations.py      # Query building, data transformation
-├── chart_validator.py       # Validation logic
-├── schemas.py               # All chart schemas
-├── exceptions.py            # Chart-specific exceptions
-└── echarts_config_generator.py  # ECharts configuration
+ddpui/
+├── api/
+│   └── charts_api.py                # HTTP request/response handling
+├── core/
+│   └── charts/
+│       ├── __init__.py
+│       ├── chart_service.py         # Business logic and orchestration
+│       ├── chart_operations.py      # Query building, data transformation
+│       ├── chart_validator.py       # Validation logic
+│       ├── exceptions.py            # Chart-specific exceptions
+│       └── echarts_config_generator.py  # ECharts configuration
+├── schemas/
+│   └── chart_schema.py              # All chart schemas
+└── models/
+    └── chart.py                     # Chart database model
 ```
 
-#### `__init__.py`
+#### `core/charts/__init__.py`
 ```python
 from .chart_service import ChartService
-from .schemas import ChartCreate, ChartUpdate, ChartResponse, ChartListResponse
 from .exceptions import ChartError, ChartNotFoundError, ChartValidationError
 
 __all__ = [
     "ChartService",
-    "ChartCreate",
-    "ChartUpdate", 
-    "ChartResponse",
-    "ChartListResponse",
     "ChartError",
     "ChartNotFoundError",
     "ChartValidationError",
@@ -1289,7 +1304,7 @@ class ChartPermissionError(ChartError):
         super().__init__(message, "CHART_PERMISSION_DENIED")
 ```
 
-#### `schemas.py`
+#### `schemas/chart_schema.py`
 ```python
 """Chart schemas"""
 
@@ -1351,7 +1366,8 @@ class ChartListResponse(Schema):
 | Before | After |
 |--------|-------|
 | `services/{module}_service.py` | `core/{module}/{module}_service.py` |
-| `schemas/{module}_schema.py` | `core/{module}/schemas.py` |
+| `schemas/{module}_schema.py` | `schemas/{module}_schema.py` (unchanged) |
+| `models/{module}.py` | `models/{module}.py` (unchanged) |
 | Exceptions in service file | `core/{module}/exceptions.py` |
 | `model.to_json()` | `Schema.from_model(model)` |
 | Direct response dict | `api_response()` wrapper |
@@ -1361,6 +1377,6 @@ class ChartListResponse(Schema):
 
 ---
 
-**Document Version**: 2.0  
-**Last Updated**: 2025-01-23  
+**Document Version**: 2.1  
+**Last Updated**: 2026-02-05  
 **Maintained By**: Dalgo Platform Team
