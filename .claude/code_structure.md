@@ -1,22 +1,5 @@
 # API Design Best Practices for Dalgo Platform
 
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Layer Architecture](#layer-architecture)
-3. [API Layer Design](#api-layer-design)
-4. [Core Layer Design](#core-layer-design)
-5. [Schema Design](#schema-design)
-6. [Model Design](#model-design)
-7. [Exception Handling](#exception-handling)
-8. [API Response Wrapper](#api-response-wrapper)
-9. [Request-Response Flow](#request-response-flow)
-10. [Migration Guide](#migration-guide)
-11. [Code Examples](#code-examples)
-12. [Checklist](#checklist)
-
----
-
 ## Overview
 
 This document establishes best practices for API design in the Dalgo platform, focusing on proper separation of concerns across API, Core, Schema, and Model layers. These practices ensure maintainability, testability, and consistency across the codebase.
