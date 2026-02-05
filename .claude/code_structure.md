@@ -1363,64 +1363,6 @@ class ChartListResponse(Schema):
 
 ---
 
-## Checklist
-
-### When Creating a New Feature Module
-
-- [ ] **Core Module Structure** (`core/{module}/`)
-  - [ ] `__init__.py` with public exports
-  - [ ] `{module}_service.py` with service class
-  - [ ] `schemas.py` with request/response schemas
-  - [ ] `exceptions.py` with custom exceptions
-  - [ ] Optional: `{module}_operations.py` for domain operations
-
-- [ ] **API Layer** (`api/{module}_api.py`)
-  - [ ] Router named `{module}_router`
-  - [ ] All endpoints have `@has_permission` decorator
-  - [ ] Request validation using schemas from core
-  - [ ] Exceptions converted to HttpError
-  - [ ] Response wrapped with `api_response()`
-  - [ ] No business logic in API layer
-
-- [ ] **Schemas** (`core/{module}/schemas.py`)
-  - [ ] Request schemas (Create, Update, Query)
-  - [ ] Response schemas with `from_model()` method
-  - [ ] Field validation and descriptions
-  - [ ] Strict validation for external service payloads
-
-- [ ] **Exceptions** (`core/{module}/exceptions.py`)
-  - [ ] Base exception: `{Module}Error`
-  - [ ] NotFound: `{Module}NotFoundError`
-  - [ ] Validation: `{Module}ValidationError`
-  - [ ] Permission: `{Module}PermissionError`
-  - [ ] External: `{Module}ExternalServiceError` (if needed)
-
-- [ ] **Service** (`core/{module}/{module}_service.py`)
-  - [ ] Static methods for CRUD operations
-  - [ ] Transaction management where needed
-  - [ ] Schema validation before external calls
-  - [ ] Proper logging
-  - [ ] Business logic validation
-
-- [ ] **General**
-  - [ ] No `to_json()`/`to_dict()` in models
-  - [ ] Consistent import patterns
-  - [ ] Error handling follows patterns
-  - [ ] Documentation/docstrings
-
-### When Reviewing/Migrating Existing Code
-
-- [ ] Service moved from `services/` to `core/{module}/`
-- [ ] Schemas moved from `schemas/` to `core/{module}/schemas.py`
-- [ ] Exceptions extracted to `core/{module}/exceptions.py`
-- [ ] API uses response wrapper
-- [ ] Models don't contain `to_json()`/`to_dict()`
-- [ ] External service calls are validated with schemas first
-
----
-
-## Summary
-
 ### Key Changes from Previous Architecture
 
 | Before | After |
@@ -1432,27 +1374,7 @@ class ChartListResponse(Schema):
 | Direct response dict | `api_response()` wrapper |
 | No validation before DBT | Schema validation required |
 
-### Module Dependencies
 
-```
-API Layer
-    ↓ imports
-Core Layer (service, schemas, exceptions)
-    ↓ imports
-Model Layer
-    ↓ uses
-Database
-```
-
-### Current Status & Next Steps
-
-1. ✅ Create `ddpui/utils/response_wrapper.py`
-2. Migrate existing services to `core/{module}/`
-3. Move schemas to `core/{module}/schemas.py`
-4. Extract exceptions to `core/{module}/exceptions.py`
-5. Add `from_model()` to response schemas
-6. Remove `to_json()`/`to_dict()` from models
-7. Update all API endpoints to use response wrapper
 
 ---
 
