@@ -6,6 +6,7 @@ from django.db.models import F
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import now as timezone_now
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.schemas.notifications_schema import NotificationMessageInfo
 
 from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.tasks import OrgTask
@@ -41,14 +42,6 @@ logger = CustomLogger("ddpui")
 FLOW_RUN = "flow-run"
 FLOW = "flow"
 DEPLOYMENT = "deployment"
-
-
-@dataclass
-class NotificationMessageInfo:
-    content: str = ""
-    subject: str = ""
-    should_send: bool = False
-    skip_reason: str = ""
 
 
 def get_message_type(message_object: dict) -> str | None:

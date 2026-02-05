@@ -15,21 +15,6 @@ from ddpui.utils.discord import send_discord_notification
 logger = CustomLogger("ddpui")
 
 
-def generate_notification_email(orgname: str, flow_run_id: str, logmessages: list) -> str:
-    """plantext notification email"""
-    tag = " [STAGING]" if not PRODUCTION else ""
-    email_body = f"""
-To the admins of {orgname}{tag},
-
-This is an automated notification from Dalgo{tag}.
-
-Flow run id: {flow_run_id}
-Logs:
-"""
-    email_body += "\n".join(logmessages)
-    return email_body
-
-
 def notify_org_managers(org: Org, message: str, email_subject: str):
     """send a notification to all users in the org"""
     error, recipients = get_recipients(
@@ -55,7 +40,10 @@ def notify_platform_admins(
     """send a notification to platform admins discord webhook"""
     prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
     airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
-    base_plan = org.base_plan() if org.base_plan() else "Unknown"
+    base_plan = org.base_plan()
+
+    if not base_plan:
+        base_plan = "Unknown"
 
     message = f"""Pipeline Failure Alert\n
 Organization: {org.slug}

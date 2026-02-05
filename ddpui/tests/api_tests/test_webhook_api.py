@@ -26,7 +26,6 @@ from ddpui.core.webhooks.webhook_functions import (
     get_flow_run_times,
 )
 from ddpui.core.notifications.delivery import (
-    generate_notification_email,
     notify_platform_admins,
 )
 from ddpui.auth import SUPER_ADMIN_ROLE, GUEST_ROLE, ACCOUNT_MANAGER_ROLE
@@ -106,35 +105,6 @@ def test_get_org_from_flow_run_by_connection():
     org = Org.objects.create(name="temp", slug="temp")
     response = get_org_from_flow_run(flow_run)
     assert response == org
-
-
-def test_generate_notification_email():
-    """tests the email generated"""
-    response = generate_notification_email(
-        "orgname", "flow-run-id", ["log-message-1", "log-message-2"]
-    )
-    assert response.find("orgname") > -1
-    assert response.find("flow-run-id") > -1
-    assert response.find("log-message-1") > -1
-    assert response.find("log-message-2") > -1
-
-
-def test_email_flowrun_logs_to_orgusers():
-    """tests the email_flowrun_logs_to_orgusers function"""
-    org = Org.objects.create(name="temp", slug="temp")
-    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_logs") as mock_get_flow_run_logs:
-        mock_get_flow_run_logs.return_value = {
-            "logs": {
-                "logs": [
-                    {
-                        "message": "log-message-1",
-                    },
-                    {
-                        "message": "log-message-2",
-                    },
-                ]
-            }
-        }
 
 
 @pytest.mark.skip(reason="Skipping this test as its failing for some reason.")
