@@ -13,7 +13,7 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
 )
-from ddpui.core.notifications_service import create_notification
+from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission

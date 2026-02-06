@@ -1,19 +1,18 @@
 import os
 import re
+from dataclasses import dataclass
 from ninja.errors import HttpError
 from django.db.models import F
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import now as timezone_now
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.schemas.notifications_schema import NotificationMessageInfo
 
 from ddpui.models.org import Org, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.tasks import OrgTask
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.awsses import send_text_message
-from ddpui.models.tasks import (
-    TaskLock,
-)
+from ddpui.models.tasks import TaskLock
 from ddpui.ddpprefect import (
     prefect_service,
     MAP_FLOW_RUN_STATE_NAME_TO_TYPE,
@@ -23,24 +22,20 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_NAME,
     FLOW_RUN_RUNNING_STATE_NAME,
     FLOW_RUN_PENDING_STATE_NAME,
+    FLOW_RUN_CRASHED_STATE_TYPE,
+    FLOW_RUN_FAILED_STATE_TYPE,
 )
-
-from ddpui.settings import PRODUCTION
-from ddpui.auth import SUPER_ADMIN_ROLE
-from ddpui.core.notifications_service import (
-    create_notification,
-    get_recipients,
-    SentToEnum,
-    NotificationDataSchema,
-)
-from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.constants import (
     SYSTEM_USER_EMAIL,
     TASK_AIRBYTECLEAR,
     TASK_AIRBYTERESET,
     TASK_AIRBYTESYNC,
 )
-from ddpui.utils.discord import send_discord_notification
+from ddpui.utils.helpers import find_all_values_for_key
+from ddpui.core.notifications.delivery import (
+    notify_org_managers,
+    notify_platform_admins,
+)
 
 logger = CustomLogger("ddpui")
 
@@ -97,94 +92,6 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
     logger.error("didn't find the org slug inside the webhook function")
 
     return None
-
-
-def generate_notification_email(orgname: str, flow_run_id: str, logmessages: list) -> str:
-    """plantext notification email"""
-    tag = " [STAGING]" if not PRODUCTION else ""
-    email_body = f"""
-To the admins of {orgname}{tag},
-
-This is an automated notification from Dalgo{tag}.
-
-Flow run id: {flow_run_id}
-Logs:
-"""
-    email_body += "\n".join(logmessages)
-    return email_body
-
-
-def email_superadmins(org: Org, email_body: str):
-    """sends a notificationemail to all OrgUsers"""
-    tag = " [STAGING]" if not PRODUCTION else ""
-    subject = f"Dalgo notification for platform admins{tag}"
-    for orguser in OrgUser.objects.filter(
-        org=org,
-        new_role__slug=SUPER_ADMIN_ROLE,
-    ).all():
-        logger.info(f"sending prefect-notification email to {orguser.user.email}")
-        send_text_message(orguser.user.email, subject, email_body)
-
-
-def email_orgusers_ses_whitelisted(org: Org, email_body: str):
-    """sends a notificationemail to all OrgUsers"""
-    if org.ses_whitelisted_email:
-        tag = " [STAGING]" if not PRODUCTION else ""
-        subject = f"Dalgo notification{tag}"
-        logger.info(f"sending email to {org.ses_whitelisted_email}")
-        send_text_message(
-            org.ses_whitelisted_email,
-            subject,
-            email_body,
-        )
-
-
-def email_flowrun_logs_to_superadmins(org: Org, flow_run_id: str):
-    """retrieves logs for a flow-run and emails them to all users for the org"""
-    logs_arr = prefect_service.recurse_flow_run_logs(flow_run_id)
-    logmessages = [x["message"] for x in logs_arr]
-    email_body = generate_notification_email(org.name, flow_run_id, logmessages)
-    email_superadmins(org, email_body)
-
-
-def notify_org_managers(org: Org, message: str, email_subject: str):
-    """send a notification to all users in the org"""
-    error, recipients = get_recipients(
-        SentToEnum.ALL_ORG_USERS, org.slug, None, manager_or_above=True
-    )
-    if error:
-        logger.error(f"Error getting recipients: {error}")
-        return
-    error, response = create_notification(
-        NotificationDataSchema(
-            author="Dalgo", message=message, email_subject=email_subject, recipients=recipients
-        )
-    )
-    if error:
-        logger.error(f"Error creating notification: {error}")
-        return
-    logger.info(f"Notification created: {response}")
-
-
-def notify_platform_admins(org: Org, flow_run_id: str, state: str):
-    """send a notification to platform admins discord webhook"""
-    prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
-    airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
-    message = (
-        f"Flow run for {org.slug} has failed with state {state}"
-        "\n"
-        f"\nBase plan: {org.base_plan() if org.base_plan() else 'Unknown'}"
-        "\n"
-        f"\n{prefect_url}/flow-runs/flow-run/{flow_run_id}"
-        "\n"
-        f"\nAirbyte workspace URL: {airbyte_url}/workspaces/{org.airbyte_workspace_id}"
-    )
-    if os.getenv("ADMIN_EMAIL"):
-        send_text_message(
-            os.getenv("ADMIN_EMAIL"), "Dalgo notification for platform admins", message
-        )
-    if os.getenv("ADMIN_DISCORD_WEBHOOK"):
-        send_discord_notification(os.getenv("ADMIN_DISCORD_WEBHOOK"), message)
 
 
 def get_flow_run_times(flow_run: dict) -> tuple:
@@ -301,77 +208,118 @@ def update_flow_run_for_deployment(deployment_id: str, state: str, flow_run: dic
     return send_failure_notifications
 
 
-def find_all_values_for_key(obj: dict, key: str) -> list:
-    """finds all occurences of the key in the object"""
-    results = []
+def notify_users_about_failed_run(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
+    """Send failure notifications to platform admins and org users"""
+    flow_run_id = flow_run["id"]
 
-    def _search(o):
-        if isinstance(o, dict):
-            for k, v in o.items():
-                if k == key:
-                    results.append(v)
-                _search(v)
-        elif isinstance(o, list):
-            for item in o:
-                _search(item)
+    # Send platform admin notifications with error isolation
+    try:
+        if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
+            failed_step = _detect_failed_step(flow_run_id)
+            logger.debug(f"Detected failed step for flow run {flow_run_id}: {failed_step}")
 
-    _search(obj)
-    return results
+            notify_platform_admins(org, flow_run_id, state, failed_step)
+            logger.info(f"Platform admin notifications sent for {flow_run_id}")
+    except Exception as e:
+        logger.error(f"Failed to send platform admin notifications for {flow_run_id}: {e}")
 
-
-def send_failure_emails(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict, state: str):
-    """send notification emails to org users"""
-    if os.getenv("SEND_FLOWRUN_LOGS_TO_SUPERADMINS", "").lower() in ["true", "1", "yes"]:
-        email_flowrun_logs_to_superadmins(org, flow_run["id"])
-    if os.getenv("NOTIFY_PLATFORM_ADMINS_OF_ERRORS", "").lower() in ["true", "1", "yes"]:
-        notify_platform_admins(org, flow_run["id"], state)
-
-    name_of_deployment = odf.name if odf else "[no deployment name]"
-    email_orgusers_ses_whitelisted(
-        org,
-        f'There is a problem with the pipeline "{name_of_deployment}"; we are working on a fix',
-    )
-
-    # start building the email, at any point if we decide we won't send it we just return
-    email_subject = f"{org.name}: Job failure for {name_of_deployment}"
-    email_body = [f"To the admins of {org.name},\n"]
-
-    if odf and odf.dataflow_type == "orchestrate":
-        email_body.append(f"The pipeline {odf.name} has failed")
-
-    elif odf and odf.dataflow_type == "manual":
-        connection_ids = find_all_values_for_key(flow_run.get("parameters", {}), "connection_id")
-        if len(connection_ids) > 0:
-            connection_names = ConnectionMeta.objects.filter(
-                connection_id__in=connection_ids
-            ).values_list("connection_name", flat=True)
-
-            email_body.append("A job has failed, the connection(s) involved were:")
-            for connection_name in connection_names:
-                email_body.append(f"- {connection_name}")
+    # Send org user notifications
+    try:
+        message_info = _build_failure_message_for_org_users(org, odf, flow_run)
+        if message_info.should_send:
+            notify_org_managers(org, message_info.content, message_info.subject)
+            logger.info(f"Org user notifications sent for {flow_run_id}")
         else:
-            orgtask_uuids = find_all_values_for_key(flow_run.get("parameters", {}), "orgtask_uuid")
-            task_slugs = OrgTask.objects.filter(uuid__in=orgtask_uuids).values_list(
-                "task__slug", flat=True
+            logger.info(f"Skipping org notifications for {flow_run_id}: {message_info.skip_reason}")
+    except Exception as e:
+        logger.error(f"Failed to send org notifications for {flow_run_id}: {e}")
+
+
+def _build_failure_message_for_org_users(org: Org, odf: OrgDataFlowv1 | None, flow_run: dict):
+    """Build the failure message content for org users"""
+    deployment_name = odf.name if odf else "[no deployment name]"
+    subject = f"{org.name}: Job failure for {deployment_name}"
+
+    if not odf:
+        return NotificationMessageInfo(skip_reason="No deployment information available")
+
+    if odf.dataflow_type == "orchestrate":
+        content = f"""To the admins of {org.name},
+
+The pipeline {odf.name} has failed.
+
+Please visit {os.getenv('FRONTEND_URL')} for more details."""
+        return NotificationMessageInfo(content=content, subject=subject, should_send=True)
+
+    elif odf.dataflow_type == "manual":
+        # Check for connection-based jobs
+        connection_ids = find_all_values_for_key(flow_run.get("parameters", {}), "connection_id")
+        if connection_ids:
+            connection_names = list(
+                ConnectionMeta.objects.filter(connection_id__in=connection_ids).values_list(
+                    "connection_name", flat=True
+                )
             )
-            if task_slugs.count() == 1 and task_slugs[0] == "generate-edr":
-                # don't send any email
-                return
 
-            email_body.append("A job has failed, the tasks involved were")
-            for task_slug in task_slugs:
-                email_body.append(f"- {task_slug}")
+            connections_list = "\n".join(f"- {name}" for name in connection_names)
+            content = f"""To the admins of {org.name},
+
+A job has failed, the connection(s) involved were:
+{connections_list}
+
+Please visit {os.getenv('FRONTEND_URL')} for more details."""
+            return NotificationMessageInfo(content=content, subject=subject, should_send=True)
+
+        # Check for task-based jobs
+        orgtask_uuids = find_all_values_for_key(flow_run.get("parameters", {}), "orgtask_uuid")
+        task_slugs = list(
+            OrgTask.objects.filter(uuid__in=orgtask_uuids).values_list("task__slug", flat=True)
+        )
+
+        # Skip generate-edr tasks
+        if len(task_slugs) == 1 and task_slugs[0] == "generate-edr":
+            return NotificationMessageInfo(
+                skip_reason="generate-edr tasks don't send notifications"
+            )
+
+        if task_slugs:
+            tasks_list = "\n".join(f"- {slug}" for slug in task_slugs)
+            content = f"""To the admins of {org.name},
+
+A job has failed, the tasks involved were:
+{tasks_list}
+
+Please visit {os.getenv('FRONTEND_URL')} for more details."""
+            return NotificationMessageInfo(content=content, subject=subject, should_send=True)
+
+        # Fallback for unknown manual job types
+        return NotificationMessageInfo(skip_reason="No connection or task information found")
+
     else:
-        email_body.append("A job has failed")
-        # should we even bother to send this email???
-        return
+        return NotificationMessageInfo(skip_reason="Unknown dataflow type")
 
-    email_body.append(f"\nPlease visit {os.getenv('FRONTEND_URL')} for more details")
-    notify_org_managers(
-        org,
-        "\n".join(email_body),
-        email_subject,
-    )
+
+def _detect_failed_step(flow_run_id: str) -> str:
+    """Detect which step failed in the flow run"""
+    try:
+        task_runs = prefect_service.get_flow_run_graphs(flow_run_id)
+
+        if not task_runs:
+            logger.debug(f"No task runs found for flow run {flow_run_id}")
+            return "Unknown Step"
+
+        # Find the failed step
+        failed_step = "Unknown Step"
+        for task in task_runs:
+            if task.get("state_type") in [FLOW_RUN_FAILED_STATE_TYPE, FLOW_RUN_CRASHED_STATE_TYPE]:
+                failed_step = task.get("label", "label?")
+                break
+
+        return failed_step
+
+    except Exception as e:
+        logger.error(f"Error detecting failed step for {flow_run_id}: {e}")
+        return "Unknown Step"
 
 
 def do_handle_prefect_webhook(flow_run_id: str, state: str):
@@ -408,10 +356,8 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                 ):
                     # odf might be None!
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
-                    send_failure_emails(org, odf, flow_run, state)
+                    notify_users_about_failed_run(org, odf, flow_run, state)
 
-                elif state in [FLOW_RUN_COMPLETED_STATE_NAME]:
-                    email_orgusers_ses_whitelisted(org, "Your pipeline completed successfully")
     except Exception as err:
         logger.error(
             "Error while handling prefect webhook for flow run %s: %s",
@@ -424,6 +370,9 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
             if task.get("slug", "") in [TASK_AIRBYTESYNC, TASK_AIRBYTERESET, TASK_AIRBYTECLEAR]:
                 connection_id = task.get("connection_id", None)
                 if connection_id:
+                    # Import here to avoid circular import
+                    from ddpui.ddpairbyte import airbytehelpers
+
                     # sync all jobs in all 6 hours
                     airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(
                         last_n_days=0, last_n_hours=6, connection_id=connection_id

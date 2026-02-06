@@ -18,11 +18,11 @@ from ddpui.settings import PRODUCTION
 
 
 from ddpui.utils import timezone, awsses
-from ddpui.utils.webhook_helpers import (
-    notify_org_managers,
+from ddpui.core.webhooks.webhook_functions import (
     do_handle_prefect_webhook,
     get_org_from_flow_run,
 )
+from ddpui.core.notifications.delivery import notify_org_managers
 
 from ddpui.ddpdbt import elementary_service
 from ddpui.utils.custom_logger import CustomLogger

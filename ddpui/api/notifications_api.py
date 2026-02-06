@@ -1,7 +1,7 @@
 from ninja import Router
 from ninja.errors import HttpError
 from ddpui import auth
-from ddpui.core import notifications_service
+from ddpui.core.notifications import notifications_functions
 from ddpui.schemas.notifications_api_schemas import (
     CreateNotificationPayloadSchema,
     UpdateReadStatusSchema,
@@ -17,7 +17,7 @@ def post_create_notification(request, payload: CreateNotificationPayloadSchema):
     """Handle the task of creating a notification"""
 
     # Filter OrgUser data based on sent_to field
-    error, recipients = notifications_service.get_recipients(
+    error, recipients = notifications_functions.get_recipients(
         payload.sent_to, payload.org_slug, payload.user_email, payload.manager_or_above
     )
 
@@ -32,7 +32,7 @@ def post_create_notification(request, payload: CreateNotificationPayloadSchema):
         "recipients": recipients,
     }
 
-    error, result = notifications_service.create_notification(notification_data)
+    error, result = notifications_functions.create_notification(notification_data)
 
     if error is not None:
         raise HttpError(400, error)
@@ -46,7 +46,7 @@ def get_notification_history(request, page: int = 1, limit: int = 10, read_statu
     Returns all the notifications including the
     past and the future scheduled notifications
     """
-    error, result = notifications_service.get_notification_history(page, limit, read_status=None)
+    error, result = notifications_functions.get_notification_history(page, limit, read_status=None)
     if error is not None:
         raise HttpError(400, error)
 
@@ -58,7 +58,7 @@ def get_notification_recipients(request, notification_id: int):
     """
     Returns all the recipients for a notification
     """
-    error, result = notifications_service.get_notification_recipients(notification_id)
+    error, result = notifications_functions.get_notification_recipients(notification_id)
     if error is not None:
         raise HttpError(400, error)
 
@@ -73,7 +73,7 @@ def get_user_notifications_v1(request, page: int = 1, limit: int = 10, read_stat
     which are already sent
     """
     orguser = request.orguser
-    error, result = notifications_service.fetch_user_notifications_v1(
+    error, result = notifications_functions.fetch_user_notifications_v1(
         orguser, page, limit, read_status
     )
     if error is not None:
@@ -88,7 +88,7 @@ def mark_as_read_v1(request, payload: UpdateReadStatusSchemav1):
     Bulk update of read status of notifications
     """
     orguser: OrgUser = request.orguser
-    error, result = notifications_service.mark_notifications_as_read_or_unread(
+    error, result = notifications_functions.mark_notifications_as_read_or_unread(
         orguser.id, payload.notification_ids, payload.read_status
     )
     if error is not None:
@@ -104,7 +104,7 @@ def delete_notification(request, notification_id: int):
     which are already sent. Accepts notification_id in the
     payload and deletes it.
     """
-    error, result = notifications_service.delete_scheduled_notification(notification_id)
+    error, result = notifications_functions.delete_scheduled_notification(notification_id)
     if error is not None:
         raise HttpError(400, error)
 
@@ -115,7 +115,7 @@ def delete_notification(request, notification_id: int):
 def get_unread_notifications_count(request):
     """Get count of unread notifications"""
     orguser: OrgUser = request.orguser
-    error, result = notifications_service.get_unread_notifications_count(orguser)
+    error, result = notifications_functions.get_unread_notifications_count(orguser)
     if error is not None:
         raise HttpError(400, error)
 
@@ -126,7 +126,7 @@ def get_unread_notifications_count(request):
 def mark_all_notifications_as_read(request):
     """Mark all notifications as read for the user"""
     orguser: OrgUser = request.orguser
-    error, result = notifications_service.mark_all_notifications_as_read(orguser.id)
+    error, result = notifications_functions.mark_all_notifications_as_read(orguser.id)
     if error is not None:
         raise HttpError(400, error)
 

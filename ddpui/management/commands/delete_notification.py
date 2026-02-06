@@ -1,6 +1,6 @@
 import sys
 from django.core.management.base import BaseCommand
-from ddpui.core import notifications_service
+from ddpui.core.notifications import notifications_functions
 
 
 class Command(BaseCommand):
@@ -16,7 +16,7 @@ class Command(BaseCommand):
         notification_id = options["notification_id"]
 
         # Call the notification service to delete the notification
-        error, result = notifications_service.delete_scheduled_notification(notification_id)
+        error, result = notifications_functions.delete_scheduled_notification(notification_id)
 
         if error is not None:
             self.stderr.write(f"Error: {error}")
