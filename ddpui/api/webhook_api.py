@@ -3,7 +3,7 @@ import json
 from ninja import Router
 from ninja.errors import HttpError
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.webhook_helpers import (
+from ddpui.core.webhooks.webhook_functions import (
     get_message_type,
     get_flowrun_id_and_state,
     FLOW_RUN,

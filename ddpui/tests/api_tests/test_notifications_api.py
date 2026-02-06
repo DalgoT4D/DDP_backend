@@ -58,8 +58,8 @@ def orguser(authuser, org_without_workspace):
     orguser.delete()
 
 
-@patch("ddpui.core.notifications_service.get_recipients")
-@patch("ddpui.core.notifications_service.create_notification")
+@patch("ddpui.core.notifications.notifications_functions.get_recipients")
+@patch("ddpui.core.notifications.notifications_functions.create_notification")
 def test_create_notification_success(mock_create_notification, mock_get_recipients):
     """tests the success of api endpoint for create notification"""
     payload = {
@@ -95,8 +95,8 @@ def test_create_notification_success(mock_create_notification, mock_get_recipien
     )
 
 
-@patch("ddpui.core.notifications_service.get_recipients")
-@patch("ddpui.core.notifications_service.create_notification")
+@patch("ddpui.core.notifications.notifications_functions.get_recipients")
+@patch("ddpui.core.notifications.notifications_functions.create_notification")
 def test_create_notification_no_recipients(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
@@ -126,8 +126,8 @@ def test_create_notification_no_recipients(mock_create_notification, mock_get_re
     mock_create_notification.assert_not_called()
 
 
-@patch("ddpui.core.notifications_service.get_recipients")
-@patch("ddpui.core.notifications_service.create_notification")
+@patch("ddpui.core.notifications.notifications_functions.get_recipients")
+@patch("ddpui.core.notifications.notifications_functions.create_notification")
 def test_create_notification_no_org_slug(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
@@ -160,8 +160,8 @@ def test_create_notification_no_org_slug(mock_create_notification, mock_get_reci
     mock_create_notification.assert_not_called()
 
 
-@patch("ddpui.core.notifications_service.get_recipients")
-@patch("ddpui.core.notifications_service.create_notification")
+@patch("ddpui.core.notifications.notifications_functions.get_recipients")
+@patch("ddpui.core.notifications.notifications_functions.create_notification")
 def test_create_notification_no_user_email(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
@@ -194,8 +194,8 @@ def test_create_notification_no_user_email(mock_create_notification, mock_get_re
     mock_create_notification.assert_not_called()
 
 
-@patch("ddpui.core.notifications_service.get_recipients")
-@patch("ddpui.core.notifications_service.create_notification")
+@patch("ddpui.core.notifications.notifications_functions.get_recipients")
+@patch("ddpui.core.notifications.notifications_functions.create_notification")
 def test_create_notification_user_does_not_exist(mock_create_notification, mock_get_recipients):
     """
     tests the failure of api endpoint for create notification
@@ -231,7 +231,7 @@ def test_create_notification_user_does_not_exist(mock_create_notification, mock_
 def test_get_notification_history_success():
     """tests the success of api endpoint for fetching notification history"""
     with patch(
-        "ddpui.core.notifications_service.get_notification_history"
+        "ddpui.core.notifications.notifications_functions.get_notification_history"
     ) as mock_get_notification_history:
         mock_get_notification_history.return_value = (
             None,
@@ -247,7 +247,7 @@ def test_get_notification_history_success():
 def test_get_notification_recipients_success():
     """tests the success of api endpoint for fetching notification recipients"""
     with patch(
-        "ddpui.core.notifications_service.get_notification_recipients"
+        "ddpui.core.notifications.notifications_functions.get_notification_recipients"
     ) as mock_get_notification_recipients:
         mock_get_notification_recipients.return_value = (
             None,
@@ -264,7 +264,7 @@ def test_delete_notification_success():
     """tests the success of api endpoint for deleting scheduled notification"""
 
     with patch(
-        "ddpui.core.notifications_service.delete_scheduled_notification"
+        "ddpui.core.notifications.notifications_functions.delete_scheduled_notification"
     ) as mock_delete_notification:
         mock_delete_notification.return_value = (
             None,
@@ -285,7 +285,7 @@ def test_delete_notification_does_not_exist():
     notification that does not exist
     """
     with patch(
-        "ddpui.core.notifications_service.delete_scheduled_notification"
+        "ddpui.core.notifications.notifications_functions.delete_scheduled_notification"
     ) as mock_delete_notification:
         mock_delete_notification.return_value = ("Notification does not exist.", None)
         with pytest.raises(HttpError) as excinfo:
@@ -300,7 +300,7 @@ def test_delete_already_sent_notification():
     notification that has already been sent
     """
     with patch(
-        "ddpui.core.notifications_service.delete_scheduled_notification"
+        "ddpui.core.notifications.notifications_functions.delete_scheduled_notification"
     ) as mock_delete_notification:
         mock_delete_notification.return_value = (
             "Notification has already been sent and cannot be deleted.",
@@ -317,7 +317,7 @@ def test_get_unread_notifications_count_success(orguser):
     request = MagicMock()
     request.orguser = orguser
     with patch(
-        "ddpui.core.notifications_service.get_unread_notifications_count"
+        "ddpui.core.notifications.notifications_functions.get_unread_notifications_count"
     ) as mock_get_unread_notifications_count:
         mock_get_unread_notifications_count.return_value = (
             None,
@@ -332,7 +332,7 @@ def test_get_unread_notifications_count_success(orguser):
         mock_get_unread_notifications_count.assert_called_once_with(orguser)
 
 
-@patch("ddpui.core.notifications_service.mark_all_notifications_as_read")
+@patch("ddpui.core.notifications.notifications_functions.mark_all_notifications_as_read")
 def test_mark_all_notifications_as_read_success(mock_mark_all_notifications_as_read, orguser):
     """Tests the success of the API endpoint to mark all notifications as read"""
     mock_mark_all_notifications_as_read.return_value = (None, {"success": True, "updated_count": 5})
@@ -347,7 +347,7 @@ def test_mark_all_notifications_as_read_success(mock_mark_all_notifications_as_r
     mock_mark_all_notifications_as_read.assert_called_once_with(orguser.id)
 
 
-@patch("ddpui.core.notifications_service.mark_all_notifications_as_read")
+@patch("ddpui.core.notifications.notifications_functions.mark_all_notifications_as_read")
 def test_mark_all_notifications_as_read_error(mock_mark_all_notifications_as_read, orguser):
     """Tests the failure of the API endpoint when the service returns an error"""
     mock_mark_all_notifications_as_read.return_value = ("Some error occurred", None)

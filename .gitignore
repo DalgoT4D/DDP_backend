@@ -155,6 +155,6 @@ cloudbuild.yaml
 Docker/.env*
 
 # ignore platform notification messages
-notifications/
+platform-notifications/
 
 .vscode/

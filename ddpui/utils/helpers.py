@@ -1,6 +1,4 @@
 import os
-import shlex
-import subprocess
 import re
 import string
 import secrets
@@ -277,3 +275,21 @@ def compare_semver(version1: str, version2: str) -> int:
         return 0
 
     return pre_release_cmp(prere1, prere2)
+
+
+def find_all_values_for_key(obj: dict, key: str) -> list:
+    """finds all occurences of the key in the object"""
+    results = []
+
+    def _search(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == key:
+                    results.append(v)
+                _search(v)
+        elif isinstance(o, list):
+            for item in o:
+                _search(item)
+
+    _search(obj)
+    return results
