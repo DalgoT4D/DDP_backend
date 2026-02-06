@@ -396,7 +396,6 @@ class {Module}Service:
         return {module}s, total
     
     @staticmethod
-    @transaction.atomic
     def create_{module}(data: {Module}Create, orguser: OrgUser) -> {Module}:
         """Create a new {module}.
         
@@ -426,7 +425,6 @@ class {Module}Service:
         return {module}
     
     @staticmethod
-    @transaction.atomic
     def update_{module}(
         {module}_id: int,
         org: Org,
@@ -463,7 +461,6 @@ class {Module}Service:
         return {module}
     
     @staticmethod
-    @transaction.atomic
     def delete_{module}({module}_id: int, org: Org, orguser: OrgUser) -> bool:
         """Delete a {module}.
         
@@ -1088,7 +1085,6 @@ def create_chart(request, payload: ChartCreate):
 # 3. Core Service Layer (core/charts/chart_service.py)
 class ChartService:
     @staticmethod
-    @transaction.atomic
     def create_chart(data: ChartCreate, orguser: OrgUser) -> Chart:
         # Business validation
         ChartService._validate_business_rules(data, orguser.org)
