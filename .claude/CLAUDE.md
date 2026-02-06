@@ -706,7 +706,6 @@ class {Module}DBTPayload(Schema):
 - Define database schema (Django ORM)
 - Define model relationships
 - Provide basic model methods (`__str__()`)
-- Model-level validations (using `clean()` method)
 
 ❌ **DON'T**:
 - Contain business logic
@@ -762,12 +761,6 @@ class {Module}(models.Model):
     def __str__(self):
         return f"{self.title} ({self.id})"
     
-    def clean(self):
-        """Model-level validation"""
-        from django.core.exceptions import ValidationError
-        
-        if not self.title or not self.title.strip():
-            raise ValidationError({"title": "Title cannot be empty"})
 ```
 
 ### Key Point: No `to_json()` or `to_dict()`
@@ -890,68 +883,6 @@ def get_{module}(request, id: int):
 ```
 
 ---
-
-## API Response Wrapper
-
-### Location
-`ddpui/utils/response_wrapper.py`
-
-### Implementation
-
-```python
-"""API Response Wrapper
-
-Provides consistent response format across all API endpoints.
-"""
-
-from typing import TypeVar, Generic, Optional, Any
-from ninja import Schema
-
-
-T = TypeVar("T")
-
-
-class ApiResponse(Schema, Generic[T]):
-    """Standard API response wrapper"""
-    success: bool
-    message: Optional[str] = None
-    data: Optional[T] = None
-    error_code: Optional[str] = None
-
-
-def api_response(
-    success: bool,
-    data: Any = None,
-    message: Optional[str] = None,
-    error_code: Optional[str] = None,
-) -> dict:
-    """Create a standardized API response.
-    
-    Args:
-        success: Whether the operation was successful
-        data: Response data (can be schema instance or dict)
-        message: Optional message
-        error_code: Optional error code for failures
-        
-    Returns:
-        Dict with standard response structure
-    """
-    response = {"success": success}
-    
-    if message is not None:
-        response["message"] = message
-    
-    if data is not None:
-        if hasattr(data, "dict"):
-            response["data"] = data.dict()
-        else:
-            response["data"] = data
-    
-    if error_code is not None:
-        response["error_code"] = error_code
-    
-    return response
-```
 
 ### Response Format
 
@@ -1133,99 +1064,6 @@ class ChartResponse(Schema):
     }
 }
 ```
-
----
-
-## Migration Guide
-
-### Migrating from `services/` to `core/`
-
-1. **Create feature folder in core:**
-   ```bash
-   mkdir -p ddpui/core/{module}
-   touch ddpui/core/{module}/__init__.py
-   ```
-
-2. **Move service file:**
-   ```bash
-   mv ddpui/services/{module}_service.py ddpui/core/{module}/{module}_service.py
-   ```
-
-3. **Create exceptions file:**
-   ```bash
-   # Extract exceptions from service file to:
-   ddpui/core/{module}/exceptions.py
-   ```
-
-4. **Keep schemas in `schemas/` folder:**
-   ```bash
-   # Schemas stay in ddpui/schemas/{module}_schema.py
-   # No migration needed for schemas
-   ```
-
-5. **Keep models in `models/` folder:**
-   ```bash
-   # Models stay in ddpui/models/{module}.py
-   # No migration needed for models
-   ```
-
-6. **Update imports in API:**
-   ```python
-   # Before
-   from ddpui.services.{module}_service import {Module}Service
-   from ddpui.schemas.{module}_schema import {Module}Create
-   
-   # After
-   from ddpui.core.{module}.{module}_service import {Module}Service
-   from ddpui.core.{module}.exceptions import {Module}NotFoundError
-   from ddpui.schemas.{module}_schema import {Module}Create  # unchanged
-   ```
-
-7. **Update `core/{module}/__init__.py`:**
-   ```python
-   from .{module}_service import {Module}Service
-   from .exceptions import {Module}Error, {Module}NotFoundError
-   
-   __all__ = [
-       "{Module}Service",
-       "{Module}Error",
-       "{Module}NotFoundError",
-   ]
-   ```
-
-### Adding Response Wrapper to Existing API
-
-1. **Import wrapper and schemas:**
-   ```python
-   from ddpui.utils.response_wrapper import api_response, ApiResponse
-   from ddpui.schemas.{module}_schema import {Module}Response, {Module}ListResponse
-   ```
-
-2. **Update endpoint signature:**
-   ```python
-   # Before
-   @router.get("/", response=List[{Module}Response])
-   
-   # After
-   @router.get("/", response=ApiResponse[{Module}ListResponse])
-   ```
-
-3. **Wrap return value:**
-   ```python
-   # Before
-   return [{Module}Response(**m.to_dict()) for m in {module}s]
-   
-   # After
-   return api_response(
-       success=True,
-       data={Module}ListResponse(
-           data=[{Module}Response.from_model(m) for m in {module}s],
-           total=total,
-           page=page,
-           page_size=page_size,
-       )
-   )
-   ```
 
 ---
 
