@@ -23,7 +23,7 @@ from ddpui.ddpdbt.elementary_service import (
     create_elementary_profile,
 )
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DDP_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
@@ -44,7 +44,12 @@ def org_dbt():
 @pytest.fixture
 def org(org_dbt):
     """org with dbt"""
-    return Org.objects.create(slug="test-org", dbt=org_dbt)
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+    return Org.objects.create(slug="test-org", dbt=org_dbt, queue_config=queue_config)
 
 
 @pytest.fixture
@@ -84,7 +89,12 @@ def edr_deployment_org():
         target_type="tgt_type",
         default_schema="test-default_schema",
     )
-    org = Org.objects.create(slug="test-org", dbt=dbt)
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+    org = Org.objects.create(slug="test-org", dbt=dbt, queue_config=queue_config)
     dataflow = OrgDataFlowv1.objects.create(
         org=org,
         name="dataflow-name",
