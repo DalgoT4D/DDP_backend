@@ -709,21 +709,26 @@ def test_create_edr_sendreport_dataflow(
     )
     mock_generate_hash_id.assert_called_once_with(8)
 
-    mock_create_dataflow_v1.assert_called_once_with(
-        PrefectDataFlowCreateSchema3(
-            deployment_name=deployment_name,
-            flow_name=deployment_name,
-            orgslug=org.slug,
-            deployment_params={
-                "config": {
-                    "tasks": [{"task": "config"}],
-                    "org_slug": orgtask.org.slug,
-                }
-            },
-            cron=cron,
-        ),
-        MANUL_DBT_WORK_QUEUE,
-    )
+    # The create_dataflow_v1 should be called with the org's transform_task_queue config
+    expected_call_args = mock_create_dataflow_v1.call_args
+
+    # Check the first argument (PrefectDataFlowCreateSchema3)
+    assert expected_call_args[0][0].deployment_name == deployment_name
+    assert expected_call_args[0][0].flow_name == deployment_name
+    assert expected_call_args[0][0].orgslug == org.slug
+    assert expected_call_args[0][0].deployment_params == {
+        "config": {
+            "tasks": [{"task": "config"}],
+            "org_slug": orgtask.org.slug,
+        }
+    }
+    assert expected_call_args[0][0].cron == cron
+
+    # Check the second argument (QueueDetailsSchema)
+    queue_details = expected_call_args[0][1]
+    assert hasattr(queue_details, "name")
+    assert hasattr(queue_details, "workpool")
+    assert queue_details.name == MANUL_DBT_WORK_QUEUE
 
 
 def test_create_elementary_profile_no_dbt(org):
