@@ -151,22 +151,27 @@ class TestOrgQueueConfig:
         with patch.dict(os.environ, {}, clear=True):
             org = Org(name="Test Org", queue_config=None)
 
-            # Should raise ValueError when env var is not set
-            with pytest.raises(
-                ValueError, match="PREFECT_WORKER_POOL_NAME environment variable must be set"
-            ):
-                org.get_queue_config()
+            config = org.get_queue_config()
+
+            # Should fall back to "default" for workpool when env var is not set
+            assert config.scheduled_pipeline_queue.name == DDP_WORK_QUEUE
+            assert config.scheduled_pipeline_queue.workpool == "default"
+            assert config.connection_sync_queue.name == DDP_WORK_QUEUE
+            assert config.connection_sync_queue.workpool == "default"
+            assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
+            assert config.transform_task_queue.workpool == "default"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": ""})
     def test_get_queue_config_with_empty_env_var(self):
         """Test get_queue_config when PREFECT_WORKER_POOL_NAME is empty string."""
         org = Org(name="Test Org", queue_config=None)
 
-        # Should raise ValueError when env var is empty string
-        with pytest.raises(
-            ValueError, match="PREFECT_WORKER_POOL_NAME environment variable must be set"
-        ):
-            org.get_queue_config()
+        config = org.get_queue_config()
+
+        # Should fall back to "default" when env var is empty string
+        assert config.scheduled_pipeline_queue.workpool == "default"
+        assert config.connection_sync_queue.workpool == "default"
+        assert config.transform_task_queue.workpool == "default"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_partial_nested_data(self):
@@ -208,17 +213,25 @@ class TestGetDefaultQueueConfig:
     def test_get_default_queue_config_without_env_var(self):
         """Test get_default_queue_config when environment variable is not set."""
         with patch.dict(os.environ, {}, clear=True):
-            # Should raise ValueError when env var is not set
-            with pytest.raises(
-                ValueError, match="PREFECT_WORKER_POOL_NAME environment variable must be set"
-            ):
-                get_default_queue_config()
+            config = get_default_queue_config()
+
+            expected = {
+                "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
+                "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
+                "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "default"},
+            }
+
+            assert config == expected
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": ""})
     def test_get_default_queue_config_with_empty_env_var(self):
         """Test get_default_queue_config when environment variable is empty."""
-        # Should raise ValueError when env var is empty string
-        with pytest.raises(
-            ValueError, match="PREFECT_WORKER_POOL_NAME environment variable must be set"
-        ):
-            get_default_queue_config()
+        config = get_default_queue_config()
+
+        expected = {
+            "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
+            "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
+            "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "default"},
+        }
+
+        assert config == expected

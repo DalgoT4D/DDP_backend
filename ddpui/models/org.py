@@ -59,9 +59,7 @@ class QueueConfigSchema(Schema):
 
 def get_default_queue_config():
     """Returns the new nested structure as default"""
-    default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME")
-    if not default_workpool:
-        raise ValueError("PREFECT_WORKER_POOL_NAME environment variable must be set")
+    default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME") or "default"
     return {
         "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
         "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
