@@ -682,6 +682,7 @@ def test_create_edr_sendreport_dataflow(
     orgtask,
 ):
     """tests create_edr_sendreport_dataflow"""
+    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
     cron = "0 0 * * *"
 
     mock_gather_dbt_project_params.return_value = Mock(
@@ -729,6 +730,7 @@ def test_create_edr_sendreport_dataflow(
     assert hasattr(queue_details, "name")
     assert hasattr(queue_details, "workpool")
     assert queue_details.name == MANUL_DBT_WORK_QUEUE
+    assert queue_details.workpool == "test_workpool"
 
 
 def test_create_elementary_profile_no_dbt(org):
