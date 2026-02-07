@@ -1,3 +1,4 @@
+import os
 from unittest.mock import patch, Mock, ANY
 from datetime import datetime
 import pytz
@@ -40,6 +41,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE, schema, DBTCORE
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
 
 
 pytestmark = pytest.mark.django_db
@@ -68,7 +70,15 @@ def org_without_workspace():
 @pytest.fixture
 def org_with_workspace():
     """a pytest fixture which creates an Org with a fake airbyte workspace id"""
-    org = Org.objects.create(slug="test-org", airbyte_workspace_id="wsid")
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
+    org = Org.objects.create(
+        slug="test-org", airbyte_workspace_id="wsid", queue_config=queue_config
+    )
     warehouse = OrgWarehouse.objects.create(
         org=org,
         wtype="bigquery",
@@ -506,6 +516,7 @@ def test_get_sync_history_for_connection_success():
     job.delete()
 
 
+@patch.dict("os.environ", {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
 @patch("ddpui.ddpairbyte.airbytehelpers.generate_hash_id")
 @patch("ddpui.ddpairbyte.airbytehelpers.logger")
 @patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.create_dataflow_v1")
@@ -538,7 +549,18 @@ def test_create_airbyte_deployment(
 
     mock_generate_hash_id.assert_called_once_with(8)
     mock_logger.info.assert_called_once_with("using the hash code 12345678 for the deployment name")
+
+    # Check that create_dataflow_v1 was called with the correct arguments
     mock_create_dataflow.assert_called_once()
+    call_args = mock_create_dataflow.call_args
+    assert len(call_args[0]) == 2  # payload and queue_details
+
+    # Verify the second argument is a QueueDetailsSchema with correct workpool
+    queue_details = call_args[0][1]
+    assert hasattr(queue_details, "name")
+    assert hasattr(queue_details, "workpool")
+    assert queue_details.workpool == "test_workpool"
+
     mock_org_dataflow.objects.filter.assert_called_once_with(deployment_id="deployment-id")
     mock_org_dataflow.objects.create.assert_called_once_with(
         org=org_with_workspace,
