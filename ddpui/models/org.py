@@ -60,6 +60,8 @@ class QueueConfigSchema(Schema):
 def get_default_queue_config():
     """Returns the new nested structure as default"""
     default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME")
+    if not default_workpool:
+        raise ValueError("PREFECT_WORKER_POOL_NAME environment variable must be set")
     return {
         "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
         "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
@@ -153,13 +155,18 @@ class Org(models.Model):
 
             # Handle new nested format
             if isinstance(queue_data, dict) and "name" in queue_data:
-                return QueueDetailsSchema(
-                    name=queue_data.get("name"), workpool=queue_data.get("workpool")
-                )
+                workpool = queue_data.get("workpool")
+                if workpool is None:
+                    # Use the default workpool from the default config
+                    default_data = default_config[key]
+                    workpool = default_data["workpool"]
+                return QueueDetailsSchema(name=queue_data.get("name"), workpool=workpool)
             # Handle legacy flat format (for backward compatibility during migration)
             elif isinstance(queue_data, str):
-                default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME")
-                return QueueDetailsSchema(name=queue_data, workpool=default_workpool)
+                # Use the default workpool from the default config
+                default_data = default_config[key]
+                workpool = default_data["workpool"]
+                return QueueDetailsSchema(name=queue_data, workpool=workpool)
 
             # Fallback to defaults
             default_data = default_config[key]
