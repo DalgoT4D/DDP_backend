@@ -25,7 +25,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.tasks import DataflowOrgTask, TaskLock
 from ddpui.models.org_user import OrgUser, Org
-from ddpui.models.org import OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import OrgPrefectBlockv1, OrgDataFlowv1, QueueDetailsSchema
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     DDP_WORK_QUEUE,
@@ -411,9 +411,9 @@ def run_shell_task_sync(task: PrefectShellTaskSetup) -> dict:  # pragma: no cove
 
 # Flows and deployments
 def create_dataflow_v1(
-    payload: PrefectDataFlowCreateSchema3, queue_name=DDP_WORK_QUEUE
+    payload: PrefectDataFlowCreateSchema3, queue_details: QueueDetailsSchema
 ) -> dict:  # pragma: no cover
-    """create a prefect deployment out of a flow and a cron schedule; to go away with the blocks"""
+    """create a prefect deployment using queue details object"""
     res = prefect_post(
         "v1/deployments/",
         {
@@ -422,8 +422,8 @@ def create_dataflow_v1(
             "org_slug": payload.orgslug,
             "deployment_params": payload.deployment_params,
             "cron": payload.cron,
-            "work_pool_name": os.getenv("PREFECT_WORKER_POOL_NAME"),
-            "work_queue_name": queue_name,
+            "work_pool_name": queue_details.workpool,
+            "work_queue_name": queue_details.name,
         },
     )
     return res

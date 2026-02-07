@@ -1,4 +1,5 @@
 import uuid
+import os
 from typing import Optional
 from pydantic import HttpUrl
 from enum import Enum
@@ -41,25 +42,37 @@ class TransformType(str, Enum):
     GIT = "github"
 
 
-class QueueConfigSchema(Schema):
-    """Queue configuration with automatic defaults"""
+class QueueDetailsSchema(Schema):
+    """Individual queue configuration with name and workpool"""
 
-    scheduled_pipeline_queue: str = DDP_WORK_QUEUE
-    connection_sync_queue: str = DDP_WORK_QUEUE
-    transform_task_queue: str = MANUL_DBT_WORK_QUEUE
+    name: str
+    workpool: str
+
+
+class QueueConfigSchema(Schema):
+    """Queue configuration with nested structure"""
+
+    scheduled_pipeline_queue: QueueDetailsSchema
+    connection_sync_queue: QueueDetailsSchema
+    transform_task_queue: QueueDetailsSchema
 
 
 def get_default_queue_config():
-    """Callable to return default queue configuration from schema"""
-    return QueueConfigSchema().dict()
+    """Returns the new nested structure as default"""
+    default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME")
+    return {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": default_workpool},
+    }
 
 
 class QueueConfigUpdateSchema(Schema):
-    """Schema for updating queue configuration - all fields optional"""
+    """Schema for updating queue configuration with nested structure - all fields optional"""
 
-    scheduled_pipeline_queue: Optional[str] = None
-    connection_sync_queue: Optional[str] = None
-    transform_task_queue: Optional[str] = None
+    scheduled_pipeline_queue: Optional[QueueDetailsSchema] = None
+    connection_sync_queue: Optional[QueueDetailsSchema] = None
+    transform_task_queue: Optional[QueueDetailsSchema] = None
 
 
 class OrgDbt(models.Model):
@@ -122,22 +135,44 @@ class Org(models.Model):
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
 
     def get_queue_config(self) -> QueueConfigSchema:
-        """Returns validated queue config with automatic defaults"""
-        defaults = QueueConfigSchema()
+        """Returns validated queue config with automatic defaults - supports both formats"""
         stored = self.queue_config or {}
 
+        # Get defaults from the function that uses environment variables
+        default_config = get_default_queue_config()
+
+        def get_queue_details(key: str) -> QueueDetailsSchema:
+            if key not in stored:
+                # Use default from function
+                default_data = default_config[key]
+                return QueueDetailsSchema(
+                    name=default_data["name"], workpool=default_data["workpool"]
+                )
+
+            queue_data = stored[key]
+
+            # Handle new nested format
+            if isinstance(queue_data, dict) and "name" in queue_data:
+                return QueueDetailsSchema(
+                    name=queue_data.get("name"), workpool=queue_data.get("workpool")
+                )
+            # Handle legacy flat format (for backward compatibility during migration)
+            elif isinstance(queue_data, str):
+                default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME")
+                return QueueDetailsSchema(name=queue_data, workpool=default_workpool)
+
+            # Fallback to defaults
+            default_data = default_config[key]
+            return QueueDetailsSchema(name=default_data["name"], workpool=default_data["workpool"])
+
         return QueueConfigSchema(
-            scheduled_pipeline_queue=stored.get(
-                "scheduled_pipeline_queue", defaults.scheduled_pipeline_queue
-            ),
-            connection_sync_queue=stored.get(
-                "connection_sync_queue", defaults.connection_sync_queue
-            ),
-            transform_task_queue=stored.get("transform_task_queue", defaults.transform_task_queue),
+            scheduled_pipeline_queue=get_queue_details("scheduled_pipeline_queue"),
+            connection_sync_queue=get_queue_details("connection_sync_queue"),
+            transform_task_queue=get_queue_details("transform_task_queue"),
         )
 
     def update_queue_config(self, update_data: QueueConfigUpdateSchema):
-        """Update queue config with partial data"""
+        """Update queue config with nested data"""
         current = self.get_queue_config()
 
         if update_data.scheduled_pipeline_queue is not None:
@@ -147,6 +182,7 @@ class Org(models.Model):
         if update_data.transform_task_queue is not None:
             current.transform_task_queue = update_data.transform_task_queue
 
+        # Store as nested structure
         self.queue_config = current.dict()
         self.save()
 
