@@ -1,6 +1,7 @@
 import yaml
 import os, glob
 import subprocess
+import uuid
 from pathlib import Path
 from unittest.mock import patch, Mock, MagicMock
 import django
@@ -16,11 +17,18 @@ from ddpui.ddpdbt.dbt_service import (
     parse_dbt_manifest_to_canvas,
     generate_manifest_json_for_dbt_project,
     cleanup_unused_sources,
+    update_github_pat_storage,
+    switch_git_repository,
+    connect_git_remote,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpprefect.schema import OrgDbtConnectGitRemote
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
+from ddpui.models.org_user import OrgUser
+from ddpui.models.org import TransformType
+from django.contrib.auth.models import User
 from ddpui.core.orgdbt_manager import DbtCommandError
 from ddpui.dbt_automation import assets
 
@@ -1399,3 +1407,703 @@ def test_cleanup_unused_sources_canvas_only_cleanup():
         CanvasNode.objects.get(id=orphaned_canvas_node.id)
     with pytest.raises(CanvasNode.DoesNotExist):
         CanvasNode.objects.get(id=no_model_canvas_node.id)
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+def test_update_github_pat_storage_new_pat_creation(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """Test creating a new PAT when no existing secret exists"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "test-pat-token"
+
+    # Mock responses
+    mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
+    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "test-block-id"}
+    mock_secretsmanager.save_github_pat.return_value = "new-secret-key"
+
+    # Execute
+    result = update_github_pat_storage(org, git_repo_url, access_token)
+
+    # Verify
+    assert result == "new-secret-key"
+
+    # Verify OAuth URL generation
+    mock_generate_oauth_url.assert_called_once_with(git_repo_url, access_token)
+
+    # Verify Prefect secret block creation
+    mock_prefect_service.upsert_secret_block.assert_called_once()
+    call_args = mock_prefect_service.upsert_secret_block.call_args[0][0]
+    assert call_args.block_name == "test-org-git-pull-url"
+    assert call_args.secret == "https://oauth2:test-pat-token@github.com/test/repo.git"
+
+    # Verify OrgPrefectBlockv1 creation
+    created_block = OrgPrefectBlockv1.objects.get(
+        org=org, block_type=SECRET, block_name="test-org-git-pull-url"
+    )
+    assert created_block.block_id == "test-block-id"
+
+    # Verify secrets manager new PAT creation
+    mock_secretsmanager.save_github_pat.assert_called_once_with(access_token)
+    mock_secretsmanager.update_github_pat.assert_not_called()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+def test_update_github_pat_storage_existing_pat_update(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """Test updating an existing PAT when secret already exists"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "updated-pat-token"
+    existing_secret = "existing-secret-key"
+
+    # Mock responses
+    mock_generate_oauth_url.return_value = (
+        "https://oauth2:updated-pat-token@github.com/test/repo.git"
+    )
+    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "test-block-id"}
+
+    # Execute
+    result = update_github_pat_storage(org, git_repo_url, access_token, existing_secret)
+
+    # Verify
+    assert result == existing_secret
+
+    # Verify OAuth URL generation
+    mock_generate_oauth_url.assert_called_once_with(git_repo_url, access_token)
+
+    # Verify Prefect secret block update
+    mock_prefect_service.upsert_secret_block.assert_called_once()
+    call_args = mock_prefect_service.upsert_secret_block.call_args[0][0]
+    assert call_args.block_name == "test-org-git-pull-url"
+    assert call_args.secret == "https://oauth2:updated-pat-token@github.com/test/repo.git"
+
+    # Verify secrets manager PAT update (not creation)
+    mock_secretsmanager.update_github_pat.assert_called_once_with(existing_secret, access_token)
+    mock_secretsmanager.save_github_pat.assert_not_called()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+def test_update_github_pat_storage_prefect_block_already_exists(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """Test when Prefect secret block already exists in database"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "test-pat-token"
+
+    # Pre-create the OrgPrefectBlockv1 record
+    existing_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_name="test-org-git-pull-url",
+        block_id="existing-block-id",
+    )
+
+    # Mock responses
+    mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
+    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "updated-block-id"}
+    mock_secretsmanager.save_github_pat.return_value = "new-secret-key"
+
+    # Execute
+    result = update_github_pat_storage(org, git_repo_url, access_token)
+
+    # Verify
+    assert result == "new-secret-key"
+
+    # Verify Prefect service was still called
+    mock_prefect_service.upsert_secret_block.assert_called_once()
+
+    # Verify no new OrgPrefectBlockv1 was created (count should still be 1)
+    blocks_count = OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name="test-org-git-pull-url"
+    ).count()
+    assert blocks_count == 1
+
+    # Verify the existing block is still there
+    existing_block.refresh_from_db()
+    assert existing_block.block_id == "existing-block-id"  # Should not be updated
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+def test_update_github_pat_storage_prefect_service_error(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """Test error handling when Prefect service fails"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "test-pat-token"
+
+    # Mock responses
+    mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
+    mock_prefect_service.upsert_secret_block.side_effect = Exception("Prefect service error")
+
+    # Execute and verify exception is raised
+    with pytest.raises(Exception, match="Prefect service error"):
+        update_github_pat_storage(org, git_repo_url, access_token)
+
+    # Verify secrets manager was not called since Prefect failed
+    mock_secretsmanager.save_github_pat.assert_not_called()
+    mock_secretsmanager.update_github_pat.assert_not_called()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+def test_update_github_pat_storage_secretsmanager_error(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """Test error handling when secrets manager fails"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "test-pat-token"
+
+    # Mock responses
+    mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
+    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "test-block-id"}
+    mock_secretsmanager.save_github_pat.side_effect = Exception("Secrets manager error")
+
+    # Execute and verify exception is raised
+    with pytest.raises(Exception, match="Secrets manager error"):
+        update_github_pat_storage(org, git_repo_url, access_token)
+
+    # Verify Prefect service was called (it succeeded)
+    mock_prefect_service.upsert_secret_block.assert_called_once()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+def test_update_github_pat_storage_oauth_url_generation_error(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """Test error handling when OAuth URL generation fails"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "test-pat-token"
+
+    # Mock responses
+    mock_generate_oauth_url.side_effect = Exception("OAuth URL generation failed")
+
+    # Execute and verify exception is raised
+    with pytest.raises(Exception, match="OAuth URL generation failed"):
+        update_github_pat_storage(org, git_repo_url, access_token)
+
+    # Verify subsequent services were not called
+    mock_prefect_service.upsert_secret_block.assert_not_called()
+    mock_secretsmanager.save_github_pat.assert_not_called()
+
+
+# Tests for switch_git_repository function
+@patch("ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block")
+@patch("ddpui.ddpdbt.dbt_service.sync_gitignore_contents")
+@patch("ddpui.ddpdbt.dbt_service.GitManager")
+@patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage")
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir")
+@patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir")
+def test_switch_git_repository_success_new_token(
+    mock_get_org_dir,
+    mock_get_dbt_project_dir,
+    mock_secretsmanager,
+    mock_update_pat_storage,
+    mock_git_manager_class,
+    mock_sync_gitignore,
+    mock_create_cli_block,
+):
+    """Test successful git repository switch with new PAT token"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo.git",
+        project_dir="old-project",
+        target_type="postgres",
+        default_schema="old_schema",
+        transform_type=TransformType.GIT,
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="new-pat-token"
+    )
+
+    # Create a warehouse for the org
+    warehouse = OrgWarehouse.objects.create(
+        org=org,
+        wtype="postgres",
+        name="test-warehouse",
+        credentials='{"host": "localhost", "port": 5432, "database": "testdb"}',
+    )
+
+    # Mock paths
+    mock_get_dbt_project_dir.return_value = "/fake/dbt/project"
+    mock_get_org_dir.return_value = "/fake/org/dir"
+    mock_update_pat_storage.return_value = "new-secret-key"
+    mock_secretsmanager.retrieve_warehouse_credentials.return_value = {
+        "username": "testuser",
+        "password": "testpass",
+    }
+    mock_create_cli_block.return_value = (Mock(), None)  # Success, no error
+
+    # Mock Path.exists to return True and shutil.rmtree
+    with (
+        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+        patch("ddpui.ddpdbt.dbt_service.shutil.rmtree") as mock_rmtree,
+    ):
+        mock_dbt_path = Mock()
+        mock_dbt_path.exists.return_value = True
+        mock_dbt_path.__str__ = Mock(return_value="/fake/dbt/project")
+        mock_org_path = Mock()
+        mock_org_path.__str__ = Mock(return_value="/fake/org/dir")
+        mock_path.return_value = mock_dbt_path
+        mock_path.side_effect = lambda x: mock_dbt_path if "dbt" in str(x) else mock_org_path
+
+        # Execute
+        result = switch_git_repository(user, payload)
+
+    # Verify PAT storage was called
+    mock_update_pat_storage.assert_called_once_with(
+        org, payload.gitrepoUrl, payload.gitrepoAccessToken, None
+    )
+
+    # Verify GitManager.clone was called
+    mock_git_manager_class.clone.assert_called_once_with(
+        cwd="/fake/org/dir",
+        remote_repo_url=payload.gitrepoUrl,
+        relative_path="dbtrepo",
+        pat=payload.gitrepoAccessToken,
+    )
+
+    # Verify OrgDbt was updated
+    orgdbt.refresh_from_db()
+    assert orgdbt.gitrepo_url == payload.gitrepoUrl
+    assert orgdbt.transform_type == TransformType.GIT
+    assert orgdbt.gitrepo_access_token_secret == "new-secret-key"
+
+    # Verify gitignore sync was called
+    mock_sync_gitignore.assert_called_once()
+
+
+@patch("ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block")
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+def test_switch_git_repository_masked_token_with_existing_secret(
+    mock_secretsmanager, mock_create_cli_block, tmp_path
+):
+    """Test repository switch with masked token when existing secret exists"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo.git",
+        project_dir="old-project",
+        target_type="postgres",
+        default_schema="old_schema",
+        transform_type=TransformType.GIT,
+        gitrepo_access_token_secret="existing-secret-key",
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    # Create warehouse for the org
+    warehouse = OrgWarehouse.objects.create(
+        org=org,
+        wtype="postgres",
+        name="test-warehouse",
+        credentials='{"host": "localhost", "port": 5432, "database": "testdb"}',
+    )
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="*******"
+    )
+
+    # Setup mock returns
+    mock_secretsmanager.retrieve_github_pat.return_value = "actual-pat-token"
+    mock_secretsmanager.retrieve_warehouse_credentials.return_value = {
+        "username": "testuser",
+        "password": "testpass",
+    }
+    mock_create_cli_block.return_value = (Mock(), None)  # Success, no error
+
+    # Use real temporary paths
+    dbt_project_dir = tmp_path / "dbt_project"
+    dbt_project_dir.mkdir()
+    org_dir = tmp_path / "org"
+    org_dir.mkdir()
+
+    # Mock other dependencies
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir") as mock_get_org_dir,
+        patch("ddpui.ddpdbt.dbt_service.GitManager.clone") as mock_clone,
+        patch("ddpui.ddpdbt.dbt_service.sync_gitignore_contents"),
+        patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage") as mock_update_pat,
+    ):
+        mock_get_dbt_dir.return_value = str(dbt_project_dir)
+        mock_get_org_dir.return_value = str(org_dir)
+
+        # Execute
+        result = switch_git_repository(user, payload)
+
+    # Verify that existing PAT was retrieved and used
+    mock_secretsmanager.retrieve_github_pat.assert_called_once_with("existing-secret-key")
+    mock_clone.assert_called_once_with(
+        cwd=str(org_dir),
+        remote_repo_url=payload.gitrepoUrl,
+        relative_path="dbtrepo",
+        pat="actual-pat-token",
+    )
+
+    # Verify update_github_pat_storage was NOT called for masked token
+    mock_update_pat.assert_not_called()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+def test_switch_git_repository_masked_token_no_existing_secret(mock_secretsmanager):
+    """Test repository switch with masked token when no existing secret exists"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo.git",
+        project_dir="old-project",
+        target_type="postgres",
+        default_schema="old_schema",
+        transform_type=TransformType.GIT,
+        gitrepo_access_token_secret=None,
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="*******"
+    )
+
+    # Execute and verify exception is raised
+    with pytest.raises(Exception, match="Cannot use masked token - no existing PAT found"):
+        switch_git_repository(user, payload)
+
+
+@patch("ddpui.ddpdbt.dbt_service.GitManager.clone")
+def test_switch_git_repository_git_clone_failure(mock_clone, tmp_path):
+    """Test repository switch when git clone fails"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo.git",
+        project_dir="old-project",
+        target_type="postgres",
+        default_schema="old_schema",
+        transform_type=TransformType.GIT,
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="test-pat-token"
+    )
+
+    # Mock clone to raise GitManagerError
+    from ddpui.core.git_manager import GitManagerError
+
+    mock_clone.side_effect = GitManagerError("Clone failed", "Authentication error")
+
+    # Use real temporary paths
+    dbt_project_dir = tmp_path / "dbt_project"
+    dbt_project_dir.mkdir()
+    org_dir = tmp_path / "org"
+    org_dir.mkdir()
+
+    # Mock other dependencies
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir") as mock_get_org_dir,
+        patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage"),
+    ):
+        mock_get_dbt_dir.return_value = str(dbt_project_dir)
+        mock_get_org_dir.return_value = str(org_dir)
+
+        # Execute and verify exception is raised
+        with pytest.raises(Exception, match="Failed to clone new repository: Clone failed"):
+            switch_git_repository(user, payload)
+
+
+# Tests for connect_git_remote function
+@patch("ddpui.ddpdbt.dbt_service.sync_gitignore_contents")
+@patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage")
+@patch("ddpui.ddpdbt.dbt_service.GitManager")
+@patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir")
+def test_connect_git_remote_success_new_token(
+    mock_get_dbt_project_dir,
+    mock_git_manager_class,
+    mock_update_pat_storage,
+    mock_sync_gitignore,
+    tmp_path,
+):
+    """Test successful git remote connection with new PAT token"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,  # No existing Git repo
+        project_dir="project",
+        target_type="postgres",
+        default_schema="schema",
+        transform_type=TransformType.UI,  # Starting from UI4T
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="test-pat-token"
+    )
+
+    # Mock dbt project directory exists
+    mock_get_dbt_project_dir.return_value = "/fake/dbt/project"
+    mock_update_pat_storage.return_value = "new-secret-key"
+
+    # Mock GitManager instance
+    mock_git_manager = Mock()
+    mock_git_manager_class.return_value = mock_git_manager
+
+    # Use real temporary path
+    dbt_project_dir = tmp_path / "dbt_project"
+    dbt_project_dir.mkdir()
+    mock_get_dbt_project_dir.return_value = str(dbt_project_dir)
+
+    # Execute
+    result = connect_git_remote(user, payload)
+
+    # Verify GitManager was initialized correctly
+    mock_git_manager_class.assert_called_once_with(
+        repo_local_path=str(dbt_project_dir), pat=payload.gitrepoAccessToken, validate_git=True
+    )
+
+    # Verify git operations were called
+    mock_git_manager.verify_remote_url.assert_called_once_with(payload.gitrepoUrl)
+    mock_git_manager.set_remote.assert_called_once_with(payload.gitrepoUrl)
+    mock_git_manager.sync_local_default_to_remote.assert_called_once()
+
+    # Verify PAT storage was called
+    mock_update_pat_storage.assert_called_once_with(
+        org, payload.gitrepoUrl, payload.gitrepoAccessToken, None
+    )
+
+    # Verify OrgDbt was updated
+    orgdbt.refresh_from_db()
+    assert orgdbt.gitrepo_url == payload.gitrepoUrl
+    assert orgdbt.transform_type == TransformType.GIT
+    assert orgdbt.gitrepo_access_token_secret == "new-secret-key"
+
+    # Verify gitignore sync was called
+    mock_sync_gitignore.assert_called_once()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.GitManager")
+def test_connect_git_remote_masked_token_with_existing_secret(
+    mock_git_manager_class, mock_secretsmanager, tmp_path
+):
+    """Test git remote connection with masked token when existing secret exists"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="project",
+        target_type="postgres",
+        default_schema="schema",
+        transform_type=TransformType.UI,
+        gitrepo_access_token_secret="existing-secret-key",
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="*******"
+    )
+
+    mock_secretsmanager.retrieve_github_pat.return_value = "actual-pat-token"
+    mock_git_manager = Mock()
+    mock_git_manager_class.return_value = mock_git_manager
+
+    # Use real temporary path
+    dbt_project_dir = tmp_path / "dbt_project"
+    dbt_project_dir.mkdir()
+
+    # Mock other dependencies
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.sync_gitignore_contents"),
+        patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage") as mock_update_pat,
+    ):
+        mock_get_dbt_dir.return_value = str(dbt_project_dir)
+
+        # Execute
+        result = connect_git_remote(user, payload)
+
+    # Verify that existing PAT was retrieved and used
+    mock_secretsmanager.retrieve_github_pat.assert_called_once_with("existing-secret-key")
+    mock_git_manager_class.assert_called_once_with(
+        repo_local_path=str(dbt_project_dir), pat="actual-pat-token", validate_git=True
+    )
+
+    # Verify update_github_pat_storage was NOT called for masked token
+    mock_update_pat.assert_not_called()
+
+
+def test_connect_git_remote_dbt_repo_not_exists():
+    """Test git remote connection when DBT repo directory doesn't exist"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="project",
+        target_type="postgres",
+        default_schema="schema",
+        transform_type=TransformType.UI,
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="test-pat-token"
+    )
+
+    # Mock dbt project directory doesn't exist
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+    ):
+        mock_get_dbt_dir.return_value = "/fake/dbt/project"
+        mock_path.return_value.exists.return_value = False
+
+        # Execute and verify exception is raised
+        with pytest.raises(Exception, match="DBT repo directory does not exist"):
+            connect_git_remote(user, payload)
+
+
+@patch("ddpui.ddpdbt.dbt_service.GitManager")
+def test_connect_git_remote_git_not_initialized(mock_git_manager_class):
+    """Test git remote connection when git is not initialized in DBT folder"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="project",
+        target_type="postgres",
+        default_schema="schema",
+        transform_type=TransformType.UI,
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="test-pat-token"
+    )
+
+    # Mock GitManager to raise error during validation
+    from ddpui.core.git_manager import GitManagerError
+
+    mock_git_manager_class.side_effect = GitManagerError("Git not initialized", "No .git directory")
+
+    # Mock other dependencies
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+    ):
+        mock_get_dbt_dir.return_value = "/fake/dbt/project"
+        mock_path.return_value.exists.return_value = True
+
+        # Execute and verify exception is raised
+        with pytest.raises(Exception, match="Git is not initialized in the DBT project folder"):
+            connect_git_remote(user, payload)
+
+
+@patch("ddpui.ddpdbt.dbt_service.GitManager")
+def test_connect_git_remote_verify_url_failure(mock_git_manager_class):
+    """Test git remote connection when remote URL verification fails"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url=None,
+        project_dir="project",
+        target_type="postgres",
+        default_schema="schema",
+        transform_type=TransformType.UI,
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="invalid-token"
+    )
+
+    # Mock GitManager instance and methods
+    from ddpui.core.git_manager import GitManagerError
+
+    mock_git_manager = Mock()
+    mock_git_manager.verify_remote_url.side_effect = GitManagerError(
+        "Authentication failed", "Invalid credentials"
+    )
+    mock_git_manager_class.return_value = mock_git_manager
+
+    # Mock other dependencies
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+    ):
+        mock_get_dbt_dir.return_value = "/fake/dbt/project"
+        mock_path.return_value.exists.return_value = True
+
+        # Execute and verify exception is raised
+        with pytest.raises(Exception, match="Authentication failed: Invalid credentials"):
+            connect_git_remote(user, payload)

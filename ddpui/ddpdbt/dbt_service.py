@@ -37,6 +37,50 @@ from ddpui.ddpprefect.schema import PrefectSecretBlockEdit, OrgDbtConnectGitRemo
 logger = CustomLogger("ddpui")
 
 
+def update_github_pat_storage(
+    org: Org, git_repo_url: str, access_token: str, existing_pat_secret: str = None
+) -> str:
+    """
+    Handle PAT storage for both Prefect secret blocks and AWS Secrets Manager.
+
+    Args:
+        org: The organization instance
+        git_repo_url: The GitHub repository URL
+        access_token: The GitHub personal access token
+        existing_pat_secret: Existing PAT secret key if updating
+
+    Returns:
+        str: The PAT secret key from secrets manager
+    """
+    # Create oauth URL for prefect secret block
+    gitrepo_url_with_token = GitManager.generate_oauth_url_static(git_repo_url, access_token)
+
+    # Create or update the prefect secret block
+    secret_block_edit_params = PrefectSecretBlockEdit(
+        block_name=f"{org.slug}-git-pull-url",
+        secret=gitrepo_url_with_token,
+    )
+
+    response = prefect_service.upsert_secret_block(secret_block_edit_params)
+    if not OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+    ).exists():
+        OrgPrefectBlockv1.objects.create(
+            org=org,
+            block_type=SECRET,
+            block_name=secret_block_edit_params.block_name,
+            block_id=response["block_id"],
+        )
+
+    # Update or create PAT in secrets manager
+    if existing_pat_secret:
+        secretsmanager.update_github_pat(existing_pat_secret, access_token)
+        return existing_pat_secret
+    else:
+        pat_secret_key = secretsmanager.save_github_pat(access_token)
+        return pat_secret_key
+
+
 DBT_GITIGNORE_CONTENT = [
     "target/",
     "dbt_packages/",
@@ -1020,36 +1064,10 @@ def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> dic
 
     # Handle PAT token storage (only if not masked)
     if not is_token_masked:
-        # Create oauth URL for prefect secret block
-        gitrepo_url_with_token = GitManager.generate_oauth_url_static(
-            payload.gitrepoUrl, payload.gitrepoAccessToken
+        pat_secret_key = update_github_pat_storage(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
         )
-
-        # Create or update the prefect secret block
-        secret_block_edit_params = PrefectSecretBlockEdit(
-            block_name=f"{org.slug}-git-pull-url",
-            secret=gitrepo_url_with_token,
-        )
-
-        response = prefect_service.upsert_secret_block(secret_block_edit_params)
-        if not OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
-        ).exists():
-            OrgPrefectBlockv1.objects.create(
-                org=org,
-                block_type=SECRET,
-                block_name=secret_block_edit_params.block_name,
-                block_id=response["block_id"],
-            )
-
-        # Update or create PAT in secrets manager
-        if orgdbt.gitrepo_access_token_secret:
-            secretsmanager.update_github_pat(
-                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
-            )
-        else:
-            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
-            orgdbt.gitrepo_access_token_secret = pat_secret_key
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
 
     # Update OrgDbt with the new gitrepo_url
     orgdbt.gitrepo_url = payload.gitrepoUrl
@@ -1100,36 +1118,10 @@ def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> 
 
     # Handle PAT token storage (only if not masked)
     if not is_token_masked:
-        # Create oauth URL for prefect secret block
-        gitrepo_url_with_token = GitManager.generate_oauth_url_static(
-            payload.gitrepoUrl, payload.gitrepoAccessToken
+        pat_secret_key = update_github_pat_storage(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
         )
-
-        # Create or update the prefect secret block
-        secret_block_edit_params = PrefectSecretBlockEdit(
-            block_name=f"{org.slug}-git-pull-url",
-            secret=gitrepo_url_with_token,
-        )
-
-        response = prefect_service.upsert_secret_block(secret_block_edit_params)
-        if not OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
-        ).exists():
-            OrgPrefectBlockv1.objects.create(
-                org=org,
-                block_type=SECRET,
-                block_name=secret_block_edit_params.block_name,
-                block_id=response["block_id"],
-            )
-
-        # Update or create PAT in secrets manager
-        if orgdbt.gitrepo_access_token_secret:
-            secretsmanager.update_github_pat(
-                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
-            )
-        else:
-            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
-            orgdbt.gitrepo_access_token_secret = pat_secret_key
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
 
     # Get paths
     dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
