@@ -33,7 +33,7 @@ from ddpui.api.user_org_api import (
     get_organization_wren,
     delete_organization_warehouses_v1,
 )
-from ddpui.models.org import Org, OrgWarehouseSchema, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import (
     OrgUser,
@@ -50,6 +50,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
     PIPELINE_MANAGER_ROLE,

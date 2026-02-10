@@ -1,13 +1,15 @@
-import uuid
 import os
-from typing import Optional
-from pydantic import HttpUrl
+
 from enum import Enum
 from django.db import models
 from django.utils import timezone
-from ninja import Schema
 
 from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
+from ddpui.schemas.org_queue_schema import (
+    QueueConfigSchema,
+    QueueDetailsSchema,
+    QueueConfigUpdateSchema,
+)
 
 
 class OrgType(str, Enum):
@@ -42,21 +44,6 @@ class TransformType(str, Enum):
     GIT = "github"
 
 
-class QueueDetailsSchema(Schema):
-    """Individual queue configuration with name and workpool"""
-
-    name: str
-    workpool: str
-
-
-class QueueConfigSchema(Schema):
-    """Queue configuration with nested structure"""
-
-    scheduled_pipeline_queue: QueueDetailsSchema
-    connection_sync_queue: QueueDetailsSchema
-    transform_task_queue: QueueDetailsSchema
-
-
 def get_default_queue_config():
     """Returns the new nested structure as default"""
     default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME") or "default"
@@ -65,14 +52,6 @@ def get_default_queue_config():
         "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
         "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": default_workpool},
     }
-
-
-class QueueConfigUpdateSchema(Schema):
-    """Schema for updating queue configuration with nested structure - all fields optional"""
-
-    scheduled_pipeline_queue: Optional[QueueDetailsSchema] = None
-    connection_sync_queue: Optional[QueueDetailsSchema] = None
-    transform_task_queue: Optional[QueueDetailsSchema] = None
 
 
 class OrgDbt(models.Model):
@@ -196,45 +175,6 @@ class Org(models.Model):
         return self.org_plans.base_plan if hasattr(self, "org_plans") else None
 
 
-class OrgSchema(Schema):
-    """Docstring"""
-
-    name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
-    is_demo: bool = False
-
-
-class CreateOrgSchema(Schema):
-    """payload for org creation"""
-
-    name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
-    is_demo: bool = False
-    base_plan: str
-    can_upgrade_plan: bool
-    subscription_duration: str
-    superset_included: bool
-    start_date: Optional[str]
-    end_date: Optional[str]
-    website: Optional[HttpUrl] = None
-
-
-class CreateFreeTrialOrgSchema(CreateOrgSchema):
-    """payload for org creation specifically for free trial account"""
-
-    email: str
-    superset_ec2_machine_id: str
-    superset_port: int
-
-
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
 
@@ -257,15 +197,6 @@ class OrgWarehouse(models.Model):
 
     def __str__(self) -> str:
         return f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
-
-
-class OrgWarehouseSchema(Schema):
-    """payload to register an organization's data warehouse"""
-
-    wtype: str
-    name: str
-    destinationDefId: str
-    airbyteConfig: dict
 
 
 # ============================================================================================
