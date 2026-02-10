@@ -790,7 +790,9 @@ def test_put_connect_git_remote_git_errors(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     # Test 1: Git not initialized
-    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect:
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
         mock_connect.side_effect = GitManagerError(
             message="Git is not initialized", error="details"
         )
@@ -800,7 +802,9 @@ def test_put_connect_git_remote_git_errors(seed_db, orguser: OrgUser):
         assert "Git is not initialized" in str(excinfo.value)
 
     # Test 2: Verification fails - authentication error
-    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect:
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
         mock_connect.side_effect = GitManagerError(
             message="Authentication failed",
             error="The PAT token is invalid",
@@ -811,7 +815,9 @@ def test_put_connect_git_remote_git_errors(seed_db, orguser: OrgUser):
         assert "Authentication failed" in str(excinfo.value)
 
     # Test 3: Verification fails - repo not found
-    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect:
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
         mock_connect.side_effect = GitManagerError(
             message="Repository not found",
             error="The repository URL is invalid",
@@ -857,7 +863,9 @@ def test_put_connect_git_remote_set_remote_fails(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect:
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
         mock_connect.side_effect = GitManagerError(
             message="Failed to set remote", error="git error"
         )
@@ -884,7 +892,9 @@ def test_put_connect_git_remote_create(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect:
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
         mock_connect.return_value = {
             "success": True,
             "gitrepo_url": payload.gitrepoUrl,
@@ -897,7 +907,7 @@ def test_put_connect_git_remote_create(seed_db, orguser: OrgUser):
         assert response["gitrepo_url"] == payload.gitrepoUrl
 
         # Verify service was called correctly
-        mock_connect.assert_called_once_with(orgdbt, payload.gitrepoUrl, payload.gitrepoAccessToken)
+        mock_connect.assert_called_once_with(request.orguser, payload)
 
     # Cleanup
     orgdbt.delete()
@@ -919,7 +929,9 @@ def test_put_connect_git_remote_update_url_only(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch:
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=True
+    ):
         mock_switch.return_value = {
             "success": True,
             "gitrepo_url": payload.gitrepoUrl,
@@ -932,7 +944,7 @@ def test_put_connect_git_remote_update_url_only(seed_db, orguser: OrgUser):
         assert response["gitrepo_url"] == payload.gitrepoUrl
 
         # Verify service was called correctly
-        mock_switch.assert_called_once_with(orgdbt, payload.gitrepoUrl, payload.gitrepoAccessToken)
+        mock_switch.assert_called_once_with(request.orguser, payload)
 
     # Cleanup
     orgdbt.delete()
@@ -954,7 +966,9 @@ def test_put_connect_git_remote_update_pat(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch:
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=True
+    ):
         mock_switch.return_value = {
             "success": True,
             "gitrepo_url": payload.gitrepoUrl,
@@ -967,7 +981,7 @@ def test_put_connect_git_remote_update_pat(seed_db, orguser: OrgUser):
         assert response["gitrepo_url"] == payload.gitrepoUrl
 
         # Verify service was called correctly
-        mock_switch.assert_called_once_with(orgdbt, payload.gitrepoUrl, payload.gitrepoAccessToken)
+        mock_switch.assert_called_once_with(request.orguser, payload)
 
     # Cleanup
     orgdbt.delete()
