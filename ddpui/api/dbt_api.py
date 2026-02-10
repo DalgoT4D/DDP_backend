@@ -13,15 +13,8 @@ from ddpui.celeryworkers.tasks import (
 )
 from ddpui.models.tasks import (
     TaskProgressHashPrefix,
-    TaskLock,
-    OrgTask,
 )
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_DBTCLEAN,
-    TASK_DBTDEPS,
-)
 from ddpui.ddpdbt import dbt_service, elementary_service
 from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import (
