@@ -351,8 +351,8 @@ def test_post_dbt_git_pull_gitpull_failed(orguser: OrgUser):
     request = mock_request(orguser)
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
-    ), patch("ddpui.ddpdbt.dbt_service.GitManager") as mock_git_manager, pytest.raises(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ), patch("ddpui.api.dbt_api.GitManager") as mock_git_manager, pytest.raises(
         HttpError
     ) as excinfo:
         mock_git_manager.return_value.pull_changes.side_effect = Exception("git pull failed")
@@ -368,8 +368,8 @@ def test_post_dbt_git_pull_succes(orguser: OrgUser):
     request = mock_request(orguser)
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
-    ), patch("ddpui.ddpdbt.dbt_service.GitManager") as mock_git_manager:
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ), patch("ddpui.api.dbt_api.GitManager") as mock_git_manager:
         mock_git_manager.return_value.pull_changes.return_value = None
         response = post_dbt_git_pull(request)
     assert response == {"success": True}
@@ -1031,9 +1031,9 @@ def test_post_publish_changes_workspace_errors(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/nonexistent/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = False
         with pytest.raises(HttpError) as excinfo:
             post_dbt_publish_changes(request, payload)
@@ -1041,12 +1041,12 @@ def test_post_publish_changes_workspace_errors(seed_db, orguser: OrgUser):
 
     # Test 3: Git not initialized
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = True
         with patch(
-            "ddpui.ddpdbt.dbt_service.GitManager",
+            "ddpui.api.dbt_api.GitManager",
             side_effect=GitManagerError(message="Not a git repository", error="details"),
         ), pytest.raises(HttpError) as excinfo:
             post_dbt_publish_changes(request, payload)
@@ -1066,9 +1066,9 @@ def test_post_publish_changes_commit_fails(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
@@ -1076,7 +1076,7 @@ def test_post_publish_changes_commit_fails(seed_db, orguser: OrgUser):
             message="Commit failed", error="git error"
         )
 
-        with patch("ddpui.ddpdbt.dbt_service.GitManager", return_value=mock_git_manager):
+        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
             assert response["success"] is False
@@ -1101,9 +1101,9 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
@@ -1115,7 +1115,7 @@ def test_post_publish_changes_push_fails(seed_db, orguser: OrgUser):
         with patch(
             "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
             return_value="actual-pat",
-        ), patch("ddpui.ddpdbt.dbt_service.GitManager", return_value=mock_git_manager):
+        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
             assert response["success"] is False
@@ -1137,9 +1137,9 @@ def test_post_publish_changes_push_fails_no_remote(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
@@ -1149,7 +1149,7 @@ def test_post_publish_changes_push_fails_no_remote(seed_db, orguser: OrgUser):
             error="fatal: 'origin' does not appear to be a git repository",
         )
 
-        with patch("ddpui.ddpdbt.dbt_service.GitManager", return_value=mock_git_manager):
+        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
             assert response["success"] is False
@@ -1177,9 +1177,9 @@ def test_post_publish_changes_success(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
@@ -1189,7 +1189,7 @@ def test_post_publish_changes_success(seed_db, orguser: OrgUser):
         with patch(
             "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
             return_value="actual-pat",
-        ), patch("ddpui.ddpdbt.dbt_service.GitManager", return_value=mock_git_manager):
+        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
             assert response["success"] is True
@@ -1223,9 +1223,9 @@ def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
     request.orguser.org.save()
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
         return_value="/existing/path",
-    ), patch("ddpui.ddpdbt.dbt_service.Path") as mock_path:
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
         mock_path.return_value.exists.return_value = True
 
         mock_git_manager = Mock()
@@ -1236,7 +1236,7 @@ def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
         with patch(
             "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
             return_value="actual-pat",
-        ), patch("ddpui.ddpdbt.dbt_service.GitManager", return_value=mock_git_manager):
+        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
             response = post_dbt_publish_changes(request, payload)
 
             assert response["success"] is True
