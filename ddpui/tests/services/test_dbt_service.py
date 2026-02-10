@@ -18,6 +18,7 @@ from ddpui.ddpdbt.dbt_service import (
     generate_manifest_json_for_dbt_project,
     cleanup_unused_sources,
     update_github_pat_storage,
+    clear_github_pat_storage,
     switch_git_repository,
     connect_git_remote,
 )
@@ -1758,6 +1759,7 @@ def test_switch_git_repository_masked_token_with_existing_secret(
     with (
         patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
         patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir") as mock_get_org_dir,
+        patch("ddpui.ddpdbt.dbt_service.GitManager") as mock_git_manager,
         patch("ddpui.ddpdbt.dbt_service.GitManager.clone") as mock_clone,
         patch("ddpui.ddpdbt.dbt_service.sync_gitignore_contents"),
         patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage") as mock_update_pat,
@@ -1856,6 +1858,166 @@ def test_switch_git_repository_git_clone_failure(mock_clone, tmp_path):
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Failed to clone new repository: Clone failed"):
             switch_git_repository(user, payload)
+
+
+def test_switch_git_repository_verification_failure():
+    """Test repository switch when remote URL verification fails and PAT storage is cleaned up"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo.git",
+        project_dir="old-project",
+        target_type="postgres",
+        default_schema="old_schema",
+        transform_type=TransformType.GIT,
+        gitrepo_access_token_secret="existing-secret-key",
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="new-pat-token"
+    )
+
+    # Create a warehouse for the org
+    warehouse = OrgWarehouse.objects.create(
+        org=org,
+        wtype="postgres",
+        name="test-warehouse",
+        credentials='{"host": "localhost", "port": 5432, "database": "testdb"}',
+    )
+
+    from ddpui.core.git_manager import GitManagerError
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir") as mock_get_org_dir,
+        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+        patch("ddpui.ddpdbt.dbt_service.shutil.rmtree") as mock_rmtree,
+        patch("ddpui.ddpdbt.dbt_service.GitManager") as mock_git_manager_class,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager") as mock_secretsmanager,
+        patch("ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block") as mock_create_cli_block,
+        patch("ddpui.ddpdbt.dbt_service.clear_github_pat_storage") as mock_clear_pat_storage,
+        patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage") as mock_update_pat_storage,
+    ):
+        # Mock paths and dependencies
+        mock_get_dbt_dir.return_value = "/fake/dbt/project"
+        mock_get_org_dir.return_value = "/fake/org/dir"
+        mock_path.return_value.exists.return_value = True
+        mock_secretsmanager.retrieve_warehouse_credentials.return_value = {
+            "username": "testuser",
+            "password": "testpass",
+        }
+        mock_create_cli_block.return_value = (Mock(), None)
+
+        # Mock GitManager clone to succeed but verify_remote_url to fail
+        mock_git_manager_class.clone.return_value = None
+        mock_git_manager = Mock()
+        mock_git_manager.verify_remote_url.side_effect = GitManagerError(
+            "Authentication failed", "Invalid PAT token"
+        )
+        mock_git_manager_class.return_value = mock_git_manager
+
+        # Execute and verify exception is raised
+        with pytest.raises(Exception, match="Authentication failed: Invalid PAT token"):
+            switch_git_repository(user, payload)
+
+        # Verify that clear_github_pat_storage was called when verification failed
+        mock_clear_pat_storage.assert_called_once_with(org, "existing-secret-key")
+
+        # Verify that update_github_pat_storage was NOT called (verification failed)
+        mock_update_pat_storage.assert_not_called()
+
+        # Verify verification was attempted
+        mock_git_manager.verify_remote_url.assert_called_once_with(payload.gitrepoUrl)
+
+
+def test_switch_git_repository_pat_updated_after_verification():
+    """Test that PAT storage is only updated after successful verification"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+    auth_user = User.objects.create(
+        username=f"testuser-{uuid.uuid4().hex[:8]}", email="test@example.com"
+    )
+    user = OrgUser.objects.create(org=org, user=auth_user)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo.git",
+        project_dir="old-project",
+        target_type="postgres",
+        default_schema="old_schema",
+        transform_type=TransformType.GIT,
+        gitrepo_access_token_secret=None,  # No existing secret
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="new-pat-token"
+    )
+
+    # Create a warehouse for the org
+    warehouse = OrgWarehouse.objects.create(
+        org=org,
+        wtype="postgres",
+        name="test-warehouse",
+        credentials='{"host": "localhost", "port": 5432, "database": "testdb"}',
+    )
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
+        patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir") as mock_get_org_dir,
+        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+        patch("ddpui.ddpdbt.dbt_service.shutil.rmtree") as mock_rmtree,
+        patch("ddpui.ddpdbt.dbt_service.GitManager") as mock_git_manager_class,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager") as mock_secretsmanager,
+        patch("ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block") as mock_create_cli_block,
+        patch("ddpui.ddpdbt.dbt_service.clear_github_pat_storage") as mock_clear_pat_storage,
+        patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage") as mock_update_pat_storage,
+        patch("ddpui.ddpdbt.dbt_service.sync_gitignore_contents") as mock_sync_gitignore,
+    ):
+        # Mock paths and dependencies
+        mock_get_dbt_dir.return_value = "/fake/dbt/project"
+        mock_get_org_dir.return_value = "/fake/org/dir"
+        mock_path.return_value.exists.return_value = True
+        mock_secretsmanager.retrieve_warehouse_credentials.return_value = {
+            "username": "testuser",
+            "password": "testpass",
+        }
+        mock_create_cli_block.return_value = (Mock(), None)
+        mock_update_pat_storage.return_value = "new-secret-key"
+
+        # Mock GitManager to succeed in all operations
+        mock_git_manager_class.clone.return_value = None
+        mock_git_manager = Mock()
+        mock_git_manager.verify_remote_url.return_value = True  # Verification succeeds
+        mock_git_manager_class.return_value = mock_git_manager
+
+        # Execute
+        result = switch_git_repository(user, payload)
+
+        # Verify success
+        assert result["success"] is True
+        assert result["gitrepo_url"] == payload.gitrepoUrl
+
+        # Verify clear_github_pat_storage was NOT called (verification succeeded)
+        mock_clear_pat_storage.assert_not_called()
+
+        # Verify update_github_pat_storage WAS called (after verification)
+        mock_update_pat_storage.assert_called_once_with(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, None
+        )
+
+        # Verify verification was attempted and succeeded
+        mock_git_manager.verify_remote_url.assert_called_once_with(payload.gitrepoUrl)
+
+        # Verify order: verification should happen before PAT update
+        # GitManager instance should be created before update_github_pat_storage is called
+        assert mock_git_manager_class.call_count >= 1
+        assert mock_update_pat_storage.call_count == 1
 
 
 # Tests for connect_git_remote function
@@ -2107,3 +2269,183 @@ def test_connect_git_remote_verify_url_failure(mock_git_manager_class):
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Authentication failed: Invalid credentials"):
             connect_git_remote(user, payload)
+
+
+# ==================== clear_github_pat_storage tests ====================
+
+
+def test_clear_github_pat_storage_both_storage_types():
+    """Test clearing both Prefect secret block and secrets manager PAT"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    # Create existing Prefect secret block
+    secret_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_name="test-org-git-pull-url",
+        block_id="test-block-id",
+    )
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block") as mock_delete_block,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager.delete_github_pat") as mock_delete_pat,
+    ):
+        # Execute
+        clear_github_pat_storage(org, "test-pat-secret-key")
+
+        # Verify Prefect secret block was deleted
+        mock_delete_block.assert_called_once_with("test-block-id")
+        assert not OrgPrefectBlockv1.objects.filter(id=secret_block.id).exists()
+
+        # Verify secrets manager PAT was deleted
+        mock_delete_pat.assert_called_once_with("test-pat-secret-key")
+
+
+def test_clear_github_pat_storage_only_secret_block():
+    """Test clearing only Prefect secret block when no PAT secret key provided"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    # Create existing Prefect secret block
+    secret_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_name="test-org-git-pull-url",
+        block_id="test-block-id",
+    )
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block") as mock_delete_block,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager.delete_github_pat") as mock_delete_pat,
+    ):
+        # Execute without PAT secret key
+        clear_github_pat_storage(org, None)
+
+        # Verify Prefect secret block was deleted
+        mock_delete_block.assert_called_once_with("test-block-id")
+        assert not OrgPrefectBlockv1.objects.filter(id=secret_block.id).exists()
+
+        # Verify secrets manager was NOT called
+        mock_delete_pat.assert_not_called()
+
+
+def test_clear_github_pat_storage_no_secret_block():
+    """Test clearing when no Prefect secret block exists"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block") as mock_delete_block,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager.delete_github_pat") as mock_delete_pat,
+    ):
+        # Execute
+        clear_github_pat_storage(org, "test-pat-secret-key")
+
+        # Verify Prefect service was NOT called (no block exists)
+        mock_delete_block.assert_not_called()
+
+        # Verify secrets manager PAT was still deleted
+        mock_delete_pat.assert_called_once_with("test-pat-secret-key")
+
+
+def test_clear_github_pat_storage_prefect_error():
+    """Test handling Prefect secret block deletion error"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    # Create existing Prefect secret block
+    secret_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_name="test-org-git-pull-url",
+        block_id="test-block-id",
+    )
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block") as mock_delete_block,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager.delete_github_pat") as mock_delete_pat,
+        patch("ddpui.ddpdbt.dbt_service.logger.warning") as mock_log_warning,
+    ):
+        # Mock Prefect error
+        mock_delete_block.side_effect = Exception("Prefect API error")
+
+        # Execute - should not raise exception despite Prefect error
+        clear_github_pat_storage(org, "test-pat-secret-key")
+
+        # Verify error was logged
+        mock_log_warning.assert_called_once_with(
+            "Failed to delete Prefect secret block test-org-git-pull-url: Prefect API error"
+        )
+
+        # Verify secrets manager was still called
+        mock_delete_pat.assert_called_once_with("test-pat-secret-key")
+
+
+def test_clear_github_pat_storage_secrets_manager_error():
+    """Test handling secrets manager deletion error"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    # Create existing Prefect secret block
+    secret_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_name="test-org-git-pull-url",
+        block_id="test-block-id",
+    )
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block") as mock_delete_block,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager.delete_github_pat") as mock_delete_pat,
+        patch("ddpui.ddpdbt.dbt_service.logger.warning") as mock_log_warning,
+    ):
+        # Mock secrets manager error
+        mock_delete_pat.side_effect = Exception("Secrets manager error")
+
+        # Execute - should not raise exception despite secrets manager error
+        clear_github_pat_storage(org, "test-pat-secret-key")
+
+        # Verify Prefect block was still deleted
+        mock_delete_block.assert_called_once_with("test-block-id")
+        assert not OrgPrefectBlockv1.objects.filter(id=secret_block.id).exists()
+
+        # Verify error was logged
+        mock_log_warning.assert_called_once_with(
+            "Failed to delete PAT from secrets manager: Secrets manager error"
+        )
+
+
+def test_clear_github_pat_storage_both_errors():
+    """Test handling both Prefect and secrets manager errors"""
+    # Setup
+    org = Org.objects.create(name="test-org", slug="test-org")
+
+    # Create existing Prefect secret block
+    secret_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=SECRET,
+        block_name="test-org-git-pull-url",
+        block_id="test-block-id",
+    )
+
+    with (
+        patch("ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block") as mock_delete_block,
+        patch("ddpui.ddpdbt.dbt_service.secretsmanager.delete_github_pat") as mock_delete_pat,
+        patch("ddpui.ddpdbt.dbt_service.logger.warning") as mock_log_warning,
+    ):
+        # Mock both errors
+        mock_delete_block.side_effect = Exception("Prefect API error")
+        mock_delete_pat.side_effect = Exception("Secrets manager error")
+
+        # Execute - should not raise exception despite both errors
+        clear_github_pat_storage(org, "test-pat-secret-key")
+
+        # Verify both errors were logged
+        assert mock_log_warning.call_count == 2
+        mock_log_warning.assert_any_call(
+            "Failed to delete Prefect secret block test-org-git-pull-url: Prefect API error"
+        )
+        mock_log_warning.assert_any_call(
+            "Failed to delete PAT from secrets manager: Secrets manager error"
+        )

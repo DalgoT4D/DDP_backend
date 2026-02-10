@@ -36,6 +36,23 @@ from ddpui.ddpprefect.schema import PrefectSecretBlockEdit, OrgDbtConnectGitRemo
 
 logger = CustomLogger("ddpui")
 
+DBT_GITIGNORE_CONTENT = [
+    "target/",
+    "dbt_packages/",
+    "logs/",
+    ".venv/",
+    "venv/",
+    "profiles/",
+    "*/profiles.yml",
+    "profiles.yaml",
+    ".user.yml",
+    "package-lock.yml",
+    ".env*",
+    ".env.local",
+    "elementary_profiles/",
+    "*.html",  # ignore elementary reports
+]
+
 
 def update_github_pat_storage(
     org: Org, git_repo_url: str, access_token: str, existing_pat_secret: str = None
@@ -81,22 +98,39 @@ def update_github_pat_storage(
         return pat_secret_key
 
 
-DBT_GITIGNORE_CONTENT = [
-    "target/",
-    "dbt_packages/",
-    "logs/",
-    ".venv/",
-    "venv/",
-    "profiles/",
-    "*/profiles.yml",
-    "profiles.yaml",
-    ".user.yml",
-    "package-lock.yml",
-    ".env*",
-    ".env.local",
-    "elementary_profiles/",
-    "*.html",  # ignore elementary reports
-]
+def clear_github_pat_storage(org: Org, pat_secret_key: str = None) -> None:
+    """
+    Clear all PAT storage from both Prefect secret blocks and AWS Secrets Manager.
+
+    This function removes:
+    1. Prefect secret block for git-pull-url
+    2. PAT from AWS Secrets Manager (if pat_secret_key provided)
+
+    Args:
+        org: The organization instance
+        pat_secret_key: Optional PAT secret key to delete from secrets manager
+    """
+    # 1. Delete Prefect secret block
+    block_name = f"{org.slug}-git-pull-url"
+    secret_block = OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name=block_name
+    ).first()
+
+    if secret_block:
+        try:
+            prefect_service.delete_secret_block(secret_block.block_id)
+            secret_block.delete()
+            logger.info(f"Deleted Prefect secret block: {block_name}")
+        except Exception as e:
+            logger.warning(f"Failed to delete Prefect secret block {block_name}: {str(e)}")
+
+    # 2. Delete PAT from secrets manager
+    if pat_secret_key:
+        try:
+            secretsmanager.delete_github_pat(pat_secret_key)
+            logger.info(f"Deleted PAT from secrets manager: {pat_secret_key}")
+        except Exception as e:
+            logger.warning(f"Failed to delete PAT from secrets manager: {str(e)}")
 
 
 def is_git_repository_switch(orgdbt: OrgDbt, new_repo_url: str) -> bool:
@@ -1116,13 +1150,6 @@ def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> 
     else:
         actual_pat = payload.gitrepoAccessToken
 
-    # Handle PAT token storage (only if not masked)
-    if not is_token_masked:
-        pat_secret_key = update_github_pat_storage(
-            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
-        )
-        orgdbt.gitrepo_access_token_secret = pat_secret_key
-
     # Get paths
     dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     org_dir = Path(DbtProjectManager.get_org_dir(org))
@@ -1158,13 +1185,6 @@ def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> 
     orgdbt.transform_type = TransformType.GIT
     orgdbt.save()
 
-    # Sync .gitignore contents
-    try:
-        sync_gitignore_contents(dbt_project_dir)
-    except Exception as err:
-        logger.error(f"Failed to sync .gitignore contents: {err}")
-        logger.warning("Continuing despite gitignore sync failure")
-
     # Update CLI profile block with new dbt_project.yml profile name
     try:
         warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -1185,6 +1205,32 @@ def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> 
     except Exception as e:
         logger.error(f"Error updating CLI profile block: {e}")
         raise Exception(f"Repository switch failed: CLI profile block update error - {e}") from e
+
+    # Verify remote URL is accessible with the PAT
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_project_dir), pat=actual_pat, validate_git=True
+        )
+        git_manager.verify_remote_url(payload.gitrepoUrl)
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during remote URL verification: {e.message}")
+        clear_github_pat_storage(org, orgdbt.gitrepo_access_token_secret)
+        raise Exception(f"{e.message}: {e.error}") from e
+
+    # Handle PAT token storage (only if not masked)
+    if not is_token_masked:
+        pat_secret_key = update_github_pat_storage(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
+        )
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
+        orgdbt.save()
+
+    # Sync .gitignore contents
+    try:
+        sync_gitignore_contents(dbt_project_dir)
+    except Exception as err:
+        logger.error(f"Failed to sync .gitignore contents: {err}")
+        logger.warning("Continuing despite gitignore sync failure")
 
     logger.info(f"Successfully switched git repository for org {org.slug} to {payload.gitrepoUrl}")
 
