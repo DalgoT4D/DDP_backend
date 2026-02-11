@@ -23,14 +23,14 @@ from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgSchemaChange,
-    OrgWarehouseSchema,
     ConnectionMeta,
 )
 from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import timezone
+from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
+
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
@@ -38,18 +38,21 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
 )
-from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
+from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
+
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import timezone
+
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_AIRBYTECLEAR,
     AIRBYTE_CONNECTION_DEPRECATED,
 )
-from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,

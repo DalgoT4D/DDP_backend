@@ -11,7 +11,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role
 from ddpui.core.orgfunctions import create_organization
-from ddpui.models.org import CreateOrgSchema
+from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.models.org_plans import OrgPlanType
 
 

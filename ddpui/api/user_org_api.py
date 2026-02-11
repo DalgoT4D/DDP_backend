@@ -16,12 +16,6 @@ from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
-from ddpui.models.org import (
-    OrgSchema,
-    OrgWarehouseSchema,
-    CreateOrgSchema,
-    CreateFreeTrialOrgSchema,
-)
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -46,13 +40,19 @@ from ddpui.models.org_user import (
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_wren import OrgWren
 from ddpui.models.role_based_access import Role, RolePermission
-from ddpui.utils.custom_logger import CustomLogger
 from ddpui.models.org import OrgWarehouse, Org, OrgType
-from ddpui.ddpairbyte import airbytehelpers
 from ddpui.models.org_preferences import OrgPreferences
-from ddpui.celeryworkers.moretasks import create_free_trial_org_account
-from ddpui.utils.feature_flags import get_all_feature_flags_for_org
+
+from ddpui.schemas.org_schema import OrgSchema, CreateOrgSchema, CreateFreeTrialOrgSchema
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
+
 from ddpui.services.org_cleanup_service import OrgCleanupService
+from ddpui.ddpairbyte import airbytehelpers
+from ddpui.celeryworkers.moretasks import create_free_trial_org_account
+
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.feature_flags import get_all_feature_flags_for_org
+
 from django.db import transaction
 
 user_org_router = Router()

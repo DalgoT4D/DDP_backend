@@ -11,8 +11,10 @@ from django.contrib.auth.models import User
 from ninja import Schema
 from pydantic import SecretStr, BaseModel
 
-from ddpui.models.org import Org, OrgSchema
+from ddpui.models.org import Org
 from ddpui.models.role_based_access import Role
+
+from ddpui.schemas.org_schema import OrgSchema
 
 
 class UserAttributes(models.Model):
