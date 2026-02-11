@@ -13,8 +13,8 @@ import requests
 from django.utils.text import slugify
 from ddpui.dbt_automation import assets
 from ddpui.ddpprefect import prefect_service, SECRET, DBTCLIPROFILE
-from ddpui.models.org import OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
-from ddpui.models.org_user import Org
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
+from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
@@ -32,9 +32,9 @@ from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
 from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.ddpprefect.schema import PrefectSecretBlockEdit, OrgDbtConnectGitRemote
 
 logger = CustomLogger("ddpui")
-
 
 DBT_GITIGNORE_CONTENT = [
     "target/",
@@ -52,6 +52,106 @@ DBT_GITIGNORE_CONTENT = [
     "elementary_profiles/",
     "*.html",  # ignore elementary reports
 ]
+
+
+def update_github_pat_storage(
+    org: Org, git_repo_url: str, access_token: str, existing_pat_secret: str = None
+) -> str:
+    """
+    Handle PAT storage for both Prefect secret blocks and AWS Secrets Manager.
+
+    Args:
+        org: The organization instance
+        git_repo_url: The GitHub repository URL
+        access_token: The GitHub personal access token
+        existing_pat_secret: Existing PAT secret key if updating
+
+    Returns:
+        str: The PAT secret key from secrets manager
+    """
+    # Create oauth URL for prefect secret block
+    gitrepo_url_with_token = GitManager.generate_oauth_url_static(git_repo_url, access_token)
+
+    # Create or update the prefect secret block
+    secret_block_edit_params = PrefectSecretBlockEdit(
+        block_name=f"{org.slug}-git-pull-url",
+        secret=gitrepo_url_with_token,
+    )
+
+    response = prefect_service.upsert_secret_block(secret_block_edit_params)
+    if not OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+    ).exists():
+        OrgPrefectBlockv1.objects.create(
+            org=org,
+            block_type=SECRET,
+            block_name=secret_block_edit_params.block_name,
+            block_id=response["block_id"],
+        )
+
+    # Update or create PAT in secrets manager
+    if existing_pat_secret:
+        secretsmanager.update_github_pat(existing_pat_secret, access_token)
+        return existing_pat_secret
+    else:
+        pat_secret_key = secretsmanager.save_github_pat(access_token)
+        return pat_secret_key
+
+
+def clear_github_pat_storage(org: Org, pat_secret_key: str = None) -> None:
+    """
+    Clear all PAT storage from both Prefect secret blocks and AWS Secrets Manager.
+
+    This function removes:
+    1. Prefect secret block for git-pull-url
+    2. PAT from AWS Secrets Manager (if pat_secret_key provided)
+
+    Args:
+        org: The organization instance
+        pat_secret_key: Optional PAT secret key to delete from secrets manager
+    """
+    # 1. Delete Prefect secret block
+    block_name = f"{org.slug}-git-pull-url"
+    secret_block = OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name=block_name
+    ).first()
+
+    if secret_block:
+        try:
+            prefect_service.delete_secret_block(secret_block.block_id)
+            secret_block.delete()
+            logger.info(f"Deleted Prefect secret block: {block_name}")
+        except Exception as e:
+            logger.warning(f"Failed to delete Prefect secret block {block_name}: {str(e)}")
+
+    # 2. Delete PAT from secrets manager
+    if pat_secret_key:
+        try:
+            secretsmanager.delete_github_pat(pat_secret_key)
+            logger.info(f"Deleted PAT from secrets manager: {pat_secret_key}")
+        except Exception as e:
+            logger.warning(f"Failed to delete PAT from secrets manager: {str(e)}")
+
+
+def is_git_repository_switch(orgdbt: OrgDbt, new_repo_url: str) -> bool:
+    """
+    Determine if this is a Git repository switch vs new connection.
+
+    Returns True for: Git Repo A → Git Repo B
+    Returns False for: UI4T → Git Repo A or Git Repo A → Git Repo A
+
+    Args:
+        orgdbt: The OrgDbt instance
+        new_repo_url: The new repository URL to connect to
+
+    Returns:
+        bool: True if this is a repository switch, False otherwise
+    """
+    return (
+        orgdbt.gitrepo_url is not None
+        and orgdbt.transform_type == TransformType.GIT
+        and orgdbt.gitrepo_url != new_repo_url
+    )
 
 
 def delete_dbt_workspace(org: Org):
@@ -937,3 +1037,188 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
         results["errors"].append(f"Error during cleanup: {str(e)}")
 
     return results
+
+
+def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str) -> dict:
+    """
+    Handle connecting to a Git remote for the first time (UI4T → Git).
+
+    This abstracts the existing logic from put_connect_git_remote into a
+    clean, testable function.
+    """
+    org: Org = orguser.org
+    orgdbt: OrgDbt = org.dbt
+
+    # Get dbt repo directory
+    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not dbt_repo_dir.exists():
+        raise Exception("DBT repo directory does not exist")
+
+    # Use the provided actual_pat (already resolved in API layer)
+
+    # Validate git is initialized locally
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+        )
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during git init validation: {e.message}")
+        raise Exception(f"Git is not initialized in the DBT project folder: {e.message}") from e
+
+    # Verify remote URL is accessible with the PAT
+    try:
+        git_manager.verify_remote_url(payload.gitrepoUrl)
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during remote URL verification: {e.message}")
+        raise Exception(f"{e.message}: {e.error}") from e
+
+    # Set or update the remote origin
+    try:
+        git_manager.set_remote(payload.gitrepoUrl)
+    except GitManagerError as e:
+        raise Exception(f"Failed to set remote: {e.message}") from e
+
+    # sync local default to remote
+    try:
+        git_manager.sync_local_default_to_remote()
+    except GitManagerError as e:
+        raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
+
+    # Handle PAT token storage (only if not masked)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+    if not is_token_masked:
+        pat_secret_key = update_github_pat_storage(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
+        )
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
+
+    # Update OrgDbt with the new gitrepo_url
+    orgdbt.gitrepo_url = payload.gitrepoUrl
+    orgdbt.transform_type = TransformType.GIT
+    orgdbt.save()
+
+    logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
+
+    # sync gitignore contents
+    try:
+        sync_gitignore_contents(dbt_repo_dir)
+    except Exception as err:
+        logger.error(f"Failed to sync .gitignore contents: {err}")
+        raise Exception(f"Failed to sync .gitignore contents: {err}") from err
+
+    return {
+        "success": True,
+        "gitrepo_url": payload.gitrepoUrl,
+        "message": "Successfully connected to remote git repository",
+        "repository_switched": False,
+    }
+
+
+def switch_git_repository(
+    orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str
+) -> dict:
+    """
+    Handle switching from one Git repository to another (Git A → Git B).
+
+    Complete replacement of the local repository with a fresh clone.
+    """
+    org = orguser.org
+    orgdbt = org.dbt
+
+    logger.info(
+        f"Switching git repository for org {org.slug} from {orgdbt.gitrepo_url} to {payload.gitrepoUrl}"
+    )
+
+    # Use the provided actual_pat (already resolved in API layer)
+
+    # Get paths
+    dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
+
+    # Clean existing references
+    try:
+        if dbt_project_dir.exists():
+            shutil.rmtree(dbt_project_dir)
+            logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+
+        # remove canvas nodes and edges related to the dbt project
+        CanvasNode.objects.filter(orgdbt=orgdbt).delete()
+
+    except Exception as e:
+        logger.error(f"Failed to clean up existing directory: {e}")
+        raise Exception(f"Failed to clean up existing repository: {e}") from e
+
+    # Clone the new repository using GitManager
+    try:
+        GitManager.clone(
+            cwd=str(org_dir),
+            remote_repo_url=payload.gitrepoUrl,
+            relative_path="dbtrepo",
+            pat=actual_pat,
+        )
+        logger.info(f"Successfully cloned new repository to {dbt_project_dir}")
+    except GitManagerError as e:
+        logger.error(f"Failed to clone new repository: {e.message}")
+        raise Exception(f"Failed to clone new repository: {e.message}") from e
+
+    # Update OrgDbt with the new gitrepo_url BEFORE cloning
+    orgdbt.gitrepo_url = payload.gitrepoUrl
+    orgdbt.transform_type = TransformType.GIT
+    orgdbt.save()
+
+    # Update CLI profile block with new dbt_project.yml profile name
+    try:
+        warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not warehouse:
+            raise Exception("No warehouse configuration found for this organization")
+
+        creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+        # This will automatically read the new dbt_project.yml and update the profile block
+        cli_profile_result, error = create_or_update_org_cli_block(
+            org, warehouse, creds  # Pass the retrieved warehouse creds
+        )
+        if error:
+            logger.error(f"Failed to update CLI profile block: {error}")
+            raise Exception(f"Failed to update CLI profile block: {error}")
+
+        logger.info("CLI profile block updated with new project configuration")
+    except Exception as e:
+        logger.error(f"Error updating CLI profile block: {e}")
+        raise Exception(f"Repository switch failed: CLI profile block update error - {e}") from e
+
+    # Verify remote URL is accessible with the PAT
+    try:
+        git_manager = GitManager(
+            repo_local_path=str(dbt_project_dir), pat=actual_pat, validate_git=True
+        )
+        git_manager.verify_remote_url(payload.gitrepoUrl)
+    except GitManagerError as e:
+        logger.error(f"GitManagerError during remote URL verification: {e.message}")
+        clear_github_pat_storage(org, orgdbt.gitrepo_access_token_secret)
+        raise Exception(f"{e.message}: {e.error}") from e
+
+    # Handle PAT token storage (only if not masked)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+    if not is_token_masked:
+        pat_secret_key = update_github_pat_storage(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
+        )
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
+        orgdbt.save()
+
+    # Sync .gitignore contents
+    try:
+        sync_gitignore_contents(dbt_project_dir)
+    except Exception as err:
+        logger.error(f"Failed to sync .gitignore contents: {err}")
+        logger.warning("Continuing despite gitignore sync failure")
+
+    logger.info(f"Successfully switched git repository for org {org.slug} to {payload.gitrepoUrl}")
+
+    return {
+        "success": True,
+        "gitrepo_url": payload.gitrepoUrl,
+        "message": "Successfully switched to new git repository",
+        "repository_switched": True,
+    }

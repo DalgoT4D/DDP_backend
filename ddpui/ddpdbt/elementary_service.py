@@ -33,7 +33,6 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.celeryworkers.tasks import run_dbt_commands
 
 logger = CustomLogger("ddpui")
 
