@@ -1618,3 +1618,69 @@ def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
 
     # Cleanup
     orgdbt.delete()
+
+
+def test_put_connect_git_remote_orgtask_creation_fails_but_git_succeeds(seed_db, orguser: OrgUser):
+    """Test that OrgTask creation failure doesn't affect successful git operation"""
+    from unittest.mock import patch, Mock
+
+    # Create orgdbt
+    orgdbt = OrgDbt.objects.create(
+        transform_type="ui", gitrepo_access_token_secret=None  # UI type  # No existing Git repo
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+    payload = OrgDbtGitHub(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="fake-pat"
+    )
+
+    with patch("ddpui.api.dbt_api.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.api.dbt_api.Task.objects.get", side_effect=Task.DoesNotExist
+    ):
+        # Set up the mock to return a successful result
+        mock_connect.return_value = {"success": True, "message": "Git connected successfully"}
+
+        # This should succeed despite OrgTask creation failing
+        response = put_connect_git_remote(request, payload)
+
+        # Verify git operation was called and returned successfully
+        mock_connect.assert_called_once()
+        assert response == {"success": True, "message": "Git connected successfully"}
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_multiple_git_tasks_but_git_succeeds(seed_db, orguser: OrgUser):
+    """Test that MultipleObjectsReturned in Task.objects.get doesn't affect successful git operation"""
+    from unittest.mock import patch, Mock
+
+    # Create orgdbt
+    orgdbt = OrgDbt.objects.create(
+        transform_type="ui", gitrepo_access_token_secret=None  # UI type  # No existing Git repo
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+
+    request = mock_request(orguser)
+    payload = OrgDbtGitHub(
+        gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="fake-pat"
+    )
+
+    with patch("ddpui.api.dbt_api.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.api.dbt_api.Task.objects.get", side_effect=Task.MultipleObjectsReturned
+    ):
+        # Set up the mock to return a successful result
+        mock_connect.return_value = {"success": True, "message": "Git connected successfully"}
+
+        # This should succeed despite OrgTask creation failing
+        response = put_connect_git_remote(request, payload)
+
+        # Verify git operation was called and returned successfully
+        mock_connect.assert_called_once()
+        assert response == {"success": True, "message": "Git connected successfully"}
+
+    # Cleanup
+    orgdbt.delete()

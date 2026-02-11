@@ -201,12 +201,30 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         else:
             result = dbt_service.connect_git_remote(orguser, payload, actual_pat)
 
-        # create the gitpull orgtask if it doesn't exist
-        task = Task.objects.get(type=TaskType.GIT, is_system=True)
-        if not OrgTask.objects.filter(org=org, dbt=orgdbt, task=task).exists():
-            logger.info(f"Creating OrgTask for git-pull for org {org.slug}")
-            OrgTask.objects.create(
-                org=org, dbt=orgdbt, task=task, uuid=uuid4(), generated_by=OrgTaskGeneratedBy.SYSTEM
+        # Create the gitpull orgtask if it doesn't exist (non-critical operation)
+        # This should not affect the success of the git operation above
+        try:
+            task = Task.objects.get(type=TaskType.GIT, is_system=True)
+            if not OrgTask.objects.filter(org=org, dbt=orgdbt, task=task).exists():
+                logger.info(f"Creating OrgTask for git-pull for org {org.slug}")
+                OrgTask.objects.create(
+                    org=org,
+                    dbt=orgdbt,
+                    task=task,
+                    uuid=uuid4(),
+                    generated_by=OrgTaskGeneratedBy.SYSTEM,
+                )
+        except Task.DoesNotExist:
+            logger.warning(
+                f"Git pull task not found in database for org {org.slug}. OrgTask creation skipped."
+            )
+        except Task.MultipleObjectsReturned:
+            logger.warning(
+                f"Multiple git pull tasks found in database for org {org.slug}. OrgTask creation skipped."
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to create git pull OrgTask for org {org.slug}: {str(e)}. Git operation was successful."
             )
 
         return result
