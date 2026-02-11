@@ -27,6 +27,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.org_user import OrgUser, OrgUserResponse
+from ddpui.models.tasks import Task, TaskType, OrgTask
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.git_manager import GitManager, GitManagerError, GitStatusSummary
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
@@ -196,9 +197,17 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
 
         # Route to appropriate business logic based on operation type
         if force_switch or dbt_service.is_git_repository_switch(orgdbt, payload.gitrepoUrl):
-            return dbt_service.switch_git_repository(orguser, payload, actual_pat)
+            result = dbt_service.switch_git_repository(orguser, payload, actual_pat)
         else:
-            return dbt_service.connect_git_remote(orguser, payload, actual_pat)
+            result = dbt_service.connect_git_remote(orguser, payload, actual_pat)
+
+        # create the gitpull orgtask if it doesn't exist
+        task = Task.objects.get(type=TaskType.GIT, is_system=True)
+        if not OrgTask.objects.filter(org=org, dbt=orgdbt, task=task).exists():
+            logger.info(f"Creating OrgTask for git-pull for org {org.slug}")
+            OrgTask.objects.create(org=org, dbt=orgdbt, task=task, uuid=uuid4())
+
+        return result
     except Exception as e:
         logger.error(f"Git remote connection failed: {str(e)}")
         raise HttpError(500, str(e)) from e
