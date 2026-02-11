@@ -15,6 +15,7 @@ django.setup()
 
 from django.contrib.auth.models import User
 from ddpui import ddpprefect
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
 from ddpui.api.airbyte_api import (
     delete_airbyte_connection_v1,
     delete_airbyte_source_v1,
@@ -60,20 +61,36 @@ def authuser():
 
 
 @pytest.fixture
-def org_without_workspace():
+def queue_config():
+    """a pytest fixture which provides the common queue configuration"""
+    return {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
+
+@pytest.fixture
+def org_without_workspace(queue_config):
     """a pytest fixture which creates an Org without an airbyte workspace"""
     print("creating org_without_workspace")
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
+
+    org = Org.objects.create(
+        airbyte_workspace_id=None, slug="test-org-slug", queue_config=queue_config
+    )
     yield org
     print("deleting org_without_workspace")
     org.delete()
 
 
 @pytest.fixture
-def org_with_workspace():
+def org_with_workspace(queue_config):
     """a pytest fixture which creates an Org having an airbyte workspace"""
     print("creating org_with_workspace")
-    org = Org.objects.create(airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug")
+
+    org = Org.objects.create(
+        airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug", queue_config=queue_config
+    )
     yield org
     print("deleting org_with_workspace")
     org.delete()

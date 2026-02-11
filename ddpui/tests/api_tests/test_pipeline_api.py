@@ -35,6 +35,8 @@ from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
     DBTCORE,
     SHELLOPERATION,
+    DDP_WORK_QUEUE,
+    MANUL_DBT_WORK_QUEUE,
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema4,
@@ -71,10 +73,17 @@ def org_without_dbt_workspace():
     """org without dbt workspace"""
     org_slug = "test-org-slug"
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     org = Org.objects.create(
         airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
         slug=org_slug,
         name=org_slug,
+        queue_config=queue_config,
     )
     yield org
     org.delete()
@@ -110,6 +119,12 @@ def org_with_dbt_workspace(tmpdir_factory):
     with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     dbt = OrgDbt.objects.create(
         gitrepo_url="dummy-git-url.github.com",
         project_dir="tmp/",
@@ -122,6 +137,7 @@ def org_with_dbt_workspace(tmpdir_factory):
         slug=org_slug,
         dbt=dbt,
         name=org_slug,
+        queue_config=queue_config,
     )
 
     # Create cli profile block for the org
@@ -169,6 +185,12 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     dbt = OrgDbt.objects.create(
         gitrepo_url="dummy-git-url.github.com",
         project_dir="tmp/",
@@ -181,6 +203,7 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
         slug=org_slug,
         dbt=dbt,
         name=org_slug,
+        queue_config=queue_config,
     )
 
     # server block
