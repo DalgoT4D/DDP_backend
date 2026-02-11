@@ -382,6 +382,28 @@ class GitManager:
 
         return owner, repo
 
+    @staticmethod
+    def _github_api_request(url: str, pat: str = None, timeout: int = 30) -> dict:
+        """
+        Common function to make GitHub API requests.
+
+        :param url: The GitHub API URL to request
+        :param pat: Personal Access Token for authentication (optional)
+        :param timeout: Request timeout in seconds
+        :return: JSON response data
+        :raises requests.HTTPError: For HTTP errors
+        :raises requests.RequestException: For network/timeout errors
+        """
+        headers = {
+            "Accept": "application/vnd.github+json",
+        }
+        if pat:
+            headers["Authorization"] = f"Bearer {pat}"
+
+        response = requests.get(url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
     def verify_remote_url(self, remote_url: str) -> bool:
         """
         Verify that the PAT has push (write) access to the remote repository.
@@ -399,30 +421,29 @@ class GitManager:
         owner, repo = self.parse_github_url_for_owner_and_repo(remote_url)
 
         try:
-            response = requests.get(
-                f"https://api.github.com/repos/{owner}/{repo}",
-                headers={
-                    "Authorization": f"Bearer {self.pat}",
-                    "Accept": "application/vnd.github+json",
-                },
-                timeout=30,
+            data = self._github_api_request(
+                f"https://api.github.com/repos/{owner}/{repo}", self.pat
             )
-            response.raise_for_status()
         except requests.HTTPError as e:
             status_code = e.response.status_code
             if status_code == 401:
                 raise GitManagerError(
                     message="Authentication failed",
-                    error=f"[{status_code}] The PAT token is invalid",
+                    error="The PAT token is invalid",
                 ) from e
             if status_code == 404:
                 raise GitManagerError(
                     message="Repository not found",
-                    error=f"[{status_code}] The repository does not exist or the PAT does not have access to it",
+                    error="The repository does not exist or the PAT does not have access to it",
+                ) from e
+            if status_code == 403:
+                raise GitManagerError(
+                    message="Access forbidden",
+                    error="The PAT does not have sufficient permissions",
                 ) from e
             raise GitManagerError(
-                message="Failed to verify repository access",
-                error=f"[{status_code}] GitHub API error: {str(e)}",
+                message="GitHub API error",
+                error=f"HTTP {status_code}: {str(e)}",
             ) from e
         except requests.RequestException as e:
             raise GitManagerError(
@@ -430,7 +451,6 @@ class GitManager:
                 error=f"Failed to connect to GitHub API: {str(e)}",
             ) from e
 
-        data = response.json()
         permissions = data.get("permissions", {})
 
         if not permissions.get("push", False):
@@ -592,3 +612,52 @@ class GitManager:
         self._run_command(["git", "branch", "-M", remote_default])
 
         return f"renamed local branch '{local_current}' -> '{remote_default}'"
+
+    @staticmethod
+    def check_remote_repository_empty_static(remote_url: str, pat: str = None) -> bool:
+        """
+        Check if a remote repository is "empty" from a dbt perspective -
+        meaning it doesn't contain dbt_project.yml file.
+
+        :param remote_url: The remote repository URL
+        :param pat: Personal Access Token for authentication
+        :return: True if no dbt_project.yml file found (empty), False if dbt project exists
+        :raises GitManagerError: For auth errors, network errors, or 5xx server errors
+        """
+        owner, repo = GitManager.parse_github_url_for_owner_and_repo(remote_url)
+
+        # Check for dbt_project.yml only
+        try:
+            GitManager._github_api_request(
+                f"https://api.github.com/repos/{owner}/{repo}/contents/dbt_project.yml", pat
+            )
+            # If we find dbt_project.yml, repository is NOT empty
+            return False
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 404:
+                # File doesn't exist, repository is considered empty
+                return True
+            elif status_code == 401:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error="The PAT token is invalid",
+                ) from e
+            elif status_code == 403:
+                raise GitManagerError(
+                    message="Access forbidden",
+                    error="The PAT does not have sufficient permissions to access this repository",
+                ) from e
+            elif status_code >= 500:
+                raise GitManagerError(
+                    message="GitHub server error",
+                    error=f"GitHub API returned {status_code}: {str(e)}",
+                ) from e
+            else:
+                # For other HTTP errors, consider repository empty
+                return True
+        except requests.RequestException as e:
+            raise GitManagerError(
+                message="Network error",
+                error=f"Failed to connect to GitHub API: {str(e)}",
+            ) from e

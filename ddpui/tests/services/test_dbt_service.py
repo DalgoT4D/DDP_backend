@@ -31,6 +31,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import TransformType
 from django.contrib.auth.models import User
 from ddpui.core.orgdbt_manager import DbtCommandError
+from ddpui.core.git_manager import GitManagerError
 from ddpui.dbt_automation import assets
 
 pytestmark = pytest.mark.django_db
@@ -1681,19 +1682,19 @@ def test_switch_git_repository_success_new_token(
         mock_path.side_effect = lambda x: mock_dbt_path if "dbt" in str(x) else mock_org_path
 
         # Execute
-        result = switch_git_repository(user, payload)
+        result = switch_git_repository(user, payload, "test-pat-token")
 
     # Verify PAT storage was called
     mock_update_pat_storage.assert_called_once_with(
         org, payload.gitrepoUrl, payload.gitrepoAccessToken, None
     )
 
-    # Verify GitManager.clone was called
+    # Verify GitManager.clone was called with actual_pat parameter
     mock_git_manager_class.clone.assert_called_once_with(
         cwd="/fake/org/dir",
         remote_repo_url=payload.gitrepoUrl,
         relative_path="dbtrepo",
-        pat=payload.gitrepoAccessToken,
+        pat="test-pat-token",  # This should be the actual_pat parameter, not the payload token
     )
 
     # Verify OrgDbt was updated
@@ -1768,15 +1769,14 @@ def test_switch_git_repository_masked_token_with_existing_secret(
         mock_get_org_dir.return_value = str(org_dir)
 
         # Execute
-        result = switch_git_repository(user, payload)
+        result = switch_git_repository(user, payload, "test-pat-token")
 
-    # Verify that existing PAT was retrieved and used
-    mock_secretsmanager.retrieve_github_pat.assert_called_once_with("existing-secret-key")
+    # Verify that the actual PAT parameter was used (PAT resolution now handled in API layer)
     mock_clone.assert_called_once_with(
         cwd=str(org_dir),
         remote_repo_url=payload.gitrepoUrl,
         relative_path="dbtrepo",
-        pat="actual-pat-token",
+        pat="test-pat-token",  # Should use the actual_pat parameter passed to the function
     )
 
     # Verify update_github_pat_storage was NOT called for masked token
@@ -1784,8 +1784,9 @@ def test_switch_git_repository_masked_token_with_existing_secret(
 
 
 @patch("ddpui.ddpdbt.dbt_service.secretsmanager")
-def test_switch_git_repository_masked_token_no_existing_secret(mock_secretsmanager):
-    """Test repository switch with masked token when no existing secret exists"""
+@patch("ddpui.ddpdbt.dbt_service.GitManager.clone")
+def test_switch_git_repository_masked_token_no_existing_secret(mock_clone, mock_secretsmanager):
+    """Test repository switch with masked token when PAT validation is handled at API layer"""
     # Setup
     org = Org.objects.create(name="test-org", slug="test-org")
     auth_user = User.objects.create(
@@ -1807,9 +1808,15 @@ def test_switch_git_repository_masked_token_no_existing_secret(mock_secretsmanag
         gitrepoUrl="https://github.com/new/repo.git", gitrepoAccessToken="*******"
     )
 
-    # Execute and verify exception is raised
-    with pytest.raises(Exception, match="Cannot use masked token - no existing PAT found"):
-        switch_git_repository(user, payload)
+    # Mock the clone to fail
+    mock_clone.side_effect = GitManagerError("Failed to clone repository", "Clone failed")
+
+    # Since PAT validation is now handled at API layer, service function just uses whatever PAT is passed
+    # This test now verifies that the service function works with any PAT value
+    with pytest.raises(
+        Exception, match="Failed to clone new repository: Failed to clone repository"
+    ):
+        switch_git_repository(user, payload, "some-actual-pat-token")
 
 
 @patch("ddpui.ddpdbt.dbt_service.GitManager.clone")
@@ -1857,7 +1864,7 @@ def test_switch_git_repository_git_clone_failure(mock_clone, tmp_path):
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Failed to clone new repository: Clone failed"):
-            switch_git_repository(user, payload)
+            switch_git_repository(user, payload, "test-pat-token")
 
 
 def test_switch_git_repository_verification_failure():
@@ -1924,7 +1931,7 @@ def test_switch_git_repository_verification_failure():
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Authentication failed: Invalid PAT token"):
-            switch_git_repository(user, payload)
+            switch_git_repository(user, payload, "test-pat-token")
 
         # Verify that clear_github_pat_storage was called when verification failed
         mock_clear_pat_storage.assert_called_once_with(org, "existing-secret-key")
@@ -1997,7 +2004,7 @@ def test_switch_git_repository_pat_updated_after_verification():
         mock_git_manager_class.return_value = mock_git_manager
 
         # Execute
-        result = switch_git_repository(user, payload)
+        result = switch_git_repository(user, payload, "test-pat-token")
 
         # Verify success
         assert result["success"] is True
@@ -2067,11 +2074,11 @@ def test_connect_git_remote_success_new_token(
     mock_get_dbt_project_dir.return_value = str(dbt_project_dir)
 
     # Execute
-    result = connect_git_remote(user, payload)
+    result = connect_git_remote(user, payload, "test-pat-token")
 
-    # Verify GitManager was initialized correctly
+    # Verify GitManager was initialized correctly with actual_pat parameter
     mock_git_manager_class.assert_called_once_with(
-        repo_local_path=str(dbt_project_dir), pat=payload.gitrepoAccessToken, validate_git=True
+        repo_local_path=str(dbt_project_dir), pat="test-pat-token", validate_git=True
     )
 
     # Verify git operations were called
@@ -2138,12 +2145,11 @@ def test_connect_git_remote_masked_token_with_existing_secret(
         mock_get_dbt_dir.return_value = str(dbt_project_dir)
 
         # Execute
-        result = connect_git_remote(user, payload)
+        result = connect_git_remote(user, payload, "test-pat-token")
 
-    # Verify that existing PAT was retrieved and used
-    mock_secretsmanager.retrieve_github_pat.assert_called_once_with("existing-secret-key")
+    # Verify that the actual PAT parameter was used (PAT resolution now handled in API layer)
     mock_git_manager_class.assert_called_once_with(
-        repo_local_path=str(dbt_project_dir), pat="actual-pat-token", validate_git=True
+        repo_local_path=str(dbt_project_dir), pat="test-pat-token", validate_git=True
     )
 
     # Verify update_github_pat_storage was NOT called for masked token
@@ -2182,7 +2188,7 @@ def test_connect_git_remote_dbt_repo_not_exists():
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="DBT repo directory does not exist"):
-            connect_git_remote(user, payload)
+            connect_git_remote(user, payload, "test-pat-token")
 
 
 @patch("ddpui.ddpdbt.dbt_service.GitManager")
@@ -2223,7 +2229,7 @@ def test_connect_git_remote_git_not_initialized(mock_git_manager_class):
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Git is not initialized in the DBT project folder"):
-            connect_git_remote(user, payload)
+            connect_git_remote(user, payload, "test-pat-token")
 
 
 @patch("ddpui.ddpdbt.dbt_service.GitManager")
@@ -2268,7 +2274,7 @@ def test_connect_git_remote_verify_url_failure(mock_git_manager_class):
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Authentication failed: Invalid credentials"):
-            connect_git_remote(user, payload)
+            connect_git_remote(user, payload, "test-pat-token")
 
 
 # ==================== clear_github_pat_storage tests ====================

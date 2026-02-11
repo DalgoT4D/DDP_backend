@@ -170,11 +170,35 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         raise HttpError(400, "Create a dbt workspace first")
 
     try:
-        # Route to appropriate business logic based on operation type
-        if dbt_service.is_git_repository_switch(orgdbt, payload.gitrepoUrl):
-            return dbt_service.switch_git_repository(orguser, payload)
+        # Determine which PAT to use for remote repository check
+        is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+
+        if is_token_masked:
+            if not orgdbt.gitrepo_access_token_secret:
+                raise HttpError(400, "Cannot use masked token - no existing PAT found")
+            actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+            if not actual_pat:
+                raise HttpError(500, "Failed to retrieve existing PAT from secrets manager")
         else:
-            return dbt_service.connect_git_remote(orguser, payload)
+            actual_pat = payload.gitrepoAccessToken
+
+        # Check if remote repository has dbt_project.yml file
+        try:
+            is_remote_empty = GitManager.check_remote_repository_empty_static(
+                payload.gitrepoUrl, actual_pat
+            )
+            # If remote repository is NOT empty (has dbt_project.yml), force switch
+            force_switch = not is_remote_empty
+        except GitManagerError as e:
+            logger.warning(f"Could not check remote repository status: {e.message}")
+            # Continue with normal logic if we can't check remote status
+            force_switch = False
+
+        # Route to appropriate business logic based on operation type
+        if force_switch or dbt_service.is_git_repository_switch(orgdbt, payload.gitrepoUrl):
+            return dbt_service.switch_git_repository(orguser, payload, actual_pat)
+        else:
+            return dbt_service.connect_git_remote(orguser, payload, actual_pat)
     except Exception as e:
         logger.error(f"Git remote connection failed: {str(e)}")
         raise HttpError(500, str(e)) from e

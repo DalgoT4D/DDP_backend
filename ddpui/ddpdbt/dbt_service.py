@@ -1039,7 +1039,7 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
     return results
 
 
-def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> dict:
+def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str) -> dict:
     """
     Handle connecting to a Git remote for the first time (UI4T → Git).
 
@@ -1054,19 +1054,7 @@ def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> dic
     if not dbt_repo_dir.exists():
         raise Exception("DBT repo directory does not exist")
 
-    # Determine which PAT to use for verification
-    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
-
-    if is_token_masked:
-        if not orgdbt.gitrepo_access_token_secret:
-            raise Exception(
-                "Cannot use masked token - no existing PAT found. Please provide a valid PAT."
-            )
-        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
-        if not actual_pat:
-            raise Exception("Failed to retrieve existing PAT from secrets manager")
-    else:
-        actual_pat = payload.gitrepoAccessToken
+    # Use the provided actual_pat (already resolved in API layer)
 
     # Validate git is initialized locally
     try:
@@ -1097,6 +1085,7 @@ def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> dic
         raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
 
     # Handle PAT token storage (only if not masked)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
     if not is_token_masked:
         pat_secret_key = update_github_pat_storage(
             org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
@@ -1125,7 +1114,9 @@ def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> dic
     }
 
 
-def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> dict:
+def switch_git_repository(
+    orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str
+) -> dict:
     """
     Handle switching from one Git repository to another (Git A → Git B).
 
@@ -1138,17 +1129,7 @@ def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> 
         f"Switching git repository for org {org.slug} from {orgdbt.gitrepo_url} to {payload.gitrepoUrl}"
     )
 
-    # Determine which PAT to use for verification
-    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
-
-    if is_token_masked:
-        if not orgdbt.gitrepo_access_token_secret:
-            raise Exception("Cannot use masked token - no existing PAT found")
-        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
-        if not actual_pat:
-            raise Exception("Failed to retrieve existing PAT from secrets manager")
-    else:
-        actual_pat = payload.gitrepoAccessToken
+    # Use the provided actual_pat (already resolved in API layer)
 
     # Get paths
     dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
@@ -1218,6 +1199,7 @@ def switch_git_repository(orguser: OrgUser, payload: OrgDbtConnectGitRemote) -> 
         raise Exception(f"{e.message}: {e.error}") from e
 
     # Handle PAT token storage (only if not masked)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
     if not is_token_masked:
         pat_secret_key = update_github_pat_storage(
             org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
