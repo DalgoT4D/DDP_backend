@@ -9,7 +9,7 @@ from ddpui.schemas.userpreferences_schema import (
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.notifications_service import create_notification
+from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.auth import has_permission
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 

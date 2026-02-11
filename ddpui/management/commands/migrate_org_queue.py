@@ -7,17 +7,19 @@ import os
 from typing import List, Set
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from ddpui.models.org import Org, QueueConfigUpdateSchema
+from ddpui.models.org import Org, QueueConfigUpdateSchema, QueueDetailsSchema
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
-from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.unified_logger import get_logger
 
-logger = CustomLogger("migrate_org_queue")
+logger = get_logger()
 
 
 class Command(BaseCommand):
-    help = "Migrate a specific organization to use a new queue for relevant dataflows"
+    help = (
+        "Migrate a specific organization to use a new queue and/or workpool for relevant dataflows"
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -40,6 +42,12 @@ class Command(BaseCommand):
             help="New queue name to migrate to",
         )
         parser.add_argument(
+            "--new-workpool",
+            type=str,
+            required=False,
+            help="New workpool name to migrate to (if not provided, keeps existing workpool)",
+        )
+        parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Show what would be changed without making actual changes",
@@ -49,13 +57,8 @@ class Command(BaseCommand):
         org_slug: str = options["org_slug"]
         queue_type: str = options["queue_type"]
         new_queue: str = options["new_queue"]
+        new_workpool: str = options.get("new_workpool")
         dry_run: bool = options["dry_run"]
-
-        # Get work pool name from environment
-        work_pool_name: str = os.getenv("PREFECT_WORKER_POOL_NAME")
-
-        if not work_pool_name:
-            raise CommandError("PREFECT_WORKER_POOL_NAME environment variable is not set")
 
         # Get the organization
         try:
@@ -63,24 +66,40 @@ class Command(BaseCommand):
         except Org.DoesNotExist:
             raise CommandError(f"Organization with slug '{org_slug}' not found")
 
+        # Get current queue config to determine current workpool if new_workpool not provided
+        current_queue_config = org.get_queue_config()
+        current_queue_details = getattr(current_queue_config, queue_type)
+
+        # Use provided workpool or keep existing one
+        final_workpool = new_workpool if new_workpool else current_queue_details.workpool
+
         # Get relevant dataflows based on queue type
         dataflows: List[OrgDataFlowv1] = self.get_dataflows_for_queue_type(org, queue_type)
 
         # Show what will be done
-        self.show_migration_plan(org, queue_type, new_queue, work_pool_name, dataflows, dry_run)
+        self.show_migration_plan(
+            org, queue_type, new_queue, final_workpool, dataflows, dry_run, new_workpool is not None
+        )
 
         if dry_run:
             self.stdout.write(self.style.SUCCESS("Dry run completed. No changes made."))
             return
 
         # Confirm before proceeding
-        confirm = input(f"Migrate {org_slug} {queue_type} to queue '{new_queue}'? (y/N): ")
+        workpool_change_msg = (
+            f" and workpool to '{final_workpool}'"
+            if new_workpool
+            else " (keeping existing workpool)"
+        )
+        confirm = input(
+            f"Migrate {org_slug} {queue_type} to queue '{new_queue}'{workpool_change_msg}? (y/N): "
+        )
         if confirm.lower() != "y":
             self.stdout.write("Migration cancelled.")
             return
 
         # Perform the migration
-        self.perform_migration(org, queue_type, new_queue, work_pool_name, dataflows)
+        self.perform_migration(org, queue_type, new_queue, final_workpool, dataflows)
 
     def get_dataflows_for_queue_type(self, org: Org, queue_type: str) -> List[OrgDataFlowv1]:
         """Get relevant dataflows based on queue type"""
@@ -124,9 +143,10 @@ class Command(BaseCommand):
         org: Org,
         queue_type: str,
         new_queue: str,
-        work_pool_name: str,
+        final_workpool: str,
         dataflows: List[OrgDataFlowv1],
         dry_run: bool,
+        workpool_changing: bool,
     ):
         """Show what the migration will do"""
         action = "Would update" if dry_run else "Will update"
@@ -134,8 +154,23 @@ class Command(BaseCommand):
         self.stdout.write(f"\n{action} organization: {org.slug} ({org.name})")
         self.stdout.write(f"Queue type: {queue_type}")
         self.stdout.write(f"New queue: {new_queue}")
-        self.stdout.write(f"Work pool: {work_pool_name}")
-        self.stdout.write(f"Relevant dataflows to update: {len(dataflows)}\n")
+
+        if workpool_changing:
+            self.stdout.write(f"New workpool: {final_workpool}")
+        else:
+            self.stdout.write(f"Workpool: {final_workpool} (unchanged)")
+
+        self.stdout.write(f"Relevant dataflows to update: {len(dataflows)}")
+
+        # Show current vs new configuration
+        current_config = org.get_queue_config()
+        current_details = getattr(current_config, queue_type)
+
+        self.stdout.write("\nConfiguration change:")
+        self.stdout.write(
+            f"  Current: queue='{current_details.name}', workpool='{current_details.workpool}'"
+        )
+        self.stdout.write(f"  New:     queue='{new_queue}', workpool='{final_workpool}'\n")
 
         if dataflows:
             for dataflow in dataflows:
@@ -152,11 +187,13 @@ class Command(BaseCommand):
         org: Org,
         queue_type: str,
         new_queue: str,
-        work_pool_name: str,
+        final_workpool: str,
         dataflows: List[OrgDataFlowv1],
     ):
-        """Perform the actual migration"""
-        self.stdout.write(f"\nMigrating {org.slug} {queue_type} to queue '{new_queue}'...")
+        """Perform the actual migration with nested queue config"""
+        self.stdout.write(
+            f"\nMigrating {org.slug} {queue_type} to queue '{new_queue}' and workpool '{final_workpool}'..."
+        )
 
         # Update dataflows in Prefect
         dataflow_errors = []
@@ -164,7 +201,7 @@ class Command(BaseCommand):
 
         for dataflow in dataflows:
             try:
-                self.update_dataflow_queue(dataflow, new_queue, work_pool_name)
+                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
                 self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
                 updated_count += 1
             except Exception as e:
@@ -173,10 +210,29 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f"  ✗ {error_msg}"))
                 logger.error(error_msg)
 
-        # Update database configuration
+        # Only update database configuration if ALL dataflows updated successfully
+        if dataflow_errors:
+            self.stdout.write(f"\nMigration failed:")
+            self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
+            self.stdout.write(
+                self.style.ERROR(f"✗ {len(dataflow_errors)} dataflow update(s) failed")
+            )
+            self.stdout.write(
+                self.style.ERROR("✗ Database config NOT updated due to dataflow failures")
+            )
+            self.stdout.write("Check logs for details.")
+            raise CommandError("Migration failed due to dataflow update errors")
+
+        # All dataflows updated successfully, now update database config
         try:
+            # Create new queue details object
+            new_queue_details = QueueDetailsSchema(name=new_queue, workpool=final_workpool)
+
+            # Create update schema with the new nested structure
             update_data = QueueConfigUpdateSchema()
-            setattr(update_data, queue_type, new_queue)
+            setattr(update_data, queue_type, new_queue_details)
+
+            # Apply the update
             org.update_queue_config(update_data)
 
             self.stdout.write(f"  ✓ Updated database config for {org.slug}")
@@ -187,16 +243,10 @@ class Command(BaseCommand):
             logger.error(error_msg)
             raise CommandError(error_msg)
 
-        # Summary
-        self.stdout.write(f"\nMigration completed:")
+        # Summary - all successful
+        self.stdout.write(f"\nMigration completed successfully:")
         self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
         self.stdout.write(f"✓ Database config updated")
-
-        if dataflow_errors:
-            self.stdout.write(
-                self.style.WARNING(f"⚠ {len(dataflow_errors)} dataflow update(s) failed")
-            )
-            self.stdout.write("Check logs for details.")
 
     def update_dataflow_queue(self, dataflow: OrgDataFlowv1, new_queue: str, work_pool_name: str):
         """Update a Prefect dataflow to use a new queue"""

@@ -21,8 +21,8 @@ from datetime import timedelta
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
-from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
-from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+
+# Legacy loggers removed - now using unified logging
 
 load_dotenv()
 
@@ -263,9 +263,56 @@ AIRBYTE_CUSTOM_SOURCES = {
 
 AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 
-# finally set up the loggers
-setup_ddp_logger()
-setup_ab_logger()
+# Unified logging configuration
+# Console out level follows DEBUG env: DEBUG -> DEBUG, otherwise INFO
+CONSOLE_OUT_LEVEL = "DEBUG" if DEBUG else "INFO"
+LOGGER_EMIT_LEVEL = "DEBUG" if DEBUG else "INFO"
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "structured": {
+            "()": "ddpui.utils.unified_logger.StructuredFormatter",
+        },
+    },
+    "filters": {
+        "max_warning": {
+            "()": "ddpui.utils.unified_logger.MaxLevelFilter",
+            "max_level": "WARNING",
+        },
+    },
+    "handlers": {
+        "console_out": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "structured",
+            "level": CONSOLE_OUT_LEVEL,
+            "filters": ["max_warning"],
+        },
+        "console_err": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "formatter": "structured",
+            "level": "ERROR",
+        },
+    },
+    "root": {
+        "handlers": ["console_out", "console_err"],
+        "level": LOGGER_EMIT_LEVEL,
+    },
+    "loggers": {
+        "uvicorn.access": {
+            "handlers": ["console_out"],
+            "level": LOGGER_EMIT_LEVEL,
+            "propagate": False,
+        },
+        "uvicorn.error": {
+            "handlers": ["console_err"],
+            "level": LOGGER_EMIT_LEVEL,
+            "propagate": False,
+        },
+    },
+}
 
 # Fixtures to seed data
 # python3 manage.py loaddata seed/tasks.json

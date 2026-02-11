@@ -39,7 +39,7 @@ from ddpui.ddpprefect.schema import (
     OrgDbtConnectGitRemote,
     OrgDbtChangesPublish,
 )
-from ddpui.core.git_manager import GitManagerError
+from ddpui.core.git_manager import GitManagerError, GitManager
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
@@ -763,35 +763,18 @@ def test_post_create_edr_sendreport_dataflow_success(orguser):
 
 
 def test_put_connect_git_remote_workspace_errors(seed_db, orguser: OrgUser):
-    """Test workspace-related errors: no dbt workspace, project dir missing, repo dir missing"""
+    """Test workspace-related errors: no dbt workspace"""
     request = mock_request(orguser)
     payload = OrgDbtConnectGitRemote(
         gitrepoUrl="https://github.com/user/repo.git",
         gitrepoAccessToken="ghp_test_token",
     )
 
-    # Test 1: No dbt workspace
+    # Test: No dbt workspace
     request.orguser.org.dbt = None
     with pytest.raises(HttpError) as excinfo:
         put_connect_git_remote(request, payload)
     assert str(excinfo.value) == "Create a dbt workspace first"
-
-    # Test 2: DBT repo directory doesn't exist
-    orgdbt = OrgDbt.objects.create()
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/nonexistent/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_path.return_value.exists.return_value = False
-        with pytest.raises(HttpError) as excinfo:
-            put_connect_git_remote(request, payload)
-        assert str(excinfo.value) == "DBT repo directory does not exist"
-
-    # Cleanup
-    orgdbt.delete()
 
 
 def test_put_connect_git_remote_git_errors(seed_db, orguser: OrgUser):
@@ -806,45 +789,41 @@ def test_put_connect_git_remote_git_errors(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = True
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
+    # Test 1: Git not initialized
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
+        mock_connect.side_effect = GitManagerError(
+            message="Git is not initialized", error="details"
+        )
 
-        # Test 1: Git not initialized
-        with patch(
-            "ddpui.api.dbt_api.GitManager",
-            side_effect=GitManagerError(message="Not a git repository", error="details"),
-        ), pytest.raises(HttpError) as excinfo:
+        with pytest.raises(HttpError) as excinfo:
             put_connect_git_remote(request, payload)
         assert "Git is not initialized" in str(excinfo.value)
 
-        # Test 2: Verification fails - authentication error
-        mock_git_manager = Mock()
-        mock_git_manager.verify_remote_url.side_effect = GitManagerError(
+    # Test 2: Verification fails - authentication error
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
+        mock_connect.side_effect = GitManagerError(
             message="Authentication failed",
             error="The PAT token is invalid",
         )
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), pytest.raises(
-            HttpError
-        ) as excinfo:
+
+        with pytest.raises(HttpError) as excinfo:
             put_connect_git_remote(request, payload)
         assert "Authentication failed" in str(excinfo.value)
 
-        # Test 3: Verification fails - repo not found
-        mock_git_manager.verify_remote_url.side_effect = GitManagerError(
+    # Test 3: Verification fails - repo not found
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
+        mock_connect.side_effect = GitManagerError(
             message="Repository not found",
             error="The repository URL is invalid",
         )
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), pytest.raises(
-            HttpError
-        ) as excinfo:
+
+        with pytest.raises(HttpError) as excinfo:
             put_connect_git_remote(request, payload)
         assert "Repository not found" in str(excinfo.value)
 
@@ -864,20 +843,9 @@ def test_put_connect_git_remote_masked_token_no_existing_pat(seed_db, orguser: O
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = True
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
-
-        with pytest.raises(HttpError) as excinfo:
-            put_connect_git_remote(request, payload)
-        assert "Cannot use masked token" in str(excinfo.value)
+    with pytest.raises(HttpError) as excinfo:
+        put_connect_git_remote(request, payload)
+    assert "Cannot use masked token" in str(excinfo.value)
 
     # Cleanup
     orgdbt.delete()
@@ -895,26 +863,14 @@ def test_put_connect_git_remote_set_remote_fails(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = True
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
-
-        mock_git_manager = Mock()
-        mock_git_manager.verify_remote_url.return_value = True
-        mock_git_manager.set_remote.side_effect = GitManagerError(
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
+        mock_connect.side_effect = GitManagerError(
             message="Failed to set remote", error="git error"
         )
 
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), pytest.raises(
-            HttpError
-        ) as excinfo:
+        with pytest.raises(HttpError) as excinfo:
             put_connect_git_remote(request, payload)
         assert excinfo.value.status_code == 500
         assert "Failed to set remote" in str(excinfo.value)
@@ -936,60 +892,26 @@ def test_put_connect_git_remote_create(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path, patch(
-        "ddpui.api.dbt_api.dbt_service.sync_gitignore_contents"
-    ) as mock_sync_gitignore:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = True
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ), patch(
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static", return_value=True
+    ):
+        mock_connect.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
 
-        mock_git_manager = Mock()
-        mock_git_manager.verify_remote_url.return_value = True
-        mock_git_manager.set_remote.return_value = None
+        response = put_connect_git_remote(request, payload)
 
-        mock_secret_name = "pat-secret-key"
-        mock_oauth_url = "https://oauth2:ghp_test_token@github.com/user/repo.git"
+        # Verify success response
+        assert response["success"] is True
+        assert response["gitrepo_url"] == payload.gitrepoUrl
 
-        with patch(
-            "ddpui.api.dbt_api.GitManager", return_value=mock_git_manager
-        ) as mock_git_class, patch(
-            "ddpui.api.dbt_api.prefect_service.upsert_secret_block",
-            return_value={"block_id": "test-block-id"},
-        ) as mock_upsert, patch(
-            "ddpui.api.dbt_api.secretsmanager.save_github_pat",
-            return_value=mock_secret_name,
-        ) as mock_save_pat:
-            # Mock the static method
-            mock_git_class.generate_oauth_url_static.return_value = mock_oauth_url
-
-            response = put_connect_git_remote(request, payload)
-
-            # Verify success response
-            assert response["success"] is True
-            assert response["gitrepo_url"] == payload.gitrepoUrl
-
-            # Verify prefect secret block was created with oauth URL
-            mock_upsert.assert_called_once()
-            call_args = mock_upsert.call_args[0][0]
-            assert call_args.block_name == "test-org-git-pull-url"
-            assert call_args.secret == mock_oauth_url
-
-            # Verify PAT was saved (not updated)
-            mock_save_pat.assert_called_once_with(payload.gitrepoAccessToken)
-
-            # Verify OrgDbt was updated
-            orgdbt.refresh_from_db()
-            assert orgdbt.gitrepo_url == payload.gitrepoUrl
-            assert orgdbt.gitrepo_access_token_secret == mock_secret_name
+        # Verify service was called correctly with actual_pat
+        mock_connect.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
 
     # Cleanup
-    OrgPrefectBlockv1.objects.filter(org=request.orguser.org).delete()
     orgdbt.delete()
 
 
@@ -1009,50 +931,26 @@ def test_put_connect_git_remote_update_url_only(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path, patch(
-        "ddpui.api.dbt_api.dbt_service.sync_gitignore_contents"
-    ) as mock_sync_gitignore:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = True
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=True
+    ), patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat", return_value="existing-pat"
+    ), patch(
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static", return_value=True
+    ):
+        mock_switch.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
 
-        mock_git_manager = Mock()
-        mock_git_manager.verify_remote_url.return_value = True
-        mock_git_manager.set_remote.return_value = None
+        response = put_connect_git_remote(request, payload)
 
-        with patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager), patch(
-            "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
-            return_value="actual-pat-from-secrets",
-        ) as mock_retrieve, patch(
-            "ddpui.api.dbt_api.prefect_service.upsert_secret_block"
-        ) as mock_upsert, patch(
-            "ddpui.api.dbt_api.secretsmanager.save_github_pat"
-        ) as mock_save, patch(
-            "ddpui.api.dbt_api.secretsmanager.update_github_pat"
-        ) as mock_update:
-            response = put_connect_git_remote(request, payload)
+        # Verify success
+        assert response["success"] is True
+        assert response["gitrepo_url"] == payload.gitrepoUrl
 
-            # Verify success
-            assert response["success"] is True
-            assert response["gitrepo_url"] == payload.gitrepoUrl
-
-            # Verify existing PAT was retrieved
-            mock_retrieve.assert_called_once_with("existing-pat-secret")
-
-            # Verify secretsmanager was NOT called (masked token = no PAT update)
-            mock_save.assert_not_called()
-            mock_update.assert_not_called()
-            mock_upsert.assert_not_called()
-
-            # Verify OrgDbt URL was updated
-            orgdbt.refresh_from_db()
-            assert orgdbt.gitrepo_url == payload.gitrepoUrl
+        # Verify service was called correctly with actual PAT
+        mock_switch.assert_called_once_with(request.orguser, payload, "existing-pat")
 
     # Cleanup
     orgdbt.delete()
@@ -1074,64 +972,389 @@ def test_put_connect_git_remote_update_pat(seed_db, orguser: OrgUser):
     request.orguser.org.dbt = orgdbt
     request.orguser.org.save()
 
-    # Create existing prefect block
-    OrgPrefectBlockv1.objects.create(
-        org=request.orguser.org,
-        block_type=SECRET,
-        block_name="test-org-git-pull-url",
-        block_id="existing-block-id",
-    )
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=True
+    ), patch(
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static", return_value=True
+    ):
+        mock_switch.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
 
-    with patch(
-        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
-        return_value="/existing/path",
-    ), patch("ddpui.api.dbt_api.Path") as mock_path, patch(
-        "ddpui.api.dbt_api.dbt_service.sync_gitignore_contents"
-    ) as mock_sync_gitignore:
-        mock_project_dir = Mock()
-        mock_project_dir.exists.return_value = True
-        mock_dbt_repo_dir = Mock()
-        mock_dbt_repo_dir.exists.return_value = True
-        mock_project_dir.__truediv__ = Mock(return_value=mock_dbt_repo_dir)
-        mock_path.return_value = mock_project_dir
+        response = put_connect_git_remote(request, payload)
 
-        mock_git_manager = Mock()
-        mock_git_manager.verify_remote_url.return_value = True
-        mock_git_manager.set_remote.return_value = None
+        # Verify success
+        assert response["success"] is True
+        assert response["gitrepo_url"] == payload.gitrepoUrl
 
-        mock_oauth_url = "https://oauth2:glpat_new_token@gitlab.com/user/repo.git"
-
-        with patch(
-            "ddpui.api.dbt_api.GitManager", return_value=mock_git_manager
-        ) as mock_git_class, patch(
-            "ddpui.api.dbt_api.prefect_service.upsert_secret_block",
-            return_value={"block_id": "updated-block-id"},
-        ) as mock_upsert, patch(
-            "ddpui.api.dbt_api.secretsmanager.update_github_pat"
-        ) as mock_update:
-            # Mock the static method
-            mock_git_class.generate_oauth_url_static.return_value = mock_oauth_url
-
-            response = put_connect_git_remote(request, payload)
-
-            # Verify success
-            assert response["success"] is True
-            assert response["gitrepo_url"] == payload.gitrepoUrl
-
-            # Verify prefect secret block was updated with new oauth URL
-            mock_upsert.assert_called_once()
-            call_args = mock_upsert.call_args[0][0]
-            assert call_args.secret == mock_oauth_url
-
-            # Verify PAT was updated (not saved)
-            mock_update.assert_called_once_with("existing-pat-secret", payload.gitrepoAccessToken)
-
-            # Verify OrgDbt was updated
-            orgdbt.refresh_from_db()
-            assert orgdbt.gitrepo_url == payload.gitrepoUrl
+        # Verify service was called correctly with new PAT
+        mock_switch.assert_called_once_with(request.orguser, payload, "glpat_new_token")
 
     # Cleanup
-    OrgPrefectBlockv1.objects.filter(org=request.orguser.org).delete()
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_force_switch_when_remote_has_dbt_project(seed_db, orguser: OrgUser):
+    """Test forced switch when remote repository contains dbt_project.yml"""
+    request = mock_request(orguser)
+    request.orguser.org.slug = "test-org"
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/dbt-repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    # Create orgdbt with UI transform type - normally would do connect_git_remote
+    orgdbt = OrgDbt.objects.create(
+        transform_type="ui", gitrepo_access_token_secret=None  # UI transform type
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ), patch(
+        # Remote repository is NOT empty (has dbt_project.yml) - should force switch
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        return_value=False,
+    ):
+        mock_switch.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Verify success
+        assert response["success"] is True
+        assert response["gitrepo_url"] == payload.gitrepoUrl
+
+        # Verify switch_git_repository was called instead of connect_git_remote due to force_switch
+        mock_switch.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_no_force_switch_when_remote_empty(seed_db, orguser: OrgUser):
+    """Test normal connect flow when remote repository is empty (no dbt_project.yml)"""
+    request = mock_request(orguser)
+    request.orguser.org.slug = "test-org"
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/empty-repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    # Create orgdbt with UI transform type
+    orgdbt = OrgDbt.objects.create(
+        transform_type="ui", gitrepo_access_token_secret=None  # UI transform type
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ), patch(
+        # Remote repository IS empty (no dbt_project.yml) - should do normal connect
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        return_value=True,
+    ):
+        mock_connect.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Verify success
+        assert response["success"] is True
+        assert response["gitrepo_url"] == payload.gitrepoUrl
+
+        # Verify connect_git_remote was called (normal flow)
+        mock_connect.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_github_api_error_fallback(seed_db, orguser: OrgUser):
+    """Test fallback to normal logic when GitHub API check fails"""
+    request = mock_request(orguser)
+    request.orguser.org.slug = "test-org"
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    orgdbt = OrgDbt.objects.create(transform_type="ui", gitrepo_access_token_secret=None)
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ), patch(
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        side_effect=GitManagerError("Network error", "Failed to connect"),
+    ):
+        mock_connect.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Verify success - should still work despite API error
+        assert response["success"] is True
+        assert response["gitrepo_url"] == payload.gitrepoUrl
+
+        # Verify connect_git_remote was called (fallback to normal logic)
+        mock_connect.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_masked_token_retrieval_fails(seed_db, orguser: OrgUser):
+    """Test error when masked token is provided but PAT retrieval fails"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/repo.git",
+        gitrepoAccessToken="********",  # Masked token
+    )
+
+    orgdbt = OrgDbt.objects.create(gitrepo_access_token_secret="existing-secret")
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    # Mock PAT retrieval failure
+    with patch("ddpui.api.dbt_api.secretsmanager.retrieve_github_pat", return_value=None):
+        with pytest.raises(HttpError) as excinfo:
+            put_connect_git_remote(request, payload)
+        assert "Failed to retrieve existing PAT from secrets manager" in str(excinfo.value)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_github_api_auth_error_fallback_to_normal_flow(
+    seed_db, orguser: OrgUser
+):
+    """Test that GitHub API auth errors don't break the flow - fallback to normal logic"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/private/repo.git",
+        gitrepoAccessToken="invalid_token",
+    )
+
+    orgdbt = OrgDbt.objects.create(transform_type="ui")
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    # Mock auth error from GitHub API - should not break the flow
+    auth_error = GitManagerError("Authentication failed", "The PAT token is invalid")
+
+    with patch(
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static", side_effect=auth_error
+    ), patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
+        mock_connect.return_value = {"success": True, "gitrepo_url": payload.gitrepoUrl}
+
+        response = put_connect_git_remote(request, payload)
+
+        # Should succeed and fallback to normal connect logic
+        assert response["success"] is True
+        mock_connect.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_github_api_server_error_fallback_to_normal_flow(
+    seed_db, orguser: OrgUser
+):
+    """Test that GitHub API server errors don't break the flow - fallback to normal logic"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    orgdbt = OrgDbt.objects.create(transform_type="ui")
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    # Mock server error from GitHub API - should not break the flow
+    server_error = GitManagerError("GitHub server error", "GitHub API returned 500")
+
+    with patch(
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        side_effect=server_error,
+    ), patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False
+    ):
+        mock_connect.return_value = {"success": True, "gitrepo_url": payload.gitrepoUrl}
+
+        response = put_connect_git_remote(request, payload)
+
+        # Should succeed and fallback to normal connect logic
+        assert response["success"] is True
+        mock_connect.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_force_switch_with_existing_git_repo(seed_db, orguser: OrgUser):
+    """Test forced switch when user already has Git repo but remote has dbt project"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/better-dbt-repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    # User already has a Git repo, normally this would be a normal switch
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/user/old-repo.git",
+        transform_type="git",  # Already Git type
+        gitrepo_access_token_secret="existing-secret",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=True  # Normal switch
+    ), patch(
+        # But remote also has dbt project - should still force switch
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        return_value=False,  # Has dbt project
+    ):
+        mock_switch.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Should still call switch (either due to normal logic OR forced switch)
+        assert response["success"] is True
+        mock_switch.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_normal_switch_overrides_force_switch(seed_db, orguser: OrgUser):
+    """Test that normal switch logic takes precedence over forced switch"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/different-repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    # User switching from one repo to another (normal switch case)
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/user/old-repo.git",
+        transform_type="git",
+        gitrepo_access_token_secret="existing-secret",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=True  # Normal switch
+    ), patch(
+        # Remote is empty, so no forced switch needed
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        return_value=True,  # Empty repo
+    ):
+        mock_switch.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Should call switch due to normal logic (force_switch = False, but normal switch = True)
+        assert response["success"] is True
+        mock_switch.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_ui_to_git_empty_repo(seed_db, orguser: OrgUser):
+    """Test UI to Git transition with empty repository (no forced switch)"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/empty-repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    # User transitioning from UI to Git
+    orgdbt = OrgDbt.objects.create(
+        transform_type="ui", gitrepo_url=None  # UI type  # No existing Git repo
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.connect_git_remote") as mock_connect, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch", return_value=False  # Not a switch
+    ), patch(
+        # Remote is empty, so no forced switch
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        return_value=True,  # Empty repo
+    ):
+        mock_connect.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Should call connect_git_remote (normal UI to Git flow)
+        assert response["success"] is True
+        mock_connect.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_connect_git_remote_ui_to_git_with_dbt_project_force_switch(seed_db, orguser: OrgUser):
+    """Test UI to Git transition with dbt project in remote (forced switch)"""
+    request = mock_request(orguser)
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/existing-dbt-repo.git",
+        gitrepoAccessToken="ghp_test_token",
+    )
+
+    # User transitioning from UI to Git
+    orgdbt = OrgDbt.objects.create(
+        transform_type="ui", gitrepo_url=None  # UI type  # No existing Git repo
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch("ddpui.ddpdbt.dbt_service.switch_git_repository") as mock_switch, patch(
+        "ddpui.ddpdbt.dbt_service.is_git_repository_switch",
+        return_value=False,  # Not a normal switch
+    ), patch(
+        # Remote has dbt project, so forced switch
+        "ddpui.api.dbt_api.GitManager.check_remote_repository_empty_static",
+        return_value=False,  # Has dbt project
+    ):
+        mock_switch.return_value = {
+            "success": True,
+            "gitrepo_url": payload.gitrepoUrl,
+        }
+
+        response = put_connect_git_remote(request, payload)
+
+        # Should call switch_git_repository due to forced switch (not connect_git_remote)
+        assert response["success"] is True
+        mock_switch.assert_called_once_with(request.orguser, payload, payload.gitrepoAccessToken)
+
+    # Cleanup
     orgdbt.delete()
 
 

@@ -1,3 +1,4 @@
+import os
 from unittest.mock import patch, Mock, ANY
 from datetime import datetime
 import pytz
@@ -31,6 +32,7 @@ from ddpui.models.org import (
     OrgPrefectBlockv1,
     OrgWarehouse,
     OrgSchemaChange,
+    OrgDbt,
 )
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.org_user import OrgUser, User
@@ -39,6 +41,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.tasks import Task, OrgTask, OrgDataFlowv1, DataflowOrgTask
 from ddpui.ddpprefect import DBTCLIPROFILE, schema, DBTCORE
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTECLEAR
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
 
 
 pytestmark = pytest.mark.django_db
@@ -67,7 +70,15 @@ def org_without_workspace():
 @pytest.fixture
 def org_with_workspace():
     """a pytest fixture which creates an Org with a fake airbyte workspace id"""
-    org = Org.objects.create(slug="test-org", airbyte_workspace_id="wsid")
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
+    org = Org.objects.create(
+        slug="test-org", airbyte_workspace_id="wsid", queue_config=queue_config
+    )
     warehouse = OrgWarehouse.objects.create(
         org=org,
         wtype="bigquery",
@@ -505,6 +516,7 @@ def test_get_sync_history_for_connection_success():
     job.delete()
 
 
+@patch.dict("os.environ", {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
 @patch("ddpui.ddpairbyte.airbytehelpers.generate_hash_id")
 @patch("ddpui.ddpairbyte.airbytehelpers.logger")
 @patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.create_dataflow_v1")
@@ -537,7 +549,18 @@ def test_create_airbyte_deployment(
 
     mock_generate_hash_id.assert_called_once_with(8)
     mock_logger.info.assert_called_once_with("using the hash code 12345678 for the deployment name")
+
+    # Check that create_dataflow_v1 was called with the correct arguments
     mock_create_dataflow.assert_called_once()
+    call_args = mock_create_dataflow.call_args
+    assert len(call_args[0]) == 2  # payload and queue_details
+
+    # Verify the second argument is a QueueDetailsSchema with correct workpool
+    queue_details = call_args[0][1]
+    assert hasattr(queue_details, "name")
+    assert hasattr(queue_details, "workpool")
+    assert queue_details.workpool == "test_workpool"
+
     mock_org_dataflow.objects.filter.assert_called_once_with(deployment_id="deployment-id")
     mock_org_dataflow.objects.create.assert_called_once_with(
         org=org_with_workspace,
@@ -632,6 +655,12 @@ def test_update_destination_name(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
     mock_update_destination.return_value = {
@@ -690,6 +719,12 @@ def test_update_destination_postgres_config(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
     mock_update_destination.return_value = {
@@ -754,6 +789,12 @@ def test_update_destination_bigquery_config(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="bigquery", name="name")
 
     mock_update_destination.return_value = {
@@ -823,6 +864,12 @@ def test_update_destination_snowflake_config(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
 
     mock_update_destination.return_value = {
@@ -904,6 +951,12 @@ def test_update_destination_cliprofile(
 ):
     """test update_destination"""
     org = Org.objects.create(name="org", slug="org")
+    # Create OrgDbt to enable dbt functionality
+    org_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
+    )
+    org.dbt = org_dbt
+    org.save()
     warehouse = OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
 
     mock_update_destination.return_value = {
@@ -1387,3 +1440,62 @@ def test_fetch_and_update_org_schema_changes_api_error(
     _, error = fetch_and_update_org_schema_changes(org_with_workspace, connection_id)
 
     assert "Something went wrong" in error
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.update_destination",
+    mock_update_destination=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+    mock_retrieve_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.update_warehouse_credentials",
+    mock_update_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
+    mock_create_or_update_org_cli_block=Mock(),
+)
+def test_update_destination_no_dbt_workspace(
+    mock_create_or_update_org_cli_block: Mock,
+    mock_update_warehouse_credentials: Mock,
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_update_destination: Mock,
+):
+    """test update_destination when dbt workspace is not setup (org.dbt is None)"""
+    # Create org without dbt workspace
+    org = Org.objects.create(name="org", slug="org", dbt=None)
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
+
+    mock_update_destination.return_value = {
+        "destinationId": "DESTINATION_ID",
+    }
+    mock_retrieve_warehouse_credentials.return_value = {"host": "localhost", "port": "5432"}
+    mock_update_warehouse_credentials.return_value = None
+
+    payload = AirbyteDestinationUpdate(
+        name="new-name",
+        destinationDefId="destinationDefId",
+        config={"host": "newhost", "port": "5433"},
+    )
+
+    response, error = update_destination(org, "destination_id", payload)
+
+    # Should complete successfully
+    assert error is None
+    assert response == {"destinationId": "DESTINATION_ID"}
+
+    # Verify warehouse name was updated
+    warehouse.refresh_from_db()
+    assert warehouse.name == "new-name"
+
+    # Verify warehouse credentials were updated
+    mock_update_warehouse_credentials.assert_called_once_with(
+        warehouse,
+        {"host": "newhost", "port": "5433"},
+    )
+
+    # Verify create_or_update_org_cli_block was NOT called since dbt workspace is not setup
+    mock_create_or_update_org_cli_block.assert_not_called()

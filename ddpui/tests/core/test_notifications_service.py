@@ -8,7 +8,7 @@ from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
-from ddpui.core.notifications_service import (
+from ddpui.core.notifications.notifications_functions import (
     get_recipients,
     handle_recipient,
     create_notification,

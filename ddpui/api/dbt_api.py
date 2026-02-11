@@ -13,15 +13,8 @@ from ddpui.celeryworkers.tasks import (
 )
 from ddpui.models.tasks import (
     TaskProgressHashPrefix,
-    TaskLock,
-    OrgTask,
 )
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.utils.constants import (
-    TASK_DBTRUN,
-    TASK_DBTCLEAN,
-    TASK_DBTDEPS,
-)
 from ddpui.ddpdbt import dbt_service, elementary_service
 from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import (
@@ -164,17 +157,10 @@ def put_dbt_github(request, payload: OrgDbtGitHub):
 def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
     """
     Connect an existing local git repository to a remote GitHub URL.
+    Handles both new connections and repository switches.
 
-    This endpoint is for users who have already set up their local DBT workspace
-    and initialized git locally. It allows them to connect to a remote GitHub
-    repository without cloning.
-
-    Actions:
-    1. Validates the OrgDbt workspace exists and git is initialized locally
-    2. Verifies the remote URL is accessible with the provided PAT
-    3. Sets/updates the remote origin in the local git repository
-    4. Stores/updates the PAT token in secrets manager
-    5. Updates OrgDbt.gitrepo_url in database
+    For new connections (UI4T → Git): Sets up remote connection for existing local repo
+    For repository switches (Git A → Git B): Replaces local repo with fresh clone
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -182,110 +168,40 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
 
     if orgdbt is None:
         raise HttpError(400, "Create a dbt workspace first")
-    # Get the dbt repo directory (get_dbt_project_dir already returns the full path including dbtrepo)
-    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    if not dbt_repo_dir.exists():
-        raise HttpError(400, "DBT repo directory does not exist")
 
-    # Check if token is masked (user only wants to update URL, not PAT)
-    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
-
-    # Determine which PAT to use for verification
-    if is_token_masked:
-        # Token is masked, retrieve the actual PAT from secrets manager
-        if not orgdbt.gitrepo_access_token_secret:
-            raise HttpError(
-                400, "Cannot use masked token - no existing PAT found. Please provide a valid PAT."
-            )
-        actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
-        if not actual_pat:
-            raise HttpError(400, "Failed to retrieve existing PAT from secrets manager")
-    else:
-        actual_pat = payload.gitrepoAccessToken
-
-    # Validate git is initialized locally
     try:
-        git_manager = GitManager(
-            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
-        )
-    except GitManagerError as e:
-        logger.error(f"GitManagerError during git init validation: {e.message}")
-        raise HttpError(
-            400, f"Git is not initialized in the DBT project folder: {e.message}"
-        ) from e
+        # Determine which PAT to use for remote repository check
+        is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
 
-    # Verify remote URL is accessible with the PAT
-    try:
-        git_manager.verify_remote_url(payload.gitrepoUrl)
-    except GitManagerError as e:
-        logger.error(f"GitManagerError during remote URL verification: {e.message}")
-        raise HttpError(400, f"{e.message}: {e.error}") from e
-
-    # Set or update the remote origin
-    try:
-        git_manager.set_remote(payload.gitrepoUrl)
-    except GitManagerError as e:
-        raise HttpError(500, f"Failed to set remote: {e.message}") from e
-
-    # sync local default to remote
-    try:
-        git_manager.sync_local_default_to_remote()
-    except GitManagerError as e:
-        raise HttpError(500, f"Failed to sync local branch with remote: {e.error}") from e
-
-    # Handle PAT token storage (only if not masked)
-    if not is_token_masked:
-        # Create oauth URL for prefect secret block
-        gitrepo_url_with_token = GitManager.generate_oauth_url_static(
-            payload.gitrepoUrl, payload.gitrepoAccessToken
-        )
-
-        # Create or update the prefect secret block
-        secret_block_edit_params = PrefectSecretBlockEdit(
-            block_name=f"{org.slug}-git-pull-url",
-            secret=gitrepo_url_with_token,
-        )
-
-        response = prefect_service.upsert_secret_block(secret_block_edit_params)
-        if not OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
-        ).exists():
-            OrgPrefectBlockv1.objects.create(
-                org=org,
-                block_type=SECRET,
-                block_name=secret_block_edit_params.block_name,
-                block_id=response["block_id"],
-            )
-
-        # Update or create PAT in secrets manager
-        if orgdbt.gitrepo_access_token_secret:
-            secretsmanager.update_github_pat(
-                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
-            )
+        if is_token_masked:
+            if not orgdbt.gitrepo_access_token_secret:
+                raise HttpError(400, "Cannot use masked token - no existing PAT found")
+            actual_pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+            if not actual_pat:
+                raise HttpError(500, "Failed to retrieve existing PAT from secrets manager")
         else:
-            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
-            orgdbt.gitrepo_access_token_secret = pat_secret_key
+            actual_pat = payload.gitrepoAccessToken
 
-    # Update OrgDbt with the new gitrepo_url
-    # mark the state of transform type to GIT
-    orgdbt.gitrepo_url = payload.gitrepoUrl
-    orgdbt.transform_type = TransformType.GIT
-    orgdbt.save()
+        # Check if remote repository has dbt_project.yml file
+        try:
+            is_remote_empty = GitManager.check_remote_repository_empty_static(
+                payload.gitrepoUrl, actual_pat
+            )
+            # If remote repository is NOT empty (has dbt_project.yml), force switch
+            force_switch = not is_remote_empty
+        except GitManagerError as e:
+            logger.warning(f"Could not check remote repository status: {e.message}")
+            # Continue with normal logic if we can't check remote status
+            force_switch = False
 
-    logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
-
-    # sync gitignore contents
-    try:
-        dbt_service.sync_gitignore_contents(dbt_repo_dir)
-    except Exception as err:
-        logger.error(f"Failed to sync .gitignore contents: {err}")
-        raise HttpError(500, f"Failed to sync .gitignore contents: {err}") from err
-
-    return {
-        "success": True,
-        "gitrepo_url": payload.gitrepoUrl,
-        "message": "Successfully connected to remote git repository",
-    }
+        # Route to appropriate business logic based on operation type
+        if force_switch or dbt_service.is_git_repository_switch(orgdbt, payload.gitrepoUrl):
+            return dbt_service.switch_git_repository(orguser, payload, actual_pat)
+        else:
+            return dbt_service.connect_git_remote(orguser, payload, actual_pat)
+    except Exception as e:
+        logger.error(f"Git remote connection failed: {str(e)}")
+        raise HttpError(500, str(e)) from e
 
 
 @dbt_router.post("/publish_changes/")

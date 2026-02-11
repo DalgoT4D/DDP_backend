@@ -11,7 +11,7 @@ import json
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 from ddpui.ddpairbyte.schema import AirbyteConnectionCreate, AirbyteSourceCreate
-from ddpui.models.org import Org, OrgWarehouseSchema
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.utils.custom_logger import CustomLogger
 from testclient.testclient import TestClient
