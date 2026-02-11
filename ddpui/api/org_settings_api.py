@@ -21,7 +21,7 @@ from ddpui.models.org_settings import (
     UpdateOrgSettingsSchema,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.core.notifications_service import create_notification
+from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -89,12 +89,16 @@ def _build_org_settings_response(org_settings):
         website=org_settings.org.website,
         ai_data_sharing_enabled=org_settings.ai_data_sharing_enabled,
         ai_logging_acknowledged=org_settings.ai_logging_acknowledged,
-        ai_settings_accepted_by_email=org_settings.ai_settings_accepted_by.email
-        if org_settings.ai_settings_accepted_by
-        else None,
-        ai_settings_accepted_at=org_settings.ai_settings_accepted_at.isoformat()
-        if org_settings.ai_settings_accepted_at
-        else None,
+        ai_settings_accepted_by_email=(
+            org_settings.ai_settings_accepted_by.email
+            if org_settings.ai_settings_accepted_by
+            else None
+        ),
+        ai_settings_accepted_at=(
+            org_settings.ai_settings_accepted_at.isoformat()
+            if org_settings.ai_settings_accepted_at
+            else None
+        ),
     )
 
 
