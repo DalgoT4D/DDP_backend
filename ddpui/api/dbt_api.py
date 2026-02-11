@@ -27,7 +27,7 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.models.org import OrgPrefectBlockv1, Org, OrgWarehouse, OrgDbt, TransformType
 from ddpui.models.org_user import OrgUser, OrgUserResponse
-from ddpui.models.tasks import Task, TaskType, OrgTask
+from ddpui.models.tasks import Task, TaskType, OrgTask, OrgTaskGeneratedBy
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.git_manager import GitManager, GitManagerError, GitStatusSummary
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
@@ -205,7 +205,9 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         task = Task.objects.get(type=TaskType.GIT, is_system=True)
         if not OrgTask.objects.filter(org=org, dbt=orgdbt, task=task).exists():
             logger.info(f"Creating OrgTask for git-pull for org {org.slug}")
-            OrgTask.objects.create(org=org, dbt=orgdbt, task=task, uuid=uuid4())
+            OrgTask.objects.create(
+                org=org, dbt=orgdbt, task=task, uuid=uuid4(), generated_by=OrgTaskGeneratedBy.SYSTEM
+            )
 
         return result
     except Exception as e:
