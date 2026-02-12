@@ -18,9 +18,6 @@ from ddpui.schemas.chart_schema import (
     TransformDataForChart,
 )
 
-# Maximum number of dimensions allowed for table charts
-MAX_DIMENSIONS = 10
-
 
 def validate_column_name(col_name: str) -> bool:
     """
@@ -150,11 +147,6 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             # Filter out empty strings
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             if filtered_dims:
-                # Check maximum dimension limit
-                if len(filtered_dims) > MAX_DIMENSIONS:
-                    raise ValueError(
-                        f"Table charts support a maximum of {MAX_DIMENSIONS} dimensions. You provided {len(filtered_dims)} dimensions."
-                    )
                 # Validate dimension names
                 is_valid, error_msg = validate_dimension_names(filtered_dims)
                 if not is_valid:
@@ -174,11 +166,6 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
         if not dims:
             logger.warning(f"normalize_dimensions - No dimensions found in payload for table chart")
         else:
-            # Check maximum dimension limit (for backward compatibility path)
-            if len(dims) > MAX_DIMENSIONS:
-                raise ValueError(
-                    f"Table charts support a maximum of {MAX_DIMENSIONS} dimensions. You provided {len(dims)} dimensions."
-                )
             # Validate dimension names
             is_valid, error_msg = validate_dimension_names(dims)
             if not is_valid:
