@@ -164,5 +164,3 @@ class TestColumnValidation:
             normalize_dimensions(payload_invalid)
         assert "Invalid column name" in str(exc_info.value)
         assert "dim-2" in str(exc_info.value)
-
-
