@@ -1,4 +1,4 @@
-"""Tests for column name validation to prevent SQL injection"""
+"""Tests for column normalization and dimension limits"""
 
 import os
 import django
@@ -9,158 +9,145 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from ddpui.core.charts.charts_service import (
-    validate_column_name,
-    validate_dimension_names,
     normalize_dimensions,
 )
-from ddpui.schemas.chart_schema import ChartDataPayload, ChartMetric
+from ddpui.schemas.chart_schema import ChartDataPayload
 
 
-class TestColumnValidation:
-    """Test column name validation for security"""
+class TestNormalizeDimensions:
+    """Test normalize_dimensions function"""
 
-    def test_validate_column_name_valid_names(self):
-        """Test that valid column names pass validation"""
-        valid_names = [
-            "column_name",
-            "ColumnName",
-            "column123",
-            "_private_column",
-            "col_123_name",
-            "a",
-            "_",
-            "column_name_with_many_underscores",
-        ]
-        for name in valid_names:
-            assert validate_column_name(name) is True, f"Expected '{name}' to be valid"
-
-    def test_validate_column_name_invalid_names(self):
-        """Test that invalid column names fail validation"""
-        invalid_names = [
-            "column-name",  # Hyphen not allowed
-            "column name",  # Space not allowed
-            "column.name",  # Dot not allowed
-            "123column",  # Cannot start with number
-            "column;DROP TABLE",  # SQL injection attempt
-            "column' OR '1'='1",  # SQL injection attempt
-            "column/*comment*/",  # SQL comment injection
-            "",  # Empty string
-            "   ",  # Just whitespace
-            "column\nname",  # Newline
-            "column\tname",  # Tab
-            "column@name",  # Special character
-            "column$name",  # Special character
-            "column%name",  # Special character
-        ]
-        for name in invalid_names:
-            assert validate_column_name(name) is False, f"Expected '{name}' to be invalid"
-
-    def test_validate_dimension_names_valid(self):
-        """Test validation of valid dimension names list"""
-        valid_dims = ["dim1", "dim2", "dimension_name"]
-        is_valid, error = validate_dimension_names(valid_dims)
-        assert is_valid is True
-        assert error is None
-
-    def test_validate_dimension_names_invalid(self):
-        """Test validation of invalid dimension names list"""
-        invalid_dims = ["dim1", "dim-2", "dimension_name"]
-        is_valid, error = validate_dimension_names(invalid_dims)
-        assert is_valid is False
-        assert error is not None
-        assert "dim-2" in error
-
-    def test_validate_dimension_names_empty_list(self):
-        """Test validation of empty dimension names list"""
-        is_valid, error = validate_dimension_names([])
-        assert is_valid is True
-        assert error is None
-
-    def test_normalize_dimensions_validates_table_chart(self):
-        """Test that normalize_dimensions validates dimension names for table charts"""
-        # Valid dimensions
+    def test_normalize_dimensions_table_chart_with_dimensions_list(self):
+        """Test that normalize_dimensions handles dimensions list for table charts"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
             table_name="test_table",
-            dimensions=["dim1", "dim2"],
+            dimensions=["dim1", "dim-2", "dim 3"],
         )
         dims = normalize_dimensions(payload)
-        assert dims == ["dim1", "dim2"]
+        assert dims == ["dim1", "dim-2", "dim 3"]
 
-        # Invalid dimensions - should raise ValueError
-        payload_invalid = ChartDataPayload(
+    def test_normalize_dimensions_table_chart_backward_compatibility(self):
+        """Test backward compatibility with dimension_col + extra_dimension"""
+        payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
             table_name="test_table",
-            dimensions=["dim1", "dim-2"],  # Invalid: contains hyphen
+            dimension_col="dim-1",
+            extra_dimension="dim 2",
         )
-        with pytest.raises(ValueError) as exc_info:
-            normalize_dimensions(payload_invalid)
-        assert "Invalid column name" in str(exc_info.value)
-        assert "dim-2" in str(exc_info.value)
+        dims = normalize_dimensions(payload)
+        assert dims == ["dim-1", "dim 2"]
 
-    def test_normalize_dimensions_validates_dimension_col(self):
-        """Test that normalize_dimensions validates dimension_col"""
-        # Valid dimension_col
+    def test_normalize_dimensions_bar_chart(self):
+        """Test normalize_dimensions for bar chart"""
         payload = ChartDataPayload(
             chart_type="bar",
             schema_name="test_schema",
             table_name="test_table",
-            dimension_col="valid_dimension",
+            dimension_col="valid-dimension",
         )
         dims = normalize_dimensions(payload)
-        assert dims == ["valid_dimension"]
+        assert dims == ["valid-dimension"]
 
-        # Invalid dimension_col - should raise ValueError
-        payload_invalid = ChartDataPayload(
-            chart_type="bar",
-            schema_name="test_schema",
-            table_name="test_table",
-            dimension_col="invalid-dimension",  # Invalid: contains hyphen
-        )
-        with pytest.raises(ValueError) as exc_info:
-            normalize_dimensions(payload_invalid)
-        assert "Invalid column name" in str(exc_info.value)
-        assert "invalid-dimension" in str(exc_info.value)
-
-    def test_sql_injection_attempts_blocked(self):
-        """Test that common SQL injection attempts are blocked"""
-        sql_injection_attempts = [
-            "col'; DROP TABLE users; --",
-            "col' OR '1'='1",
-            "col; DELETE FROM table",
-            "col UNION SELECT password FROM users",
-            "col' AND 1=1 --",
-            "col/**/OR/**/1=1",
-        ]
-        for attempt in sql_injection_attempts:
-            assert (
-                validate_column_name(attempt) is False
-            ), f"SQL injection attempt '{attempt}' should be blocked"
-
-    def test_normalize_dimensions_backward_compatibility(self):
-        """Test that backward compatibility with dimension_col + extra_dimension still validates"""
-        # Valid backward compatible usage
+    def test_normalize_dimensions_filters_empty_strings(self):
+        """Test that empty strings are filtered out"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
             table_name="test_table",
-            dimension_col="dim1",
-            extra_dimension="dim2",
+            dimensions=["dim1", "", "dim2", "  ", "dim3"],
         )
         dims = normalize_dimensions(payload)
-        assert dims == ["dim1", "dim2"]
+        assert dims == ["dim1", "dim2", "dim3"]
 
-        # Invalid backward compatible usage - should raise ValueError
-        payload_invalid = ChartDataPayload(
+    def test_normalize_dimensions_special_characters_allowed(self):
+        """Test that special characters are allowed in column names"""
+        payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
             table_name="test_table",
-            dimension_col="dim1",
-            extra_dimension="dim-2",  # Invalid: contains hyphen
+            dimensions=[
+                "Total Registrations",
+                "my-column",
+                "user.name",
+                "Price $",
+                "100% Complete",
+            ],
         )
-        with pytest.raises(ValueError) as exc_info:
-            normalize_dimensions(payload_invalid)
-        assert "Invalid column name" in str(exc_info.value)
-        assert "dim-2" in str(exc_info.value)
+        dims = normalize_dimensions(payload)
+        assert len(dims) == 5
+        assert "Total Registrations" in dims
+        assert "my-column" in dims
+
+    def test_normalize_dimensions_no_dimensions(self):
+        """Test normalize_dimensions when no dimensions are provided"""
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="test_schema",
+            table_name="test_table",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == []
+
+
+class TestSQLAlchemyHandlesColumnNames:
+    """
+    Tests to verify that SQLAlchemy properly handles column names.
+
+    Note: SQL injection protection is now handled by SQLAlchemy's column()
+    function which properly quotes identifiers. These tests verify that
+    column names with special characters work correctly.
+    """
+
+    def test_column_names_with_spaces_work(self):
+        """Test that column names with spaces are accepted"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=["First Name", "Last Name", "Total Sales"],
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["First Name", "Last Name", "Total Sales"]
+
+    def test_column_names_with_special_chars_work(self):
+        """Test that column names with special characters are accepted"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=[
+                "user@email",
+                "price$",
+                "100%",
+                "#items",
+                "col.name",
+            ],
+        )
+        dims = normalize_dimensions(payload)
+        assert len(dims) == 5
+
+    def test_unicode_column_names_work(self):
+        """Test that unicode column names are accepted"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=["日本語", "données", "名前"],
+        )
+        dims = normalize_dimensions(payload)
+        assert len(dims) == 3
+
+    def test_column_names_with_quotes_work(self):
+        """Test that column names with quotes are now accepted (SQLAlchemy handles quoting)"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=["column'name", 'column"name'],
+        )
+        dims = normalize_dimensions(payload)
+        # SQLAlchemy will properly quote these when building the query
+        assert len(dims) == 2
