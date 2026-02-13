@@ -238,8 +238,8 @@ class TestDimensionLimitValidation:
 class TestSQLAlchemyHandlesColumnNames:
     """
     Tests to verify that SQLAlchemy properly handles column names.
-    
-    Note: SQL injection protection is now handled by SQLAlchemy's column() 
+
+    Note: SQL injection protection is now handled by SQLAlchemy's column()
     function which properly quotes identifiers. These tests verify that
     column names with special characters work correctly.
     """
