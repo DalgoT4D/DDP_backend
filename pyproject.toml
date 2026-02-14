@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "about-time==3.1.1",
     "agate==1.7.0",
+    "aiohttp>=3.13.2",
     "aiosqlite==0.18.0",
     "alembic==1.10.2",
     "alive-progress==2.3.1",
@@ -162,6 +163,7 @@ dependencies = [
     "nodeenv==1.9.1",
     "numpy>=2.2.4",
     "oauthlib==3.2.2",
+    "openai>=2.7.2",
     "ordered-set==4.1.0",
     "orjson==3.8.8",
     "packaging==23.0",
