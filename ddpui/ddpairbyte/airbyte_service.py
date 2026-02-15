@@ -1044,8 +1044,8 @@ def parse_job_info(jobinfo: dict) -> dict:
         "recordsCommitted": 0,
         "totalTimeInSeconds": 0,
         "resetConfig": jobinfo["job"].get("resetConfig", None),
+        "attempt_no": 0,
     }
-    retval["attempt_no"] = 0
     for attempt in jobinfo["attempts"]:
         if attempt["status"] == "succeeded":
             retval["attempt_no"] = attempt["id"]
@@ -1102,7 +1102,6 @@ def get_connection_catalog(connection_id: str, **kwargs) -> dict:
 
 def get_current_airbyte_version():
     """Fetch airbyte version"""
-
     res = abreq("instance_configuration", method="GET")
     print(res, "AIRBYTE RESPONSE")
     if "version" not in res:
