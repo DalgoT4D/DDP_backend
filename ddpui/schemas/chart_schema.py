@@ -141,6 +141,9 @@ class TransformDataForChart(Schema):
 
     customizations: Optional[dict] = None
 
+    # Time grain for formatting axis labels
+    time_grain: Optional[str] = None
+
 
 class GeoJSONListResponse(Schema):
     """Schema for GeoJSON list response"""

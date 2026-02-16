@@ -61,6 +61,54 @@ def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgr
     return column_expr
 
 
+def format_time_grain_label(value: Any, time_grain: str) -> str:
+    """
+    Format time-truncated values into human-readable labels for chart axes.
+
+    Args:
+        value: The time value (datetime, date, or string)
+        time_grain: The time grain used ('year', 'month', 'day', 'hour', 'minute', 'second')
+
+    Returns:
+        Formatted string for display on chart axis
+    """
+    if value is None:
+        return "Unknown"
+
+    # Convert to datetime if it's a string
+    if isinstance(value, str):
+        try:
+            # Try to parse common datetime formats
+            if "T" in value or " " in value:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            else:
+                dt = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return str(value)  # Return as-is if parsing fails
+    elif isinstance(value, date) and not isinstance(value, datetime):
+        dt = datetime.combine(value, datetime.min.time())
+    elif isinstance(value, datetime):
+        dt = value
+    else:
+        return str(value)  # Return as-is for other types
+
+    # Format based on time grain
+    if time_grain == "year":
+        return dt.strftime("%Y")
+    elif time_grain == "month":
+        return dt.strftime("%b %Y")  # "Jan 2024"
+    elif time_grain == "day":
+        return dt.strftime("%b %d, %Y")  # "Jan 15, 2024"
+    elif time_grain == "hour":
+        return dt.strftime("%b %d, %Y %H:00")  # "Jan 15, 2024 14:00"
+    elif time_grain == "minute":
+        return dt.strftime("%b %d, %Y %H:%M")  # "Jan 15, 2024 14:30"
+    elif time_grain == "second":
+        return dt.strftime("%b %d, %Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
+    else:
+        return str(value)  # Default fallback
+
+
 def get_pagination_params(payload: ChartDataPayload):
     """
     Extract pagination parameters from payload.
@@ -127,10 +175,13 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
 
         return dims
     else:
-        # For other charts, return single dimension if present
+        # For other charts, include both dimension_col and extra_dimension if present
+        dims = []
         if payload.dimension_col:
-            return [payload.dimension_col]
-        return []
+            dims.append(payload.dimension_col)
+        if payload.extra_dimension:
+            dims.append(payload.extra_dimension)
+        return dims
 
 
 logger = CustomLogger("ddpui.charts")
@@ -220,8 +271,9 @@ def build_multi_metric_query(
 
         dimension_column = column(dim_col)
 
-        # Apply time grain if specified and warehouse type is available
-        if time_grain and org_warehouse:
+        # Apply time grain ONLY to the primary dimension column (dimension_col), not to extra_dimension
+        is_primary_dimension = dim_col == payload.dimension_col
+        if time_grain and org_warehouse and is_primary_dimension:
             warehouse_type = org_warehouse.wtype.lower()
             dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
             # Add label to preserve original column name for data access
@@ -232,8 +284,8 @@ def build_multi_metric_query(
 
         query_builder.add_column(dimension_column)
 
-        # Group by dimension column (use the same time grain logic)
-        if time_grain and org_warehouse:
+        # Group by dimension column (apply time grain logic only to primary dimension)
+        if time_grain and org_warehouse and is_primary_dimension:
             # When time grain is applied, group by the time grain expression (without label)
             warehouse_type = org_warehouse.wtype.lower()
             time_grain_expr = apply_time_grain(column(dim_col), time_grain, warehouse_type)
@@ -834,6 +886,14 @@ def transform_data_for_chart(
 
             x_axis_data = sorted(list(x_values))
 
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
+
             series_data = []
             legend_data = []
 
@@ -863,8 +923,8 @@ def transform_data_for_chart(
                     legend_data.append(dimension)
 
             return {
-                "xAxisData": x_axis_data,  # For vertical bars
-                "yAxisData": x_axis_data,  # For horizontal bars
+                "xAxisData": formatted_x_axis,  # For vertical bars
+                "yAxisData": formatted_x_axis,  # For horizontal bars
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -876,6 +936,14 @@ def transform_data_for_chart(
                 )
                 for row in results
             ]
+
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
 
             # Create series for each dimension-metric combination
             series_data = []
@@ -900,8 +968,8 @@ def transform_data_for_chart(
                 legend_data.append(display_name)
 
             return {
-                "xAxisData": x_axis_data,  # For vertical bars
-                "yAxisData": x_axis_data,  # For horizontal bars
+                "xAxisData": formatted_x_axis,  # For vertical bars
+                "yAxisData": formatted_x_axis,  # For horizontal bars
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -1016,6 +1084,14 @@ def transform_data_for_chart(
 
             x_axis_data = sorted(list(x_values))
 
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
+
             series_data = []
             legend_data = []
 
@@ -1045,7 +1121,7 @@ def transform_data_for_chart(
                     legend_data.append(dimension)
 
             return {
-                "xAxisData": x_axis_data,
+                "xAxisData": formatted_x_axis,  # Use formatted labels for display
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -1057,6 +1133,14 @@ def transform_data_for_chart(
                 )
                 for row in results
             ]
+
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
 
             series_data = []
             legend_data = []
@@ -1078,7 +1162,7 @@ def transform_data_for_chart(
                 legend_data.append(display_name)
 
             return {
-                "xAxisData": x_axis_data,
+                "xAxisData": formatted_x_axis,  # Use formatted labels for display
                 "series": series_data,
                 "legend": legend_data,
             }
