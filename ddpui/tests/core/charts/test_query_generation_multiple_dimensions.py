@@ -285,7 +285,7 @@ class TestQueryGenerationEdgeCases:
         # (check that we don't have empty GROUP BY clauses)
 
     def test_query_with_time_grain_and_multiple_dimensions(self):
-        """Test query generation with time grain and multiple dimensions"""
+        """Test query generation with time grain and multiple dimensions - table charts should ignore time grain"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="public",
@@ -304,19 +304,28 @@ class TestQueryGenerationEdgeCases:
         print(f"\n=== TEST: test_query_with_time_grain_and_multiple_dimensions ===")
         print(f"Compiled Query:\n{compiled_query}\n")
 
-        # Verify time grain is applied to date_column
-        # PostgreSQL uses DATE_TRUNC for time grain
-        assert "DATE_TRUNC" in compiled_query.upper() or "date_trunc" in compiled_query.lower()
+        # For table charts, time grain should be IGNORED
+        # Table charts should not apply DATE_TRUNC even if time_grain is provided
+        assert (
+            "DATE_TRUNC" not in compiled_query.upper()
+            and "date_trunc" not in compiled_query.lower()
+        )
 
-        # Verify region is still included
+        # Verify both dimensions are included as-is (without time grain transformation)
+        assert "date_column" in compiled_query.lower()
         assert "region" in compiled_query.lower()
 
-        # Verify GROUP BY includes both time grain expression and region
+        # Verify revenue metric is included
+        assert "revenue" in compiled_query.lower()
+        assert "sum" in compiled_query.lower() or "SUM" in compiled_query
+
+        # Verify GROUP BY includes both dimensions without time grain transformation
         group_by_section = (
             compiled_query.upper().split("GROUP BY")[-1]
             if "GROUP BY" in compiled_query.upper()
             else ""
         )
+        assert "date_column" in group_by_section.lower() or "DATE_COLUMN" in group_by_section
         assert "region" in group_by_section.lower() or "REGION" in group_by_section
 
 
