@@ -138,45 +138,25 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     Returns list of dimension column names.
     Note: SQL injection protection is handled by SQLAlchemy's column() quoting.
     """
+    final_dims = []
     if payload.chart_type == "table":
         # For table charts, use dimensions list if available
         if payload.dimensions:
             # Filter out empty strings
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
-            if filtered_dims:
-                # Validate dimension names
-                is_valid, error_msg = validate_dimension_names(filtered_dims)
-                if not is_valid:
-                    raise ValueError(error_msg)
-                return filtered_dims
-            else:
-                logger.warning(
-                    f"normalize_dimensions - dimensions array was provided but all were empty: {payload.dimensions}"
-                )
-        # Backward compatibility: convert dimension_col + extra_dimension to list
-        dims = []
-        if payload.dimension_col:
-            dims.append(payload.dimension_col)
-        if payload.extra_dimension:
-            dims.append(payload.extra_dimension)
+            final_dims = filtered_dims if filtered_dims else []
 
-        if not dims:
-            logger.warning(f"normalize_dimensions - No dimensions found in payload for table chart")
-        else:
-            # Validate dimension names
-            is_valid, error_msg = validate_dimension_names(dims)
-            if not is_valid:
-                raise ValueError(error_msg)
-
-        return dims
     else:
         # For other charts, include both dimension_col and extra_dimension if present
-        dims = []
         if payload.dimension_col:
-            dims.append(payload.dimension_col)
+            final_dims.append(payload.dimension_col)
         if payload.extra_dimension:
-            dims.append(payload.extra_dimension)
-        return dims
+            final_dims.append(payload.extra_dimension)
+
+    if not final_dims:
+        logger.warning(f"No valid dimensions found {payload.dimensions}")
+
+    return final_dims
 
 
 logger = CustomLogger("ddpui.charts")
