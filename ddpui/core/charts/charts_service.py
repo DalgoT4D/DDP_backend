@@ -100,11 +100,11 @@ def format_time_grain_label(value: Any, time_grain: str) -> str:
     elif time_grain == "day":
         return dt.strftime("%b %d, %Y")  # "Jan 15, 2024"
     elif time_grain == "hour":
-        return dt.strftime("%b %d, %Y %H:00")  # "Jan 15, 2024 14:00"
+        return dt.strftime("%b %d,%Y %H:00")  # "Jan 15, 2024 14:00"
     elif time_grain == "minute":
-        return dt.strftime("%b %d, %Y %H:%M")  # "Jan 15, 2024 14:30"
+        return dt.strftime("%b %d,%Y %H:%M")  # "Jan 15, 2024 14:30"
     elif time_grain == "second":
-        return dt.strftime("%b %d, %Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
+        return dt.strftime("%b %d,%Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
     else:
         return str(value)  # Default fallback
 
@@ -264,35 +264,31 @@ def build_multi_metric_query(
     # Add all dimension columns with time grain if specified
     time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
 
-    for dim_col in dimensions:
-        if not dim_col or not dim_col.strip():
-            logger.warning(f"Skipping empty dimension column: {dim_col}")
+    warehouse_type = org_warehouse.wtype.lower() if org_warehouse else None
+
+    for dim_col_str in dimensions:
+        if not dim_col_str or not dim_col_str.strip():
+            logger.warning(f"Skipping empty dimension column: {dim_col_str}")
             continue
 
-        dimension_column = column(dim_col)
+        dimension_col_clause = column(dim_col_str)
+        is_primary_dimension = dim_col_str == payload.dimension_col
+        is_time_grain_applicable = time_grain and warehouse_type and is_primary_dimension
 
-        # Apply time grain ONLY to the primary dimension column (dimension_col), not to extra_dimension
-        is_primary_dimension = dim_col == payload.dimension_col
-        if time_grain and org_warehouse and is_primary_dimension:
-            warehouse_type = org_warehouse.wtype.lower()
-            dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
-            # Add label to preserve original column name for data access
-            dimension_column = dimension_column.label(dim_col)
+        # select & groupby dimension (apply time grain logic only to primary dimension)
+        if is_time_grain_applicable:
+            time_grain_dim_col_expression = apply_time_grain(
+                dimension_col_clause, time_grain, warehouse_type
+            )
+            # add label to preserve original column name for data access and grouping
+            time_grain_dim_col_clause = time_grain_dim_col_expression.label(dim_col_str)
+            query_builder.add_column(time_grain_dim_col_clause)
+            query_builder.group_cols_by(time_grain_dim_col_clause)
         else:
             # Even without time grain, ensure we have a label for consistent key access
-            dimension_column = dimension_column.label(dim_col)
-
-        query_builder.add_column(dimension_column)
-
-        # Group by dimension column (apply time grain logic only to primary dimension)
-        if time_grain and org_warehouse and is_primary_dimension:
-            # When time grain is applied, group by the time grain expression (without label)
-            warehouse_type = org_warehouse.wtype.lower()
-            time_grain_expr = apply_time_grain(column(dim_col), time_grain, warehouse_type)
-            query_builder.group_cols_by(time_grain_expr)
-        else:
-            # Normal grouping by column name
-            query_builder.group_cols_by(dim_col)
+            dimension_col_clause_labeled = dimension_col_clause.label(dim_col_str)
+            query_builder.add_column(dimension_col_clause_labeled)
+            query_builder.group_cols_by(dim_col_str)
 
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
@@ -762,6 +758,8 @@ def execute_query(
     compiled_stmt = sql_stmt.compile(
         bind=warehouse_client.engine, compile_kwargs={"literal_binds": True}
     )
+
+    logger.debug(f"Executing SQL: {compiled_stmt}")
 
     # Execute query
     results: list[dict] = warehouse_client.execute(compiled_stmt)
