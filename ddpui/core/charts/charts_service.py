@@ -316,7 +316,7 @@ def build_multi_metric_query(
             )
 
     # Add default ordering by time grain column when time grain is applied
-    if time_grain and org_warehouse and dimensions:
+    if time_grain and dimensions:
         # Order by the first dimension column (which will have time grain applied) in ascending order (chronological)
         query_builder.order_cols_by([(dimensions[0], "asc")])
 
