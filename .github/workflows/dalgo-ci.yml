@@ -46,7 +46,7 @@ jobs:
         run: uv run pre-commit run --all-files
 
       - name: Start Redis
-        uses: supercharge/redis-github-action@1.5.0
+        uses: supercharge/redis-github-action@1.8.1
         with:
           redis-version: ${{ matrix.redis-version }}
 
