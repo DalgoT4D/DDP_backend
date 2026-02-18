@@ -178,9 +178,11 @@ class ChartValidator:
                 "comma",
                 "percentage",
                 "currency",
+                "indian",
+                "international",
             ]:
                 raise ChartValidationError(
-                    f"Invalid number format '{number_format}'. Must be one of: default, comma, percentage, currency"
+                    f"Invalid number format '{number_format}'. Must be one of: default, comma, percentage, currency,indian, international"
                 )
 
             decimal_places = customizations.get("decimalPlaces")
@@ -222,9 +224,9 @@ class ChartValidator:
             customizations = extra_config.get("customizations", {})
             if "numberFormat" in customizations:
                 number_format = customizations["numberFormat"]
-                if number_format not in ["default", "comma", "percentage", "currency"]:
+                if number_format not in ["default", "comma", "percentage", "currency", "indian", "international"]:
                     raise ChartValidationError(
-                        f"Invalid number format '{number_format}'. Must be one of: default, comma, percentage, currency"
+                        f"Invalid number format '{number_format}'. Must be one of: default, comma, percentage, currency, indian, international"
                     )
 
             return True, None
