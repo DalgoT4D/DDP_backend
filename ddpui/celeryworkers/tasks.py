@@ -11,6 +11,7 @@ from django.core.management import call_command
 from django.utils.text import slugify
 
 import yaml
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 from celery.schedules import crontab
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
@@ -144,7 +145,8 @@ def clone_github_repo(
         logger.info("created project_dir %s", org_dir)
 
     elif dbtrepo_dir.exists():
-        shutil.rmtree(str(dbtrepo_dir))
+        storage = StorageFactory.get_storage_adapter()
+        storage.delete_file(str(dbtrepo_dir))
 
     try:
         GitManager.clone(org_dir, gitrepo_url, "dbtrepo", gitrepo_access_token)
@@ -403,12 +405,13 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         )
 
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
-        profile_filename = profile_dirname / "profiles.yml"
-        logger.info("writing dbt profile to " + str(profile_filename))
-        with open(profile_filename, "w", encoding="utf-8") as f:
-            yaml.safe_dump(profile, f)
+        storage = StorageFactory.get_storage_adapter()
+        profile_dirname = str(Path(dbt_project_params.project_dir) / "profiles")
+        storage.create_directory(profile_dirname)
+        profile_filename = str(Path(dbt_project_params.project_dir) / "profiles" / "profiles.yml")
+        logger.info("writing dbt profile to " + profile_filename)
+        profile_content = yaml.safe_dump(profile)
+        storage.write_file(profile_filename, profile_content)
 
         # dbt clean
         taskprogress.add({"message": "starting dbt clean", "status": "running"})

@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 from django.utils.text import slugify
 from ddpui.dbt_automation import assets
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 from ddpui.ddpprefect import prefect_service, SECRET, DBTCLIPROFILE
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
 from ddpui.models.org_user import OrgUser
@@ -221,8 +222,9 @@ def delete_dbt_workspace(org: Org):
         org.save()
 
         # remove dbt project dir and OrgDbt model
-        if os.path.exists(dbt.project_dir):
-            shutil.rmtree(dbt.project_dir)
+        storage = StorageFactory.get_storage_adapter()
+        if storage.exists(dbt.project_dir):
+            storage.delete_file(dbt.project_dir)
         dbt.delete()
 
 
@@ -250,18 +252,30 @@ def sync_gitignore_contents(
     If it does not exist, create one with the provided entries.
     """
 
-    gitignore_path = Path(dbt_project_path) / ".gitignore"
+    storage = StorageFactory.get_storage_adapter()
+    gitignore_path = str(Path(dbt_project_path) / ".gitignore")
     existing_entries = set()
 
-    if gitignore_path.exists():
-        with open(gitignore_path, "r", encoding="utf-8") as f:
-            for line in f:
-                existing_entries.add(line.strip())
+    if storage.exists(gitignore_path):
+        content = storage.read_file(gitignore_path)
+        for line in content.splitlines():
+            existing_entries.add(line.strip())
 
-    with open(gitignore_path, "a", encoding="utf-8") as f:
-        for entry in ignore_entries:
-            if entry not in existing_entries:
-                f.write(entry + "\n")
+    # Prepare new content to append
+    new_lines = []
+    for entry in ignore_entries:
+        if entry not in existing_entries:
+            new_lines.append(entry)
+
+    if new_lines:
+        # If file exists, append to existing content, otherwise create new
+        if storage.exists(gitignore_path):
+            existing_content = storage.read_file(gitignore_path)
+            new_content = existing_content + "\n" + "\n".join(new_lines) + "\n"
+        else:
+            new_content = "\n".join(new_lines) + "\n"
+
+        storage.write_file(gitignore_path, new_content)
 
     logger.info(f"Synced .gitignore at {gitignore_path} with new entries.")
 
@@ -304,11 +318,12 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         orgdbt.save()
 
     # this client's dbt setup happens here
-    if dbtrepo_dir.exists():
+    storage = StorageFactory.get_storage_adapter()
+    if storage.exists(str(dbtrepo_dir)):
         raise Exception(f"Project {project_name} already exists")
 
-    if not project_dir.exists():
-        project_dir.mkdir(parents=True, exist_ok=True)
+    if not storage.exists(str(project_dir)):
+        storage.create_directory(str(project_dir))
         logger.info("created project_dir %s", project_dir)
 
     logger.info(f"starting to setup local dbt workspace at {project_dir}")
@@ -328,9 +343,10 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         )
 
         # Delete example models
-        example_models_dir = dbtrepo_dir / "models" / "example"
-        if example_models_dir.exists():
-            shutil.rmtree(example_models_dir)
+        storage = StorageFactory.get_storage_adapter()
+        example_models_dir = str(dbtrepo_dir / "models" / "example")
+        if storage.exists(example_models_dir):
+            storage.delete_file(example_models_dir)
 
     except subprocess.CalledProcessError as e:
         logger.error(f"dbt init failed with {e.returncode}")
@@ -339,21 +355,27 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
     try:
         # copy packages.yml
         logger.info("copying packages.yml from assets")
-        target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+        storage = StorageFactory.get_storage_adapter()
+        target_packages_yml = str(Path(dbtrepo_dir) / "packages.yml")
         source_packages_yml = os.path.abspath(
             os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
         )
-        shutil.copy(source_packages_yml, target_packages_yml)
+        # Read local asset file and write to storage
+        with open(source_packages_yml, "r", encoding="utf-8") as f:
+            content = f.read()
+        storage.write_file(target_packages_yml, content)
 
         # copy all macros with .sql extension from assets
         assets_dir = assets.__path__[0]
 
         for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
             # Get the target path in the project_dir/macros directory
-            target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
+            target_path = str(Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name)
 
-            # Copy the .sql file to the target path
-            shutil.copy(sql_file_path, target_path)
+            # Read local asset file and write to storage
+            with open(sql_file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            storage.write_file(target_path, content)
 
             # Log the creation of the file
             logger.info("created %s", target_path)
@@ -437,12 +459,13 @@ def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
         profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile_block.block_name)[
             "profile"
         ]
-        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
-        profile_filename = profile_dirname / "profiles.yml"
-        logger.info("writing dbt profile to " + str(profile_filename))
-        with open(profile_filename, "w", encoding="utf-8") as f:
-            yaml.safe_dump(profile, f)
+        storage = StorageFactory.get_storage_adapter()
+        profile_dirname = str(Path(dbt_project_params.project_dir) / "profiles")
+        storage.create_directory(profile_dirname)
+        profile_filename = str(Path(dbt_project_params.project_dir) / "profiles" / "profiles.yml")
+        logger.info("writing dbt profile to " + profile_filename)
+        profile_content = yaml.safe_dump(profile)
+        storage.write_file(profile_filename, profile_content)
     except Exception as err:
         logger.error(f"failed to write profiles.yml: {str(err)}")
         raise Exception(f"Something went wrong while writing profiles.yml: {str(err)}") from err
@@ -472,14 +495,16 @@ def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
         raise Exception(f"Something went wrong while generating manifest.json: {str(err)}")
 
     # make sure the manifest.json file exists
+    storage = StorageFactory.get_storage_adapter()
     project_dir: Path = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    manifest_path = str(project_dir / "target" / "manifest.json")
 
-    if not os.path.exists(project_dir / "target" / "manifest.json"):
+    if not storage.exists(manifest_path):
         logger.error("dbt compile did not generate manifest.json")
         raise Exception("dbt compile did not generate manifest.json")
 
-    with open(project_dir / "target" / "manifest.json", "r") as manifest_file:
-        manifest_json = json.load(manifest_file)
+    manifest_content = storage.read_file(manifest_path)
+    manifest_json = json.loads(manifest_content)
 
     return manifest_json
 
@@ -555,11 +580,12 @@ def parse_dbt_manifest_to_canvas(
     logger.info(f"Starting manifest parsing for orgdbt {orgdbt.project_dir}")
 
     # Load the manifest.json from the target folder if it exists
+    storage = StorageFactory.get_storage_adapter()
     dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    manifest_json_path = dbt_repo_dir / "target" / "manifest.json"
-    if manifest_json_path.exists():
-        with open(manifest_json_path, "r") as manifest_file:
-            manifest_json = json.load(manifest_file)
+    manifest_json_path = str(dbt_repo_dir / "target" / "manifest.json")
+    if storage.exists(manifest_json_path):
+        manifest_content = storage.read_file(manifest_json_path)
+        manifest_json = json.loads(manifest_content)
 
     # Overwrite/generate manifest if not provided or if we are refreshing the manifest
     if manifest_json is None or refresh:
@@ -846,8 +872,9 @@ def sync_remote_dbtproject_to_canvas(org: Org, orgdbt: OrgDbt, warehouse_obj: Or
     """
     logger.info(f"Syncing remote dbt project to canvas for org: {org.slug}")
 
+    storage = StorageFactory.get_storage_adapter()
     dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    if not dbt_repo_dir.exists():
+    if not storage.exists(str(dbt_repo_dir)):
         raise Exception("DBT repo directory does not exist")
 
     pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
@@ -1050,8 +1077,9 @@ def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual
     orgdbt: OrgDbt = org.dbt
 
     # Get dbt repo directory
+    storage = StorageFactory.get_storage_adapter()
     dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    if not dbt_repo_dir.exists():
+    if not storage.exists(str(dbt_repo_dir)):
         raise Exception("DBT repo directory does not exist")
 
     # Use the provided actual_pat (already resolved in API layer)
@@ -1137,9 +1165,11 @@ def switch_git_repository(
 
     # Clean existing references
     try:
-        if dbt_project_dir.exists():
-            shutil.rmtree(dbt_project_dir)
-            logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+        storage = StorageFactory.get_storage_adapter()
+        dbt_project_dir_str = str(dbt_project_dir)
+        if storage.exists(dbt_project_dir_str):
+            storage.delete_file(dbt_project_dir_str)
+            logger.info(f"Removed existing dbt directory: {dbt_project_dir_str}")
 
         # remove canvas nodes and edges related to the dbt project
         CanvasNode.objects.filter(orgdbt=orgdbt).delete()

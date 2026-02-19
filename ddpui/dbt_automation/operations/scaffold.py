@@ -10,6 +10,7 @@ import subprocess, sys
 from ddpui.dbt_automation.utils.warehouseclient import get_client
 from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
 from ddpui.dbt_automation import assets
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 
 
 basicConfig(level=INFO)
@@ -18,16 +19,18 @@ logger = getLogger()
 
 def scaffold(config: dict, warehouse: WarehouseInterface, project_dir: str):
     """scaffolds a dbt project"""
+    storage = StorageFactory.get_storage_adapter()
+
     project_name = config["project_name"]
     default_schema = config["default_schema"]
-    project_dir = Path(project_dir) / project_name
+    project_dir = str(Path(project_dir) / project_name)
 
-    if os.path.exists(project_dir):
+    if storage.exists(project_dir):
         print("directory exists: %s", project_dir)
         return
 
     logger.info("mkdir %s", project_dir)
-    os.makedirs(project_dir)
+    storage.create_directory(project_dir)
 
     for subdir in [
         # "analyses",
@@ -39,11 +42,14 @@ def scaffold(config: dict, warehouse: WarehouseInterface, project_dir: str):
         "target",
         "tests",
     ]:
-        (Path(project_dir) / subdir).mkdir()
-        logger.info("created %s", str(Path(project_dir) / subdir))
+        subdir_path = str(Path(project_dir) / subdir)
+        storage.create_directory(subdir_path)
+        logger.info("created %s", subdir_path)
 
-    (Path(project_dir) / "models" / "staging").mkdir()
-    (Path(project_dir) / "models" / "intermediate").mkdir()
+    staging_dir = str(Path(project_dir) / "models" / "staging")
+    intermediate_dir = str(Path(project_dir) / "models" / "intermediate")
+    storage.create_directory(staging_dir)
+    storage.create_directory(intermediate_dir)
 
     # copy all .sql files from assets/ to project_dir/macros
     # create if the file is not present in project_dir/macros
@@ -52,15 +58,17 @@ def scaffold(config: dict, warehouse: WarehouseInterface, project_dir: str):
     # loop over all sql macros with .sql extension
     for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
         # Get the target path in the project_dir/macros directory
-        target_path = Path(project_dir) / "macros" / Path(sql_file_path).name
+        target_path = str(Path(project_dir) / "macros" / Path(sql_file_path).name)
 
-        # Copy the .sql file to the target path
-        shutil.copy(sql_file_path, target_path)
+        # Read the local asset file and write to storage
+        with open(sql_file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        storage.write_file(target_path, content)
 
         # Log the creation of the file
         logger.info("created %s", target_path)
 
-    dbtproject_filename = Path(project_dir) / "dbt_project.yml"
+    dbtproject_filename = str(Path(project_dir) / "dbt_project.yml")
     PROJECT_TEMPLATE = Template(
         """
 name: '$project_name'
@@ -78,16 +86,14 @@ clean-targets:
 """
     )
     dbtproject_template = PROJECT_TEMPLATE.substitute({"project_name": project_name})
-    with open(dbtproject_filename, "w", encoding="utf-8") as dbtprojectfile:
-        dbtprojectfile.write(dbtproject_template)
-        logger.info("wrote %s", dbtproject_filename)
+    storage.write_file(dbtproject_filename, dbtproject_template)
+    logger.info("wrote %s", dbtproject_filename)
 
-    dbtpackages_filename = Path(project_dir) / "packages.yml"
-    with open(dbtpackages_filename, "w", encoding="utf-8") as dbtpackgesfile:
-        yaml.safe_dump(
-            {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.1.1"}]},
-            dbtpackgesfile,
-        )
+    dbtpackages_filename = str(Path(project_dir) / "packages.yml")
+    packages_content = yaml.safe_dump(
+        {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.1.1"}]}
+    )
+    storage.write_file(dbtpackages_filename, packages_content)
 
     # create a python virtual environment in project directory
     subprocess.call([sys.executable, "-m", "venv", Path(project_dir) / "venv"])

@@ -4,15 +4,18 @@ import re
 import os
 from pathlib import Path
 
+from ddpui.utils.file_storage.storage_factory import StorageFactory
+
 
 def create_single_html(orgslug: str) -> str:
     """put the manifest and catalog into the generated index and return"""
+    storage = StorageFactory.get_storage_adapter()
     dbttargetdir = Path(os.getenv("CLIENTDBT_ROOT")) / orgslug / "dbtrepo" / "target"
-    with open(os.path.join(dbttargetdir, "index.html"), "r", encoding="utf-8") as indexfile:
-        content_index = indexfile.read()
 
-    with open(os.path.join(dbttargetdir, "manifest.json"), "r", encoding="utf-8") as manifestfile:
-        json_manifest = json.load(manifestfile)
+    content_index = storage.read_file(str(dbttargetdir / "index.html"))
+
+    manifest_content = storage.read_file(str(dbttargetdir / "manifest.json"))
+    json_manifest = json.loads(manifest_content)
 
     # In the static website there are 2 more projects inside the documentation: dbt and dbt_bigquery
     # This is technical information that we don't want to provide to our final users, so we drop it
@@ -33,8 +36,8 @@ def create_single_html(orgslug: str) -> str:
                 ):  # match with string that start with '*.<ignore_project>.'
                     del json_manifest[element_type][key]  # delete element
 
-    with open(os.path.join(dbttargetdir, "catalog.json"), "r", encoding="utf-8") as catalogfile:
-        json_catalog = json.load(catalogfile)
+    catalog_content = storage.read_file(str(dbttargetdir / "catalog.json"))
+    json_catalog = json.loads(catalog_content)
 
     # create single docs file in public folder
     search_str = 'o=[i("manifest","manifest.json"+t),i("catalog","catalog.json"+t)]'
