@@ -312,8 +312,8 @@ def fetch_elementary_report(org: Org):
     s3 = boto3.client(
         "s3",
         "ap-south-1",
-        aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
+        aws_access_key_id=os.getenv("S3_AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("S3_AWS_SECRET_ACCESS_KEY"),
     )
     bucket_file_path = make_edr_report_s3_path(org)
     try:

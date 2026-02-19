@@ -43,12 +43,11 @@ from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.models.org_preferences import OrgPreferences
 
-from ddpui.schemas.org_schema import OrgSchema, CreateOrgSchema, CreateFreeTrialOrgSchema
+from ddpui.schemas.org_schema import OrgSchema, CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 
 from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.ddpairbyte import airbytehelpers
-from ddpui.celeryworkers.moretasks import create_free_trial_org_account
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
@@ -562,24 +561,6 @@ def post_organization_v1(request, payload: CreateOrgSchema):
 
     logger.info(f"{orguser.user.email} created new org {org.name}")
     return OrgSchema(name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug)
-
-
-@user_org_router.post("/v1/organizations/free_trial")
-@has_permission(["can_create_org"])
-def post_organization_free_trial(request, payload: CreateFreeTrialOrgSchema):
-    """create a new org with free trial plan and a warehouse/superset with it"""
-    orguser: OrgUser = request.orguser
-
-    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
-    if userattributes is None or userattributes.can_create_orgs is False:
-        raise HttpError(403, "Insufficient permissions for this operation")
-
-    if payload.base_plan != OrgPlanType.FREE_TRIAL:
-        raise HttpError(403, "Only free trial orgs can be created")
-
-    task = create_free_trial_org_account.delay(payload.dict())
-
-    return {"task_id": task.id}
 
 
 @user_org_router.delete("/v1/organizations/warehouses/")
