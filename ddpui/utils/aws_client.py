@@ -119,11 +119,17 @@ class AWSClient:
         aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
         aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 
-        cls._default_boto_session = boto3.Session(
+        if not aws_access_key_id or not aws_secret_access_key:
+            raise ValueError(
+                "Missing default AWS credentials: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY required"
+            )
+
+        session = boto3.Session(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
             region_name=region,
         )
+        cls._default_boto_session = session
         logger.debug(f"Initialized default AWS session for region {region}")
 
     @classmethod
@@ -138,11 +144,12 @@ class AWSClient:
                 "Missing S3 AWS credentials: S3_AWS_ACCESS_KEY_ID and S3_AWS_SECRET_ACCESS_KEY required"
             )
 
-        cls._s3_boto_session = boto3.Session(
+        session = boto3.Session(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
             region_name=region,
         )
+        cls._s3_boto_session = session
         logger.debug(f"Initialized S3 AWS session for region {region}")
 
     @classmethod
@@ -157,16 +164,34 @@ class AWSClient:
                 "Missing SES AWS credentials: SES_ACCESS_KEY_ID and SES_SECRET_ACCESS_KEY required"
             )
 
-        cls._ses_boto_session = boto3.Session(
+        session = boto3.Session(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
             region_name=region,
         )
+        cls._ses_boto_session = session
         logger.debug(f"Initialized SES AWS session for region {region}")
 
     @classmethod
     def reset_instance(cls):
         """Reset all sessions and clients"""
+        # Release any locks that might be held
+        try:
+            if cls._default_lock.locked():
+                cls._default_lock.release()
+        except:
+            pass
+        try:
+            if cls._s3_lock.locked():
+                cls._s3_lock.release()
+        except:
+            pass
+        try:
+            if cls._ses_lock.locked():
+                cls._ses_lock.release()
+        except:
+            pass
+
         cls._default_boto_session = None
         cls._s3_boto_session = None
         cls._ses_boto_session = None
