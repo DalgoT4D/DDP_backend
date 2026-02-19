@@ -6,9 +6,9 @@ import subprocess
 from uuid import uuid4
 from datetime import datetime
 import yaml
-import boto3
 import boto3.exceptions
 from ninja.errors import HttpError
+from ddpui.utils.aws_client import AWSClient
 from django.utils import timezone as djantotimezone
 
 from ddpui import settings
@@ -309,12 +309,7 @@ def fetch_elementary_report(org: Org):
     if not os.path.exists(project_dir / "elementary_profiles"):
         return "set up elementary profile first", None
 
-    s3 = boto3.client(
-        "s3",
-        "ap-south-1",
-        aws_access_key_id=os.getenv("S3_AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("S3_AWS_SECRET_ACCESS_KEY"),
-    )
+    s3 = AWSClient.get_instance("s3", "s3")
     bucket_file_path = make_edr_report_s3_path(org)
     try:
         s3response = s3.get_object(
