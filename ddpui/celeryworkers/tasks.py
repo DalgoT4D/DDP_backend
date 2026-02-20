@@ -160,6 +160,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             org, orgdbt
         )
 
+        # TODO: we can't run this on s3. It needs to be a local subprocess
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
         storage = StorageFactory.get_storage_adapter()
         profile_dirname = str(Path(dbt_project_params.project_dir) / "profiles")
