@@ -19,8 +19,6 @@ from ddpui.api.dbt_api import (
     put_dbt_schema_v1,
     get_transform_type,
     post_run_dbt_commands,
-    post_dbt_workspace,
-    put_dbt_github,
     put_connect_git_remote,
     get_elementary_setup_status,
     get_check_dbt_files,
@@ -161,121 +159,6 @@ def test_seed_data(seed_db):
     assert Role.objects.count() == 5
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
-
-
-def test_post_dbt_workspace(orguser):
-    """
-    passes an org with an orgdbt
-    verifies that the orgdbt is deleted
-    ensures that the celery setup task is called
-    """
-    request = mock_request(orguser)
-    orgdbt = OrgDbt.objects.create()
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-
-    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
-    payload = OrgDbtSchema(
-        profile=dbtprofile,
-        gitrepoUrl="gitrepoUrl",
-    )
-
-    mocked_task = Mock()
-    mocked_task.id = "task-id"
-    with patch(
-        "ddpui.celeryworkers.tasks.setup_dbtworkspace.delay", return_value=mocked_task
-    ) as delay, patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True):
-        post_dbt_workspace(request, payload)
-        delay.assert_called_once_with(orguser.org.id, payload.dict())
-        assert orguser.org.dbt is None
-
-
-def test_put_dbt_github(orguser):
-    """
-    verifies that the orgdbt is updated with the new parameters
-    verifies that the celery task is called with the right parameters
-    """
-    request = mock_request(orguser)
-    orgdbt = OrgDbt.objects.create()
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-    request.orguser.org.slug = "org-slug"
-
-    payload = OrgDbtGitHub(gitrepoUrl="new-url", gitrepoAccessToken="new-access-token")
-
-    OrgPrefectBlockv1.objects.create(
-        org=request.orguser.org,
-        block_type=SECRET,
-        block_name=f"{request.orguser.org.slug}-git-pull-url",
-    )
-
-    mocked_task = Mock()
-    mocked_task.id = "task-id"
-    mock_secret_name = "gitrepoAccessToken-test-secret"
-    with patch(
-        "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
-    ) as delay, patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True), patch(
-        "ddpui.ddpprefect.prefect_service.upsert_secret_block"
-    ), patch(
-        "ddpui.api.dbt_api.secretsmanager.save_github_pat", return_value=mock_secret_name
-    ):
-        put_dbt_github(request, payload)
-        delay.assert_called_once_with(
-            "org-slug",
-            "new-url",
-            mock_secret_name,
-            os.getenv("CLIENTDBT_ROOT") + "/org-slug",
-            None,
-            False,
-        )
-        assert request.orguser.org.dbt.gitrepo_url == "new-url"
-        assert request.orguser.org.dbt.gitrepo_access_token_secret == mock_secret_name
-
-
-def test_put_dbt_github_with_elementary_setup(orguser):
-    """
-    verifies that when elementary is already set up and we update the git repo URL,
-    the clone_github_repo task is called with setup_elementary=True
-    """
-    request = mock_request(orguser)
-    orgdbt = OrgDbt.objects.create()
-    request.orguser.org.dbt = orgdbt
-    request.orguser.org.save()
-    request.orguser.org.slug = "org-slug"
-
-    payload = OrgDbtGitHub(gitrepoUrl="new-url", gitrepoAccessToken="new-access-token")
-
-    OrgPrefectBlockv1.objects.create(
-        org=request.orguser.org,
-        block_type=SECRET,
-        block_name=f"{request.orguser.org.slug}-git-pull-url",
-    )
-
-    mocked_task = Mock()
-    mocked_task.id = "task-id"
-    mock_secret_name = "gitrepoAccessToken-test-secret"
-
-    with patch(
-        "ddpui.celeryworkers.tasks.clone_github_repo.delay", return_value=mocked_task
-    ) as delay, patch("ddpui.api.dbt_api.dbt_service.check_repo_exists", return_value=True), patch(
-        "ddpui.ddpprefect.prefect_service.upsert_secret_block"
-    ), patch(
-        "ddpui.api.dbt_api.elementary_service.elementary_setup_status",
-        return_value={"status": "set-up"},
-    ), patch(
-        "ddpui.api.dbt_api.secretsmanager.save_github_pat", return_value=mock_secret_name
-    ):
-        put_dbt_github(request, payload)
-        delay.assert_called_once_with(
-            "org-slug",
-            "new-url",
-            mock_secret_name,
-            os.getenv("CLIENTDBT_ROOT") + "/org-slug",
-            None,
-            True,
-        )
-        assert request.orguser.org.dbt.gitrepo_url == "new-url"
-        assert request.orguser.org.dbt.gitrepo_access_token_secret == mock_secret_name
 
 
 def test_dbt_delete_no_org(orguser):

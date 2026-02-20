@@ -6,11 +6,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
-from ddpui.celeryworkers.tasks import (
-    clone_github_repo,
-    run_dbt_commands,
-    setup_dbtworkspace,
-)
+from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.models.tasks import (
     TaskProgressHashPrefix,
 )
@@ -41,116 +37,6 @@ from ddpui.schemas.org_task_schema import TaskParameters
 
 dbt_router = Router()
 logger = CustomLogger("ddpui")
-
-
-@dbt_router.post("/workspace/", deprecated=True)
-@has_permission(["can_create_dbt_workspace"])
-def post_dbt_workspace(request, payload: OrgDbtSchema):
-    """Setup the client git repo and install a virtual env inside it to run dbt"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    if org.dbt is not None:
-        org.dbt.delete()
-        org.dbt = None
-        org.save()
-
-    repo_exists = dbt_service.check_repo_exists(payload.gitrepoUrl, payload.gitrepoAccessToken)
-
-    if not repo_exists:
-        raise HttpError(400, "Github repository does not exist")
-
-    task = setup_dbtworkspace.delay(org.id, payload.dict())
-
-    return {"task_id": task.id}
-
-
-@dbt_router.put("/github/", deprecated=True)
-@has_permission(["can_edit_dbt_workspace"])
-def put_dbt_github(request, payload: OrgDbtGitHub):
-    """Setup the client git repo and install a virtual env inside it to run dbt"""
-    orguser: OrgUser = request.orguser
-    org = orguser.org
-    orgdbt = org.dbt
-    if orgdbt is None:
-        raise HttpError(400, "Create a dbt workspace first")
-
-    repo_exists = dbt_service.check_repo_exists(payload.gitrepoUrl, payload.gitrepoAccessToken)
-
-    if not repo_exists:
-        raise HttpError(400, "Github repository does not exist")
-
-    orgdbt.gitrepo_url = payload.gitrepoUrl
-
-    # ignore if token is *******
-    if set(payload.gitrepoAccessToken.strip()) == set("*"):
-        pass
-
-    # if token is empty, delete the secret block
-    elif payload.gitrepoAccessToken in [None, ""]:
-        block_name = f"{orguser.org.slug}-git-pull-url"
-        secret_block = OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=SECRET, block_name=block_name
-        ).first()
-        if secret_block:
-            prefect_service.delete_secret_block(secret_block.block_id)
-            secret_block.delete()
-
-        # remove from secrets manager
-        if orgdbt.gitrepo_access_token_secret:
-            secretsmanager.delete_github_pat(orgdbt.gitrepo_access_token_secret)
-            orgdbt.gitrepo_access_token_secret = None
-
-    # else create / update the secret block
-    else:
-        gitrepo_url = payload.gitrepoUrl.replace(
-            "github.com", "oauth2:" + payload.gitrepoAccessToken + "@github.com"
-        )
-
-        # update the git oauth endpoint with token in the prefect secret block
-        secret_block_edit_params = PrefectSecretBlockEdit(
-            block_name=f"{orguser.org.slug}-git-pull-url",
-            secret=gitrepo_url,
-        )
-
-        response = prefect_service.upsert_secret_block(secret_block_edit_params)
-        if not OrgPrefectBlockv1.objects.filter(
-            org=orguser.org, block_type=SECRET, block_name=secret_block_edit_params.block_name
-        ).exists():
-            OrgPrefectBlockv1.objects.create(
-                org=orguser.org,
-                block_type=SECRET,
-                block_name=secret_block_edit_params.block_name,
-                block_id=response["block_id"],
-            )
-
-        # update or create in secrets manager
-        if orgdbt.gitrepo_access_token_secret:
-            secretsmanager.update_github_pat(
-                orgdbt.gitrepo_access_token_secret, payload.gitrepoAccessToken
-            )
-        else:
-            pat_secret_key = secretsmanager.save_github_pat(payload.gitrepoAccessToken)
-            orgdbt.gitrepo_access_token_secret = pat_secret_key
-
-    # save all orgdbt updates at once
-    orgdbt.save()
-
-    org_dir = DbtProjectManager.get_org_dir(org)
-
-    # check if elementary is setup
-    elementary_status_resp = elementary_service.elementary_setup_status(org)
-
-    task = clone_github_repo.delay(
-        org.slug,
-        org.dbt.gitrepo_url,
-        org.dbt.gitrepo_access_token_secret,
-        org_dir,
-        None,
-        elementary_status_resp["status"]
-        == "set-up",  # setup_elementary if it was setup in the old repo
-    )
-
-    return {"task_id": task.id}
 
 
 @dbt_router.put("/connect_git_remote/")
