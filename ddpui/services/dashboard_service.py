@@ -26,7 +26,7 @@ from ddpui.models.dashboard import (
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.charts.charts_service import (
     get_warehouse_client,
     execute_chart_query,
@@ -34,7 +34,7 @@ from ddpui.core.charts.charts_service import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
-from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
 logger = CustomLogger("ddpui.dashboard_service")

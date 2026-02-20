@@ -8,7 +8,7 @@ from ddpui.models.org import TransformType
 from ddpui.models.dbt_workflow import OrgDbt
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.dbt_automation import assets
+from ddpui.core.dbt_automation import assets
 
 import logging
 
@@ -23,7 +23,7 @@ class Command(BaseCommand):
     """
 
     def handle(self, *args, **options):
-        # for OrgDbt go into the macros directory copy custom macros from ddpui.dbt_automation
+        # for OrgDbt go into the macros directory copy custom macros from ddpui.core.dbt_automation
 
         for org_dbt in OrgDbt.objects.all():
             project_name = "dbtrepo"

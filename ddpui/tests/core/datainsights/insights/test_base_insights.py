@@ -12,12 +12,12 @@ django.setup()
 
 import pytest
 
-from ddpui.datainsights.insights.common.queries import BaseDataStats
-from ddpui.datainsights.insights.insight_interface import (
+from ddpui.core.datainsights.insights.common.queries import BaseDataStats
+from ddpui.core.datainsights.insights.insight_interface import (
     MAP_TRANSLATE_TYPES,
     TranslateColDataType,
 )
-from ddpui.datainsights.insights.common.base_insights import BaseInsights
+from ddpui.core.datainsights.insights.common.base_insights import BaseInsights
 
 
 @pytest.fixture

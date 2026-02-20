@@ -11,12 +11,12 @@ django.setup()
 
 import pytest
 
-from ddpui.datainsights.insights.datetime_type.queries import DistributionChart
-from ddpui.datainsights.insights.insight_interface import (
+from ddpui.core.datainsights.insights.datetime_type.queries import DistributionChart
+from ddpui.core.datainsights.insights.insight_interface import (
     MAP_TRANSLATE_TYPES,
     TranslateColDataType,
 )
-from ddpui.datainsights.insights.datetime_type.datetime_insight import (
+from ddpui.core.datainsights.insights.datetime_type.datetime_insight import (
     DatetimeColInsights,
 )
 

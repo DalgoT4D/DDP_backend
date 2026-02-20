@@ -12,7 +12,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilterType
 from ddpui.core.charts.charts_service import execute_query, get_warehouse_client
-from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -321,9 +321,9 @@ def get_filter_preview(
                 "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
                 "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
                 "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
-                "distinct_count": int(row["distinct_count"])
-                if row["distinct_count"] is not None
-                else 0,
+                "distinct_count": (
+                    int(row["distinct_count"]) if row["distinct_count"] is not None else 0
+                ),
             }
 
             return FilterPreviewResponse(stats=stats)

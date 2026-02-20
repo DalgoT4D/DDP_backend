@@ -23,8 +23,8 @@ from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.singletaskprogress import SingleTaskProgress
 from ddpui.auth import has_permission
 
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.generate_result import GenerateResult, poll_for_column_insights
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.core.datainsights.generate_result import GenerateResult, poll_for_column_insights
 from ddpui.celeryworkers.tasks import summarize_warehouse_results
 
 from ddpui.schemas.warehouse_api_schemas import (
@@ -82,7 +82,7 @@ def get_column_values(request, schema_name: str, table_name: str, column_name: s
         raise HttpError(404, "Please set up your warehouse first")
 
     try:
-        from ddpui.datainsights.query_builder import AggQueryBuilder
+        from ddpui.core.datainsights.query_builder import AggQueryBuilder
 
         # Use query builder to fetch distinct column values
         query_builder = AggQueryBuilder()

@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from sqlalchemy import text
 from ddpui.core.charts import charts_service
-from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.chart_schema import ChartDataPayload, ChartMetric
 from ddpui.models.org import OrgWarehouse
 

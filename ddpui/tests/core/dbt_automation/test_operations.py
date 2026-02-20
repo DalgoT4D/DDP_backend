@@ -5,8 +5,8 @@ Test cases for dbt_automation operations, specifically the union_tables_sql func
 import pytest
 from unittest.mock import Mock
 
-from ddpui.dbt_automation.operations.mergetables import union_tables_sql
-from ddpui.dbt_automation.utils.interfaces.warehouse_interface import WarehouseInterface
+from ddpui.core.dbt_automation.operations.mergetables import union_tables_sql
+from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
 
 
 class TestUnionTablesSql:
@@ -232,7 +232,7 @@ class TestUnionTablesSql:
                 "source_name": "test",
                 "input_name": "single_table",
             },
-            "source_columns": ["col1", "col2"]
+            "source_columns": ["col1", "col2"],
             # No "other_inputs" key
         }
 

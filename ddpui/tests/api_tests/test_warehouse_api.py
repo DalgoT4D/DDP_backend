@@ -207,7 +207,7 @@ def test_get_warehouse_table_columns_spec_table_not_found_in_schema(orguser):
         "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
         return_value={"some-creds": "some-value"},
     ) as mock_retrieve_warehouse_credentials, patch(
-        "ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect"
+        "ddpui.utils.warehouse.client.warehouse_factory.WarehouseFactory.connect"
     ) as mock_wclient:
         mock_wclient.return_value.get_table_columns.side_effect = sqlalchemy.exc.NoSuchTableError()
         with pytest.raises(Exception) as exc:
@@ -226,7 +226,7 @@ def test_get_warehouse_table_columns_spec_table_failed_to_connect_to_warehouse(o
         "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
         return_value={"some-creds": "some-value"},
     ) as mock_retrieve_warehouse_credentials, patch(
-        "ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect",
+        "ddpui.utils.warehouse.client.warehouse_factory.WarehouseFactory.connect",
         side_effect=Exception("Warehouse connection failed"),
     ) as mock_wclient:
         with pytest.raises(Exception) as exc:
@@ -245,7 +245,7 @@ def test_get_warehouse_table_columns_spec_table_success(orguser):
         "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
         return_value={"some-creds": "some-value"},
     ) as mock_retrieve_warehouse_credentials, patch(
-        "ddpui.datainsights.warehouse.warehouse_factory.WarehouseFactory.connect",
+        "ddpui.utils.warehouse.client.warehouse_factory.WarehouseFactory.connect",
     ) as mock_wclient:
         mock_wclient.return_value.get_table_columns.side_effect = [
             [

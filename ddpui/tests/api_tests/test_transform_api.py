@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch, call
 from datetime import datetime, timedelta
 from django.utils import timezone
 from ninja.errors import HttpError, ValidationError
-from ddpui.dbt_automation import assets
+from ddpui.core.dbt_automation import assets
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse, OrgDbt, TransformType
@@ -59,7 +59,7 @@ from ddpui.schemas.dbt_workflow_schema import (
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
-from ddpui.dbt_automation.utils.warehouseclient import PostgresClient
+from ddpui.utils.warehouse.old_client.warehouse_factory import PostgresClient
 
 pytestmark = pytest.mark.django_db
 

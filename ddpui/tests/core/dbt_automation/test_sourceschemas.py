@@ -1,7 +1,7 @@
 import pytest
 import os
 import yaml
-from ddpui.dbt_automation.utils.sourceschemas import get_source, mksourcedefinition
+from ddpui.core.dbt_automation.utils.sourceschemas import get_source, mksourcedefinition
 
 SOURCES_YAML = {
     "version": 2,
