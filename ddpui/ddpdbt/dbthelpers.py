@@ -4,6 +4,7 @@ import yaml
 from ninja.errors import HttpError
 
 from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
 from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -32,14 +33,15 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
+        storage = StorageFactory.get_storage_adapter()
         dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
-        if not os.path.exists(dbt_project_filename):
+        if not storage.exists(dbt_project_filename):
             raise HttpError(400, dbt_project_filename + " is missing")
 
-        with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-            dbt_project = yaml.safe_load(dbt_project_file)
-            if "profile" not in dbt_project:
-                raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+        dbt_project_content = storage.read_file(dbt_project_filename)
+        dbt_project = yaml.safe_load(dbt_project_content)
+        if "profile" not in dbt_project:
+            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
 
         profile_name = dbt_project["profile"]
         target = dbt_project_params.target

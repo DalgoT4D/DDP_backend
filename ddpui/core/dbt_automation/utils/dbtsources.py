@@ -2,6 +2,8 @@ import os
 import yaml
 from pathlib import Path
 
+from ddpui.utils.file_storage.storage_factory import StorageFactory
+
 
 # TODO: need to take into account the multiple schemas in a single source file
 
@@ -9,9 +11,10 @@ from pathlib import Path
 # ================================================================================
 def readsourcedefinitions(sourcefilename: str):
     """read the source definitions from a dbt sources.yml"""
-    with open(sourcefilename, "r", encoding="utf-8") as sourcefile:
-        sourcedefinitions = yaml.safe_load(sourcefile)
-        return sourcedefinitions
+    storage = StorageFactory.get_storage_adapter()
+    content = storage.read_file(sourcefilename)
+    sourcedefinitions = yaml.safe_load(content)
+    return sourcedefinitions
 
 
 # ================================================================================
@@ -117,12 +120,13 @@ def read_sources(project_dir) -> list[dict]:
 def read_sources_from_yaml(project_dir, sources_yml_rel_path) -> list[dict]:
     """Read sources from a sources.yaml file"""
     sources = {}
-    sources_yml_full_path = Path(project_dir) / sources_yml_rel_path
-    with open(sources_yml_full_path, "r") as f:
-        yaml_data = yaml.safe_load(f)
-        temp_sources = []
-        if "sources" in yaml_data:
-            temp_sources = yaml_data["sources"]
+    sources_yml_full_path = str(Path(project_dir) / sources_yml_rel_path)
+    storage = StorageFactory.get_storage_adapter()
+    content = storage.read_file(sources_yml_full_path)
+    yaml_data = yaml.safe_load(content)
+    temp_sources = []
+    if "sources" in yaml_data:
+        temp_sources = yaml_data["sources"]
 
         if len(temp_sources) > 0:
             src_yml_path = Path(sources_yml_full_path).relative_to(project_dir)

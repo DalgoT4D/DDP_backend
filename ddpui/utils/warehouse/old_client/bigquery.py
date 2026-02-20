@@ -8,6 +8,7 @@ from google.oauth2 import service_account
 import json
 from ddpui.core.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 
 basicConfig(level=INFO)
 logger = getLogger()
@@ -20,8 +21,9 @@ class BigQueryClient(WarehouseInterface):
         self.name = "bigquery"
         self.bqclient = None
         if conn_info is None:  # take creds from env
-            creds_file = open(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-            conn_info = json.load(creds_file)
+            storage = StorageFactory.get_storage_adapter()
+            creds_content = storage.read_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+            conn_info = json.loads(creds_content)
             location = os.getenv("BIQUERY_LOCATION")
 
         creds1 = service_account.Credentials.from_service_account_info(conn_info)
