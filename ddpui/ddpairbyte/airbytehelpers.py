@@ -61,7 +61,6 @@ from ddpui.utils.helpers import (
     get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
-from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
@@ -900,20 +899,6 @@ def get_warehouses(org: Org):
         for warehouse in OrgWarehouse.objects.filter(org=org)
     ]
     return warehouses, None
-
-
-def get_demo_whitelisted_source_config(type_: str):
-    """Returns the config of whitelisted source based on type"""
-    ret_src = None
-    for src in DEMO_WHITELIST_SOURCES:
-        if src["type"] == type_:
-            ret_src = src
-            break
-
-    if not ret_src:
-        return ret_src, "source not found"
-
-    return ret_src["config"], None
 
 
 def delete_source(org: Org, source_id: str):

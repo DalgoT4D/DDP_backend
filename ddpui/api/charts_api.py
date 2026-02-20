@@ -41,7 +41,7 @@ from ddpui.schemas.chart_schema import (
     GeoJSONListResponse,
     GeoJSONUpload,
 )
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui")
 

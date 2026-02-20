@@ -11,7 +11,6 @@ from django.db.models import Q
 from django.db import transaction
 from django.utils import timezone
 
-from ddpui.datainsights import warehouse
 from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType, OrgDataFlowv1

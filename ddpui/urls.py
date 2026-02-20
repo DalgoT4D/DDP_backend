@@ -7,7 +7,7 @@ from ddpui.routes import src_api, public_api
 from ddpui.html.docs import get_dbt_docs
 from ddpui.html.elementary import get_elementary_report
 
-from ddpui.datainsights.generate_result import DataInsightsConsumer
+from ddpui.core.datainsights.generate_result import DataInsightsConsumer
 from ddpui.websockets.airbyte_consumer import SchemaCatalogConsumer, SourceCheckConnectionConsumer
 from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
 

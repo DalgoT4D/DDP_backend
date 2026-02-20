@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 import requests
 from django.utils.text import slugify
-from ddpui.dbt_automation import assets
+from ddpui.core.dbt_automation import assets
 from ddpui.utils.file_storage.storage_factory import StorageFactory
 from ddpui.ddpprefect import prefect_service, SECRET, DBTCLIPROFILE
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse, TransformType
@@ -31,7 +31,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
 from ddpui.core.git_manager import GitManager, GitManagerError
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import PrefectSecretBlockEdit, OrgDbtConnectGitRemote
 
