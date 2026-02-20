@@ -1,12 +1,12 @@
 import os
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
-from ddpui.dbt_automation.utils.bigquery import BigQueryClient
+from ddpui.utils.warehouse.old_client.bigquery import BigQueryClient
 
 
 @pytest.fixture
 def mock_bigquery_client():
-    with patch("ddpui.dbt_automation.utils.bigquery.bigquery.Client") as mock_client:
+    with patch("ddpui.core.dbt_automation.utils.bigquery.bigquery.Client") as mock_client:
         yield mock_client
 
 

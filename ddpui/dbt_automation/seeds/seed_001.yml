@@ -1,9 +1,0 @@
-version: 1
-description: "Yaml template to get you started on automating your dbt work. DO NOT EDIT this, make a copy and use"
-warehouse: bigquery
-
-seed_data:
-  - schema: tests_001
-    tables:
-      - name: model_001
-        csv: seed_001.csv

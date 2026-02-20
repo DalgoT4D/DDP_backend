@@ -25,8 +25,8 @@ from ddpui.core.dbtautomation_service import (
     ensure_source_yml_definition_in_project,
     SourceYmlDefinition,
 )
-from ddpui.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.dbt_automation.utils.dbtsources import read_sources_from_yaml
+from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.core.dbt_automation.utils.dbtsources import read_sources_from_yaml
 
 pytestmark = pytest.mark.django_db
 
