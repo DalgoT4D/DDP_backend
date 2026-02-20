@@ -12,6 +12,11 @@ from ddpui.utils.file_storage.storage_interface import StorageInterface
 class LocalStorageAdapter(StorageInterface):
     """Local filesystem storage implementation"""
 
+    @property
+    def is_remote(self) -> bool:
+        """Local storage is not remote"""
+        return False
+
     def read_file(self, file_path: str) -> str:
         """Read content from a local file"""
         try:
@@ -107,3 +112,7 @@ class LocalStorageAdapter(StorageInterface):
             raise IOError(
                 f"Failed to copy tree from {source_directory} to {destination_directory}: {str(e)}"
             )
+
+    def download_tree(self, remote_path: str, local_path: str) -> None:
+        """Download not applicable for local storage"""
+        raise NotImplementedError("download_tree is not applicable for local storage")

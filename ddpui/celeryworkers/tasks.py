@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import sleep
@@ -107,6 +108,9 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
     # Lock all dbt tasks that will be run
     task_locks: list[TaskLock] = []
 
+    # tmp dir to download dbt models from remote storage in
+    temp_dir = None
+
     try:
         orgtasks = OrgTask.objects.filter(
             dbt__id=orgdbt_id, task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN]
@@ -160,15 +164,42 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             org, orgdbt
         )
 
-        # TODO: we can't run this on s3. It needs to be a local subprocess
+        # Get dbt profile from prefect block
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
         storage = StorageFactory.get_storage_adapter()
-        profile_dirname = str(Path(dbt_project_params.project_dir) / "profiles")
-        storage.create_directory(profile_dirname)
-        profile_filename = str(Path(dbt_project_params.project_dir) / "profiles" / "profiles.yml")
-        logger.info("writing dbt profile to " + profile_filename)
-        profile_content = yaml.safe_dump(profile)
-        storage.write_file(profile_filename, profile_content)
+
+        # Check if we need to download from remote storage
+        local_project_dir = dbt_project_params.project_dir
+
+        if storage.is_remote:
+            # For remote storage: Download project to temp dir, run locally
+            temp_dir = tempfile.mkdtemp(prefix="dbt_run_")
+            local_project_dir = Path(temp_dir) / "dbt_project"
+            logger.info(f"Using temporary directory for dbt run: {local_project_dir}")
+
+            try:
+                # Download the entire dbt project from remote storage to local temp directory
+                logger.info("Downloading dbt project from remote storage to temp directory")
+                storage.download_tree(dbt_project_params.project_dir, str(local_project_dir))
+            except Exception as error:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                taskprogress.add(
+                    {
+                        "message": f"Failed to prepare temp directory for remote dbt run: {str(error)}",
+                        "status": "failed",
+                    }
+                )
+                logger.exception(error)
+                raise Exception(
+                    f"Failed to prepare temp directory for remote dbt run: {str(error)}"
+                ) from error
+
+        profile_dirname = Path(local_project_dir) / "profiles"
+        profile_dirname.mkdir(exist_ok=True)
+        profile_filename = profile_dirname / "profiles.yml"
+        logger.info(f"Writing dbt profile to {profile_filename}")
+        with open(profile_filename, "w", encoding="utf-8") as f:
+            yaml.safe_dump(profile, f)
 
         # dbt clean
         taskprogress.add({"message": "starting dbt clean", "status": "running"})
@@ -180,7 +211,11 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                 }
             )
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["clean"], keyword_args={"profiles-dir": "profiles"}
+                org,
+                orgdbt,
+                ["clean"],
+                keyword_args={"profiles-dir": "profiles"},
+                cwd=local_project_dir,
             )
             command_output = process.stdout.split("\n")
             for cmd_out in command_output:
@@ -212,7 +247,11 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         try:
             taskprogress.add({"message": "starting dbt deps", "status": "running"})
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["deps"], keyword_args={"profiles-dir": "profiles"}
+                org,
+                orgdbt,
+                ["deps"],
+                keyword_args={"profiles-dir": "profiles"},
+                cwd=local_project_dir,
             )
             command_output = process.stdout.split("\n")
             taskprogress.add(
@@ -257,7 +296,12 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
             taskprogress.add({"message": "starting dbt run", "status": "running"})
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["run"], keyword_args=keyword_args, flags=flags
+                org,
+                orgdbt,
+                ["run"],
+                keyword_args=keyword_args,
+                flags=flags,
+                cwd=local_project_dir,
             )
 
             command_output = process.stdout.split("\n")
@@ -292,7 +336,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             logger.exception(error.message)
             raise Exception("Dbt run failed") from error
 
-        # done
+        # done - no need to upload back since dbt just materializes tables in warehouse
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
         taskprogress.add(
@@ -303,6 +347,14 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         )
 
     finally:
+        # Cleanup temp directory if using remote storage
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"Cleaned up temporary directory: {temp_dir}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup temp directory {temp_dir}: {str(cleanup_error)}")
+
         for task_lock in task_locks:
             task_lock.delete()
 

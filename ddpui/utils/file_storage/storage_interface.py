@@ -8,6 +8,17 @@ from pathlib import Path
 class StorageInterface(ABC):
     """Abstract base class for file storage operations"""
 
+    @property
+    @abstractmethod
+    def is_remote(self) -> bool:
+        """
+        Returns True if this is a remote storage adapter (like S3), False for local storage
+
+        Returns:
+            True for remote storage, False for local storage
+        """
+        pass
+
     @abstractmethod
     def read_file(self, file_path: str) -> str:
         """
@@ -123,5 +134,22 @@ class StorageInterface(ABC):
         Raises:
             FileNotFoundError: If source directory doesn't exist
             IOError: If copy operation fails
+        """
+        pass
+
+    @abstractmethod
+    def download_tree(self, remote_path: str, local_path: str) -> None:
+        """
+        Download entire directory tree from remote storage to local filesystem
+        Only implemented for remote storage adapters.
+
+        Args:
+            remote_path: Remote directory path (e.g., S3 prefix)
+            local_path: Local filesystem directory path
+
+        Raises:
+            NotImplementedError: If called on local storage adapter
+            FileNotFoundError: If remote path doesn't exist
+            IOError: If download operation fails
         """
         pass

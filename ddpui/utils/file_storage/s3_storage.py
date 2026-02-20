@@ -2,6 +2,7 @@
 
 import os
 import logging
+from pathlib import Path
 from typing import List, Optional
 from botocore.exceptions import ClientError
 
@@ -13,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 class S3StorageAdapter(StorageInterface):
     """S3 storage implementation"""
+
+    @property
+    def is_remote(self) -> bool:
+        """S3 storage is remote"""
+        return True
 
     def __init__(self, bucket_name: str, prefix: str = ""):
         """
@@ -247,3 +253,68 @@ class S3StorageAdapter(StorageInterface):
             raise IOError(
                 f"Failed to copy tree from {source_directory} to {destination_directory}: {str(e)}"
             )
+
+    def download_tree(self, remote_path: str, local_path: str) -> None:
+        """Download entire directory tree from S3 to local filesystem"""
+        s3_prefix = self._get_s3_key(remote_path)
+        if not s3_prefix.endswith("/"):
+            s3_prefix += "/"
+
+        try:
+            # Create local directory if it doesn't exist
+            os.makedirs(local_path, exist_ok=True)
+
+            # List all objects with the prefix
+            paginator = self.s3_client.get_paginator("list_objects_v2")
+            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=s3_prefix)
+
+            downloaded_count = 0
+            for page in pages:
+                if "Contents" in page:
+                    for obj in page["Contents"]:
+                        s3_key = obj["Key"]
+
+                        # Skip directory markers (keys ending with /)
+                        if s3_key.endswith("/"):
+                            continue
+
+                        # Calculate local file path
+                        relative_path = s3_key[len(s3_prefix) :]
+                        if not relative_path:  # Skip if it's the root directory itself
+                            continue
+
+                        local_file_path = Path(local_path) / relative_path
+
+                        # Create parent directories if needed
+                        local_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                        # Download the file
+                        try:
+                            response = self.s3_client.get_object(
+                                Bucket=self.bucket_name, Key=s3_key
+                            )
+                            content = response["Body"].read().decode("utf-8")
+
+                            with open(local_file_path, "w", encoding="utf-8") as f:
+                                f.write(content)
+
+                            downloaded_count += 1
+                            logger.debug(
+                                f"Downloaded: s3://{self.bucket_name}/{s3_key} -> {local_file_path}"
+                            )
+
+                        except Exception as file_error:
+                            logger.warning(f"Failed to download {s3_key}: {str(file_error)}")
+                            continue
+
+            if downloaded_count == 0:
+                raise FileNotFoundError(f"No files found in remote path: {remote_path}")
+
+            logger.info(
+                f"Downloaded {downloaded_count} files from S3://{self.bucket_name}/{s3_prefix} to {local_path}"
+            )
+
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise IOError(f"Failed to download tree from {remote_path} to {local_path}: {str(e)}")
