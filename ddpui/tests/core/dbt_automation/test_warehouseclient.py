@@ -4,8 +4,8 @@ from unittest.mock import patch, Mock
 from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
 
 
-@patch("ddpui.core.dbt_automation.utils.warehouseclient.BigQueryClient")
-@patch("ddpui.core.dbt_automation.utils.warehouseclient.PostgresClient")
+@patch("ddpui.utils.warehouse.old_client.warehouse_factory.BigQueryClient")
+@patch("ddpui.utils.warehouse.old_client.warehouse_factory.PostgresClient")
 def test_dbt_automation_warehouse_client(MockPostgresClient: Mock, MockBigqueryClient: Mock):
     """test the warehouse client"""
     conn_info = {

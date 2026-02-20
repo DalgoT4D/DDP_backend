@@ -6,7 +6,7 @@ from ddpui.utils.warehouse.old_client.bigquery import BigQueryClient
 
 @pytest.fixture
 def mock_bigquery_client():
-    with patch("ddpui.core.dbt_automation.utils.bigquery.bigquery.Client") as mock_client:
+    with patch("ddpui.utils.warehouse.old_client.bigquery.bigquery.Client") as mock_client:
         yield mock_client
 
 
