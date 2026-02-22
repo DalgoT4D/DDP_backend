@@ -1,0 +1,384 @@
+"""
+AI API endpoints for Dalgo platform.
+Provides generic AI capabilities that work with any configured provider.
+"""
+
+import json
+import asyncio
+from django.http import JsonResponse, StreamingHttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django.utils.decorators import method_decorator
+from django.utils import timezone
+from django.views import View
+from ninja import Router
+from ninja.errors import HttpError
+from ninja.security import HttpBearer
+
+from ddpui.auth import has_permission
+from ddpui.schemas.ai_schema import (
+    ChatMessageSchema,
+    ChatCompletionRequest,
+    CompletionRequest,
+    ProviderConfigRequest,
+    AIResponseSchema,
+)
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.ai.factory import get_ai_provider, get_default_ai_provider, AIProviderFactory
+from ddpui.core.ai.interfaces import (
+    AIMessage,
+    AIResponse,
+    AIProviderType,
+    AIProviderConfigurationError,
+    AIProviderConnectionError,
+    AIProviderRateLimitError,
+)
+from ddpui.models.org_settings import OrgSettings
+
+logger = CustomLogger("ddpui.api.ai")
+
+# Ninja router for AI API
+router = Router()
+
+
+def _ensure_org_ai_enabled(request) -> OrgSettings:
+    """
+    Ensure the current organization has AI features enabled.
+
+    We currently treat AI enablement as equivalent to data sharing being enabled,
+    consistent with /api/org-settings/ai-status where ai_enabled is derived from
+    ai_data_sharing_enabled.
+    """
+    orguser = getattr(request, "orguser", None)
+    if not orguser or not getattr(orguser, "org", None):
+        raise HttpError(400, "Organization not found")
+
+    org_settings = OrgSettings.objects.filter(org=orguser.org).first()
+    if not org_settings:
+        raise HttpError(
+            403,
+            "AI features are not configured for this organization. Please contact your account manager.",
+        )
+
+    if not org_settings.ai_data_sharing_enabled:
+        raise HttpError(
+            403,
+            "AI features are disabled for this organization because AI data sharing is turned off. "
+            "Please enable AI data sharing in organization settings to use AI endpoints.",
+        )
+
+    return org_settings
+
+
+def handle_ai_error(error: Exception) -> JsonResponse:
+    """Convert AI provider errors to appropriate HTTP responses."""
+    if isinstance(error, AIProviderConfigurationError):
+        raise HttpError(400, f"Configuration Error for provider {error.provider}: {str(error)}")
+    elif isinstance(error, AIProviderConnectionError):
+        raise HttpError(502, f"Connection error for provider: {error.provider} : {str(error)}")
+    elif isinstance(error, AIProviderRateLimitError):
+        raise HttpError(429, f"Rate Limit Exceeded for provider: {error.provider} : {str(error)}")
+    else:
+        logger.error(f"Unexpected AI error: {error}")
+        raise HttpError(500, f"Internal Error: {str(error)}")
+
+
+@router.post("/chat/completions")
+@has_permission(["can_use_ai"])
+def chat_completions(request, payload: ChatCompletionRequest):
+    """
+    Generate chat completions using the configured AI provider.
+
+    This endpoint provides a unified interface for chat completions
+    regardless of the underlying AI provider (OpenAI, Claude, Ollama).
+    """
+    # Enforce org-level AI enablement before calling any provider
+    _ensure_org_ai_enabled(request)
+    try:
+        # Get AI provider
+        provider = (
+            get_ai_provider(payload.provider_type)
+            if payload.provider_type
+            else get_default_ai_provider()
+        )
+
+        # Convert schema messages to AI messages
+        messages = [
+            AIMessage(role=msg.role, content=msg.content, metadata=msg.metadata)
+            for msg in payload.messages
+        ]
+
+        # Handle streaming vs non-streaming
+        if payload.stream:
+            return StreamingHttpResponse(
+                _stream_chat_completion(provider, messages, payload),
+                content_type="text/event-stream",
+            )
+        else:
+            # Generate completion
+            response = provider.chat_completion(
+                messages=messages,
+                model=payload.model,
+                temperature=payload.temperature,
+                max_tokens=payload.max_tokens,
+            )
+
+            return JsonResponse(
+                {
+                    "id": f"chatcmpl-{response.metadata.get('response_id', 'unknown')}"
+                    if response.metadata
+                    else "chatcmpl-unknown",
+                    "object": "chat.completion",
+                    "created": int(timezone.now().timestamp()),
+                    "model": response.model,
+                    "provider": response.provider,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": response.content},
+                            "finish_reason": response.metadata.get("finish_reason", "stop")
+                            if response.metadata
+                            else "stop",
+                        }
+                    ],
+                    "usage": response.usage or {},
+                }
+            )
+
+    except Exception as e:
+        return handle_ai_error(e)
+
+
+async def _stream_chat_completion(provider, messages, payload):
+    """Generate streaming chat completion response."""
+    try:
+        sent_done = False
+        async for chunk in provider.stream_chat_completion(
+            messages=messages,
+            model=payload.model,
+            temperature=payload.temperature,
+            max_tokens=payload.max_tokens,
+        ):
+            data = {
+                "id": f"chatcmpl-stream",
+                "object": "chat.completion.chunk",
+                "created": int(asyncio.get_event_loop().time()),
+                "model": payload.model or "unknown",
+                "provider": provider.get_provider_type().value,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": chunk.content},
+                        "finish_reason": "stop" if chunk.is_complete else None,
+                    }
+                ],
+            }
+
+            if chunk.usage:
+                data["usage"] = chunk.usage
+
+            yield f"data: {json.dumps(data)}\n\n"
+
+            if chunk.is_complete:
+                yield "data: [DONE]\n\n"
+                sent_done = True
+                break
+
+        # Fallback: ensure the client always receives a [DONE] sentinel
+        if not sent_done:
+            yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        error_data = {"error": {"message": str(e), "type": type(e).__name__}}
+        yield f"data: {json.dumps(error_data)}\n\n"
+
+
+@router.post("/completions")
+@has_permission(["can_use_ai"])
+def completions(request, payload: CompletionRequest):
+    """
+    Generate text completions using the configured AI provider.
+
+    This endpoint provides a unified interface for text completions.
+    """
+    # Enforce org-level AI enablement before calling any provider
+    _ensure_org_ai_enabled(request)
+    try:
+        # Get AI provider
+        provider = (
+            get_ai_provider(payload.provider_type)
+            if payload.provider_type
+            else get_default_ai_provider()
+        )
+
+        # Generate completion
+        response = provider.completion(
+            prompt=payload.prompt,
+            model=payload.model,
+            temperature=payload.temperature,
+            max_tokens=payload.max_tokens,
+        )
+
+        return JsonResponse(
+            {
+                "id": f"cmpl-{response.metadata.get('response_id', 'unknown')}"
+                if response.metadata
+                else "cmpl-unknown",
+                "object": "text_completion",
+                "created": int(asyncio.get_event_loop().time()),
+                "model": response.model,
+                "provider": response.provider,
+                "choices": [
+                    {
+                        "text": response.content,
+                        "index": 0,
+                        "finish_reason": response.metadata.get("finish_reason", "stop")
+                        if response.metadata
+                        else "stop",
+                    }
+                ],
+                "usage": response.usage or {},
+            }
+        )
+
+    except Exception as e:
+        return handle_ai_error(e)
+
+
+@router.get("/providers")
+@has_permission(["can_use_ai"])
+def list_providers(request):
+    """
+    List available AI providers and their status.
+    """
+    # Enforce org-level AI enablement before listing providers
+    _ensure_org_ai_enabled(request)
+    try:
+        providers = AIProviderFactory.get_available_providers()
+        health_status = AIProviderFactory.health_check_all()
+
+        return JsonResponse(
+            {
+                "providers": [
+                    {
+                        "name": provider,
+                        "available": provider in health_status,
+                        "healthy": health_status.get(provider, False),
+                    }
+                    for provider in providers
+                ]
+            }
+        )
+
+    except Exception as e:
+        return handle_ai_error(e)
+
+
+@router.get("/providers/{provider_type}/models")
+@has_permission(["can_use_ai"])
+def list_models(request, provider_type: str):
+    """
+    List available models for a specific provider.
+    """
+    # Enforce org-level AI enablement before listing models
+    _ensure_org_ai_enabled(request)
+    try:
+        provider = get_ai_provider(provider_type)
+        models = provider.get_available_models()
+
+        return JsonResponse({"provider": provider_type, "models": models})
+
+    except Exception as e:
+        return handle_ai_error(e)
+
+
+@router.get("/providers/{provider_type}/health")
+@has_permission(["can_use_ai"])
+def provider_health(request, provider_type: str):
+    """
+    Check health of a specific provider.
+    """
+    # Enforce org-level AI enablement before checking provider health
+    _ensure_org_ai_enabled(request)
+    try:
+        provider = get_ai_provider(provider_type)
+        is_healthy = provider.health_check()
+
+        return JsonResponse(
+            {
+                "provider": provider_type,
+                "healthy": is_healthy,
+                "timestamp": int(timezone.now().timestamp()),
+            }
+        )
+
+    except Exception as e:
+        return handle_ai_error(e)
+
+
+@router.post("/providers/configure")
+@has_permission(["can_manage_ai_providers"])
+def configure_provider(request, payload: ProviderConfigRequest):
+    """
+    Configure a specific AI provider.
+    Note: This creates a new instance with the given config.
+    """
+    # Enforce org-level AI enablement before configuring providers
+    _ensure_org_ai_enabled(request)
+    try:
+        provider = AIProviderFactory.create_provider(
+            payload.provider_type, payload.config, use_env=False, force_new=True
+        )
+
+        # Test the configuration
+        is_healthy = provider.health_check()
+
+        return JsonResponse(
+            {"provider": payload.provider_type, "configured": True, "healthy": is_healthy}
+        )
+
+    except Exception as e:
+        return handle_ai_error(e)
+
+
+# Legacy Django views for backward compatibility
+@method_decorator(csrf_exempt, name="dispatch")
+@method_decorator(has_permission(["can_use_ai"]), name="dispatch")
+class ChatCompletionView(View):
+    """Legacy Django view for chat completions."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+
+            # Convert to schema format
+            payload = ChatCompletionRequest(**data)
+
+            # Reuse the router logic
+            return chat_completions(request, payload)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            return handle_ai_error(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+@method_decorator(has_permission(["can_use_ai"]), name="dispatch")
+class CompletionView(View):
+    """Legacy Django view for completions."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+
+            # Convert to schema format
+            payload = CompletionRequest(**data)
+
+            # Reuse the router logic
+            return completions(request, payload)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            return handle_ai_error(e)

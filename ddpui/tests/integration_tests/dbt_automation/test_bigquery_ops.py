@@ -1,6 +1,7 @@
 """tests for bigquery operations"""
 
 import os
+import unittest
 from pathlib import Path
 import math
 import json
@@ -34,18 +35,35 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
+def _init_bigquery_client():
+    service_json = os.getenv("TEST_BG_SERVICEJSON")
+    if not service_json:
+        raise unittest.SkipTest("Missing TEST_BG_SERVICEJSON for BigQuery integration tests")
+
+    try:
+        credentials = json.loads(service_json)
+    except Exception as exc:
+        raise unittest.SkipTest(f"Invalid TEST_BG_SERVICEJSON: {exc}")
+
+    location = os.getenv("TEST_BG_LOCATION")
+    return get_client("bigquery", credentials, location)
+
+
 class TestBigqueryOperations:
     """test operations in bigquery warehouse"""
 
     warehouse = "bigquery"
     test_project_dir = None
 
-    wc_client = get_client(
-        "bigquery",
-        json.loads(os.getenv("TEST_BG_SERVICEJSON")),
-        os.environ.get("TEST_BG_LOCATION"),
-    )
-    schema = os.environ.get("TEST_BG_DATASET_SRC")  # source schema where the raw data lies
+    wc_client = None
+    schema = None  # source schema where the raw data lies
+
+    @classmethod
+    def setup_class(cls):
+        cls.wc_client = _init_bigquery_client()
+        cls.schema = os.environ.get("TEST_BG_DATASET_SRC")
+        if not cls.schema:
+            raise unittest.SkipTest("Missing TEST_BG_DATASET_SRC for BigQuery integration tests")
 
     @staticmethod
     def execute_dbt(cmd: str, select_model: str = None):

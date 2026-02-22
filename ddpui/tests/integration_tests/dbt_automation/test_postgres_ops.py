@@ -1,6 +1,7 @@
 """tests for postgres operations"""
 
 import os
+import unittest
 from pathlib import Path
 import math
 import subprocess
@@ -20,6 +21,7 @@ from ddpui.dbt_automation.operations.arithmetic import arithmetic
 from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes
 from ddpui.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.dbt_automation.operations.regexextraction import regex_extraction
+from ddpui.dbt_automation.operations.syncsources import sync_sources
 from ddpui.dbt_automation.operations.mergetables import union_tables
 from ddpui.dbt_automation.operations.aggregate import aggregate
 from ddpui.dbt_automation.operations.casewhen import casewhen
@@ -31,22 +33,46 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
+def _init_postgres_client():
+    env_keys = [
+        "TEST_PG_DBHOST",
+        "TEST_PG_DBPORT",
+        "TEST_PG_DBUSER",
+        "TEST_PG_DBNAME",
+        "TEST_PG_DBPASSWORD",
+        "TEST_PG_DBSCHEMA_SRC",
+    ]
+    missing = [key for key in env_keys if not os.environ.get(key)]
+    if missing:
+        raise unittest.SkipTest(f"Missing Postgres integration test env vars: {', '.join(missing)}")
+
+    try:
+        return get_client(
+            "postgres",
+            {
+                "host": os.environ.get("TEST_PG_DBHOST"),
+                "port": os.environ.get("TEST_PG_DBPORT"),
+                "user": os.environ.get("TEST_PG_DBUSER"),
+                "database": os.environ.get("TEST_PG_DBNAME"),
+                "password": os.environ.get("TEST_PG_DBPASSWORD"),
+            },
+        )
+    except Exception as exc:
+        raise unittest.SkipTest(f"Postgres integration test connection failed: {exc}")
+
+
 class TestPostgresOperations:
     """test rename_columns operation"""
 
     warehouse = "postgres"
     test_project_dir = None
-    wc_client = get_client(
-        "postgres",
-        {
-            "host": os.environ.get("TEST_PG_DBHOST"),
-            "port": os.environ.get("TEST_PG_DBPORT"),
-            "user": os.environ.get("TEST_PG_DBUSER"),
-            "database": os.environ.get("TEST_PG_DBNAME"),
-            "password": os.environ.get("TEST_PG_DBPASSWORD"),
-        },
-    )
-    schema = os.environ.get("TEST_PG_DBSCHEMA_SRC")  # source schema where the raw data lies
+    wc_client = None
+    schema = None  # source schema where the raw data lies
+
+    @classmethod
+    def setup_class(cls):
+        cls.wc_client = _init_postgres_client()
+        cls.schema = os.environ.get("TEST_PG_DBSCHEMA_SRC")
 
     @staticmethod
     def execute_dbt(cmd: str, select_model: str = None):

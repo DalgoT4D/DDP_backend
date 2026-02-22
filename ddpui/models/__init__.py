@@ -10,3 +10,4 @@ from ddpui.models.admin_user import AdminUser
 from ddpui.models.georegion import GeoRegion
 from ddpui.models.geojson import GeoJSON
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge
+from ddpui.models.ai_chat_logging import AIChatLog, AIChatMetering
