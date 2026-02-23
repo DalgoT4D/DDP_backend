@@ -83,7 +83,6 @@ from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
-    compute_dataflow_run_times_from_history,
     get_flow_run_poll,
 )
 from ddpui.ddpprefect import (
@@ -1411,18 +1410,6 @@ def sync_airbyte_job_stats_for_all_connections(
     airbytehelpers.fetch_and_update_airbyte_jobs_for_all_connections(
         last_n_days=last_n_days, last_n_hours=last_n_hours, connection_id=connection_id, org=org
     )
-
-
-@app.task()
-def compute_dataflow_run_times(org: Org = None):
-    """Computes run times for all dataflows"""
-    dataflows = OrgDataFlowv1.objects
-
-    if org:
-        dataflows = dataflows.filter(org=org)
-
-    for dataflow in dataflows.all():
-        compute_dataflow_run_times_from_history(dataflow)
 
 
 @app.task()
