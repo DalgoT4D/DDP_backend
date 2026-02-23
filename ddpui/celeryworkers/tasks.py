@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from time import sleep
 import subprocess
-from isodate import parse_datetime
+from django.utils.dateparse import parse_datetime
 import pytz
 from django.core.management import call_command
 from django.utils.text import slugify
