@@ -11,7 +11,7 @@ from django.db.models import F
 from django.http import StreamingHttpResponse
 from ninja.errors import HttpError
 
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -345,7 +345,7 @@ def get_public_filter_preview(
 
         # Use the exact same function as authenticated API
         from ddpui.core.charts.charts_service import get_warehouse_client
-        from ddpui.datainsights.query_builder import AggQueryBuilder
+        from ddpui.core.datainsights.query_builder import AggQueryBuilder
         from ddpui.core.charts.charts_service import execute_query
         from sqlalchemy import func, column, distinct, cast, Float, Date
 

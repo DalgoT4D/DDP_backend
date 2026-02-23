@@ -86,7 +86,7 @@ from ddpui.ddpprefect.prefect_service import (
     get_flow_run_poll,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, TASK_RUN_KIND, FLOW_RUN_KIND
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
     find_key_in_dictionary,

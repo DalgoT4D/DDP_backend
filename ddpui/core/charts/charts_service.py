@@ -8,9 +8,9 @@ from sqlalchemy import column, func, and_, or_, text
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
-from ddpui.datainsights.query_builder import AggQueryBuilder
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.chart_schema import (
     ChartDataPayload,

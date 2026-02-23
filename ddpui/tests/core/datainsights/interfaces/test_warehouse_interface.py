@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.django_db
 
-from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 
 
 class UnimplementedMethodWarehouse(Warehouse):

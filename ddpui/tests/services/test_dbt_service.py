@@ -32,7 +32,7 @@ from ddpui.models.org import TransformType
 from django.contrib.auth.models import User
 from ddpui.core.orgdbt_manager import DbtCommandError
 from ddpui.core.git_manager import GitManagerError
-from ddpui.dbt_automation import assets
+from ddpui.core.dbt_automation import assets
 
 pytestmark = pytest.mark.django_db
 

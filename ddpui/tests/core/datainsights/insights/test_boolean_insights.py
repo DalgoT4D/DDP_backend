@@ -11,12 +11,12 @@ django.setup()
 
 import pytest
 
-from ddpui.datainsights.insights.boolean_type.queries import DataStats
-from ddpui.datainsights.insights.insight_interface import (
+from ddpui.core.datainsights.insights.boolean_type.queries import DataStats
+from ddpui.core.datainsights.insights.insight_interface import (
     MAP_TRANSLATE_TYPES,
     TranslateColDataType,
 )
-from ddpui.datainsights.insights.boolean_type.boolean_insights import BooleanColInsights
+from ddpui.core.datainsights.insights.boolean_type.boolean_insights import BooleanColInsights
 
 
 @pytest.fixture
