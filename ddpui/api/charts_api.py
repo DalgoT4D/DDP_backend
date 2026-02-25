@@ -41,7 +41,7 @@ from ddpui.schemas.chart_schema import (
     GeoJSONListResponse,
     GeoJSONUpload,
 )
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui")
 
@@ -184,6 +184,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     logger.debug(f"Query results for {chart_id_str}: {len(dict_results)} rows")
 
     # Transform data for chart
+    time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
     transform_payload = TransformDataForChart(
         chart_type=payload.chart_type,
         x_axis=payload.x_axis,
@@ -193,6 +194,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         dimensions=payload.dimensions,  # Pass dimensions for table charts
         customizations=payload.customizations,
         metrics=payload.metrics,
+        time_grain=time_grain,  # Pass time_grain for formatting labels
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 

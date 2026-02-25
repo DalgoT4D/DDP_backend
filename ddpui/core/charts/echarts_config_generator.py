@@ -1,4 +1,5 @@
 """ECharts configuration generator for different chart types"""
+
 from typing import Dict, List, Any, Optional
 
 
@@ -175,14 +176,16 @@ class EChartsConfigGenerator:
                 "data": series_data.get("data", []),
                 "label": {
                     "show": show_data_labels,
-                    "position": data_label_position
-                    if orientation == "vertical"
-                    else (
-                        "right"
-                        if data_label_position == "top"
-                        else "left"
-                        if data_label_position == "bottom"
-                        else "inside"
+                    "position": (
+                        data_label_position
+                        if orientation == "vertical"
+                        else (
+                            "right"
+                            if data_label_position == "top"
+                            else "left"
+                            if data_label_position == "bottom"
+                            else "inside"
+                        )
                     ),
                 },
             }
@@ -347,14 +350,20 @@ class EChartsConfigGenerator:
                 "nameLocation": "center",
                 "nameGap": 30,
                 "boundaryGap": False,
-                "axisLabel": {"rotate": rotation_map.get(x_axis_label_rotation, 0)},
+                "axisLabel": {
+                    "rotate": rotation_map.get(x_axis_label_rotation, 0),
+                    "hideOverlap": True,
+                },
             },
             "yAxis": {
                 "type": "value",
                 "name": y_axis_title,
                 "nameLocation": "center",
                 "nameGap": 50,
-                "axisLabel": {"rotate": rotation_map.get(y_axis_label_rotation, 0)},
+                "axisLabel": {
+                    "rotate": rotation_map.get(y_axis_label_rotation, 0),
+                    "hideOverlap": True,
+                },
             },
             "series": [],
         }

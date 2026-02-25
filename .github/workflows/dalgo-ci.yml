@@ -46,15 +46,12 @@ jobs:
         run: uv run pre-commit run --all-files
 
       - name: Start Redis
-        uses: supercharge/redis-github-action@1.5.0
+        uses: supercharge/redis-github-action@1.8.1
         with:
           redis-version: ${{ matrix.redis-version }}
 
       - name: Create logs directory
         run: mkdir -p ddpui/logs
-
-      - name: Create whitelist.py
-        run: cp ddpui/assets/whitelist.template.py ddpui/assets/whitelist.py
 
       - name: Apply database migrations  
         env:

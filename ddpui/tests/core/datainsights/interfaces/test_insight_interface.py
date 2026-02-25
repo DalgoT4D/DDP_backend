@@ -14,7 +14,7 @@ pytestmark = pytest.mark.django_db
 
 from sqlalchemy.sql.selectable import Select
 
-from ddpui.datainsights.insights.insight_interface import (
+from ddpui.core.datainsights.insights.insight_interface import (
     ColInsight,
     TranslateColDataType,
     DataTypeColInsights,
