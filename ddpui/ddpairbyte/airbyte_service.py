@@ -525,6 +525,21 @@ def get_destination_definition_specification(workspace_id: str, destinationdef_i
     return res
 
 
+def get_destination_definition_specification_for_destination(destination_id: str) -> dict:
+    """Fetch destination definition specification for a specific destination instance"""
+    if not isinstance(destination_id, str):
+        raise HttpError(400, "destination_id must be a string")
+
+    res = abreq(
+        "destination_definition_specifications/get_for_destination",
+        {"destinationId": destination_id},
+    )
+    if "connectionSpecification" not in res:
+        logger.error("Specification not found for destination: %s", destination_id)
+        raise HttpError(404, "Failed to get destination specification")
+    return res
+
+
 def get_destinations(workspace_id: str) -> dict:
     """Fetch all desintations in an airbyte workspace"""
     if not isinstance(workspace_id, str):
