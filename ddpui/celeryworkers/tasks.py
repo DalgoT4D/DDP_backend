@@ -1439,8 +1439,7 @@ def clear_stuck_locks():
 
             if not flow_run:
                 # Flow run not found, delete all locks for this flow_run_id
-                deleted_count = TaskLock.objects.filter(flow_run_id=flow_run_id).count()
-                TaskLock.objects.filter(flow_run_id=flow_run_id).delete()
+                deleted_count, _ = TaskLock.objects.filter(flow_run_id=flow_run_id).delete()
                 logger.info(f"Flow run {flow_run_id} not found, deleted {deleted_count} locks")
                 processed_count += 1
                 continue
