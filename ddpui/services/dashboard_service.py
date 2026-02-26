@@ -986,6 +986,109 @@ class DashboardService:
 
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
+    @staticmethod
+    def export_dashboard_for_llm(dashboard_id: int, org: Org) -> Dict[str, Any]:
+        """Export dashboard configuration in JSON format for LLM context
+
+        Args:
+            dashboard_id: Dashboard ID to export
+            org: Organization object
+
+        Returns:
+            Dictionary with dashboard export data
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+        """
+        try:
+            dashboard = Dashboard.objects.prefetch_related("filters").get(id=dashboard_id, org=org)
+        except Dashboard.DoesNotExist as err:
+            raise DashboardNotFoundError(f"Dashboard {dashboard_id} not found") from err
+
+        charts = []
+
+        # Extract chart IDs from dashboard components
+        for component_id, component_data in dashboard.components.items():
+            if component_data.get("type") == "chart" and component_data.get("config", {}).get(
+                "chartId"
+            ):
+                chart_id = component_data["config"]["chartId"]
+                try:
+                    chart = Chart.objects.get(id=chart_id, org=org)
+
+                    # Extract configuration from extra_config
+                    extra_config = chart.extra_config or {}
+
+                    # Build data source
+                    data_source = f"{chart.schema_name}.{chart.table_name}"
+
+                    # Extract metrics and dimensions
+                    metrics = []
+                    dimensions = []
+                    metric_calculation = ""
+
+                    if extra_config.get("metrics"):
+                        metric_parts = []
+                        for metric in extra_config["metrics"]:
+                            if metric.get("column"):
+                                metrics.append(metric["column"])
+                            if metric.get("aggregation") and metric.get("column"):
+                                metric_parts.append(f"{metric['aggregation']}({metric['column']})")
+                            elif metric.get("aggregation") == "count":
+                                metric_parts.append("COUNT(*)")
+                        metric_calculation = ", ".join(metric_parts) if metric_parts else "COUNT(*)"
+
+                    if extra_config.get("dimensions"):
+                        dimensions = extra_config["dimensions"]
+                    elif extra_config.get("dimension_col"):
+                        dimensions = [extra_config["dimension_col"]]
+
+                    # Extract filters applied to this chart
+                    chart_filters = []
+                    for dashboard_filter in dashboard.filters.all():
+                        if (
+                            dashboard_filter.schema_name == chart.schema_name
+                            and dashboard_filter.table_name == chart.table_name
+                        ):
+                            filter_str = f"{dashboard_filter.column_name}"
+                            if dashboard_filter.settings.get("default_value"):
+                                filter_str += f" = {dashboard_filter.settings['default_value']}"
+                            chart_filters.append(filter_str)
+
+                    # Determine grain
+                    grain = (
+                        "total"
+                        if not dimensions
+                        else dimensions[0].lower()
+                        if len(dimensions) == 1
+                        else "custom"
+                    )
+
+                    chart_export = {
+                        "chart_id": str(chart.id),
+                        "title": chart.title,
+                        "chart_type": chart.chart_type.title(),
+                        "data_source": data_source,
+                        "metric_calculation": metric_calculation,
+                        "filters": chart_filters,
+                        "measures": metrics,
+                        "dimensions": dimensions,
+                        "grain": grain,
+                        "x_axis": extra_config.get("x_axis"),
+                    }
+                    charts.append(chart_export)
+
+                except Chart.DoesNotExist:
+                    logger.warning(f"Chart {chart_id} not found for dashboard {dashboard_id}")
+                    continue
+
+        return {
+            "dashboard_id": str(dashboard.id),
+            "title": dashboard.title,
+            "description": dashboard.description or "",
+            "charts": charts,
+        }
+
 
 def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:
     """
