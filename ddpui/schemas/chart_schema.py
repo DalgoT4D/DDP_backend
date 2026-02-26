@@ -174,3 +174,18 @@ class GeoJSONUpload(Schema):
     description: Optional[str] = None
     properties_key: str
     geojson_data: dict
+
+
+class ChartExportSchema(Schema):
+    """Schema for chart data in dashboard export format"""
+
+    chart_id: str
+    title: str
+    chart_type: str
+    data_source: str
+    metric_calculation: str
+    filters: List[str]
+    measures: List[str]
+    dimensions: List[str]
+    grain: str
+    x_axis: Optional[str] = None
