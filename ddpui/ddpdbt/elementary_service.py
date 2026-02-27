@@ -6,9 +6,9 @@ import subprocess
 from uuid import uuid4
 from datetime import datetime
 import yaml
-import boto3
 import boto3.exceptions
 from ninja.errors import HttpError
+from ddpui.utils.aws_client import AWSClient
 from django.utils import timezone as djantotimezone
 
 from ddpui import settings
@@ -33,6 +33,7 @@ from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 
 logger = CustomLogger("ddpui")
 
@@ -51,7 +52,8 @@ def elementary_setup_status(org: Org) -> dict:
 
     project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
 
-    if not os.path.exists(project_dir / "elementary_profiles/profiles.yml"):
+    storage = StorageFactory.get_storage_adapter()
+    if not storage.exists(str(project_dir / "elementary_profiles/profiles.yml")):
         return {"status": "not-set-up"}
 
     orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR).first()
@@ -66,29 +68,31 @@ def elementary_setup_status(org: Org) -> dict:
 
 def get_elementary_target_schema(dbt_project_yml: str) -> dict | None:
     """{'schema': 'elementary'} or {'+schema': 'elementary'}"""
-    with open(dbt_project_yml, "r", encoding="utf-8") as dbt_project_yml_f:  # skipcq: PTC-W6004
-        dbt_project_obj = yaml.safe_load(dbt_project_yml_f)
-        if "elementary" not in dbt_project_obj["models"]:
-            return None
-        if "schema" in dbt_project_obj["models"]["elementary"]:
-            return {"schema": dbt_project_obj["models"]["elementary"]["schema"]}
-        if "+schema" in dbt_project_obj["models"]["elementary"]:
-            return {"+schema": dbt_project_obj["models"]["elementary"]["+schema"]}
+    storage = StorageFactory.get_storage_adapter()
+    content = storage.read_file(str(dbt_project_yml))
+    dbt_project_obj = yaml.safe_load(content)
+    if "elementary" not in dbt_project_obj["models"]:
         return None
+    if "schema" in dbt_project_obj["models"]["elementary"]:
+        return {"schema": dbt_project_obj["models"]["elementary"]["schema"]}
+    if "+schema" in dbt_project_obj["models"]["elementary"]:
+        return {"+schema": dbt_project_obj["models"]["elementary"]["+schema"]}
+    return None
 
 
 def get_elementary_package_version(packages_yml: str) -> dict | None:
     """{'package': 'elementary-data/elementary', 'version': '0.15.2'}"""
-    with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:  # skipcq: PTC-W6004
-        packages_obj = yaml.safe_load(packages_yml_f)
-        if (
-            packages_obj is not None
-            and "packages" in packages_obj
-            and isinstance(packages_obj["packages"], list)
-        ):
-            for package in packages_obj["packages"]:
-                if package["package"] == "elementary-data/elementary":
-                    return package
+    storage = StorageFactory.get_storage_adapter()
+    content = storage.read_file(str(packages_yml))
+    packages_obj = yaml.safe_load(content)
+    if (
+        packages_obj is not None
+        and "packages" in packages_obj
+        and isinstance(packages_obj["packages"], list)
+    ):
+        for package in packages_obj["packages"]:
+            if package["package"] == "elementary-data/elementary":
+                return package
     return None
 
 
@@ -99,13 +103,14 @@ def check_dbt_files(org: Org):
 
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
+    storage = StorageFactory.get_storage_adapter()
     dbt_project_yml = Path(dbt_project_params.project_dir) / "dbt_project.yml"
     packages_yml = Path(dbt_project_params.project_dir) / "packages.yml"
 
-    if not dbt_project_yml.exists():
+    if not storage.exists(str(dbt_project_yml)):
         return str(dbt_project_yml) if settings.DEBUG else "dbt_project.yml not found", None
 
-    if not packages_yml.exists():
+    if not storage.exists(str(packages_yml)):
         return str(packages_yml) if settings.DEBUG else "packages.yml not found", None
 
     elementary_package = get_elementary_package_version(packages_yml)
@@ -217,9 +222,10 @@ def create_elementary_profile(org: Org):
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
     # read profiles.yml is created either from disk or from the prefect block
+    storage = StorageFactory.get_storage_adapter()
     dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
     dbt_profile = {}
-    if not os.path.exists(dbt_profile_file):
+    if not storage.exists(str(dbt_profile_file)):
         # fetch from the cli profile block in prefect
         logger.info("fetching dbt profile from prefect block")
         dbt_cli_profile: OrgPrefectBlockv1 = org.dbt.cli_profile_block if org.dbt else None
@@ -232,16 +238,16 @@ def create_elementary_profile(org: Org):
 
         # write the dbt profile to disk also since elementary cli will reference it while generating its profile
         profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
+        storage.create_directory(str(profile_dirname))
         profile_filename = profile_dirname / "profiles.yml"
         logger.info("writing dbt profile to " + str(profile_filename))
-        with open(profile_filename, "w", encoding="utf-8") as f:
-            yaml.safe_dump(dbt_profile, f)
+        profile_content = yaml.safe_dump(dbt_profile)
+        storage.write_file(str(profile_filename), profile_content)
         logger.info("wrote dbt profile to %s", profile_filename)
     else:
-        with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
-            dbt_profile = yaml.safe_load(dbt_profile_file_f)
-            logger.info("read dbt profile from %s", dbt_profile_file)
+        content = storage.read_file(str(dbt_profile_file))
+        dbt_profile = yaml.safe_load(content)
+        logger.info("read dbt profile from %s", dbt_profile_file)
 
     # now we have to fix up the auth section by copying the dbt profile's auth section
     r = subprocess.check_output(
@@ -261,13 +267,13 @@ def create_elementary_profile(org: Org):
 
     # get the profile from dbt_project.yaml
     dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
-    if not os.path.exists(dbt_project_filename):
+    if not storage.exists(dbt_project_filename):
         raise HttpError(400, dbt_project_filename + " is missing")
 
-    with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-        dbt_project = yaml.safe_load(dbt_project_file)
-        if "profile" not in dbt_project:
-            raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+    content = storage.read_file(dbt_project_filename)
+    dbt_project = yaml.safe_load(content)
+    if "profile" not in dbt_project:
+        raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
 
     dbt_profile_name = dbt_project["profile"]
     dbt_profiles_target = dbt_project_params.target
@@ -287,12 +293,12 @@ def create_elementary_profile(org: Org):
 
     elementary_profile_dir = Path(dbt_project_params.project_dir) / "elementary_profiles"
 
-    if not elementary_profile_dir.exists():
-        elementary_profile_dir.mkdir()
+    if not storage.exists(str(elementary_profile_dir)):
+        storage.create_directory(str(elementary_profile_dir))
 
     elementary_profile_file = elementary_profile_dir / "profiles.yml"
-    with open(elementary_profile_file, "w", encoding="utf-8") as elementary_profile_file_f:
-        yaml.dump(elementary_profile, elementary_profile_file_f)
+    profile_content = yaml.safe_dump(elementary_profile)
+    storage.write_file(str(elementary_profile_file), profile_content)
 
     logger.info("wrote elementary profile to %s", elementary_profile_file)
 
@@ -304,17 +310,13 @@ def fetch_elementary_report(org: Org):
     if org.dbt is None:
         return "dbt is not configured for this client", None
 
+    storage = StorageFactory.get_storage_adapter()
     project_dir = Path(DbtProjectManager.get_dbt_project_dir(org.dbt))
 
-    if not os.path.exists(project_dir / "elementary_profiles"):
+    if not storage.exists(str(project_dir / "elementary_profiles")):
         return "set up elementary profile first", None
 
-    s3 = boto3.client(
-        "s3",
-        "ap-south-1",
-        aws_access_key_id=os.getenv("S3_AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("S3_AWS_SECRET_ACCESS_KEY"),
-    )
+    s3 = AWSClient.get_instance("s3", "s3")
     bucket_file_path = make_edr_report_s3_path(org)
     try:
         s3response = s3.get_object(
@@ -329,9 +331,7 @@ def fetch_elementary_report(org: Org):
 
     report_html = s3response["Body"].read().decode("utf-8")
     htmlfilename = str(project_dir / "elementary-report.html")
-    with open(htmlfilename, "w", encoding="utf-8") as indexfile:
-        indexfile.write(report_html)
-        indexfile.close()
+    storage.write_file(htmlfilename, report_html)
     logger.info("wrote elementary report to %s", htmlfilename)
 
     redis = RedisClient.get_instance()

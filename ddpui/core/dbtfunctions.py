@@ -2,6 +2,7 @@ import os
 from typing import Union
 
 from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 
 
 def map_airbyte_destination_spec_to_dbtcli_profile(
@@ -41,10 +42,11 @@ def map_airbyte_destination_spec_to_dbtcli_profile(
         if mode:
             conn_info["sslmode"] = mode
 
+        # TODO: if the storage backend is S3, then how would this work ?
         if ca_certificate and dbt_project_params.org_project_dir:
+            storage = StorageFactory.get_storage_adapter()
             file_path = os.path.join(dbt_project_params.org_project_dir, "sslrootcert.pem")
-            with open(file_path, "w", encoding="utf-8") as file:
-                file.write(ca_certificate)
+            storage.write_file(file_path, ca_certificate)
             conn_info["sslrootcert"] = file_path
 
     return conn_info

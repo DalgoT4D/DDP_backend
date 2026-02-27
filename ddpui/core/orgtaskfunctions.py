@@ -7,6 +7,8 @@ import uuid
 from typing import Union
 from pathlib import Path
 import yaml
+
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus, TaskType
 from ddpui.models.org import (
     Org,
@@ -76,8 +78,9 @@ def fetch_elementary_profile_target(orgdbt: OrgDbt) -> str:
             f"couldn't find the profiles.yml file for the elementary setup for orgdbt {orgdbt.id}. setting target to default"
         )
     else:
-        with open(elementary_profiles_yml, "r") as file:
-            config = yaml.safe_load(file)
+        storage = StorageFactory.get_storage_adapter()
+        content = storage.read_file(elementary_profiles_yml)
+        config = yaml.safe_load(content)
         elementary_config = config.get("elementary", {})
         outputs = elementary_config.get("outputs", {})
         targets = list(outputs.keys())

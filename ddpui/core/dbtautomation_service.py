@@ -4,6 +4,7 @@ from collections import deque
 from ninja import Schema
 
 from django.db.models import Q
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 from ninja.errors import HttpError
 from ddpui.core.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
 from ddpui.core.dbt_automation.operations.castdatatypes import cast_datatypes, cast_datatypes_sql
@@ -235,15 +236,18 @@ def upsert_multiple_sources_to_a_yaml(
     sources_file = dbt_project.sources_filename(rel_dir_to_models)
 
     # Ensure the directory exists
-    if not source_dir.exists():
-        source_dir.mkdir(parents=True)
-        logger.info(f"Created source directory {source_dir}")
+    storage = StorageFactory.get_storage_adapter()
+    source_dir_str = str(source_dir)
+    if not storage.exists(source_dir_str):
+        storage.create_directory(source_dir_str)
+        logger.info(f"Created source directory {source_dir_str}")
 
     # Determine final sources to write
-    if sources_file.exists():
+    sources_file_str = str(sources_file)
+    if storage.exists(sources_file_str):
         # File exists - read existing and merge
-        with open(sources_file, "r", encoding="utf-8") as infile:
-            existing_yaml = yaml.safe_load(infile) or {}
+        existing_content = storage.read_file(sources_file_str)
+        existing_yaml = yaml.safe_load(existing_content) or {}
 
         existing_sources_data = {}
         for source in existing_yaml.get("sources", []):
@@ -293,9 +297,9 @@ def upsert_multiple_sources_to_a_yaml(
             yaml_content["sources"].append(source_def)
 
     # Write the YAML file
-    with open(sources_file, "w", encoding="utf-8") as outfile:
-        yaml.safe_dump(yaml_content, outfile, sort_keys=False)
-        logger.info(f"Upserted source definitions to {sources_file}")
+    yaml_output = yaml.safe_dump(yaml_content, sort_keys=False)
+    storage.write_file(sources_file_str, yaml_output)
+    logger.info(f"Upserted source definitions to {sources_file_str}")
 
     return dbt_project.strip_project_dir(sources_file)
 
