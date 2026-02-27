@@ -26,13 +26,23 @@ from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
 from ddpui.celeryworkers.tasks import (
     detect_schema_changes_for_org,
     get_connection_catalog_task,
+    clear_stuck_locks,
 )
 from ddpui.models.tasks import TaskProgressStatus
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.models.tasks import Task, OrgTask
+from ddpui.models.tasks import Task, OrgTask, TaskLock
 from ddpui.utils.constants import TASK_AIRBYTESYNC
 from ddpui.utils.singletaskprogress import SingleTaskProgress
+from ddpui.ddpprefect import (
+    FLOW_RUN_COMPLETED_STATE_NAME,
+    FLOW_RUN_FAILED_STATE_NAME,
+    FLOW_RUN_CRASHED_STATE_NAME,
+    FLOW_RUN_CANCELLED_STATE_NAME,
+    FLOW_RUN_RUNNING_STATE_NAME,
+)
+from datetime import datetime, timedelta
+import pytz
 
 pytestmark = pytest.mark.django_db
 
@@ -554,3 +564,255 @@ def test_get_connection_catalog_task_success(org_without_workspace: Org):
             },
         },
     ]
+
+
+# Clear Stuck Locks Tests
+
+
+def create_test_orgtask(orguser):
+    """Helper function to create an OrgTask for testing"""
+    synctask = Task.objects.filter(slug=TASK_AIRBYTESYNC).first()
+    if synctask is None:
+        synctask = Task.objects.create(
+            slug=TASK_AIRBYTESYNC, type="Airbyte Sync", label="Airbyte Sync"
+        )
+    return OrgTask.objects.create(
+        org=orguser.org, task=synctask, connection_id="test-connection-id"
+    )
+
+
+def test_clear_stuck_locks_no_locks(orguser):
+    """Test clear_stuck_locks when there are no locks"""
+    assert TaskLock.objects.count() == 0
+
+    result = clear_stuck_locks()
+
+    assert result == 0
+    assert TaskLock.objects.count() == 0
+
+
+def test_clear_stuck_locks_flow_run_not_found(orguser):
+    """Test clear_stuck_locks when flow run is not found in Prefect"""
+    orgtask = create_test_orgtask(orguser)
+
+    # Create a lock with a flow_run_id
+    lock = TaskLock.objects.create(
+        orgtask=orgtask, locked_by=orguser, flow_run_id="missing-flow-run-id"
+    )
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run:
+        mock_get_flow_run.return_value = None
+
+        result = clear_stuck_locks()
+
+        assert result == 1
+        assert TaskLock.objects.count() == 0  # Lock should be deleted
+
+
+def test_clear_stuck_locks_terminal_state_recent(orguser):
+    """Test clear_stuck_locks with terminal state but recent end_time (<5 min)"""
+    # Create locks
+    lock1 = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="recent-flow-run-id"
+    )
+
+    # Mock flow run that ended 2 minutes ago
+    recent_time = datetime.now(pytz.utc) - timedelta(minutes=2)
+    mock_flow_run = {
+        "id": "recent-flow-run-id",
+        "state_name": FLOW_RUN_COMPLETED_STATE_NAME,
+        "end_time": recent_time.isoformat(),
+        "updated": recent_time.isoformat(),
+    }
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        mock_get_flow_run.return_value = mock_flow_run
+
+        result = clear_stuck_locks()
+
+        assert result == 0  # Should not process recent flow runs
+        assert TaskLock.objects.count() == 1  # Lock should still exist
+        mock_webhook.assert_not_called()
+
+
+def test_clear_stuck_locks_terminal_state_old(orguser):
+    """Test clear_stuck_locks with terminal state and old end_time (>5 min)"""
+    # Create locks for same flow_run_id
+    lock1 = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="old-flow-run-id"
+    )
+    lock2 = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="old-flow-run-id"
+    )
+
+    # Mock flow run that ended 10 minutes ago
+    old_time = datetime.now(pytz.utc) - timedelta(minutes=10)
+    mock_flow_run = {
+        "id": "old-flow-run-id",
+        "state_name": FLOW_RUN_FAILED_STATE_NAME,
+        "end_time": old_time.isoformat(),
+        "updated": old_time.isoformat(),
+    }
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        mock_get_flow_run.return_value = mock_flow_run
+
+        result = clear_stuck_locks()
+
+        assert result == 1  # Should process one flow_run_id
+        mock_get_flow_run.assert_called_once_with("old-flow-run-id")
+        mock_webhook.assert_called_once_with("old-flow-run-id", FLOW_RUN_FAILED_STATE_NAME)
+
+
+def test_clear_stuck_locks_no_end_time_fallback_to_updated(orguser):
+    """Test clear_stuck_locks with no end_time, falls back to updated field"""
+    lock = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser),
+        locked_by=orguser,
+        flow_run_id="no-endtime-flow-run-id",
+    )
+
+    # Mock flow run with no end_time but old updated time
+    old_time = datetime.now(pytz.utc) - timedelta(minutes=10)
+    mock_flow_run = {
+        "id": "no-endtime-flow-run-id",
+        "state_name": FLOW_RUN_CRASHED_STATE_NAME,
+        "end_time": None,
+        "updated": old_time.isoformat(),
+    }
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        mock_get_flow_run.return_value = mock_flow_run
+
+        result = clear_stuck_locks()
+
+        assert result == 1
+        mock_webhook.assert_called_once_with("no-endtime-flow-run-id", FLOW_RUN_CRASHED_STATE_NAME)
+
+
+def test_clear_stuck_locks_running_state_ignored(orguser):
+    """Test clear_stuck_locks ignores non-terminal states"""
+    lock = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="running-flow-run-id"
+    )
+
+    mock_flow_run = {
+        "id": "running-flow-run-id",
+        "state_name": FLOW_RUN_RUNNING_STATE_NAME,
+        "end_time": None,
+        "updated": (datetime.now(pytz.utc) - timedelta(hours=1)).isoformat(),
+    }
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        mock_get_flow_run.return_value = mock_flow_run
+
+        result = clear_stuck_locks()
+
+        assert result == 0  # Should not process running states
+        assert TaskLock.objects.count() == 1  # Lock should still exist
+        mock_webhook.assert_not_called()
+
+
+def test_clear_stuck_locks_multiple_flow_runs(orguser):
+    """Test clear_stuck_locks with multiple different flow_run_ids"""
+    # Create locks for different flow_run_ids
+    lock1 = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="old-flow-1"
+    )
+    lock2 = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="old-flow-2"
+    )
+    lock3 = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="recent-flow"
+    )
+
+    old_time = datetime.now(pytz.utc) - timedelta(minutes=10)
+    recent_time = datetime.now(pytz.utc) - timedelta(minutes=2)
+
+    def mock_get_flow_run(flow_run_id):
+        if flow_run_id == "old-flow-1":
+            return {
+                "id": "old-flow-1",
+                "state_name": FLOW_RUN_COMPLETED_STATE_NAME,
+                "end_time": old_time.isoformat(),
+                "updated": old_time.isoformat(),
+            }
+        elif flow_run_id == "old-flow-2":
+            return {
+                "id": "old-flow-2",
+                "state_name": FLOW_RUN_CANCELLED_STATE_NAME,
+                "end_time": old_time.isoformat(),
+                "updated": old_time.isoformat(),
+            }
+        elif flow_run_id == "recent-flow":
+            return {
+                "id": "recent-flow",
+                "state_name": FLOW_RUN_FAILED_STATE_NAME,
+                "end_time": recent_time.isoformat(),
+                "updated": recent_time.isoformat(),
+            }
+        return None
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll", side_effect=mock_get_flow_run), patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        result = clear_stuck_locks()
+
+        assert result == 2  # Should process 2 old flow runs
+        assert mock_webhook.call_count == 2
+
+        # Check that the right calls were made
+        webhook_calls = [call[0] for call in mock_webhook.call_args_list]
+        assert ("old-flow-1", FLOW_RUN_COMPLETED_STATE_NAME) in webhook_calls
+        assert ("old-flow-2", FLOW_RUN_CANCELLED_STATE_NAME) in webhook_calls
+
+
+def test_clear_stuck_locks_api_error_handling(orguser):
+    """Test clear_stuck_locks handles API errors gracefully"""
+    lock = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="error-flow-run-id"
+    )
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        mock_get_flow_run.side_effect = Exception("API Error")
+
+        result = clear_stuck_locks()
+
+        assert result == 0  # Should not process due to error
+        assert TaskLock.objects.count() == 1  # Lock should still exist
+        mock_webhook.assert_not_called()
+
+
+def test_clear_stuck_locks_no_time_fields(orguser):
+    """Test clear_stuck_locks when both end_time and updated are null/unparseable"""
+    lock = TaskLock.objects.create(
+        orgtask=create_test_orgtask(orguser), locked_by=orguser, flow_run_id="no-time-flow-run-id"
+    )
+
+    mock_flow_run = {
+        "id": "no-time-flow-run-id",
+        "state_name": FLOW_RUN_COMPLETED_STATE_NAME,
+        "end_time": None,
+        "updated": None,
+    }
+
+    with patch("ddpui.celeryworkers.tasks.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.celeryworkers.tasks.do_handle_prefect_webhook"
+    ) as mock_webhook:
+        mock_get_flow_run.return_value = mock_flow_run
+
+        result = clear_stuck_locks()
+
+        assert result == 0  # Should not process without time reference
+        assert TaskLock.objects.count() == 1  # Lock should still exist
+        mock_webhook.assert_not_called()

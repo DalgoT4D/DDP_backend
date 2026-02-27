@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from time import sleep
 import subprocess
+from django.utils.dateparse import parse_datetime
 import pytz
 from django.core.management import call_command
 from django.utils.text import slugify
@@ -84,10 +85,17 @@ from ddpui.ddpprefect.prefect_service import (
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
-    compute_dataflow_run_times_from_history,
     get_flow_run_poll,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE, TASK_RUN_KIND, FLOW_RUN_KIND
+from ddpui.ddpprefect import (
+    DBTCLIPROFILE,
+    TASK_RUN_KIND,
+    FLOW_RUN_KIND,
+    FLOW_RUN_CRASHED_STATE_NAME,
+    FLOW_RUN_CANCELLED_STATE_NAME,
+    FLOW_RUN_COMPLETED_STATE_NAME,
+    FLOW_RUN_FAILED_STATE_NAME,
+)
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
 from ddpui.utils.helpers import (
@@ -1217,21 +1225,88 @@ def sync_airbyte_job_stats_for_all_connections(
 
 
 @app.task()
-def compute_dataflow_run_times(org: Org = None):
-    """Computes run times for all dataflows"""
-    dataflows = OrgDataFlowv1.objects
-
-    if org:
-        dataflows = dataflows.filter(org=org)
-
-    for dataflow in dataflows.all():
-        compute_dataflow_run_times_from_history(dataflow)
-
-
-@app.task()
 def flush_blacklisted_tokens():
     """Flush expired tokens from the blacklist app"""
     call_command("flushexpiredtokens")
+
+
+@app.task(bind=False)
+def clear_stuck_locks():
+    """Process stuck locks by calling webhook handler for flow runs that finished >5 minutes ago"""
+    logger.info("Starting periodic check to clear stuck locks")
+
+    # Get unique flow_run_ids with locks
+    flow_run_ids = (
+        TaskLock.objects.exclude(flow_run_id__isnull=True)
+        .exclude(flow_run_id="")
+        .values_list("flow_run_id", flat=True)
+        .distinct()
+    )
+    processed_count = 0
+
+    for flow_run_id in flow_run_ids:
+        try:
+            # Check if flow run is in terminal state in Prefect
+            flow_run = get_flow_run_poll(flow_run_id)
+
+            if not flow_run:
+                # Flow run not found, delete all locks for this flow_run_id
+                deleted_count, _ = TaskLock.objects.filter(flow_run_id=flow_run_id).delete()
+                logger.info(f"Flow run {flow_run_id} not found, deleted {deleted_count} locks")
+                processed_count += 1
+                continue
+
+            state_name = flow_run.get("state_name", "")
+            end_time_str = flow_run.get("end_time")
+
+            # Only process terminal states
+            if state_name in [
+                FLOW_RUN_COMPLETED_STATE_NAME,
+                FLOW_RUN_CANCELLED_STATE_NAME,
+                FLOW_RUN_FAILED_STATE_NAME,
+                FLOW_RUN_CRASHED_STATE_NAME,
+            ]:
+                # Check if at least 5 minutes have passed since flow run ended
+                reference_time = None
+                reference_field = ""
+
+                if end_time_str:
+                    reference_time = parse_datetime(end_time_str)
+                    reference_field = "end_time"
+                else:
+                    # Fall back to updated field if end_time is null
+                    updated_time_str = flow_run.get("updated")
+                    if updated_time_str:
+                        reference_time = parse_datetime(updated_time_str)
+                        reference_field = "updated"
+
+                if reference_time:
+                    # Use timezone-aware datetime to match Prefect's timestamps
+                    now = datetime.now(pytz.utc)
+                    time_since_reference = now - reference_time
+                    if time_since_reference.total_seconds() >= 300:  # 5 minutes = 300 seconds
+                        lock_count = TaskLock.objects.filter(flow_run_id=flow_run_id).count()
+                        logger.info(
+                            f"Processing flow run {flow_run_id} with {lock_count} stuck locks ({reference_field}: {time_since_reference.total_seconds():.0f}s ago)"
+                        )
+                        # Call the webhook handler once to properly process the flow run
+                        do_handle_prefect_webhook(flow_run_id, state_name)
+                        processed_count += 1
+                    else:
+                        logger.debug(
+                            f"Flow run {flow_run_id} {reference_field} recently, waiting for webhook"
+                        )
+                else:
+                    logger.warning(
+                        f"Could not parse time fields for flow run {flow_run_id}: end_time={end_time_str}, updated={flow_run.get('updated')}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Error processing flow run {flow_run_id}: {e}")
+            continue
+
+    logger.info(f"Processed {processed_count} flow runs with stuck locks")
+    return processed_count
 
 
 @app.on_after_finalize.connect
@@ -1251,6 +1326,9 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
 
     # clear canvas locks every; every 60 seconds or 1 minute
     sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
+
+    # clear stuck task locks; every 5 minutes
+    sender.add_periodic_task(300.0, clear_stuck_locks.s(), name="clear stuck task locks")
 
     # sync flow runs of deployment; every 6 hours
     sender.add_periodic_task(
