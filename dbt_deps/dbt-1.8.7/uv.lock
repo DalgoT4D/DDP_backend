@@ -432,7 +432,7 @@ dependencies = [
     { name = "dbt-bigquery" },
     { name = "dbt-core" },
     { name = "dbt-postgres" },
-    { name = "elementary-data" },
+    { name = "elementary-data", extra = ["bigquery", "postgres"] },
 ]
 
 [package.metadata]
@@ -440,7 +440,7 @@ requires-dist = [
     { name = "dbt-bigquery", specifier = "==1.8.2" },
     { name = "dbt-core", specifier = "==1.8.7" },
     { name = "dbt-postgres", specifier = "==1.8.2" },
-    { name = "elementary-data", specifier = "==0.22.0" },
+    { name = "elementary-data", extras = ["bigquery", "postgres"], specifier = "==0.22.0" },
 ]
 
 [[package]]
@@ -647,6 +647,14 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/91/e2/17477bda83e3117380fd8dbd3e03a9ca31170621096fe8baaf931c504bd8/elementary_data-0.22.0.tar.gz", hash = "sha256:6b3b286d3717d457dfd0a99bb0148f33487ad3eaf93f39f1204803ac8298a943", size = 1371093, upload-time = "2026-01-29T12:05:50.699Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/49/6bf27bd5e9ddf9cc2faa234dd10c15286e90c999d836ce0b5f24351ffc1d/elementary_data-0.22.0-py3-none-any.whl", hash = "sha256:4387cc88a84c88dc6e310bf9f2d30204aa8ac7d34e54fc4adad60e06222d6367", size = 1456991, upload-time = "2026-01-29T12:05:49.402Z" },
+]
+
+[package.optional-dependencies]
+bigquery = [
+    { name = "dbt-bigquery" },
+]
+postgres = [
+    { name = "dbt-postgres" },
 ]
 
 [[package]]

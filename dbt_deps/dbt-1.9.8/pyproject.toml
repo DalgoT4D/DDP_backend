@@ -7,6 +7,6 @@ dependencies = [
     "dbt-core==1.9.8",
     "dbt-postgres==1.9.0",
     "dbt-bigquery==1.9.2",
-    "elementary-data==0.22.0"
+    "elementary-data[bigquery,postgres]==0.22.0"
 ]
 
