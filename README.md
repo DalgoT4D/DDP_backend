@@ -155,6 +155,12 @@ cd dbt_deps/dbt-1.9.8/
 UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.9.8 uv sync
 ```
 
+#### For DBT 1.10.19
+```bash
+cd dbt_deps/dbt-1.10.19/
+UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.10.19 uv sync
+```
+
 **Note**: The `uv.lock` files are committed to ensure reproducible dependency versions across all environments.
 
 Set the DBT environment path in `.env`:
