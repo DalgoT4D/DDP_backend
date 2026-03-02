@@ -73,6 +73,7 @@ ALLOWED_HOSTS = [
     "dashboard.dalgo.org",
     "staging-app.dalgo.org",
     "insights.dalgo.org",
+    "experiments.dalgo.org",
 ]
 # For cookie-based authentication, we need specific origins instead of wildcard
 CORS_ALLOW_ALL_ORIGINS = False
@@ -87,6 +88,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://staging-app.dalgo.org",
     "https://dashboard.dalgo.org",
     "https://insights.dalgo.org",
+    "https://experiments.dalgo.org",
 ]
 CORS_ALLOW_METHODS = [
     "GET",
