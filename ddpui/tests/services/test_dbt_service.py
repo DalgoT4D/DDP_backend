@@ -72,16 +72,25 @@ def test_delete_dbt_workspace():
     assert OrgPrefectBlockv1.objects.filter(block_id="dbtcli-block-id").count() == 1
     assert OrgPrefectBlockv1.objects.filter(block_id="secret-block-id").count() == 1
 
-    with patch("ddpui.ddpdbt.dbt_service.os.path.exists") as mock_exists, patch(
-        "ddpui.ddpdbt.dbt_service.shutil.rmtree"
-    ) as mock_rmtree, patch(
+    with patch(
+        "ddpui.ddpdbt.dbt_service.StorageFactory.get_storage_adapter"
+    ) as mock_storage_adapter, patch(
         "ddpui.ddpdbt.dbt_service.prefect_service.delete_dbt_cli_profile_block"
     ) as mock_delete_dbt_cli_block, patch(
         "ddpui.ddpdbt.dbt_service.prefect_service.delete_secret_block"
     ) as mock_delete_secret_block:
+        mock_storage = Mock()
+        mock_storage.exists.return_value = True  # Directory exists
+        mock_storage.delete_file.return_value = None  # Successful deletion
+        mock_storage_adapter.return_value = mock_storage
+
         delete_dbt_workspace(org)
-        mock_exists.return_value = True
-        mock_rmtree.assert_called_once_with("project-dir")
+
+        # Verify storage operations
+        mock_storage.exists.assert_called_once_with("project-dir")
+        mock_storage.delete_file.assert_called_once_with("project-dir")
+
+        # Verify prefect operations
         mock_delete_dbt_cli_block.assert_called_once_with("dbtcli-block-id")
         mock_delete_secret_block.assert_called_once_with("secret-block-id")
 
@@ -111,7 +120,7 @@ def test_setup_local_dbt_workspace_project_already_exists(tmp_path):
     dbtrepo_dir: Path = project_dir / project_name
     os.makedirs(dbtrepo_dir)
 
-    with patch("os.getenv", return_value=tmp_path):
+    with patch.dict(os.environ, {"CLIENTDBT_ROOT": str(tmp_path)}):
         with pytest.raises(Exception) as excinfo:
             setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
         assert str(excinfo.value) == f"Project {project_name} already exists"
@@ -127,7 +136,7 @@ def test_setup_local_dbt_workspace_dbt_init_failed(tmp_path):
     OrgWarehouse.objects.create(org=org, wtype="postgres")
 
     # Mock the DbtProjectManager methods that would be called
-    with patch("os.getenv", return_value=tmp_path), patch(
+    with patch.dict(os.environ, {"CLIENTDBT_ROOT": str(tmp_path)}), patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
     ) as mock_run_command, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
@@ -167,7 +176,7 @@ def test_setup_local_dbt_workspace_success(tmp_path):
         return Mock(returncode=0, stdout="", stderr="")
 
     # Mock the DbtProjectManager methods and other dependencies
-    with patch("os.getenv", return_value=tmp_path), patch(
+    with patch.dict(os.environ, {"CLIENTDBT_ROOT": str(tmp_path)}), patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command", side_effect=mock_run_dbt_init
     ) as mock_run_command, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
@@ -2222,10 +2231,15 @@ def test_connect_git_remote_git_not_initialized(mock_git_manager_class):
     # Mock other dependencies
     with (
         patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
-        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+        patch(
+            "ddpui.ddpdbt.dbt_service.StorageFactory.get_storage_adapter"
+        ) as mock_storage_adapter,
     ):
         mock_get_dbt_dir.return_value = "/fake/dbt/project"
-        mock_path.return_value.exists.return_value = True
+
+        mock_storage = Mock()
+        mock_storage.exists.return_value = True  # Directory exists
+        mock_storage_adapter.return_value = mock_storage
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Git is not initialized in the DBT project folder"):
@@ -2267,10 +2281,15 @@ def test_connect_git_remote_verify_url_failure(mock_git_manager_class):
     # Mock other dependencies
     with (
         patch("ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_project_dir") as mock_get_dbt_dir,
-        patch("ddpui.ddpdbt.dbt_service.Path") as mock_path,
+        patch(
+            "ddpui.ddpdbt.dbt_service.StorageFactory.get_storage_adapter"
+        ) as mock_storage_adapter,
     ):
         mock_get_dbt_dir.return_value = "/fake/dbt/project"
-        mock_path.return_value.exists.return_value = True
+
+        mock_storage = Mock()
+        mock_storage.exists.return_value = True  # Directory exists
+        mock_storage_adapter.return_value = mock_storage
 
         # Execute and verify exception is raised
         with pytest.raises(Exception, match="Authentication failed: Invalid credentials"):
