@@ -71,12 +71,14 @@ def get_elementary_target_schema(dbt_project_yml: str) -> dict | None:
     storage = StorageFactory.get_storage_adapter()
     content = storage.read_file(str(dbt_project_yml))
     dbt_project_obj = yaml.safe_load(content)
-    if "elementary" not in dbt_project_obj["models"]:
+    models = dbt_project_obj.get("models", {})
+    if not isinstance(models, dict) or "elementary" not in models:
         return None
-    if "schema" in dbt_project_obj["models"]["elementary"]:
-        return {"schema": dbt_project_obj["models"]["elementary"]["schema"]}
-    if "+schema" in dbt_project_obj["models"]["elementary"]:
-        return {"+schema": dbt_project_obj["models"]["elementary"]["+schema"]}
+    elementary = models.get("elementary", {})
+    if "schema" in elementary:
+        return {"schema": elementary["schema"]}
+    if "+schema" in elementary:
+        return {"+schema": elementary["+schema"]}
     return None
 
 
