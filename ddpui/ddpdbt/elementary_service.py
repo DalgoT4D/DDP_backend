@@ -91,7 +91,7 @@ def get_elementary_package_version(packages_yml: str) -> dict | None:
         and isinstance(packages_obj["packages"], list)
     ):
         for package in packages_obj["packages"]:
-            if package["package"] == "elementary-data/elementary":
+            if "package" in package and package["package"] == "elementary-data/elementary":
                 return package
     return None
 
