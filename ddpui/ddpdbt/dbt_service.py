@@ -51,7 +51,7 @@ DBT_GITIGNORE_CONTENT = [
     ".env.local",
     "elementary_profiles/",
     "*.html",  # ignore elementary reports
-    "edr_target/"
+    "edr_target/",
 ]
 
 
