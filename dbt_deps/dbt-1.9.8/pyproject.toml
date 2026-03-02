@@ -1,0 +1,11 @@
+[project]
+name = "dalgo-dbt-1.9.8"
+version = "0.1.0"
+description = "DBT 1.9.8 dependencies for Dalgo platform"
+requires-python = ">=3.10"
+dependencies = [
+    "dbt-core==1.9.8",
+    "dbt-postgres==1.9.0",
+    "dbt-bigquery==1.9.2"
+]
+
