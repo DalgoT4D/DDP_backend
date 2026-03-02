@@ -140,30 +140,37 @@ PREFECT_PROXY_API_URL=
 -   Set `DEV_SECRETS_DIR` in `.env` unless you want to use Amazon's Secrets Manager
 
 ### Step 7: Install DBT
--   Open a new terminal
 
--   Create a local `venv`, install `dbt` and put its location into `DBT_VENV` in `.env`
+The platform now supports multiple DBT versions using `uv` and `pyproject.toml` for better dependency management.
 
-```
-pyenv local 3.10
-
-pyenv exec python -m venv <env-name>
-
-source <env-name>/bin/activate
-
-python -m pip install \
-  dbt-core \
-  dbt-postgres \
-  dbt-bigquery
-
+#### For DBT 1.8.7 (current production)
+```bash
+cd dbt_deps/dbt-1.8.7/
+UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv uv sync
 ```
 
--   Create empty directories for `CLIENTDBT_ROOT`
+#### For DBT 1.9.8 (migration target)
+```bash
+cd dbt_deps/dbt-1.9.8/
+UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.9.8 uv sync
+```
 
+**Note**: The `uv.lock` files are committed to ensure reproducible dependency versions across all environments.
+
+Set the DBT environment path in `.env`:
 ```
-CLIENTDBT_ROOT=
-DBT_VENV=<env-name>/bin/activate
+CLIENTDBT_ROOT=/path/to/client/dbt/projects
+DBT_VENV=/path/to/dbt/environments
 ```
+
+This creates the structure:
+```
+$DBT_VENV/
+├── venv/          # DBT 1.8.7
+└── venv-1.9.8/    # DBT 1.9.8
+```
+
+Organizations use either `venv` or `venv-1.9.8` in their `dbt_venv` database field.
 
 ### Step 8: Add SIGNUPCODE and FRONTEND_URL
 
