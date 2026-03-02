@@ -1,4 +1,7 @@
-"""tests for bigquery operations"""
+"""
+TODO: need to rework these after the refactor and changes to UI4T feature
+tests for bigquery operations
+"""
 
 import os
 from pathlib import Path
@@ -15,7 +18,6 @@ from ddpui.core.dbt_automation.operations.mergeoperations import (
 from ddpui.core.dbt_automation.operations.rawsql import generic_sql_function
 from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.core.dbt_automation.operations.scaffold import scaffold
 from ddpui.core.dbt_automation.operations.syncsources import sync_sources
 from ddpui.core.dbt_automation.operations.flattenairbyte import flatten_operation
 from ddpui.core.dbt_automation.operations.coalescecolumns import coalesce_columns
@@ -76,6 +78,7 @@ class TestBigqueryOperations:
             "project_name": project_name,
             "default_schema": TestBigqueryOperations.schema,
         }
+        # TODO: need to change this
         scaffold(config, TestBigqueryOperations.wc_client, tmpdir)
         TestBigqueryOperations.test_project_dir = Path(tmpdir) / project_name
         TestBigqueryOperations.execute_dbt("deps")

@@ -1,4 +1,7 @@
-"""tests for postgres operations"""
+"""
+TODO: need to rework these after the refactor and changes to UI4T feature
+tests for postgres operations
+"""
 
 import os
 from pathlib import Path
@@ -11,7 +14,6 @@ from ddpui.core.dbt_automation.operations.generic import generic_function
 from ddpui.core.dbt_automation.operations.mergeoperations import merge_operations
 from ddpui.core.dbt_automation.operations.rawsql import generic_sql_function
 from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
-from ddpui.core.dbt_automation.operations.scaffold import scaffold
 from ddpui.core.dbtautomation_service import upsert_multiple_sources_to_a_yaml
 from ddpui.core.dbt_automation.operations.flattenairbyte import flatten_operation
 from ddpui.core.dbt_automation.operations.coalescecolumns import coalesce_columns
@@ -77,6 +79,7 @@ class TestPostgresOperations:
             "project_name": project_name,
             "default_schema": TestPostgresOperations.schema,
         }
+        # TODO: need to change this
         scaffold(config, TestPostgresOperations.wc_client, tmpdir)
         TestPostgresOperations.test_project_dir = Path(tmpdir) / project_name
         TestPostgresOperations.execute_dbt("deps")
