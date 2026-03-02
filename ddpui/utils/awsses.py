@@ -6,7 +6,7 @@ from ddpui.utils.aws_client import AWSClient
 
 def get_ses_client():
     """Get SES client from unified AWS client using SES credentials"""
-    return AWSClient.get_instance("ses", "ses")
+    return AWSClient.get_instance("ses")
 
 
 def send_text_message(to_email, subject, message):

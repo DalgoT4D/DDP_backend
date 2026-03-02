@@ -316,7 +316,7 @@ def fetch_elementary_report(org: Org):
     if not storage.exists(str(project_dir / "elementary_profiles")):
         return "set up elementary profile first", None
 
-    s3 = AWSClient.get_instance("s3", "s3")
+    s3 = AWSClient.get_instance("s3")
     bucket_file_path = make_edr_report_s3_path(org)
     try:
         s3response = s3.get_object(
