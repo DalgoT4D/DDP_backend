@@ -1211,6 +1211,101 @@ class ChartListResponse(Schema):
 
 ---
 
-**Document Version**: 2.1  
-**Last Updated**: 2026-02-05  
+---
+
+## Testing Guidelines
+
+### Testing Philosophy
+
+When working on the DDP backend, always follow these testing principles:
+
+#### 1. Use `uv` for Running Tests
+
+Always use `uv run` to execute tests in the DDP backend:
+
+```bash
+# Run specific test class
+uv run pytest ddpui/tests/core/dbt_automation/test_operations.py::TestRawSqlOperation -v
+
+# Run specific test method
+uv run pytest ddpui/tests/core/dbt_automation/test_operations.py::TestRawSqlOperation::test_functions_with_parentheses_and_commas -v
+
+# Run all tests in a file
+uv run pytest ddpui/tests/core/dbt_automation/test_operations.py -v
+
+# Run tests with coverage
+uv run pytest --cov=ddpui ddpui/tests/ -v
+```
+
+#### 2. Iterative Test Development
+
+**CRITICAL**: Follow this workflow when writing or modifying code:
+
+1. **Write a test case** → 2. **Run the test** → 3. **Fix/implement code** → 4. **Run test again** → 5. **Move to next test case**
+
+**Never write multiple test cases without running each one immediately.** This ensures:
+- Each test case works as expected
+- Early detection of issues
+- Faster debugging cycles
+- Higher confidence in test validity
+
+#### 3. Test Coverage for Edge Cases
+
+When fixing bugs or adding features, ensure comprehensive test coverage:
+
+##### Example: SQL Parsing Edge Cases
+When fixing SQL parsing issues (like the coalesce function parsing bug), create test cases for:
+
+- **Basic functionality**: Simple column selection
+- **Edge cases**: Functions with commas `coalesce(a, b)`
+- **Complex scenarios**: Nested functions, mixed expressions
+- **Boundary conditions**: Empty inputs, special characters
+
+```python
+def test_functions_with_parentheses_and_commas(self, mock_warehouse):
+    """Test rawsql with functions containing commas (e.g., coalesce, concat)"""
+    config = {
+        "sql_statement_1": "coalesce(col1, col2) as combined, concat(first_name, ' ', last_name) as full_name",
+        # ... rest of config
+    }
+    sql, output_cols = raw_generic_dbt_sql(config, mock_warehouse)
+    assert output_cols == ["combined", "full_name"]
+```
+
+#### 4. Test Organization
+
+- Group related tests in the same test class
+- Use descriptive test method names that explain the scenario
+- Include docstrings for complex test cases
+- Add test cases to existing test classes rather than creating new files when possible
+
+#### 5. Test Data and Fixtures
+
+- Use meaningful test data that represents real-world scenarios
+- Leverage pytest fixtures for common test setup
+- Keep test data simple but comprehensive enough to catch edge cases
+
+### Example Workflow
+
+```bash
+# 1. Write test case for new feature/fix
+# 2. Run the test (should fail initially)
+uv run pytest ddpui/tests/core/dbt_automation/test_operations.py::TestRawSqlOperation::test_new_feature -v
+
+# 3. Implement the fix/feature
+# 4. Run the test again (should pass)
+uv run pytest ddpui/tests/core/dbt_automation/test_operations.py::TestRawSqlOperation::test_new_feature -v
+
+# 5. Run all related tests to ensure no regressions
+uv run pytest ddpui/tests/core/dbt_automation/test_operations.py::TestRawSqlOperation -v
+
+# 6. Move to next test case and repeat
+```
+
+This approach ensures robust, well-tested code that handles edge cases properly and maintains high quality standards.
+
+---
+
+**Document Version**: 2.2  
+**Last Updated**: 2026-03-05  
 **Maintained By**: Dalgo Platform Team
