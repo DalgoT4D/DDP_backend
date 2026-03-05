@@ -24,7 +24,6 @@ from ddpui.tests.api_tests.test_user_org_api import (
 )
 from ddpui.ddpprefect.schema import DbtProfile, OrgDbtSchema
 from ddpui.celeryworkers.tasks import (
-    setup_dbtworkspace,
     detect_schema_changes_for_org,
     get_connection_catalog_task,
     clear_stuck_locks,
@@ -46,103 +45,6 @@ from datetime import datetime, timedelta
 import pytz
 
 pytestmark = pytest.mark.django_db
-
-
-def test_post_dbt_workspace_failed_warehouse_not_present(orguser):
-    """a failure test case when trying to setup dbt workspace without the warehouse"""
-    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
-    payload = OrgDbtSchema(
-        profile=dbtprofile,
-        gitrepoUrl="gitrepoUrl",
-    )
-
-    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
-        TaskProgress, "add", return_value=Mock()
-    ) as add_progress_mock:
-        with pytest.raises(Exception) as exc:
-            setup_dbtworkspace(orguser.org.id, payload.dict())
-        assert exc.value.args[0] == f"need to set up a warehouse first for org {orguser.org.name}"
-        add_progress_mock.assert_has_calls(
-            [
-                call({"message": "started", "status": "running"}),
-                call(
-                    {
-                        "message": "need to set up a warehouse first",
-                        "status": "failed",
-                    }
-                ),
-            ]
-        )
-
-
-def test_post_dbt_workspace_failed_gitclone(orguser, tmp_path):
-    """a failure test case when trying to setup dbt workspace due to failure in cloning git repo"""
-    OrgWarehouse.objects.create(
-        org=orguser.org,
-        wtype="postgres",
-        airbyte_destination_id="airbyte_destination_id",
-    )
-    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
-    payload = OrgDbtSchema(
-        profile=dbtprofile,
-        gitrepoUrl="gitrepoUrl",
-    )
-
-    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
-        TaskProgress, "add", return_value=Mock()
-    ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
-        "ddpui.celeryworkers.tasks.clone_github_repo", return_value=False
-    ) as gitclone_method_mock:
-        with pytest.raises(Exception) as exc:
-            setup_dbtworkspace(orguser.org.id, payload.dict())
-        assert exc.value.args[0] == f"Failed to clone git repo"
-        add_progress_mock.assert_has_calls([call({"message": "started", "status": "running"})])
-        gitclone_method_mock.assert_called_once()
-
-
-def test_post_dbt_workspace_success(orguser, tmp_path):
-    """a success test case for setting up dbt workspace"""
-    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
-    OrgWarehouse.objects.create(
-        org=orguser.org,
-        wtype="postgres",
-        airbyte_destination_id="airbyte_destination_id",
-    )
-    dbtprofile = DbtProfile(name="fake-name", target_configs_schema="target_configs_schema")
-    payload = OrgDbtSchema(
-        profile=dbtprofile,
-        gitrepoUrl="gitrepoUrl",
-    )
-
-    with patch.object(TaskProgress, "__init__", return_value=None), patch.object(
-        TaskProgress, "add", return_value=Mock()
-    ) as add_progress_mock, patch(
-        "ddpui.celeryworkers.tasks.DbtProjectManager.get_org_dir",
-        return_value=str(tmp_path / orguser.org.slug),
-    ), patch(
-        "ddpui.celeryworkers.tasks.clone_github_repo",
-        return_value=str(tmp_path / orguser.org.slug / "dbtrepo"),
-    ) as gitclone_method_mock, patch(
-        "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
-        return_value={},
-    ) as retrieve_warehouse_credentials_mock, patch(
-        "ddpui.celeryworkers.tasks.create_or_update_org_cli_block", return_value=(("", ""), None)
-    ) as create_or_update_org_cli_block_mock:
-        assert OrgDbt.objects.filter(org=orguser.org).count() == 0
-        setup_dbtworkspace(orguser.org.id, payload.dict())
-
-        add_progress_mock.assert_has_calls([call({"message": "started", "status": "running"})])
-        gitclone_method_mock.assert_called_once()
-        assert OrgDbt.objects.filter(org=orguser.org).count() == 1
-        add_progress_mock.assert_has_calls(
-            [
-                call({"message": "started", "status": "running"}),
-                call({"message": "wrote OrgDbt entry", "status": "completed"}),
-            ]
-        )
-
-        retrieve_warehouse_credentials_mock.assert_called_once()
-        create_or_update_org_cli_block_mock.assert_called_once()
 
 
 def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path):

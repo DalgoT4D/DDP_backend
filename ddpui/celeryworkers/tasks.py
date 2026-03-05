@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import sleep
@@ -12,6 +13,7 @@ from django.core.management import call_command
 from django.utils.text import slugify
 
 import yaml
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 from celery.schedules import crontab
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
@@ -106,249 +108,6 @@ UTC = timezone.UTC
 
 
 @app.task(bind=True)
-def clone_github_repo(
-    self,
-    org_slug: str,
-    gitrepo_url: str,
-    gitrepo_access_token: str | None,
-    org_dir: str,
-    taskprogress: TaskProgress | None,
-    setup_elementary_profile: bool = False,
-) -> bool:
-    """clones an org's github repo"""
-    if taskprogress is None:
-        child = False
-        taskprogress = TaskProgress(
-            self.request.id, f"{TaskProgressHashPrefix.CLONEGITREPO}-{org_slug}"
-        )
-    else:
-        child = True
-
-    taskprogress.add(
-        {
-            "message": "started cloning github repository",
-            "status": "running",
-        }
-    )
-
-    # clone the client's dbt repo into "dbtrepo/" under the project_dir
-    # if we have an access token with the "contents" and "metadata" permissions then
-    #   git clone https://oauth2:[TOKEN]@github.com/[REPO-OWNER]/[REPO-NAME]
-    # if gitrepo_access_token is not None:
-    #     gitrepo_url = gitrepo_url.replace(
-    #         "github.com", "oauth2:" + gitrepo_access_token + "@github.com"
-    #     )
-
-    org_dir: Path = Path(org_dir)
-    dbtrepo_dir = org_dir / "dbtrepo"
-    if not org_dir.exists():
-        org_dir.mkdir()
-        taskprogress.add(
-            {
-                "message": "created project_dir",
-                "status": "running",
-            }
-        )
-        logger.info("created project_dir %s", org_dir)
-
-    elif dbtrepo_dir.exists():
-        shutil.rmtree(str(dbtrepo_dir))
-
-    try:
-        GitManager.clone(org_dir, gitrepo_url, "dbtrepo", gitrepo_access_token)
-    except Exception as error:
-        taskprogress.add(
-            {
-                "message": "git clone failed",
-                "error": str(error),
-                "status": "failed",
-            }
-        )
-        logger.exception(error)
-        return None
-
-    taskprogress.add(
-        {
-            "message": "cloned git repo",
-            "status": "running" if child else "completed",
-        }
-    )
-
-    # note that here we are only setting up the profile for elementary, not the entire elementary setup
-    # entire setup should be done separately
-    if setup_elementary_profile:
-        org = Org.objects.filter(slug=org_slug).first()
-        taskprogress.add(
-            {
-                "message": "setting up elementary profile",
-                "status": "running",
-            }
-        )
-
-        try:
-            elementary_service.create_elementary_profile(org)
-        except Exception as error:
-            taskprogress.add(
-                {
-                    "message": "elementary setup failed",
-                    "error": str(error),
-                    "status": "failed",
-                }
-            )
-            logger.exception(error)
-
-        taskprogress.add(
-            {
-                "message": "finished setting up elementary profile",
-                "status": "completed",
-            }
-        )
-
-    return dbtrepo_dir
-
-
-@app.task(bind=True)
-def setup_dbtworkspace(self, org_id: int, payload: dict) -> str:
-    """sets up an org's dbt workspace, recreating it if it already exists"""
-    org = Org.objects.filter(id=org_id).first()
-    logger.info("found org %s", org.name)
-
-    taskprogress = TaskProgress(
-        self.request.id, f"{TaskProgressHashPrefix.DBTWORKSPACE}-{org.slug}"
-    )
-
-    taskprogress.add(
-        {
-            "message": "started",
-            "status": "running",
-        }
-    )
-    warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if warehouse is None:
-        taskprogress.add(
-            {
-                "message": "need to set up a warehouse first",
-                "status": "failed",
-            }
-        )
-        logger.error("need to set up a warehouse first for org %s", org.name)
-        raise Exception("need to set up a warehouse first for org %s" % org.name)
-
-    if org.slug is None:
-        org.slug = slugify(org.name)
-        org.save()
-
-    # this client'a dbt setup happens here
-    org_dir = DbtProjectManager.get_org_dir(org)
-
-    # five parameters here is correct despite vscode thinking otherwise
-    dbtcloned_repo_path = clone_github_repo(
-        org.slug,
-        payload["gitrepoUrl"],
-        payload["gitrepoAccessToken"],
-        org_dir,
-        taskprogress,
-    )
-    if not dbtcloned_repo_path:
-        raise Exception("Failed to clone git repo")
-
-    logger.info("git clone succeeded for org %s", org.name)
-
-    # create or update orgdbt model
-    try:
-        if org.dbt:
-            dbt = org.dbt
-            dbt.gitrepo_url = payload["gitrepoUrl"]
-            dbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path)
-            dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
-            dbt.target_type = warehouse.wtype
-            dbt.default_schema = payload["profile"]["target_configs_schema"]
-            dbt.transform_type = TransformType.GIT
-            dbt.save()
-            logger.info("updated orgdbt for org %s", org.name)
-        else:
-            dbt = OrgDbt(
-                gitrepo_url=payload["gitrepoUrl"],
-                project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtcloned_repo_path),
-                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
-                target_type=warehouse.wtype,
-                default_schema=payload["profile"]["target_configs_schema"],
-                transform_type=TransformType.GIT,
-            )
-            dbt.save()
-            logger.info("created orgdbt for org %s", org.name)
-            org.dbt = dbt
-            org.save()
-            logger.info("set org.dbt for org %s", org.name)
-    except Exception as e:
-        taskprogress.add(
-            {
-                "message": "failed to write OrgDbt entry",
-                "status": "failed",
-            }
-        )
-        logger.error("failed to create orgdbt for org %s: %s", org.name, e)
-        raise Exception(f"Something went wrong while creating OrgDbt model : {e}")
-
-    if payload["gitrepoAccessToken"] is not None:
-        if dbt.gitrepo_access_token_secret:
-            secretsmanager.update_github_pat(
-                dbt.gitrepo_access_token_secret, payload["gitrepoAccessToken"]
-            )
-        else:
-            pat_secret_key = secretsmanager.save_github_pat(payload["gitrepoAccessToken"])
-            dbt.gitrepo_access_token_secret = pat_secret_key
-            dbt.save()
-
-    taskprogress.add(
-        {
-            "message": "wrote OrgDbt entry",
-            "status": "completed",
-        }
-    )
-
-    taskprogress.add(
-        {
-            "message": "creating dbt profile from the warehouse",
-            "status": "completed",
-        }
-    )
-    saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
-    if saved_creds is None:
-        taskprogress.add(
-            {
-                "message": "failed to retrieve warehouse credentials",
-                "status": "failed",
-            }
-        )
-        logger.error("failed to retrieve warehouse credentials for org %s", org.name)
-        raise Exception("failed to retrieve warehouse credentials for org %s" % org.name)
-
-    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
-        org, warehouse, saved_creds
-    )
-
-    if error:
-        taskprogress.add(
-            {
-                "message": f"failed to create dbt cli profile: {error}",
-                "status": "failed",
-            }
-        )
-        logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
-        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
-
-    taskprogress.add(
-        {
-            "message": "set dbt workspace completed",
-            "status": "completed",
-        }
-    )
-
-    logger.info("set dbt workspace completed for org %s", org.name)
-
-
-@app.task(bind=True)
 def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_params: dict = None):
     """run a dbt command via celery instead of via prefect"""
     org: Org = Org.objects.filter(id=org_id).first()
@@ -356,6 +115,9 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
     # Lock all dbt tasks that will be run
     task_locks: list[TaskLock] = []
+
+    # tmp dir to download dbt models from remote storage in
+    temp_dir = None
 
     try:
         orgtasks = OrgTask.objects.filter(
@@ -410,11 +172,40 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             org, orgdbt
         )
 
+        # Get dbt profile from prefect block
         profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
+        storage = StorageFactory.get_storage_adapter()
+
+        # Check if we need to download from remote storage
+        local_project_dir = dbt_project_params.project_dir
+
+        if storage.is_remote:
+            # For remote storage: Download project to temp dir, run locally
+            temp_dir = tempfile.mkdtemp(prefix="dbt_run_")
+            local_project_dir = Path(temp_dir) / "dbt_project"
+            logger.info(f"Using temporary directory for dbt run: {local_project_dir}")
+
+            try:
+                # Download the entire dbt project from remote storage to local temp directory
+                logger.info("Downloading dbt project from remote storage to temp directory")
+                storage.download_tree(dbt_project_params.project_dir, str(local_project_dir))
+            except Exception as error:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                taskprogress.add(
+                    {
+                        "message": f"Failed to prepare temp directory for remote dbt run: {str(error)}",
+                        "status": "failed",
+                    }
+                )
+                logger.exception(error)
+                raise Exception(
+                    f"Failed to prepare temp directory for remote dbt run: {str(error)}"
+                ) from error
+
+        profile_dirname = Path(local_project_dir) / "profiles"
+        profile_dirname.mkdir(exist_ok=True)
         profile_filename = profile_dirname / "profiles.yml"
-        logger.info("writing dbt profile to " + str(profile_filename))
+        logger.info(f"Writing dbt profile to {profile_filename}")
         with open(profile_filename, "w", encoding="utf-8") as f:
             yaml.safe_dump(profile, f)
 
@@ -428,7 +219,11 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
                 }
             )
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["clean"], keyword_args={"profiles-dir": "profiles"}
+                org,
+                orgdbt,
+                ["clean"],
+                keyword_args={"profiles-dir": "profiles"},
+                cwd=local_project_dir,
             )
             command_output = process.stdout.split("\n")
             for cmd_out in command_output:
@@ -460,7 +255,11 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         try:
             taskprogress.add({"message": "starting dbt deps", "status": "running"})
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["deps"], keyword_args={"profiles-dir": "profiles"}
+                org,
+                orgdbt,
+                ["deps"],
+                keyword_args={"profiles-dir": "profiles"},
+                cwd=local_project_dir,
             )
             command_output = process.stdout.split("\n")
             taskprogress.add(
@@ -505,7 +304,12 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
             taskprogress.add({"message": "starting dbt run", "status": "running"})
             process: subprocess.CompletedProcess = DbtProjectManager.run_dbt_command(
-                org, orgdbt, ["run"], keyword_args=keyword_args, flags=flags
+                org,
+                orgdbt,
+                ["run"],
+                keyword_args=keyword_args,
+                flags=flags,
+                cwd=local_project_dir,
             )
 
             command_output = process.stdout.split("\n")
@@ -540,7 +344,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             logger.exception(error.message)
             raise Exception("Dbt run failed") from error
 
-        # done
+        # done - no need to upload back since dbt just materializes tables in warehouse
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
         taskprogress.add(
@@ -551,6 +355,14 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         )
 
     finally:
+        # Cleanup temp directory if using remote storage
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"Cleaned up temporary directory: {temp_dir}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup temp directory {temp_dir}: {str(cleanup_error)}")
+
         for task_lock in task_locks:
             task_lock.delete()
 

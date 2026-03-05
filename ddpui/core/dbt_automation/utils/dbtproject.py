@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import yaml
 
+from ddpui.utils.file_storage.storage_factory import StorageFactory
+
 
 class dbtProject:  # pylint:disable=invalid-name
     """the folder and files in a dbt project"""
@@ -11,6 +13,7 @@ class dbtProject:  # pylint:disable=invalid-name
     def __init__(self, project_dir: str):
         """constructor"""
         self.project_dir = project_dir
+        self.storage = StorageFactory.get_storage_adapter()
 
     def sources_filename(self, schema: str) -> Path:
         """returns the pathname of the sources.yml in the folder for the given schema"""
@@ -22,9 +25,9 @@ class dbtProject:  # pylint:disable=invalid-name
 
     def ensure_models_dir(self, schema: str, subdir="") -> None:
         """ensures the existence of the output models folder for the given schema"""
-        output_schema_dir = self.models_dir(schema, subdir)
-        if not os.path.exists(output_schema_dir):
-            os.makedirs(output_schema_dir)
+        output_schema_dir = str(self.models_dir(schema, subdir))
+        if not self.storage.exists(output_schema_dir):
+            self.storage.create_directory(output_schema_dir)
 
     def strip_project_dir(self, child_dir: Path) -> str:
         """removes the leading project_dir from the child_dir"""
@@ -51,11 +54,10 @@ class dbtProject:  # pylint:disable=invalid-name
                 modelname + ".sql"
             )
 
-        with open(model_filename, "w", encoding="utf-8") as outfile:
-            if kwargs.get("logger"):
-                kwargs["logger"].info("[write_model] %s", model_filename)
-            outfile.write(model_sql)
-            outfile.close()
+        model_filename_str = str(model_filename)
+        if kwargs.get("logger"):
+            kwargs["logger"].info("[write_model] %s", model_filename_str)
+        self.storage.write_file(model_filename_str, model_sql)
 
         return self.strip_project_dir(model_filename)
 
@@ -63,26 +65,28 @@ class dbtProject:  # pylint:disable=invalid-name
         """writes a .yml with a models: key"""
         self.ensure_models_dir(schema, kwargs.get("subdir", ""))
         models_filename = Path(self.models_dir(schema, kwargs.get("subdir", ""))) / "models.yml"
-        with open(models_filename, "w", encoding="utf-8") as models_file:
-            if kwargs.get("logger"):
-                kwargs["logger"].info("writing %s", models_filename)
-            yaml.safe_dump(
-                {
-                    "version": 2,
-                    "models": models,
-                },
-                models_file,
-                sort_keys=False,
-            )
+        models_filename_str = str(models_filename)
+
+        if kwargs.get("logger"):
+            kwargs["logger"].info("writing %s", models_filename_str)
+
+        models_content = yaml.safe_dump(
+            {
+                "version": 2,
+                "models": models,
+            },
+            sort_keys=False,
+        )
+        self.storage.write_file(models_filename_str, models_content)
 
         return self.strip_project_dir(models_filename)
 
     def delete_model(self, model_relative_path: Path):
         """Delete a model; relative path will look like models/intermediate/example_model.sql"""
 
-        model_path = Path(self.project_dir) / model_relative_path
-        if model_path.exists():
-            model_path.unlink()
+        model_path = str(Path(self.project_dir) / model_relative_path)
+        if self.storage.exists(model_path):
+            self.storage.delete_file(model_path)
             return True
 
         return False

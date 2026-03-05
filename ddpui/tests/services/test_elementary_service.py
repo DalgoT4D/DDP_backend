@@ -124,21 +124,21 @@ def test_elementary_setup_status_success(dbt_project_manager, edr_deployment_org
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager")
-@patch("ddpui.ddpdbt.elementary_service.os.path.exists")
+@patch("ddpui.ddpdbt.elementary_service.StorageFactory.get_storage_adapter")
 def test_elementary_setup_status_no_edr_deployment_found(
-    mock_os_path_exists, dbt_project_manager, org
+    mock_storage_adapter, dbt_project_manager, org
 ):
     """tests elementary_setup_status"""
     dbt_project_manager.get_dbt_project_dir = Mock(return_value="test-project-dir")
-    mock_os_path_exists.return_value = True
+    mock_storage = Mock()
+    mock_storage.exists.return_value = False
+    mock_storage_adapter.return_value = mock_storage
 
     result = elementary_setup_status(org)
     assert result == {"status": "not-set-up"}
 
     dbt_project_manager.get_dbt_project_dir.assert_called_once_with(org.dbt)
-    mock_os_path_exists.assert_called_once_with(
-        Path("test-project-dir/elementary_profiles/profiles.yml")
-    )
+    mock_storage.exists.assert_called_once_with("test-project-dir/elementary_profiles/profiles.yml")
 
 
 def test_elementary_setup_status_no_dbt(org):
@@ -241,34 +241,32 @@ def test_get_elementary_package_version_empty_file():
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
-@patch("ddpui.ddpdbt.elementary_service.Path")
+@patch("ddpui.ddpdbt.elementary_service.StorageFactory.get_storage_adapter")
 def test_check_dbt_files_missing_packages_yml(
-    mock_path,
+    mock_storage_adapter,
     mock_gather_dbt_project_params,
     org,
 ):
     """tests check_dbt_files"""
-    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+    mock_gather_dbt_project_params.return_value = Mock(project_dir="test-project-dir")
 
-    mock_dbt_project_yml = MagicMock()
-    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
-    mock_packages_yml = MagicMock()
-    mock_packages_yml.__str__.return_value = "packages.yml"
+    mock_storage = Mock()
+    mock_storage_adapter.return_value = mock_storage
 
-    # Configure the mock to handle the "/" operator
-    mock_path.return_value.__truediv__.side_effect = lambda other: (
-        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
-    )
+    # dbt_project.yml exists, packages.yml doesn't exist
+    def mock_exists(file_path):
+        return "dbt_project.yml" in file_path
 
-    # Configure the mock to handle the exists() method
-    mock_dbt_project_yml.exists.return_value = True
-    mock_packages_yml.exists.return_value = False
+    mock_storage.exists.side_effect = mock_exists
 
     response = check_dbt_files(org)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
 
-    assert response == ("packages.yml" if settings.DEBUG else "packages.yml not found", None)
+    assert response == (
+        "test-project-dir/packages.yml" if settings.DEBUG else "packages.yml not found",
+        None,
+    )
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -305,30 +303,20 @@ def test_check_dbt_files_missing_dbt_project_yml(
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
-@patch("ddpui.ddpdbt.elementary_service.Path")
+@patch("ddpui.ddpdbt.elementary_service.StorageFactory.get_storage_adapter")
 def test_check_dbt_files_missing_elementary_package_missing_target_schema(
-    mock_path,
+    mock_storage_adapter,
     mock_get_elementary_target_schema,
     mock_get_elementary_package_version,
     mock_gather_dbt_project_params,
     org,
 ):
     """tests check_dbt_files"""
-    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+    mock_gather_dbt_project_params.return_value = Mock(project_dir="test-project-dir")
 
-    mock_dbt_project_yml = MagicMock()
-    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
-    mock_packages_yml = MagicMock()
-    mock_packages_yml.__str__.return_value = "packages.yml"
-
-    # Configure the mock to handle the "/" operator
-    mock_path.return_value.__truediv__.side_effect = lambda other: (
-        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
-    )
-
-    # Configure the mock to handle the exists() method
-    mock_dbt_project_yml.exists.return_value = True
-    mock_packages_yml.exists.return_value = True
+    mock_storage = Mock()
+    mock_storage_adapter.return_value = mock_storage
+    mock_storage.exists.return_value = True  # Both files exist
 
     mock_get_elementary_target_schema.return_value = None
     mock_get_elementary_package_version.return_value = None
@@ -352,30 +340,20 @@ def test_check_dbt_files_missing_elementary_package_missing_target_schema(
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
-@patch("ddpui.ddpdbt.elementary_service.Path")
+@patch("ddpui.ddpdbt.elementary_service.StorageFactory.get_storage_adapter")
 def test_check_dbt_files_have_elementary_package_missing_target_schema(
-    mock_path,
+    mock_storage_adapter,
     mock_get_elementary_target_schema,
     mock_get_elementary_package_version,
     mock_gather_dbt_project_params,
     org,
 ):
     """tests check_dbt_files"""
-    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+    mock_gather_dbt_project_params.return_value = Mock(project_dir="test-project-dir")
 
-    mock_dbt_project_yml = MagicMock()
-    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
-    mock_packages_yml = MagicMock()
-    mock_packages_yml.__str__.return_value = "packages.yml"
-
-    # Configure the mock to handle the "/" operator
-    mock_path.return_value.__truediv__.side_effect = lambda other: (
-        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
-    )
-
-    # Configure the mock to handle the exists() method
-    mock_dbt_project_yml.exists.return_value = True
-    mock_packages_yml.exists.return_value = True
+    mock_storage = Mock()
+    mock_storage_adapter.return_value = mock_storage
+    mock_storage.exists.return_value = True  # Both files exist
 
     mock_get_elementary_target_schema.return_value = None
     mock_get_elementary_package_version.return_value = {
@@ -406,30 +384,20 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
-@patch("ddpui.ddpdbt.elementary_service.Path")
+@patch("ddpui.ddpdbt.elementary_service.StorageFactory.get_storage_adapter")
 def test_check_dbt_files_needs_upgrade(
-    mock_path,
+    mock_storage_adapter,
     mock_get_elementary_target_schema,
     mock_get_elementary_package_version,
     mock_gather_dbt_project_params,
     org,
 ):
     """tests check_dbt_files"""
-    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+    mock_gather_dbt_project_params.return_value = Mock(project_dir="test-project-dir")
 
-    mock_dbt_project_yml = MagicMock()
-    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
-    mock_packages_yml = MagicMock()
-    mock_packages_yml.__str__.return_value = "packages.yml"
-
-    # Configure the mock to handle the "/" operator
-    mock_path.return_value.__truediv__.side_effect = lambda other: (
-        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
-    )
-
-    # Configure the mock to handle the exists() method
-    mock_dbt_project_yml.exists.return_value = True
-    mock_packages_yml.exists.return_value = True
+    mock_storage = Mock()
+    mock_storage_adapter.return_value = mock_storage
+    mock_storage.exists.return_value = True  # Both files exist
 
     mock_get_elementary_target_schema.return_value = None
     mock_get_elementary_package_version.return_value = {
@@ -463,30 +431,20 @@ def test_check_dbt_files_needs_upgrade(
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_package_version")
 @patch("ddpui.ddpdbt.elementary_service.get_elementary_target_schema")
-@patch("ddpui.ddpdbt.elementary_service.Path")
+@patch("ddpui.ddpdbt.elementary_service.StorageFactory.get_storage_adapter")
 def test_check_dbt_files_missing_elementary_package_have_target_schema(
-    mock_path,
+    mock_storage_adapter,
     mock_get_elementary_target_schema,
     mock_get_elementary_package_version,
     mock_gather_dbt_project_params,
     org,
 ):
     """tests check_dbt_files"""
-    mock_gather_dbt_project_params.retval = Mock(project_dir="test-project-dir")
+    mock_gather_dbt_project_params.return_value = Mock(project_dir="test-project-dir")
 
-    mock_dbt_project_yml = MagicMock()
-    mock_dbt_project_yml.__str__.return_value = "dbt_project.yml"
-    mock_packages_yml = MagicMock()
-    mock_packages_yml.__str__.return_value = "packages.yml"
-
-    # Configure the mock to handle the "/" operator
-    mock_path.return_value.__truediv__.side_effect = lambda other: (
-        mock_dbt_project_yml if other == "dbt_project.yml" else mock_packages_yml
-    )
-
-    # Configure the mock to handle the exists() method
-    mock_dbt_project_yml.exists.return_value = True
-    mock_packages_yml.exists.return_value = True
+    mock_storage = Mock()
+    mock_storage_adapter.return_value = mock_storage
+    mock_storage.exists.return_value = True  # Both files exist
 
     mock_get_elementary_target_schema.return_value = {"+schema": "elementary"}
     mock_get_elementary_package_version.return_value = None

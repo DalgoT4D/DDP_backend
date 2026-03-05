@@ -17,6 +17,7 @@ from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.file_storage.storage_factory import StorageFactory
 
 logger = CustomLogger("ddpui")
 
@@ -147,10 +148,11 @@ class OrgCleanupService:
         )
         if not self.dry_run:
             if orgdbt:
+                storage = StorageFactory.get_storage_adapter()
                 dbt_project_dir = DbtProjectManager.get_dbt_project_dir(orgdbt)
 
-                if os.path.exists(dbt_project_dir):
-                    shutil.rmtree(dbt_project_dir)
+                if storage.exists(str(dbt_project_dir)):
+                    storage.delete_file(str(dbt_project_dir))
 
                 logger.info("deleted dbt project directory from disk")
 
@@ -350,11 +352,12 @@ class OrgCleanupService:
                 logger.info(f"deleted airbyte server block {block.block_name} from db")
 
         # delete org directory created on disk for transformation
+        storage = StorageFactory.get_storage_adapter()
         org_dir = DbtProjectManager.get_org_dir(self.org)
         logger.info(f"will delete org directory from disk {org_dir}")
         if not self.dry_run:
-            if os.path.exists(org_dir):
-                shutil.rmtree(org_dir)
+            if storage.exists(str(org_dir)):
+                storage.delete_file(str(org_dir))
                 logger.info(f"deleted org directory from disk {org_dir}")
 
         # delete org object itself
