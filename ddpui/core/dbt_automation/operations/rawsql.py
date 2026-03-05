@@ -5,6 +5,37 @@ import sqlparse
 import re
 
 
+def _split_columns_respecting_parentheses(select_clause: str) -> list:
+    """
+    Split column expressions by comma while respecting parentheses.
+    Example: "coalesce(a, b), c, sum(x, y) as total" -> ["coalesce(a, b)", "c", "sum(x, y) as total"]
+    """
+    if not select_clause:
+        return []
+
+    parts = []
+    current = ""
+    paren_count = 0
+
+    for char in select_clause:
+        if char == "(":
+            paren_count += 1
+        elif char == ")":
+            paren_count -= 1
+        elif char == "," and paren_count == 0:
+            if current.strip():
+                parts.append(current.strip())
+            current = ""
+            continue
+
+        current += char
+
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts
+
+
 def extract_output_columns_from_select_clause(select_clause: str, source_columns: list) -> list:
     """
     Extract output column names from SELECT clause part only.
@@ -14,12 +45,14 @@ def extract_output_columns_from_select_clause(select_clause: str, source_columns
     - "col1, col2"
     - "col1, *"
     - "count(*) as total, col1"
+    - "coalesce(a, b) as c, sum(x, y)"
     """
     if not select_clause:
         return []
 
     columns = []
-    parts = [part.strip() for part in select_clause.split(",")]
+    # Use the new parentheses-aware splitting instead of simple split(",")
+    parts = _split_columns_respecting_parentheses(select_clause)
 
     for part in parts:
         if not part:

@@ -538,3 +538,108 @@ class TestRawSqlOperation:
         for select_clause, expected_cols in test_cases:
             result = extract_output_columns_from_select_clause(select_clause, source_cols)
             assert result == expected_cols, f"Failed for: {select_clause}"
+
+    def test_functions_with_parentheses_and_commas(self, mock_warehouse):
+        """Test rawsql with functions containing commas (e.g., coalesce, concat)"""
+        config = {
+            "sql_statement_1": "coalesce(col1, col2) as combined, concat(first_name, ' ', last_name) as full_name",
+            "sql_statement_2": "",
+            "source_columns": ["col1", "col2", "first_name", "last_name"],
+            "input": {
+                "input_type": "source",
+                "source_name": "test_source",
+                "input_name": "test_table",
+            },
+        }
+
+        sql, output_cols = raw_generic_dbt_sql(config, mock_warehouse)
+
+        # Should extract aliases correctly despite commas in function calls
+        assert output_cols == ["combined", "full_name"]
+        assert (
+            "SELECT coalesce(col1, col2) as combined, concat(first_name, ' ', last_name) as full_name"
+            in sql
+        )
+
+    def test_nested_functions_with_commas(self, mock_warehouse):
+        """Test rawsql with nested functions containing commas"""
+        config = {
+            "sql_statement_1": "sum(case when status in ('active', 'pending') then 1 else 0 end) as active_count",
+            "sql_statement_2": "",
+            "source_columns": ["status", "id"],
+            "input": {
+                "input_type": "model",
+                "source_name": None,
+                "input_name": "status_table",
+            },
+        }
+
+        sql, output_cols = raw_generic_dbt_sql(config, mock_warehouse)
+
+        # Should handle complex nested expressions with commas
+        assert output_cols == ["active_count"]
+        assert (
+            "sum(case when status in ('active', 'pending') then 1 else 0 end) as active_count"
+            in sql
+        )
+
+    def test_mixed_functions_and_simple_columns(self, mock_warehouse):
+        """Test rawsql with mix of functions with commas and simple columns"""
+        config = {
+            "sql_statement_1": "id, coalesce(first_name, last_name, 'Unknown') as name, email",
+            "sql_statement_2": "",
+            "source_columns": ["id", "first_name", "last_name", "email"],
+            "input": {
+                "input_type": "source",
+                "source_name": "users",
+                "input_name": "user_data",
+            },
+        }
+
+        sql, output_cols = raw_generic_dbt_sql(config, mock_warehouse)
+
+        # Should correctly identify all columns including function with commas
+        assert output_cols == ["id", "name", "email"]
+        assert "SELECT id, coalesce(first_name, last_name, 'Unknown') as name, email" in sql
+
+    def test_function_without_alias(self, mock_warehouse):
+        """Test rawsql with functions that don't have aliases"""
+        config = {
+            "sql_statement_1": "coalesce(col1, col2), sum(amount)",
+            "sql_statement_2": "",
+            "source_columns": ["col1", "col2", "amount"],
+            "input": {
+                "input_type": "source",
+                "source_name": "test_source",
+                "input_name": "test_table",
+            },
+        }
+
+        sql, output_cols = raw_generic_dbt_sql(config, mock_warehouse)
+
+        # Should generate clean column names for functions without aliases
+        assert output_cols == ["coalesce_col1_col2", "sum_amount"]
+        assert "SELECT coalesce(col1, col2), sum(amount)" in sql
+
+    def test_column_extraction_with_parentheses_edge_cases(self, mock_warehouse):
+        """Test the column extraction helper function with parentheses edge cases"""
+        source_cols = ["a", "b", "c", "x", "y"]
+
+        test_cases = [
+            # Function with commas and alias
+            ("coalesce(a, b) as combined", ["combined"]),
+            # Multiple functions with commas
+            ("coalesce(a, b), concat(x, y) as joined", ["coalesce_a_b", "joined"]),
+            # Function with commas mixed with simple columns
+            ("a, coalesce(b, c) as backup, x", ["a", "backup", "x"]),
+            # Nested functions
+            ("sum(case when a in (1, 2, 3) then b else 0 end) as total", ["total"]),
+            # Function with string literals containing commas
+            ("concat(a, ', ', b) as full_name", ["full_name"]),
+            # Multiple functions without aliases
+            ("coalesce(a, b), sum(x, y)", ["coalesce_a_b", "sum_x_y"]),
+        ]
+
+        for select_clause, expected_cols in test_cases:
+            result = extract_output_columns_from_select_clause(select_clause, source_cols)
+            assert result == expected_cols, f"Failed for: {select_clause}"
