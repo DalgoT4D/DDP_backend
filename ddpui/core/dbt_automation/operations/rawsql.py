@@ -90,7 +90,7 @@ def extract_output_columns_from_select_clause(select_clause: str, source_columns
 
 
 def raw_generic_dbt_sql(
-    config: str,
+    config: dict,
     warehouse: WarehouseInterface,
 ):
     """
