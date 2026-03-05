@@ -1,5 +1,5 @@
 from ninja import Field, Schema
-from typing import Union, Any, Literal
+from typing import Union, Any, Literal, Optional
 
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.models.canvas_models import CanvasNode
@@ -273,7 +273,7 @@ class FilterClauseConfig(Schema):
 
     column: str
     operator: str
-    operand: ArithmeticOperand
+    operand: Optional[ArithmeticOperand] = None  # Optional for null operators
 
 
 class WhereFilterOperationConfig(Schema):

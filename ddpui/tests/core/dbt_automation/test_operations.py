@@ -10,6 +10,8 @@ from ddpui.core.dbt_automation.operations.rawsql import (
     raw_generic_dbt_sql,
     extract_output_columns_from_select_clause,
 )
+from ddpui.core.dbt_automation.operations.casewhen import casewhen_dbt_sql
+from ddpui.core.dbt_automation.operations.wherefilter import where_filter_sql
 from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
 
 
@@ -643,3 +645,324 @@ class TestRawSqlOperation:
         for select_clause, expected_cols in test_cases:
             result = extract_output_columns_from_select_clause(select_clause, source_cols)
             assert result == expected_cols, f"Failed for: {select_clause}"
+
+
+class TestCaseWhenOperation:
+    """Test cases for CaseWhen operation with null operators"""
+
+    @pytest.fixture
+    def mock_warehouse(self):
+        """Create a mock warehouse interface"""
+        mock_warehouse = Mock(spec=WarehouseInterface)
+        mock_warehouse.name = "postgres"
+        return mock_warehouse
+
+    def test_casewhen_is_null_operator(self, mock_warehouse):
+        """Test CaseWhen operation with IS NULL operator"""
+        config = {
+            "source_columns": ["name", "age"],
+            "when_clauses": [
+                {
+                    "column": "name",
+                    "operator": "IS NULL",
+                    "operands": [],  # Empty operands for null operators
+                    "then": {"value": "Unknown", "is_col": False},
+                }
+            ],
+            "else_clause": {"value": "Known", "is_col": False},
+            "output_column_name": "name_status",
+            "case_type": "simple",
+            "input": {
+                "input_type": "source",
+                "source_name": "test_schema",
+                "input_name": "test_table",
+            },
+        }
+
+        sql, columns = casewhen_dbt_sql(config, mock_warehouse)
+
+        # Verify SQL contains correct null check (columns are quoted)
+        assert "WHEN \"name\" IS NULL THEN 'Unknown'" in sql
+        assert "name_status" in columns
+        assert "SELECT" in sql
+        assert "CASE" in sql
+        assert "ELSE 'Known'" in sql
+        assert 'END AS "name_status"' in sql
+
+    def test_casewhen_is_not_null_operator(self, mock_warehouse):
+        """Test CaseWhen operation with IS NOT NULL operator"""
+        config = {
+            "source_columns": ["email", "phone"],
+            "when_clauses": [
+                {
+                    "column": "email",
+                    "operator": "IS NOT NULL",
+                    "operands": [],  # Empty operands for null operators
+                    "then": {"value": "Has Email", "is_col": False},
+                }
+            ],
+            "else_clause": {"value": "No Email", "is_col": False},
+            "output_column_name": "email_status",
+            "case_type": "simple",
+            "input": {
+                "input_type": "source",
+                "source_name": "test_schema",
+                "input_name": "test_table",
+            },
+        }
+
+        sql, columns = casewhen_dbt_sql(config, mock_warehouse)
+
+        # Verify SQL contains correct null check
+        assert "WHEN \"email\" IS NOT NULL THEN 'Has Email'" in sql
+        assert "email_status" in columns
+        assert "ELSE 'No Email'" in sql
+        assert 'END AS "email_status"' in sql
+
+    def test_casewhen_mixed_operators_with_null(self, mock_warehouse):
+        """Test CaseWhen operation with mix of null and regular operators"""
+        config = {
+            "source_columns": ["name", "age", "status"],
+            "when_clauses": [
+                {
+                    "column": "name",
+                    "operator": "IS NULL",
+                    "operands": [],
+                    "then": {"value": "Unknown Name", "is_col": False},
+                },
+                {
+                    "column": "age",
+                    "operator": ">=",
+                    "operands": [{"value": "18", "is_col": False}],
+                    "then": {"value": "Adult", "is_col": False},
+                },
+            ],
+            "else_clause": {"value": "Minor", "is_col": False},
+            "output_column_name": "classification",
+            "case_type": "simple",
+            "input": {"input_type": "source", "source_name": "users", "input_name": "user_data"},
+        }
+
+        sql, columns = casewhen_dbt_sql(config, mock_warehouse)
+
+        # Verify both null and regular operators work
+        assert "WHEN \"name\" IS NULL THEN 'Unknown Name'" in sql
+        assert "WHEN \"age\" >= '18' THEN 'Adult'" in sql
+        assert "ELSE 'Minor'" in sql
+        assert "classification" in columns
+
+    def test_casewhen_multiple_null_operators(self, mock_warehouse):
+        """Test CaseWhen operation with multiple null operators"""
+        config = {
+            "source_columns": ["email", "phone", "address"],
+            "when_clauses": [
+                {
+                    "column": "email",
+                    "operator": "IS NULL",
+                    "operands": [],
+                    "then": {"value": "No Email", "is_col": False},
+                },
+                {
+                    "column": "phone",
+                    "operator": "IS NOT NULL",
+                    "operands": [],
+                    "then": {"value": "Has Phone", "is_col": False},
+                },
+            ],
+            "else_clause": {"value": "Unknown Contact", "is_col": False},
+            "output_column_name": "contact_status",
+            "case_type": "simple",
+            "input": {"input_type": "model", "source_name": None, "input_name": "contacts"},
+        }
+
+        sql, columns = casewhen_dbt_sql(config, mock_warehouse)
+
+        # Verify both null operators work together
+        assert "WHEN \"email\" IS NULL THEN 'No Email'" in sql
+        assert "WHEN \"phone\" IS NOT NULL THEN 'Has Phone'" in sql
+        assert "ELSE 'Unknown Contact'" in sql
+        assert "contact_status" in columns
+
+    def test_casewhen_frontend_payload_format(self, mock_warehouse):
+        """Test CaseWhen operation with exact frontend payload format for null operators"""
+        # This test simulates the exact payload format sent from the frontend
+        config = {
+            "source_columns": ["name", "status"],
+            "when_clauses": [
+                {
+                    "column": "name",
+                    "operator": "IS NULL",
+                    "operands": [],  # Frontend sends empty array for null operators
+                    "then": {"value": "Unknown", "is_col": False},
+                }
+            ],
+            "else_clause": {"value": "Known", "is_col": False},
+            "output_column_name": "name_status",
+            "case_type": "simple",
+            "sql_snippet": "",
+            "input": {
+                "input_type": "source",
+                "source_name": "test_schema",
+                "input_name": "test_table",
+            },
+        }
+
+        # This should not raise a validation error
+        sql, columns = casewhen_dbt_sql(config, mock_warehouse)
+
+        # Verify the operation works correctly
+        assert "WHEN \"name\" IS NULL THEN 'Unknown'" in sql
+        assert "name_status" in columns
+        assert "CASE" in sql
+        assert "ELSE 'Known'" in sql
+
+
+class TestWhereFilterOperation:
+    """Test cases for WhereFilter operation with null operators"""
+
+    @pytest.fixture
+    def mock_warehouse(self):
+        """Create a mock warehouse interface"""
+        mock_warehouse = Mock(spec=WarehouseInterface)
+        mock_warehouse.name = "postgres"
+        return mock_warehouse
+
+    def test_wherefilter_is_null_operator(self, mock_warehouse):
+        """Test WhereFilter operation with IS NULL operator"""
+        config = {
+            "source_columns": ["name", "age", "email"],
+            "clauses": [
+                {
+                    "column": "email",
+                    "operator": "IS NULL",
+                    "operand": None,  # No operand for null operators
+                }
+            ],
+            "where_type": "and",
+            "input": {
+                "input_type": "source",
+                "source_name": "test_schema",
+                "input_name": "test_table",
+            },
+        }
+
+        sql, columns = where_filter_sql(config, mock_warehouse)
+
+        # Verify SQL contains correct null check
+        assert 'WHERE ("email" IS NULL)' in sql
+        assert columns == ["name", "age", "email"]
+        assert "SELECT" in sql
+        assert "FROM" in sql
+
+    def test_wherefilter_is_not_null_operator(self, mock_warehouse):
+        """Test WhereFilter operation with IS NOT NULL operator"""
+        config = {
+            "source_columns": ["name", "phone", "status"],
+            "clauses": [
+                {
+                    "column": "name",
+                    "operator": "IS NOT NULL",
+                    "operand": None,  # No operand for null operators
+                }
+            ],
+            "where_type": "and",
+            "input": {
+                "input_type": "source",
+                "source_name": "test_schema",
+                "input_name": "test_table",
+            },
+        }
+
+        sql, columns = where_filter_sql(config, mock_warehouse)
+
+        # Verify SQL contains correct null check
+        assert 'WHERE ("name" IS NOT NULL)' in sql
+        assert columns == ["name", "phone", "status"]
+
+    def test_wherefilter_mixed_operators_with_null(self, mock_warehouse):
+        """Test WhereFilter operation with mix of null and regular operators"""
+        config = {
+            "source_columns": ["name", "age", "email"],
+            "clauses": [
+                {"column": "email", "operator": "IS NOT NULL", "operand": None},
+                {"column": "age", "operator": ">=", "operand": {"value": "18", "is_col": False}},
+            ],
+            "where_type": "and",
+            "input": {"input_type": "source", "source_name": "users", "input_name": "user_data"},
+        }
+
+        sql, columns = where_filter_sql(config, mock_warehouse)
+
+        # Verify both null and regular operators work together
+        assert 'WHERE ("email" IS NOT NULL AND "age" >= \'18\')' in sql
+        assert columns == ["name", "age", "email"]
+
+    def test_wherefilter_or_condition_with_null(self, mock_warehouse):
+        """Test WhereFilter operation with OR condition including null operators"""
+        config = {
+            "source_columns": ["email", "phone"],
+            "clauses": [
+                {"column": "email", "operator": "IS NULL", "operand": None},
+                {"column": "phone", "operator": "IS NULL", "operand": None},
+            ],
+            "where_type": "or",
+            "input": {"input_type": "model", "source_name": None, "input_name": "contacts"},
+        }
+
+        sql, columns = where_filter_sql(config, mock_warehouse)
+
+        # Verify OR condition with null operators
+        assert 'WHERE ("email" IS NULL OR "phone" IS NULL)' in sql
+        assert columns == ["email", "phone"]
+
+    def test_wherefilter_multiple_null_operators(self, mock_warehouse):
+        """Test WhereFilter operation with multiple different null operators"""
+        config = {
+            "source_columns": ["first_name", "last_name", "email", "phone"],
+            "clauses": [
+                {"column": "first_name", "operator": "IS NOT NULL", "operand": None},
+                {"column": "email", "operator": "IS NULL", "operand": None},
+                {"column": "phone", "operator": "IS NOT NULL", "operand": None},
+            ],
+            "where_type": "and",
+            "input": {
+                "input_type": "source",
+                "source_name": "user_data",
+                "input_name": "incomplete_profiles",
+            },
+        }
+
+        sql, columns = where_filter_sql(config, mock_warehouse)
+
+        # Verify multiple null operators combined
+        assert 'WHERE ("first_name" IS NOT NULL AND "email" IS NULL AND "phone" IS NOT NULL)' in sql
+        assert columns == ["first_name", "last_name", "email", "phone"]
+
+    def test_wherefilter_frontend_payload_format(self, mock_warehouse):
+        """Test WhereFilter operation with exact frontend payload format for null operators"""
+        # This test simulates the exact payload format sent from the frontend
+        config = {
+            "source_columns": ["name", "email"],
+            "clauses": [
+                {
+                    "column": "email",
+                    "operator": "IS NULL",
+                    "operand": None,  # Frontend sends null for null operators
+                }
+            ],
+            "where_type": "and",
+            "sql_snippet": "",
+            "input": {
+                "input_type": "source",
+                "source_name": "test_schema",
+                "input_name": "test_table",
+            },
+        }
+
+        # This should not raise a validation error
+        sql, columns = where_filter_sql(config, mock_warehouse)
+
+        # Verify the operation works correctly
+        assert 'WHERE ("email" IS NULL)' in sql
+        assert columns == ["name", "email"]
+        assert "SELECT" in sql
