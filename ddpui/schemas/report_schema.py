@@ -5,6 +5,17 @@ from datetime import date, datetime
 from ninja import Schema, Field
 
 
+# Shared schemas
+
+
+class DateColumnSchema(Schema):
+    """Identifies a datetime column on a dashboard filter"""
+
+    schema_name: str
+    table_name: str
+    column_name: str
+
+
 # Request schemas
 
 
@@ -13,8 +24,9 @@ class SnapshotCreate(Schema):
 
     title: str = Field(..., min_length=1, max_length=255)
     dashboard_id: int
-    period_start: date
-    period_end: Optional[date] = None  # None = "till today" (rolling)
+    date_column: DateColumnSchema
+    period_start: Optional[date] = None  # None = no lower bound
+    period_end: date
 
 
 class SnapshotUpdate(Schema):
@@ -32,9 +44,9 @@ class SnapshotListResponse(Schema):
     id: int
     title: str
     dashboard_title: Optional[str]  # From frozen_dashboard, not a live FK
-    period_start: date
-    period_end: date  # Resolved: stored value or today if rolling
-    is_rolling_end: bool  # True = "till today" (period_end was NULL in DB)
+    date_column: Optional[Dict[str, str]]
+    period_start: Optional[date]
+    period_end: date
     status: str
     summary: Optional[str]
     created_by: Optional[str]

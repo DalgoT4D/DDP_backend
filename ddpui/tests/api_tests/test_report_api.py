@@ -2,7 +2,8 @@
 
 Tests:
 1. list_snapshots - empty, with data, search
-2. create_snapshot - success, fixed end, rolling end, invalid date range, dashboard not found
+2. create_snapshot - success, without start date, invalid date range, dashboard not found,
+                     invalid date column
 3. get_snapshot_view - success, not found
 4. update_snapshot_summary - success, not found
 5. delete_snapshot - success, not found
@@ -33,7 +34,7 @@ from ddpui.api.report_api import (
     update_snapshot,
     delete_snapshot,
 )
-from ddpui.schemas.report_schema import SnapshotCreate, SnapshotUpdate
+from ddpui.schemas.report_schema import SnapshotCreate, SnapshotUpdate, DateColumnSchema
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -107,7 +108,7 @@ def sample_dashboard(orguser, org):
 
 @pytest.fixture
 def sample_filter(sample_dashboard):
-    """A sample filter for testing"""
+    """A sample datetime filter for testing"""
     filter_obj = DashboardFilter.objects.create(
         dashboard=sample_dashboard,
         name="Date Filter",
@@ -159,6 +160,11 @@ def sample_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart)
     snapshot = ReportService.create_snapshot(
         title="January 2025 Report",
         dashboard_id=sample_dashboard.id,
+        date_column={
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "created_at",
+        },
         period_start=date(2025, 1, 1),
         period_end=date(2025, 1, 31),
         orguser=orguser,
@@ -191,7 +197,8 @@ class TestListSnapshots:
         response = list_snapshots(request)
         assert len(response) == 1
         assert response[0].title == "January 2025 Report"
-        assert response[0].is_rolling_end is False
+        assert response[0].date_column is not None
+        assert response[0].date_column["column_name"] == "created_at"
 
     def test_list_with_search(self, orguser, sample_snapshot, seed_db):
         """Test listing with search filter"""
@@ -212,45 +219,61 @@ class TestListSnapshots:
 class TestCreateSnapshot:
     """Tests for create_snapshot endpoint"""
 
-    def test_create_fixed_end(self, orguser, sample_dashboard, sample_chart, seed_db):
-        """Test creating a snapshot with fixed end date"""
+    def test_create_with_both_dates(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        """Test creating a snapshot with both start and end date"""
         request = mock_request(orguser)
         payload = SnapshotCreate(
             title="Q1 Report",
             dashboard_id=sample_dashboard.id,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
             period_start=date(2025, 1, 1),
             period_end=date(2025, 3, 31),
         )
         response = create_snapshot(request, payload)
         assert response.title == "Q1 Report"
-        assert response.is_rolling_end is False
+        assert response.period_start == date(2025, 1, 1)
         assert response.period_end == date(2025, 3, 31)
         assert response.dashboard_title == "Test Dashboard"
+        assert response.date_column["column_name"] == "created_at"
         # Cleanup
         ReportSnapshot.objects.filter(id=response.id).delete()
 
-    def test_create_rolling_end(self, orguser, sample_dashboard, sample_chart, seed_db):
-        """Test creating a snapshot with rolling end (till today)"""
+    def test_create_without_start_date(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        """Test creating a snapshot without a start date (no lower bound)"""
         request = mock_request(orguser)
         payload = SnapshotCreate(
             title="Ongoing Report",
             dashboard_id=sample_dashboard.id,
-            period_start=date(2025, 1, 1),
-            period_end=None,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
+            period_start=None,
+            period_end=date(2025, 3, 31),
         )
         response = create_snapshot(request, payload)
         assert response.title == "Ongoing Report"
-        assert response.is_rolling_end is True
-        assert response.period_end == date.today()
+        assert response.period_start is None
+        assert response.period_end == date(2025, 3, 31)
         # Cleanup
         ReportSnapshot.objects.filter(id=response.id).delete()
 
-    def test_create_invalid_date_range(self, orguser, sample_dashboard, sample_chart, seed_db):
+    def test_create_invalid_date_range(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
         """Test creating snapshot with end before start"""
         request = mock_request(orguser)
         payload = SnapshotCreate(
             title="Bad Dates",
             dashboard_id=sample_dashboard.id,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
             period_start=date(2025, 3, 31),
             period_end=date(2025, 1, 1),
         )
@@ -264,6 +287,27 @@ class TestCreateSnapshot:
         payload = SnapshotCreate(
             title="Ghost Dashboard",
             dashboard_id=99999,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 1, 31),
+        )
+        with pytest.raises(HttpError) as exc_info:
+            create_snapshot(request, payload)
+        assert exc_info.value.status_code == 400
+
+    def test_create_invalid_date_column(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        """Test creating snapshot with a date column that doesn't match any datetime filter"""
+        request = mock_request(orguser)
+        payload = SnapshotCreate(
+            title="Bad Column",
+            dashboard_id=sample_dashboard.id,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="nonexistent_col"
+            ),
             period_start=date(2025, 1, 1),
             period_end=date(2025, 1, 31),
         )
@@ -279,6 +323,9 @@ class TestCreateSnapshot:
         payload = SnapshotCreate(
             title="Freeze Test",
             dashboard_id=sample_dashboard.id,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
             period_start=date(2025, 1, 1),
             period_end=date(2025, 1, 31),
         )
@@ -302,6 +349,9 @@ class TestCreateSnapshot:
         assert frozen_chart["schema_name"] == "public"
         assert frozen_chart["table_name"] == "orders"
 
+        # Check date_column stored
+        assert snapshot.date_column["column_name"] == "created_at"
+
         # Cleanup
         snapshot.delete()
 
@@ -322,7 +372,7 @@ class TestGetSnapshotView:
         assert response.report_metadata["title"] == "January 2025 Report"
         assert response.report_metadata["period_start"] == "2025-01-01"
         assert response.report_metadata["period_end"] == "2025-01-31"
-        assert response.report_metadata["is_rolling_end"] is False
+        assert response.report_metadata["date_column"]["column_name"] == "created_at"
         assert response.dashboard_data["title"] == "Test Dashboard"
         assert response.dashboard_data["dashboard_type"] == "native"
 

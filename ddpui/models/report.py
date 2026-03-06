@@ -31,14 +31,19 @@ class ReportSnapshot(models.Model):
     id = models.BigAutoField(primary_key=True)
     title = models.CharField(max_length=255, help_text="User-provided title for this snapshot")
 
+    # Which datetime column the date range applies to
+    date_column = models.JSONField(
+        default=dict,
+        help_text="Selected datetime column: {schema_name, table_name, column_name}",
+    )
+
     # Date range this snapshot covers
-    # period_end = null means "till today" (resolved dynamically at view time)
-    period_start = models.DateField(help_text="Start of reporting period (inclusive)")
-    period_end = models.DateField(
+    period_start = models.DateField(
         null=True,
         blank=True,
-        help_text="End of reporting period (inclusive). NULL = till today (rolling).",
+        help_text="Start of reporting period (inclusive). NULL = no lower bound.",
     )
+    period_end = models.DateField(help_text="End of reporting period (inclusive)")
 
     # --- FROZEN DATA (2 layers) ---
 
@@ -83,8 +88,8 @@ class ReportSnapshot(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        end = self.period_end or "today"
-        return f"{self.title} ({self.period_start} - {end})"
+        start = self.period_start or "unbounded"
+        return f"{self.title} ({start} - {self.period_end})"
 
     class Meta:
         db_table = "report_snapshot"

@@ -35,9 +35,9 @@ def list_snapshots(request, search: str = None):
             id=s.id,
             title=s.title,
             dashboard_title=s.frozen_dashboard.get("title") if s.frozen_dashboard else None,
+            date_column=s.date_column or None,
             period_start=s.period_start,
-            period_end=ReportService._resolve_period_end(s),
-            is_rolling_end=s.period_end is None,
+            period_end=s.period_end,
             status=s.status,
             summary=s.summary,
             created_by=s.created_by.user.email if s.created_by else None,
@@ -56,17 +56,18 @@ def create_snapshot(request, payload: SnapshotCreate):
         s = ReportService.create_snapshot(
             title=payload.title,
             dashboard_id=payload.dashboard_id,
-            period_start=payload.period_start,
+            date_column=payload.date_column.dict(),
             period_end=payload.period_end,
             orguser=orguser,
+            period_start=payload.period_start,
         )
         return SnapshotListResponse(
             id=s.id,
             title=s.title,
             dashboard_title=s.frozen_dashboard.get("title") if s.frozen_dashboard else None,
+            date_column=s.date_column or None,
             period_start=s.period_start,
-            period_end=ReportService._resolve_period_end(s),
-            is_rolling_end=s.period_end is None,
+            period_end=s.period_end,
             status=s.status,
             summary=s.summary,
             created_by=orguser.user.email,
@@ -103,6 +104,8 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
         return {"success": True, "summary": snapshot.summary}
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
 
 
 @report_router.delete("/{snapshot_id}/")

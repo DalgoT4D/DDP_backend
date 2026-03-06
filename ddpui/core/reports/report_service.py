@@ -16,6 +16,8 @@ from .exceptions import SnapshotNotFoundError, SnapshotValidationError
 
 logger = CustomLogger("ddpui.core.reports")
 
+ALLOWED_UPDATE_FIELDS = {"summary"}
+
 
 class ReportService:
     """Service class for snapshot operations"""
@@ -71,17 +73,6 @@ class ReportService:
         return frozen
 
     # =========================================================================
-    # Period End Resolution
-    # =========================================================================
-
-    @staticmethod
-    def _resolve_period_end(snapshot: ReportSnapshot) -> date:
-        """Resolve period_end: stored value or today if NULL (rolling)."""
-        if snapshot.period_end is not None:
-            return snapshot.period_end
-        return date.today()
-
-    # =========================================================================
     # Snapshot CRUD
     # =========================================================================
 
@@ -89,9 +80,10 @@ class ReportService:
     def create_snapshot(
         title: str,
         dashboard_id: int,
-        period_start: date,
-        period_end: Optional[date],
+        date_column: Dict[str, str],
+        period_end: date,
         orguser: OrgUser,
+        period_start: Optional[date] = None,
     ) -> ReportSnapshot:
         """
         Create a snapshot from a dashboard.
@@ -99,12 +91,11 @@ class ReportService:
         Steps:
         1. Validate date range
         2. Validate dashboard exists
-        3. Freeze 2 layers of config
-        4. Create snapshot record (no FK to dashboard — fully self-contained)
-
-        period_end=None means "till today" (rolling end date).
+        3. Validate date_column matches a datetime filter on the dashboard
+        4. Freeze 2 layers of config
+        5. Create snapshot record (no FK to dashboard — fully self-contained)
         """
-        if period_end is not None and period_start > period_end:
+        if period_start is not None and period_start > period_end:
             raise SnapshotValidationError("period_start must be before period_end")
 
         # Fetch dashboard with filters prefetched (used only for freezing)
@@ -115,11 +106,25 @@ class ReportService:
         except Dashboard.DoesNotExist:
             raise SnapshotValidationError(f"Dashboard {dashboard_id} not found")
 
+        # Validate date_column against dashboard's datetime filters
+        datetime_filters = dashboard.filters.filter(filter_type="datetime")
+        match = datetime_filters.filter(
+            schema_name=date_column["schema_name"],
+            table_name=date_column["table_name"],
+            column_name=date_column["column_name"],
+        ).exists()
+        if not match:
+            raise SnapshotValidationError(
+                f"No datetime filter found for "
+                f"{date_column['schema_name']}.{date_column['table_name']}.{date_column['column_name']}"
+            )
+
         frozen_dashboard = ReportService._freeze_dashboard(dashboard)
         frozen_chart_configs = ReportService._freeze_chart_configs(dashboard)
 
         snapshot = ReportSnapshot.objects.create(
             title=title,
+            date_column=date_column,
             period_start=period_start,
             period_end=period_end,
             frozen_dashboard=frozen_dashboard,
@@ -160,11 +165,8 @@ class ReportService:
 
         Returns dashboard_data shaped like Dashboard.to_json() so
         DashboardNativeView can render it directly.
-
-        period_end=None is resolved to today's date (rolling end).
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
-        resolved_end = ReportService._resolve_period_end(snapshot)
 
         # Mark as viewed
         if snapshot.status == SnapshotStatus.GENERATED.value:
@@ -190,9 +192,9 @@ class ReportService:
         report_metadata = {
             "snapshot_id": snapshot.id,
             "title": snapshot.title,
-            "period_start": snapshot.period_start.isoformat(),
-            "period_end": resolved_end.isoformat(),
-            "is_rolling_end": snapshot.period_end is None,
+            "date_column": snapshot.date_column,
+            "period_start": snapshot.period_start.isoformat() if snapshot.period_start else None,
+            "period_end": snapshot.period_end.isoformat(),
             "summary": snapshot.summary,
             "status": snapshot.status,
             "created_at": snapshot.created_at.isoformat(),
@@ -212,6 +214,8 @@ class ReportService:
         snapshot = ReportService.get_snapshot(snapshot_id, org)
         update_fields = []
         for field, value in fields.items():
+            if field not in ALLOWED_UPDATE_FIELDS:
+                raise SnapshotValidationError(f"Field '{field}' is not editable")
             if value is not None:
                 setattr(snapshot, field, value)
                 update_fields.append(field)
