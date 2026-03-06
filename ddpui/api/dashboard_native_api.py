@@ -48,7 +48,6 @@ from ddpui.schemas.dashboard_schema import (
     LandingPageResolveResponse,
     DashboardExportResponse,
 )
-from ddpui.schemas.chart_schema import ChartExportSchema
 
 logger = CustomLogger("ddpui")
 
@@ -98,7 +97,7 @@ def export_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
-        export_data = DashboardService.export_dashboard_for_llm(dashboard_id, orguser.org)
+        export_data = DashboardService.export_dashboard_context(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 

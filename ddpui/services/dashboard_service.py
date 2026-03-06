@@ -987,24 +987,24 @@ class DashboardService:
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
     @staticmethod
-    def export_dashboard_for_llm(dashboard_id: int, org: Org) -> Dict[str, Any]:
-        """Export dashboard configuration in JSON format for LLM context
+    def export_dashboard_context(dashboard_id: int, org: Org) -> Dict[str, Any]:
+        """Export dashboard configuration reusing existing business logic
 
         Args:
             dashboard_id: Dashboard ID to export
             org: Organization object
 
         Returns:
-            Dictionary with dashboard export data
+            Dictionary with complete dashboard and chart data
 
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist
         """
-        try:
-            dashboard = Dashboard.objects.prefetch_related("filters").get(id=dashboard_id, org=org)
-        except Dashboard.DoesNotExist as err:
-            raise DashboardNotFoundError(f"Dashboard {dashboard_id} not found") from err
+        # Get dashboard using existing business logic - this includes filters, lock status, etc.
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+        dashboard_response = DashboardService.get_dashboard_response(dashboard)
 
+        # Get all charts referenced in this dashboard with complete configuration
         charts = []
 
         # Extract chart IDs from dashboard components
@@ -1016,76 +1016,26 @@ class DashboardService:
                 try:
                     chart = Chart.objects.get(id=chart_id, org=org)
 
-                    # Extract configuration from extra_config
-                    extra_config = chart.extra_config or {}
-
-                    # Build data source
-                    data_source = f"{chart.schema_name}.{chart.table_name}"
-
-                    # Extract metrics and dimensions
-                    metrics = []
-                    dimensions = []
-                    metric_calculation = ""
-
-                    if extra_config.get("metrics"):
-                        metric_parts = []
-                        for metric in extra_config["metrics"]:
-                            if metric.get("column"):
-                                metrics.append(metric["column"])
-                            if metric.get("aggregation") and metric.get("column"):
-                                metric_parts.append(f"{metric['aggregation']}({metric['column']})")
-                            elif metric.get("aggregation") == "count":
-                                metric_parts.append("COUNT(*)")
-                        metric_calculation = ", ".join(metric_parts) if metric_parts else "COUNT(*)"
-
-                    if extra_config.get("dimensions"):
-                        dimensions = extra_config["dimensions"]
-                    elif extra_config.get("dimension_col"):
-                        dimensions = [extra_config["dimension_col"]]
-
-                    # Extract filters applied to this chart
-                    chart_filters = []
-                    for dashboard_filter in dashboard.filters.all():
-                        if (
-                            dashboard_filter.schema_name == chart.schema_name
-                            and dashboard_filter.table_name == chart.table_name
-                        ):
-                            filter_str = f"{dashboard_filter.column_name}"
-                            if dashboard_filter.settings.get("default_value"):
-                                filter_str += f" = {dashboard_filter.settings['default_value']}"
-                            chart_filters.append(filter_str)
-
-                    # Determine grain
-                    grain = (
-                        "total"
-                        if not dimensions
-                        else dimensions[0].lower()
-                        if len(dimensions) == 1
-                        else "custom"
-                    )
-
-                    chart_export = {
-                        "chart_id": str(chart.id),
+                    # Use the same structure as ChartResponse to get complete chart data
+                    chart_data = {
+                        "id": chart.id,
                         "title": chart.title,
-                        "chart_type": chart.chart_type.title(),
-                        "data_source": data_source,
-                        "metric_calculation": metric_calculation,
-                        "filters": chart_filters,
-                        "measures": metrics,
-                        "dimensions": dimensions,
-                        "grain": grain,
-                        "x_axis": extra_config.get("x_axis"),
+                        "description": chart.description,
+                        "chart_type": chart.chart_type,
+                        "schema_name": chart.schema_name,
+                        "table_name": chart.table_name,
+                        "extra_config": chart.extra_config or {},
+                        "created_at": chart.created_at.isoformat(),
+                        "updated_at": chart.updated_at.isoformat(),
                     }
-                    charts.append(chart_export)
+                    charts.append(chart_data)
 
                 except Chart.DoesNotExist:
                     logger.warning(f"Chart {chart_id} not found for dashboard {dashboard_id}")
                     continue
 
         return {
-            "dashboard_id": str(dashboard.id),
-            "title": dashboard.title,
-            "description": dashboard.description or "",
+            "dashboard": dashboard_response,
             "charts": charts,
         }
 

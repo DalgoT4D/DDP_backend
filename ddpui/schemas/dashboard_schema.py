@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 from ninja import Schema
-from ddpui.schemas.chart_schema import ChartExportSchema
 
 
 # =============================================================================
@@ -190,9 +189,7 @@ class LandingPageResolveResponse(Schema):
 
 
 class DashboardExportResponse(Schema):
-    """Schema for dashboard export format"""
+    """Schema for dashboard export format - reuses existing response structures"""
 
-    dashboard_id: str
-    title: str
-    description: str
-    charts: List["ChartExportSchema"]
+    dashboard: DashboardResponse
+    charts: List[dict]  # ChartResponse data for each chart in dashboard
