@@ -39,6 +39,10 @@ class EChartsConfigGenerator:
 
         font_size = size_map.get(number_size, 48)
 
+        # Calculate subtitle offset based on font size (more compact for better fit)
+        # Use smaller offset to ensure subtitle fits in minimum tile sizes
+        subtitle_offset = int(font_size * 0.65) + 10  # Reduced from font_size + 20
+
         # Create a custom configuration for displaying a single metric
         # Using a gauge series with custom text display
         config = {
@@ -51,7 +55,7 @@ class EChartsConfigGenerator:
             "series": [
                 {
                     "type": "gauge",
-                    "center": ["50%", "50%"],
+                    "center": ["50%", "48%"],  # Slightly higher to better center content
                     "radius": "0%",
                     "startAngle": 0,
                     "endAngle": 0,
@@ -72,9 +76,9 @@ class EChartsConfigGenerator:
                         "show": True,
                         "offsetCenter": [
                             0,
-                            font_size + 20,
-                        ],  # Position subtitle below number based on size
-                        "fontSize": 16,
+                            subtitle_offset,
+                        ],  # Position subtitle below number with optimized spacing
+                        "fontSize": 14,  # Slightly smaller subtitle for better fit
                         "color": "#666",
                         "fontWeight": "normal",
                     },
