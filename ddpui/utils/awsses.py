@@ -3,13 +3,17 @@
 import os
 from ddpui.utils.aws_client import AWSClient
 
-ses = AWSClient.get_instance("ses")
+
+def _get_ses_client():
+    """Get SES client instance - lazy initialization to avoid import-time failures"""
+    return AWSClient.get_instance("ses")
 
 
 def send_text_message(to_email, subject, message):
     """
     send a plain-text email using ses
     """
+    ses = _get_ses_client()
     response = ses.send_email(
         Destination={"ToAddresses": [to_email]},
         Message={
