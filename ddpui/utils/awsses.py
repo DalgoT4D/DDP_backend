@@ -1,14 +1,9 @@
 """send emails using SES"""
 
 import os
-import boto3
+from ddpui.utils.aws_client import AWSClient
 
-ses = boto3.client(
-    "ses",
-    "ap-south-1",
-    aws_access_key_id=os.getenv("SES_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("SES_SECRET_ACCESS_KEY"),
-)
+ses = AWSClient.get_instance("ses")
 
 
 def send_text_message(to_email, subject, message):
