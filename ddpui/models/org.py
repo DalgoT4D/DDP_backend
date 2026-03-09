@@ -255,6 +255,12 @@ class ConnectionMeta(models.Model):
 
     connection_id = models.CharField(max_length=36, null=False)
     connection_name = models.CharField(max_length=100, null=True)
+    description = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Description of the connection (max 100 characters)",
+    )
 
 
 class ConnectionJob(models.Model):
