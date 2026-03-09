@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any
 from datetime import date, datetime
 from ninja import Schema, Field
 
+# Sharing schemas are shared with dashboards — import from dashboard_schema
+from ddpui.schemas.dashboard_schema import ShareToggle, ShareResponse, ShareStatus  # noqa: F401
+
 
 # Shared schemas
 

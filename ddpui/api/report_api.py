@@ -1,5 +1,8 @@
 """Report API endpoints"""
 
+import secrets
+
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -18,6 +21,7 @@ from ddpui.schemas.report_schema import (
     SnapshotListResponse,
     SnapshotViewResponse,
 )
+from ddpui.schemas.dashboard_schema import ShareToggle, ShareResponse, ShareStatus
 
 logger = CustomLogger("ddpui.report_api")
 
@@ -118,3 +122,87 @@ def delete_snapshot(request, snapshot_id: int):
         return {"success": True}
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+
+
+# ===== Report Sharing Endpoints (same pattern as Dashboard) =====
+
+
+@report_router.put("/{snapshot_id}/share/", response=ShareResponse)
+@has_permission(["can_share_dashboards"])
+def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
+    """Toggle public sharing for a report snapshot"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+
+    # Check permissions - only snapshot creator can modify sharing
+    if snapshot.created_by != orguser:
+        raise HttpError(403, "Only report creators can modify sharing settings")
+
+    is_public = payload.is_public
+
+    if is_public:
+        if not snapshot.public_share_token:
+            snapshot.public_share_token = secrets.token_urlsafe(48)
+        snapshot.public_shared_at = timezone.now()
+        snapshot.public_disabled_at = None
+    else:
+        snapshot.public_disabled_at = timezone.now()
+
+    snapshot.is_public = is_public
+    snapshot.save()
+
+    # Build response
+    response_data = {
+        "is_public": snapshot.is_public,
+        "message": f'Report {"made public" if is_public else "made private"}',
+    }
+
+    if snapshot.is_public and snapshot.public_share_token:
+        from django.conf import settings
+
+        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        response_data["public_url"] = f"{frontend_url}/share/report/{snapshot.public_share_token}"
+        response_data["public_share_token"] = snapshot.public_share_token
+
+    logger.info(
+        f"Report {snapshot_id} sharing {'enabled' if is_public else 'disabled'} "
+        f"by user {orguser.user.email}, token: {snapshot.public_share_token}"
+    )
+
+    return ShareResponse(**response_data)
+
+
+@report_router.get("/{snapshot_id}/share/", response=ShareStatus)
+@has_permission(["can_view_dashboards"])
+def get_report_sharing_status(request, snapshot_id: int):
+    """Get report sharing status"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+
+    if snapshot.created_by != orguser:
+        raise HttpError(403, "Only report creators can view sharing settings")
+
+    response_data = {
+        "is_public": snapshot.is_public,
+        "public_access_count": snapshot.public_access_count,
+        "last_public_accessed": snapshot.last_public_accessed,
+        "public_shared_at": snapshot.public_shared_at,
+    }
+
+    if snapshot.is_public and snapshot.public_share_token:
+        from django.conf import settings
+
+        FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        response_data["public_url"] = f"{frontend_url}/share/report/{snapshot.public_share_token}"
+
+    return ShareStatus(**response_data)

@@ -77,6 +77,16 @@ class ReportSnapshot(models.Model):
         default=SnapshotStatus.GENERATED.value,
     )
 
+    # Public sharing (same pattern as Dashboard)
+    is_public = models.BooleanField(default=False)
+    public_share_token = models.CharField(
+        max_length=64, unique=True, null=True, blank=True, db_index=True
+    )
+    public_shared_at = models.DateTimeField(null=True, blank=True)
+    public_disabled_at = models.DateTimeField(null=True, blank=True)
+    public_access_count = models.IntegerField(default=0)
+    last_public_accessed = models.DateTimeField(null=True, blank=True)
+
     # Metadata
     created_by = models.ForeignKey(
         OrgUser,
