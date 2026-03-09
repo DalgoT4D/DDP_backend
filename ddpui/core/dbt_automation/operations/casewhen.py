@@ -58,16 +58,19 @@ def casewhen_dbt_sql(
                 else quote_constvalue(str(clause["then"]["value"]), warehouse.name)
             )
 
-            operator_prefix = operator
-            if operator == "between":
+            if operator in ["IS NULL", "IS NOT NULL"]:
+                # For null operators, no operands needed
+                dbt_code += f"\n    WHEN {clause_col} {operator} THEN {then_value}"
+            elif operator == "between":
                 operator_prefix = "BETWEEN"
                 operator = " AND "
-
-            # expression for between will be : BETWEEN col1 AND col2
-            # expression for others will be : <= col1
-            expression = f'{operator_prefix} {f"{operator}".join(operands)}'
-
-            dbt_code += f"\n    WHEN {clause_col} {expression} THEN {then_value}"
+                # expression for between will be : BETWEEN col1 AND col2
+                expression = f'{operator_prefix} {f"{operator}".join(operands)}'
+                dbt_code += f"\n    WHEN {clause_col} {expression} THEN {then_value}"
+            else:
+                # Regular operators with single operand
+                expression = f"{operator} {operands[0]}"
+                dbt_code += f"\n    WHEN {clause_col} {expression} THEN {then_value}"
 
         # default else value will be NULL
         else_value = "NULL"
