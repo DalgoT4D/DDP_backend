@@ -1513,7 +1513,7 @@ def test_put_connect_git_remote_orgtask_creation_fails_but_git_succeeds(seed_db,
     orguser.org.save()
 
     request = mock_request(orguser)
-    payload = OrgDbtGitHub(
+    payload = OrgDbtConnectGitRemote(
         gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="fake-pat"
     )
 
@@ -1546,7 +1546,7 @@ def test_put_connect_git_remote_multiple_git_tasks_but_git_succeeds(seed_db, org
     orguser.org.save()
 
     request = mock_request(orguser)
-    payload = OrgDbtGitHub(
+    payload = OrgDbtConnectGitRemote(
         gitrepoUrl="https://github.com/test/repo.git", gitrepoAccessToken="fake-pat"
     )
 
