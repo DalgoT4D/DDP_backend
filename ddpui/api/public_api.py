@@ -1119,33 +1119,11 @@ def get_public_report(request, token: str):
             public_access_count=F("public_access_count") + 1, last_public_accessed=timezone.now()
         )
 
-        # Build view data (same as ReportService.get_snapshot_view_data)
-        dashboard_data = {
-            **snapshot.frozen_dashboard,
-            "id": snapshot.id,
-            "dashboard_type": "native",
-            "is_published": True,
-            "is_locked": False,
-            "locked_by": None,
-            "is_public": False,
-            "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
-            "org_id": snapshot.org.id,
-            "created_at": snapshot.created_at.isoformat(),
-            "updated_at": snapshot.created_at.isoformat(),
-        }
+        # Reuse the service method which handles both dashboard-filter and
+        # warehouse-discovered-column cases (chart-level filter injection)
+        from ddpui.core.reports.report_service import ReportService
 
-        report_metadata = {
-            "snapshot_id": snapshot.id,
-            "title": snapshot.title,
-            "date_column": snapshot.date_column,
-            "period_start": snapshot.period_start.isoformat() if snapshot.period_start else None,
-            "period_end": snapshot.period_end.isoformat(),
-            "summary": snapshot.summary,
-            "status": snapshot.status,
-            "created_at": snapshot.created_at.isoformat(),
-            "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
-            "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
-        }
+        view_data = ReportService.get_snapshot_view_data(snapshot.id, snapshot.org)
 
         ip_address = request.META.get("REMOTE_ADDR", "unknown")
         user_agent = request.META.get("HTTP_USER_AGENT", "unknown")[:100]
@@ -1155,9 +1133,7 @@ def get_public_report(request, token: str):
         )
 
         return {
-            "dashboard_data": dashboard_data,
-            "report_metadata": report_metadata,
-            "frozen_chart_configs": snapshot.frozen_chart_configs or {},
+            **view_data,
             "org_name": snapshot.org.name,
             "is_valid": True,
         }

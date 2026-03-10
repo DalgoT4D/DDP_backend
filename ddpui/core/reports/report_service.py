@@ -1,5 +1,6 @@
 """Report service — snapshot creation, viewing, CRUD"""
 
+import copy
 from typing import Optional, List, Dict, Any
 from datetime import date
 
@@ -73,6 +74,130 @@ class ReportService:
         return frozen
 
     # =========================================================================
+    # Filter Injection for View Time
+    # =========================================================================
+
+    @staticmethod
+    def _inject_period_into_filters(
+        frozen_dashboard: Dict[str, Any], snapshot: "ReportSnapshot"
+    ) -> bool:
+        """Inject snapshot period dates into the matching datetime filter.
+
+        Finds the frozen datetime filter matching snapshot.date_column and
+        sets default_start_date / default_end_date + locked=True in its
+        settings.
+
+        When no matching filter exists (warehouse-discovered column), injects
+        a display-only filter with a negative numeric ID so the UI shows the
+        locked date range. Actual data filtering for this case is handled
+        separately via _inject_period_into_chart_configs.
+
+        Returns True if a pre-existing filter was matched, False if a
+        display-only filter was injected instead.
+        Mutates frozen_dashboard in place (caller must deep-copy first).
+        """
+        date_col = snapshot.date_column
+        if not date_col:
+            return True  # Nothing to inject
+
+        filters = frozen_dashboard.get("filters")
+        if filters is None:
+            filters = []
+            frozen_dashboard["filters"] = filters
+
+        period_settings = {
+            "default_start_date": (
+                snapshot.period_start.isoformat() if snapshot.period_start else None
+            ),
+            "default_end_date": (
+                snapshot.period_end.isoformat() if snapshot.period_end else None
+            ),
+            "locked": True,
+        }
+
+        # Try to find and enrich the matching datetime filter
+        for f in filters:
+            if (
+                f.get("filter_type") == "datetime"
+                and f.get("schema_name") == date_col.get("schema_name")
+                and f.get("table_name") == date_col.get("table_name")
+                and f.get("column_name") == date_col.get("column_name")
+            ):
+                settings = f.get("settings") or {}
+                settings.update(period_settings)
+                f["settings"] = settings
+                return True
+
+        # No matching dashboard filter — inject a display-only filter.
+        # Use a negative numeric ID so the frontend can render it without
+        # hitting "expected a number" errors from Django integer fields.
+        display_filter = {
+            "id": -snapshot.id,
+            "dashboard_id": snapshot.id,
+            "name": f"Date Filter ({date_col.get('column_name', '')})",
+            "filter_type": "datetime",
+            "schema_name": date_col.get("schema_name", ""),
+            "table_name": date_col.get("table_name", ""),
+            "column_name": date_col.get("column_name", ""),
+            "settings": period_settings,
+            "order": 0,
+            "created_at": snapshot.created_at.isoformat(),
+            "updated_at": snapshot.created_at.isoformat(),
+        }
+        filters.insert(0, display_filter)
+        return False
+
+    @staticmethod
+    def _inject_period_into_chart_configs(
+        frozen_chart_configs: Dict[str, Any], snapshot: "ReportSnapshot"
+    ) -> None:
+        """Inject date range filters directly into frozen chart configs.
+
+        Used when the date column was discovered via warehouse introspection
+        and has no matching dashboard-level datetime filter. Adds chart-level
+        filters (column/operator/value) so the backend applies them when
+        fetching chart data.
+
+        Mutates frozen_chart_configs in place.
+        """
+        date_col = snapshot.date_column
+        if not date_col or not frozen_chart_configs:
+            return
+
+        col_name = date_col.get("column_name", "")
+        target_schema = date_col.get("schema_name", "")
+        target_table = date_col.get("table_name", "")
+
+        for chart_id, config in frozen_chart_configs.items():
+            if (
+                config.get("schema_name") == target_schema
+                and config.get("table_name") == target_table
+            ):
+                extra_config = config.get("extra_config") or {}
+                filters = list(extra_config.get("filters") or [])
+
+                if snapshot.period_start:
+                    filters.append(
+                        {
+                            "column": col_name,
+                            "operator": "greater_than_equal",
+                            "value": snapshot.period_start.isoformat(),
+                        }
+                    )
+                if snapshot.period_end:
+                    filters.append(
+                        {
+                            "column": col_name,
+                            "operator": "less_than_equal",
+                            "value": snapshot.period_end.isoformat()
+                            + "T23:59:59",
+                        }
+                    )
+
+                extra_config["filters"] = filters
+                config["extra_config"] = extra_config
+
+    # =========================================================================
     # Snapshot CRUD
     # =========================================================================
 
@@ -106,18 +231,55 @@ class ReportService:
         except Dashboard.DoesNotExist:
             raise SnapshotValidationError(f"Dashboard {dashboard_id} not found")
 
-        # Validate date_column against dashboard's datetime filters
+        # Validate date_column: first check dashboard filters, then fall back
+        # to verifying the column exists in the warehouse as a datetime type
         datetime_filters = dashboard.filters.filter(filter_type="datetime")
-        match = datetime_filters.filter(
+        match_on_filter = datetime_filters.filter(
             schema_name=date_column["schema_name"],
             table_name=date_column["table_name"],
             column_name=date_column["column_name"],
         ).exists()
-        if not match:
-            raise SnapshotValidationError(
-                f"No datetime filter found for "
-                f"{date_column['schema_name']}.{date_column['table_name']}.{date_column['column_name']}"
+
+        if not match_on_filter:
+            # Fallback: verify the column exists in the warehouse as datetime
+            from ddpui.models.org import OrgWarehouse
+            from ddpui.core.charts.charts_service import get_warehouse_client
+            from ddpui.api.filter_api import (
+                get_table_columns,
+                determine_filter_type_from_column,
             )
+
+            org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+            if not org_warehouse:
+                raise SnapshotValidationError("Warehouse not configured")
+
+            warehouse_client = get_warehouse_client(org_warehouse)
+            all_columns = get_table_columns(
+                warehouse_client,
+                org_warehouse,
+                date_column["schema_name"],
+                date_column["table_name"],
+            )
+
+            # Find the specific column
+            target_col = None
+            for col in all_columns:
+                if col["column_name"] == date_column["column_name"]:
+                    target_col = col
+                    break
+
+            if not target_col:
+                raise SnapshotValidationError(
+                    f"Column '{date_column['column_name']}' not found in "
+                    f"{date_column['schema_name']}.{date_column['table_name']}"
+                )
+
+            col_type = determine_filter_type_from_column(target_col["data_type"])
+            if col_type != "datetime":
+                raise SnapshotValidationError(
+                    f"Column '{date_column['column_name']}' is not a datetime column "
+                    f"(type: {target_col['data_type']})"
+                )
 
         frozen_dashboard = ReportService._freeze_dashboard(dashboard)
         frozen_chart_configs = ReportService._freeze_chart_configs(dashboard)
@@ -175,8 +337,25 @@ class ReportService:
 
         # Build dashboard-like response from frozen dashboard
         # No dashboard_id — snapshot is fully self-contained
+        # Deep-copy so we never mutate the stored frozen_dashboard
+        frozen_copy = copy.deepcopy(snapshot.frozen_dashboard)
+
+        # Inject period dates into the matching datetime filter's settings
+        # so the frontend auto-applies them and renders charts pre-filtered.
+        # If no matching dashboard filter exists (warehouse-discovered column),
+        # inject date filters directly into each chart's extra_config instead.
+        filter_matched = ReportService._inject_period_into_filters(
+            frozen_copy, snapshot
+        )
+
+        frozen_charts = copy.deepcopy(snapshot.frozen_chart_configs or {})
+        if not filter_matched:
+            ReportService._inject_period_into_chart_configs(
+                frozen_charts, snapshot
+            )
+
         dashboard_data = {
-            **snapshot.frozen_dashboard,
+            **frozen_copy,
             "id": snapshot.id,
             "dashboard_type": "native",
             "is_published": True,
@@ -205,7 +384,7 @@ class ReportService:
         return {
             "dashboard_data": dashboard_data,
             "report_metadata": report_metadata,
-            "frozen_chart_configs": snapshot.frozen_chart_configs or {},
+            "frozen_chart_configs": frozen_charts,
         }
 
     @staticmethod

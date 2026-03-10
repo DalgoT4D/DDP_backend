@@ -1,14 +1,20 @@
 """Report API endpoints"""
 
 import secrets
+from typing import List
 
 from django.utils import timezone
-from ninja import Router
+from ninja import Router, Schema
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org import OrgWarehouse
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.core.charts.charts_service import get_warehouse_client
+from ddpui.api.filter_api import determine_filter_type_from_column, get_table_columns
 
 from ddpui.core.reports.report_service import ReportService
 from ddpui.core.reports.exceptions import (
@@ -122,6 +128,107 @@ def delete_snapshot(request, snapshot_id: int):
         return {"success": True}
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+
+
+# ===== Datetime Column Discovery =====
+
+
+class DatetimeColumnResponse(Schema):
+    """A datetime column discovered from a dashboard's chart tables"""
+
+    schema_name: str
+    table_name: str
+    column_name: str
+    data_type: str
+
+
+@report_router.get(
+    "/dashboards/{dashboard_id}/datetime-columns/",
+    response=List[DatetimeColumnResponse],
+)
+@has_permission(["can_view_dashboards"])
+def list_dashboard_datetime_columns(request, dashboard_id: int):
+    """Discover datetime columns from all tables used by a dashboard's charts."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = Dashboard.objects.prefetch_related("filters").get(
+            id=dashboard_id, org=orguser.org
+        )
+    except Dashboard.DoesNotExist:
+        raise HttpError(404, f"Dashboard {dashboard_id} not found")
+
+    # Extract unique (schema_name, table_name) from chart components
+    components = dashboard.components or {}
+    chart_ids = []
+    for comp_id, component in components.items():
+        if component.get("type") == "chart":
+            chart_id = component.get("config", {}).get("chartId")
+            if chart_id:
+                chart_ids.append(chart_id)
+
+    charts = Chart.objects.filter(id__in=chart_ids, org=orguser.org)
+    table_refs = set()
+    for chart in charts:
+        if chart.schema_name and chart.table_name:
+            table_refs.add((chart.schema_name, chart.table_name))
+
+    if not table_refs:
+        return []
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        raise HttpError(404, "Warehouse not configured")
+
+    try:
+        warehouse_client = get_warehouse_client(org_warehouse)
+    except Exception as e:
+        logger.error(f"Error connecting to warehouse: {e}")
+        raise HttpError(500, "Error connecting to warehouse") from e
+
+    # Discover datetime columns from each table
+    seen = set()
+    datetime_columns = []
+
+    for schema_name, table_name in table_refs:
+        try:
+            columns = get_table_columns(
+                warehouse_client, org_warehouse, schema_name, table_name
+            )
+            for col in columns:
+                filter_type = determine_filter_type_from_column(col["data_type"])
+                if filter_type == "datetime":
+                    key = (schema_name, table_name, col["column_name"])
+                    if key not in seen:
+                        seen.add(key)
+                        datetime_columns.append(
+                            DatetimeColumnResponse(
+                                schema_name=schema_name,
+                                table_name=table_name,
+                                column_name=col["column_name"],
+                                data_type=col["data_type"],
+                            )
+                        )
+        except Exception as e:
+            logger.warning(
+                f"Error fetching columns for {schema_name}.{table_name}: {e}"
+            )
+
+    # Also include existing dashboard datetime filters not already discovered
+    for f in dashboard.filters.filter(filter_type="datetime"):
+        key = (f.schema_name, f.table_name, f.column_name)
+        if key not in seen:
+            seen.add(key)
+            datetime_columns.append(
+                DatetimeColumnResponse(
+                    schema_name=f.schema_name,
+                    table_name=f.table_name,
+                    column_name=f.column_name,
+                    data_type="datetime",
+                )
+            )
+
+    return datetime_columns
 
 
 # ===== Report Sharing Endpoints (same pattern as Dashboard) =====
