@@ -23,9 +23,7 @@ class AWSClient:
 
     _locks = {"secretsmanager": threading.Lock(), "s3": threading.Lock(), "ses": threading.Lock()}
 
-    _sessions = {"secretsmanager": None, "s3": None, "ses": None}
-
-    _clients = {}
+    _clients = {}  # for various services
 
     # Supported AWS services
     SUPPORTED_SERVICES = {"s3", "ses", "secretsmanager"}
@@ -54,23 +52,26 @@ class AWSClient:
     @classmethod
     def _get_client(cls, service_name: str):
         """Get client for the specified service"""
-        if cls._sessions[service_name] is None:
+        if service_name not in cls._clients or cls._clients[service_name] is None:
             if cls._locks[service_name].acquire(timeout=10):
                 try:
-                    if cls._sessions[service_name] is None:
-                        cls._initialize_session(service_name)
+                    boto_session = cls._initialize_boto_session(service_name)
+                    cls._clients[service_name] = boto_session.client(service_name)
                 finally:
                     cls._locks[service_name].release()
+            else:
+                raise RuntimeError(
+                    f"Timeout while acquiring lock for {service_name} session initialization"
+                )
 
-        if service_name not in cls._clients:
-            cls._clients[service_name] = cls._sessions[service_name].client(service_name)
-            logger.debug(f"Created AWS {service_name} client")
+        if cls._clients[service_name] is None:
+            raise RuntimeError(f"Failed to initialize client for {service_name}")
 
         return cls._clients[service_name]
 
     @classmethod
-    def _initialize_session(cls, service_name: str):
-        """Initialize AWS boto3 session for the specified service"""
+    def _initialize_boto_session(cls, service_name: str) -> boto3.Session:
+        """Initialize generic AWS boto3 session for a particular set of creds"""
         region = os.getenv("AWS_DEFAULT_REGION", "ap-south-1")
 
         # Get credentials based on service
@@ -99,8 +100,9 @@ class AWSClient:
             aws_secret_access_key=secret_key,
             region_name=region,
         )
-        cls._sessions[service_name] = session
-        logger.debug(f"Initialized {service_display} AWS session for region {region}")
+
+        logger.debug(f"Initialized boto session for {service_display} in region {region}")
+        return session
 
     @classmethod
     def reset_instance(cls):
@@ -113,5 +115,4 @@ class AWSClient:
             except:
                 pass
 
-        cls._sessions = {service: None for service in cls.SUPPORTED_SERVICES}
         cls._clients = {}
