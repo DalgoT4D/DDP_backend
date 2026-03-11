@@ -54,11 +54,12 @@ class AWSClient:
         """Get client for the specified service"""
         if service_name not in cls._clients or cls._clients[service_name] is None:
             if cls._locks[service_name].acquire(timeout=10):
-                try:
-                    boto_session = cls._initialize_boto_session(service_name)
-                    cls._clients[service_name] = boto_session.client(service_name)
-                finally:
-                    cls._locks[service_name].release()
+                if service_name not in cls._clients or cls._clients[service_name] is None:
+                    try:
+                        boto_session = cls._initialize_boto_session(service_name)
+                        cls._clients[service_name] = boto_session.client(service_name)
+                    finally:
+                        cls._locks[service_name].release()
             else:
                 raise RuntimeError(
                     f"Timeout while acquiring lock for {service_name} session initialization"
