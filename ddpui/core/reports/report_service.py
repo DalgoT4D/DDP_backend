@@ -13,7 +13,11 @@ from ddpui.models.report import ReportSnapshot, SnapshotStatus
 from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 
-from .exceptions import SnapshotNotFoundError, SnapshotValidationError
+from .exceptions import (
+    SnapshotNotFoundError,
+    SnapshotValidationError,
+    SnapshotPermissionError,
+)
 
 logger = CustomLogger("ddpui.core.reports")
 
@@ -403,9 +407,27 @@ class ReportService:
         return snapshot
 
     @staticmethod
-    def delete_snapshot(snapshot_id: int, org: Org) -> bool:
-        """Delete a snapshot."""
+    def delete_snapshot(snapshot_id: int, org: Org, orguser: OrgUser) -> bool:
+        """Delete a snapshot.
+
+        Args:
+            snapshot_id: The snapshot ID
+            org: The organization
+            orguser: The user deleting the snapshot
+
+        Returns:
+            True if deletion was successful
+
+        Raises:
+            SnapshotNotFoundError: If snapshot doesn't exist
+            SnapshotPermissionError: If user doesn't have permission
+        """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        # Only allow deletion if the current user is the creator
+        if snapshot.created_by != orguser:
+            raise SnapshotPermissionError("You can only delete reports you created.")
+
         snapshot.delete()
-        logger.info(f"Deleted snapshot {snapshot_id}")
+        logger.info(f"Deleted snapshot {snapshot_id} by user {orguser.user.email}")
         return True

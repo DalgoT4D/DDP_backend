@@ -20,6 +20,7 @@ from ddpui.core.reports.report_service import ReportService
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
     SnapshotValidationError,
+    SnapshotPermissionError,
 )
 from ddpui.schemas.report_schema import (
     SnapshotCreate,
@@ -124,10 +125,12 @@ def delete_snapshot(request, snapshot_id: int):
     """Delete a snapshot"""
     orguser: OrgUser = request.orguser
     try:
-        ReportService.delete_snapshot(snapshot_id, orguser.org)
+        ReportService.delete_snapshot(snapshot_id, orguser.org, orguser)
         return {"success": True}
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+    except SnapshotPermissionError as err:
+        raise HttpError(403, str(err)) from err
 
 
 # ===== Datetime Column Discovery =====

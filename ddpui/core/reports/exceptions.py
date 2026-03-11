@@ -22,3 +22,10 @@ class SnapshotValidationError(ReportError):
 
     def __init__(self, message: str):
         super().__init__(message, "SNAPSHOT_VALIDATION_ERROR")
+
+
+class SnapshotPermissionError(ReportError):
+    """Raised when user doesn't have permission for snapshot operation"""
+
+    def __init__(self, message: str = "Permission denied"):
+        super().__init__(message, "SNAPSHOT_PERMISSION_DENIED")
