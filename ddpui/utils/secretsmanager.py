@@ -1,7 +1,6 @@
 import os
 import json
 from uuid import uuid4
-import boto3
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.aws_client import AWSClient
 from ddpui.models.org import Org, OrgWarehouse, OrgDbt
