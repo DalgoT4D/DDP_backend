@@ -459,7 +459,7 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
             },
             cron=cron,
         ),
-        org.get_queue_config().transform_task_queue,
+        org.get_queue_config().edr_queue,
     )
 
     logger.info(

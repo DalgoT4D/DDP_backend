@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest.mock import patch
 from ddpui.models.org import Org, get_default_queue_config
-from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
 
 
 @pytest.fixture
