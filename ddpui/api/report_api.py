@@ -152,7 +152,14 @@ class DatetimeColumnResponse(Schema):
 )
 @has_permission(["can_view_dashboards"])
 def list_dashboard_datetime_columns(request, dashboard_id: int):
-    """Discover datetime columns from all tables used by a dashboard's charts."""
+    """Discover datetime columns from all tables used by a dashboard's charts.
+
+    Warehouse introspection (get_table_columns + determine_filter_type_from_column)
+    is needed because dashboard filters only cover columns the user has already
+    configured. A chart's underlying table may have additional datetime columns
+    (e.g. updated_at, shipped_at) that aren't dashboard filters yet but are
+    valid choices for filtering a report by date range.
+    """
     orguser: OrgUser = request.orguser
 
     try:
