@@ -707,3 +707,38 @@ class TestListSnapshots:
 
         result = ReportService.list_snapshots(org, search="nonexistent")
         assert len(result) == 0
+
+    def test_list_filter_by_dashboard_title(self, org, sample_snapshot):
+        """Filter by dashboard_title matches frozen_dashboard.title"""
+        result = ReportService.list_snapshots(org, dashboard_title="Test Dashboard")
+        assert len(result) == 1
+
+        result = ReportService.list_snapshots(org, dashboard_title="test dash")
+        assert len(result) == 1  # icontains
+
+        result = ReportService.list_snapshots(org, dashboard_title="nonexistent")
+        assert len(result) == 0
+
+    def test_list_filter_by_created_by_email(self, org, sample_snapshot):
+        """Filter by created_by_email matches creator's email"""
+        result = ReportService.list_snapshots(org, created_by_email="svcreportuser@test.com")
+        assert len(result) == 1
+
+        result = ReportService.list_snapshots(org, created_by_email="svcreport")
+        assert len(result) == 1  # icontains
+
+        result = ReportService.list_snapshots(org, created_by_email="nobody@test.com")
+        assert len(result) == 0
+
+    def test_list_combined_filters(self, org, sample_snapshot):
+        """Multiple filters are combined with AND"""
+        result = ReportService.list_snapshots(
+            org, search="Jan", dashboard_title="Test", created_by_email="svcreport"
+        )
+        assert len(result) == 1
+
+        # One filter mismatches -> no results
+        result = ReportService.list_snapshots(
+            org, search="Jan", dashboard_title="wrong"
+        )
+        assert len(result) == 0

@@ -261,6 +261,26 @@ class TestListSnapshots:
         response = list_snapshots(request, search="nonexistent")
         assert len(response) == 0
 
+    def test_list_filter_by_dashboard_title(self, orguser, sample_snapshot, seed_db):
+        """Test listing with dashboard_title filter"""
+        request = mock_request(orguser)
+
+        response = list_snapshots(request, dashboard_title="Test Dashboard")
+        assert len(response) == 1
+
+        response = list_snapshots(request, dashboard_title="nonexistent")
+        assert len(response) == 0
+
+    def test_list_filter_by_created_by(self, orguser, sample_snapshot, seed_db):
+        """Test listing with created_by filter"""
+        request = mock_request(orguser)
+
+        response = list_snapshots(request, created_by="reportapiuser@test.com")
+        assert len(response) == 1
+
+        response = list_snapshots(request, created_by="nobody")
+        assert len(response) == 0
+
 
 # ================================================================================
 # Test create_snapshot endpoint

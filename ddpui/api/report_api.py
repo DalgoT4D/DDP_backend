@@ -37,10 +37,20 @@ report_router = Router()
 
 @report_router.get("/", response=list[SnapshotListResponse])
 @has_permission(["can_view_dashboards"])
-def list_snapshots(request, search: str = None):
+def list_snapshots(
+    request,
+    search: str = None,
+    dashboard_title: str = None,
+    created_by: str = None,
+):
     """List all snapshots for the organization"""
     orguser: OrgUser = request.orguser
-    snapshots = ReportService.list_snapshots(orguser.org, search=search)
+    snapshots = ReportService.list_snapshots(
+        orguser.org,
+        search=search,
+        dashboard_title=dashboard_title,
+        created_by_email=created_by,
+    )
     return [
         SnapshotListResponse(
             id=s.id,

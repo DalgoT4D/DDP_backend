@@ -303,11 +303,20 @@ class ReportService:
         return snapshot
 
     @staticmethod
-    def list_snapshots(org: Org, search: Optional[str] = None) -> List[ReportSnapshot]:
+    def list_snapshots(
+        org: Org,
+        search: Optional[str] = None,
+        dashboard_title: Optional[str] = None,
+        created_by_email: Optional[str] = None,
+    ) -> List[ReportSnapshot]:
         """List all snapshots for an org."""
         query = Q(org=org)
         if search:
             query &= Q(title__icontains=search)
+        if dashboard_title:
+            query &= Q(frozen_dashboard__title__icontains=dashboard_title)
+        if created_by_email:
+            query &= Q(created_by__user__email__icontains=created_by_email)
         return list(
             ReportSnapshot.objects.filter(query)
             .select_related("created_by__user")
