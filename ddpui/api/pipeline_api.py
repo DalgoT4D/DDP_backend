@@ -1,4 +1,3 @@
-import os
 from typing import List
 
 from ninja import Router
@@ -31,7 +30,6 @@ from ddpui.schemas.org_task_schema import (
     ClearSelectedStreams,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams
-from ddpui.utils.prefectlogs import parse_prefect_logs
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
@@ -739,25 +737,6 @@ def get_flow_runs_logs(
     """return the logs from a flow-run"""
     try:
         result = prefect_service.get_flow_run_logs(flow_run_id, task_run_id, limit, offset)
-    except Exception as error:
-        logger.exception(error)
-        raise HttpError(400, "failed to retrieve logs") from error
-    return result
-
-
-@pipeline_router.get("flow_runs/{flow_run_id}/logsummary")
-@has_permission(["can_view_pipeline"])
-def get_flow_runs_logsummary(request, flow_run_id):  # pylint: disable=unused-argument
-    """return the logs from a flow-run"""
-    try:
-        connection_info = {
-            "host": os.getenv("PREFECT_HOST"),
-            "port": os.getenv("PREFECT_PORT"),
-            "database": os.getenv("PREFECT_DB"),
-            "user": os.getenv("PREFECT_USER"),
-            "password": os.getenv("PREFECT_PASSWORD"),
-        }
-        result = parse_prefect_logs(connection_info, flow_run_id)
     except Exception as error:
         logger.exception(error)
         raise HttpError(400, "failed to retrieve logs") from error
