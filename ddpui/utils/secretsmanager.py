@@ -1,8 +1,8 @@
 import os
 import json
 from uuid import uuid4
-import boto3
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.aws_client import AWSClient
 from ddpui.models.org import Org, OrgWarehouse, OrgDbt
 
 logger = CustomLogger("ddpui")
@@ -76,12 +76,7 @@ def get_client():
     """
     if os.getenv("USE_AWS_SECRETS_MANAGER") == "True":
         logger.info("using aws secretsmanager")
-        secretsmanager = boto3.client(
-            "secretsmanager",
-            "ap-south-1",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        )
+        secretsmanager = AWSClient.get_instance("secretsmanager")
     else:
         logger.info("using dev secretsmanager")
         secretsmanager = DevSecretsManager()

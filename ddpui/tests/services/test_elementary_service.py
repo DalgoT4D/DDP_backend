@@ -383,6 +383,9 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
         "version": "0.19.1",
     }
 
+    # Set environment variable to control the expected upgrade version
+    os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"] = "0.20.0"
+
     response = check_dbt_files(org)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
@@ -394,6 +397,7 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
                 "elementary_package": {
                     "package": "elementary-data/elementary",
                     "version": "0.19.1",
+                    "needs_upgrade": "0.20.0",
                 },
             },
             "missing": {
@@ -401,6 +405,9 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
             },
         },
     )
+
+    # Clean up environment variable
+    del os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"]
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
