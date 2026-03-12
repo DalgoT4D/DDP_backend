@@ -143,6 +143,7 @@ class DatetimeColumnResponse(Schema):
     table_name: str
     column_name: str
     data_type: str
+    is_dashboard_filter: bool = False
 
 
 @report_router.get(
@@ -189,6 +190,11 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
         logger.error(f"Error connecting to warehouse: {e}")
         raise HttpError(500, "Error connecting to warehouse") from e
 
+    # Collect existing dashboard datetime filter keys for flagging
+    dashboard_filter_keys = set()
+    for f in dashboard.filters.filter(filter_type="datetime"):
+        dashboard_filter_keys.add((f.schema_name, f.table_name, f.column_name))
+
     # Discover datetime columns from each table
     seen = set()
     datetime_columns = []
@@ -210,6 +216,7 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
                                 table_name=table_name,
                                 column_name=col["column_name"],
                                 data_type=col["data_type"],
+                                is_dashboard_filter=key in dashboard_filter_keys,
                             )
                         )
         except Exception as e:
@@ -228,6 +235,7 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
                     table_name=f.table_name,
                     column_name=f.column_name,
                     data_type="datetime",
+                    is_dashboard_filter=True,
                 )
             )
 

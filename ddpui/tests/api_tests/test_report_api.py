@@ -4,14 +4,18 @@ Tests:
 1. list_snapshots - empty, with data, search
 2. create_snapshot - success, without start date, invalid date range, dashboard not found,
                      invalid date column
-3. get_snapshot_view - success, not found
+3. get_snapshot_view - success, not found, already viewed stays viewed
 4. update_snapshot_summary - success, not found
-5. delete_snapshot - success, not found
+5. delete_snapshot - success, not found, non-creator forbidden
+6. toggle_report_sharing - enable, disable, not found, non-creator forbidden
+7. get_report_sharing_status - public, private, not found, non-creator forbidden
+8. list_dashboard_datetime_columns - success, dashboard not found, no charts, includes filters
 """
 
 import os
 import django
 from datetime import date
+from unittest.mock import patch, MagicMock
 import pytest
 from ninja.errors import HttpError
 
@@ -20,7 +24,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -33,8 +37,12 @@ from ddpui.api.report_api import (
     get_snapshot_view,
     update_snapshot,
     delete_snapshot,
+    toggle_report_sharing,
+    get_report_sharing_status,
+    list_dashboard_datetime_columns,
 )
 from ddpui.schemas.report_schema import SnapshotCreate, SnapshotUpdate, DateColumnSchema
+from ddpui.schemas.dashboard_schema import ShareToggle
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -72,6 +80,28 @@ def orguser(authuser, org):
     """An OrgUser with account manager role"""
     orguser = OrgUser.objects.create(
         user=authuser,
+        org=org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+@pytest.fixture
+def other_authuser():
+    """A second django User for permission tests"""
+    user = User.objects.create(
+        username="otherreportuser", email="otherreportuser@test.com", password="testpassword"
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def other_orguser(other_authuser, org):
+    """A second OrgUser in the same org (not the snapshot creator)"""
+    orguser = OrgUser.objects.create(
+        user=other_authuser,
         org=org,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
@@ -174,6 +204,27 @@ def sample_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart)
         snapshot.refresh_from_db()
         snapshot.delete()
     except ReportSnapshot.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def empty_dashboard(orguser, org):
+    """A dashboard with no chart components"""
+    dashboard = Dashboard.objects.create(
+        title="Empty Dashboard",
+        description="No charts",
+        dashboard_type="native",
+        grid_columns=12,
+        layout_config=[],
+        components={},
+        created_by=orguser,
+        org=org,
+    )
+    yield dashboard
+    try:
+        dashboard.refresh_from_db()
+        dashboard.delete()
+    except Dashboard.DoesNotExist:
         pass
 
 
@@ -385,12 +436,42 @@ class TestGetSnapshotView:
         sample_snapshot.refresh_from_db()
         assert sample_snapshot.status == SnapshotStatus.VIEWED.value
 
+    def test_view_already_viewed_stays_viewed(self, orguser, sample_snapshot, seed_db):
+        """Test that viewing an already-viewed snapshot does not change status"""
+        sample_snapshot.status = SnapshotStatus.VIEWED.value
+        sample_snapshot.save(update_fields=["status"])
+
+        request = mock_request(orguser)
+        get_snapshot_view(request, sample_snapshot.id)
+
+        sample_snapshot.refresh_from_db()
+        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
+
     def test_view_not_found(self, orguser, seed_db):
         """Test viewing a nonexistent snapshot"""
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc_info:
             get_snapshot_view(request, 99999)
         assert exc_info.value.status_code == 404
+
+    def test_view_injects_period_into_filters(self, orguser, sample_snapshot, seed_db):
+        """Test that the view response injects period dates into the matching filter"""
+        request = mock_request(orguser)
+        response = get_snapshot_view(request, sample_snapshot.id)
+
+        # Find the datetime filter in dashboard_data
+        filters = response.dashboard_data.get("filters", [])
+        datetime_filter = None
+        for f in filters:
+            if f.get("filter_type") == "datetime" and f.get("column_name") == "created_at":
+                datetime_filter = f
+                break
+
+        assert datetime_filter is not None
+        settings = datetime_filter.get("settings", {})
+        assert settings.get("locked") is True
+        assert settings.get("default_start_date") == "2025-01-01"
+        assert settings.get("default_end_date") == "2025-01-31"
 
 
 # ================================================================================
@@ -445,3 +526,236 @@ class TestDeleteSnapshot:
         with pytest.raises(HttpError) as exc_info:
             delete_snapshot(request, 99999)
         assert exc_info.value.status_code == 404
+
+    def test_delete_by_non_creator_forbidden(
+        self, other_orguser, sample_snapshot, seed_db
+    ):
+        """Test that a user who did not create the snapshot cannot delete it"""
+        request = mock_request(other_orguser)
+        with pytest.raises(HttpError) as exc_info:
+            delete_snapshot(request, sample_snapshot.id)
+        assert exc_info.value.status_code == 403
+
+
+# ================================================================================
+# Test toggle_report_sharing endpoint
+# ================================================================================
+
+
+class TestToggleReportSharing:
+    """Tests for toggle_report_sharing endpoint"""
+
+    def test_enable_sharing(self, orguser, sample_snapshot, seed_db):
+        """Test enabling public sharing generates token and URL"""
+        request = mock_request(orguser)
+        payload = ShareToggle(is_public=True)
+        response = toggle_report_sharing(request, sample_snapshot.id, payload)
+
+        assert response.is_public is True
+        assert response.public_url is not None
+        assert "/share/report/" in response.public_url
+        assert response.public_share_token is not None
+        assert response.message == "Report made public"
+
+        sample_snapshot.refresh_from_db()
+        assert sample_snapshot.is_public is True
+        assert sample_snapshot.public_share_token is not None
+        assert sample_snapshot.public_shared_at is not None
+        assert sample_snapshot.public_disabled_at is None
+
+    def test_disable_sharing(self, orguser, sample_snapshot, seed_db):
+        """Test disabling public sharing"""
+        # First enable
+        request = mock_request(orguser)
+        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+
+        # Then disable
+        response = toggle_report_sharing(
+            request, sample_snapshot.id, ShareToggle(is_public=False)
+        )
+
+        assert response.is_public is False
+        assert response.message == "Report made private"
+
+        sample_snapshot.refresh_from_db()
+        assert sample_snapshot.is_public is False
+        assert sample_snapshot.public_disabled_at is not None
+
+    def test_enable_sharing_preserves_existing_token(self, orguser, sample_snapshot, seed_db):
+        """Test re-enabling sharing reuses the existing token"""
+        request = mock_request(orguser)
+        # Enable
+        resp1 = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+        token1 = resp1.public_share_token
+
+        # Disable
+        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
+
+        # Re-enable
+        resp2 = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+        token2 = resp2.public_share_token
+
+        assert token1 == token2
+
+    def test_sharing_not_found(self, orguser, seed_db):
+        """Test toggling sharing on nonexistent snapshot"""
+        request = mock_request(orguser)
+        payload = ShareToggle(is_public=True)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_report_sharing(request, 99999, payload)
+        assert exc_info.value.status_code == 404
+
+    def test_sharing_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
+        """Test that non-creator cannot toggle sharing"""
+        request = mock_request(other_orguser)
+        payload = ShareToggle(is_public=True)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_report_sharing(request, sample_snapshot.id, payload)
+        assert exc_info.value.status_code == 403
+
+
+# ================================================================================
+# Test get_report_sharing_status endpoint
+# ================================================================================
+
+
+class TestGetReportSharingStatus:
+    """Tests for get_report_sharing_status endpoint"""
+
+    def test_status_private_report(self, orguser, sample_snapshot, seed_db):
+        """Test sharing status for a private report"""
+        request = mock_request(orguser)
+        response = get_report_sharing_status(request, sample_snapshot.id)
+
+        assert response.is_public is False
+        assert response.public_access_count == 0
+
+    def test_status_public_report(self, orguser, sample_snapshot, seed_db):
+        """Test sharing status for a public report includes URL"""
+        request = mock_request(orguser)
+        # Enable sharing first
+        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+
+        response = get_report_sharing_status(request, sample_snapshot.id)
+
+        assert response.is_public is True
+        assert response.public_url is not None
+        assert "/share/report/" in response.public_url
+        assert response.public_shared_at is not None
+
+    def test_status_not_found(self, orguser, seed_db):
+        """Test sharing status for nonexistent snapshot"""
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc_info:
+            get_report_sharing_status(request, 99999)
+        assert exc_info.value.status_code == 404
+
+    def test_status_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
+        """Test that non-creator cannot view sharing status"""
+        request = mock_request(other_orguser)
+        with pytest.raises(HttpError) as exc_info:
+            get_report_sharing_status(request, sample_snapshot.id)
+        assert exc_info.value.status_code == 403
+
+
+# ================================================================================
+# Test list_dashboard_datetime_columns endpoint
+# ================================================================================
+
+
+class TestListDashboardDatetimeColumns:
+    """Tests for list_dashboard_datetime_columns endpoint"""
+
+    def test_dashboard_not_found(self, orguser, seed_db):
+        """Test with nonexistent dashboard"""
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc_info:
+            list_dashboard_datetime_columns(request, 99999)
+        assert exc_info.value.status_code == 404
+
+    def test_no_charts_returns_existing_filters(self, orguser, empty_dashboard, seed_db):
+        """Test dashboard with no charts returns empty list (no filters either)"""
+        request = mock_request(orguser)
+        response = list_dashboard_datetime_columns(request, empty_dashboard.id)
+        assert len(response) == 0
+
+    def test_includes_existing_datetime_filters(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        """Test that existing dashboard datetime filters are included in results"""
+        # Mock warehouse so it returns no columns (only dashboard filters matter)
+        mock_warehouse = MagicMock()
+        mock_org_warehouse = MagicMock()
+
+        with patch(
+            "ddpui.api.report_api.OrgWarehouse.objects"
+        ) as mock_ow_objects, patch(
+            "ddpui.api.report_api.get_warehouse_client"
+        ) as mock_get_wc, patch(
+            "ddpui.api.report_api.get_table_columns"
+        ) as mock_get_cols:
+            mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
+            mock_get_wc.return_value = mock_warehouse
+            mock_get_cols.return_value = []  # No warehouse columns
+
+            request = mock_request(orguser)
+            response = list_dashboard_datetime_columns(request, sample_dashboard.id)
+
+        # The existing datetime filter should be included and flagged
+        assert len(response) >= 1
+        column_names = [r.column_name for r in response]
+        assert "created_at" in column_names
+        created_at_col = next(r for r in response if r.column_name == "created_at")
+        assert created_at_col.is_dashboard_filter is True
+
+    def test_discovers_warehouse_datetime_columns(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        """Test that warehouse datetime columns are discovered"""
+        mock_warehouse = MagicMock()
+        mock_org_warehouse = MagicMock()
+
+        with patch(
+            "ddpui.api.report_api.OrgWarehouse.objects"
+        ) as mock_ow_objects, patch(
+            "ddpui.api.report_api.get_warehouse_client"
+        ) as mock_get_wc, patch(
+            "ddpui.api.report_api.get_table_columns"
+        ) as mock_get_cols, patch(
+            "ddpui.api.report_api.determine_filter_type_from_column"
+        ) as mock_determine:
+            mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
+            mock_get_wc.return_value = mock_warehouse
+            mock_get_cols.return_value = [
+                {"column_name": "created_at", "data_type": "timestamp"},
+                {"column_name": "updated_at", "data_type": "timestamp"},
+                {"column_name": "name", "data_type": "varchar"},
+            ]
+            mock_determine.side_effect = lambda dt: (
+                "datetime" if "timestamp" in dt.lower() else "value"
+            )
+
+            request = mock_request(orguser)
+            response = list_dashboard_datetime_columns(request, sample_dashboard.id)
+
+        # Should find the timestamp columns + existing filter (deduplicated)
+        column_names = [r.column_name for r in response]
+        assert "created_at" in column_names
+        assert "updated_at" in column_names
+        assert "name" not in column_names
+
+        # created_at matches a dashboard filter, updated_at does not
+        created_at_col = next(r for r in response if r.column_name == "created_at")
+        assert created_at_col.is_dashboard_filter is True
+        updated_at_col = next(r for r in response if r.column_name == "updated_at")
+        assert updated_at_col.is_dashboard_filter is False
+
+    def test_no_warehouse_configured(self, orguser, sample_dashboard, sample_chart, seed_db):
+        """Test error when warehouse is not configured"""
+        with patch("ddpui.api.report_api.OrgWarehouse.objects") as mock_ow_objects:
+            mock_ow_objects.filter.return_value.first.return_value = None
+
+            request = mock_request(orguser)
+            with pytest.raises(HttpError) as exc_info:
+                list_dashboard_datetime_columns(request, sample_dashboard.id)
+            assert exc_info.value.status_code == 404
