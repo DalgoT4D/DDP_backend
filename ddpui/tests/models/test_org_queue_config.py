@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest.mock import patch
 from ddpui.models.org import Org, get_default_queue_config
-from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
 
 
 @pytest.fixture
@@ -28,6 +28,8 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "test_workpool"
         assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
         assert config.transform_task_queue.workpool == "test_workpool"
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_with_empty_dict(self):
@@ -42,6 +44,8 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "test_workpool"
         assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
         assert config.transform_task_queue.workpool == "test_workpool"
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_with_complete_nested_format(self):
@@ -61,6 +65,9 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "another-workpool"
         assert config.transform_task_queue.name == "custom-transform"
         assert config.transform_task_queue.workpool == "transform-workpool"
+        # edr_queue should fall back to defaults since not in config
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_with_nested_format_missing_workpool(self):
@@ -84,6 +91,9 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "test_workpool"
         assert config.transform_task_queue.name == "custom-transform"
         assert config.transform_task_queue.workpool == "transform-workpool"
+        # edr_queue should fall back to defaults since not in config
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_with_legacy_flat_format(self):
@@ -104,6 +114,9 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "test_workpool"
         assert config.transform_task_queue.name == "legacy-transform"
         assert config.transform_task_queue.workpool == "test_workpool"
+        # edr_queue should fall back to defaults since not in config
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_with_mixed_formats(self):
@@ -124,6 +137,9 @@ class TestOrgQueueConfig:
         # Missing key should fall back to defaults
         assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
         assert config.transform_task_queue.workpool == "test_workpool"
+        # edr_queue should fall back to defaults since not in config
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_with_invalid_data_types(self):
@@ -144,6 +160,9 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "test_workpool"
         assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
         assert config.transform_task_queue.workpool == "test_workpool"
+        # edr_queue should fall back to defaults since not in config
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
     def test_get_queue_config_without_env_var(self):
         """Test get_queue_config when PREFECT_WORKER_POOL_NAME is not set."""
@@ -160,6 +179,8 @@ class TestOrgQueueConfig:
             assert config.connection_sync_queue.workpool == "default"
             assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
             assert config.transform_task_queue.workpool == "default"
+            assert config.edr_queue.name == EDR_WORK_QUEUE
+            assert config.edr_queue.workpool == "default"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": ""})
     def test_get_queue_config_with_empty_env_var(self):
@@ -172,6 +193,7 @@ class TestOrgQueueConfig:
         assert config.scheduled_pipeline_queue.workpool == "default"
         assert config.connection_sync_queue.workpool == "default"
         assert config.transform_task_queue.workpool == "default"
+        assert config.edr_queue.workpool == "default"
 
     @patch.dict(os.environ, {"PREFECT_WORKER_POOL_NAME": "test_workpool"})
     def test_get_queue_config_partial_nested_data(self):
@@ -192,6 +214,8 @@ class TestOrgQueueConfig:
         assert config.connection_sync_queue.workpool == "test_workpool"
         assert config.transform_task_queue.name == MANUL_DBT_WORK_QUEUE
         assert config.transform_task_queue.workpool == "test_workpool"
+        assert config.edr_queue.name == EDR_WORK_QUEUE
+        assert config.edr_queue.workpool == "test_workpool"
 
 
 class TestGetDefaultQueueConfig:
@@ -206,6 +230,7 @@ class TestGetDefaultQueueConfig:
             "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
             "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
             "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+            "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "test_workpool"},
         }
 
         assert config == expected
@@ -219,6 +244,7 @@ class TestGetDefaultQueueConfig:
                 "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
                 "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
                 "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "default"},
+                "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "default"},
             }
 
             assert config == expected
@@ -232,6 +258,7 @@ class TestGetDefaultQueueConfig:
             "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
             "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
             "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "default"},
+            "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "default"},
         }
 
         assert config == expected

@@ -11,6 +11,7 @@ from ddpui.models.org import Org, QueueConfigUpdateSchema, QueueDetailsSchema
 from ddpui.models.org import OrgDataFlowv1
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
+from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.utils.unified_logger import get_logger
 
 logger = get_logger()
@@ -32,7 +33,12 @@ class Command(BaseCommand):
             "--queue-type",
             type=str,
             required=True,
-            choices=["scheduled_pipeline_queue", "connection_sync_queue", "transform_task_queue"],
+            choices=[
+                "scheduled_pipeline_queue",
+                "connection_sync_queue",
+                "transform_task_queue",
+                "edr_queue",
+            ],
             help="Type of queue to migrate",
         )
         parser.add_argument(
@@ -129,6 +135,19 @@ class Command(BaseCommand):
 
             dataflow_ids: Set[str] = set()
             for org_task in transform_org_tasks:
+                dataflow_org_tasks = DataflowOrgTask.objects.filter(orgtask=org_task)
+                for dot in dataflow_org_tasks:
+                    if dot.dataflow:
+                        dataflow_ids.add(dot.dataflow.id)
+
+            return list(OrgDataFlowv1.objects.filter(id__in=dataflow_ids, dataflow_type="manual"))
+
+        elif queue_type == "edr_queue":
+            # Get manual dataflows with EDR (Elementary Data Reliability) tasks
+            edr_org_tasks = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR)
+
+            dataflow_ids: Set[str] = set()
+            for org_task in edr_org_tasks:
                 dataflow_org_tasks = DataflowOrgTask.objects.filter(orgtask=org_task)
                 for dot in dataflow_org_tasks:
                     if dot.dataflow:

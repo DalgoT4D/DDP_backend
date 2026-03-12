@@ -15,6 +15,7 @@ class QueueConfigSchema(Schema):
     scheduled_pipeline_queue: QueueDetailsSchema
     connection_sync_queue: QueueDetailsSchema
     transform_task_queue: QueueDetailsSchema
+    edr_queue: QueueDetailsSchema
 
 
 class QueueConfigUpdateSchema(Schema):
@@ -23,3 +24,4 @@ class QueueConfigUpdateSchema(Schema):
     scheduled_pipeline_queue: Optional[QueueDetailsSchema] = None
     connection_sync_queue: Optional[QueueDetailsSchema] = None
     transform_task_queue: Optional[QueueDetailsSchema] = None
+    edr_queue: Optional[QueueDetailsSchema] = None

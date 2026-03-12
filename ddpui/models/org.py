@@ -4,7 +4,7 @@ from enum import Enum
 from django.db import models
 from django.utils import timezone
 
-from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
 from ddpui.schemas.org_queue_schema import (
     QueueConfigSchema,
     QueueDetailsSchema,
@@ -51,6 +51,7 @@ def get_default_queue_config():
         "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
         "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
         "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": default_workpool},
+        "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": default_workpool},
     }
 
 
@@ -105,7 +106,7 @@ class Org(models.Model):
     website = models.CharField(max_length=1000, null=True)
     queue_config = models.JSONField(
         default=get_default_queue_config,
-        help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue)",
+        help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue, edr_queue)",
     )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -153,6 +154,7 @@ class Org(models.Model):
             scheduled_pipeline_queue=get_queue_details("scheduled_pipeline_queue"),
             connection_sync_queue=get_queue_details("connection_sync_queue"),
             transform_task_queue=get_queue_details("transform_task_queue"),
+            edr_queue=get_queue_details("edr_queue"),
         )
 
     def update_queue_config(self, update_data: QueueConfigUpdateSchema):
@@ -165,6 +167,8 @@ class Org(models.Model):
             current.connection_sync_queue = update_data.connection_sync_queue
         if update_data.transform_task_queue is not None:
             current.transform_task_queue = update_data.transform_task_queue
+        if update_data.edr_queue is not None:
+            current.edr_queue = update_data.edr_queue
 
         # Store as nested structure
         self.queue_config = current.dict()
