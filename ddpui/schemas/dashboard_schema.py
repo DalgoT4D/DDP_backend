@@ -4,7 +4,7 @@ This module contains all Pydantic schemas for dashboard-related API endpoints.
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
 from ninja import Schema
 
@@ -181,3 +181,15 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str]
     dashboard_type: Optional[str]
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Dashboard Export Schemas
+# =============================================================================
+
+
+class DashboardExportResponse(Schema):
+    """Schema for dashboard export format - reuses existing response structures"""
+
+    dashboard: DashboardResponse
+    charts: List[dict]  # ChartResponse data for each chart in dashboard

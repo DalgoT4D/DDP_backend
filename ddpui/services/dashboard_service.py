@@ -986,6 +986,59 @@ class DashboardService:
 
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
+    @staticmethod
+    def export_dashboard_context(dashboard_id: int, org: Org) -> Dict[str, Any]:
+        """Export dashboard configuration reusing existing business logic
+
+        Args:
+            dashboard_id: Dashboard ID to export
+            org: Organization object
+
+        Returns:
+            Dictionary with complete dashboard and chart data
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist
+        """
+        # Get dashboard using existing business logic - this includes filters, lock status, etc.
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+        dashboard_response = DashboardService.get_dashboard_response(dashboard)
+
+        # Get all charts referenced in this dashboard with complete configuration
+        charts = []
+
+        # Extract chart IDs from dashboard components
+        for component_id, component_data in dashboard.components.items():
+            if component_data.get("type") == "chart" and component_data.get("config", {}).get(
+                "chartId"
+            ):
+                chart_id = component_data["config"]["chartId"]
+                try:
+                    chart = Chart.objects.get(id=chart_id, org=org)
+
+                    # Use the same structure as ChartResponse to get complete chart data
+                    chart_data = {
+                        "id": chart.id,
+                        "title": chart.title,
+                        "description": chart.description,
+                        "chart_type": chart.chart_type,
+                        "schema_name": chart.schema_name,
+                        "table_name": chart.table_name,
+                        "extra_config": chart.extra_config or {},
+                        "created_at": chart.created_at.isoformat(),
+                        "updated_at": chart.updated_at.isoformat(),
+                    }
+                    charts.append(chart_data)
+
+                except Chart.DoesNotExist:
+                    logger.warning(f"Chart {chart_id} not found for dashboard {dashboard_id}")
+                    continue
+
+        return {
+            "dashboard": dashboard_response,
+            "charts": charts,
+        }
+
 
 def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:
     """

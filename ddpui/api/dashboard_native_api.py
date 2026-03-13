@@ -46,6 +46,7 @@ from ddpui.schemas.dashboard_schema import (
     DashboardShareStatus,
     LandingPageResponse,
     LandingPageResolveResponse,
+    DashboardExportResponse,
 )
 
 logger = CustomLogger("ddpui")
@@ -87,6 +88,20 @@ def get_dashboard(request, dashboard_id: int):
         raise HttpError(404, "Dashboard not found") from err
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+
+
+@dashboard_native_router.get("/{dashboard_id}/export/", response=DashboardExportResponse)
+@has_permission(["can_view_dashboards"])
+def export_dashboard(request, dashboard_id: int):
+    """Export dashboard configuration in JSON format for LLM context"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        export_data = DashboardService.export_dashboard_context(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return export_data
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
