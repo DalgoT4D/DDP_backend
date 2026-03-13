@@ -1305,14 +1305,6 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         name="flush expired blacklisted tokens",
     )
 
-    # compute run times for each deployment; every 3 hours
-    if not os.getenv("ESTIMATE_TIME_FOR_QUEUE_RUNS", "false").lower() == "true":
-        sender.add_periodic_task(
-            crontab(minute=0, hour="*/3"),
-            compute_dataflow_run_times.s(),
-            name="compute run times of each deployment based on its past flow runs",
-        )
-
     # sync airbyte job stats for connections; every 24 hours
     sender.add_periodic_task(
         crontab(minute=0, hour=0),
