@@ -56,6 +56,39 @@ class FilterPreviewResponse(Schema):
     stats: Optional[Dict[str, Any]] = None  # Can be numerical or datetime stats
 
 
+def get_table_columns(warehouse_client, org_warehouse, schema_name, table_name):
+    """Query warehouse information_schema for columns in a table.
+
+    Returns list of dicts with keys: column_name, data_type, is_nullable.
+    Supports Postgres and BigQuery warehouses.
+    Returns empty list for unsupported warehouse types.
+    """
+    query_builder = AggQueryBuilder()
+
+    if org_warehouse.wtype == "postgres":
+        query_builder.add_column(column("column_name"))
+        query_builder.add_column(column("data_type"))
+        query_builder.add_column(column("is_nullable"))
+        query_builder.fetch_from("columns", "information_schema")
+        query_builder.where_clause(column("table_schema") == schema_name)
+        query_builder.where_clause(column("table_name") == table_name)
+        query_builder.order_cols_by([("ordinal_position", "asc")])
+    elif org_warehouse.wtype == "bigquery":
+        query_builder.add_column(column("column_name"))
+        query_builder.add_column(column("data_type"))
+        query_builder.add_column(column("is_nullable"))
+        query_builder.fetch_from(
+            "COLUMNS",
+            f"{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA",
+        )
+        query_builder.where_clause(column("table_name") == table_name)
+        query_builder.order_cols_by([("ordinal_position", "asc")])
+    else:
+        return []
+
+    return execute_query(warehouse_client, query_builder)
+
+
 def determine_filter_type_from_column(data_type: str) -> str:
     """Simple filter type determination based on column data type"""
     data_type_lower = data_type.lower()
@@ -192,33 +225,10 @@ def list_columns(request, schema_name: str, table_name: str):
 
     try:
         warehouse_client = get_warehouse_client(org_warehouse)
+        results = get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
 
-        # Build query using AggQueryBuilder
-        query_builder = AggQueryBuilder()
-
-        if org_warehouse.wtype == "postgres":
-            query_builder.add_column(column("column_name"))
-            query_builder.add_column(column("data_type"))
-            query_builder.add_column(column("is_nullable"))
-            query_builder.fetch_from("columns", "information_schema")
-            query_builder.where_clause(column("table_schema") == schema_name)
-            query_builder.where_clause(column("table_name") == table_name)
-            query_builder.order_cols_by([("ordinal_position", "asc")])
-
-        elif org_warehouse.wtype == "bigquery":
-            query_builder.add_column(column("column_name"))
-            query_builder.add_column(column("data_type"))
-            query_builder.add_column(column("is_nullable"))
-            query_builder.fetch_from(
-                "COLUMNS", f"{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA"
-            )
-            query_builder.where_clause(column("table_name") == table_name)
-            query_builder.order_cols_by([("ordinal_position", "asc")])
-        else:
+        if not results and org_warehouse.wtype not in ("postgres", "bigquery"):
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
-
-        # Execute query using charts_service function
-        results = execute_query(warehouse_client, query_builder)
 
         columns = []
         for row in results:

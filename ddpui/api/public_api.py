@@ -13,6 +13,7 @@ from ninja.errors import HttpError
 
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.models.dashboard import Dashboard, DashboardFilter
+from ddpui.models.report import ReportSnapshot
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
@@ -1090,3 +1091,254 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
     except Exception as e:
         logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
+
+
+# =============================================================================
+# Public Report Endpoints (same pattern as public dashboard endpoints)
+# =============================================================================
+
+
+def _get_public_report_snapshot(token: str) -> ReportSnapshot:
+    """Helper to lookup a public report snapshot by token. Raises ReportSnapshot.DoesNotExist."""
+    return ReportSnapshot.objects.select_related("org", "created_by__user").get(
+        public_share_token=token, is_public=True
+    )
+
+
+@public_router.get(
+    "/reports/{token}/view/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_report(request, token: str):
+    """Get public report snapshot view data"""
+    try:
+        snapshot = _get_public_report_snapshot(token)
+
+        # Update access analytics
+        ReportSnapshot.objects.filter(id=snapshot.id).update(
+            public_access_count=F("public_access_count") + 1, last_public_accessed=timezone.now()
+        )
+
+        # Reuse the service method which handles both dashboard-filter and
+        # warehouse-discovered-column cases (chart-level filter injection)
+        from ddpui.core.reports.report_service import ReportService
+
+        view_data = ReportService.get_snapshot_view_data(snapshot.id, snapshot.org)
+
+        ip_address = request.META.get("REMOTE_ADDR", "unknown")
+        user_agent = request.META.get("HTTP_USER_AGENT", "unknown")[:100]
+        logger.info(
+            f"Public report {snapshot.id} ({snapshot.title}) accessed by {ip_address}, "
+            f"org: {snapshot.org.name}, user_agent: {user_agent}"
+        )
+
+        return {
+            **view_data,
+            "org_name": snapshot.org.name,
+            "is_valid": True,
+        }
+
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(f"Public report access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public report access error: {str(e)}")
+        return 404, PublicErrorResponse(error="Report not accessible", is_valid=False)
+
+
+@public_router.post(
+    "/reports/{token}/chart-data/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_report_chart_data(request, token: str):
+    """Get chart data for a public report (bar/line/pie/number charts)"""
+    try:
+        snapshot = _get_public_report_snapshot(token)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        payload_data = json.loads(request.body) if request.body else {}
+        payload = ChartDataPayload(**payload_data)
+
+        from ddpui.api.charts_api import generate_chart_data_and_config
+
+        chart_data = generate_chart_data_and_config(payload, org_warehouse)
+
+        return {**chart_data, "is_valid": True}
+
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(f"Public report chart-data access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public report chart data error: {str(e)}")
+        return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
+
+
+@public_router.post(
+    "/reports/{token}/chart-data-preview/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_report_table_data(request, token: str, page: int = 0, limit: int = 100):
+    """Get table chart data for a public report"""
+    try:
+        snapshot = _get_public_report_snapshot(token)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        payload_data = json.loads(request.body) if request.body else {}
+        chart_payload = ChartDataPayload(**payload_data)
+
+        preview_data = charts_service.get_chart_data_table_preview(
+            org_warehouse, chart_payload, page, limit
+        )
+
+        return {
+            "columns": preview_data["columns"],
+            "column_types": preview_data["column_types"],
+            "data": preview_data["data"],
+            "page": preview_data["page"],
+            "limit": preview_data["limit"],
+            "is_valid": True,
+        }
+
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(f"Public report table data access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public report table data error: {str(e)}")
+        return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
+
+
+@public_router.post(
+    "/reports/{token}/chart-data-preview/total-rows/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_report_table_total_rows(request, token: str):
+    """Get total row count for table chart in a public report"""
+    try:
+        snapshot = _get_public_report_snapshot(token)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        payload_data = json.loads(request.body) if request.body else {}
+        chart_payload = ChartDataPayload(**payload_data)
+
+        total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
+
+        return {"total_rows": total_rows, "is_valid": True}
+
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(f"Public report total rows access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public report total rows error: {str(e)}")
+        return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
+
+
+@public_router.post(
+    "/reports/{token}/map-data/",
+    response={200: dict, 404: PublicErrorResponse},
+)
+def get_public_report_map_data(request, token: str):
+    """Get map data overlay for a public report"""
+    try:
+        snapshot = _get_public_report_snapshot(token)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+
+        payload = json.loads(request.body) if request.body else {}
+
+        # Add metrics from payload if not provided (same logic as dashboard map endpoint)
+        if "metrics" not in payload and payload.get("value_column"):
+            payload["metrics"] = [
+                {
+                    "column": payload.get("value_column"),
+                    "aggregation": payload.get("aggregate_function", "sum"),
+                    "alias": "value",
+                }
+            ]
+
+        map_payload = MapDataOverlayPayload(**payload)
+
+        if not all(
+            [
+                map_payload.schema_name,
+                map_payload.table_name,
+                map_payload.geographic_column,
+                map_payload.value_column,
+            ]
+        ):
+            raise Exception("Missing required fields for map data")
+
+        if not map_payload.metrics:
+            raise Exception("Missing metrics - at least one metric is required")
+
+        extra_config = copy.deepcopy(map_payload.extra_config or {})
+
+        from ddpui.schemas.chart_schema import ExecuteChartQuery
+
+        chart_payload = ChartDataPayload(
+            chart_type="map",
+            schema_name=map_payload.schema_name,
+            table_name=map_payload.table_name,
+            dimension_col=map_payload.geographic_column,
+            metrics=map_payload.metrics,
+            extra_config=extra_config,
+        )
+
+        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
+
+        if map_payload.filters:
+            from sqlalchemy import column, func
+
+            for filter_column, filter_value in map_payload.filters.items():
+                query_builder.where_clause(
+                    func.upper(column(filter_column)) == str(filter_value).upper()
+                )
+
+        execute_payload = ExecuteChartQuery(
+            chart_type="map",
+            dimension_col=map_payload.geographic_column,
+            metrics=map_payload.metrics,
+        )
+
+        dict_results = charts_service.execute_chart_query(
+            warehouse_client, query_builder, execute_payload
+        )
+
+        map_data = []
+        for row in dict_results:
+            region_name = row.get(map_payload.geographic_column)
+            value = row.get("value")
+            if region_name and value is not None:
+                normalized_name = str(region_name).strip().title()
+                map_data.append({"name": normalized_name, "value": float(value)})
+
+        return {"data": map_data, "is_valid": True, "count": len(map_data)}
+
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(f"Public report map data access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
+    except Exception as e:
+        logger.error(f"Public report map data error: {str(e)}")
+        return 404, PublicErrorResponse(error="Map data unavailable", is_valid=False)
