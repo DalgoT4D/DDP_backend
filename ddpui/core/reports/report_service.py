@@ -4,6 +4,7 @@ import copy
 from typing import Optional, List, Dict, Any
 from datetime import date
 
+from django.db import transaction
 from django.db.models import Q
 
 from ddpui.models.org import Org
@@ -206,6 +207,7 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
+    @transaction.atomic
     def create_snapshot(
         title: str,
         dashboard_id: int,
@@ -214,15 +216,29 @@ class ReportService:
         orguser: OrgUser,
         period_start: Optional[date] = None,
     ) -> ReportSnapshot:
-        """
-        Create a snapshot from a dashboard.
+        """Create a snapshot from a dashboard.
 
-        Steps:
-        1. Validate date range
-        2. Validate dashboard exists
-        3. Validate date_column matches a datetime filter on the dashboard
-        4. Freeze 2 layers of config
-        5. Create snapshot record (no FK to dashboard — fully self-contained)
+        Freezes dashboard layout and chart configs at snapshot creation time,
+        allowing the snapshot to be viewed even if the original dashboard or
+        charts are later deleted. All database operations are performed within
+        a transaction to ensure consistency.
+
+        Args:
+            title: User-provided title for the snapshot
+            dashboard_id: ID of the dashboard to snapshot
+            date_column: Dictionary with {schema_name, table_name, column_name}
+                        identifying the datetime column for period filtering
+            period_end: End of reporting period (inclusive)
+            orguser: The user creating the snapshot
+            period_start: Start of reporting period (inclusive). None means no lower bound.
+
+        Returns:
+            ReportSnapshot: Created snapshot instance with frozen config
+
+        Raises:
+            SnapshotValidationError: If date range is invalid (start > end),
+                                    dashboard doesn't exist, or date_column is
+                                    not a valid datetime column in the warehouse
         """
         if period_start is not None and period_start > period_end:
             raise SnapshotValidationError("period_start must be before period_end")
@@ -309,7 +325,17 @@ class ReportService:
         dashboard_title: Optional[str] = None,
         created_by_email: Optional[str] = None,
     ) -> List[ReportSnapshot]:
-        """List all snapshots for an org."""
+        """List all snapshots for an organization with optional filtering.
+
+        Args:
+            org: The organization to list snapshots for
+            search: Optional search term to filter snapshots by title (case-insensitive)
+            dashboard_title: Optional filter for snapshots from dashboards with matching title
+            created_by_email: Optional filter for snapshots created by user with matching email
+
+        Returns:
+            List[ReportSnapshot]: List of matching snapshots ordered by creation date (newest first)
+        """
         query = Q(org=org)
         if search:
             query &= Q(title__icontains=search)
@@ -325,7 +351,18 @@ class ReportService:
 
     @staticmethod
     def get_snapshot(snapshot_id: int, org: Org) -> ReportSnapshot:
-        """Get a snapshot by ID."""
+        """Get a snapshot by ID for an organization.
+
+        Args:
+            snapshot_id: The snapshot ID to retrieve
+            org: The organization to filter by
+
+        Returns:
+            ReportSnapshot: The matching snapshot instance with creator user info
+
+        Raises:
+            SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
+        """
         try:
             return ReportSnapshot.objects.select_related("created_by__user").get(
                 id=snapshot_id, org=org
@@ -335,11 +372,24 @@ class ReportService:
 
     @staticmethod
     def get_snapshot_view_data(snapshot_id: int, org: Org) -> Dict[str, Any]:
-        """
-        Get full data to render a snapshot in the frontend.
+        """Get full data to render a snapshot in the frontend.
 
         Returns dashboard_data shaped like Dashboard.to_json() so
-        DashboardNativeView can render it directly.
+        DashboardNativeView can render it directly. Automatically injects
+        period filters into either dashboard filters or chart configs.
+
+        Args:
+            snapshot_id: The snapshot ID to retrieve view data for
+            org: The organization to filter by
+
+        Returns:
+            Dict containing:
+                - dashboard_data: Dashboard config with injected period filters
+                - report_metadata: Snapshot metadata (title, dates, status, etc.)
+                - frozen_chart_configs: Chart configurations with injected filters
+
+        Raises:
+            SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
@@ -402,7 +452,23 @@ class ReportService:
 
     @staticmethod
     def update_snapshot(snapshot_id: int, org: Org, **fields) -> ReportSnapshot:
-        """Update mutable fields on a snapshot."""
+        """Update mutable fields on a snapshot.
+
+        Only allows updates to fields in ALLOWED_UPDATE_FIELDS (currently: summary).
+        Frozen dashboard and chart configs cannot be modified after creation.
+
+        Args:
+            snapshot_id: The snapshot ID to update
+            org: The organization to filter by
+            **fields: Field names and values to update (must be in ALLOWED_UPDATE_FIELDS)
+
+        Returns:
+            ReportSnapshot: The updated snapshot instance
+
+        Raises:
+            SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
+            SnapshotValidationError: If attempting to update a non-editable field
+        """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
         update_fields = []
         for field, value in fields.items():

@@ -4,35 +4,34 @@ import secrets
 from typing import List
 
 from django.utils import timezone
-from ninja import Router, Schema
+from ninja import Router
 from ninja.errors import HttpError
 
-from ddpui.auth import has_permission
-from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgWarehouse
-from ddpui.models.dashboard import Dashboard
-from ddpui.models.visualization import Chart
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.core.charts.charts_service import get_warehouse_client
 from ddpui.api.filter_api import determine_filter_type_from_column, get_table_columns
-
-from ddpui.core.reports.report_service import ReportService
+from ddpui.auth import has_permission
+from ddpui.core.charts.charts_service import get_warehouse_client
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
-    SnapshotValidationError,
     SnapshotPermissionError,
+    SnapshotValidationError,
 )
+from ddpui.core.reports.report_service import ReportService
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.org import OrgWarehouse
+from ddpui.models.org_user import OrgUser
+from ddpui.models.visualization import Chart
+from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.schemas.report_schema import (
-    SnapshotCreate,
-    SnapshotUpdate,
-    SnapshotListResponse,
-    SnapshotViewResponse,
-    SnapshotUpdateResponse,
-    SnapshotDeleteResponse,
     DatetimeColumnResponse,
+    SnapshotCreate,
+    SnapshotDeleteResponse,
+    SnapshotListResponse,
+    SnapshotUpdate,
+    SnapshotUpdateResponse,
+    SnapshotViewResponse,
 )
-from ddpui.schemas.dashboard_schema import ShareToggle, ShareResponse, ShareStatus
-from ddpui.utils.response_wrapper import api_response, ApiResponse
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.response_wrapper import ApiResponse, api_response
 
 logger = CustomLogger("ddpui.report_api")
 
@@ -83,7 +82,7 @@ def create_snapshot(request, payload: SnapshotCreate):
     except SnapshotValidationError as err:
         raise HttpError(400, str(err)) from err
     except Exception as e:
-        logger.error(f"Error creating snapshot: {e}")
+        logger.error(f"Unexpected error creating snapshot: {e}", exc_info=True)
         raise HttpError(500, "Failed to create snapshot") from e
 
 
@@ -191,7 +190,7 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
     try:
         warehouse_client = get_warehouse_client(org_warehouse)
     except Exception as e:
-        logger.error(f"Error connecting to warehouse: {e}")
+        logger.error(f"Error connecting to warehouse: {e}", exc_info=True)
         raise HttpError(500, "Error connecting to warehouse") from e
 
     # Collect existing dashboard datetime filter keys for flagging
@@ -225,7 +224,8 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
                         )
         except Exception as e:
             logger.warning(
-                f"Error fetching columns for {schema_name}.{table_name}: {e}"
+                f"Error fetching columns for {schema_name}.{table_name}: {e}",
+                exc_info=True
             )
 
     # Also include existing dashboard datetime filters not already discovered
@@ -287,8 +287,12 @@ def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
         from django.conf import settings
 
         FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
-        response_data["public_url"] = f"{frontend_url}/share/report/{snapshot.public_share_token}"
+        frontend_url = FRONTEND_URL_V2 or getattr(
+            settings, "FRONTEND_URL", "http://localhost:3001"
+        )
+        response_data["public_url"] = (
+            f"{frontend_url}/share/report/{snapshot.public_share_token}"
+        )
         response_data["public_share_token"] = snapshot.public_share_token
 
     logger.info(
@@ -324,7 +328,11 @@ def get_report_sharing_status(request, snapshot_id: int):
         from django.conf import settings
 
         FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
-        response_data["public_url"] = f"{frontend_url}/share/report/{snapshot.public_share_token}"
+        frontend_url = FRONTEND_URL_V2 or getattr(
+            settings, "FRONTEND_URL", "http://localhost:3001"
+        )
+        response_data["public_url"] = (
+            f"{frontend_url}/share/report/{snapshot.public_share_token}"
+        )
 
     return ShareStatus(**response_data)
