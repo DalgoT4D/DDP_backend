@@ -55,6 +55,22 @@ class SnapshotListResponse(Schema):
     created_by: Optional[str]
     created_at: datetime
 
+    @classmethod
+    def from_model(cls, snapshot) -> "SnapshotListResponse":
+        """Create response from ReportSnapshot model instance"""
+        return cls(
+            id=snapshot.id,
+            title=snapshot.title,
+            dashboard_title=snapshot.frozen_dashboard.get("title") if snapshot.frozen_dashboard else None,
+            date_column=snapshot.date_column or None,
+            period_start=snapshot.period_start,
+            period_end=snapshot.period_end,
+            status=snapshot.status,
+            summary=snapshot.summary,
+            created_by=snapshot.created_by.user.email if snapshot.created_by else None,
+            created_at=snapshot.created_at,
+        )
+
 
 class SnapshotViewResponse(Schema):
     """Schema for snapshot view data for rendering"""
@@ -62,3 +78,25 @@ class SnapshotViewResponse(Schema):
     dashboard_data: Dict[str, Any]
     report_metadata: Dict[str, Any]
     frozen_chart_configs: Dict[str, Any]
+
+
+class DatetimeColumnResponse(Schema):
+    """A datetime column discovered from a dashboard's chart tables"""
+
+    schema_name: str
+    table_name: str
+    column_name: str
+    data_type: str
+    is_dashboard_filter: bool = False
+
+
+class SnapshotUpdateResponse(Schema):
+    """Schema for snapshot update response"""
+
+    summary: Optional[str]
+
+
+class SnapshotDeleteResponse(Schema):
+    """Schema for snapshot delete response - empty success response"""
+
+    pass
