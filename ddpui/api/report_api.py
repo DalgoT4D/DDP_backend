@@ -1,8 +1,10 @@
 """Report API endpoints"""
 
+import os
 import secrets
 from typing import List
 
+from django.http import FileResponse
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
@@ -15,6 +17,7 @@ from ddpui.core.reports.exceptions import (
     SnapshotPermissionError,
     SnapshotValidationError,
 )
+from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import OrgWarehouse
@@ -137,6 +140,63 @@ def delete_snapshot(request, snapshot_id: int):
         raise HttpError(404, str(err)) from err
     except SnapshotPermissionError as err:
         raise HttpError(403, str(err)) from err
+
+
+# ===== PDF Export =====
+
+
+@report_router.post("/{snapshot_id}/export/pdf/", response={200: None})
+@has_permission(["can_view_dashboards"])
+def export_report_pdf(request, snapshot_id: int):
+    """Generate PDF of report via Playwright and return as download"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+
+    # Save original sharing state
+    original_is_public = snapshot.is_public
+    original_token = snapshot.public_share_token
+
+    try:
+        # Ensure snapshot has a share token and is temporarily public
+        if not snapshot.public_share_token:
+            snapshot.public_share_token = secrets.token_urlsafe(48)
+        snapshot.is_public = True
+        snapshot.save(update_fields=["is_public", "public_share_token"])
+
+        # Generate PDF
+        pdf_path = PdfExportService.generate_pdf(
+            snapshot_id, snapshot.public_share_token
+        )
+
+        # Restore original sharing state
+        snapshot.is_public = original_is_public
+        snapshot.save(update_fields=["is_public"])
+
+        # Return the PDF file
+        safe_title = "".join(
+            c for c in snapshot.title if c.isalnum() or c in " -_"
+        ).strip()
+        filename = f"{safe_title or 'report'}.pdf"
+
+        response = FileResponse(
+            open(pdf_path, "rb"),
+            content_type="application/pdf",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    except Exception as e:
+        # Restore sharing state even on failure
+        snapshot.is_public = original_is_public
+        snapshot.public_share_token = original_token
+        snapshot.save(update_fields=["is_public", "public_share_token"])
+
+        logger.error(f"PDF export failed for snapshot {snapshot_id}: {e}", exc_info=True)
+        raise HttpError(500, "Failed to generate PDF") from e
 
 
 # ===== Datetime Column Discovery =====
