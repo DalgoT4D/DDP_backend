@@ -13,7 +13,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilterType
 from ddpui.core.charts.charts_service import execute_query, get_warehouse_client
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
-from ddpui.core import warehouse_utils as _wh_utils
+from ddpui.core import warehousefunctions as _wh_funcs
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -167,7 +167,7 @@ def list_columns(request, schema_name: str, table_name: str):
 
     try:
         warehouse_client = get_warehouse_client(org_warehouse)
-        results = _wh_utils.get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
+        results = _wh_funcs.get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
 
         if not results and org_warehouse.wtype not in ("postgres", "bigquery"):
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
@@ -184,7 +184,7 @@ def list_columns(request, schema_name: str, table_name: str):
                 normalized_type = "string"
 
             # Determine recommended filter type
-            recommended_filter_type = _wh_utils.determine_filter_type_from_column(row["data_type"])
+            recommended_filter_type = _wh_funcs.determine_filter_type_from_column(row["data_type"])
 
             columns.append(
                 ColumnResponse(

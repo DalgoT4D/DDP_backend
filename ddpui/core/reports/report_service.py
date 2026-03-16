@@ -266,7 +266,7 @@ class ReportService:
         if not match_on_filter:
             # Fallback: verify the column exists in the warehouse as datetime
             from ddpui.core.charts.charts_service import get_warehouse_client
-            from ddpui.core.warehouse_utils import (
+            from ddpui.core.warehousefunctions import (
                 get_table_columns,
                 determine_filter_type_from_column,
             )
@@ -537,7 +537,7 @@ class ReportService:
             SnapshotExternalServiceError: If warehouse connection fails
         """
         from ddpui.core.charts.charts_service import get_warehouse_client
-        from ddpui.core.warehouse_utils import get_table_columns, determine_filter_type_from_column
+        from ddpui.core.warehousefunctions import get_table_columns, determine_filter_type_from_column
         from ddpui.schemas.report_schema import DatetimeColumnResponse
 
         try:

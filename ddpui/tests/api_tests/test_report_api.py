@@ -727,7 +727,7 @@ class TestListDashboardDatetimeColumns:
         ) as mock_ow_objects, patch(
             "ddpui.core.charts.charts_service.get_warehouse_client"
         ) as mock_get_wc, patch(
-            "ddpui.core.warehouse_utils.get_table_columns"
+            "ddpui.core.warehousefunctions.get_table_columns"
         ) as mock_get_cols:
             mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
             mock_get_wc.return_value = mock_warehouse
@@ -756,9 +756,9 @@ class TestListDashboardDatetimeColumns:
         ) as mock_ow_objects, patch(
             "ddpui.core.charts.charts_service.get_warehouse_client"
         ) as mock_get_wc, patch(
-            "ddpui.core.warehouse_utils.get_table_columns"
+            "ddpui.core.warehousefunctions.get_table_columns"
         ) as mock_get_cols, patch(
-            "ddpui.core.warehouse_utils.determine_filter_type_from_column"
+            "ddpui.core.warehousefunctions.determine_filter_type_from_column"
         ) as mock_determine:
             mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
             mock_get_wc.return_value = mock_warehouse
