@@ -147,7 +147,7 @@ class ReportService:
             "settings": period_settings,
             "order": 0,
             "created_at": snapshot.created_at.isoformat(),
-            "updated_at": snapshot.created_at.isoformat(),
+            "updated_at": snapshot.updated_at.isoformat(),
         }
         filters.insert(0, display_filter)
         return False
@@ -428,7 +428,7 @@ class ReportService:
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
             "org_id": snapshot.org.id,
             "created_at": snapshot.created_at.isoformat(),
-            "updated_at": snapshot.created_at.isoformat(),
+            "updated_at": snapshot.updated_at.isoformat(),
         }
 
         report_metadata = {
@@ -440,6 +440,7 @@ class ReportService:
             "summary": snapshot.summary,
             "status": snapshot.status,
             "created_at": snapshot.created_at.isoformat(),
+            "updated_at": snapshot.updated_at.isoformat(),
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
         }

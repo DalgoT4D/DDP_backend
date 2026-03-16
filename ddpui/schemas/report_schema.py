@@ -54,6 +54,7 @@ class SnapshotListResponse(Schema):
     summary: Optional[str]
     created_by: Optional[str]
     created_at: datetime
+    updated_at: datetime
 
     @classmethod
     def from_model(cls, snapshot) -> "SnapshotListResponse":
@@ -69,6 +70,7 @@ class SnapshotListResponse(Schema):
             summary=snapshot.summary,
             created_by=snapshot.created_by.user.email if snapshot.created_by else None,
             created_at=snapshot.created_at,
+            updated_at=snapshot.updated_at,
         )
 
 
