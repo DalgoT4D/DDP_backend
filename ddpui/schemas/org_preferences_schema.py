@@ -14,6 +14,13 @@ class CreateOrgPreferencesSchema(Schema):
     llm_optin_date: Optional[datetime]
     enable_discord_notifications: Optional[bool] = False
     discord_webhook: Optional[str]
+    ai_data_sharing_enabled: Optional[bool] = False
+    ai_data_sharing_consented_by: Optional[int] = None
+    ai_data_sharing_consented_at: Optional[datetime] = None
+    ai_org_context_markdown: Optional[str] = ""
+    ai_org_context_updated_by: Optional[int] = None
+    ai_org_context_updated_at: Optional[datetime] = None
+    ai_chat_source_config: Optional[dict] = None
 
 
 class UpdateOrgPreferencesSchema(Schema):
@@ -26,6 +33,13 @@ class UpdateOrgPreferencesSchema(Schema):
     llm_optin_date: Optional[datetime] = None
     enable_discord_notifications: Optional[bool] = None
     discord_webhook: Optional[str] = None
+    ai_data_sharing_enabled: Optional[bool] = None
+    ai_data_sharing_consented_by: Optional[int] = None
+    ai_data_sharing_consented_at: Optional[datetime] = None
+    ai_org_context_markdown: Optional[str] = None
+    ai_org_context_updated_by: Optional[int] = None
+    ai_org_context_updated_at: Optional[datetime] = None
+    ai_chat_source_config: Optional[dict] = None
 
 
 class UpdateLLMOptinSchema(Schema):

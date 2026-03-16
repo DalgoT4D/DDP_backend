@@ -65,6 +65,9 @@ class DashboardResponse(Schema):
     components: dict
     is_published: bool
     published_at: Optional[datetime]
+    ai_context_markdown: str = ""
+    ai_context_updated_by: Optional[str] = None
+    ai_context_updated_at: Optional[datetime] = None
     is_locked: bool = False
     locked_by: Optional[str] = None
     created_by: str

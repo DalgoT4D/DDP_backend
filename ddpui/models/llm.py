@@ -18,6 +18,26 @@ class LlmSessionStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
+
+
+class DashboardChatSessionStatus(str, Enum):
+    """Lifecycle states for dashboard chat sessions."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    @classmethod
+    def choices(cls):
+        """django model definition needs an iterable for `choices`"""
+        return [(key.value, key.name) for key in cls]
+
 
 class LogsSummarizationType(str, Enum):
     """enum for log summarization types"""
@@ -87,3 +107,37 @@ class UserPrompt(models.Model):
         max_length=100,
     )
     label = models.CharField(max_length=200, null=True)
+
+
+class DashboardChatSession(models.Model):
+    """Persist multi-turn dashboard chat state independently of legacy LLM sessions."""
+
+    session_id = models.UUIDField(editable=False, unique=True, default=uuid.uuid4)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    orguser = models.ForeignKey(OrgUser, null=True, on_delete=models.SET_NULL)
+    dashboard = models.ForeignKey("ddpui.Dashboard", on_delete=models.SET_NULL, null=True)
+    selected_chart = models.ForeignKey(
+        "ddpui.Chart", on_delete=models.SET_NULL, null=True, blank=True
+    )
+    status = models.CharField(
+        max_length=50,
+        choices=DashboardChatSessionStatus.choices(),
+        default=DashboardChatSessionStatus.QUEUED,
+    )
+    messages = models.JSONField(default=list)
+    latest_response = models.JSONField(null=True, blank=True)
+    request_meta = models.JSONField(null=True, blank=True)
+    response_meta = models.JSONField(null=True, blank=True)
+    feedback = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_created=True, default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dashboard_chat_session"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(
+                fields=["org", "dashboard", "created_at"],
+                name="dchat_sess_org_dash_idx",
+            ),
+        ]

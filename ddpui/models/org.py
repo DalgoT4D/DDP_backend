@@ -71,6 +71,10 @@ class OrgDbt(models.Model):
     transform_type = models.CharField(max_length=10, null=True)
     branch_name = models.CharField(max_length=256, null=True)
     is_default_branch = models.BooleanField(null=True)
+    ai_manifest_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    ai_catalog_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    ai_docs_generated_at = models.DateTimeField(null=True, blank=True)
+    ai_vector_last_ingested_at = models.DateTimeField(null=True, blank=True)
     cli_profile_block = models.ForeignKey(
         "ddpui.OrgPrefectBlockv1",
         on_delete=models.SET_NULL,

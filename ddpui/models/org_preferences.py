@@ -4,6 +4,16 @@ from ddpui.models.org_user import OrgUser
 from django.utils import timezone
 
 
+def default_ai_chat_source_config() -> dict:
+    """Default source toggle state for dashboard chat context ingestion."""
+    return {
+        "org_context": True,
+        "dashboard_context": True,
+        "dbt_manifest": True,
+        "dbt_catalog": True,
+    }
+
+
 class OrgPreferences(models.Model):
     """Model to store org preferences for settings panel"""
 
@@ -19,6 +29,25 @@ class OrgPreferences(models.Model):
     )
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
+    ai_data_sharing_enabled = models.BooleanField(default=False)
+    ai_data_sharing_consented_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        related_name="ai_data_sharing_consents",
+        null=True,
+        blank=True,
+    )
+    ai_data_sharing_consented_at = models.DateTimeField(null=True, blank=True)
+    ai_org_context_markdown = models.TextField(blank=True, default="")
+    ai_org_context_updated_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        related_name="ai_org_context_updates",
+        null=True,
+        blank=True,
+    )
+    ai_org_context_updated_at = models.DateTimeField(null=True, blank=True)
+    ai_chat_source_config = models.JSONField(default=default_ai_chat_source_config)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -36,4 +65,25 @@ class OrgPreferences(models.Model):
             "llm_optin_date": self.llm_optin_date.isoformat() if self.llm_optin_date else None,
             "enable_discord_notifications": bool(self.enable_discord_notifications),
             "discord_webhook": self.discord_webhook,
+            "ai_data_sharing_enabled": bool(self.ai_data_sharing_enabled),
+            "ai_data_sharing_consented_by": (
+                self.ai_data_sharing_consented_by.user.email
+                if self.ai_data_sharing_consented_by
+                else None
+            ),
+            "ai_data_sharing_consented_at": (
+                self.ai_data_sharing_consented_at.isoformat()
+                if self.ai_data_sharing_consented_at
+                else None
+            ),
+            "ai_org_context_markdown": self.ai_org_context_markdown,
+            "ai_org_context_updated_by": (
+                self.ai_org_context_updated_by.user.email if self.ai_org_context_updated_by else None
+            ),
+            "ai_org_context_updated_at": (
+                self.ai_org_context_updated_at.isoformat()
+                if self.ai_org_context_updated_at
+                else None
+            ),
+            "ai_chat_source_config": self.ai_chat_source_config,
         }

@@ -81,6 +81,15 @@ class Dashboard(models.Model):
     # Publishing status
     is_published = models.BooleanField(default=False)
     published_at = models.DateTimeField(null=True, blank=True)
+    ai_context_markdown = models.TextField(blank=True, default="")
+    ai_context_updated_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_context_dashboards_updated",
+    )
+    ai_context_updated_at = models.DateTimeField(null=True, blank=True)
 
     # Public sharing configuration
     is_public = models.BooleanField(
@@ -137,6 +146,13 @@ class Dashboard(models.Model):
             "filter_layout": self.filter_layout,
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
+            "ai_context_markdown": self.ai_context_markdown,
+            "ai_context_updated_by": (
+                self.ai_context_updated_by.user.email if self.ai_context_updated_by else None
+            ),
+            "ai_context_updated_at": (
+                self.ai_context_updated_at.isoformat() if self.ai_context_updated_at else None
+            ),
             "created_by": self.created_by.user.email if self.created_by else None,
             "org_id": self.org.id,
             "last_modified_by": self.last_modified_by.user.email if self.last_modified_by else None,
