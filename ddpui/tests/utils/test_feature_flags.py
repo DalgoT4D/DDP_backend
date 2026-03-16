@@ -95,6 +95,17 @@ class TestFeatureFlags(TestCase):
         self.assertEqual(OrgFeatureFlag.objects.filter(flag_name="INVALID_FLAG").count(), 0)
         self.assertEqual(OrgFeatureFlag.objects.filter(flag_name="ANOTHER_INVALID_FLAG").count(), 0)
 
+    def test_ai_dashboard_chat_flag_is_supported(self):
+        """Test the Chat with Dashboards flag is available in the feature flag registry."""
+        result = enable_feature_flag("AI_DASHBOARD_CHAT", org=self.org)
+
+        self.assertTrue(result)
+        self.assertTrue(is_feature_flag_enabled("AI_DASHBOARD_CHAT", org=self.org))
+
+        all_flags = get_all_feature_flags_for_org(self.org)
+        self.assertIn("AI_DASHBOARD_CHAT", all_flags)
+        self.assertTrue(all_flags["AI_DASHBOARD_CHAT"])
+
     def test_uniqueness_constraint(self):
         """Test that the database uniqueness constraint prevents duplicate (org, flag_name) pairs"""
         from django.db import transaction

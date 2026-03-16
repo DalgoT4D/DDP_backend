@@ -14,6 +14,7 @@ django.setup()
 
 from ddpui.api.user_org_api import (
     get_current_user_v2,
+    get_organization_feature_flags,
     post_organization_user,
     get_organization_users,
     delete_organization_users_v1,
@@ -34,6 +35,7 @@ from ddpui.api.user_org_api import (
     delete_organization_warehouses_v1,
 )
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import OrgFeatureFlag
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import (
     OrgUser,
@@ -57,6 +59,7 @@ from ddpui.auth import (
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
 )
+from ddpui.utils.feature_flags import enable_feature_flag
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
@@ -165,6 +168,28 @@ def test_seed_data(seed_db):
     assert Role.objects.count() == 5
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
+
+
+def test_manage_org_settings_permission_seeded(seed_db):
+    """The org settings permission should exist and be granted only to privileged roles."""
+    permission = Permission.objects.get(slug="can_manage_org_settings")
+    granted_roles = set(
+        RolePermission.objects.filter(permission=permission).values_list("role__slug", flat=True)
+    )
+
+    assert permission.name == "Can manage organization settings"
+    assert granted_roles == {SUPER_ADMIN_ROLE, ACCOUNT_MANAGER_ROLE}
+
+
+def test_get_organization_feature_flags_includes_ai_dashboard_chat(orguser, seed_db):
+    """The organization flags endpoint should include the dashboard chat flag."""
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
+    request = mock_request(orguser)
+
+    response = get_organization_feature_flags(request)
+
+    assert "AI_DASHBOARD_CHAT" in response
+    assert response["AI_DASHBOARD_CHAT"] is True
 
 
 def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_workspace):
