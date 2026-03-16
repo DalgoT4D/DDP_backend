@@ -1,0 +1,1 @@
+"""Dashboard chat core package."""

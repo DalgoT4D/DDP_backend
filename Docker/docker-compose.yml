@@ -8,6 +8,20 @@ services:
       - redis_data:/data
     networks:
       - dalgo-network 
+
+  chroma:
+    image: chromadb/chroma:0.4.24
+    ports:
+      - "8003:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - dalgo-network
+
   backend:
     image: dalgo_backend:latest
     command: backend
@@ -16,10 +30,20 @@ services:
       - "8002:8002"
     env_file:
       - .env.docker
+    depends_on:
+      - redis_server
+      - chroma
     volumes:
       - ${CLIENTS_DBT_MOUNT}:/data/clients_dbt
       - ${DEV_SECRETS_MOUNT}:/data/secrets
       - ${LOGS_MOUNT}:/usr/src/backend/ddpui/logs
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_DASHBOARD_CHAT_CHROMA_HOST=chroma
+      - AI_DASHBOARD_CHAT_CHROMA_PORT=8000
+      - AI_DASHBOARD_CHAT_CHROMA_SSL=False
+      - AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX=${AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX}
+      - AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL=${AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL}
     networks:
       - dalgo-network
   celery_beat:
@@ -28,8 +52,16 @@ services:
     depends_on:
       - backend
       - redis_server
+      - chroma
     env_file:
       - .env.docker
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_DASHBOARD_CHAT_CHROMA_HOST=chroma
+      - AI_DASHBOARD_CHAT_CHROMA_PORT=8000
+      - AI_DASHBOARD_CHAT_CHROMA_SSL=False
+      - AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX=${AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX}
+      - AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL=${AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL}
     volumes:
       - celerybeat_volume:/data
     networks:
@@ -41,17 +73,26 @@ services:
     depends_on:
       - backend
       - redis_server
+      - chroma
     env_file:
       - .env.docker
     volumes:
       - ${CLIENTS_DBT_MOUNT}:/data/clients_dbt
       - ${DEV_SECRETS_MOUNT}:/data/secrets
       - ${LOGS_MOUNT}:/usr/src/backend/ddpui/logs
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_DASHBOARD_CHAT_CHROMA_HOST=chroma
+      - AI_DASHBOARD_CHAT_CHROMA_PORT=8000
+      - AI_DASHBOARD_CHAT_CHROMA_SSL=False
+      - AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX=${AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX}
+      - AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL=${AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL}
     networks:
       - dalgo-network
 
 volumes:
   redis_data:
+  chroma_data:
   celerybeat_volume:
 
 networks:
