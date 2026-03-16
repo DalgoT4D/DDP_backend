@@ -28,6 +28,9 @@ class FakeCollection:
     def __init__(self):
         self.upsert_calls = []
         self.query_calls = []
+        self.get_calls = []
+        self.delete_calls = []
+        self.documents = {}
         self.query_response = {
             "ids": [["doc-1"]],
             "documents": [["matched content"]],
@@ -37,10 +40,59 @@ class FakeCollection:
 
     def upsert(self, **kwargs):
         self.upsert_calls.append(kwargs)
+        for document_id, document, metadata in zip(
+            kwargs["ids"],
+            kwargs["documents"],
+            kwargs["metadatas"],
+        ):
+            self.documents[document_id] = {
+                "id": document_id,
+                "document": document,
+                "metadata": metadata,
+            }
 
     def query(self, **kwargs):
         self.query_calls.append(kwargs)
         return self.query_response
+
+    def get(self, **kwargs):
+        self.get_calls.append(kwargs)
+        rows = list(self.documents.values())
+        where = kwargs.get("where")
+        if where:
+            rows = [row for row in rows if _matches_where(row["metadata"], where)]
+        return {
+            "ids": [row["id"] for row in rows],
+            "documents": [row["document"] for row in rows],
+            "metadatas": [row["metadata"] for row in rows],
+        }
+
+    def delete(self, ids=None, where=None):
+        self.delete_calls.append({"ids": ids, "where": where})
+        if ids is not None:
+            for document_id in ids:
+                self.documents.pop(document_id, None)
+            return
+
+        for document_id, row in list(self.documents.items()):
+            if _matches_where(row["metadata"], where):
+                self.documents.pop(document_id, None)
+
+
+def _matches_where(metadata, where):
+    """Minimal Chroma where-clause matcher for test stubs."""
+    if where is None:
+        return True
+    if "$and" in where:
+        return all(_matches_where(metadata, condition) for condition in where["$and"])
+    for key, value in where.items():
+        if isinstance(value, dict) and "$in" in value:
+            if metadata.get(key) not in value["$in"]:
+                return False
+            continue
+        if metadata.get(key) != value:
+            return False
+    return True
 
 
 class FakeChromaClient:
@@ -193,3 +245,49 @@ def test_delete_collection_returns_false_for_missing_org():
     )
 
     assert store.delete_collection(404) is False
+
+
+def test_get_documents_and_delete_documents_respect_where_filters():
+    """Collection reads and deletes should honor source and dashboard scoping."""
+    fake_client = FakeChromaClient()
+    store = ChromaDashboardChatVectorStore(
+        config=DashboardChatVectorStoreConfig(),
+        embedding_provider=FakeEmbeddingProvider(),
+        client=fake_client,
+    )
+    documents = [
+        DashboardChatVectorDocument(
+            org_id=23,
+            source_type=DashboardChatSourceType.ORG_CONTEXT,
+            source_identifier="org:23:context",
+            content="org chunk",
+        ),
+        DashboardChatVectorDocument(
+            org_id=23,
+            source_type=DashboardChatSourceType.DASHBOARD_CONTEXT,
+            source_identifier="dashboard:7:context",
+            content="dashboard chunk",
+            dashboard_id=7,
+        ),
+    ]
+    store.upsert_documents(23, documents)
+
+    stored_documents = store.get_documents(
+        23,
+        source_types=[DashboardChatSourceType.DASHBOARD_CONTEXT],
+        dashboard_id=7,
+        include_documents=True,
+    )
+
+    assert len(stored_documents) == 1
+    assert stored_documents[0].content == "dashboard chunk"
+    assert stored_documents[0].metadata["dashboard_id"] == 7
+
+    deleted_count = store.delete_documents(
+        23,
+        source_types=[DashboardChatSourceType.DASHBOARD_CONTEXT],
+    )
+
+    assert deleted_count == 1
+    assert len(store.get_documents(23)) == 1
+    assert store.get_documents(23)[0].metadata["source_type"] == "org_context"

@@ -63,6 +63,15 @@ class DashboardChatVectorQueryResult:
     distance: float | None = None
 
 
+@dataclass(frozen=True)
+class DashboardChatStoredDocument:
+    """Stored document metadata returned from Chroma collection reads."""
+
+    document_id: str
+    metadata: dict[str, Any]
+    content: str | None = None
+
+
 class ChromaDashboardChatVectorStore:
     """Thin wrapper around the Chroma HTTP client with Dalgo-specific conventions."""
 
@@ -115,7 +124,62 @@ class ChromaDashboardChatVectorStore:
         self.client.delete_collection(name=self.collection_name(org_id))
         return True
 
-    def upsert_documents(self, org_id: int, documents: list[DashboardChatVectorDocument]) -> list[str]:
+    def get_documents(
+        self,
+        org_id: int,
+        source_types: list[DashboardChatSourceType | str] | None = None,
+        dashboard_id: int | None = None,
+        include_documents: bool = False,
+    ) -> list[DashboardChatStoredDocument]:
+        """Load stored documents for an org using metadata filters."""
+        collection = self.load_collection(org_id)
+        if collection is None:
+            return []
+
+        include = ["metadatas"]
+        if include_documents:
+            include.append("documents")
+
+        result = collection.get(
+            where=self._build_where_clause(source_types=source_types, dashboard_id=dashboard_id),
+            include=include,
+        )
+        return self._parse_get_result(result, include_documents=include_documents)
+
+    def delete_documents(
+        self,
+        org_id: int,
+        ids: list[str] | None = None,
+        source_types: list[DashboardChatSourceType | str] | None = None,
+        dashboard_id: int | None = None,
+    ) -> int:
+        """Delete matching documents from an org collection."""
+        collection = self.load_collection(org_id)
+        if collection is None:
+            return 0
+
+        where = self._build_where_clause(source_types=source_types, dashboard_id=dashboard_id)
+        if ids is None and where is None:
+            return 0
+
+        deleted_count = (
+            len(ids)
+            if ids is not None
+            else len(
+                self.get_documents(
+                    org_id,
+                    source_types=source_types,
+                    dashboard_id=dashboard_id,
+                    include_documents=False,
+                )
+            )
+        )
+        collection.delete(ids=ids, where=where)
+        return deleted_count
+
+    def upsert_documents(
+        self, org_id: int, documents: list[DashboardChatVectorDocument]
+    ) -> list[str]:
         """Upsert documents into the org-specific Chroma collection."""
         if not documents:
             return []
@@ -166,7 +230,9 @@ class ChromaDashboardChatVectorStore:
 
         if source_types:
             normalized_types = [
-                source_type.value if isinstance(source_type, DashboardChatSourceType) else source_type
+                source_type.value
+                if isinstance(source_type, DashboardChatSourceType)
+                else source_type
                 for source_type in source_types
             ]
             if len(normalized_types) == 1:
@@ -204,6 +270,29 @@ class ChromaDashboardChatVectorStore:
                     content=content,
                     metadata=metadata,
                     distance=distance,
+                )
+            )
+        return parsed_results
+
+    @staticmethod
+    def _parse_get_result(
+        result: dict[str, Any],
+        include_documents: bool = False,
+    ) -> list[DashboardChatStoredDocument]:
+        """Parse Chroma's get result into typed stored-document rows."""
+        ids = result.get("ids", [])
+        metadatas = result.get("metadatas", [])
+        documents = result.get("documents", []) if include_documents else []
+
+        parsed_results: list[DashboardChatStoredDocument] = []
+        for index, document_id in enumerate(ids):
+            parsed_results.append(
+                DashboardChatStoredDocument(
+                    document_id=document_id,
+                    metadata=metadatas[index] if index < len(metadatas) else {},
+                    content=documents[index]
+                    if include_documents and index < len(documents)
+                    else None,
                 )
             )
         return parsed_results
