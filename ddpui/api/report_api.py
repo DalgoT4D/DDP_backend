@@ -148,7 +148,12 @@ def delete_snapshot(request, snapshot_id: int):
 @report_router.post("/{snapshot_id}/export/pdf/", response={200: None})
 @has_permission(["can_view_dashboards"])
 def export_report_pdf(request, snapshot_id: int):
-    """Generate PDF of report via Playwright and return as download"""
+    """Generate PDF of report via Playwright and return as download.
+
+    Uses an X-Render-Secret header (injected by Playwright route
+    interception) so the public report endpoints serve data without
+    the snapshot needing is_public=True.  No public state is toggled.
+    """
     orguser: OrgUser = request.orguser
 
     try:
@@ -156,27 +161,18 @@ def export_report_pdf(request, snapshot_id: int):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
-    # Save original sharing state
-    original_is_public = snapshot.is_public
-    original_token = snapshot.public_share_token
-
     try:
-        # Ensure snapshot has a share token and is temporarily public
+        # Ensure the snapshot has a share token (needed for the URL).
+        # This does NOT make the report publicly accessible — Playwright
+        # authenticates via the render secret header, not is_public.
         if not snapshot.public_share_token:
             snapshot.public_share_token = secrets.token_urlsafe(48)
-        snapshot.is_public = True
-        snapshot.save(update_fields=["is_public", "public_share_token"])
+            snapshot.save(update_fields=["public_share_token"])
 
-        # Generate PDF
         pdf_path = PdfExportService.generate_pdf(
             snapshot_id, snapshot.public_share_token
         )
 
-        # Restore original sharing state
-        snapshot.is_public = original_is_public
-        snapshot.save(update_fields=["is_public"])
-
-        # Return the PDF file
         safe_title = "".join(
             c for c in snapshot.title if c.isalnum() or c in " -_"
         ).strip()
@@ -190,11 +186,6 @@ def export_report_pdf(request, snapshot_id: int):
         return response
 
     except Exception as e:
-        # Restore sharing state even on failure
-        snapshot.is_public = original_is_public
-        snapshot.public_share_token = original_token
-        snapshot.save(update_fields=["is_public", "public_share_token"])
-
         logger.error(f"PDF export failed for snapshot {snapshot_id}: {e}", exc_info=True)
         raise HttpError(500, "Failed to generate PDF") from e
 

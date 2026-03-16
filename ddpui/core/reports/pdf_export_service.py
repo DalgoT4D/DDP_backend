@@ -24,11 +24,13 @@ class PdfExportService:
         """Generate a PDF of a report snapshot.
 
         Launches headless Chromium, navigates to the public report page
-        in print mode, waits for charts to render, and generates a PDF.
+        in print mode, and injects an X-Render-Secret header via route
+        interception so the backend serves data without requiring
+        is_public=True on the snapshot.
 
         Args:
             snapshot_id: The snapshot ID
-            share_token: Public share token for accessing the report
+            share_token: The snapshot's public_share_token (used in the URL)
 
         Returns:
             File path to the generated PDF
@@ -37,6 +39,13 @@ class PdfExportService:
             Exception: If PDF generation fails
         """
         from playwright.sync_api import sync_playwright
+
+        render_secret = getattr(settings, "RENDER_SECRET", None)
+        if not render_secret:
+            raise ValueError(
+                "RENDER_SECRET is not configured. "
+                "Set the RENDER_SECRET environment variable."
+            )
 
         frontend_url = getattr(settings, "FRONTEND_URL_V2", None) or getattr(
             settings, "FRONTEND_URL", "http://localhost:3001"
@@ -57,6 +66,16 @@ class PdfExportService:
                 page = browser.new_page(
                     viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
                 )
+
+                # Intercept all requests and inject the render secret header.
+                # This lets the backend's public report endpoints serve data
+                # without the snapshot needing is_public=True.
+                def _inject_render_secret(route):
+                    headers = {**route.request.headers, "x-render-secret": render_secret}
+                    route.continue_(headers=headers)
+
+                page.route("**/*", _inject_render_secret)
+
                 page.goto(url, wait_until="networkidle")
                 page.wait_for_selector(
                     "[data-pdf-ready='true']", timeout=CANVAS_TIMEOUT_MS
