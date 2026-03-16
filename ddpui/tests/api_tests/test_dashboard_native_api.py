@@ -31,6 +31,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
     get_dashboard,
+    export_dashboard,
     create_dashboard,
     update_dashboard,
     delete_dashboard,
@@ -127,6 +128,28 @@ def sample_filter(sample_dashboard):
         filter_obj.refresh_from_db()
         filter_obj.delete()
     except DashboardFilter.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def sample_chart(orguser, org):
+    """A sample chart for dashboard export tests."""
+    chart = Chart.objects.create(
+        title="Enrollment by District",
+        description="Enrollment count split by district",
+        chart_type="bar",
+        schema_name="analytics",
+        table_name="enrollments",
+        extra_config={"metric": "enrollment_count"},
+        created_by=orguser,
+        last_modified_by=orguser,
+        org=org,
+    )
+    yield chart
+    try:
+        chart.refresh_from_db()
+        chart.delete()
+    except Chart.DoesNotExist:
         pass
 
 
@@ -263,6 +286,82 @@ class TestGetDashboard:
         assert excinfo.value.status_code == 404
 
         # Cleanup
+        other_dashboard.delete()
+        other_orguser.delete()
+        other_user.delete()
+        other_org.delete()
+
+
+class TestExportDashboard:
+    """Tests for export_dashboard endpoint."""
+
+    def test_export_dashboard_success(self, orguser, sample_dashboard, sample_chart, seed_db):
+        """Test exporting a dashboard returns dashboard payload and chart metadata."""
+        sample_dashboard.components = {
+            "chart-1": {
+                "id": "chart-1",
+                "type": "chart",
+                "config": {"chartId": sample_chart.id},
+            },
+            "text-1": {
+                "id": "text-1",
+                "type": "text",
+                "config": {"content": "Narrative"},
+            },
+        }
+        sample_dashboard.save(update_fields=["components"])
+
+        request = mock_request(orguser)
+
+        response = export_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response["dashboard"]["id"] == sample_dashboard.id
+        assert response["dashboard"]["title"] == "Test Dashboard"
+        assert len(response["charts"]) == 1
+        assert response["charts"][0]["id"] == sample_chart.id
+        assert response["charts"][0]["schema_name"] == "analytics"
+        assert response["charts"][0]["table_name"] == "enrollments"
+
+    def test_export_dashboard_not_found(self, orguser, seed_db):
+        """Test exporting a missing dashboard returns 404."""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            export_dashboard(request, dashboard_id=99999)
+
+        assert excinfo.value.status_code == 404
+
+    def test_export_dashboard_wrong_org(self, orguser, sample_chart, seed_db):
+        """Test exporting another org's dashboard returns 404."""
+        other_org = Org.objects.create(name="Other Org", slug="other-org-exp")
+        other_user = User.objects.create(username="otherexpuser", email="otherexp@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=other_org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        other_dashboard = Dashboard.objects.create(
+            title="Other Dashboard",
+            dashboard_type="native",
+            layout_config=[],
+            components={
+                "chart-1": {
+                    "id": "chart-1",
+                    "type": "chart",
+                    "config": {"chartId": sample_chart.id},
+                }
+            },
+            created_by=other_orguser,
+            org=other_org,
+        )
+
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            export_dashboard(request, dashboard_id=other_dashboard.id)
+
+        assert excinfo.value.status_code == 404
+
         other_dashboard.delete()
         other_orguser.delete()
         other_user.delete()

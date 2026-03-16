@@ -270,6 +270,48 @@ class DashboardService:
         return list(Dashboard.objects.filter(query).order_by("-updated_at"))
 
     @staticmethod
+    def export_dashboard_context(dashboard_id: int, org: Org) -> Dict[str, Any]:
+        """Export dashboard configuration and chart metadata for downstream context use."""
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+        dashboard_response = DashboardService.get_dashboard_response(dashboard)
+
+        charts: List[Dict[str, Any]] = []
+        for component in (dashboard.components or {}).values():
+            if component.get("type") != "chart":
+                continue
+
+            chart_id = component.get("config", {}).get("chartId")
+            if not chart_id:
+                continue
+
+            try:
+                chart = Chart.objects.get(id=chart_id, org=org)
+            except Chart.DoesNotExist:
+                logger.warning(
+                    "Chart %s referenced by dashboard %s was not found for org %s",
+                    chart_id,
+                    dashboard_id,
+                    org.id,
+                )
+                continue
+
+            charts.append(
+                {
+                    "id": chart.id,
+                    "title": chart.title,
+                    "description": chart.description,
+                    "chart_type": chart.chart_type,
+                    "schema_name": chart.schema_name,
+                    "table_name": chart.table_name,
+                    "extra_config": chart.extra_config or {},
+                    "created_at": chart.created_at.isoformat(),
+                    "updated_at": chart.updated_at.isoformat(),
+                }
+            )
+
+        return {"dashboard": dashboard_response, "charts": charts}
+
+    @staticmethod
     def create_dashboard(data: DashboardData, orguser: OrgUser) -> Dashboard:
         """Create a new dashboard.
 

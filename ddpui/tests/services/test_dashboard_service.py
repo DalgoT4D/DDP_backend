@@ -24,6 +24,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardLock
+from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -124,6 +125,28 @@ def sample_dashboard(orguser, org):
         pass
 
 
+@pytest.fixture
+def sample_chart(orguser, org):
+    """A sample chart for dashboard export tests."""
+    chart = Chart.objects.create(
+        title="Program Reach",
+        description="Program reach by month",
+        chart_type="line",
+        schema_name="analytics",
+        table_name="program_reach",
+        extra_config={"metric": "beneficiaries"},
+        created_by=orguser,
+        last_modified_by=orguser,
+        org=org,
+    )
+    yield chart
+    try:
+        chart.refresh_from_db()
+        chart.delete()
+    except Chart.DoesNotExist:
+        pass
+
+
 # ================================================================================
 # Test update_dashboard lock checking (NOT in API tests)
 # ================================================================================
@@ -156,6 +179,57 @@ class TestUpdateDashboardLockChecking:
 
         # Cleanup
         DashboardLock.objects.filter(dashboard=sample_dashboard).delete()
+
+
+class TestExportDashboardContext:
+    """Tests for DashboardService.export_dashboard_context()."""
+
+    def test_export_dashboard_context_includes_all_referenced_charts(
+        self, org, sample_dashboard, sample_chart, orguser, seed_db
+    ):
+        """Test export includes chart metadata for every chart component reference."""
+        second_chart = Chart.objects.create(
+            title="Attendance Trend",
+            description="Attendance by month",
+            chart_type="bar",
+            schema_name="analytics",
+            table_name="attendance",
+            extra_config={"metric": "attendance_count"},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        sample_dashboard.components = {
+            "chart-1": {"id": "chart-1", "type": "chart", "config": {"chartId": sample_chart.id}},
+            "chart-2": {"id": "chart-2", "type": "chart", "config": {"chartId": second_chart.id}},
+            "text-1": {"id": "text-1", "type": "text", "config": {"content": "Intro"}},
+        }
+        sample_dashboard.save(update_fields=["components"])
+
+        export_data = DashboardService.export_dashboard_context(sample_dashboard.id, org)
+
+        assert export_data["dashboard"]["id"] == sample_dashboard.id
+        assert {chart["id"] for chart in export_data["charts"]} == {
+            sample_chart.id,
+            second_chart.id,
+        }
+
+        second_chart.delete()
+
+    def test_export_dashboard_context_skips_missing_chart_references(
+        self, org, sample_dashboard, sample_chart, seed_db
+    ):
+        """Test export skips broken chart references without failing the full export."""
+        sample_dashboard.components = {
+            "chart-1": {"id": "chart-1", "type": "chart", "config": {"chartId": sample_chart.id}},
+            "chart-missing": {"id": "chart-missing", "type": "chart", "config": {"chartId": 99999}},
+        }
+        sample_dashboard.save(update_fields=["components"])
+
+        export_data = DashboardService.export_dashboard_context(sample_dashboard.id, org)
+
+        assert len(export_data["charts"]) == 1
+        assert export_data["charts"][0]["id"] == sample_chart.id
 
     def test_update_dashboard_locked_by_same_user_succeeds(
         self, orguser, sample_dashboard, seed_db
