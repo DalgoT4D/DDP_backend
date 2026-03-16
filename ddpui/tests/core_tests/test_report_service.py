@@ -742,3 +742,98 @@ class TestListSnapshots:
             org, search="Jan", dashboard_title="wrong"
         )
         assert len(result) == 0
+
+
+# ================================================================================
+# Test snapshot isolation — deleting charts/dashboards doesn't affect snapshots
+# ================================================================================
+
+
+class TestSnapshotIsolation:
+    """Snapshots freeze config at creation time. Deleting the original
+    dashboard or its charts must not affect snapshot view data."""
+
+    def test_deleting_chart_does_not_affect_snapshot(
+        self, sample_snapshot, org, sample_chart
+    ):
+        """After deleting the original chart, get_snapshot_view_data still returns
+        the full frozen chart config."""
+        snapshot_id = sample_snapshot.id
+        chart_id = sample_chart.id  # Save before delete sets it to None
+
+        # Verify the chart is in frozen configs before deletion
+        assert str(chart_id) in sample_snapshot.frozen_chart_configs
+
+        # Delete the original chart
+        sample_chart.delete()
+        assert not Chart.objects.filter(id=chart_id).exists()
+
+        # Snapshot view data should still work — it reads from frozen JSON, not the Chart table
+        view_data = ReportService.get_snapshot_view_data(snapshot_id, org)
+
+        frozen_charts = view_data["frozen_chart_configs"]
+        assert str(chart_id) in frozen_charts
+        assert frozen_charts[str(chart_id)]["title"] == "Bar Chart"
+        assert frozen_charts[str(chart_id)]["chart_type"] == "bar"
+        assert frozen_charts[str(chart_id)]["schema_name"] == "public"
+        assert frozen_charts[str(chart_id)]["table_name"] == "orders"
+
+    def test_deleting_dashboard_does_not_affect_snapshot(
+        self, sample_snapshot, org, sample_dashboard
+    ):
+        """After deleting the original dashboard, get_snapshot_view_data still
+        returns the full frozen dashboard config."""
+        snapshot_id = sample_snapshot.id
+        original_title = sample_dashboard.title
+
+        # Delete the original dashboard (cascades to filters)
+        sample_dashboard.delete()
+        assert not Dashboard.objects.filter(id=sample_dashboard.id).exists()
+
+        # Snapshot view data should still work
+        view_data = ReportService.get_snapshot_view_data(snapshot_id, org)
+
+        dd = view_data["dashboard_data"]
+        assert dd["title"] == original_title
+        assert dd["dashboard_type"] == "native"
+        assert "components" in dd
+        assert "filters" in dd
+
+        rm = view_data["report_metadata"]
+        assert rm["dashboard_title"] == original_title
+
+    def test_different_datetime_columns_produce_two_filters(
+        self, sample_snapshot, org
+    ):
+        """When the report's date_column differs from the dashboard's existing
+        datetime filter, two datetime filters appear in the view data:
+        one is the original dashboard filter (untouched) and one is the
+        injected display-only filter (locked with the snapshot period)."""
+        # Change date_column to a different column than the dashboard filter
+        # Dashboard filter: public.orders.created_at
+        # Snapshot date_column: public.orders.updated_at (different column)
+        sample_snapshot.date_column = {
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "updated_at",
+        }
+        sample_snapshot.save(update_fields=["date_column"])
+
+        view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
+
+        filters = view_data["dashboard_data"]["filters"]
+        datetime_filters = [f for f in filters if f.get("filter_type") == "datetime"]
+        assert len(datetime_filters) == 2
+
+        # The display-only filter (injected) should be first and locked
+        display_filter = datetime_filters[0]
+        assert display_filter["column_name"] == "updated_at"
+        assert display_filter["settings"]["locked"] is True
+        assert display_filter["settings"]["default_start_date"] == "2025-01-01"
+        assert display_filter["settings"]["default_end_date"] == "2025-01-31"
+        assert display_filter["id"] < 0  # Negative ID for display-only
+
+        # The original dashboard filter should remain untouched (not locked)
+        original_filter = datetime_filters[1]
+        assert original_filter["column_name"] == "created_at"
+        assert original_filter["settings"].get("locked") is not True
