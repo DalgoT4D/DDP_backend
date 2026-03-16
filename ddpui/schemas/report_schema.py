@@ -14,9 +14,9 @@ from ddpui.schemas.dashboard_schema import ShareToggle, ShareResponse, ShareStat
 class DateColumnSchema(Schema):
     """Identifies a datetime column on a dashboard filter"""
 
-    schema_name: str
-    table_name: str
-    column_name: str
+    schema_name: str = Field(..., min_length=1)
+    table_name: str = Field(..., min_length=1)
+    column_name: str = Field(..., min_length=1)
 
 
 # Request schemas
@@ -81,6 +81,11 @@ class SnapshotViewResponse(Schema):
     report_metadata: Dict[str, Any]
     frozen_chart_configs: Dict[str, Any]
 
+    @classmethod
+    def from_view_data(cls, view_data: dict) -> "SnapshotViewResponse":
+        """Create response from view data dict"""
+        return cls(**view_data)
+
 
 class DatetimeColumnResponse(Schema):
     """A datetime column discovered from a dashboard's chart tables"""
@@ -96,6 +101,11 @@ class SnapshotUpdateResponse(Schema):
     """Schema for snapshot update response"""
 
     summary: Optional[str]
+
+    @classmethod
+    def from_model(cls, snapshot) -> "SnapshotUpdateResponse":
+        """Create response from ReportSnapshot model instance"""
+        return cls(summary=snapshot.summary)
 
 
 class SnapshotDeleteResponse(Schema):

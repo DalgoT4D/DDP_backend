@@ -581,11 +581,12 @@ class TestToggleReportSharing:
         payload = ShareToggle(is_public=True)
         response = toggle_report_sharing(request, sample_snapshot.id, payload)
 
-        assert response.is_public is True
-        assert response.public_url is not None
-        assert "/share/report/" in response.public_url
-        assert response.public_share_token is not None
-        assert response.message == "Report made public"
+        data = response["data"]
+        assert data["is_public"] is True
+        assert data["public_url"] is not None
+        assert "/share/report/" in data["public_url"]
+        assert data["public_share_token"] is not None
+        assert data["message"] == "Report made public"
 
         sample_snapshot.refresh_from_db()
         assert sample_snapshot.is_public is True
@@ -604,8 +605,9 @@ class TestToggleReportSharing:
             request, sample_snapshot.id, ShareToggle(is_public=False)
         )
 
-        assert response.is_public is False
-        assert response.message == "Report made private"
+        data = response["data"]
+        assert data["is_public"] is False
+        assert data["message"] == "Report made private"
 
         sample_snapshot.refresh_from_db()
         assert sample_snapshot.is_public is False
@@ -616,14 +618,14 @@ class TestToggleReportSharing:
         request = mock_request(orguser)
         # Enable
         resp1 = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-        token1 = resp1.public_share_token
+        token1 = resp1["data"]["public_share_token"]
 
         # Disable
         toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
 
         # Re-enable
         resp2 = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-        token2 = resp2.public_share_token
+        token2 = resp2["data"]["public_share_token"]
 
         assert token1 == token2
 
@@ -657,8 +659,9 @@ class TestGetReportSharingStatus:
         request = mock_request(orguser)
         response = get_report_sharing_status(request, sample_snapshot.id)
 
-        assert response.is_public is False
-        assert response.public_access_count == 0
+        data = response["data"]
+        assert data["is_public"] is False
+        assert data["public_access_count"] == 0
 
     def test_status_public_report(self, orguser, sample_snapshot, seed_db):
         """Test sharing status for a public report includes URL"""
@@ -668,10 +671,11 @@ class TestGetReportSharingStatus:
 
         response = get_report_sharing_status(request, sample_snapshot.id)
 
-        assert response.is_public is True
-        assert response.public_url is not None
-        assert "/share/report/" in response.public_url
-        assert response.public_shared_at is not None
+        data = response["data"]
+        assert data["is_public"] is True
+        assert data["public_url"] is not None
+        assert "/share/report/" in data["public_url"]
+        assert data["public_shared_at"] is not None
 
     def test_status_not_found(self, orguser, seed_db):
         """Test sharing status for nonexistent snapshot"""
@@ -719,11 +723,11 @@ class TestListDashboardDatetimeColumns:
         mock_org_warehouse = MagicMock()
 
         with patch(
-            "ddpui.api.report_api.OrgWarehouse.objects"
+            "ddpui.core.reports.report_service.OrgWarehouse.objects"
         ) as mock_ow_objects, patch(
-            "ddpui.api.report_api.get_warehouse_client"
+            "ddpui.core.charts.charts_service.get_warehouse_client"
         ) as mock_get_wc, patch(
-            "ddpui.api.report_api.get_table_columns"
+            "ddpui.api.filter_api.get_table_columns"
         ) as mock_get_cols:
             mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
             mock_get_wc.return_value = mock_warehouse
@@ -748,13 +752,13 @@ class TestListDashboardDatetimeColumns:
         mock_org_warehouse = MagicMock()
 
         with patch(
-            "ddpui.api.report_api.OrgWarehouse.objects"
+            "ddpui.core.reports.report_service.OrgWarehouse.objects"
         ) as mock_ow_objects, patch(
-            "ddpui.api.report_api.get_warehouse_client"
+            "ddpui.core.charts.charts_service.get_warehouse_client"
         ) as mock_get_wc, patch(
-            "ddpui.api.report_api.get_table_columns"
+            "ddpui.api.filter_api.get_table_columns"
         ) as mock_get_cols, patch(
-            "ddpui.api.report_api.determine_filter_type_from_column"
+            "ddpui.api.filter_api.determine_filter_type_from_column"
         ) as mock_determine:
             mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
             mock_get_wc.return_value = mock_warehouse
@@ -785,10 +789,12 @@ class TestListDashboardDatetimeColumns:
 
     def test_no_warehouse_configured(self, orguser, sample_dashboard, sample_chart, seed_db):
         """Test error when warehouse is not configured"""
-        with patch("ddpui.api.report_api.OrgWarehouse.objects") as mock_ow_objects:
+        with patch(
+            "ddpui.core.reports.report_service.OrgWarehouse.objects"
+        ) as mock_ow_objects:
             mock_ow_objects.filter.return_value.first.return_value = None
 
             request = mock_request(orguser)
             with pytest.raises(HttpError) as exc_info:
                 list_dashboard_datetime_columns(request, sample_dashboard.id)
-            assert exc_info.value.status_code == 404
+            assert exc_info.value.status_code == 502
