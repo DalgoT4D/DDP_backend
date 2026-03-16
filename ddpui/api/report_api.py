@@ -1,10 +1,9 @@
 """Report API endpoints"""
 
-import os
 import secrets
 from typing import List
 
-from django.http import FileResponse
+from django.http import HttpResponse
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
@@ -169,7 +168,7 @@ def export_report_pdf(request, snapshot_id: int):
             snapshot.public_share_token = secrets.token_urlsafe(48)
             snapshot.save(update_fields=["public_share_token"])
 
-        pdf_path = PdfExportService.generate_pdf(
+        pdf_bytes = PdfExportService.generate_pdf(
             snapshot_id, snapshot.public_share_token
         )
 
@@ -178,10 +177,7 @@ def export_report_pdf(request, snapshot_id: int):
         ).strip()
         filename = f"{safe_title or 'report'}.pdf"
 
-        response = FileResponse(
-            open(pdf_path, "rb"),
-            content_type="application/pdf",
-        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
