@@ -32,7 +32,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import TransformType
 from django.contrib.auth.models import User
 from ddpui.core.orgdbt_manager import DbtCommandError
-from ddpui.core.git_manager import GitManagerError
+from ddpui.core.git_manager import GitManagerError, GitManager
 from ddpui.core.dbt_automation import assets
 
 pytestmark = pytest.mark.django_db
@@ -176,13 +176,14 @@ def test_setup_managed_git_workspace_success(tmp_path):
         return Mock(returncode=0, stdout="", stderr="")
 
     # Mock the GitManager and other dependencies for managed Git workflow
-    with patch("os.getenv") as mock_getenv, patch(
-        "ddpui.ddpdbt.dbt_service.GitManager.create_managed_repository"
-    ) as mock_create_repo, patch(
-        "ddpui.ddpdbt.dbt_service.GitManager.create_repository_pat"
+    # Test uses patch.object to avoid mock issues with dictionary access
+    with patch.object(GitManager, "create_managed_repository") as mock_create_repo, patch.object(
+        GitManager, "create_repository_pat"
     ) as mock_create_pat, patch(
         "ddpui.ddpdbt.dbt_service.GitManager"
     ) as mock_git_manager_class, patch(
+        "os.getenv"
+    ) as mock_getenv, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command", side_effect=mock_run_dbt_init
     ) as mock_run_command, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
@@ -206,17 +207,22 @@ def test_setup_managed_git_workspace_success(tmp_path):
         # Mock GitManager functionality
         repo_name = f"dbt-{org.slug}-test"
         repo_url = f"https://github.com/test-dalgo-org/{repo_name}.git"
-        repo_dict = {
-            "name": repo_name,
-            "full_name": f"test-dalgo-org/{repo_name}",
-            "clone_url": repo_url,
-        }
-        mock_create_repo.return_value = repo_dict
+
+        # Create a dict that returns actual strings, not mocks
+        def create_repo_side_effect(*args, **kwargs):
+            return {
+                "name": repo_name,
+                "full_name": f"test-dalgo-org/{repo_name}",
+                "clone_url": repo_url,
+            }
+
+        mock_create_repo.side_effect = create_repo_side_effect
         mock_create_pat.return_value = "test-repo-pat"
         mock_save_pat.return_value = "test-secret-key"
 
         # Mock GitManager instance
         mock_git_manager = Mock()
+        mock_git_manager.clone.return_value = None
         mock_git_manager.commit_changes.return_value = None
         mock_git_manager.push_changes.return_value = None
         mock_git_manager_class.return_value = mock_git_manager
@@ -248,12 +254,13 @@ def test_setup_managed_git_workspace_success(tmp_path):
         assert project_name in args
 
         # Verify GitManager instance methods were called
+        mock_git_manager.clone.assert_called_once()
         mock_git_manager.commit_changes.assert_called_once()
         mock_git_manager.push_changes.assert_called_once()
 
         # Verify PAT storage operations
         mock_save_pat.assert_called_once_with("test-repo-pat")
-        mock_update_pat.assert_called_once()
+        mock_update_pat.assert_called_once_with(orgdbt, "test-repo-pat")
 
         mock_retrieve_creds.assert_called_once()
         mock_create_cli_block.assert_called_once()
