@@ -79,7 +79,7 @@ def get_elementary_target_schema(dbt_project_yml: str) -> dict | None:
 
 
 def get_elementary_package_version(packages_yml: str) -> dict | None:
-    """{'package': 'elementary-data/elementary', 'version': '0.15.2'}"""
+    """{'package': 'elementary-data/elementary', 'version': '0.22.0'}"""
     with open(packages_yml, "r", encoding="utf-8") as packages_yml_f:  # skipcq: PTC-W6004
         packages_obj = yaml.safe_load(packages_yml_f)
         if (
@@ -111,7 +111,7 @@ def check_dbt_files(org: Org):
 
     elementary_package = get_elementary_package_version(packages_yml)
     elementary_target_schema = get_elementary_target_schema(dbt_project_yml)
-    latest_elementary_package_version = os.getenv("LATEST_ELEMENTARY_PACKAGE_VERSION", "0.16.1")
+    latest_elementary_package_version = os.getenv("LATEST_ELEMENTARY_PACKAGE_VERSION", "0.22.0")
 
     retval = {"exists": {}, "missing": {}}
 

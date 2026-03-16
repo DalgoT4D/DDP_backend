@@ -201,11 +201,11 @@ def test_get_elementary_package_version_found():
     packages_content = """
     packages:
       - package: elementary-data/elementary
-        version: 0.15.2
+        version: 0.22.0
     """
     with patch("builtins.open", mock_open(read_data=packages_content)):
         result = get_elementary_package_version("packages.yml")
-        assert result == {"package": "elementary-data/elementary", "version": "0.15.2"}
+        assert result == {"package": "elementary-data/elementary", "version": "0.22.0"}
 
 
 def test_get_elementary_package_version_not_found():
@@ -225,7 +225,7 @@ def test_get_elementary_package_version_no_packages_key():
     packages_content = """
     other_key:
       - package: elementary-data/elementary
-        version: 0.15.2
+        version: 0.22.0
     """
     with patch("builtins.open", mock_open(read_data=packages_content)):
         result = get_elementary_package_version("packages.yml")
