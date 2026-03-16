@@ -240,46 +240,48 @@ class TestListSnapshots:
         """Test listing when no snapshots exist"""
         request = mock_request(orguser)
         response = list_snapshots(request)
-        assert len(response) == 0
+        assert response["success"] is True
+        assert len(response["data"]) == 0
 
     def test_list_with_data(self, orguser, sample_snapshot, seed_db):
         """Test listing returns snapshots"""
         request = mock_request(orguser)
         response = list_snapshots(request)
-        assert len(response) == 1
-        assert response[0].title == "January 2025 Report"
-        assert response[0].date_column is not None
-        assert response[0].date_column["column_name"] == "created_at"
+        data = response["data"]
+        assert len(data) == 1
+        assert data[0].title == "January 2025 Report"
+        assert data[0].date_column is not None
+        assert data[0].date_column["column_name"] == "created_at"
 
     def test_list_with_search(self, orguser, sample_snapshot, seed_db):
         """Test listing with search filter"""
         request = mock_request(orguser)
 
         response = list_snapshots(request, search="January")
-        assert len(response) == 1
+        assert len(response["data"]) == 1
 
         response = list_snapshots(request, search="nonexistent")
-        assert len(response) == 0
+        assert len(response["data"]) == 0
 
     def test_list_filter_by_dashboard_title(self, orguser, sample_snapshot, seed_db):
         """Test listing with dashboard_title filter"""
         request = mock_request(orguser)
 
         response = list_snapshots(request, dashboard_title="Test Dashboard")
-        assert len(response) == 1
+        assert len(response["data"]) == 1
 
         response = list_snapshots(request, dashboard_title="nonexistent")
-        assert len(response) == 0
+        assert len(response["data"]) == 0
 
     def test_list_filter_by_created_by(self, orguser, sample_snapshot, seed_db):
         """Test listing with created_by filter"""
         request = mock_request(orguser)
 
         response = list_snapshots(request, created_by="reportapiuser@test.com")
-        assert len(response) == 1
+        assert len(response["data"]) == 1
 
         response = list_snapshots(request, created_by="nobody")
-        assert len(response) == 0
+        assert len(response["data"]) == 0
 
 
 # ================================================================================
@@ -305,13 +307,15 @@ class TestCreateSnapshot:
             period_end=date(2025, 3, 31),
         )
         response = create_snapshot(request, payload)
-        assert response.title == "Q1 Report"
-        assert response.period_start == date(2025, 1, 1)
-        assert response.period_end == date(2025, 3, 31)
-        assert response.dashboard_title == "Test Dashboard"
-        assert response.date_column["column_name"] == "created_at"
+        assert response["success"] is True
+        data = response["data"]
+        assert data["title"] == "Q1 Report"
+        assert data["period_start"] == date(2025, 1, 1)
+        assert data["period_end"] == date(2025, 3, 31)
+        assert data["dashboard_title"] == "Test Dashboard"
+        assert data["date_column"]["column_name"] == "created_at"
         # Cleanup
-        ReportSnapshot.objects.filter(id=response.id).delete()
+        ReportSnapshot.objects.filter(id=data["id"]).delete()
 
     def test_create_without_start_date(
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
@@ -328,11 +332,13 @@ class TestCreateSnapshot:
             period_end=date(2025, 3, 31),
         )
         response = create_snapshot(request, payload)
-        assert response.title == "Ongoing Report"
-        assert response.period_start is None
-        assert response.period_end == date(2025, 3, 31)
+        assert response["success"] is True
+        data = response["data"]
+        assert data["title"] == "Ongoing Report"
+        assert data["period_start"] is None
+        assert data["period_end"] == date(2025, 3, 31)
         # Cleanup
-        ReportSnapshot.objects.filter(id=response.id).delete()
+        ReportSnapshot.objects.filter(id=data["id"]).delete()
 
     def test_create_invalid_date_range(
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
@@ -401,8 +407,9 @@ class TestCreateSnapshot:
             period_end=date(2025, 1, 31),
         )
         response = create_snapshot(request, payload)
+        assert response["success"] is True
 
-        snapshot = ReportSnapshot.objects.get(id=response.id)
+        snapshot = ReportSnapshot.objects.get(id=response["data"]["id"])
         # Check frozen_dashboard (layout + filters merged)
         assert snapshot.frozen_dashboard["title"] == "Test Dashboard"
         assert snapshot.frozen_dashboard["grid_columns"] == 12
@@ -439,13 +446,15 @@ class TestGetSnapshotView:
         """Test successfully viewing a snapshot"""
         request = mock_request(orguser)
         response = get_snapshot_view(request, sample_snapshot.id)
+        assert response["success"] is True
+        data = response["data"]
 
-        assert response.report_metadata["title"] == "January 2025 Report"
-        assert response.report_metadata["period_start"] == "2025-01-01"
-        assert response.report_metadata["period_end"] == "2025-01-31"
-        assert response.report_metadata["date_column"]["column_name"] == "created_at"
-        assert response.dashboard_data["title"] == "Test Dashboard"
-        assert response.dashboard_data["dashboard_type"] == "native"
+        assert data["report_metadata"]["title"] == "January 2025 Report"
+        assert data["report_metadata"]["period_start"] == "2025-01-01"
+        assert data["report_metadata"]["period_end"] == "2025-01-31"
+        assert data["report_metadata"]["date_column"]["column_name"] == "created_at"
+        assert data["dashboard_data"]["title"] == "Test Dashboard"
+        assert data["dashboard_data"]["dashboard_type"] == "native"
 
     def test_view_marks_as_viewed(self, orguser, sample_snapshot, seed_db):
         """Test that viewing a snapshot marks it as viewed"""
@@ -478,9 +487,10 @@ class TestGetSnapshotView:
         """Test that the view response injects period dates into the matching filter"""
         request = mock_request(orguser)
         response = get_snapshot_view(request, sample_snapshot.id)
+        data = response["data"]
 
         # Find the datetime filter in dashboard_data
-        filters = response.dashboard_data.get("filters", [])
+        filters = data["dashboard_data"].get("filters", [])
         datetime_filter = None
         for f in filters:
             if f.get("filter_type") == "datetime" and f.get("column_name") == "created_at":
@@ -509,7 +519,7 @@ class TestUpdateSnapshot:
         response = update_snapshot(request, sample_snapshot.id, payload)
 
         assert response["success"] is True
-        assert response["summary"] == "Key findings: revenue up 15%"
+        assert response["data"]["summary"] == "Key findings: revenue up 15%"
 
         sample_snapshot.refresh_from_db()
         assert sample_snapshot.summary == "Key findings: revenue up 15%"
@@ -697,7 +707,8 @@ class TestListDashboardDatetimeColumns:
         """Test dashboard with no charts returns empty list (no filters either)"""
         request = mock_request(orguser)
         response = list_dashboard_datetime_columns(request, empty_dashboard.id)
-        assert len(response) == 0
+        assert response["success"] is True
+        assert len(response["data"]) == 0
 
     def test_includes_existing_datetime_filters(
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
@@ -721,11 +732,12 @@ class TestListDashboardDatetimeColumns:
             request = mock_request(orguser)
             response = list_dashboard_datetime_columns(request, sample_dashboard.id)
 
+        data = response["data"]
         # The existing datetime filter should be included and flagged
-        assert len(response) >= 1
-        column_names = [r.column_name for r in response]
+        assert len(data) >= 1
+        column_names = [r.column_name for r in data]
         assert "created_at" in column_names
-        created_at_col = next(r for r in response if r.column_name == "created_at")
+        created_at_col = next(r for r in data if r.column_name == "created_at")
         assert created_at_col.is_dashboard_filter is True
 
     def test_discovers_warehouse_datetime_columns(
@@ -758,16 +770,17 @@ class TestListDashboardDatetimeColumns:
             request = mock_request(orguser)
             response = list_dashboard_datetime_columns(request, sample_dashboard.id)
 
+        data = response["data"]
         # Should find the timestamp columns + existing filter (deduplicated)
-        column_names = [r.column_name for r in response]
+        column_names = [r.column_name for r in data]
         assert "created_at" in column_names
         assert "updated_at" in column_names
         assert "name" not in column_names
 
         # created_at matches a dashboard filter, updated_at does not
-        created_at_col = next(r for r in response if r.column_name == "created_at")
+        created_at_col = next(r for r in data if r.column_name == "created_at")
         assert created_at_col.is_dashboard_filter is True
-        updated_at_col = next(r for r in response if r.column_name == "updated_at")
+        updated_at_col = next(r for r in data if r.column_name == "updated_at")
         assert updated_at_col.is_dashboard_filter is False
 
     def test_no_warehouse_configured(self, orguser, sample_dashboard, sample_chart, seed_db):
