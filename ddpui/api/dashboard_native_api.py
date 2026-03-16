@@ -31,10 +31,13 @@ from ddpui.services.dashboard_service import (
     FilterValidationError,
     delete_dashboard_safely,
 )
+from ddpui.services.ai_dashboard_chat_settings_service import AiDashboardChatSettingsService
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     DashboardResponse,
+    DashboardAiContextEnvelopeResponse,
+    DashboardAiContextUpdate,
     DashboardExportResponse,
     DashboardFilterResponse,
     FilterCreate,
@@ -100,6 +103,88 @@ def export_dashboard(request, dashboard_id: int):
         return DashboardService.export_dashboard_context(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
+
+
+@dashboard_native_router.get(
+    "/{dashboard_id}/ai-context/",
+    response=DashboardAiContextEnvelopeResponse,
+)
+@has_permission(["can_manage_org_settings"])
+def get_dashboard_ai_context(request, dashboard_id: int):
+    """Get AI context metadata for a dashboard in the current organization."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return {
+        "success": True,
+        "res": {
+            "dashboard_id": dashboard.id,
+            "dashboard_title": dashboard.title,
+            "ai_context_markdown": dashboard.ai_context_markdown or "",
+            "ai_context_updated_by": (
+                dashboard.ai_context_updated_by.user.email
+                if dashboard.ai_context_updated_by
+                else None
+            ),
+            "ai_context_updated_at": dashboard.ai_context_updated_at,
+            "ai_vector_last_ingested_at": (
+                orguser.org.dbt.ai_vector_last_ingested_at if orguser.org.dbt else None
+            ),
+        },
+    }
+
+
+@dashboard_native_router.put(
+    "/{dashboard_id}/ai-context/",
+    response=DashboardAiContextEnvelopeResponse,
+)
+@has_permission(["can_manage_org_settings"])
+@transaction.atomic
+def update_dashboard_ai_context(request, dashboard_id: int, payload: DashboardAiContextUpdate):
+    """Update dashboard-specific AI context metadata."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    markdown = payload.ai_context_markdown or ""
+    if markdown != dashboard.ai_context_markdown:
+        dashboard.ai_context_markdown = markdown
+        dashboard.ai_context_updated_by = orguser
+        dashboard.ai_context_updated_at = timezone.now()
+        dashboard.save(
+            update_fields=[
+                "ai_context_markdown",
+                "ai_context_updated_by",
+                "ai_context_updated_at",
+                "updated_at",
+            ]
+        )
+        AiDashboardChatSettingsService.mark_context_dirty(orguser.org)
+
+    return {
+        "success": True,
+        "res": {
+            "dashboard_id": dashboard.id,
+            "dashboard_title": dashboard.title,
+            "ai_context_markdown": dashboard.ai_context_markdown or "",
+            "ai_context_updated_by": (
+                dashboard.ai_context_updated_by.user.email
+                if dashboard.ai_context_updated_by
+                else None
+            ),
+            "ai_context_updated_at": dashboard.ai_context_updated_at,
+            "ai_vector_last_ingested_at": (
+                orguser.org.dbt.ai_vector_last_ingested_at if orguser.org.dbt else None
+            ),
+        },
+    }
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)

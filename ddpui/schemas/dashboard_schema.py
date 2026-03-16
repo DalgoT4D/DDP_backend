@@ -196,3 +196,27 @@ class DashboardExportResponse(Schema):
 
     dashboard: DashboardResponse
     charts: List[dict]
+
+
+class DashboardAiContextUpdate(Schema):
+    """Payload for dashboard-specific AI context."""
+
+    ai_context_markdown: str = ""
+
+
+class DashboardAiContextResponse(Schema):
+    """Dashboard-specific AI context metadata for settings management."""
+
+    dashboard_id: int
+    dashboard_title: str
+    ai_context_markdown: str = ""
+    ai_context_updated_by: Optional[str] = None
+    ai_context_updated_at: Optional[datetime] = None
+    ai_vector_last_ingested_at: Optional[datetime] = None
+
+
+class DashboardAiContextEnvelopeResponse(Schema):
+    """Standard success envelope for dashboard AI context endpoints."""
+
+    success: bool
+    res: DashboardAiContextResponse

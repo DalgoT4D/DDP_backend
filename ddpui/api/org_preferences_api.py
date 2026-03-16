@@ -10,6 +10,9 @@ from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
+    AiDashboardChatSettingsEnvelopeSchema,
+    AiDashboardChatStatusEnvelopeSchema,
+    UpdateAiDashboardChatSettingsSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
 )
@@ -22,6 +25,10 @@ from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
+)
+from ddpui.services.ai_dashboard_chat_settings_service import (
+    AiDashboardChatSettingsService,
+    AiDashboardChatSettingsValidationError,
 )
 from ddpui.utils.awsses import send_text_message
 from ddpui.utils.redis_client import RedisClient
@@ -137,6 +144,51 @@ def get_org_preferences(request):
         org_preferences = OrgPreferences.objects.create(org=org)
 
     return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.get("/ai-dashboard-chat", response=AiDashboardChatSettingsEnvelopeSchema)
+@has_permission(["can_manage_org_settings"])
+def get_ai_dashboard_chat_settings(request):
+    """Get AI dashboard chat settings for the current organization."""
+    orguser: OrgUser = request.orguser
+    preferences = AiDashboardChatSettingsService.get_or_create_preferences(orguser.org)
+
+    return {
+        "success": True,
+        "res": AiDashboardChatSettingsService.build_settings_response(orguser.org, preferences),
+    }
+
+
+@orgpreference_router.put("/ai-dashboard-chat", response=AiDashboardChatSettingsEnvelopeSchema)
+@has_permission(["can_manage_org_settings"])
+@transaction.atomic
+def update_ai_dashboard_chat_settings(request, payload: UpdateAiDashboardChatSettingsSchema):
+    """Update AI dashboard chat settings for the current organization."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        preferences = AiDashboardChatSettingsService.update_org_settings(
+            orguser, payload.dict(exclude_none=True)
+        )
+    except AiDashboardChatSettingsValidationError as err:
+        raise HttpError(400, str(err)) from err
+
+    return {
+        "success": True,
+        "res": AiDashboardChatSettingsService.build_settings_response(orguser.org, preferences),
+    }
+
+
+@orgpreference_router.get("/ai-dashboard-chat/status", response=AiDashboardChatStatusEnvelopeSchema)
+def get_ai_dashboard_chat_status(request):
+    """Get the effective availability state for dashboard chat."""
+    orguser: OrgUser = request.orguser
+    preferences = AiDashboardChatSettingsService.get_or_create_preferences(orguser.org)
+
+    return {
+        "success": True,
+        "res": AiDashboardChatSettingsService.build_status_response(orguser.org, preferences),
+    }
 
 
 @orgpreference_router.get("/toolinfo")
