@@ -13,7 +13,7 @@ from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
 from ddpui.core.orgdbt_manager import DbtCommandError
 from ddpui.ddpdbt.dbt_service import (
     delete_dbt_workspace,
-    setup_local_dbt_workspace,
+    setup_managed_git_workspace,
     parse_dbt_manifest_to_canvas,
     generate_manifest_json_for_dbt_project,
     cleanup_unused_sources,
@@ -21,6 +21,7 @@ from ddpui.ddpdbt.dbt_service import (
     clear_github_pat_storage,
     switch_git_repository,
     connect_git_remote,
+    connect_existing_repo_to_remote,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
@@ -90,34 +91,40 @@ def test_delete_dbt_workspace():
     assert OrgPrefectBlockv1.objects.filter(block_id="block-id").count() == 0
 
 
-def test_setup_local_dbt_workspace_warehouse_not_created():
-    """a failure test; creating local dbt workspace without org warehouse"""
+def test_setup_managed_git_workspace_warehouse_not_created():
+    """a failure test; creating managed git workspace without org warehouse"""
     org = Org.objects.create(name="temp", slug="temp")
 
     with pytest.raises(Exception) as excinfo:
-        setup_local_dbt_workspace(org, project_name="dbtrepo", default_schema="default")
+        setup_managed_git_workspace(org, project_name="dbtrepo", default_schema="default")
     assert str(excinfo.value) == "Please set up your warehouse first"
 
 
-def test_setup_local_dbt_workspace_project_already_exists(tmp_path):
-    """a failure test; creating local dbt workspace failed if project already exists"""
-    project_name = "dbtrepo"
-    default_schema = "default"
-
+@patch("ddpui.core.git_manager.GitManager.create_managed_repository")
+@patch("ddpui.core.git_manager.GitManager.create_repository_pat")
+@patch("ddpui.utils.secretsmanager.save_github_pat")
+def test_setup_managed_git_workspace_environment_vars_missing(
+    mock_save_pat, mock_create_pat, mock_create_repo
+):
+    """a failure test; creating managed git workspace without required environment variables"""
     org = Org.objects.create(name="temp", slug="temp")
-
     OrgWarehouse.objects.create(org=org, wtype="postgres")
-    project_dir: Path = Path(tmp_path) / org.slug
-    dbtrepo_dir: Path = project_dir / project_name
-    os.makedirs(dbtrepo_dir)
 
-    with patch("os.getenv", return_value=tmp_path):
+    # Test with missing DALGO_GITHUB_ORG
+    with patch("os.getenv", return_value=None):
         with pytest.raises(Exception) as excinfo:
-            setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
-        assert str(excinfo.value) == f"Project {project_name} already exists"
+            setup_managed_git_workspace(org, project_name="dbtrepo", default_schema="default")
+        assert "DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set" in str(excinfo.value)
 
 
-def test_setup_local_dbt_workspace_dbt_init_failed(tmp_path):
+@patch("ddpui.core.git_manager.GitManager.create_managed_repository")
+@patch("ddpui.core.git_manager.GitManager.create_repository_pat")
+@patch("ddpui.utils.secretsmanager.save_github_pat")
+@patch("ddpui.ddpdbt.dbt_service.update_github_pat_storage")
+@patch("os.getenv")
+def test_setup_managed_git_workspace_dbt_init_failed(
+    mock_getenv, mock_update_pat, mock_save_pat, mock_create_pat, mock_create_repo, tmp_path
+):
     """a failure test; setup fails because dbt init failed"""
     project_name = "dbtrepo"
     default_schema = "default"
@@ -140,7 +147,9 @@ def test_setup_local_dbt_workspace_dbt_init_failed(tmp_path):
         mock_run_command.side_effect = DbtCommandError("dbt init failed", "command failed")
 
         with pytest.raises(Exception) as excinfo:
-            setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
+            setup_managed_git_workspace(
+                org, project_name=project_name, default_schema=default_schema
+            )
         assert "dbt init failed" in str(excinfo.value)
         mock_run_command.assert_called_once()
         # retrieve_warehouse_credentials and cli block creation are not called when dbt init fails early
@@ -148,8 +157,8 @@ def test_setup_local_dbt_workspace_dbt_init_failed(tmp_path):
         mock_create_cli_block.assert_not_called()
 
 
-def test_setup_local_dbt_workspace_success(tmp_path):
-    """a success test for creating local dbt workspace"""
+def test_setup_managed_git_workspace_success(tmp_path):
+    """a success test for creating managed git dbt workspace"""
     project_name = "dbtrepo"
     default_schema = "default"
 
@@ -166,8 +175,14 @@ def test_setup_local_dbt_workspace_success(tmp_path):
         # Return a mock CompletedProcess
         return Mock(returncode=0, stdout="", stderr="")
 
-    # Mock the DbtProjectManager methods and other dependencies
-    with patch("os.getenv", return_value=tmp_path), patch(
+    # Mock the GitManager and other dependencies for managed Git workflow
+    with patch("os.getenv") as mock_getenv, patch(
+        "ddpui.ddpdbt.dbt_service.GitManager.create_managed_repository"
+    ) as mock_create_repo, patch(
+        "ddpui.ddpdbt.dbt_service.GitManager.create_repository_pat"
+    ) as mock_create_pat, patch(
+        "ddpui.ddpdbt.dbt_service.GitManager"
+    ) as mock_git_manager_class, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command", side_effect=mock_run_dbt_init
     ) as mock_run_command, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.gather_dbt_project_params"
@@ -175,8 +190,38 @@ def test_setup_local_dbt_workspace_success(tmp_path):
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
     ) as mock_retrieve_creds, patch(
         "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block", return_value=((None, None), None)
-    ) as mock_create_cli_block:
-        # Mock gather_dbt_project_params to return valid params (called during CLI block creation)
+    ) as mock_create_cli_block, patch(
+        "ddpui.ddpdbt.dbt_service.update_github_pat_storage"
+    ) as mock_update_pat, patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.save_github_pat"
+    ) as mock_save_pat:
+        # Mock environment variables
+        mock_getenv.side_effect = lambda key, default=None: {
+            "CLIENTDBT_ROOT": str(tmp_path),
+            "DALGO_GITHUB_ORG": "test-dalgo-org",
+            "DALGO_ORG_ADMIN_PAT": "test-admin-pat",
+            "ENVIRONMENT": "test",
+        }.get(key, default)
+
+        # Mock GitManager functionality
+        repo_name = f"dbt-{org.slug}-test"
+        repo_url = f"https://github.com/test-dalgo-org/{repo_name}.git"
+        repo_dict = {
+            "name": repo_name,
+            "full_name": f"test-dalgo-org/{repo_name}",
+            "clone_url": repo_url,
+        }
+        mock_create_repo.return_value = repo_dict
+        mock_create_pat.return_value = "test-repo-pat"
+        mock_save_pat.return_value = "test-secret-key"
+
+        # Mock GitManager instance
+        mock_git_manager = Mock()
+        mock_git_manager.commit_changes.return_value = None
+        mock_git_manager.push_changes.return_value = None
+        mock_git_manager_class.return_value = mock_git_manager
+
+        # Mock gather_dbt_project_params to return valid params
         from ddpui.ddpdbt.schema import DbtProjectParams
 
         mock_gather_params.return_value = DbtProjectParams(
@@ -188,13 +233,27 @@ def test_setup_local_dbt_workspace_success(tmp_path):
             org_project_dir=str(project_dir),
         )
 
-        setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
+        setup_managed_git_workspace(org, project_name=project_name, default_schema=default_schema)
+
+        # Verify GitManager methods were called
+        mock_create_repo.assert_called_once_with(org_slug=org.slug, environment="test")
+        mock_create_pat.assert_called_once_with(
+            org_name="test-dalgo-org", repo_name=f"dbt-{org.slug}-test", org_slug=org.slug
+        )
 
         # Verify the dbt command was called for init
         mock_run_command.assert_called_once()
         args = mock_run_command.call_args[0][2]  # third argument is the command list
         assert "init" in args
         assert project_name in args
+
+        # Verify GitManager instance methods were called
+        mock_git_manager.commit_changes.assert_called_once()
+        mock_git_manager.push_changes.assert_called_once()
+
+        # Verify PAT storage operations
+        mock_save_pat.assert_called_once_with("test-repo-pat")
+        mock_update_pat.assert_called_once()
 
         mock_retrieve_creds.assert_called_once()
         mock_create_cli_block.assert_called_once()
@@ -218,6 +277,8 @@ def test_setup_local_dbt_workspace_success(tmp_path):
     orgdbt = OrgDbt.objects.filter(org=org).first()
     assert orgdbt is not None
     assert org.dbt == orgdbt
+    assert orgdbt.is_repo_managed_by_system == True
+    assert orgdbt.transform_type == TransformType.GIT
 
 
 # ============= Tests for generate_manifest_json_for_dbt_project =============

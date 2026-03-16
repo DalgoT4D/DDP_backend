@@ -30,6 +30,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
 from ddpui.core.git_manager import GitManager, GitManagerError
+from ddpui.utils import secretsmanager
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import PrefectSecretBlockEdit, OrgDbtConnectGitRemote
@@ -265,6 +266,188 @@ def sync_gitignore_contents(
                 f.write(entry + "\n")
 
     logger.info(f"Synced .gitignore at {gitignore_path} with new entries.")
+
+
+def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str):
+    """
+    Creates a Dalgo-managed Git repository and sets up dbt workspace.
+    This replaces the UI-based local storage approach with managed Git repositories.
+    """
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+
+    if not warehouse:
+        raise Exception("Please set up your warehouse first")
+
+    if org.slug is None:
+        org.slug = slugify(org.name)
+        org.save()
+
+    # Get environment for repository naming
+    environment = os.getenv("ENVIRONMENT", "development")
+
+    try:
+        logger.info(f"Creating managed Git repository for org {org.name}")
+
+        # 1. Create managed repository using GitManager
+        repo_data = GitManager.create_managed_repository(org_slug=org.slug, environment=environment)
+        repo_url = repo_data["clone_url"]
+        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
+
+        logger.info(f"Created repository: {repo_data['full_name']}")
+
+        # 2. Create repository-specific PAT
+        repo_specific_pat = GitManager.create_repository_pat(
+            org_name=dalgo_github_org, repo_name=repo_data["name"], org_slug=org.slug
+        )
+
+        # 3. Save PAT to secrets manager
+        pat_secret_key = secretsmanager.save_github_pat(repo_specific_pat)
+
+        # 4. Set up local paths (same as original function)
+        project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
+        dbtrepo_dir: Path = project_dir / project_name
+
+        # 5. Create or update OrgDbt record
+        orgdbt = org.dbt
+        if not orgdbt:
+            dbt = OrgDbt(
+                project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
+                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
+                target_type=warehouse.wtype,
+                default_schema=default_schema,
+                transform_type=TransformType.GIT,  # Set to GIT instead of UI
+                gitrepo_url=repo_url,
+                gitrepo_access_token_secret=pat_secret_key,
+                is_repo_managed_by_system=True,  # Mark as managed
+            )
+            dbt.save()
+            logger.info("created managed git orgdbt for org %s", org.name)
+            org.dbt = dbt
+            org.save()
+            logger.info("set org.dbt for org %s", org.name)
+            orgdbt = dbt
+        else:
+            # Update existing OrgDbt to use managed Git
+            orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir)
+            orgdbt.target_type = warehouse.wtype
+            orgdbt.default_schema = default_schema
+            orgdbt.transform_type = TransformType.GIT
+            orgdbt.gitrepo_url = repo_url
+            orgdbt.gitrepo_access_token_secret = pat_secret_key
+            orgdbt.is_repo_managed_by_system = True
+            orgdbt.save()
+
+        # 6. Check if project already exists
+        if dbtrepo_dir.exists():
+            raise Exception(f"Project {project_name} already exists")
+
+        if not project_dir.exists():
+            project_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("created project_dir %s", project_dir)
+
+        # 7. Clone managed repository to org directory
+        logger.info(f"Cloning managed repository to {dbtrepo_dir}")
+        try:
+            git_manager = GitManager(repo_local_path=str(dbtrepo_dir), pat=repo_specific_pat)
+            git_manager.clone(remote_url=repo_url, branch="main")
+        except Exception as err:
+            logger.error(f"Failed to clone managed repository: {str(err)}")
+            raise Exception(f"Failed to clone managed repository: {str(err)}") from err
+
+        logger.info(f"Starting to scaffold dbt project at {dbtrepo_dir}")
+
+        # 8. Run dbt init to create project structure (same as original)
+        try:
+            DbtProjectManager.run_dbt_command(
+                org,
+                orgdbt,
+                [
+                    "init",
+                    project_name,
+                ],
+                cwd=str(project_dir),
+                flags=["--skip-profile-setup"],
+            )
+
+            # Delete example models
+            example_models_dir = dbtrepo_dir / "models" / "example"
+            if example_models_dir.exists():
+                shutil.rmtree(example_models_dir)
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"dbt init failed with {e.returncode}")
+            raise Exception(f"dbt init failed: {e}") from e
+
+        # 9. Copy asset files (same as original)
+        try:
+            # Copy packages.yml
+            logger.info("copying packages.yml from assets")
+            target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+            source_packages_yml = os.path.abspath(
+                os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+            )
+            shutil.copy(source_packages_yml, target_packages_yml)
+
+            # Copy all macros with .sql extension from assets
+            assets_dir = assets.__path__[0]
+
+            for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
+                target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
+                shutil.copy(sql_file_path, target_path)
+                logger.info("created %s", target_path)
+
+        except Exception as e:
+            logger.error(f"failed to copy asset files: {e}")
+            raise Exception(f"Something went wrong while copying asset files : {e}")
+
+        # 10. Set up warehouse credentials and CLI profile block
+        saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+        if saved_creds is None:
+            logger.error(
+                "failed to retrieve warehouse credentials for org %s to create dbt profile",
+                org.name,
+            )
+            raise Exception(
+                "failed to retrieve warehouse credentials for org %s to create dbt profile"
+                % org.name
+            )
+
+        (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+            org, warehouse, saved_creds
+        )
+
+        if error:
+            logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
+            raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
+
+        # 11. Create .gitignore file
+        try:
+            sync_gitignore_contents(dbtrepo_dir)
+        except Exception as err:
+            logger.error(f"Failed to create .gitignore file: {str(err)}")
+            raise Exception(f"Failed to create .gitignore file: {str(err)}") from err
+
+        # 12. Commit and push scaffolded project back to managed repository
+        try:
+            logger.info("Committing and pushing scaffolded dbt project to managed repository")
+            git_manager.commit_changes(
+                commit_message=f"Initial dbt project scaffolding for {org.name}", add_all=True
+            )
+            git_manager.push_changes()
+            logger.info("Successfully pushed scaffolded project to managed repository")
+
+        except Exception as err:
+            logger.error(f"Failed to commit/push scaffolded project: {str(err)}")
+            raise Exception(f"Failed to commit/push scaffolded project: {str(err)}") from err
+
+        # 13. Set up Prefect blocks (dual storage - AWS + Prefect)
+        update_github_pat_storage(orgdbt, repo_specific_pat)
+
+        logger.info(f"Successfully set up managed Git workspace for org {org.name}")
+
+    except Exception as e:
+        logger.error(f"Failed to set up managed Git workspace for org {org.name}: {str(e)}")
+        raise Exception(f"Failed to set up managed Git workspace: {str(e)}")
 
 
 def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
@@ -1040,27 +1223,28 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
     return results
 
 
-def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str) -> dict:
+def connect_existing_repo_to_remote(
+    org: Org, orgdbt: OrgDbt, remote_repo_url: str, access_token: str
+) -> None:
     """
-    Handle connecting to a Git remote for the first time (UI4T → Git).
+    Connect an existing local Git repository to a remote repository.
+    This handles the core logic for connecting UI repos to Git remotes.
 
-    This abstracts the existing logic from put_connect_git_remote into a
-    clean, testable function.
+    Args:
+        org: Organization instance
+        orgdbt: OrgDbt instance
+        remote_repo_url: URL of the remote repository
+        access_token: Access token for the repository
     """
-    org: Org = orguser.org
-    orgdbt: OrgDbt = org.dbt
-
     # Get dbt repo directory
     dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     if not dbt_repo_dir.exists():
         raise Exception("DBT repo directory does not exist")
 
-    # Use the provided actual_pat (already resolved in API layer)
-
     # Validate git is initialized locally
     try:
         git_manager = GitManager(
-            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
+            repo_local_path=str(dbt_repo_dir), pat=access_token, validate_git=True
         )
     except GitManagerError as e:
         logger.error(f"GitManagerError during git init validation: {e.message}")
@@ -1068,44 +1252,63 @@ def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual
 
     # Verify remote URL is accessible with the PAT
     try:
-        git_manager.verify_remote_url(payload.gitrepoUrl)
+        git_manager.verify_remote_url(remote_repo_url)
     except GitManagerError as e:
         logger.error(f"GitManagerError during remote URL verification: {e.message}")
         raise Exception(f"{e.message}: {e.error}") from e
 
     # Set or update the remote origin
     try:
-        git_manager.set_remote(payload.gitrepoUrl)
+        git_manager.set_remote(remote_repo_url)
     except GitManagerError as e:
         raise Exception(f"Failed to set remote: {e.message}") from e
 
-    # sync local default to remote
+    # Sync local default to remote (push existing commits)
     try:
         git_manager.sync_local_default_to_remote()
     except GitManagerError as e:
         raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
 
-    # Handle PAT token storage (only if not masked)
-    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
-    if not is_token_masked:
-        pat_secret_key = update_github_pat_storage(
-            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
-        )
-        orgdbt.gitrepo_access_token_secret = pat_secret_key
+    # Save PAT to secrets manager
+    pat_secret_key = secretsmanager.save_github_pat(access_token)
 
-    # Update OrgDbt with the new gitrepo_url
-    orgdbt.gitrepo_url = payload.gitrepoUrl
+    # Update OrgDbt record
+    orgdbt.gitrepo_url = remote_repo_url
+    orgdbt.gitrepo_access_token_secret = pat_secret_key
     orgdbt.transform_type = TransformType.GIT
     orgdbt.save()
 
-    logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
+    # Set up Prefect blocks (dual storage - AWS + Prefect)
+    update_github_pat_storage(orgdbt, access_token)
 
-    # sync gitignore contents
+    # Sync gitignore contents
     try:
         sync_gitignore_contents(dbt_repo_dir)
     except Exception as err:
         logger.error(f"Failed to sync .gitignore contents: {err}")
         raise Exception(f"Failed to sync .gitignore contents: {err}") from err
+
+    logger.info(f"Connected git remote for org {org.slug}: {remote_repo_url}")
+
+
+def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str) -> dict:
+    """
+    Handle connecting to a Git remote for the first time (UI4T → Git).
+    Uses the refactored connect_existing_repo_to_remote for core logic.
+    """
+    org: Org = orguser.org
+    orgdbt: OrgDbt = org.dbt
+
+    # Handle PAT token storage (only if not masked)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+    if not is_token_masked:
+        # Use the refactored function for core Git connection logic
+        connect_existing_repo_to_remote(
+            org=org, orgdbt=orgdbt, remote_repo_url=payload.gitrepoUrl, access_token=actual_pat
+        )
+    else:
+        # If token is masked, we can't perform the actual connection
+        raise Exception("Cannot connect with masked token")
 
     return {
         "success": True,

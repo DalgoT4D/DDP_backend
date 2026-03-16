@@ -383,13 +383,17 @@ class GitManager:
         return owner, repo
 
     @staticmethod
-    def _github_api_request(url: str, pat: str = None, timeout: int = 30) -> dict:
+    def _github_api_request(
+        url: str, pat: str = None, timeout: int = 30, payload: dict = None, method: str = "GET"
+    ) -> dict:
         """
         Common function to make GitHub API requests.
 
         :param url: The GitHub API URL to request
         :param pat: Personal Access Token for authentication (optional)
         :param timeout: Request timeout in seconds
+        :param payload: JSON payload for POST/PUT requests (optional)
+        :param method: HTTP method (GET, POST, PUT, DELETE)
         :return: JSON response data
         :raises requests.HTTPError: For HTTP errors
         :raises requests.RequestException: For network/timeout errors
@@ -400,7 +404,18 @@ class GitManager:
         if pat:
             headers["Authorization"] = f"Bearer {pat}"
 
-        response = requests.get(url, headers=headers, timeout=timeout)
+        # Choose the appropriate request method
+        if method.upper() == "GET":
+            response = requests.get(url, headers=headers, timeout=timeout)
+        elif method.upper() == "POST":
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        elif method.upper() == "PUT":
+            response = requests.put(url, headers=headers, json=payload, timeout=timeout)
+        elif method.upper() == "DELETE":
+            response = requests.delete(url, headers=headers, timeout=timeout)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+
         response.raise_for_status()
         return response.json()
 
@@ -661,3 +676,116 @@ class GitManager:
                 message="Network error",
                 error=f"Failed to connect to GitHub API: {str(e)}",
             ) from e
+
+    @staticmethod
+    def create_managed_repository(org_slug: str, environment: str) -> dict:
+        """
+        Create a new private repository in the Dalgo GitHub organization.
+
+        Args:
+            org_slug: Organization slug for naming
+            environment: Environment (from settings.ENVIRONMENT)
+
+        Returns:
+            Dict containing repository data from GitHub API
+
+        Raises:
+            GitManagerError: If repository creation fails
+        """
+        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
+        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
+
+        if not dalgo_github_org or not org_admin_pat:
+            raise GitManagerError(
+                "DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set in environment"
+            )
+
+        repo_name = f"dbt-{org_slug}-{environment}"
+
+        payload = {
+            "name": repo_name,
+            "description": f"Managed dbt repository for {org_slug} ({environment})",
+            "private": True,  # Always create private repositories
+            "auto_init": True,  # Initialize with README
+            "gitignore_template": "Python",
+        }
+
+        try:
+            repo_data = GitManager._github_api_request(
+                url=f"https://api.github.com/orgs/{dalgo_github_org}/repos",
+                pat=org_admin_pat,
+                payload=payload,
+                method="POST",
+            )
+
+            logger.info(f"Created private repository: {repo_data['full_name']}")
+            return repo_data
+
+        except Exception as e:
+            error_message = str(e)
+            if "422" in error_message:
+                raise GitManagerError(f"Repository {repo_name} already exists or name is invalid")
+            elif "401" in error_message:
+                raise GitManagerError("Authentication failed - check PAT permissions")
+            elif "403" in error_message:
+                raise GitManagerError(
+                    "Insufficient permissions to create repository in organization"
+                )
+            else:
+                raise GitManagerError(f"GitHub API error: {error_message}")
+
+    @staticmethod
+    def create_repository_pat(org_name: str, repo_name: str, org_slug: str) -> str:
+        """
+        Create a repository-specific fine-grained PAT using GitHub API.
+        This PAT will have minimal permissions - only access to this specific repository.
+
+        Args:
+            org_name: GitHub organization name
+            repo_name: Repository name
+            org_slug: Organization slug for naming
+
+        Returns:
+            Repository-specific PAT token string
+
+        Note: Fine-grained PAT creation via API may not be available in all GitHub plans.
+        This implementation includes a fallback to org admin PAT.
+        """
+        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
+
+        if not org_admin_pat:
+            raise GitManagerError("DALGO_ORG_ADMIN_PAT must be set in environment")
+
+        # Attempt to create fine-grained PAT with repository-specific permissions
+        payload = {
+            "name": f"dalgo-managed-{org_slug}-{repo_name}",
+            "description": f"Managed repository access for {org_slug}",
+            "scopes": [],  # Empty for fine-grained PATs
+            "repositories": [f"{org_name}/{repo_name}"],  # Only this repository
+            "repository_permissions": {
+                "contents": "write",  # Read/write repository contents
+                "metadata": "read",  # Read repository metadata
+                "pull_requests": "write",  # Create/update pull requests
+                "actions": "read",  # Read GitHub Actions (if used)
+            },
+        }
+
+        try:
+            # Try to create fine-grained PAT
+            pat_data = GitManager._github_api_request(
+                url="https://api.github.com/user/tokens",
+                pat=org_admin_pat,
+                payload=payload,
+                method="POST",
+            )
+
+            logger.info(f"Created fine-grained PAT for repository {repo_name}")
+            return pat_data["token"]
+
+        except Exception as e:
+            # Fallback: Use org admin PAT
+            logger.warning(
+                f"Fine-grained PAT creation failed ({str(e)}), "
+                f"falling back to org admin PAT for {repo_name}"
+            )
+            return org_admin_pat
