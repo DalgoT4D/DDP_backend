@@ -33,3 +33,31 @@ class DashboardChatVectorStoreConfig:
                 "AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL", "text-embedding-3-small"
             ),
         )
+
+
+@dataclass(frozen=True)
+class DashboardChatRuntimeConfig:
+    """Runtime limits and model selection for dashboard chat orchestration."""
+
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_ms: int = 45000
+    retrieval_limit: int = 6
+    related_dashboard_limit: int = 3
+    max_query_rows: int = 200
+    max_distinct_values: int = 50
+    max_schema_tables: int = 6
+
+    @classmethod
+    def from_env(cls) -> "DashboardChatRuntimeConfig":
+        """Build runtime config from environment variables."""
+        return cls(
+            llm_model=os.getenv("AI_DASHBOARD_CHAT_MODEL", "gpt-4o-mini"),
+            llm_timeout_ms=int(os.getenv("AI_CHAT_TIMEOUT_MS", "45000")),
+            retrieval_limit=int(os.getenv("AI_DASHBOARD_CHAT_RETRIEVAL_LIMIT", "6")),
+            related_dashboard_limit=int(
+                os.getenv("AI_DASHBOARD_CHAT_RELATED_DASHBOARD_LIMIT", "3")
+            ),
+            max_query_rows=int(os.getenv("AI_CHAT_MAX_ROWS", "200")),
+            max_distinct_values=int(os.getenv("AI_DASHBOARD_CHAT_MAX_DISTINCT_VALUES", "50")),
+            max_schema_tables=int(os.getenv("AI_DASHBOARD_CHAT_MAX_SCHEMA_TABLES", "6")),
+        )
