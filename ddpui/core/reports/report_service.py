@@ -15,6 +15,8 @@ from ddpui.models.dashboard import Dashboard
 from ddpui.models.report import ReportSnapshot, SnapshotStatus
 from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
 
 from .exceptions import (
     SnapshotNotFoundError,
@@ -265,20 +267,12 @@ class ReportService:
 
         if not match_on_filter:
             # Fallback: verify the column exists in the warehouse as datetime
-            from ddpui.core.charts.charts_service import get_warehouse_client
-            from ddpui.core.warehousefunctions import (
-                get_table_columns,
-                determine_filter_type_from_column,
-            )
-
             org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
             if not org_warehouse:
                 raise SnapshotValidationError("Warehouse not configured")
 
-            warehouse_client = get_warehouse_client(org_warehouse)
-            all_columns = get_table_columns(
-                warehouse_client,
-                org_warehouse,
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            all_columns = warehouse_client.get_table_columns(
                 date_column["schema_name"],
                 date_column["table_name"],
             )
@@ -286,7 +280,7 @@ class ReportService:
             # Find the specific column
             target_col = None
             for col in all_columns:
-                if col["column_name"] == date_column["column_name"]:
+                if col["name"] == date_column["column_name"]:
                     target_col = col
                     break
 
@@ -296,8 +290,7 @@ class ReportService:
                     f"{date_column['schema_name']}.{date_column['table_name']}"
                 )
 
-            col_type = determine_filter_type_from_column(target_col["data_type"])
-            if col_type != "datetime":
+            if target_col.get("translated_type") != TranslateColDataType.DATETIME:
                 raise SnapshotValidationError(
                     f"Column '{date_column['column_name']}' is not a datetime column "
                     f"(type: {target_col['data_type']})"
@@ -536,8 +529,6 @@ class ReportService:
             SnapshotValidationError: If dashboard not found
             SnapshotExternalServiceError: If warehouse connection fails
         """
-        from ddpui.core.charts.charts_service import get_warehouse_client
-        from ddpui.core.warehousefunctions import get_table_columns, determine_filter_type_from_column
         from ddpui.schemas.report_schema import DatetimeColumnResponse
 
         try:
@@ -570,7 +561,7 @@ class ReportService:
             raise SnapshotExternalServiceError("warehouse", "Warehouse not configured")
 
         try:
-            warehouse_client = get_warehouse_client(org_warehouse)
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
         except Exception as e:
             raise SnapshotExternalServiceError(
                 "warehouse", f"Error connecting to warehouse: {e}"
@@ -587,20 +578,19 @@ class ReportService:
 
         for schema_name, table_name in table_refs:
             try:
-                columns = get_table_columns(
-                    warehouse_client, org_warehouse, schema_name, table_name
+                columns = warehouse_client.get_table_columns(
+                    schema_name, table_name
                 )
                 for col in columns:
-                    filter_type = determine_filter_type_from_column(col["data_type"])
-                    if filter_type == "datetime":
-                        key = (schema_name, table_name, col["column_name"])
+                    if col.get("translated_type") == TranslateColDataType.DATETIME:
+                        key = (schema_name, table_name, col["name"])
                         if key not in seen:
                             seen.add(key)
                             datetime_columns.append(
                                 DatetimeColumnResponse(
                                     schema_name=schema_name,
                                     table_name=table_name,
-                                    column_name=col["column_name"],
+                                    column_name=col["name"],
                                     data_type=col["data_type"],
                                     is_dashboard_filter=key in dashboard_filter_keys,
                                 )

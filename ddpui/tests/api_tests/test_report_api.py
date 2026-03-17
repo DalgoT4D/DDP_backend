@@ -720,18 +720,16 @@ class TestListDashboardDatetimeColumns:
         """Test that existing dashboard datetime filters are included in results"""
         # Mock warehouse so it returns no columns (only dashboard filters matter)
         mock_warehouse = MagicMock()
+        mock_warehouse.get_table_columns.return_value = []
         mock_org_warehouse = MagicMock()
 
         with patch(
             "ddpui.core.reports.report_service.OrgWarehouse.objects"
         ) as mock_ow_objects, patch(
-            "ddpui.core.charts.charts_service.get_warehouse_client"
-        ) as mock_get_wc, patch(
-            "ddpui.core.warehousefunctions.get_table_columns"
-        ) as mock_get_cols:
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_wc:
             mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
             mock_get_wc.return_value = mock_warehouse
-            mock_get_cols.return_value = []  # No warehouse columns
 
             request = mock_request(orguser)
             response = list_dashboard_datetime_columns(request, sample_dashboard.id)
@@ -748,28 +746,23 @@ class TestListDashboardDatetimeColumns:
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
     ):
         """Test that warehouse datetime columns are discovered"""
+        from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
+
         mock_warehouse = MagicMock()
+        mock_warehouse.get_table_columns.return_value = [
+            {"name": "created_at", "data_type": "timestamp", "translated_type": TranslateColDataType.DATETIME, "nullable": False},
+            {"name": "updated_at", "data_type": "timestamp", "translated_type": TranslateColDataType.DATETIME, "nullable": True},
+            {"name": "name", "data_type": "varchar", "translated_type": TranslateColDataType.STRING, "nullable": True},
+        ]
         mock_org_warehouse = MagicMock()
 
         with patch(
             "ddpui.core.reports.report_service.OrgWarehouse.objects"
         ) as mock_ow_objects, patch(
-            "ddpui.core.charts.charts_service.get_warehouse_client"
-        ) as mock_get_wc, patch(
-            "ddpui.core.warehousefunctions.get_table_columns"
-        ) as mock_get_cols, patch(
-            "ddpui.core.warehousefunctions.determine_filter_type_from_column"
-        ) as mock_determine:
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_wc:
             mock_ow_objects.filter.return_value.first.return_value = mock_org_warehouse
             mock_get_wc.return_value = mock_warehouse
-            mock_get_cols.return_value = [
-                {"column_name": "created_at", "data_type": "timestamp"},
-                {"column_name": "updated_at", "data_type": "timestamp"},
-                {"column_name": "name", "data_type": "varchar"},
-            ]
-            mock_determine.side_effect = lambda dt: (
-                "datetime" if "timestamp" in dt.lower() else "value"
-            )
 
             request = mock_request(orguser)
             response = list_dashboard_datetime_columns(request, sample_dashboard.id)
