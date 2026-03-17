@@ -41,7 +41,7 @@ class SnapshotUpdate(Schema):
 # Response schemas
 
 
-class SnapshotListResponse(Schema):
+class SnapshotResponse(Schema):
     """Schema for snapshot list item"""
 
     id: int
@@ -57,7 +57,7 @@ class SnapshotListResponse(Schema):
     updated_at: datetime
 
     @classmethod
-    def from_model(cls, snapshot) -> "SnapshotListResponse":
+    def from_model(cls, snapshot) -> "SnapshotResponse":
         """Create response from ReportSnapshot model instance"""
         return cls(
             id=snapshot.id,

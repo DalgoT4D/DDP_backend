@@ -88,8 +88,8 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    def _inject_period_into_filters(
-        frozen_dashboard: Dict[str, Any], snapshot: "ReportSnapshot"
+    def _inject_period_into_dashboard_config(
+        frozen_dashboard: Dict[str, Any], snapshot: ReportSnapshot
     ) -> bool:
         """Inject snapshot period dates into the matching datetime filter.
 
@@ -159,7 +159,7 @@ class ReportService:
 
     @staticmethod
     def _inject_period_into_chart_configs(
-        frozen_chart_configs: Dict[str, Any], snapshot: "ReportSnapshot"
+        frozen_chart_configs: Dict[str, Any], snapshot: ReportSnapshot
     ) -> None:
         """Inject date range filters directly into frozen chart configs.
 
@@ -402,7 +402,7 @@ class ReportService:
         # so the frontend auto-applies them and renders charts pre-filtered.
         # If no matching dashboard filter exists (warehouse-discovered column),
         # inject date filters directly into each chart's extra_config instead.
-        filter_matched = ReportService._inject_period_into_filters(
+        filter_matched = ReportService._inject_period_into_dashboard_config(
             frozen_copy, snapshot
         )
 

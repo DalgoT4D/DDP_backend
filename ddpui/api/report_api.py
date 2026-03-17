@@ -22,7 +22,7 @@ from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     SnapshotCreate,
     SnapshotDeleteResponse,
-    SnapshotListResponse,
+    SnapshotResponse,
     SnapshotUpdate,
     SnapshotUpdateResponse,
     SnapshotViewResponse,
@@ -35,7 +35,7 @@ logger = CustomLogger("ddpui.report_api")
 report_router = Router()
 
 
-@report_router.get("/", response=ApiResponse[list[SnapshotListResponse]])
+@report_router.get("/", response=ApiResponse[list[SnapshotResponse]])
 @has_permission(["can_view_dashboards"])
 def list_snapshots(
     request,
@@ -53,11 +53,11 @@ def list_snapshots(
     )
     return api_response(
         success=True,
-        data=[SnapshotListResponse.from_model(s) for s in snapshots]
+        data=[SnapshotResponse.from_model(s) for s in snapshots]
     )
 
 
-@report_router.post("/", response=ApiResponse[SnapshotListResponse])
+@report_router.post("/", response=ApiResponse[SnapshotResponse])
 @has_permission(["can_create_dashboards"])
 def create_snapshot(request, payload: SnapshotCreate):
     """Create a new snapshot from a dashboard"""
@@ -73,7 +73,7 @@ def create_snapshot(request, payload: SnapshotCreate):
         )
         return api_response(
             success=True,
-            data=SnapshotListResponse.from_model(s),
+            data=SnapshotResponse.from_model(s),
             message="Snapshot created successfully"
         )
     except SnapshotValidationError as err:

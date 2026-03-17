@@ -1,7 +1,7 @@
 """Service-layer tests for ReportService
 
 Tests:
-1. _inject_period_into_filters — matching filter, no match (display-only), no date_col, null filters
+1. _inject_period_into_dashboard_config — matching filter, no match (display-only), no date_col, null filters
 2. _inject_period_into_chart_configs — inject, no date_col, non-matching chart, no period dates
 3. _freeze_dashboard — captures all expected keys
 4. _freeze_chart_configs — captures chart data, skips non-chart components, handles empty components
@@ -194,17 +194,17 @@ def sample_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart)
 
 
 # ================================================================================
-# Test _inject_period_into_filters
+# Test _inject_period_into_dashboard_config
 # ================================================================================
 
 
 class TestInjectPeriodIntoFilters:
-    """Tests for ReportService._inject_period_into_filters"""
+    """Tests for ReportService._inject_period_into_dashboard_config"""
 
     def test_matching_filter_is_enriched(self, sample_snapshot):
         """When a datetime filter matches the snapshot's date_column, inject dates + locked"""
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is True
         dt_filter = None
@@ -227,7 +227,7 @@ class TestInjectPeriodIntoFilters:
             "column_name": "event_time",
         }
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is False
         # A display-only filter should have been inserted at position 0
@@ -242,7 +242,7 @@ class TestInjectPeriodIntoFilters:
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
         sample_snapshot.date_column = {}
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
         assert result is True
 
     def test_null_filters_creates_list(self, sample_snapshot):
@@ -256,7 +256,7 @@ class TestInjectPeriodIntoFilters:
             "column_name": "event_time",
         }
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is False
         assert "filters" in frozen
@@ -267,7 +267,7 @@ class TestInjectPeriodIntoFilters:
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
         sample_snapshot.period_start = None
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is True
         dt_filter = None
