@@ -17,6 +17,7 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
+from ddpui.schemas.report_schema import DatetimeColumnResponse
 
 from .exceptions import (
     SnapshotNotFoundError,
@@ -529,8 +530,6 @@ class ReportService:
             SnapshotValidationError: If dashboard not found
             SnapshotExternalServiceError: If warehouse connection fails
         """
-        from ddpui.schemas.report_schema import DatetimeColumnResponse
-
         try:
             dashboard = Dashboard.objects.prefetch_related("filters").get(
                 id=dashboard_id, org=org
