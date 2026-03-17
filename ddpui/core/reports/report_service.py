@@ -5,7 +5,6 @@ import secrets
 from typing import Optional, List, Dict, Any
 from datetime import date
 
-from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -213,7 +212,6 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    @transaction.atomic
     def create_snapshot(
         title: str,
         dashboard_id: int,
