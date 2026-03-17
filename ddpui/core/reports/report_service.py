@@ -151,8 +151,8 @@ class ReportService:
             "column_name": date_col.get("column_name", ""),
             "settings": period_settings,
             "order": 0,
-            "created_at": snapshot.created_at.isoformat(),
-            "updated_at": snapshot.updated_at.isoformat(),
+            "created_at": snapshot.created_at,
+            "updated_at": snapshot.updated_at,
         }
         filters.insert(0, display_filter)
         return False
@@ -421,20 +421,20 @@ class ReportService:
             "is_public": False,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
             "org_id": snapshot.org.id,
-            "created_at": snapshot.created_at.isoformat(),
-            "updated_at": snapshot.updated_at.isoformat(),
+            "created_at": snapshot.created_at,
+            "updated_at": snapshot.updated_at,
         }
 
         report_metadata = {
             "snapshot_id": snapshot.id,
             "title": snapshot.title,
             "date_column": snapshot.date_column,
-            "period_start": snapshot.period_start.isoformat() if snapshot.period_start else None,
-            "period_end": snapshot.period_end.isoformat(),
+            "period_start": snapshot.period_start,
+            "period_end": snapshot.period_end,
             "summary": snapshot.summary,
             "status": snapshot.status,
-            "created_at": snapshot.created_at.isoformat(),
-            "updated_at": snapshot.updated_at.isoformat(),
+            "created_at": snapshot.created_at,
+            "updated_at": snapshot.updated_at,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
         }

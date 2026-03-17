@@ -574,8 +574,8 @@ class TestGetSnapshotViewData:
         rm = view_data["report_metadata"]
         assert rm["snapshot_id"] == sample_snapshot.id
         assert rm["title"] == "Jan 2025 Report"
-        assert rm["period_start"] == "2025-01-01"
-        assert rm["period_end"] == "2025-01-31"
+        assert rm["period_start"] == date(2025, 1, 1)
+        assert rm["period_end"] == date(2025, 1, 31)
         assert rm["dashboard_title"] == "Test Dashboard"
 
     def test_warehouse_discovered_column_injects_chart_filters(self, sample_snapshot, org):
