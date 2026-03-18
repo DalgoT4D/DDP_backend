@@ -6,7 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
     dependencies = [
         ("ddpui", "0151_alter_org_queue_config"),
-        ("ddpui", "0152_reportsnapshot_is_public_and_more"),
+        ("ddpui", "0152_reportsnapshot"),
     ]
 
     operations = []
