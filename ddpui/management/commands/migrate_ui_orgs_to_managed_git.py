@@ -151,20 +151,18 @@ class Command(BaseCommand):
 
         self.stdout.write(f'    Created repository: {repo_data["full_name"]}')
 
-        # 2. Create repository-specific PAT
-        self.stdout.write(f"  Creating repository-specific PAT...")
-        repo_specific_pat = GitManager.create_repository_pat(
-            org_name=dalgo_github_org, repo_name=repo_data["name"], org_slug=org.slug
-        )
+        # 2. Get org admin PAT for repository operations
+        self.stdout.write(f"  Getting org admin PAT...")
+        repo_pat = GitManager.get_org_admin_pat()
 
         # 3. Commit any uncommitted changes in local repository
         self.stdout.write(f"  Committing any uncommitted local changes...")
-        self._commit_local_changes(org, orgdbt, repo_specific_pat)
+        self._commit_local_changes(org, orgdbt, repo_pat)
 
         # 4. Connect existing local repo to managed repository using refactored service
         self.stdout.write(f"  Connecting existing local Git repo to managed repository...")
         connect_existing_repo_to_remote(
-            org=org, orgdbt=orgdbt, remote_repo_url=repo_url, access_token=repo_specific_pat
+            org=org, orgdbt=orgdbt, remote_repo_url=repo_url, access_token=repo_pat
         )
 
         # 5. Mark as managed repository (the service function doesn't set this flag)

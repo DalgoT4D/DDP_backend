@@ -295,13 +295,11 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
 
         logger.info(f"Created repository: {repo_data['full_name']}")
 
-        # 2. Create repository-specific PAT
-        repo_specific_pat = GitManager.create_repository_pat(
-            org_name=dalgo_github_org, repo_name=repo_data["name"], org_slug=org.slug
-        )
+        # 2. Get org admin PAT for repository operations
+        repo_pat = GitManager.get_org_admin_pat()
 
         # 3. Save PAT to secrets manager
-        pat_secret_key = secretsmanager.save_github_pat(repo_specific_pat)
+        pat_secret_key = secretsmanager.save_github_pat(repo_pat)
 
         # 4. Set up local paths (same as original function)
         project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
@@ -348,7 +346,7 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
         # 7. Clone managed repository to org directory
         logger.info(f"Cloning managed repository to {dbtrepo_dir}")
         try:
-            git_manager = GitManager(repo_local_path=str(dbtrepo_dir), pat=repo_specific_pat)
+            git_manager = GitManager(repo_local_path=str(dbtrepo_dir), pat=repo_pat)
             git_manager.clone(remote_url=repo_url, branch="main")
         except Exception as err:
             logger.error(f"Failed to clone managed repository: {str(err)}")
@@ -441,7 +439,7 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             raise Exception(f"Failed to commit/push scaffolded project: {str(err)}") from err
 
         # 13. Set up Prefect blocks (dual storage - AWS + Prefect)
-        update_github_pat_storage(orgdbt, repo_specific_pat)
+        update_github_pat_storage(orgdbt, repo_pat)
 
         logger.info(f"Successfully set up managed Git workspace for org {org.name}")
 

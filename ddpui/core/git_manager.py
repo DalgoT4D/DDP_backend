@@ -735,57 +735,25 @@ class GitManager:
                 raise GitManagerError(f"GitHub API error: {error_message}")
 
     @staticmethod
-    def create_repository_pat(org_name: str, repo_name: str, org_slug: str) -> str:
+    def get_org_admin_pat() -> str:
         """
-        Create a repository-specific fine-grained PAT using GitHub API.
-        This PAT will have minimal permissions - only access to this specific repository.
+        Get the organization admin PAT for managed repository operations.
 
-        Args:
-            org_name: GitHub organization name
-            repo_name: Repository name
-            org_slug: Organization slug for naming
+        This PAT has organization-level permissions and is used for:
+        - Creating new repositories
+        - All Git operations on managed repositories
+
+        Note: This is a security trade-off. The PAT has broader permissions than
+        repository-specific tokens, but GitHub does not currently support
+        programmatic creation of repository-scoped PATs via REST API.
 
         Returns:
-            Repository-specific PAT token string
+            Organization admin PAT token string
 
-        Note: Fine-grained PAT creation via API may not be available in all GitHub plans.
-        This implementation includes a fallback to org admin PAT.
+        Raises:
+            GitManagerError: If DALGO_ORG_ADMIN_PAT is not configured
         """
         org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
-
         if not org_admin_pat:
             raise GitManagerError("DALGO_ORG_ADMIN_PAT must be set in environment")
-
-        # Attempt to create fine-grained PAT with repository-specific permissions
-        payload = {
-            "name": f"dalgo-managed-{org_slug}-{repo_name}",
-            "description": f"Managed repository access for {org_slug}",
-            "scopes": [],  # Empty for fine-grained PATs
-            "repositories": [f"{org_name}/{repo_name}"],  # Only this repository
-            "repository_permissions": {
-                "contents": "write",  # Read/write repository contents
-                "metadata": "read",  # Read repository metadata
-                "pull_requests": "write",  # Create/update pull requests
-                "actions": "read",  # Read GitHub Actions (if used)
-            },
-        }
-
-        try:
-            # Try to create fine-grained PAT
-            pat_data = GitManager._github_api_request(
-                url="https://api.github.com/user/tokens",
-                pat=org_admin_pat,
-                payload=payload,
-                method="POST",
-            )
-
-            logger.info(f"Created fine-grained PAT for repository {repo_name}")
-            return pat_data["token"]
-
-        except Exception as e:
-            # Fallback: Use org admin PAT
-            logger.warning(
-                f"Fine-grained PAT creation failed ({str(e)}), "
-                f"falling back to org admin PAT for {repo_name}"
-            )
-            return org_admin_pat
+        return org_admin_pat
