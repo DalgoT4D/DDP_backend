@@ -161,12 +161,11 @@ class ReportService:
     def _inject_period_into_chart_configs(
         frozen_chart_configs: Dict[str, Any], snapshot: ReportSnapshot
     ) -> None:
-        """Inject date range filters directly into frozen chart configs.
+        """Inject date range filters into all compatible frozen chart configs.
 
-        Used when the date column was discovered via warehouse introspection
-        and has no matching dashboard-level datetime filter. Adds chart-level
-        filters (column/operator/value) so the backend applies them when
-        fetching chart data.
+        For charts on the anchor table (same schema+table as date_column),
+        filters are applied unconditionally. For charts on other tables,
+        the warehouse is queried to check whether the column exists.
 
         Mutates frozen_chart_configs in place.
         """
@@ -175,37 +174,53 @@ class ReportService:
             return
 
         col_name = date_col.get("column_name", "")
-        target_schema = date_col.get("schema_name", "")
-        target_table = date_col.get("table_name", "")
+        anchor_schema = date_col.get("schema_name", "")
+        anchor_table = date_col.get("table_name", "")
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError(
+                "Warehouse", "not configured for this organization"
+            )
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
         for chart_id, config in frozen_chart_configs.items():
-            if (
-                config.get("schema_name") == target_schema
-                and config.get("table_name") == target_table
-            ):
-                extra_config = config.get("extra_config") or {}
-                filters = list(extra_config.get("filters") or [])
+            chart_schema = config.get("schema_name", "")
+            chart_table = config.get("table_name", "")
 
-                if snapshot.period_start:
-                    filters.append(
-                        {
-                            "column": col_name,
-                            "operator": "greater_than_equal",
-                            "value": snapshot.period_start.isoformat(),
-                        }
-                    )
-                if snapshot.period_end:
-                    filters.append(
-                        {
-                            "column": col_name,
-                            "operator": "less_than_equal",
-                            "value": snapshot.period_end.isoformat()
-                            + "T23:59:59",
-                        }
-                    )
+            if chart_schema == anchor_schema and chart_table == anchor_table:
+                eligible = True
+            else:
+                eligible = warehouse_client.column_exists(
+                    chart_schema, chart_table, col_name
+                )
 
-                extra_config["filters"] = filters
-                config["extra_config"] = extra_config
+            if not eligible:
+                continue
+
+            extra_config = config.get("extra_config") or {}
+            filters = list(extra_config.get("filters") or [])
+
+            if snapshot.period_start:
+                filters.append(
+                    {
+                        "column": col_name,
+                        "operator": "greater_than_equal",
+                        "value": snapshot.period_start.isoformat(),
+                    }
+                )
+            if snapshot.period_end:
+                filters.append(
+                    {
+                        "column": col_name,
+                        "operator": "less_than_equal",
+                        "value": snapshot.period_end.isoformat()
+                        + "T23:59:59",
+                    }
+                )
+
+            extra_config["filters"] = filters
+            config["extra_config"] = extra_config
 
     # =========================================================================
     # Snapshot CRUD
@@ -398,18 +413,13 @@ class ReportService:
         frozen_copy = copy.deepcopy(snapshot.frozen_dashboard)
 
         # Inject period dates into the matching datetime filter's settings
-        # so the frontend auto-applies them and renders charts pre-filtered.
-        # If no matching dashboard filter exists (warehouse-discovered column),
-        # inject date filters directly into each chart's extra_config instead.
-        filter_matched = ReportService._inject_period_into_dashboard_config(
-            frozen_copy, snapshot
-        )
+        # so the frontend renders a locked date-range indicator.
+        ReportService._inject_period_into_dashboard_config(frozen_copy, snapshot)
 
+        # Always inject chart-level filters for all compatible charts,
+        # regardless of whether a dashboard filter matched.
         frozen_charts = copy.deepcopy(snapshot.frozen_chart_configs or {})
-        if not filter_matched:
-            ReportService._inject_period_into_chart_configs(
-                frozen_charts, snapshot
-            )
+        ReportService._inject_period_into_chart_configs(frozen_charts, snapshot)
 
         dashboard_data = {
             **frozen_copy,
