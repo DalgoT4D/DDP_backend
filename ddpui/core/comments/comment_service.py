@@ -5,7 +5,7 @@ from typing import Optional
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.models.comment import Comment, CommentMention, CommentReadStatus
+from ddpui.models.comment import Comment, CommentReadStatus
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -42,7 +42,6 @@ class CommentService:
         query = Q(
             snapshot=snapshot,
             target_type=target_type,
-            is_deleted=False,
         )
 
         if target_type == "chart" and chart_id is not None:
@@ -53,9 +52,23 @@ class CommentService:
         comments = list(
             Comment.objects.filter(query)
             .select_related("author", "author__user")
-            .prefetch_related("mentions__mentioned_user__user")
             .order_by("created_at")
         )
+
+        # Batch-resolve mentioned emails to user names
+        all_emails = set()
+        for c in comments:
+            all_emails.update(c.mentioned_emails or [])
+
+        users_map = {}
+        if all_emails:
+            for ou in OrgUser.objects.filter(
+                user__email__in=all_emails
+            ).select_related("user"):
+                users_map[ou.user.email] = ou
+
+        for c in comments:
+            c._mentioned_users_map = users_map
 
         # Determine last_read_at for is_new calculation
         last_read_at = None
@@ -131,11 +144,10 @@ class CommentService:
             raise CommentPermissionError("You can only edit your own comments")
 
         comment.content = content
-        comment.is_edited = True
-        comment.save(update_fields=["content", "is_edited", "updated_at"])
+        comment.mentioned_emails = []
+        comment.save(update_fields=["content", "updated_at", "mentioned_emails"])
 
         # Re-process mentions
-        comment.mentions.all().delete()
         MentionService.process_mentions(comment, org, orguser)
 
         logger.info(f"Updated comment {comment.id}")
@@ -146,19 +158,17 @@ class CommentService:
         comment_id: int,
         org: Org,
         orguser: OrgUser,
-    ) -> Comment:
-        """Soft-delete a comment. Author-only."""
+    ) -> None:
+        """Hard-delete a comment. Author-only."""
         comment = CommentService._get_comment(comment_id, org)
 
         if comment.author != orguser:
             raise CommentPermissionError("You can only delete your own comments")
 
-        comment.is_deleted = True
-        comment.deleted_at = timezone.now()
-        comment.save(update_fields=["is_deleted", "deleted_at", "updated_at"])
+        comment_id_log = comment.id
+        comment.delete()
 
-        logger.info(f"Soft-deleted comment {comment.id}")
-        return comment
+        logger.info(f"Deleted comment {comment_id_log}")
 
     @staticmethod
     def get_comment_states(
@@ -174,9 +184,9 @@ class CommentService:
         """
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
-        # Get all non-deleted comments for this snapshot
+        # Get all comments for this snapshot
         comments = Comment.objects.filter(
-            snapshot=snapshot, is_deleted=False
+            snapshot=snapshot,
         ).values_list("target_type", "snapshot_chart_id", "created_at", "id")
 
         if not comments:
@@ -190,13 +200,13 @@ class CommentService:
             )
         }
 
-        # Get comment IDs where this user is mentioned
+        # Get comment IDs where this user is mentioned (via JSONField)
+        user_email = orguser.user.email
         mentioned_comment_ids = set(
-            CommentMention.objects.filter(
-                mentioned_user=orguser,
-                comment__snapshot=snapshot,
-                comment__is_deleted=False,
-            ).values_list("comment_id", flat=True)
+            Comment.objects.filter(
+                snapshot=snapshot,
+                mentioned_emails__contains=[user_email],
+            ).values_list("id", flat=True)
         )
 
         # Group comments by target
@@ -278,8 +288,8 @@ class CommentService:
 
     @staticmethod
     def _get_comment(comment_id: int, org: Org) -> Comment:
-        """Get a non-deleted comment, ensuring it belongs to the org."""
+        """Get a comment, ensuring it belongs to the org."""
         try:
-            return Comment.objects.get(id=comment_id, org=org, is_deleted=False)
+            return Comment.objects.get(id=comment_id, org=org)
         except Comment.DoesNotExist:
             raise CommentNotFoundError(comment_id)

@@ -61,8 +61,6 @@ class CommentResponse(Schema):
     chart_id: Optional[int] = None
     content: str
     author: CommentAuthorResponse
-    is_edited: bool
-    is_deleted: bool
     is_new: bool = False
     created_at: datetime
     updated_at: datetime
@@ -76,13 +74,27 @@ class CommentResponse(Schema):
             name=_get_user_name(comment.author),
         )
 
-        mentions = [
-            CommentMentionResponse(
-                email=m.mentioned_user.user.email,
-                name=_get_user_name(m.mentioned_user),
-            )
-            for m in comment.mentions.all()
-        ]
+        # Resolve mentioned emails to names
+        emails = comment.mentioned_emails or []
+        mentions = []
+        if emails:
+            users_map = getattr(comment, "_mentioned_users_map", None)
+            if users_map is None:
+                from ddpui.models.org_user import OrgUser
+
+                users_map = {
+                    ou.user.email: ou
+                    for ou in OrgUser.objects.filter(
+                        user__email__in=emails
+                    ).select_related("user")
+                }
+            mentions = [
+                CommentMentionResponse(
+                    email=email,
+                    name=_get_user_name(users_map[email]) if email in users_map else None,
+                )
+                for email in emails
+            ]
 
         return cls(
             id=comment.id,
@@ -91,8 +103,6 @@ class CommentResponse(Schema):
             chart_id=comment.snapshot_chart_id,
             content=comment.content,
             author=author,
-            is_edited=comment.is_edited,
-            is_deleted=comment.is_deleted,
             is_new=getattr(comment, "is_new", False),
             created_at=comment.created_at,
             updated_at=comment.updated_at,

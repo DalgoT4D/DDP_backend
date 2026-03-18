@@ -2,7 +2,7 @@
 
 import re
 
-from ddpui.models.comment import Comment, CommentMention
+from ddpui.models.comment import Comment
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -16,11 +16,11 @@ MENTION_REGEX = re.compile(r"@([\w.+-]+@[\w.-]+\.\w+)")
 
 
 class MentionService:
-    """Handles @mention parsing, record creation, and notifications"""
+    """Handles @mention parsing, storage, and notifications"""
 
     @staticmethod
     def process_mentions(comment: Comment, org: Org, author: OrgUser) -> list:
-        """Parse mentions from content, create records, and send notifications.
+        """Parse mentions from content, store emails, and send notifications.
 
         Returns list of mentioned OrgUsers.
         """
@@ -28,7 +28,7 @@ class MentionService:
         if not mentioned_users:
             return []
 
-        MentionService.create_mention_records(comment, mentioned_users)
+        MentionService.store_mentioned_emails(comment, mentioned_users)
 
         # Don't notify the author if they mention themselves
         users_to_notify = [u for u in mentioned_users if u != author]
@@ -52,13 +52,10 @@ class MentionService:
         )
 
     @staticmethod
-    def create_mention_records(comment: Comment, users: list) -> None:
-        """Create CommentMention entries for mentioned users."""
-        mentions = [
-            CommentMention(comment=comment, mentioned_user=user)
-            for user in users
-        ]
-        CommentMention.objects.bulk_create(mentions, ignore_conflicts=True)
+    def store_mentioned_emails(comment: Comment, users: list) -> None:
+        """Store mentioned user emails in the comment's JSONField."""
+        comment.mentioned_emails = list(set(u.user.email for u in users))
+        comment.save(update_fields=["mentioned_emails"])
 
     @staticmethod
     def send_mention_notifications(
@@ -87,26 +84,3 @@ class MentionService:
         error, result = create_notification(notification_data)
         if error:
             logger.error(f"Failed to create mention notification: {error}")
-
-    @staticmethod
-    def send_reply_notification(comment: Comment, author: OrgUser) -> None:
-        """Notify parent comment author about a reply."""
-        parent = comment.parent_comment
-        if not parent or parent.author == author:
-            return
-
-        author_name = author.user.email
-        snapshot_title = comment.snapshot.title if comment.snapshot else "report"
-
-        notification_data = NotificationDataSchema(
-            author=author_name,
-            message=f"{author_name} replied to your comment on '{snapshot_title}': \"{comment.content[:200]}\"",
-            email_subject=f"New reply to your comment on '{snapshot_title}'",
-            urgent=False,
-            scheduled_time=None,
-            recipients=[parent.author.id],
-        )
-
-        error, result = create_notification(notification_data)
-        if error:
-            logger.error(f"Failed to create reply notification: {error}")

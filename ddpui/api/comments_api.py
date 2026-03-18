@@ -170,7 +170,7 @@ def update_comment(request, comment_id: int, payload: CommentUpdate):
 @comments_router.delete("/{comment_id}/", response=ApiResponse)
 @has_permission(["can_view_dashboards"])
 def delete_comment(request, comment_id: int):
-    """Soft-delete a comment (author-only)"""
+    """Delete a comment (author-only)"""
     orguser: OrgUser = request.orguser
 
     try:
