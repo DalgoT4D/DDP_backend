@@ -7,11 +7,11 @@ from ddpui.models.report import ReportSnapshot
 
 
 class Comment(models.Model):
-    """Comment on a report snapshot or chart within a snapshot"""
+    """Comment on a chart or executive summary within a report snapshot"""
 
     TARGET_CHOICES = [
         ("chart", "Chart"),
-        ("report", "Report"),
+        ("summary", "Summary"),
     ]
 
     id = models.BigAutoField(primary_key=True)
@@ -76,7 +76,7 @@ class CommentReadStatus(models.Model):
     )
     target_type = models.CharField(
         max_length=20,
-        choices=[("report", "Report"), ("chart", "Chart")],
+        choices=[("chart", "Chart"), ("summary", "Summary")],
     )
     chart_id = models.IntegerField(
         null=True,

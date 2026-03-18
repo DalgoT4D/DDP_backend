@@ -14,7 +14,7 @@ class CommentCreate(Schema):
     """Schema for creating a comment on a report snapshot"""
 
     snapshot_id: int
-    target_type: str = Field(..., description="'report' or 'chart'")
+    target_type: str = Field(..., description="'summary' or 'chart'")
     chart_id: Optional[int] = Field(None, description="Required when target_type='chart'")
     content: str = Field(..., min_length=1, max_length=5000)
 
@@ -29,7 +29,7 @@ class MarkReadRequest(Schema):
     """Schema for marking comments as read"""
 
     snapshot_id: int
-    target_type: str = Field(..., description="'report' or 'chart'")
+    target_type: str = Field(..., description="'summary' or 'chart'")
     chart_id: Optional[int] = None
 
 

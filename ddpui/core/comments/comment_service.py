@@ -102,7 +102,7 @@ class CommentService:
         """Create a comment on a report snapshot."""
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
-        if target_type not in ("report", "chart"):
+        if target_type not in ("summary", "chart"):
             raise CommentValidationError(f"Invalid target_type: {target_type}")
 
         if target_type == "chart" and chart_id is None:
@@ -180,7 +180,7 @@ class CommentService:
 
         State priority: mentioned > unread > read > none
 
-        Returns: {"report": {"state": "mentioned", "count": 3}, "42": {"state": "unread", "count": 1}}
+        Returns: {"summary": {"state": "mentioned", "count": 3}, "42": {"state": "unread", "count": 1}}
         """
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
@@ -212,7 +212,7 @@ class CommentService:
         # Group comments by target
         targets = {}  # target_key -> list of (created_at, comment_id)
         for target_type, chart_id, created_at, comment_id in comments:
-            key = "report" if target_type == "report" else str(chart_id)
+            key = "summary" if target_type == "summary" else str(chart_id)
             if key not in targets:
                 targets[key] = []
             targets[key].append((created_at, comment_id))
@@ -220,8 +220,8 @@ class CommentService:
         # Compute state and count per target
         states = {}
         for target_key, comment_data in targets.items():
-            if target_key == "report":
-                rs_key = ("report", None)
+            if target_key == "summary":
+                rs_key = ("summary", None)
             else:
                 rs_key = ("chart", int(target_key))
 
