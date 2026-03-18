@@ -1,7 +1,7 @@
 """Service-layer tests for ReportService
 
 Tests:
-1. _inject_period_into_filters — matching filter, no match (display-only), no date_col, null filters
+1. _inject_period_into_dashboard_config — matching filter, no match (display-only), no date_col, null filters
 2. _inject_period_into_chart_configs — inject, no date_col, non-matching chart, no period dates
 3. _freeze_dashboard — captures all expected keys
 4. _freeze_chart_configs — captures chart data, skips non-chart components, handles empty components
@@ -194,17 +194,17 @@ def sample_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart)
 
 
 # ================================================================================
-# Test _inject_period_into_filters
+# Test _inject_period_into_dashboard_config
 # ================================================================================
 
 
 class TestInjectPeriodIntoFilters:
-    """Tests for ReportService._inject_period_into_filters"""
+    """Tests for ReportService._inject_period_into_dashboard_config"""
 
     def test_matching_filter_is_enriched(self, sample_snapshot):
         """When a datetime filter matches the snapshot's date_column, inject dates + locked"""
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is True
         dt_filter = None
@@ -227,7 +227,7 @@ class TestInjectPeriodIntoFilters:
             "column_name": "event_time",
         }
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is False
         # A display-only filter should have been inserted at position 0
@@ -242,7 +242,7 @@ class TestInjectPeriodIntoFilters:
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
         sample_snapshot.date_column = {}
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
         assert result is True
 
     def test_null_filters_creates_list(self, sample_snapshot):
@@ -256,7 +256,7 @@ class TestInjectPeriodIntoFilters:
             "column_name": "event_time",
         }
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is False
         assert "filters" in frozen
@@ -267,7 +267,7 @@ class TestInjectPeriodIntoFilters:
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
         sample_snapshot.period_start = None
 
-        result = ReportService._inject_period_into_filters(frozen, sample_snapshot)
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
 
         assert result is True
         dt_filter = None
@@ -285,14 +285,19 @@ class TestInjectPeriodIntoFilters:
 # ================================================================================
 
 
+@patch("ddpui.core.reports.report_service.WarehouseFactory")
+@patch("ddpui.core.reports.report_service.OrgWarehouse")
 class TestInjectPeriodIntoChartConfigs:
     """Tests for ReportService._inject_period_into_chart_configs"""
 
-    def test_inject_filters_into_matching_chart(self, sample_snapshot):
+    def test_inject_filters_into_matching_chart(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
         """Injects date filters into charts matching the date column's schema/table"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
         frozen_charts = copy.deepcopy(sample_snapshot.frozen_chart_configs)
-        # The chart has schema_name=public, table_name=orders
-        # snapshot date_column matches
         ReportService._inject_period_into_chart_configs(frozen_charts, sample_snapshot)
 
         chart = frozen_charts["1"]
@@ -304,7 +309,9 @@ class TestInjectPeriodIntoChartConfigs:
         assert filters[1]["operator"] == "less_than_equal"
         assert "2025-01-31" in filters[1]["value"]
 
-    def test_no_date_col_does_nothing(self, sample_snapshot):
+    def test_no_date_col_does_nothing(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
         """When date_column is empty, no filters are injected"""
         frozen_charts = copy.deepcopy(sample_snapshot.frozen_chart_configs)
         sample_snapshot.date_column = {}
@@ -315,11 +322,17 @@ class TestInjectPeriodIntoChartConfigs:
         extra = chart.get("extra_config", {})
         assert "filters" not in extra or len(extra.get("filters", [])) == 0
 
-    def test_non_matching_chart_not_modified(self, sample_snapshot):
-        """Charts with different schema/table are not modified"""
+    def test_non_matching_chart_not_modified(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
+        """Charts whose table lacks the column are not modified"""
         frozen_charts = copy.deepcopy(sample_snapshot.frozen_chart_configs)
-        # Change the chart's schema so it doesn't match
         frozen_charts["1"]["schema_name"] = "other_schema"
+
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_wh_client = MagicMock()
+        mock_wh_client.column_exists.return_value = False
+        mock_factory.get_warehouse_client.return_value = mock_wh_client
 
         ReportService._inject_period_into_chart_configs(frozen_charts, sample_snapshot)
 
@@ -327,8 +340,13 @@ class TestInjectPeriodIntoChartConfigs:
         extra = chart.get("extra_config", {})
         assert "filters" not in extra or len(extra.get("filters", [])) == 0
 
-    def test_no_period_start_only_end_filter(self, sample_snapshot):
+    def test_no_period_start_only_end_filter(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
         """When period_start is None, only the end-date filter is injected"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
         frozen_charts = copy.deepcopy(sample_snapshot.frozen_chart_configs)
         sample_snapshot.period_start = None
 
@@ -339,7 +357,9 @@ class TestInjectPeriodIntoChartConfigs:
         assert len(filters) == 1
         assert filters[0]["operator"] == "less_than_equal"
 
-    def test_empty_frozen_configs_does_nothing(self, sample_snapshot):
+    def test_empty_frozen_configs_does_nothing(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
         """When frozen_chart_configs is empty, no error is raised"""
         frozen_charts = {}
         ReportService._inject_period_into_chart_configs(frozen_charts, sample_snapshot)
@@ -533,10 +553,16 @@ class TestGetSnapshot:
 # ================================================================================
 
 
+@patch("ddpui.core.reports.report_service.WarehouseFactory")
+@patch("ddpui.core.reports.report_service.OrgWarehouse")
 class TestGetSnapshotViewData:
     """Tests for ReportService.get_snapshot_view_data"""
 
-    def test_marks_generated_as_viewed(self, sample_snapshot, org):
+    def test_marks_generated_as_viewed(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
+    ):
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
         """A generated snapshot is marked as viewed after get_snapshot_view_data"""
         assert sample_snapshot.status == SnapshotStatus.GENERATED.value
 
@@ -548,8 +574,13 @@ class TestGetSnapshotViewData:
         assert "report_metadata" in view_data
         assert "frozen_chart_configs" in view_data
 
-    def test_already_viewed_stays_viewed(self, sample_snapshot, org):
+    def test_already_viewed_stays_viewed(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
+    ):
         """A viewed snapshot stays viewed"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
         sample_snapshot.status = SnapshotStatus.VIEWED.value
         sample_snapshot.save(update_fields=["status"])
 
@@ -558,8 +589,13 @@ class TestGetSnapshotViewData:
         sample_snapshot.refresh_from_db()
         assert sample_snapshot.status == SnapshotStatus.VIEWED.value
 
-    def test_view_data_structure(self, sample_snapshot, org):
+    def test_view_data_structure(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
+    ):
         """View data has expected keys and values"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
         view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
 
         # dashboard_data keys
@@ -574,12 +610,17 @@ class TestGetSnapshotViewData:
         rm = view_data["report_metadata"]
         assert rm["snapshot_id"] == sample_snapshot.id
         assert rm["title"] == "Jan 2025 Report"
-        assert rm["period_start"] == "2025-01-01"
-        assert rm["period_end"] == "2025-01-31"
+        assert rm["period_start"] == date(2025, 1, 1)
+        assert rm["period_end"] == date(2025, 1, 31)
         assert rm["dashboard_title"] == "Test Dashboard"
 
-    def test_warehouse_discovered_column_injects_chart_filters(self, sample_snapshot, org):
+    def test_warehouse_discovered_column_injects_chart_filters(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
+    ):
         """When date_column doesn't match a dashboard filter, chart-level filters are injected"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
         # Change date_column to something not matching any dashboard filter
         sample_snapshot.date_column = {
             "schema_name": "public",
@@ -599,7 +640,9 @@ class TestGetSnapshotViewData:
         col_names = [f["column"] for f in filters]
         assert "updated_at" in col_names
 
-    def test_not_found(self, org):
+    def test_not_found(
+        self, mock_org_warehouse_model, mock_factory, org
+    ):
         """Viewing nonexistent snapshot raises SnapshotNotFoundError"""
         with pytest.raises(SnapshotNotFoundError):
             ReportService.get_snapshot_view_data(99999, org)
@@ -742,3 +785,183 @@ class TestListSnapshots:
             org, search="Jan", dashboard_title="wrong"
         )
         assert len(result) == 0
+
+
+# ================================================================================
+# Test snapshot isolation — deleting charts/dashboards doesn't affect snapshots
+# ================================================================================
+
+
+@patch("ddpui.core.reports.report_service.WarehouseFactory")
+@patch("ddpui.core.reports.report_service.OrgWarehouse")
+class TestSnapshotIsolation:
+    """Snapshots freeze config at creation time. Deleting the original
+    dashboard or its charts must not affect snapshot view data."""
+
+    def test_deleting_chart_does_not_affect_snapshot(
+        self, mock_org_warehouse_model, mock_factory,
+        sample_snapshot, org, sample_chart
+    ):
+        """After deleting the original chart, get_snapshot_view_data still returns
+        the full frozen chart config."""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        snapshot_id = sample_snapshot.id
+        chart_id = sample_chart.id
+
+        assert str(chart_id) in sample_snapshot.frozen_chart_configs
+
+        sample_chart.delete()
+        assert not Chart.objects.filter(id=chart_id).exists()
+
+        view_data = ReportService.get_snapshot_view_data(snapshot_id, org)
+
+        frozen_charts = view_data["frozen_chart_configs"]
+        assert str(chart_id) in frozen_charts
+        assert frozen_charts[str(chart_id)]["title"] == "Bar Chart"
+        assert frozen_charts[str(chart_id)]["chart_type"] == "bar"
+        assert frozen_charts[str(chart_id)]["schema_name"] == "public"
+        assert frozen_charts[str(chart_id)]["table_name"] == "orders"
+
+    def test_deleting_dashboard_does_not_affect_snapshot(
+        self, mock_org_warehouse_model, mock_factory,
+        sample_snapshot, org, sample_dashboard
+    ):
+        """After deleting the original dashboard, get_snapshot_view_data still
+        returns the full frozen dashboard config."""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        snapshot_id = sample_snapshot.id
+        original_title = sample_dashboard.title
+
+        sample_dashboard.delete()
+        assert not Dashboard.objects.filter(id=sample_dashboard.id).exists()
+
+        view_data = ReportService.get_snapshot_view_data(snapshot_id, org)
+
+        dd = view_data["dashboard_data"]
+        assert dd["title"] == original_title
+        assert dd["dashboard_type"] == "native"
+        assert "components" in dd
+        assert "filters" in dd
+
+        rm = view_data["report_metadata"]
+        assert rm["dashboard_title"] == original_title
+
+    def test_different_datetime_columns_produce_two_filters(
+        self, mock_org_warehouse_model, mock_factory,
+        sample_snapshot, org
+    ):
+        """When the report's date_column differs from the dashboard's existing
+        datetime filter, two datetime filters appear in the view data:
+        one is the original dashboard filter (untouched) and one is the
+        injected display-only filter (locked with the snapshot period)."""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        sample_snapshot.date_column = {
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "updated_at",
+        }
+        sample_snapshot.save(update_fields=["date_column"])
+
+        view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
+
+        filters = view_data["dashboard_data"]["filters"]
+        datetime_filters = [f for f in filters if f.get("filter_type") == "datetime"]
+        assert len(datetime_filters) == 2
+
+        display_filter = datetime_filters[0]
+        assert display_filter["column_name"] == "updated_at"
+        assert display_filter["settings"]["locked"] is True
+        assert display_filter["settings"]["default_start_date"] == "2025-01-01"
+        assert display_filter["settings"]["default_end_date"] == "2025-01-31"
+        assert display_filter["id"] < 0
+
+        original_filter = datetime_filters[1]
+        assert original_filter["column_name"] == "created_at"
+        assert original_filter["settings"].get("locked") is not True
+
+
+# ================================================================================
+# Test cross-table filter injection (new behavior)
+# ================================================================================
+
+
+@patch("ddpui.core.reports.report_service.WarehouseFactory")
+@patch("ddpui.core.reports.report_service.OrgWarehouse")
+class TestCrossTableFilterInjection:
+    """Tests for applying date filters across ALL charts whose table has the
+    date column, not just the anchor table.
+
+    New behavior: any chart whose table has a column with the same
+    name (e.g. created_at) should get filtered.
+    """
+
+    def test_chart_on_different_table_with_same_column_gets_filtered(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
+        """A chart on public.customers (different table) should also get date
+        filters if its table has a 'created_at' column.
+
+        sample_snapshot.date_column = {schema: public, table: orders, column: created_at}
+        """
+        frozen_charts = {
+            "1": {
+                "id": 1,
+                "title": "Orders Chart",
+                "chart_type": "bar",
+                "schema_name": "public",
+                "table_name": "orders",
+                "extra_config": {},
+            },
+            "2": {
+                "id": 2,
+                "title": "Customers Chart",
+                "chart_type": "line",
+                "schema_name": "public",
+                "table_name": "customers",
+                "extra_config": {},
+            },
+        }
+
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = (
+            MagicMock()
+        )
+        mock_wh_client = MagicMock()
+        mock_wh_client.column_exists.return_value = True
+        mock_factory.get_warehouse_client.return_value = mock_wh_client
+
+        ReportService._inject_period_into_chart_configs(frozen_charts, sample_snapshot)
+
+        # Anchor table chart should be filtered
+        orders_filters = frozen_charts["1"]["extra_config"].get("filters", [])
+        assert len(orders_filters) == 2
+
+        # Different table chart should ALSO be filtered
+        customers_filters = frozen_charts["2"]["extra_config"].get("filters", [])
+        assert len(customers_filters) == 2
+        assert customers_filters[0]["column"] == "created_at"
+        assert customers_filters[0]["operator"] == "greater_than_equal"
+        assert customers_filters[1]["operator"] == "less_than_equal"
+
+    def test_view_data_injects_chart_filters_even_when_dashboard_filter_matches(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
+    ):
+        """Even when a dashboard datetime filter matches (filter_matched=True),
+        chart-level filters should still be injected."""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
+
+        frozen_charts = view_data["frozen_chart_configs"]
+        chart = frozen_charts.get("1")
+        assert chart is not None
+
+        filters = chart.get("extra_config", {}).get("filters", [])
+        assert len(filters) == 2  # start + end date filters
+        assert filters[0]["column"] == "created_at"

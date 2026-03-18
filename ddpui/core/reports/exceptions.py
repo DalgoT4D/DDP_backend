@@ -29,3 +29,14 @@ class SnapshotPermissionError(ReportError):
 
     def __init__(self, message: str = "Permission denied"):
         super().__init__(message, "SNAPSHOT_PERMISSION_DENIED")
+
+
+class SnapshotExternalServiceError(ReportError):
+    """Raised when external service (warehouse, etc.) call fails"""
+
+    def __init__(self, service: str, message: str):
+        super().__init__(
+            f"{service} error: {message}",
+            "SNAPSHOT_EXTERNAL_ERROR",
+        )
+        self.service = service

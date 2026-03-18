@@ -1,11 +1,13 @@
 """Public API endpoints - no authentication required"""
 
+import hmac
 import json
 from typing import Optional, List
 import copy
 from datetime import datetime
 
 from ninja import Router, Schema
+from django.conf import settings
 from django.utils import timezone
 from django.db.models import F
 from django.http import StreamingHttpResponse
@@ -1098,8 +1100,24 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
 # =============================================================================
 
 
-def _get_public_report_snapshot(token: str) -> ReportSnapshot:
-    """Helper to lookup a public report snapshot by token. Raises ReportSnapshot.DoesNotExist."""
+def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
+    """Helper to lookup a report snapshot by token.
+
+    If the request carries a valid X-Render-Secret header (matching
+    settings.RENDER_SECRET), the is_public check is skipped. This
+    allows server-side Playwright PDF rendering without toggling
+    the snapshot's public state.
+
+    Raises ReportSnapshot.DoesNotExist if not found.
+    """
+    if request:
+        render_secret = request.META.get("HTTP_X_RENDER_SECRET")
+        expected = getattr(settings, "RENDER_SECRET", None)
+        if render_secret and expected and hmac.compare_digest(render_secret, expected):
+            return ReportSnapshot.objects.select_related("org", "created_by__user").get(
+                public_share_token=token,
+            )
+
     return ReportSnapshot.objects.select_related("org", "created_by__user").get(
         public_share_token=token, is_public=True
     )
@@ -1112,7 +1130,7 @@ def _get_public_report_snapshot(token: str) -> ReportSnapshot:
 def get_public_report(request, token: str):
     """Get public report snapshot view data"""
     try:
-        snapshot = _get_public_report_snapshot(token)
+        snapshot = _get_public_report_snapshot(token, request=request)
 
         # Update access analytics
         ReportSnapshot.objects.filter(id=snapshot.id).update(
@@ -1155,7 +1173,7 @@ def get_public_report(request, token: str):
 def get_public_report_chart_data(request, token: str):
     """Get chart data for a public report (bar/line/pie/number charts)"""
     try:
-        snapshot = _get_public_report_snapshot(token)
+        snapshot = _get_public_report_snapshot(token, request=request)
 
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:
@@ -1187,7 +1205,7 @@ def get_public_report_chart_data(request, token: str):
 def get_public_report_table_data(request, token: str, page: int = 0, limit: int = 100):
     """Get table chart data for a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token)
+        snapshot = _get_public_report_snapshot(token, request=request)
 
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:
@@ -1226,7 +1244,7 @@ def get_public_report_table_data(request, token: str, page: int = 0, limit: int 
 def get_public_report_table_total_rows(request, token: str):
     """Get total row count for table chart in a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token)
+        snapshot = _get_public_report_snapshot(token, request=request)
 
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:
@@ -1256,7 +1274,7 @@ def get_public_report_table_total_rows(request, token: str):
 def get_public_report_map_data(request, token: str):
     """Get map data overlay for a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token)
+        snapshot = _get_public_report_snapshot(token, request=request)
 
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:

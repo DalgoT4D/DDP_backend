@@ -13,6 +13,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilterType
 from ddpui.core.charts.charts_service import execute_query, get_warehouse_client
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core import warehousefunctions as _wh_funcs
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -55,65 +56,6 @@ class FilterPreviewResponse(Schema):
     options: Optional[List[FilterOptionResponse]] = None
     stats: Optional[Dict[str, Any]] = None  # Can be numerical or datetime stats
 
-
-def get_table_columns(warehouse_client, org_warehouse, schema_name, table_name):
-    """Query warehouse information_schema for columns in a table.
-
-    Returns list of dicts with keys: column_name, data_type, is_nullable.
-    Supports Postgres and BigQuery warehouses.
-    Returns empty list for unsupported warehouse types.
-    """
-    query_builder = AggQueryBuilder()
-
-    if org_warehouse.wtype == "postgres":
-        query_builder.add_column(column("column_name"))
-        query_builder.add_column(column("data_type"))
-        query_builder.add_column(column("is_nullable"))
-        query_builder.fetch_from("columns", "information_schema")
-        query_builder.where_clause(column("table_schema") == schema_name)
-        query_builder.where_clause(column("table_name") == table_name)
-        query_builder.order_cols_by([("ordinal_position", "asc")])
-    elif org_warehouse.wtype == "bigquery":
-        query_builder.add_column(column("column_name"))
-        query_builder.add_column(column("data_type"))
-        query_builder.add_column(column("is_nullable"))
-        query_builder.fetch_from(
-            "COLUMNS",
-            f"{org_warehouse.bq_location}.{schema_name}.INFORMATION_SCHEMA",
-        )
-        query_builder.where_clause(column("table_name") == table_name)
-        query_builder.order_cols_by([("ordinal_position", "asc")])
-    else:
-        return []
-
-    return execute_query(warehouse_client, query_builder)
-
-
-def determine_filter_type_from_column(data_type: str) -> str:
-    """Simple filter type determination based on column data type"""
-    data_type_lower = data_type.lower()
-
-    # DateTime patterns
-    datetime_patterns = ["timestamp", "datetime", "date", "timestamptz", "time"]
-    if any(pattern in data_type_lower for pattern in datetime_patterns):
-        return DashboardFilterType.DATETIME.value
-
-    # Numerical patterns
-    numerical_patterns = [
-        "integer",
-        "bigint",
-        "numeric",
-        "decimal",
-        "double",
-        "real",
-        "float",
-        "money",
-    ]
-    if any(pattern in data_type_lower for pattern in numerical_patterns):
-        return DashboardFilterType.NUMERICAL.value
-
-    # Default to value filter for text/categorical
-    return DashboardFilterType.VALUE.value
 
 
 @filter_router.get("/schemas/", response=List[SchemaResponse])
@@ -225,7 +167,7 @@ def list_columns(request, schema_name: str, table_name: str):
 
     try:
         warehouse_client = get_warehouse_client(org_warehouse)
-        results = get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
+        results = _wh_funcs.get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
 
         if not results and org_warehouse.wtype not in ("postgres", "bigquery"):
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")
@@ -242,7 +184,7 @@ def list_columns(request, schema_name: str, table_name: str):
                 normalized_type = "string"
 
             # Determine recommended filter type
-            recommended_filter_type = determine_filter_type_from_column(row["data_type"])
+            recommended_filter_type = _wh_funcs.determine_filter_type_from_column(row["data_type"])
 
             columns.append(
                 ColumnResponse(
