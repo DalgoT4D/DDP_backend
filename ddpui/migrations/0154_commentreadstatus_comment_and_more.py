@@ -16,9 +16,7 @@ class Migration(migrations.Migration):
                 ("id", models.BigAutoField(primary_key=True, serialize=False)),
                 (
                     "target_type",
-                    models.CharField(
-                        choices=[("report", "Report"), ("chart", "Chart")], max_length=20
-                    ),
+                    models.CharField(max_length=20),
                 ),
                 (
                     "chart_id",
@@ -56,9 +54,7 @@ class Migration(migrations.Migration):
                 ("id", models.BigAutoField(primary_key=True, serialize=False)),
                 (
                     "target_type",
-                    models.CharField(
-                        choices=[("chart", "Chart"), ("report", "Report")], max_length=20
-                    ),
+                    models.CharField(max_length=20),
                 ),
                 (
                     "snapshot_chart_id",

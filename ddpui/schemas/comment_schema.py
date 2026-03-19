@@ -111,10 +111,11 @@ class CommentResponse(Schema):
 
 
 class CommentStateEntry(Schema):
-    """State and unread count for a single target"""
+    """State and counts for a single target"""
 
     state: str  # "none" | "unread" | "read" | "mentioned"
-    count: int  # number of unread comments
+    count: int  # total number of comments
+    unread_count: int  # number of unread comments
 
 
 class CommentStatesResponse(Schema):

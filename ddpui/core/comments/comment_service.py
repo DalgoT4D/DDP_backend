@@ -5,7 +5,7 @@ from typing import Optional
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.models.comment import Comment, CommentReadStatus
+from ddpui.models.comment import Comment, CommentReadStatus, CommentTargetType
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -44,9 +44,9 @@ class CommentService:
             target_type=target_type,
         )
 
-        if target_type == "chart" and chart_id is not None:
+        if target_type == CommentTargetType.CHART and chart_id is not None:
             query &= Q(snapshot_chart_id=chart_id)
-        elif target_type == "chart":
+        elif target_type == CommentTargetType.CHART:
             raise CommentValidationError("chart_id is required for chart comments")
 
         comments = list(
@@ -77,7 +77,7 @@ class CommentService:
                 user=orguser,
                 snapshot=snapshot,
                 target_type=target_type,
-                chart_id=chart_id if target_type == "chart" else None,
+                chart_id=chart_id if target_type == CommentTargetType.CHART else None,
             ).first()
             if read_status:
                 last_read_at = read_status.last_read_at
@@ -102,14 +102,14 @@ class CommentService:
         """Create a comment on a report snapshot."""
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
-        if target_type not in ("summary", "chart"):
+        if target_type not in CommentTargetType.ALL:
             raise CommentValidationError(f"Invalid target_type: {target_type}")
 
-        if target_type == "chart" and chart_id is None:
+        if target_type == CommentTargetType.CHART and chart_id is None:
             raise CommentValidationError("chart_id is required for chart comments")
 
         # Validate chart_id exists in frozen_chart_configs
-        if target_type == "chart" and chart_id is not None:
+        if target_type == CommentTargetType.CHART and chart_id is not None:
             if str(chart_id) not in (snapshot.frozen_chart_configs or {}):
                 raise CommentValidationError(
                     f"Chart {chart_id} not found in snapshot {snapshot_id}"
@@ -118,7 +118,7 @@ class CommentService:
         comment = Comment.objects.create(
             target_type=target_type,
             snapshot=snapshot,
-            snapshot_chart_id=chart_id if target_type == "chart" else None,
+            snapshot_chart_id=chart_id if target_type == CommentTargetType.CHART else None,
             content=content,
             author=orguser,
             org=org,
@@ -212,22 +212,26 @@ class CommentService:
         # Group comments by target
         targets = {}  # target_key -> list of (created_at, comment_id)
         for target_type, chart_id, created_at, comment_id in comments:
-            key = "summary" if target_type == "summary" else str(chart_id)
-            if key not in targets:
-                targets[key] = []
-            targets[key].append((created_at, comment_id))
+            if target_type == CommentTargetType.SUMMARY:
+                key = CommentTargetType.SUMMARY
+            elif target_type == CommentTargetType.CHART and chart_id is not None:
+                key = str(chart_id)
+            else:
+                continue  # skip invalid data
+            targets.setdefault(key, []).append((created_at, comment_id))
 
-        # Compute state and count per target
+        # Compute state and counts per target
         states = {}
         for target_key, comment_data in targets.items():
-            if target_key == "summary":
-                rs_key = ("summary", None)
+            if target_key == CommentTargetType.SUMMARY:
+                rs_key = (CommentTargetType.SUMMARY, None)
             else:
-                rs_key = ("chart", int(target_key))
+                rs_key = (CommentTargetType.CHART, int(target_key))
 
             last_read = read_statuses.get(rs_key)
 
             # Count unread comments and check for mentions
+            total_count = len(comment_data)
             unread_count = 0
             has_unread_mention = False
             for created_at, comment_id in comment_data:
@@ -244,7 +248,11 @@ class CommentService:
             else:
                 state = "read"
 
-            states[target_key] = {"state": state, "count": unread_count}
+            states[target_key] = {
+                "state": state,
+                "count": total_count,
+                "unread_count": unread_count,
+            }
 
         return states
 
@@ -263,7 +271,7 @@ class CommentService:
             user=orguser,
             snapshot=snapshot,
             target_type=target_type,
-            chart_id=chart_id if target_type == "chart" else None,
+            chart_id=chart_id if target_type == CommentTargetType.CHART else None,
             defaults={"last_read_at": timezone.now()},
         )
 

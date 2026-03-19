@@ -6,17 +6,21 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.report import ReportSnapshot
 
 
+class CommentTargetType:
+    """Application-level enum for comment target types"""
+
+    CHART = "chart"
+    SUMMARY = "summary"
+
+    ALL = [CHART, SUMMARY]
+
+
 class Comment(models.Model):
     """Comment on a chart or executive summary within a report snapshot"""
 
-    TARGET_CHOICES = [
-        ("chart", "Chart"),
-        ("summary", "Summary"),
-    ]
-
     id = models.BigAutoField(primary_key=True)
 
-    target_type = models.CharField(max_length=20, choices=TARGET_CHOICES)
+    target_type = models.CharField(max_length=20)
     snapshot = models.ForeignKey(
         ReportSnapshot,
         on_delete=models.CASCADE,
@@ -24,7 +28,7 @@ class Comment(models.Model):
         blank=True,
         related_name="comments",
     )
-    # For report comments targeting a specific chart within a snapshot.
+    # For comments targeting a specific chart within a snapshot.
     # This is an integer referencing a key in frozen_chart_configs, NOT a FK.
     snapshot_chart_id = models.IntegerField(
         null=True,
@@ -74,10 +78,7 @@ class CommentReadStatus(models.Model):
     snapshot = models.ForeignKey(
         ReportSnapshot, on_delete=models.CASCADE, related_name="comment_read_statuses"
     )
-    target_type = models.CharField(
-        max_length=20,
-        choices=[("chart", "Chart"), ("summary", "Summary")],
-    )
+    target_type = models.CharField(max_length=20)
     chart_id = models.IntegerField(
         null=True,
         blank=True,
