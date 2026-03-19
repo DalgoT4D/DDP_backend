@@ -16,6 +16,7 @@ from ddpui.models.dashboard import (
     DashboardLock,
     DashboardFilterType,
 )
+from ddpui.models.dashboard_chat import DashboardAIContext
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
@@ -47,11 +48,30 @@ from ddpui.schemas.dashboard_schema import (
     DashboardShareStatus,
     LandingPageResponse,
     LandingPageResolveResponse,
+    DashboardAIContextResponse,
+    UpdateDashboardAIContextSchema,
 )
 
 logger = CustomLogger("ddpui")
 
 dashboard_native_router = Router()
+
+
+def _get_or_create_dashboard_ai_context(dashboard: Dashboard):
+    context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
+    return context
+
+
+def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAIContext):
+    org_dbt = dashboard.org.dbt
+    return DashboardAIContextResponse(
+        dashboard_id=dashboard.id,
+        dashboard_title=dashboard.title,
+        dashboard_context_markdown=context.markdown,
+        dashboard_context_updated_by=context.updated_by.user.email if context.updated_by else None,
+        dashboard_context_updated_at=context.updated_at,
+        vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+    )
 
 
 # Endpoints
@@ -100,6 +120,53 @@ def export_dashboard(request, dashboard_id: int):
         return DashboardService.export_dashboard_context(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
+
+
+@dashboard_native_router.get(
+    "/{dashboard_id}/ai-context/",
+    response=DashboardAIContextResponse,
+)
+@has_permission(["can_manage_org_settings"])
+def get_dashboard_ai_context(request, dashboard_id: int):
+    """Load dashboard-level AI context settings for settings management."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    context = _get_or_create_dashboard_ai_context(dashboard)
+
+    return _serialize_dashboard_ai_context(dashboard, context)
+
+
+@dashboard_native_router.put(
+    "/{dashboard_id}/ai-context/",
+    response=DashboardAIContextResponse,
+)
+@has_permission(["can_manage_org_settings"])
+@transaction.atomic
+def update_dashboard_ai_context(
+    request,
+    dashboard_id: int,
+    payload: UpdateDashboardAIContextSchema,
+):
+    """Update dashboard-level AI context markdown for settings management."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    context = _get_or_create_dashboard_ai_context(dashboard)
+    context.markdown = payload.dashboard_context_markdown
+    context.updated_by = orguser
+    context.updated_at = timezone.now()
+    context.save()
+
+    return _serialize_dashboard_ai_context(dashboard, context)
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
