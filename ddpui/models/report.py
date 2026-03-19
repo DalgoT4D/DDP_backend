@@ -11,7 +11,6 @@ class SnapshotStatus(str, Enum):
 
     GENERATED = "generated"
     VIEWED = "viewed"
-    ARCHIVED = "archived"
 
     @classmethod
     def choices(cls):
