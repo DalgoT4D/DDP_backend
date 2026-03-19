@@ -11,7 +11,7 @@ from django.utils import timezone
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.report import ReportSnapshot, SnapshotStatus
+from ddpui.models.report import ReportSnapshot
 from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
@@ -401,11 +401,6 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        # Mark as viewed
-        if snapshot.status == SnapshotStatus.GENERATED.value:
-            snapshot.status = SnapshotStatus.VIEWED.value
-            snapshot.save(update_fields=["status"])
-
         # Build dashboard-like response from frozen dashboard
         # No dashboard_id — snapshot is fully self-contained
         # Deep-copy so we never mutate the stored frozen_dashboard
@@ -441,7 +436,6 @@ class ReportService:
             "period_start": snapshot.period_start,
             "period_end": snapshot.period_end,
             "summary": snapshot.summary,
-            "status": snapshot.status,
             "created_at": snapshot.created_at,
             "updated_at": snapshot.updated_at,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,

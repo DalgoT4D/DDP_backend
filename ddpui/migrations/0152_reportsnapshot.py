@@ -56,18 +56,6 @@ class Migration(migrations.Migration):
                         null=True,
                     ),
                 ),
-                (
-                    "status",
-                    models.CharField(
-                        choices=[
-                            ("generated", "GENERATED"),
-                            ("viewed", "VIEWED"),
-                            ("archived", "ARCHIVED"),
-                        ],
-                        default="generated",
-                        max_length=20,
-                    ),
-                ),
                 ("is_public", models.BooleanField(default=False)),
                 (
                     "public_share_token",

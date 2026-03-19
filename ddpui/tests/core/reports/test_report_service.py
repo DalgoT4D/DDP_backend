@@ -28,7 +28,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
-from ddpui.models.report import ReportSnapshot, SnapshotStatus
+from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.schemas.report_schema import SnapshotUpdate
@@ -554,36 +554,18 @@ class TestGetSnapshot:
 class TestGetSnapshotViewData:
     """Tests for ReportService.get_snapshot_view_data"""
 
-    def test_marks_generated_as_viewed(
+    def test_view_data_returns_expected_keys(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
     ):
+        """get_snapshot_view_data returns dashboard_data, report_metadata, frozen_chart_configs"""
         mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
         mock_factory.get_warehouse_client.return_value = MagicMock()
-        """A generated snapshot is marked as viewed after get_snapshot_view_data"""
-        assert sample_snapshot.status == SnapshotStatus.GENERATED.value
 
         view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
 
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
         assert "dashboard_data" in view_data
         assert "report_metadata" in view_data
         assert "frozen_chart_configs" in view_data
-
-    def test_already_viewed_stays_viewed(
-        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
-    ):
-        """A viewed snapshot stays viewed"""
-        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
-        mock_factory.get_warehouse_client.return_value = MagicMock()
-
-        sample_snapshot.status = SnapshotStatus.VIEWED.value
-        sample_snapshot.save(update_fields=["status"])
-
-        ReportService.get_snapshot_view_data(sample_snapshot.id, org)
-
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
 
     def test_view_data_structure(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org

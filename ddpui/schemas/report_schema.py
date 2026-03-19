@@ -50,7 +50,6 @@ class SnapshotResponse(Schema):
     date_column: Optional[Dict[str, str]]
     period_start: Optional[date]
     period_end: date
-    status: str
     summary: Optional[str]
     created_by: Optional[str]
     created_at: datetime
@@ -66,7 +65,6 @@ class SnapshotResponse(Schema):
             date_column=snapshot.date_column or None,
             period_start=snapshot.period_start,
             period_end=snapshot.period_end,
-            status=snapshot.status,
             summary=snapshot.summary,
             created_by=snapshot.created_by.user.email if snapshot.created_by else None,
             created_at=snapshot.created_at,
