@@ -678,5 +678,13 @@
             "name": "Can Delete Alerts",
             "slug": "can_delete_alerts"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 86,
+        "fields": {
+            "name": "Can Manage Organization Settings",
+            "slug": "can_manage_org_settings"
+        }
     }
 ]
