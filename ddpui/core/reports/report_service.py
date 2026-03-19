@@ -5,6 +5,7 @@ import secrets
 from typing import Optional, List, Dict, Any
 from datetime import date
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -627,8 +628,6 @@ class ReportService:
     @staticmethod
     def _build_public_url(token: str) -> str:
         """Build the public share URL for a report snapshot."""
-        from django.conf import settings
-
         frontend_url_v2 = getattr(settings, "FRONTEND_URL_V2", None)
         frontend_url = frontend_url_v2 or getattr(
             settings, "FRONTEND_URL", "http://localhost:3001"
