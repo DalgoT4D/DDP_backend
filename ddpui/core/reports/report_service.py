@@ -16,7 +16,7 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.report_schema import DatetimeColumnResponse
+from ddpui.schemas.report_schema import DatetimeColumnResponse, SnapshotUpdate
 
 from .exceptions import (
     SnapshotNotFoundError,
@@ -27,7 +27,6 @@ from .exceptions import (
 
 logger = CustomLogger("ddpui.core.reports")
 
-ALLOWED_UPDATE_FIELDS = {"summary"}
 
 
 class ReportService:
@@ -456,34 +455,26 @@ class ReportService:
         }
 
     @staticmethod
-    def update_snapshot(snapshot_id: int, org: Org, **fields) -> ReportSnapshot:
+    def update_snapshot(
+        snapshot_id: int, org: Org, data: SnapshotUpdate
+    ) -> ReportSnapshot:
         """Update mutable fields on a snapshot.
-
-        Only allows updates to fields in ALLOWED_UPDATE_FIELDS (currently: summary).
-        Frozen dashboard and chart configs cannot be modified after creation.
 
         Args:
             snapshot_id: The snapshot ID to update
             org: The organization to filter by
-            **fields: Field names and values to update (must be in ALLOWED_UPDATE_FIELDS)
+            data: Validated update payload
 
         Returns:
             ReportSnapshot: The updated snapshot instance
 
         Raises:
             SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
-            SnapshotValidationError: If attempting to update a non-editable field
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
-        update_fields = []
-        for field, value in fields.items():
-            if field not in ALLOWED_UPDATE_FIELDS:
-                raise SnapshotValidationError(f"Field '{field}' is not editable")
-            if value is not None:
-                setattr(snapshot, field, value)
-                update_fields.append(field)
-        if update_fields:
-            snapshot.save(update_fields=update_fields)
+        if data.summary is not None:
+            snapshot.summary = data.summary
+            snapshot.save(update_fields=["summary"])
         return snapshot
 
     @staticmethod

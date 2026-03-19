@@ -31,6 +31,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot, SnapshotStatus
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
+from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
     SnapshotValidationError,
@@ -475,30 +476,25 @@ class TestFreezeChartConfigs:
 class TestUpdateSnapshot:
     """Tests for ReportService.update_snapshot"""
 
-    def test_update_allowed_field(self, sample_snapshot, org):
+    def test_update_summary(self, sample_snapshot, org):
         """Updating 'summary' succeeds"""
-        updated = ReportService.update_snapshot(
-            sample_snapshot.id, org, summary="New summary"
-        )
+        data = SnapshotUpdate(summary="New summary")
+        updated = ReportService.update_snapshot(sample_snapshot.id, org, data)
         assert updated.summary == "New summary"
-
-    def test_update_disallowed_field_raises(self, sample_snapshot, org):
-        """Updating a non-editable field raises SnapshotValidationError"""
-        with pytest.raises(SnapshotValidationError) as exc_info:
-            ReportService.update_snapshot(sample_snapshot.id, org, title="New title")
-        assert "not editable" in str(exc_info.value)
 
     def test_update_not_found_raises(self, org):
         """Updating nonexistent snapshot raises SnapshotNotFoundError"""
+        data = SnapshotUpdate(summary="test")
         with pytest.raises(SnapshotNotFoundError):
-            ReportService.update_snapshot(99999, org, summary="test")
+            ReportService.update_snapshot(99999, org, data)
 
     def test_update_with_none_value_skips(self, sample_snapshot, org):
         """Updating with None value does not change the field"""
         sample_snapshot.summary = "Original"
         sample_snapshot.save(update_fields=["summary"])
 
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, summary=None)
+        data = SnapshotUpdate(summary=None)
+        updated = ReportService.update_snapshot(sample_snapshot.id, org, data)
         assert updated.summary == "Original"
 
 

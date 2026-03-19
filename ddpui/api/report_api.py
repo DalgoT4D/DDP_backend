@@ -105,7 +105,7 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     orguser: OrgUser = request.orguser
     try:
         snapshot = ReportService.update_snapshot(
-            snapshot_id, orguser.org, **payload.dict(exclude_none=True)
+            snapshot_id, orguser.org, payload
         )
         return api_response(
             success=True,
@@ -114,8 +114,6 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
         )
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
-    except SnapshotValidationError as err:
-        raise HttpError(400, str(err)) from err
 
 
 @report_router.delete("/{snapshot_id}/", response=ApiResponse[SnapshotDeleteResponse])
