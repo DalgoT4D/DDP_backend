@@ -181,3 +181,15 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str]
     dashboard_type: Optional[str]
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Dashboard Export Schemas
+# =============================================================================
+
+
+class DashboardExportResponse(Schema):
+    """Response schema for exporting dashboard context and referenced charts"""
+
+    dashboard: DashboardResponse
+    charts: List[dict]

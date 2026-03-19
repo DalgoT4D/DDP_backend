@@ -986,6 +986,50 @@ class DashboardService:
 
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
+    @staticmethod
+    def export_dashboard_context(dashboard_id: int, org: Org) -> Dict[str, Any]:
+        """Return dashboard data along with the full config for referenced charts."""
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+        dashboard_response = DashboardService.get_dashboard_response(dashboard)
+
+        charts = []
+        for component_data in (dashboard.components or {}).values():
+            if component_data.get("type") != DashboardComponentType.CHART.value:
+                continue
+
+            chart_id = component_data.get("config", {}).get("chartId")
+            if not chart_id:
+                continue
+
+            try:
+                chart = Chart.objects.get(id=chart_id, org=org)
+            except Chart.DoesNotExist:
+                logger.warning(
+                    "Chart %s referenced by dashboard %s was not found",
+                    chart_id,
+                    dashboard_id,
+                )
+                continue
+
+            charts.append(
+                {
+                    "id": chart.id,
+                    "title": chart.title,
+                    "description": chart.description,
+                    "chart_type": chart.chart_type,
+                    "schema_name": chart.schema_name,
+                    "table_name": chart.table_name,
+                    "extra_config": chart.extra_config or {},
+                    "created_at": chart.created_at.isoformat(),
+                    "updated_at": chart.updated_at.isoformat(),
+                }
+            )
+
+        return {
+            "dashboard": dashboard_response,
+            "charts": charts,
+        }
+
 
 def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:
     """
