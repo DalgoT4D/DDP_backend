@@ -131,7 +131,7 @@ class ReportService:
         }
 
         # Try to find and enrich the matching datetime filter
-        for f in filters:
+        for i, f in enumerate(filters):
             if (
                 f.get("filter_type") == "datetime"
                 and f.get("schema_name") == date_col.get("schema_name")
@@ -141,6 +141,9 @@ class ReportService:
                 settings = f.get("settings") or {}
                 settings.update(period_settings)
                 f["settings"] = settings
+                # Move the locked filter to the front so users see it first
+                if i > 0:
+                    filters.insert(0, filters.pop(i))
                 return True
 
         # No matching dashboard filter — inject a display-only filter.
