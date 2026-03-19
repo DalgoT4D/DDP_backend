@@ -42,6 +42,7 @@ from ddpui.models.org import (
 from ddpui.models.airbyte import AirbyteJob
 
 from ddpui.models.org_user import OrgUser
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.tasks import (
     TaskLock,
     OrgTask,
@@ -96,13 +97,17 @@ from ddpui.ddpprefect import (
 )
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
+from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionService
 from ddpui.utils.helpers import (
     find_key_in_dictionary,
     convert_sqlalchemy_rows_to_csv_string,
 )
+from ddpui.utils.redis_client import RedisClient
+from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
+DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
 @app.task(bind=True)
@@ -1254,6 +1259,84 @@ def clear_stuck_locks():
     return processed_count
 
 
+def _get_dashboard_chat_context_build_orgs():
+    """Return orgs that are eligible for scheduled dashboard chat context builds."""
+    candidate_orgs = (
+        Org.objects.select_related("dbt", "preferences")
+        .filter(
+            dbt__isnull=False,
+            preferences__ai_data_sharing_enabled=True,
+        )
+        .order_by("id")
+    )
+    return [
+        org
+        for org in candidate_orgs
+        if get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
+    ]
+
+
+def _dashboard_chat_context_build_lock_key(org_id: int) -> str:
+    """Build the Redis lock key for an org's scheduled context build."""
+    return f"dashboard_chat_context_build:{org_id}"
+
+
+@app.task
+def schedule_dashboard_chat_context_builds():
+    """Fan out one dashboard chat context-build task per eligible org."""
+    enqueued_org_ids: list[int] = []
+    for org in _get_dashboard_chat_context_build_orgs():
+        build_dashboard_chat_context_for_org.delay(org.id)
+        enqueued_org_ids.append(org.id)
+
+    logger.info("enqueued dashboard chat context builds for org ids=%s", enqueued_org_ids)
+    return {"enqueued_org_ids": enqueued_org_ids}
+
+
+@app.task(bind=True)
+def build_dashboard_chat_context_for_org(self, org_id: int):
+    """Build dashboard chat retrieval context for one org if the org is eligible."""
+    org = (
+        Org.objects.select_related("dbt", "preferences")
+        .filter(id=org_id, dbt__isnull=False)
+        .first()
+    )
+    if org is None:
+        logger.warning("dashboard chat context build skipped: org %s not found or missing dbt", org_id)
+        return {"status": "skipped_missing_org", "org_id": org_id}
+
+    preferences = OrgPreferences.objects.filter(org=org).first()
+    feature_enabled = get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
+    if not feature_enabled or preferences is None or not preferences.ai_data_sharing_enabled:
+        logger.info("dashboard chat context build skipped for org=%s because it is not eligible", org_id)
+        return {"status": "skipped_ineligible", "org_id": org_id}
+
+    redis_client = RedisClient.get_instance()
+    lock = redis_client.lock(
+        _dashboard_chat_context_build_lock_key(org_id),
+        timeout=DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS,
+    )
+    if not lock.acquire(blocking=False):
+        logger.info("dashboard chat context build skipped for org=%s because a rebuild is already running", org_id)
+        return {"status": "skipped_locked", "org_id": org_id}
+
+    try:
+        result = DashboardChatIngestionService().ingest_org(org)
+        return {
+            "status": "completed",
+            "org_id": org_id,
+            "docs_generated_at": result.docs_generated_at.isoformat(),
+            "vector_last_ingested_at": result.vector_ingested_at.isoformat(),
+            "source_document_counts": result.source_document_counts,
+        }
+    finally:
+        try:
+            if lock.owned():
+                lock.release()
+        except Exception:
+            logger.exception("failed to release dashboard chat context build lock for org=%s", org_id)
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1280,6 +1363,12 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour="*/6"),
         sync_flow_runs_of_deployments.s(),
         name="sync flow runs of deployments into our db",
+    )
+
+    sender.add_periodic_task(
+        crontab(minute=0, hour="*/3"),
+        schedule_dashboard_chat_context_builds.s(),
+        name="build dashboard chat context",
     )
 
     if os.getenv("ADMIN_EMAIL"):
