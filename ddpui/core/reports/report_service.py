@@ -16,7 +16,12 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.report_schema import DatetimeColumnResponse, SnapshotUpdate
+from ddpui.schemas.report_schema import (
+    DatetimeColumnResponse,
+    FrozenChartConfig,
+    FrozenDashboardConfig,
+    SnapshotUpdate,
+)
 
 from .exceptions import (
     SnapshotNotFoundError,
@@ -309,8 +314,13 @@ class ReportService:
                     f"(type: {target_col['data_type']})"
                 )
 
-        frozen_dashboard = ReportService._freeze_dashboard(dashboard)
-        frozen_chart_configs = ReportService._freeze_chart_configs(dashboard)
+        frozen_dashboard = FrozenDashboardConfig(
+            **ReportService._freeze_dashboard(dashboard)
+        ).dict()
+        frozen_chart_configs = {
+            k: FrozenChartConfig(**v).dict()
+            for k, v in ReportService._freeze_chart_configs(dashboard).items()
+        }
 
         snapshot = ReportSnapshot.objects.create(
             title=title,
