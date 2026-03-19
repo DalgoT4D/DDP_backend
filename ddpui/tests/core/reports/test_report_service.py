@@ -218,6 +218,31 @@ class TestInjectPeriodIntoFilters:
         assert dt_filter["settings"]["default_start_date"] == "2025-01-01"
         assert dt_filter["settings"]["default_end_date"] == "2025-01-31"
 
+    def test_matching_filter_moved_to_front(self, sample_snapshot):
+        """When a matching datetime filter is not first, it should be moved to position 0"""
+        frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
+        # Insert a value filter before the datetime filter so it's not at index 0
+        frozen["filters"].insert(0, {
+            "id": 999,
+            "filter_type": "value",
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "status",
+            "settings": {},
+            "order": 0,
+        })
+        # The datetime filter is now at index 1
+        assert frozen["filters"][1]["column_name"] == "created_at"
+
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
+
+        assert result is True
+        # The locked datetime filter should now be first
+        assert frozen["filters"][0]["column_name"] == "created_at"
+        assert frozen["filters"][0]["settings"]["locked"] is True
+        # The value filter should be second
+        assert frozen["filters"][1]["column_name"] == "status"
+
     def test_no_matching_filter_injects_display_filter(self, sample_snapshot):
         """When no matching filter exists, a display-only filter is injected"""
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
