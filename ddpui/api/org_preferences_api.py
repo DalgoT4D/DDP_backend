@@ -50,6 +50,12 @@ def _is_dashboard_chat_feature_enabled(org) -> bool:
     return get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
 
 
+def _ensure_dashboard_chat_feature_enabled(org) -> None:
+    """Hide dashboard chat management APIs unless the feature flag is enabled."""
+    if not _is_dashboard_chat_feature_enabled(org):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+
+
 def _is_dbt_configured(org) -> bool:
     return org.dbt is not None
 
@@ -213,6 +219,7 @@ def get_ai_dashboard_chat_settings(request):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
+    _ensure_dashboard_chat_feature_enabled(org)
     org_preferences = _get_or_create_org_preferences(org)
     org_context = _get_or_create_org_ai_context(org)
 
@@ -230,8 +237,14 @@ def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChat
     orguser: OrgUser = request.orguser
     org = orguser.org
 
+    _ensure_dashboard_chat_feature_enabled(org)
     org_preferences = _get_or_create_org_preferences(org)
     org_context = _get_or_create_org_ai_context(org)
+    target_ai_data_sharing_enabled = (
+        payload.ai_data_sharing_enabled
+        if payload.ai_data_sharing_enabled is not None
+        else org_preferences.ai_data_sharing_enabled
+    )
 
     if (
         payload.ai_data_sharing_enabled is True
@@ -244,6 +257,11 @@ def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChat
         org_preferences.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
 
     if payload.org_context_markdown is not None:
+        if not target_ai_data_sharing_enabled:
+            raise HttpError(
+                409,
+                "Enable AI data sharing before updating organization AI context",
+            )
         org_context.markdown = payload.org_context_markdown
         org_context.updated_by = orguser
         org_context.updated_at = timezone.now()

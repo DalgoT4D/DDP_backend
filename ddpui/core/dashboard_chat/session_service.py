@@ -42,6 +42,7 @@ def get_or_create_dashboard_chat_session(
     session = DashboardChatSession.objects.filter(
         session_id=session_uuid,
         org=orguser.org,
+        orguser=orguser,
         dashboard=dashboard,
     ).first()
     if session is None:

@@ -11,6 +11,7 @@ from ddpui.core.dashboard_chat.allowlist import (
     DashboardChatAllowlistBuilder,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig
+from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.llm_client import (
     DashboardChatLlmClient,
     OpenAIDashboardChatLlmClient,
@@ -105,8 +106,10 @@ class DashboardChatRuntime:
         llm_client: DashboardChatLlmClient | None = None,
         warehouse_tools_factory: Callable[[Org], DashboardChatWarehouseTools] | None = None,
         runtime_config: DashboardChatRuntimeConfig | None = None,
+        source_config: DashboardChatSourceConfig | None = None,
     ):
         self.runtime_config = runtime_config or DashboardChatRuntimeConfig.from_env()
+        self.source_config = source_config or DashboardChatSourceConfig.from_env()
         self.vector_store = vector_store or ChromaDashboardChatVectorStore()
         self.llm_client = llm_client or OpenAIDashboardChatLlmClient(
             model=self.runtime_config.llm_model,
@@ -230,25 +233,31 @@ class DashboardChatRuntime:
         dashboard_results = self._query_vector_store(
             org=org,
             query_text=state["user_query"],
-            source_types=[
+            source_types=self.source_config.filter_enabled(
+                [
                 DashboardChatSourceType.DASHBOARD_EXPORT.value,
                 DashboardChatSourceType.DASHBOARD_CONTEXT.value,
-            ],
+                ]
+            ),
             dashboard_id=state["dashboard_id"],
         )
         org_results = self._query_vector_store(
             org=org,
             query_text=state["user_query"],
-            source_types=[DashboardChatSourceType.ORG_CONTEXT.value],
+            source_types=self.source_config.filter_enabled(
+                [DashboardChatSourceType.ORG_CONTEXT.value]
+            ),
         )
         dbt_results = self._filter_allowlisted_dbt_results(
             self._query_vector_store(
                 org=org,
                 query_text=state["user_query"],
-                source_types=[
+                source_types=self.source_config.filter_enabled(
+                    [
                     DashboardChatSourceType.DBT_MANIFEST.value,
                     DashboardChatSourceType.DBT_CATALOG.value,
-                ],
+                    ]
+                ),
             ),
             state["allowlist"],
         )
@@ -721,14 +730,20 @@ class DashboardChatRuntime:
         query_text: str,
     ) -> list[DashboardChatRelatedDashboard]:
         """Suggest other dashboards with matching retrieved context."""
+        related_dashboard_source_types = self.source_config.filter_enabled(
+            [
+                DashboardChatSourceType.DASHBOARD_CONTEXT.value,
+                DashboardChatSourceType.DASHBOARD_EXPORT.value,
+            ]
+        )
+        if not related_dashboard_source_types:
+            return []
+
         related_results = self.vector_store.query(
             org.id,
             query_text=query_text,
             n_results=self.runtime_config.related_dashboard_limit * 4,
-            source_types=[
-                DashboardChatSourceType.DASHBOARD_CONTEXT.value,
-                DashboardChatSourceType.DASHBOARD_EXPORT.value,
-            ],
+            source_types=related_dashboard_source_types,
         )
         candidate_dashboard_ids = [
             result.metadata.get("dashboard_id")

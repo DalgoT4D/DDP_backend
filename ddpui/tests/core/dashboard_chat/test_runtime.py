@@ -13,7 +13,7 @@ django.setup()
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.dashboard_chat.allowlist import DashboardChatAllowlist, DashboardChatAllowlistBuilder
-from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig
+from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.runtime import DashboardChatRuntime
 from ddpui.core.dashboard_chat.runtime_types import (
     DashboardChatConversationMessage,
@@ -191,6 +191,24 @@ class SqlPathLlm:
         return "Education has 120 beneficiaries on the current dashboard."
 
 
+class PiiSqlPathLlm(SqlPathLlm):
+    """LLM stub that generates an unsafe row-level PII query."""
+
+    def generate_sql(
+        self,
+        user_query,
+        dashboard_summary,
+        query_plan,
+        schema_prompt,
+        distinct_values,
+        allowlisted_tables,
+    ):
+        return DashboardChatSqlDraft(
+            sql="SELECT email FROM analytics.program_reach LIMIT 25",
+            reason="Returns raw email addresses.",
+        )
+
+
 @pytest.fixture
 def org():
     organization = Org.objects.create(
@@ -353,6 +371,25 @@ def test_sql_guard_enforces_single_statement_allowlist_and_limit():
     assert any("No LIMIT clause found" in warning for warning in allowed_query.warnings)
 
 
+def test_sql_guard_rejects_row_level_pii_queries():
+    """SQL guard should reject row-level projections of sensitive fields."""
+    allowlist = DashboardChatAllowlist(allowed_tables={"analytics.program_reach"})
+    guard = DashboardChatSqlGuard(allowlist=allowlist, max_rows=200)
+
+    pii_query = guard.validate(
+        "SELECT email, COUNT(*) AS beneficiary_count "
+        "FROM analytics.program_reach "
+        "GROUP BY email "
+        "LIMIT 50"
+    )
+
+    assert pii_query.is_valid is False
+    assert pii_query.sanitized_sql is None
+    assert pii_query.errors == [
+        "Queries returning row-level sensitive data are not allowed. Please aggregate the results or rephrase."
+    ]
+
+
 def test_runtime_context_query_returns_citations_and_related_dashboards(
     org,
     primary_dashboard,
@@ -472,3 +509,116 @@ def test_runtime_data_query_uses_distinct_values_before_sql_execution(
     assert response.sql is not None
     assert response.metadata["query_plan_mode"] == "sql"
     assert any(citation.source_type == "warehouse_table" for citation in response.citations)
+
+
+def test_runtime_rejects_row_level_pii_queries_before_execution(org, primary_dashboard):
+    """Unsafe PII SQL should never reach warehouse execution."""
+    transaction.commit()
+    vector_store = FakeVectorStore(
+        [
+            DashboardChatVectorQueryResult(
+                document_id="doc-dashboard-export",
+                content="Chart id: 1. Data source: analytics.program_reach.",
+                metadata={
+                    "source_type": "dashboard_export",
+                    "source_identifier": f"dashboard:{primary_dashboard.id}:chart:1",
+                    "dashboard_id": primary_dashboard.id,
+                },
+                distance=0.01,
+            )
+        ]
+    )
+    fake_warehouse = FakeWarehouseTools()
+
+    runtime = DashboardChatRuntime(
+        vector_store=vector_store,
+        llm_client=PiiSqlPathLlm(),
+        warehouse_tools_factory=lambda org: fake_warehouse,
+        runtime_config=DashboardChatRuntimeConfig(
+            retrieval_limit=6,
+            related_dashboard_limit=2,
+            max_query_rows=200,
+            max_distinct_values=20,
+            max_schema_tables=4,
+        ),
+    )
+
+    response = runtime.run(
+        org=org,
+        dashboard_id=primary_dashboard.id,
+        user_query="List email addresses for this dashboard",
+    )
+
+    assert fake_warehouse.executed_sql == []
+    assert response.sql is None
+    assert response.sql_results is None
+    assert "aggregate the results or rephrase" in response.answer_text
+    assert response.metadata["sql_guard_errors"] == [
+        "Queries returning row-level sensitive data are not allowed. Please aggregate the results or rephrase."
+    ]
+
+
+def test_runtime_skips_disabled_source_types_during_retrieval(org, primary_dashboard, related_dashboard):
+    """Disabled source types should not be queried from the vector store."""
+    transaction.commit()
+    vector_store = FakeVectorStore(
+        [
+            DashboardChatVectorQueryResult(
+                document_id="doc-dashboard-context",
+                content="This dashboard tracks monthly reach across programs.",
+                metadata={
+                    "source_type": "dashboard_context",
+                    "source_identifier": f"dashboard:{primary_dashboard.id}:context",
+                    "dashboard_id": primary_dashboard.id,
+                },
+                distance=0.02,
+            ),
+            DashboardChatVectorQueryResult(
+                document_id="doc-org-context",
+                content="Dalgo supports NGO dashboards and program reporting.",
+                metadata={
+                    "source_type": "org_context",
+                    "source_identifier": f"org:{org.id}:context",
+                },
+                distance=0.04,
+            ),
+            DashboardChatVectorQueryResult(
+                document_id="doc-related-dashboard",
+                content="This dashboard shows donor-wise funding and cashflow trends.",
+                metadata={
+                    "source_type": "dashboard_export",
+                    "source_identifier": f"dashboard:{related_dashboard.id}:summary",
+                    "dashboard_id": related_dashboard.id,
+                },
+                distance=0.05,
+            ),
+        ]
+    )
+
+    runtime = DashboardChatRuntime(
+        vector_store=vector_store,
+        llm_client=ContextOnlyLlm(),
+        runtime_config=DashboardChatRuntimeConfig(
+            retrieval_limit=6,
+            related_dashboard_limit=2,
+            max_query_rows=200,
+            max_distinct_values=20,
+            max_schema_tables=4,
+        ),
+        source_config=DashboardChatSourceConfig(
+            enabled_source_types=(
+                "dashboard_context",
+                "dashboard_export",
+            )
+        ),
+    )
+
+    runtime.run(
+        org=org,
+        dashboard_id=primary_dashboard.id,
+        user_query="Explain the reach metric",
+    )
+
+    queried_source_groups = [tuple(call["source_types"]) for call in vector_store.calls]
+    assert ("org_context",) not in queried_source_groups
+    assert ("dbt_manifest", "dbt_catalog") not in queried_source_groups

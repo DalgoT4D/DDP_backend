@@ -1,7 +1,10 @@
 """Configuration helpers for dashboard chat infrastructure."""
 
 from dataclasses import dataclass
+from enum import Enum
 import os
+
+from ddpui.core.dashboard_chat.vector_documents import DashboardChatSourceType
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
@@ -9,6 +12,50 @@ def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_csv_env(value: str | None) -> tuple[str, ...] | None:
+    """Parse a comma-separated env var into a normalized tuple."""
+    if value is None:
+        return None
+    parsed_values = tuple(
+        item.strip().lower() for item in value.split(",") if item and item.strip()
+    )
+    return parsed_values or None
+
+
+@dataclass(frozen=True)
+class DashboardChatSourceConfig:
+    """Environment-backed enablement for retrieval source types."""
+
+    enabled_source_types: tuple[str, ...] = tuple(
+        source_type.value for source_type in DashboardChatSourceType
+    )
+
+    @classmethod
+    def from_env(cls) -> "DashboardChatSourceConfig":
+        """Build source-type config from environment variables."""
+        env_value = _parse_csv_env(os.getenv("AI_DASHBOARD_CHAT_ENABLED_SOURCE_TYPES"))
+        return cls(
+            enabled_source_types=env_value
+            or tuple(source_type.value for source_type in DashboardChatSourceType)
+        )
+
+    def is_enabled(self, source_type: DashboardChatSourceType | str) -> bool:
+        """Return whether the given source type should participate in runtime work."""
+        source_type_value = source_type.value if isinstance(source_type, Enum) else source_type
+        return source_type_value in self.enabled_source_types
+
+    def filter_enabled(
+        self,
+        source_types: list[DashboardChatSourceType | str] | tuple[DashboardChatSourceType | str, ...],
+    ) -> list[str]:
+        """Keep only the configured source types from a requested set."""
+        return [
+            source_type.value if isinstance(source_type, Enum) else source_type
+            for source_type in source_types
+            if self.is_enabled(source_type)
+        ]
 
 
 @dataclass(frozen=True)

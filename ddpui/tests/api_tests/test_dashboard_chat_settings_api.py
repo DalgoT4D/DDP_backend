@@ -146,6 +146,7 @@ def test_get_ai_dashboard_chat_settings_returns_enveloped_response(orguser, seed
 
 def test_update_ai_dashboard_chat_settings_stamps_consent_and_context(orguser, seed_db):
     request = mock_request(orguser)
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
     payload = UpdateOrgAIDashboardChatSchema(
         ai_data_sharing_enabled=True,
         org_context_markdown="## Org context",
@@ -216,6 +217,7 @@ def test_get_ai_dashboard_chat_settings_requires_permission(guest_orguser, seed_
 
 def test_get_dashboard_ai_context_returns_direct_payload(orguser, dashboard, seed_db):
     request = mock_request(orguser)
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
 
     response = get_dashboard_ai_context(request, dashboard.id)
 
@@ -228,6 +230,13 @@ def test_get_dashboard_ai_context_returns_direct_payload(orguser, dashboard, see
 
 def test_update_dashboard_ai_context_persists_context(orguser, dashboard, seed_db):
     request = mock_request(orguser)
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
+    OrgPreferences.objects.create(
+        org=orguser.org,
+        ai_data_sharing_enabled=True,
+        ai_data_sharing_consented_by=orguser,
+        ai_data_sharing_consented_at=timezone.now(),
+    )
     payload = UpdateDashboardAIContextSchema(dashboard_context_markdown="## Dashboard context")
 
     response = update_dashboard_ai_context(request, dashboard.id, payload)
@@ -254,9 +263,59 @@ def test_get_dashboard_ai_context_requires_permission(guest_orguser, dashboard, 
 
 def test_get_dashboard_ai_context_is_org_scoped(orguser, other_org_dashboard, seed_db):
     request = mock_request(orguser)
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
 
     with pytest.raises(HttpError) as excinfo:
         get_dashboard_ai_context(request, other_org_dashboard.id)
 
     assert excinfo.value.status_code == 404
     assert str(excinfo.value) == "Dashboard not found"
+
+
+def test_dashboard_chat_settings_are_hidden_when_feature_flag_is_off(orguser, seed_db):
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_ai_dashboard_chat_settings(request)
+
+    assert excinfo.value.status_code == 404
+    assert str(excinfo.value) == "Chat with dashboards is not enabled for this organization"
+
+
+def test_update_ai_dashboard_chat_settings_rejects_context_without_consent(orguser, seed_db):
+    request = mock_request(orguser)
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
+
+    with pytest.raises(HttpError) as excinfo:
+        update_ai_dashboard_chat_settings(
+            request,
+            UpdateOrgAIDashboardChatSchema(org_context_markdown="## Org context"),
+        )
+
+    assert excinfo.value.status_code == 409
+    assert str(excinfo.value) == "Enable AI data sharing before updating organization AI context"
+
+
+def test_dashboard_ai_context_is_hidden_when_feature_flag_is_off(orguser, dashboard, seed_db):
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        get_dashboard_ai_context(request, dashboard.id)
+
+    assert excinfo.value.status_code == 404
+    assert str(excinfo.value) == "Chat with dashboards is not enabled for this organization"
+
+
+def test_update_dashboard_ai_context_requires_ai_consent(orguser, dashboard, seed_db):
+    request = mock_request(orguser)
+    enable_feature_flag("AI_DASHBOARD_CHAT", org=orguser.org)
+
+    with pytest.raises(HttpError) as excinfo:
+        update_dashboard_ai_context(
+            request,
+            dashboard.id,
+            UpdateDashboardAIContextSchema(dashboard_context_markdown="## Dashboard context"),
+        )
+
+    assert excinfo.value.status_code == 409
+    assert str(excinfo.value) == "Enable AI data sharing before updating dashboard AI context"

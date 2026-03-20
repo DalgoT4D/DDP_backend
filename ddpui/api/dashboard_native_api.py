@@ -17,9 +17,11 @@ from ddpui.models.dashboard import (
     DashboardFilterType,
 )
 from ddpui.models.dashboard_chat import DashboardAIContext
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 from ddpui.services.dashboard_service import (
     DashboardService,
     DashboardData,
@@ -72,6 +74,19 @@ def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAICo
         dashboard_context_updated_at=context.updated_at,
         vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
     )
+
+
+def _ensure_dashboard_chat_feature_enabled(org) -> None:
+    """Hide dashboard chat settings endpoints unless the feature flag is enabled."""
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+
+
+def _ensure_dashboard_chat_consent_enabled(org) -> None:
+    """Require consent before writing dashboard-specific AI context."""
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None or not org_preferences.ai_data_sharing_enabled:
+        raise HttpError(409, "Enable AI data sharing before updating dashboard AI context")
 
 
 # Endpoints
@@ -130,6 +145,7 @@ def export_dashboard(request, dashboard_id: int):
 def get_dashboard_ai_context(request, dashboard_id: int):
     """Load dashboard-level AI context settings for settings management."""
     orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
 
     try:
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
@@ -154,6 +170,8 @@ def update_dashboard_ai_context(
 ):
     """Update dashboard-level AI context markdown for settings management."""
     orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+    _ensure_dashboard_chat_consent_enabled(orguser.org)
 
     try:
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
