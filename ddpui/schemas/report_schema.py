@@ -1,6 +1,6 @@
 """Report schemas for request/response validation"""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import date, datetime
 from ninja import Schema, Field
 
@@ -17,6 +17,31 @@ class DateColumnSchema(Schema):
     schema_name: str = Field(..., min_length=1)
     table_name: str = Field(..., min_length=1)
     column_name: str = Field(..., min_length=1)
+
+
+class FrozenDashboardConfig(Schema):
+    """Schema for frozen dashboard config stored in snapshots"""
+
+    title: str
+    description: Optional[str] = None
+    grid_columns: Optional[int] = None
+    target_screen_size: Optional[str] = None
+    layout_config: Optional[Any] = None
+    components: Optional[Dict[str, Any]] = None
+    filter_layout: Optional[str] = None
+    filters: List[Dict[str, Any]] = []
+
+
+class FrozenChartConfig(Schema):
+    """Schema for a single frozen chart config stored in snapshots"""
+
+    id: int
+    title: str
+    description: Optional[str] = None
+    chart_type: str
+    schema_name: str
+    table_name: str
+    extra_config: Optional[Dict[str, Any]] = None
 
 
 # Request schemas
@@ -50,7 +75,6 @@ class SnapshotResponse(Schema):
     date_column: Optional[Dict[str, str]]
     period_start: Optional[date]
     period_end: date
-    status: str
     summary: Optional[str]
     created_by: Optional[str]
     created_at: datetime
@@ -66,7 +90,6 @@ class SnapshotResponse(Schema):
             date_column=snapshot.date_column or None,
             period_start=snapshot.period_start,
             period_end=snapshot.period_end,
-            status=snapshot.status,
             summary=snapshot.summary,
             created_by=snapshot.created_by.user.email if snapshot.created_by else None,
             created_at=snapshot.created_at,

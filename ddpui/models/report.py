@@ -1,22 +1,8 @@
 """Report models for Dalgo platform"""
 
-from enum import Enum
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-
-
-class SnapshotStatus(str, Enum):
-    """Snapshot status enum"""
-
-    GENERATED = "generated"
-    VIEWED = "viewed"
-    ARCHIVED = "archived"
-
-    @classmethod
-    def choices(cls):
-        """django model definition needs an iterable for `choices`"""
-        return [(key.value, key.name) for key in cls]
 
 
 class ReportSnapshot(models.Model):
@@ -68,13 +54,6 @@ class ReportSnapshot(models.Model):
         blank=True,
         null=True,
         help_text="Executive summary or notes displayed above the dashboard",
-    )
-
-    # Status tracking
-    status = models.CharField(
-        max_length=20,
-        choices=SnapshotStatus.choices(),
-        default=SnapshotStatus.GENERATED.value,
     )
 
     # Public sharing (same pattern as Dashboard)

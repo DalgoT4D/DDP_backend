@@ -28,9 +28,10 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
-from ddpui.models.report import ReportSnapshot, SnapshotStatus
+from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
+from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
     SnapshotValidationError,
@@ -216,6 +217,31 @@ class TestInjectPeriodIntoFilters:
         assert dt_filter["settings"]["locked"] is True
         assert dt_filter["settings"]["default_start_date"] == "2025-01-01"
         assert dt_filter["settings"]["default_end_date"] == "2025-01-31"
+
+    def test_matching_filter_moved_to_front(self, sample_snapshot):
+        """When a matching datetime filter is not first, it should be moved to position 0"""
+        frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
+        # Insert a value filter before the datetime filter so it's not at index 0
+        frozen["filters"].insert(0, {
+            "id": 999,
+            "filter_type": "value",
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "status",
+            "settings": {},
+            "order": 0,
+        })
+        # The datetime filter is now at index 1
+        assert frozen["filters"][1]["column_name"] == "created_at"
+
+        result = ReportService._inject_period_into_dashboard_config(frozen, sample_snapshot)
+
+        assert result is True
+        # The locked datetime filter should now be first
+        assert frozen["filters"][0]["column_name"] == "created_at"
+        assert frozen["filters"][0]["settings"]["locked"] is True
+        # The value filter should be second
+        assert frozen["filters"][1]["column_name"] == "status"
 
     def test_no_matching_filter_injects_display_filter(self, sample_snapshot):
         """When no matching filter exists, a display-only filter is injected"""
@@ -475,30 +501,25 @@ class TestFreezeChartConfigs:
 class TestUpdateSnapshot:
     """Tests for ReportService.update_snapshot"""
 
-    def test_update_allowed_field(self, sample_snapshot, org):
+    def test_update_summary(self, sample_snapshot, org):
         """Updating 'summary' succeeds"""
-        updated = ReportService.update_snapshot(
-            sample_snapshot.id, org, summary="New summary"
-        )
+        data = SnapshotUpdate(summary="New summary")
+        updated = ReportService.update_snapshot(sample_snapshot.id, org, data)
         assert updated.summary == "New summary"
-
-    def test_update_disallowed_field_raises(self, sample_snapshot, org):
-        """Updating a non-editable field raises SnapshotValidationError"""
-        with pytest.raises(SnapshotValidationError) as exc_info:
-            ReportService.update_snapshot(sample_snapshot.id, org, title="New title")
-        assert "not editable" in str(exc_info.value)
 
     def test_update_not_found_raises(self, org):
         """Updating nonexistent snapshot raises SnapshotNotFoundError"""
+        data = SnapshotUpdate(summary="test")
         with pytest.raises(SnapshotNotFoundError):
-            ReportService.update_snapshot(99999, org, summary="test")
+            ReportService.update_snapshot(99999, org, data)
 
     def test_update_with_none_value_skips(self, sample_snapshot, org):
         """Updating with None value does not change the field"""
         sample_snapshot.summary = "Original"
         sample_snapshot.save(update_fields=["summary"])
 
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, summary=None)
+        data = SnapshotUpdate(summary=None)
+        updated = ReportService.update_snapshot(sample_snapshot.id, org, data)
         assert updated.summary == "Original"
 
 
@@ -558,36 +579,18 @@ class TestGetSnapshot:
 class TestGetSnapshotViewData:
     """Tests for ReportService.get_snapshot_view_data"""
 
-    def test_marks_generated_as_viewed(
+    def test_view_data_returns_expected_keys(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
     ):
+        """get_snapshot_view_data returns dashboard_data, report_metadata, frozen_chart_configs"""
         mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
         mock_factory.get_warehouse_client.return_value = MagicMock()
-        """A generated snapshot is marked as viewed after get_snapshot_view_data"""
-        assert sample_snapshot.status == SnapshotStatus.GENERATED.value
 
         view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
 
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
         assert "dashboard_data" in view_data
         assert "report_metadata" in view_data
         assert "frozen_chart_configs" in view_data
-
-    def test_already_viewed_stays_viewed(
-        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
-    ):
-        """A viewed snapshot stays viewed"""
-        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
-        mock_factory.get_warehouse_client.return_value = MagicMock()
-
-        sample_snapshot.status = SnapshotStatus.VIEWED.value
-        sample_snapshot.save(update_fields=["status"])
-
-        ReportService.get_snapshot_view_data(sample_snapshot.id, org)
-
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
 
     def test_view_data_structure(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org

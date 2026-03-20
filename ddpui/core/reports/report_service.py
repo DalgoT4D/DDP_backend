@@ -5,18 +5,24 @@ import secrets
 from typing import Optional, List, Dict, Any
 from datetime import date
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.report import ReportSnapshot, SnapshotStatus
+from ddpui.models.report import ReportSnapshot
 from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.report_schema import DatetimeColumnResponse
+from ddpui.schemas.report_schema import (
+    DatetimeColumnResponse,
+    FrozenChartConfig,
+    FrozenDashboardConfig,
+    SnapshotUpdate,
+)
 
 from .exceptions import (
     SnapshotNotFoundError,
@@ -27,7 +33,6 @@ from .exceptions import (
 
 logger = CustomLogger("ddpui.core.reports")
 
-ALLOWED_UPDATE_FIELDS = {"summary"}
 
 
 class ReportService:
@@ -126,7 +131,7 @@ class ReportService:
         }
 
         # Try to find and enrich the matching datetime filter
-        for f in filters:
+        for i, f in enumerate(filters):
             if (
                 f.get("filter_type") == "datetime"
                 and f.get("schema_name") == date_col.get("schema_name")
@@ -136,6 +141,9 @@ class ReportService:
                 settings = f.get("settings") or {}
                 settings.update(period_settings)
                 f["settings"] = settings
+                # Move the locked filter to the front so users see it first
+                if i > 0:
+                    filters.insert(0, filters.pop(i))
                 return True
 
         # No matching dashboard filter — inject a display-only filter.
@@ -310,8 +318,13 @@ class ReportService:
                     f"(type: {target_col['data_type']})"
                 )
 
-        frozen_dashboard = ReportService._freeze_dashboard(dashboard)
-        frozen_chart_configs = ReportService._freeze_chart_configs(dashboard)
+        frozen_dashboard = FrozenDashboardConfig(
+            **ReportService._freeze_dashboard(dashboard)
+        ).dict()
+        frozen_chart_configs = {
+            k: FrozenChartConfig(**v).dict()
+            for k, v in ReportService._freeze_chart_configs(dashboard).items()
+        }
 
         snapshot = ReportSnapshot.objects.create(
             title=title,
@@ -402,11 +415,6 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        # Mark as viewed
-        if snapshot.status == SnapshotStatus.GENERATED.value:
-            snapshot.status = SnapshotStatus.VIEWED.value
-            snapshot.save(update_fields=["status"])
-
         # Build dashboard-like response from frozen dashboard
         # No dashboard_id — snapshot is fully self-contained
         # Deep-copy so we never mutate the stored frozen_dashboard
@@ -442,7 +450,6 @@ class ReportService:
             "period_start": snapshot.period_start,
             "period_end": snapshot.period_end,
             "summary": snapshot.summary,
-            "status": snapshot.status,
             "created_at": snapshot.created_at,
             "updated_at": snapshot.updated_at,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
@@ -456,34 +463,26 @@ class ReportService:
         }
 
     @staticmethod
-    def update_snapshot(snapshot_id: int, org: Org, **fields) -> ReportSnapshot:
+    def update_snapshot(
+        snapshot_id: int, org: Org, data: SnapshotUpdate
+    ) -> ReportSnapshot:
         """Update mutable fields on a snapshot.
-
-        Only allows updates to fields in ALLOWED_UPDATE_FIELDS (currently: summary).
-        Frozen dashboard and chart configs cannot be modified after creation.
 
         Args:
             snapshot_id: The snapshot ID to update
             org: The organization to filter by
-            **fields: Field names and values to update (must be in ALLOWED_UPDATE_FIELDS)
+            data: Validated update payload
 
         Returns:
             ReportSnapshot: The updated snapshot instance
 
         Raises:
             SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
-            SnapshotValidationError: If attempting to update a non-editable field
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
-        update_fields = []
-        for field, value in fields.items():
-            if field not in ALLOWED_UPDATE_FIELDS:
-                raise SnapshotValidationError(f"Field '{field}' is not editable")
-            if value is not None:
-                setattr(snapshot, field, value)
-                update_fields.append(field)
-        if update_fields:
-            snapshot.save(update_fields=update_fields)
+        if data.summary is not None:
+            snapshot.summary = data.summary
+            snapshot.save(update_fields=["summary"])
         return snapshot
 
     @staticmethod
@@ -632,8 +631,6 @@ class ReportService:
     @staticmethod
     def _build_public_url(token: str) -> str:
         """Build the public share URL for a report snapshot."""
-        from django.conf import settings
-
         frontend_url_v2 = getattr(settings, "FRONTEND_URL_V2", None)
         frontend_url = frontend_url_v2 or getattr(
             settings, "FRONTEND_URL", "http://localhost:3001"
