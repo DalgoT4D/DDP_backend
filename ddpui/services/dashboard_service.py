@@ -986,6 +986,69 @@ class DashboardService:
 
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
+    @staticmethod
+    def export_dashboard_context(dashboard_id: int, org: Org) -> Dict[str, Any]:
+        """Return dashboard data along with the full config for referenced charts."""
+        dashboard = DashboardService.get_dashboard(dashboard_id, org)
+        return DashboardService.export_dashboard_context_for_dashboard(dashboard, org)
+
+    @staticmethod
+    def extract_chart_ids_from_components(components: dict | None) -> list[int]:
+        """Extract referenced chart IDs from dashboard components while preserving order."""
+        chart_ids: list[int] = []
+        for component_data in (components or {}).values():
+            if component_data.get("type") != DashboardComponentType.CHART.value:
+                continue
+
+            chart_id = component_data.get("config", {}).get("chartId")
+            if chart_id:
+                chart_ids.append(chart_id)
+        return list(dict.fromkeys(chart_ids))
+
+    @staticmethod
+    def export_dashboard_context_for_dashboard(
+        dashboard: Dashboard,
+        org: Org,
+        charts_by_id: Dict[int, Chart] | None = None,
+    ) -> Dict[str, Any]:
+        """Return dashboard data plus chart configs for an already loaded dashboard object."""
+        dashboard_response = DashboardService.get_dashboard_response(dashboard)
+        chart_ids = DashboardService.extract_chart_ids_from_components(dashboard.components)
+        if charts_by_id is None:
+            charts_by_id = {
+                chart.id: chart for chart in Chart.objects.filter(id__in=chart_ids, org=org)
+            }
+
+        charts = []
+        for chart_id in chart_ids:
+            chart = charts_by_id.get(chart_id)
+            if chart is None:
+                logger.warning(
+                    "Chart %s referenced by dashboard %s was not found",
+                    chart_id,
+                    dashboard.id,
+                )
+                continue
+
+            charts.append(
+                {
+                    "id": chart.id,
+                    "title": chart.title,
+                    "description": chart.description,
+                    "chart_type": chart.chart_type,
+                    "schema_name": chart.schema_name,
+                    "table_name": chart.table_name,
+                    "extra_config": chart.extra_config or {},
+                    "created_at": chart.created_at.isoformat(),
+                    "updated_at": chart.updated_at.isoformat(),
+                }
+            )
+
+        return {
+            "dashboard": dashboard_response,
+            "charts": charts,
+        }
+
 
 def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, str]:
     """

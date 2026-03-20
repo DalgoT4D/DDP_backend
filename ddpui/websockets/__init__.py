@@ -1,4 +1,5 @@
 import json
+from http.cookies import SimpleCookie
 from channels.generic.websocket import WebsocketConsumer
 from rest_framework_simplejwt.tokens import AccessToken
 from urllib.parse import parse_qs
@@ -12,10 +13,25 @@ logger = CustomLogger("ddpui")
 
 
 class BaseConsumer(WebsocketConsumer):
+    def _get_cookie_token(self):
+        """Return the access token from the websocket cookie header when present."""
+        for header_name, header_value in self.scope.get("headers", []):
+            if header_name != b"cookie":
+                continue
+
+            cookie = SimpleCookie()
+            cookie.load(header_value.decode())
+            access_token = cookie.get("access_token")
+            if access_token is not None:
+                return access_token.value
+
+        return None
+
     def authenticate_user(self, token: str, orgslug: str):
         """Authenticate user using JWT token"""
         self.orguser = None
         self.user = None
+        token = token or self._get_cookie_token()
 
         try:
             # Validate and decode JWT using SimpleJWT's AccessToken

@@ -82,6 +82,8 @@ class OrgDbt(models.Model):
         null=True,
         related_name="dbtcloud_creds_block",
     )
+    docs_generated_at = models.DateTimeField(null=True, blank=True)
+    vector_last_ingested_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

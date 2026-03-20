@@ -41,6 +41,39 @@ class UpdateDiscordNotificationsSchema(Schema):
     discord_webhook: Optional[str]
 
 
+class OrgAIDashboardChatSettingsResponse(Schema):
+    """Response schema for org-level dashboard chat settings."""
+
+    feature_flag_enabled: bool
+    ai_data_sharing_enabled: bool
+    ai_data_sharing_consented_by: Optional[str]
+    ai_data_sharing_consented_at: Optional[datetime]
+    org_context_markdown: str
+    org_context_updated_by: Optional[str]
+    org_context_updated_at: Optional[datetime]
+    dbt_configured: bool
+    docs_generated_at: Optional[datetime]
+    vector_last_ingested_at: Optional[datetime]
+
+
+class UpdateOrgAIDashboardChatSchema(Schema):
+    """Request schema for org-level dashboard chat settings updates."""
+
+    ai_data_sharing_enabled: Optional[bool] = None
+    org_context_markdown: Optional[str] = None
+
+
+class OrgAIDashboardChatStatusResponse(Schema):
+    """Response schema for dashboard chat readiness."""
+
+    feature_flag_enabled: bool
+    ai_data_sharing_enabled: bool
+    chat_available: bool
+    dbt_configured: bool
+    docs_generated_at: Optional[datetime]
+    vector_last_ingested_at: Optional[datetime]
+
+
 class CreateOrgSupersetDetailsSchema(Schema):
     """Schema for creating organization superset details."""
 

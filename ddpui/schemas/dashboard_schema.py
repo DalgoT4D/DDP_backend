@@ -181,3 +181,32 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str]
     dashboard_type: Optional[str]
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Dashboard Export Schemas
+# =============================================================================
+
+
+class DashboardExportResponse(Schema):
+    """Response schema for exporting dashboard context and referenced charts"""
+
+    dashboard: DashboardResponse
+    charts: List[dict]
+
+
+class DashboardAIContextResponse(Schema):
+    """Response schema for dashboard-level AI context settings."""
+
+    dashboard_id: int
+    dashboard_title: str
+    dashboard_context_markdown: str
+    dashboard_context_updated_by: Optional[str]
+    dashboard_context_updated_at: Optional[datetime]
+    vector_last_ingested_at: Optional[datetime]
+
+
+class UpdateDashboardAIContextSchema(Schema):
+    """Request schema for dashboard-level AI context updates."""
+
+    dashboard_context_markdown: str
