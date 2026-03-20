@@ -98,6 +98,16 @@ from ddpui.ddpprefect import (
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
 from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionService
+from ddpui.core.dashboard_chat.events import (
+    build_dashboard_chat_event,
+    publish_dashboard_chat_event,
+)
+from ddpui.core.dashboard_chat.runtime import DashboardChatRuntime
+from ddpui.core.dashboard_chat.session_service import (
+    create_dashboard_chat_assistant_message,
+    list_dashboard_chat_history,
+    serialize_dashboard_chat_message,
+)
 from ddpui.utils.helpers import (
     find_key_in_dictionary,
     convert_sqlalchemy_rows_to_csv_string,
@@ -1335,6 +1345,100 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
                 lock.release()
         except Exception:
             logger.exception("failed to release dashboard chat context build lock for org=%s", org_id)
+
+
+@app.task
+def run_dashboard_chat_turn(session_id: str, user_message_id: int):
+    """Run one dashboard chat turn asynchronously and emit websocket events."""
+    from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
+
+    session = (
+        DashboardChatSession.objects.select_related("org", "dashboard", "orguser")
+        .filter(session_id=session_id)
+        .first()
+    )
+    if session is None or session.dashboard is None:
+        logger.warning(
+            "dashboard chat turn skipped because session %s was not found or has no dashboard",
+            session_id,
+        )
+        return {"status": "skipped_missing_session", "session_id": session_id}
+
+    user_message = (
+        DashboardChatMessage.objects.filter(
+            id=user_message_id,
+            session=session,
+            role="user",
+        )
+        .first()
+    )
+    if user_message is None:
+        logger.warning(
+            "dashboard chat turn skipped because message %s was not found in session %s",
+            user_message_id,
+            session_id,
+        )
+        return {"status": "skipped_missing_message", "session_id": session_id}
+
+    try:
+        response = DashboardChatRuntime().run(
+            org=session.org,
+            dashboard_id=session.dashboard.id,
+            user_query=user_message.content,
+            conversation_history=list_dashboard_chat_history(
+                session,
+                exclude_message_id=user_message.id,
+            ),
+        )
+        assistant_payload = {
+            "intent": response.intent.value,
+            "citations": [citation.to_dict() for citation in response.citations],
+            "related_dashboards": [
+                related_dashboard.to_dict()
+                for related_dashboard in response.related_dashboards
+            ],
+            "warnings": response.warnings,
+            "sql": response.sql,
+            "sql_results": response.sql_results,
+            "metadata": response.metadata,
+        }
+        assistant_message = create_dashboard_chat_assistant_message(
+            session=session,
+            content=response.answer_text,
+            payload=assistant_payload,
+        )
+        publish_dashboard_chat_event(
+            str(session.session_id),
+            build_dashboard_chat_event(
+                event_type="assistant_message",
+                session_id=str(session.session_id),
+                dashboard_id=session.dashboard.id,
+                message_id=str(assistant_message.id),
+                data=serialize_dashboard_chat_message(assistant_message),
+            ),
+        )
+        return {
+            "status": "completed",
+            "session_id": str(session.session_id),
+            "assistant_message_id": assistant_message.id,
+        }
+    except Exception:
+        logger.exception(
+            "dashboard chat turn failed for session=%s message_id=%s",
+            session_id,
+            user_message_id,
+        )
+        publish_dashboard_chat_event(
+            str(session.session_id),
+            build_dashboard_chat_event(
+                event_type="error",
+                session_id=str(session.session_id),
+                dashboard_id=session.dashboard.id,
+                message_id=str(user_message.id),
+                data={"message": "Something went wrong while generating the response"},
+            ),
+        )
+        raise
 
 
 @app.on_after_finalize.connect
