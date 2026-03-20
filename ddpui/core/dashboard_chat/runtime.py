@@ -520,6 +520,8 @@ class DashboardChatRuntime:
                         for related_dashboard in state.get("related_dashboards", [])
                     ],
                 )
+            except AssertionError:
+                raise
             except Exception:
                 answer_text = self._fallback_answer_text(
                     retrieved_documents=state.get("retrieved_documents", []),
@@ -545,7 +547,11 @@ class DashboardChatRuntime:
         response = state["response"]
         citations = list(response.citations)
         sql_validation = state.get("sql_validation")
-        if sql_validation is not None:
+        if (
+            sql_validation is not None
+            and sql_validation.is_valid
+            and sql_validation.sanitized_sql is not None
+        ):
             citations.extend(
                 DashboardChatCitation(
                     source_type="warehouse_table",
@@ -577,7 +583,9 @@ class DashboardChatRuntime:
                 "retrieved_document_ids": [
                     document.document_id for document in state.get("retrieved_documents", [])
                 ],
-                "allowlisted_tables": sorted(state["allowlist"].allowed_tables),
+                "allowlisted_tables": sorted(
+                    state.get("allowlist", DashboardChatAllowlist()).allowed_tables
+                ),
                 "sql_guard_errors": state.get("sql_validation").errors
                 if state.get("sql_validation")
                 else [],
