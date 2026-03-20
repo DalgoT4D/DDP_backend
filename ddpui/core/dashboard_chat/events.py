@@ -6,6 +6,10 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.utils import timezone
 
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui")
+
 
 def dashboard_chat_group_name(session_id: str) -> str:
     """Return the channel-layer group name for a dashboard chat session."""
@@ -39,10 +43,17 @@ def publish_dashboard_chat_event(session_id: str, event: dict) -> None:
     channel_layer = get_channel_layer()
     if channel_layer is None:
         return
-    async_to_sync(channel_layer.group_send)(
-        dashboard_chat_group_name(session_id),
-        {
-            "type": "dashboard_chat_event",
-            "event": json.dumps(event),
-        },
-    )
+    try:
+        async_to_sync(channel_layer.group_send)(
+            dashboard_chat_group_name(session_id),
+            {
+                "type": "dashboard_chat_event",
+                "event": json.dumps(event),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "failed to publish dashboard chat event for session=%s event_type=%s",
+            session_id,
+            event.get("event_type"),
+        )

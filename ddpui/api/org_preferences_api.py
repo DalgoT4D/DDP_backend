@@ -35,9 +35,7 @@ orgpreference_router = Router()
 
 
 def _get_or_create_org_preferences(org):
-    org_preferences = OrgPreferences.objects.filter(org=org).first()
-    if org_preferences is None:
-        org_preferences = OrgPreferences.objects.create(org=org)
+    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
     return org_preferences
 
 
@@ -72,7 +70,9 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
         ),
         ai_data_sharing_consented_at=org_preferences.ai_data_sharing_consented_at,
         org_context_markdown=org_context.markdown,
-        org_context_updated_by=org_context.updated_by.user.email if org_context.updated_by else None,
+        org_context_updated_by=org_context.updated_by.user.email
+        if org_context.updated_by
+        else None,
         org_context_updated_at=org_context.updated_at,
         dbt_configured=_is_dbt_configured(org),
         docs_generated_at=org_dbt.docs_generated_at if org_dbt else None,
@@ -246,10 +246,7 @@ def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChat
         else org_preferences.ai_data_sharing_enabled
     )
 
-    if (
-        payload.ai_data_sharing_enabled is True
-        and org_preferences.ai_data_sharing_enabled is False
-    ):
+    if payload.ai_data_sharing_enabled is True and org_preferences.ai_data_sharing_enabled is False:
         org_preferences.ai_data_sharing_consented_by = orguser
         org_preferences.ai_data_sharing_consented_at = timezone.now()
 
@@ -275,6 +272,7 @@ def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChat
         "res": _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context).dict(),
     }
 
+
 @orgpreference_router.get("/ai-dashboard-chat/status")
 def get_ai_dashboard_chat_status(request):
     """Return feature readiness for dashboard chat for the current org."""
@@ -283,7 +281,10 @@ def get_ai_dashboard_chat_status(request):
 
     org_preferences = _get_or_create_org_preferences(org)
 
-    return {"success": True, "res": _serialize_ai_dashboard_chat_status(org, org_preferences).dict()}
+    return {
+        "success": True,
+        "res": _serialize_ai_dashboard_chat_status(org, org_preferences).dict(),
+    }
 
 
 @orgpreference_router.get("/toolinfo")
