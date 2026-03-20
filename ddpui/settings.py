@@ -339,10 +339,14 @@ SIMPLE_JWT = {
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
+# Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
+RENDER_SECRET = os.getenv("RENDER_SECRET")
+
 
 # Cookie settings
-COOKIE_SECURE = True
-COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
+_is_production = os.getenv("ENVIRONMENT", "") == "production"
+COOKIE_SECURE = _is_production
+COOKIE_SAMESITE = "None" if _is_production else "Lax"
 COOKIE_HTTPONLY = True
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB
