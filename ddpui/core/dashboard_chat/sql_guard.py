@@ -23,6 +23,14 @@ FORBIDDEN_SQL_KEYWORDS = {
     "VACUUM",
 }
 
+AGGREGATE_FUNCTION_PATTERNS = (
+    r"\bCOUNT\s*\(",
+    r"\bSUM\s*\(",
+    r"\bAVG\s*\(",
+    r"\bMIN\s*\(",
+    r"\bMAX\s*\(",
+)
+
 PII_PATTERNS = [
     r"\b(name|phone|email|address|national_id|id_number)\b",
     r"\b(contact|mobile|telephone|personal|identification)\b",
@@ -79,6 +87,11 @@ class DashboardChatSqlGuard:
         if re.search(r"\bSELECT\s+\*", sql_upper):
             warnings.append("SELECT * detected. Prefer explicit column lists.")
 
+        if self._selects_row_level_pii(sanitized_sql):
+            errors.append(
+                "Queries returning row-level sensitive data are not allowed. Please aggregate the results or rephrase."
+            )
+
         for pii_pattern in PII_PATTERNS:
             if re.search(pii_pattern, sanitized_sql, re.IGNORECASE):
                 warnings.append(f"Query may touch PII-like columns matching {pii_pattern}.")
@@ -128,3 +141,102 @@ class DashboardChatSqlGuard:
             tables.append(table_name.lower())
 
         return list(dict.fromkeys(tables))
+
+    @classmethod
+    def _selects_row_level_pii(cls, sql: str) -> bool:
+        """Detect row-level sensitive fields in the outer SELECT list."""
+        select_clause = cls._extract_outer_select_clause(sql)
+        if not select_clause:
+            return False
+
+        for expression in cls._split_select_expressions(select_clause):
+            normalized_expression = expression.strip()
+            if not normalized_expression:
+                continue
+            if cls._contains_aggregate(normalized_expression):
+                continue
+            if any(
+                re.search(pii_pattern, normalized_expression, re.IGNORECASE)
+                for pii_pattern in PII_PATTERNS
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _extract_outer_select_clause(sql: str) -> str | None:
+        """Return the outer-most SELECT projection segment."""
+        sql_upper = sql.upper()
+        depth = 0
+        select_start: int | None = None
+
+        for index, character in enumerate(sql_upper):
+            if character == "(":
+                depth += 1
+                continue
+            if character == ")":
+                depth = max(depth - 1, 0)
+                continue
+
+            if depth == 0 and DashboardChatSqlGuard._matches_keyword(sql_upper, index, "SELECT"):
+                select_start = index + len("SELECT")
+                break
+
+        if select_start is None:
+            return None
+
+        depth = 0
+        for index in range(select_start, len(sql_upper)):
+            character = sql_upper[index]
+            if character == "(":
+                depth += 1
+                continue
+            if character == ")":
+                depth = max(depth - 1, 0)
+                continue
+            if depth == 0 and DashboardChatSqlGuard._matches_keyword(sql_upper, index, "FROM"):
+                return sql[select_start:index].strip()
+
+        return None
+
+    @staticmethod
+    def _matches_keyword(sql_upper: str, index: int, keyword: str) -> bool:
+        """Check whether a keyword occurs at a top-level position."""
+        keyword_end = index + len(keyword)
+        if sql_upper[index:keyword_end] != keyword:
+            return False
+
+        previous_character = sql_upper[index - 1] if index > 0 else " "
+        next_character = sql_upper[keyword_end] if keyword_end < len(sql_upper) else " "
+        return not (previous_character.isalnum() or previous_character == "_") and not (
+            next_character.isalnum() or next_character == "_"
+        )
+
+    @staticmethod
+    def _split_select_expressions(select_clause: str) -> list[str]:
+        """Split a SELECT clause by top-level commas only."""
+        expressions: list[str] = []
+        current_expression: list[str] = []
+        depth = 0
+
+        for character in select_clause:
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth = max(depth - 1, 0)
+            elif character == "," and depth == 0:
+                expressions.append("".join(current_expression).strip())
+                current_expression = []
+                continue
+            current_expression.append(character)
+
+        if current_expression:
+            expressions.append("".join(current_expression).strip())
+        return expressions
+
+    @staticmethod
+    def _contains_aggregate(expression: str) -> bool:
+        """Treat aggregate projections as safe even if they mention sensitive columns."""
+        return any(
+            re.search(pattern, expression, re.IGNORECASE)
+            for pattern in AGGREGATE_FUNCTION_PATTERNS
+        )

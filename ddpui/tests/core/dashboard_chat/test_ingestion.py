@@ -20,6 +20,7 @@ from ddpui.core.dashboard_chat.dbt_docs import (
     DashboardChatDbtDocsArtifacts,
     generate_dashboard_chat_dbt_docs_artifacts,
 )
+from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionService
 from ddpui.core.dashboard_chat.vector_store import DashboardChatStoredDocument
 from ddpui.ddpdbt.schema import DbtProjectParams
@@ -436,3 +437,49 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
     }
     assert remaining_ids == original_ids
     assert vector_store.delete_calls == []
+
+
+def test_ingest_org_deletes_disabled_source_documents(org, orgdbt, orguser, dashboard):
+    """Disabled source types should be omitted from the target document set."""
+    OrgAIContext.objects.create(
+        org=org,
+        markdown="# Org context\n\nImportant org notes.",
+        updated_by=orguser,
+        updated_at=timezone.now(),
+    )
+    DashboardAIContext.objects.create(
+        dashboard=dashboard,
+        markdown="## Dashboard context\n\nThis dashboard tracks monthly reach.",
+        updated_by=orguser,
+        updated_at=timezone.now(),
+    )
+    vector_store = FakeDashboardChatVectorStore()
+    artifacts = StoredArtifacts(
+        manifest_json={"metadata": {"project_name": "dashchat"}, "sources": {}, "nodes": {}},
+        catalog_json={"sources": {}, "nodes": {}},
+        generated_at=timezone.now(),
+    )
+    initial_service = DashboardChatIngestionService(
+        vector_store=vector_store,
+        dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
+    )
+    initial_service.ingest_org(org)
+
+    disabled_source_service = DashboardChatIngestionService(
+        vector_store=vector_store,
+        dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
+        source_config=DashboardChatSourceConfig(
+            enabled_source_types=("dashboard_context", "dashboard_export", "dbt_manifest")
+        ),
+    )
+
+    result = disabled_source_service.ingest_org(org)
+    stored_source_types = {
+        document.metadata["source_type"]
+        for document in vector_store.get_documents(org.id, include_documents=False)
+    }
+
+    assert result.source_document_counts["org_context"] == 0
+    assert result.source_document_counts["dbt_catalog"] == 0
+    assert "org_context" not in stored_source_types
+    assert "dbt_catalog" not in stored_source_types

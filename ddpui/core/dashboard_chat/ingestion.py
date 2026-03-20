@@ -11,6 +11,7 @@ from ddpui.core.dashboard_chat.dbt_docs import (
     DashboardChatDbtDocsArtifacts,
     generate_dashboard_chat_dbt_docs_artifacts,
 )
+from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.vector_documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
@@ -102,9 +103,11 @@ class DashboardChatIngestionService:
         self,
         vector_store: ChromaDashboardChatVectorStore | None = None,
         dbt_docs_generator: Callable[[Org, object], DashboardChatDbtDocsArtifacts] | None = None,
+        source_config: DashboardChatSourceConfig | None = None,
     ):
         self.vector_store = vector_store or ChromaDashboardChatVectorStore()
         self.dbt_docs_generator = dbt_docs_generator or generate_dashboard_chat_dbt_docs_artifacts
+        self.source_config = source_config or DashboardChatSourceConfig.from_env()
 
     def ingest_org(self, org: Org) -> DashboardChatIngestionResult:
         """Run dbt docs generation and rebuild the desired vector documents for an org."""
@@ -116,6 +119,7 @@ class DashboardChatIngestionService:
         desired_documents = [
             document
             for source_type in INGEST_SOURCE_ORDER
+            if self.source_config.is_enabled(source_type)
             for document in documents_by_source[source_type.value]
         ]
 
@@ -145,7 +149,11 @@ class DashboardChatIngestionService:
             docs_generated_at=dbt_docs.generated_at,
             vector_ingested_at=vector_ingested_at,
             source_document_counts={
-                source_type.value: len(documents_by_source[source_type.value])
+                source_type.value: (
+                    len(documents_by_source[source_type.value])
+                    if self.source_config.is_enabled(source_type)
+                    else 0
+                )
                 for source_type in INGEST_SOURCE_ORDER
             },
             upserted_document_ids=upserted_document_ids,
