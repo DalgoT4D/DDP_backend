@@ -235,10 +235,16 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_updates_timestamp(org, orgdb
         artifacts = generate_dashboard_chat_dbt_docs_artifacts(org, orgdbt)
 
     orgdbt.refresh_from_db()
-    assert (project_dir / "profiles" / "profiles.yml").exists()
     assert mock_run_dbt.call_count == 2
     assert mock_run_dbt.call_args_list[0].kwargs["command"] == ["deps"]
     assert mock_run_dbt.call_args_list[1].kwargs["command"] == ["docs", "generate"]
+    first_profiles_dir = Path(mock_run_dbt.call_args_list[0].kwargs["keyword_args"]["profiles-dir"])
+    second_profiles_dir = Path(
+        mock_run_dbt.call_args_list[1].kwargs["keyword_args"]["profiles-dir"]
+    )
+    assert first_profiles_dir == second_profiles_dir
+    assert not (project_dir / "profiles" / "profiles.yml").exists()
+    assert not first_profiles_dir.exists()
     assert artifacts.manifest_json == manifest_json
     assert artifacts.catalog_json == catalog_json
     assert orgdbt.docs_generated_at is not None
@@ -433,7 +439,8 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
         service.ingest_org(org)
 
     remaining_ids = {
-        document.document_id for document in vector_store.get_documents(org.id, include_documents=False)
+        document.document_id
+        for document in vector_store.get_documents(org.id, include_documents=False)
     }
     assert remaining_ids == original_ids
     assert vector_store.delete_calls == []
@@ -483,3 +490,23 @@ def test_ingest_org_deletes_disabled_source_documents(org, orgdbt, orguser, dash
     assert result.source_document_counts["dbt_catalog"] == 0
     assert "org_context" not in stored_source_types
     assert "dbt_catalog" not in stored_source_types
+
+
+def test_ingest_org_skips_dbt_docs_when_dbt_sources_are_disabled(org, orgdbt, dashboard):
+    """Disabling both dbt sources should skip dbt docs generation entirely."""
+    vector_store = FakeDashboardChatVectorStore()
+    dbt_docs_generator = Mock(side_effect=AssertionError("dbt docs should not run"))
+    service = DashboardChatIngestionService(
+        vector_store=vector_store,
+        dbt_docs_generator=dbt_docs_generator,
+        source_config=DashboardChatSourceConfig(
+            enabled_source_types=("org_context", "dashboard_context", "dashboard_export")
+        ),
+    )
+
+    result = service.ingest_org(org)
+
+    dbt_docs_generator.assert_not_called()
+    assert result.docs_generated_at is None
+    assert result.source_document_counts["dbt_manifest"] == 0
+    assert result.source_document_counts["dbt_catalog"] == 0

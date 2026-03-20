@@ -1,9 +1,11 @@
 """Warehouse access helpers used by dashboard chat runtime."""
 
+import json
 from typing import Any
 
 from ddpui.core.dashboard_chat.runtime_types import DashboardChatSchemaSnippet
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.utils import secretsmanager
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 
@@ -128,10 +130,29 @@ class DashboardChatWarehouseTools:
 
     def _quote_bigquery_table_ref(self, schema_name: str, table_name: str) -> str:
         """Quote a BigQuery fully-qualified table reference."""
-        project_name = self.org_warehouse.bq_location
+        project_name = self._get_bigquery_project_id()
         if not project_name:
-            raise DashboardChatWarehouseToolsError("BigQuery location/project not configured")
+            raise DashboardChatWarehouseToolsError("BigQuery project id not configured")
         return f"`{project_name}.{schema_name}.{table_name}`"
+
+    def _get_bigquery_project_id(self) -> str | None:
+        """Read the BigQuery project id from stored warehouse credentials."""
+        credentials = secretsmanager.retrieve_warehouse_credentials(self.org_warehouse) or {}
+        project_id = credentials.get("project_id")
+        if project_id:
+            return str(project_id)
+
+        credentials_json = credentials.get("credentials_json")
+        if isinstance(credentials_json, str):
+            try:
+                parsed_credentials = json.loads(credentials_json)
+            except json.JSONDecodeError:
+                return None
+            project_id = parsed_credentials.get("project_id")
+            if project_id:
+                return str(project_id)
+
+        return None
 
     @staticmethod
     def _quote_postgres_identifier(identifier: str) -> str:
@@ -151,4 +172,6 @@ class DashboardChatWarehouseTools:
         if not table_name or "." not in table_name:
             return None
         schema_name, bare_table_name = table_name.split(".", 1)
-        return schema_name.strip().strip('"').strip("`"), bare_table_name.strip().strip('"').strip("`")
+        return schema_name.strip().strip('"').strip("`"), bare_table_name.strip().strip('"').strip(
+            "`"
+        )

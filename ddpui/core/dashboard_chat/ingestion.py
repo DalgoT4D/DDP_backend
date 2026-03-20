@@ -20,6 +20,7 @@ from ddpui.core.dashboard_chat.vector_store import ChromaDashboardChatVectorStor
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardAIContext, OrgAIContext
 from ddpui.models.org import Org
+from ddpui.models.visualization import Chart
 from ddpui.services.dashboard_service import DashboardService
 
 MARKDOWN_CHUNK_MAX_CHARS = 1200
@@ -42,7 +43,7 @@ class DashboardChatIngestionResult:
     """Summary of one completed org context build."""
 
     org_id: int
-    docs_generated_at: timezone.datetime
+    docs_generated_at: timezone.datetime | None
     vector_ingested_at: timezone.datetime
     source_document_counts: dict[str, int]
     upserted_document_ids: list[str]
@@ -114,7 +115,11 @@ class DashboardChatIngestionService:
         if org.dbt is None:
             raise DashboardChatIngestionError("dbt workspace not configured")
 
-        dbt_docs = self.dbt_docs_generator(org, org.dbt)
+        dbt_docs = None
+        if self.source_config.is_enabled(
+            DashboardChatSourceType.DBT_MANIFEST
+        ) or self.source_config.is_enabled(DashboardChatSourceType.DBT_CATALOG):
+            dbt_docs = self.dbt_docs_generator(org, org.dbt)
         documents_by_source = self._build_documents(org, dbt_docs)
         desired_documents = [
             document
@@ -134,7 +139,9 @@ class DashboardChatIngestionService:
         ]
         upserted_document_ids: list[str] = []
         if new_documents:
-            upserted_document_ids = sorted(self.vector_store.upsert_documents(org.id, new_documents))
+            upserted_document_ids = sorted(
+                self.vector_store.upsert_documents(org.id, new_documents)
+            )
 
         stale_document_ids = sorted(existing_document_ids - desired_document_ids)
         if stale_document_ids:
@@ -146,7 +153,7 @@ class DashboardChatIngestionService:
 
         return DashboardChatIngestionResult(
             org_id=org.id,
-            docs_generated_at=dbt_docs.generated_at,
+            docs_generated_at=dbt_docs.generated_at if dbt_docs else org.dbt.docs_generated_at,
             vector_ingested_at=vector_ingested_at,
             source_document_counts={
                 source_type.value: (
@@ -163,7 +170,7 @@ class DashboardChatIngestionService:
     def _build_documents(
         self,
         org: Org,
-        dbt_docs: DashboardChatDbtDocsArtifacts,
+        dbt_docs: DashboardChatDbtDocsArtifacts | None,
     ) -> dict[str, list[DashboardChatVectorDocument]]:
         """Build the full desired vector document set for an org."""
         documents_by_source: dict[str, list[DashboardChatVectorDocument]] = defaultdict(list)
@@ -187,7 +194,19 @@ class DashboardChatIngestionService:
                 dashboard__org=org,
             ).select_related("dashboard")
         }
-        dashboards = list(Dashboard.objects.filter(org=org).order_by("id"))
+        dashboards = list(
+            Dashboard.objects.filter(org=org).prefetch_related("filters").order_by("id")
+        )
+        chart_ids = {
+            chart_id
+            for dashboard in dashboards
+            for chart_id in DashboardService.extract_chart_ids_from_components(
+                dashboard.components,
+            )
+        }
+        charts_by_id = {
+            chart.id: chart for chart in Chart.objects.filter(org=org, id__in=chart_ids)
+        }
 
         for dashboard in dashboards:
             dashboard_context = dashboard_contexts.get(dashboard.id)
@@ -204,17 +223,27 @@ class DashboardChatIngestionService:
                     )
                 )
 
-            export_payload = DashboardService.export_dashboard_context(dashboard.id, org)
+            export_payload = DashboardService.export_dashboard_context_for_dashboard(
+                dashboard,
+                org,
+                charts_by_id=charts_by_id,
+            )
             documents_by_source[DashboardChatSourceType.DASHBOARD_EXPORT.value].extend(
                 self._build_dashboard_export_documents(org.id, dashboard.id, export_payload)
             )
 
-        documents_by_source[DashboardChatSourceType.DBT_MANIFEST.value].extend(
-            self._build_manifest_documents(org.id, dbt_docs)
-        )
-        documents_by_source[DashboardChatSourceType.DBT_CATALOG.value].extend(
-            self._build_catalog_documents(org.id, dbt_docs)
-        )
+        if dbt_docs is not None and self.source_config.is_enabled(
+            DashboardChatSourceType.DBT_MANIFEST
+        ):
+            documents_by_source[DashboardChatSourceType.DBT_MANIFEST.value].extend(
+                self._build_manifest_documents(org.id, dbt_docs)
+            )
+        if dbt_docs is not None and self.source_config.is_enabled(
+            DashboardChatSourceType.DBT_CATALOG
+        ):
+            documents_by_source[DashboardChatSourceType.DBT_CATALOG.value].extend(
+                self._build_catalog_documents(org.id, dbt_docs)
+            )
 
         return {
             source_type.value: documents_by_source.get(source_type.value, [])

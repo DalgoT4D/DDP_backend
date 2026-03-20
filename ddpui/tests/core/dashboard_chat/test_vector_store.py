@@ -158,8 +158,19 @@ def test_vector_document_has_stable_id_and_required_metadata():
         chunk_index=3,
         updated_at=updated_at,
     )
+    other_document = DashboardChatVectorDocument(
+        org_id=7,
+        source_type=DashboardChatSourceType.DBT_MANIFEST,
+        source_identifier="model.public.fact_enrollments",
+        content="manifest chunk",
+        dashboard_id=9,
+        chart_id=12,
+        title="Fact Enrollments",
+        chunk_index=3,
+        updated_at=updated_at,
+    )
 
-    assert document.document_id == document.document_id
+    assert document.document_id == other_document.document_id
     assert document.metadata() == {
         "org_id": 7,
         "source_type": "dbt_manifest",

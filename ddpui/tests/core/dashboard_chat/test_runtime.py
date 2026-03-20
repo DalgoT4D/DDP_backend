@@ -1,18 +1,14 @@
 """Tests for dashboard chat LangGraph runtime, allowlist, and SQL guard."""
 
-import os
-
-import django
 import pytest
 from django.contrib.auth.models import User
 from django.db import transaction
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
-django.setup()
-
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.dashboard_chat.allowlist import DashboardChatAllowlist, DashboardChatAllowlistBuilder
+from ddpui.core.dashboard_chat.allowlist import (
+    DashboardChatAllowlist,
+    DashboardChatAllowlistBuilder,
+)
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.runtime import DashboardChatRuntime
 from ddpui.core.dashboard_chat.runtime_types import (
@@ -209,6 +205,16 @@ class PiiSqlPathLlm(SqlPathLlm):
         )
 
 
+def test_heuristic_intent_does_not_treat_summary_as_sum_keyword():
+    """Substring matches like sum->summary should not force the SQL path."""
+    decision = DashboardChatRuntime._heuristic_intent_decision(
+        user_query="Give me a summary of this dashboard",
+        conversation_history=[],
+    )
+
+    assert decision is None or decision.intent != DashboardChatIntent.DATA_QUERY
+
+
 @pytest.fixture
 def org():
     organization = Org.objects.create(
@@ -365,7 +371,9 @@ def test_sql_guard_enforces_single_statement_allowlist_and_limit():
     assert disallowed_table.is_valid is False
     assert any("not accessible" in error for error in disallowed_table.errors)
 
-    allowed_query = guard.validate("SELECT COUNT(*) AS beneficiary_count FROM analytics.program_reach")
+    allowed_query = guard.validate(
+        "SELECT COUNT(*) AS beneficiary_count FROM analytics.program_reach"
+    )
     assert allowed_query.is_valid is True
     assert allowed_query.sanitized_sql.endswith("LIMIT 200")
     assert any("No LIMIT clause found" in warning for warning in allowed_query.warnings)
@@ -388,6 +396,20 @@ def test_sql_guard_rejects_row_level_pii_queries():
     assert pii_query.errors == [
         "Queries returning row-level sensitive data are not allowed. Please aggregate the results or rephrase."
     ]
+
+
+def test_sql_guard_rejects_select_into_queries():
+    """SQL guard should reject SELECT ... INTO statements."""
+    allowlist = DashboardChatAllowlist(allowed_tables={"analytics.program_reach"})
+    guard = DashboardChatSqlGuard(allowlist=allowlist, max_rows=200)
+
+    select_into_query = guard.validate(
+        "SELECT program_name INTO temp_programs FROM analytics.program_reach LIMIT 50"
+    )
+
+    assert select_into_query.is_valid is False
+    assert select_into_query.sanitized_sql is None
+    assert "SELECT INTO is not allowed" in select_into_query.errors
 
 
 def test_runtime_context_query_returns_citations_and_related_dashboards(
@@ -558,7 +580,9 @@ def test_runtime_rejects_row_level_pii_queries_before_execution(org, primary_das
     ]
 
 
-def test_runtime_skips_disabled_source_types_during_retrieval(org, primary_dashboard, related_dashboard):
+def test_runtime_skips_disabled_source_types_during_retrieval(
+    org, primary_dashboard, related_dashboard
+):
     """Disabled source types should not be queried from the vector store."""
     transaction.commit()
     vector_store = FakeVectorStore(

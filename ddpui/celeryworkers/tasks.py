@@ -117,7 +117,10 @@ from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
-DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS = 3 * 60 * 60
+DASHBOARD_CHAT_CONTEXT_BUILD_INTERVAL_SECONDS = 3 * 60 * 60
+DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS = (
+    DASHBOARD_CHAT_CONTEXT_BUILD_INTERVAL_SECONDS + 5 * 60
+)
 
 
 @app.task(bind=True)
@@ -1312,13 +1315,17 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
         .first()
     )
     if org is None:
-        logger.warning("dashboard chat context build skipped: org %s not found or missing dbt", org_id)
+        logger.warning(
+            "dashboard chat context build skipped: org %s not found or missing dbt", org_id
+        )
         return {"status": "skipped_missing_org", "org_id": org_id}
 
     preferences = OrgPreferences.objects.filter(org=org).first()
     feature_enabled = get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
     if not feature_enabled or preferences is None or not preferences.ai_data_sharing_enabled:
-        logger.info("dashboard chat context build skipped for org=%s because it is not eligible", org_id)
+        logger.info(
+            "dashboard chat context build skipped for org=%s because it is not eligible", org_id
+        )
         return {"status": "skipped_ineligible", "org_id": org_id}
 
     redis_client = RedisClient.get_instance()
@@ -1327,7 +1334,10 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
         timeout=DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS,
     )
     if not lock.acquire(blocking=False):
-        logger.info("dashboard chat context build skipped for org=%s because a rebuild is already running", org_id)
+        logger.info(
+            "dashboard chat context build skipped for org=%s because a rebuild is already running",
+            org_id,
+        )
         return {"status": "skipped_locked", "org_id": org_id}
 
     try:
@@ -1335,7 +1345,9 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
         return {
             "status": "completed",
             "org_id": org_id,
-            "docs_generated_at": result.docs_generated_at.isoformat(),
+            "docs_generated_at": (
+                result.docs_generated_at.isoformat() if result.docs_generated_at else None
+            ),
             "vector_last_ingested_at": result.vector_ingested_at.isoformat(),
             "source_document_counts": result.source_document_counts,
         }
@@ -1344,7 +1356,9 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
             if lock.owned():
                 lock.release()
         except Exception:
-            logger.exception("failed to release dashboard chat context build lock for org=%s", org_id)
+            logger.exception(
+                "failed to release dashboard chat context build lock for org=%s", org_id
+            )
 
 
 @app.task
@@ -1364,14 +1378,11 @@ def run_dashboard_chat_turn(session_id: str, user_message_id: int):
         )
         return {"status": "skipped_missing_session", "session_id": session_id}
 
-    user_message = (
-        DashboardChatMessage.objects.filter(
-            id=user_message_id,
-            session=session,
-            role="user",
-        )
-        .first()
-    )
+    user_message = DashboardChatMessage.objects.filter(
+        id=user_message_id,
+        session=session,
+        role="user",
+    ).first()
     if user_message is None:
         logger.warning(
             "dashboard chat turn skipped because message %s was not found in session %s",
@@ -1394,8 +1405,7 @@ def run_dashboard_chat_turn(session_id: str, user_message_id: int):
             "intent": response.intent.value,
             "citations": [citation.to_dict() for citation in response.citations],
             "related_dashboards": [
-                related_dashboard.to_dict()
-                for related_dashboard in response.related_dashboards
+                related_dashboard.to_dict() for related_dashboard in response.related_dashboards
             ],
             "warnings": response.warnings,
             "sql": response.sql,
