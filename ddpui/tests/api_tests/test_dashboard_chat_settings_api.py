@@ -57,7 +57,7 @@ def org():
 
 
 @pytest.fixture
-def orguser(authuser, org):
+def orguser(authuser, org, seed_db):
     orguser = OrgUser.objects.create(
         user=authuser,
         org=org,
@@ -68,7 +68,7 @@ def orguser(authuser, org):
 
 
 @pytest.fixture
-def guest_orguser(org):
+def guest_orguser(org, seed_db):
     guest_user = User.objects.create(
         username="chatsettingsguest",
         email="chatsettingsguest@test.com",
@@ -85,7 +85,7 @@ def guest_orguser(org):
 
 
 @pytest.fixture
-def other_org_dashboard():
+def other_org_dashboard(seed_db):
     other_org = Org.objects.create(
         name="Other Dashboard Chat Org",
         slug="other-chat-org",

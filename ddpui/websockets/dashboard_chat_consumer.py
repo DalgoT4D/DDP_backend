@@ -17,8 +17,12 @@ from ddpui.celeryworkers.tasks import run_dashboard_chat_turn
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.role_based_access import RolePermission
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 from ddpui.websockets import BaseConsumer
+
+logger = CustomLogger("ddpui")
+
 
 class DashboardChatConsumer(BaseConsumer):
     """Authenticated websocket for dashboard-level chat."""
@@ -78,6 +82,16 @@ class DashboardChatConsumer(BaseConsumer):
             content=raw_message,
             client_message_id=payload.get("client_message_id"),
         )
+        try:
+            run_dashboard_chat_turn.delay(str(session.session_id), user_message.id)
+        except Exception:
+            logger.exception(
+                "dashboard chat turn could not be enqueued for session=%s",
+                session.session_id,
+            )
+            self._respond_error("Unable to start chat right now")
+            return
+
         self._subscribe_to_session(str(session.session_id))
         publish_dashboard_chat_event(
             str(session.session_id),
@@ -89,7 +103,6 @@ class DashboardChatConsumer(BaseConsumer):
                 data={"label": "thinking"},
             ),
         )
-        run_dashboard_chat_turn.delay(str(session.session_id), user_message.id)
 
     def websocket_disconnect(self, message):
         """Remove the socket from any joined session groups on disconnect."""
@@ -124,7 +137,9 @@ class DashboardChatConsumer(BaseConsumer):
 
     def _chat_available(self) -> tuple[bool, str]:
         """Return whether the current org is ready for dashboard chat."""
-        feature_enabled = get_all_feature_flags_for_org(self.orguser.org).get("AI_DASHBOARD_CHAT", False)
+        feature_enabled = get_all_feature_flags_for_org(self.orguser.org).get(
+            "AI_DASHBOARD_CHAT", False
+        )
         if not feature_enabled:
             return False, "Chat with dashboards is not enabled for this organization"
 

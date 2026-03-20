@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 import json
+import re
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -128,7 +129,8 @@ class DashboardChatRuntime:
         org: Org,
         dashboard_id: int,
         user_query: str,
-        conversation_history: Sequence[DashboardChatConversationMessage | dict[str, str]] | None = None,
+        conversation_history: Sequence[DashboardChatConversationMessage | dict[str, str]]
+        | None = None,
     ) -> DashboardChatResponse:
         """Run a single dashboard chat turn and return the structured response."""
         initial_state: DashboardChatRuntimeState = {
@@ -235,8 +237,8 @@ class DashboardChatRuntime:
             query_text=state["user_query"],
             source_types=self.source_config.filter_enabled(
                 [
-                DashboardChatSourceType.DASHBOARD_EXPORT.value,
-                DashboardChatSourceType.DASHBOARD_CONTEXT.value,
+                    DashboardChatSourceType.DASHBOARD_EXPORT.value,
+                    DashboardChatSourceType.DASHBOARD_CONTEXT.value,
                 ]
             ),
             dashboard_id=state["dashboard_id"],
@@ -254,8 +256,8 @@ class DashboardChatRuntime:
                 query_text=state["user_query"],
                 source_types=self.source_config.filter_enabled(
                     [
-                    DashboardChatSourceType.DBT_MANIFEST.value,
-                    DashboardChatSourceType.DBT_CATALOG.value,
+                        DashboardChatSourceType.DBT_MANIFEST.value,
+                        DashboardChatSourceType.DBT_CATALOG.value,
                     ]
                 ),
             ),
@@ -286,7 +288,10 @@ class DashboardChatRuntime:
     ) -> DashboardChatRuntimeState:
         """Load schema snippets for the relevant dashboard tables."""
         intent_decision = state["intent_decision"]
-        if not intent_decision.force_sql_path and intent_decision.intent != DashboardChatIntent.DATA_QUERY:
+        if (
+            not intent_decision.force_sql_path
+            and intent_decision.intent != DashboardChatIntent.DATA_QUERY
+        ):
             state["schema_snippets"] = {}
             state["schema_prompt"] = ""
             return state
@@ -310,6 +315,11 @@ class DashboardChatRuntime:
             state["schema_prompt"] = ""
             state["warnings"] = state.get("warnings", []) + [str(error)]
             return state
+        except Exception as error:
+            state["schema_snippets"] = {}
+            state["schema_prompt"] = ""
+            state["warnings"] = state.get("warnings", []) + [str(error)]
+            return state
 
         state["schema_snippets"] = schema_snippets
         state["schema_prompt"] = "\n\n".join(
@@ -321,7 +331,10 @@ class DashboardChatRuntime:
         """Produce the structured execution plan."""
         intent_decision = state["intent_decision"]
 
-        if intent_decision.intent == DashboardChatIntent.CONTEXT_QUERY and not intent_decision.force_sql_path:
+        if (
+            intent_decision.intent == DashboardChatIntent.CONTEXT_QUERY
+            and not intent_decision.force_sql_path
+        ):
             state["query_plan"] = DashboardChatQueryPlan(
                 mode=DashboardChatPlanMode.CONTEXT,
                 reason=intent_decision.reason,
@@ -391,11 +404,18 @@ class DashboardChatRuntime:
             if not state["allowlist"].is_allowed(table_name) or table_name not in available_tables:
                 continue
             distinct_key = f"{table_name}.{text_filter.column_name}"
-            distinct_values[distinct_key] = warehouse_tools.get_distinct_values(
-                table_name=table_name,
-                column_name=text_filter.column_name,
-                limit=self.runtime_config.max_distinct_values,
-            )
+            try:
+                distinct_values[distinct_key] = warehouse_tools.get_distinct_values(
+                    table_name=table_name,
+                    column_name=text_filter.column_name,
+                    limit=self.runtime_config.max_distinct_values,
+                )
+            except DashboardChatWarehouseToolsError as error:
+                state["warnings"] = state.get("warnings", []) + [str(error)]
+                distinct_values[distinct_key] = []
+            except Exception as error:
+                state["warnings"] = state.get("warnings", []) + [str(error)]
+                distinct_values[distinct_key] = []
 
         state["distinct_values"] = distinct_values
         return state
@@ -461,16 +481,14 @@ class DashboardChatRuntime:
         if sql_draft is not None:
             warnings.extend(warning for warning in sql_draft.warnings if warning not in warnings)
         if sql_validation is not None:
-            warnings.extend(warning for warning in sql_validation.warnings if warning not in warnings)
+            warnings.extend(
+                warning for warning in sql_validation.warnings if warning not in warnings
+            )
 
         if intent_decision.intent == DashboardChatIntent.SMALL_TALK:
-            answer_text = (
-                "I can help explain this dashboard or answer questions about the data behind its charts."
-            )
+            answer_text = "I can help explain this dashboard or answer questions about the data behind its charts."
         elif intent_decision.intent == DashboardChatIntent.IRRELEVANT:
-            answer_text = (
-                "I can help with questions about this dashboard, its charts, and the data behind them."
-            )
+            answer_text = "I can help with questions about this dashboard, its charts, and the data behind them."
         elif intent_decision.intent == DashboardChatIntent.NEEDS_CLARIFICATION:
             answer_text = (
                 intent_decision.clarification_question
@@ -520,7 +538,9 @@ class DashboardChatRuntime:
         )
         return state
 
-    def _node_finalize_response(self, state: DashboardChatRuntimeState) -> DashboardChatRuntimeState:
+    def _node_finalize_response(
+        self, state: DashboardChatRuntimeState
+    ) -> DashboardChatRuntimeState:
         """Attach metadata and table citations to the final response."""
         response = state["response"]
         citations = list(response.citations)
@@ -631,14 +651,17 @@ class DashboardChatRuntime:
                 reason="Greeting or pleasantry",
             )
 
-        if any(keyword in normalized_query for keyword in DATA_QUERY_KEYWORDS):
+        if DashboardChatRuntime._contains_keyword_phrase(normalized_query, DATA_QUERY_KEYWORDS):
             return DashboardChatIntentDecision(
                 intent=DashboardChatIntent.DATA_QUERY,
                 reason="Contains data-analysis keywords",
                 force_sql_path=True,
             )
 
-        if any(keyword in normalized_query for keyword in CONTEXT_QUERY_KEYWORDS):
+        if DashboardChatRuntime._contains_keyword_phrase(
+            normalized_query,
+            CONTEXT_QUERY_KEYWORDS,
+        ):
             return DashboardChatIntentDecision(
                 intent=DashboardChatIntent.CONTEXT_QUERY,
                 reason="Contains definition or explanation keywords",
@@ -651,6 +674,13 @@ class DashboardChatRuntime:
                 force_sql_path=True,
             )
         return None
+
+    @staticmethod
+    def _contains_keyword_phrase(normalized_query: str, keywords: set[str]) -> bool:
+        """Match keywords on word boundaries to avoid substring false positives."""
+        return any(
+            re.search(rf"\b{re.escape(keyword)}\b", normalized_query) for keyword in keywords
+        )
 
     def _query_vector_store(
         self,
@@ -835,7 +865,9 @@ class DashboardChatRuntime:
         if document.source_type == DashboardChatSourceType.DASHBOARD_CONTEXT.value:
             return f"Dashboard context: {dashboard_title}"
         if document.source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value:
-            chart_id = DashboardChatRuntime._chart_id_from_source_identifier(document.source_identifier)
+            chart_id = DashboardChatRuntime._chart_id_from_source_identifier(
+                document.source_identifier
+            )
             if chart_id is not None and chart_id in chart_lookup:
                 return f"Chart: {chart_lookup[chart_id]}"
             return f"Dashboard export: {dashboard_title}"

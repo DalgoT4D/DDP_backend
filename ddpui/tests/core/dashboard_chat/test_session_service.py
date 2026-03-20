@@ -14,10 +14,11 @@ from django.contrib.auth.models import User
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.dashboard_chat.session_service import (
     DashboardChatSessionError,
+    create_dashboard_chat_user_message,
     get_or_create_dashboard_chat_session,
 )
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.dashboard_chat import DashboardChatSession
+from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
@@ -120,9 +121,38 @@ def test_get_or_create_dashboard_chat_session_rejects_other_user_session(
         dashboard=dashboard,
     )
 
-    with pytest.raises(DashboardChatSessionError, match="Chat session not found for this dashboard"):
+    with pytest.raises(
+        DashboardChatSessionError, match="Chat session not found for this dashboard"
+    ):
         get_or_create_dashboard_chat_session(
             orguser=other_orguser,
             dashboard=dashboard,
             session_id=str(session.session_id),
         )
+
+
+def test_create_dashboard_chat_user_message_is_idempotent_for_client_message_id(
+    session_owner,
+    dashboard,
+):
+    """Retries with the same client message id should reuse the stored message."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+
+    first_message = create_dashboard_chat_user_message(
+        session=session,
+        content="Why did funding drop?",
+        client_message_id="client-1",
+    )
+    second_message = create_dashboard_chat_user_message(
+        session=session,
+        content="Why did funding drop?",
+        client_message_id="client-1",
+    )
+
+    assert first_message.id == second_message.id
+    assert first_message.sequence_number == 1
+    assert DashboardChatMessage.objects.filter(session=session).count() == 1

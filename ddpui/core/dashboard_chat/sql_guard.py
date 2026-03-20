@@ -8,6 +8,7 @@ from ddpui.core.dashboard_chat.allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.runtime_types import DashboardChatSqlValidationResult
 
 FORBIDDEN_SQL_KEYWORDS = {
+    "INTO",
     "INSERT",
     "UPDATE",
     "DELETE",
@@ -56,7 +57,9 @@ class DashboardChatSqlGuard:
 
         sql_without_comments = self._strip_sql_comments(sql)
         statements = [
-            statement.strip() for statement in sqlparse.split(sql_without_comments) if statement.strip()
+            statement.strip()
+            for statement in sqlparse.split(sql_without_comments)
+            if statement.strip()
         ]
         if len(statements) != 1:
             return DashboardChatSqlValidationResult(
@@ -71,7 +74,13 @@ class DashboardChatSqlGuard:
         if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
             errors.append("Query must start with SELECT or WITH")
 
+        select_into_detected = self._contains_select_into_clause(sanitized_sql)
+        if select_into_detected:
+            errors.append("SELECT INTO is not allowed")
+
         for keyword in FORBIDDEN_SQL_KEYWORDS:
+            if keyword == "INTO" and select_into_detected:
+                continue
             if re.search(rf"\b{keyword}\b", sql_upper):
                 errors.append(f"Forbidden keyword detected: {keyword}")
 
@@ -114,8 +123,7 @@ class DashboardChatSqlGuard:
     @staticmethod
     def _strip_sql_comments(sql: str) -> str:
         """Remove line and block comments before validation."""
-        sql_without_block_comments = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
-        return re.sub(r"--.*", "", sql_without_block_comments)
+        return sqlparse.format(sql, strip_comments=True)
 
     @classmethod
     def _extract_table_names(cls, sql: str) -> list[str]:
@@ -161,6 +169,14 @@ class DashboardChatSqlGuard:
             ):
                 return True
         return False
+
+    @classmethod
+    def _contains_select_into_clause(cls, sql: str) -> bool:
+        """Detect SELECT ... INTO before the outer FROM clause."""
+        select_clause = cls._extract_outer_select_clause(sql)
+        if not select_clause:
+            return False
+        return bool(re.search(r"\bINTO\b", select_clause, re.IGNORECASE))
 
     @staticmethod
     def _extract_outer_select_clause(sql: str) -> str | None:
@@ -237,6 +253,5 @@ class DashboardChatSqlGuard:
     def _contains_aggregate(expression: str) -> bool:
         """Treat aggregate projections as safe even if they mention sensitive columns."""
         return any(
-            re.search(pattern, expression, re.IGNORECASE)
-            for pattern in AGGREGATE_FUNCTION_PATTERNS
+            re.search(pattern, expression, re.IGNORECASE) for pattern in AGGREGATE_FUNCTION_PATTERNS
         )

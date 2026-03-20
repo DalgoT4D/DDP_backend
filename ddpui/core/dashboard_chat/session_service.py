@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from django.db import IntegrityError
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -119,19 +120,37 @@ def _create_dashboard_chat_message(
     """Create a session-scoped chat message with a stable next sequence number."""
     with transaction.atomic():
         locked_session = DashboardChatSession.objects.select_for_update().get(id=session.id)
+        if client_message_id:
+            existing_message = DashboardChatMessage.objects.filter(
+                session=locked_session,
+                client_message_id=client_message_id,
+            ).first()
+            if existing_message is not None:
+                return existing_message
+
         next_sequence_number = (
             locked_session.messages.aggregate(max_sequence_number=Max("sequence_number"))[
                 "max_sequence_number"
             ]
             or 0
         ) + 1
-        message = DashboardChatMessage.objects.create(
-            session=locked_session,
-            sequence_number=next_sequence_number,
-            role=role,
-            content=content,
-            client_message_id=client_message_id,
-            payload=payload,
-        )
+        try:
+            message = DashboardChatMessage.objects.create(
+                session=locked_session,
+                sequence_number=next_sequence_number,
+                role=role,
+                content=content,
+                client_message_id=client_message_id,
+                payload=payload,
+            )
+        except IntegrityError:
+            if not client_message_id:
+                raise
+            message = DashboardChatMessage.objects.filter(
+                session=locked_session,
+                client_message_id=client_message_id,
+            ).first()
+            if message is None:
+                raise
         DashboardChatSession.objects.filter(id=locked_session.id).update(updated_at=timezone.now())
     return message

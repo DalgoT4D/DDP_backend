@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import tempfile
 
 import yaml
 from django.utils import timezone
@@ -29,7 +30,7 @@ class DashboardChatDbtDocsArtifacts:
     target_dir: Path
 
 
-def _write_profiles_file(org: Org, orgdbt: OrgDbt) -> Path:
+def _write_profiles_file(org: Org, orgdbt: OrgDbt, profiles_dir: Path) -> Path:
     """Write the dbt profiles.yml required for dbt CLI execution."""
     if orgdbt.cli_profile_block is None:
         raise DashboardChatDbtDocsError("dbt CLI profile block not found")
@@ -44,7 +45,6 @@ def _write_profiles_file(org: Org, orgdbt: OrgDbt) -> Path:
             f"Failed to load dbt CLI profile for dashboard chat: {error}"
         ) from error
 
-    profiles_dir = Path(dbt_project_params.project_dir) / "profiles"
     profiles_dir.mkdir(parents=True, exist_ok=True)
     profile_path = profiles_dir / "profiles.yml"
     with open(profile_path, "w", encoding="utf-8") as profile_file:
@@ -60,27 +60,29 @@ def generate_dashboard_chat_dbt_docs_artifacts(
     if orgdbt is None:
         raise DashboardChatDbtDocsError("dbt workspace not configured")
 
-    _write_profiles_file(org, orgdbt)
+    with tempfile.TemporaryDirectory(prefix=f"dashboard-chat-dbt-{org.id}-") as profiles_dir:
+        profile_path = _write_profiles_file(org, orgdbt, Path(profiles_dir))
+        profiles_dir_arg = str(profile_path.parent)
 
-    try:
-        logger.info("running dbt deps for dashboard chat org=%s", org.id)
-        DbtProjectManager.run_dbt_command(
-            org,
-            orgdbt,
-            command=["deps"],
-            keyword_args={"profiles-dir": "profiles"},
-        )
-        logger.info("running dbt docs generate for dashboard chat org=%s", org.id)
-        DbtProjectManager.run_dbt_command(
-            org,
-            orgdbt,
-            command=["docs", "generate"],
-            keyword_args={"profiles-dir": "profiles"},
-        )
-    except Exception as error:
-        raise DashboardChatDbtDocsError(
-            f"dbt docs generate failed for dashboard chat: {error}"
-        ) from error
+        try:
+            logger.info("running dbt deps for dashboard chat org=%s", org.id)
+            DbtProjectManager.run_dbt_command(
+                org,
+                orgdbt,
+                command=["deps"],
+                keyword_args={"profiles-dir": profiles_dir_arg},
+            )
+            logger.info("running dbt docs generate for dashboard chat org=%s", org.id)
+            DbtProjectManager.run_dbt_command(
+                org,
+                orgdbt,
+                command=["docs", "generate"],
+                keyword_args={"profiles-dir": profiles_dir_arg},
+            )
+        except Exception as error:
+            raise DashboardChatDbtDocsError(
+                f"dbt docs generate failed for dashboard chat: {error}"
+            ) from error
 
     target_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt)) / "target"
     manifest_path = target_dir / "manifest.json"

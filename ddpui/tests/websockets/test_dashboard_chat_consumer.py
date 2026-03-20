@@ -76,3 +76,49 @@ def test_dashboard_chat_consumer_send_message_creates_session_and_dispatches_tas
     consumer._subscribe_to_session.assert_called_once_with("session-123")
     mock_publish_event.assert_called_once()
     mock_delay.assert_called_once_with("session-123", 17)
+
+
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_event")
+@patch(
+    "ddpui.websockets.dashboard_chat_consumer.run_dashboard_chat_turn.delay",
+    side_effect=RuntimeError("enqueue failed"),
+)
+@patch("ddpui.websockets.dashboard_chat_consumer.create_dashboard_chat_user_message")
+@patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
+def test_dashboard_chat_consumer_send_message_returns_error_when_enqueue_fails(
+    mock_get_or_create_session,
+    mock_create_user_message,
+    mock_delay,
+    mock_publish_event,
+):
+    session = Mock(session_id="session-123")
+    user_message = Mock(id=17)
+    mock_get_or_create_session.return_value = session
+    mock_create_user_message.return_value = user_message
+
+    consumer = DashboardChatConsumer()
+    consumer.dashboard = Mock(id=42)
+    consumer.orguser = Mock()
+    consumer.send = Mock()
+    consumer._chat_available = Mock(return_value=(True, ""))
+    consumer._subscribe_to_session = Mock()
+
+    consumer.websocket_receive(
+        {
+            "text": json.dumps(
+                {
+                    "action": "send_message",
+                    "message": "Why did funding drop?",
+                    "client_message_id": "ui-1",
+                }
+            )
+        }
+    )
+
+    mock_delay.assert_called_once_with("session-123", 17)
+    consumer._subscribe_to_session.assert_not_called()
+    mock_publish_event.assert_not_called()
+
+    payload = json.loads(consumer.send.call_args.kwargs["text_data"])
+    assert payload["event_type"] == "error"
+    assert payload["data"]["message"] == "Unable to start chat right now"
