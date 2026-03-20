@@ -14,10 +14,14 @@ from django.utils import timezone
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celeryworkers.tasks import (
     build_dashboard_chat_context_for_org,
+    run_dashboard_chat_turn,
     schedule_dashboard_chat_context_builds,
 )
 from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionResult
+from ddpui.core.dashboard_chat.runtime_types import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.org import Org, OrgDbt
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
@@ -60,6 +64,16 @@ def _create_org_dbt(org: Org) -> OrgDbt:
     org.dbt = dbt
     org.save(update_fields=["dbt"])
     return dbt
+
+
+def _create_dashboard(orguser: OrgUser) -> Dashboard:
+    return Dashboard.objects.create(
+        title="Chat Dashboard",
+        dashboard_type="native",
+        created_by=orguser,
+        last_modified_by=orguser,
+        org=orguser.org,
+    )
 
 
 def test_schedule_dashboard_chat_context_builds_enqueues_only_eligible_orgs(orguser):
@@ -148,3 +162,70 @@ def test_build_dashboard_chat_context_for_org_runs_ingestion(orguser):
     assert result["source_document_counts"] == {"dashboard_export": 2}
     ingestion_service.ingest_org.assert_called_once()
     redis_lock.release.assert_called_once()
+
+
+@patch("ddpui.celeryworkers.tasks.publish_dashboard_chat_event")
+@patch("ddpui.celeryworkers.tasks.DashboardChatRuntime")
+def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
+    runtime_class,
+    publish_event,
+    orguser,
+):
+    _create_org_dbt(orguser.org)
+    dashboard = _create_dashboard(orguser)
+    session = DashboardChatSession.objects.create(
+        org=orguser.org,
+        orguser=orguser,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    runtime_class.return_value.run.return_value = DashboardChatResponse(
+        answer_text="Funding dropped because donor inflows slowed this quarter.",
+        intent=DashboardChatIntent.DATA_QUERY,
+        warnings=["Example warning"],
+        sql="SELECT 1",
+        sql_results=[{"value": 1}],
+    )
+
+    result = run_dashboard_chat_turn(str(session.session_id), user_message.id)
+
+    assistant_message = DashboardChatMessage.objects.get(session=session, role="assistant")
+    assert assistant_message.sequence_number == 2
+    assert assistant_message.content == "Funding dropped because donor inflows slowed this quarter."
+    assert assistant_message.payload["sql"] == "SELECT 1"
+    assert result["status"] == "completed"
+    publish_event.assert_called_once()
+
+
+@patch("ddpui.celeryworkers.tasks.publish_dashboard_chat_event")
+@patch("ddpui.celeryworkers.tasks.DashboardChatRuntime")
+def test_run_dashboard_chat_turn_publishes_error_when_runtime_fails(
+    runtime_class,
+    publish_event,
+    orguser,
+):
+    _create_org_dbt(orguser.org)
+    dashboard = _create_dashboard(orguser)
+    session = DashboardChatSession.objects.create(
+        org=orguser.org,
+        orguser=orguser,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    runtime_class.return_value.run.side_effect = RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_dashboard_chat_turn(str(session.session_id), user_message.id)
+
+    assert DashboardChatMessage.objects.filter(session=session, role="assistant").count() == 0
+    publish_event.assert_called_once()
