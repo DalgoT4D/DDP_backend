@@ -383,13 +383,17 @@ class GitManager:
         return owner, repo
 
     @staticmethod
-    def _github_api_request(url: str, pat: str = None, timeout: int = 30) -> dict:
+    def _github_api_request(
+        url: str, pat: str = None, timeout: int = 30, payload: dict = None, method: str = "GET"
+    ) -> dict:
         """
         Common function to make GitHub API requests.
 
         :param url: The GitHub API URL to request
         :param pat: Personal Access Token for authentication (optional)
         :param timeout: Request timeout in seconds
+        :param payload: JSON payload for POST/PUT requests (optional)
+        :param method: HTTP method (GET, POST, PUT, DELETE)
         :return: JSON response data
         :raises requests.HTTPError: For HTTP errors
         :raises requests.RequestException: For network/timeout errors
@@ -400,7 +404,18 @@ class GitManager:
         if pat:
             headers["Authorization"] = f"Bearer {pat}"
 
-        response = requests.get(url, headers=headers, timeout=timeout)
+        # Choose the appropriate request method
+        if method.upper() == "GET":
+            response = requests.get(url, headers=headers, timeout=timeout)
+        elif method.upper() == "POST":
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        elif method.upper() == "PUT":
+            response = requests.put(url, headers=headers, json=payload, timeout=timeout)
+        elif method.upper() == "DELETE":
+            response = requests.delete(url, headers=headers, timeout=timeout)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+
         response.raise_for_status()
         return response.json()
 
@@ -661,3 +676,84 @@ class GitManager:
                 message="Network error",
                 error=f"Failed to connect to GitHub API: {str(e)}",
             ) from e
+
+    @staticmethod
+    def create_managed_repository(org_slug: str, environment: str) -> dict:
+        """
+        Create a new private repository in the Dalgo GitHub organization.
+
+        Args:
+            org_slug: Organization slug for naming
+            environment: Environment (from settings.ENVIRONMENT)
+
+        Returns:
+            Dict containing repository data from GitHub API
+
+        Raises:
+            GitManagerError: If repository creation fails
+        """
+        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
+        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
+
+        if not dalgo_github_org or not org_admin_pat:
+            raise GitManagerError(
+                "DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set in environment"
+            )
+
+        repo_name = f"dbt-{org_slug}-{environment}"
+
+        payload = {
+            "name": repo_name,
+            "description": f"Managed dbt repository for {org_slug} ({environment})",
+            "private": True,  # Always create private repositories
+            "auto_init": True,  # Initialize with README
+            "gitignore_template": "Python",
+        }
+
+        try:
+            repo_data = GitManager._github_api_request(
+                url=f"https://api.github.com/orgs/{dalgo_github_org}/repos",
+                pat=org_admin_pat,
+                payload=payload,
+                method="POST",
+            )
+
+            logger.info(f"Created private repository: {repo_data['full_name']}")
+            return repo_data
+
+        except Exception as e:
+            error_message = str(e)
+            if "422" in error_message:
+                raise GitManagerError(f"Repository {repo_name} already exists or name is invalid")
+            elif "401" in error_message:
+                raise GitManagerError("Authentication failed - check PAT permissions")
+            elif "403" in error_message:
+                raise GitManagerError(
+                    "Insufficient permissions to create repository in organization"
+                )
+            else:
+                raise GitManagerError(f"GitHub API error: {error_message}")
+
+    @staticmethod
+    def get_org_admin_pat() -> str:
+        """
+        Get the organization admin PAT for managed repository operations.
+
+        This PAT has organization-level permissions and is used for:
+        - Creating new repositories
+        - All Git operations on managed repositories
+
+        Note: This is a security trade-off. The PAT has broader permissions than
+        repository-specific tokens, but GitHub does not currently support
+        programmatic creation of repository-scoped PATs via REST API.
+
+        Returns:
+            Organization admin PAT token string
+
+        Raises:
+            GitManagerError: If DALGO_ORG_ADMIN_PAT is not configured
+        """
+        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
+        if not org_admin_pat:
+            raise GitManagerError("DALGO_ORG_ADMIN_PAT must be set in environment")
+        return org_admin_pat
