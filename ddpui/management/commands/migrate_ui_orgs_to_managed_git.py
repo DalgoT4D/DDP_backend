@@ -206,8 +206,7 @@ class Command(BaseCommand):
 
                 # Commit all changes
                 git_manager.commit_changes(
-                    commit_message=f"Pre-migration commit for {org.name} - save current state before moving to managed Git",
-                    add_all=True,
+                    message=f"Pre-migration commit for {org.name} - save current state before moving to managed Git"
                 )
 
                 self.stdout.write(f"    Committed {len(files_to_commit)} changes")

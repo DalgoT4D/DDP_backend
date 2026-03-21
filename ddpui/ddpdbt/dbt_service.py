@@ -44,8 +44,8 @@ DBT_GITIGNORE_CONTENT = [
     ".venv/",
     "venv/",
     "profiles/",
-    "*/profiles.yml",
-    "profiles.yaml",
+    "**/profiles.yml",
+    "**/profiles.yaml",
     ".user.yml",
     "package-lock.yml",
     ".env*",
@@ -54,6 +54,63 @@ DBT_GITIGNORE_CONTENT = [
     "*.html",  # ignore elementary reports
     "edr_target/",
 ]
+
+
+def _scaffold_dbt_project(org: Org, orgdbt: OrgDbt, project_name: str, dbtrepo_dir: Path):
+    """
+    Initialize a new dbt project with scaffolding and copy required asset files.
+    Private function for internal use in dbt_service.py only.
+
+    Args:
+        org: Organization instance
+        orgdbt: OrgDbt instance
+        project_name: Name of the dbt project
+        dbtrepo_dir: Path to the dbt repository directory
+
+    Raises:
+        Exception: If dbt init fails or asset file copying fails
+    """
+    logger.info(f"Starting to scaffold dbt project at {dbtrepo_dir}")
+
+    # Run dbt init to create project structure
+    try:
+        DbtProjectManager.run_dbt_command(
+            org,
+            orgdbt,
+            ["init", project_name],
+            cwd=str(dbtrepo_dir.parent),
+            flags=["--skip-profile-setup"],
+        )
+
+        # Delete example models
+        example_models_dir = dbtrepo_dir / "models" / "example"
+        if example_models_dir.exists():
+            shutil.rmtree(example_models_dir)
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt init failed with {e.returncode}")
+        raise Exception(f"dbt init failed: {e}") from e
+
+    # Copy asset files
+    try:
+        # Copy packages.yml
+        logger.info("copying packages.yml from assets")
+        target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+        source_packages_yml = os.path.abspath(
+            os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
+        )
+        shutil.copy(source_packages_yml, target_packages_yml)
+
+        # Copy all macros with .sql extension from assets
+        assets_dir = assets.__path__[0]
+        for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
+            target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
+            shutil.copy(sql_file_path, target_path)
+            logger.info("created %s", target_path)
+
+    except Exception as e:
+        logger.error(f"failed to copy asset files: {e}")
+        raise Exception(f"Something went wrong while copying asset files : {e}")
 
 
 def update_github_pat_storage(
@@ -291,15 +348,12 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
         # 1. Create managed repository using GitManager
         repo_data = GitManager.create_managed_repository(org_slug=org.slug, environment=environment)
         repo_url = repo_data["clone_url"]
-        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
 
         logger.info(f"Created repository: {repo_data['full_name']}")
 
-        # 2. Get org admin PAT for repository operations
+        # 2. Get org admin PAT and set up storage (both AWS + Prefect)
         repo_pat = GitManager.get_org_admin_pat()
-
-        # 3. Save PAT to secrets manager
-        pat_secret_key = secretsmanager.save_github_pat(repo_pat)
+        pat_secret_key = update_github_pat_storage(org, repo_url, repo_pat)
 
         # 4. Set up local paths (same as original function)
         project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
@@ -352,51 +406,8 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             logger.error(f"Failed to clone managed repository: {str(err)}")
             raise Exception(f"Failed to clone managed repository: {str(err)}") from err
 
-        logger.info(f"Starting to scaffold dbt project at {dbtrepo_dir}")
-
-        # 8. Run dbt init to create project structure (same as original)
-        try:
-            DbtProjectManager.run_dbt_command(
-                org,
-                orgdbt,
-                [
-                    "init",
-                    project_name,
-                ],
-                cwd=str(project_dir),
-                flags=["--skip-profile-setup"],
-            )
-
-            # Delete example models
-            example_models_dir = dbtrepo_dir / "models" / "example"
-            if example_models_dir.exists():
-                shutil.rmtree(example_models_dir)
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"dbt init failed with {e.returncode}")
-            raise Exception(f"dbt init failed: {e}") from e
-
-        # 9. Copy asset files (same as original)
-        try:
-            # Copy packages.yml
-            logger.info("copying packages.yml from assets")
-            target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
-            source_packages_yml = os.path.abspath(
-                os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
-            )
-            shutil.copy(source_packages_yml, target_packages_yml)
-
-            # Copy all macros with .sql extension from assets
-            assets_dir = assets.__path__[0]
-
-            for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
-                target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
-                shutil.copy(sql_file_path, target_path)
-                logger.info("created %s", target_path)
-
-        except Exception as e:
-            logger.error(f"failed to copy asset files: {e}")
-            raise Exception(f"Something went wrong while copying asset files : {e}")
+        # 8. Scaffold dbt project (init + copy assets)
+        _scaffold_dbt_project(org, orgdbt, project_name, dbtrepo_dir)
 
         # 10. Set up warehouse credentials and CLI profile block
         saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
@@ -428,18 +439,13 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
         # 12. Commit and push scaffolded project back to managed repository
         try:
             logger.info("Committing and pushing scaffolded dbt project to managed repository")
-            git_manager.commit_changes(
-                commit_message=f"Initial dbt project scaffolding for {org.name}", add_all=True
-            )
+            git_manager.commit_changes(message=f"Initial dbt project scaffolding for {org.name}")
             git_manager.push_changes()
             logger.info("Successfully pushed scaffolded project to managed repository")
 
         except Exception as err:
             logger.error(f"Failed to commit/push scaffolded project: {str(err)}")
             raise Exception(f"Failed to commit/push scaffolded project: {str(err)}") from err
-
-        # 13. Set up Prefect blocks (dual storage - AWS + Prefect)
-        update_github_pat_storage(orgdbt, repo_pat)
 
         logger.info(f"Successfully set up managed Git workspace for org {org.name}")
 
