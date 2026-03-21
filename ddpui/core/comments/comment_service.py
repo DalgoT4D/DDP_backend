@@ -82,11 +82,14 @@ class CommentService:
             if read_status:
                 last_read_at = read_status.last_read_at
 
-        # Annotate comments with is_new
+        # Annotate comments with is_new (own comments are never new)
         for comment in comments:
-            comment.is_new = (
-                last_read_at is None or comment.created_at > last_read_at
-            )
+            if orguser and comment.author_id == orguser.id:
+                comment.is_new = False
+            else:
+                comment.is_new = (
+                    last_read_at is None or comment.created_at > last_read_at
+                )
 
         return comments
 
