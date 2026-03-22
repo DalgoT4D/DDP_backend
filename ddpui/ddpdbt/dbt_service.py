@@ -4,7 +4,6 @@ import uuid
 import json
 from django.db import transaction
 
-import glob
 import os
 import shutil
 import subprocess
@@ -96,16 +95,17 @@ def _scaffold_dbt_project(org: Org, orgdbt: OrgDbt, project_name: str, dbtrepo_d
         # Copy packages.yml
         logger.info("copying packages.yml from assets")
         target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
-        source_packages_yml = os.path.abspath(
-            os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
-        )
+        assets_module_path = Path(assets.__file__).parent
+        source_packages_yml = assets_module_path / "packages.yml"
         shutil.copy(source_packages_yml, target_packages_yml)
 
         # Copy all macros with .sql extension from assets
-        assets_dir = assets.__path__[0]
-        for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
-            target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
-            shutil.copy(sql_file_path, target_path)
+        macros_dir = Path(dbtrepo_dir) / "macros"
+        macros_dir.mkdir(exist_ok=True)  # Ensure macros directory exists
+
+        for sql_file in assets_module_path.glob("*.sql"):
+            target_path = macros_dir / sql_file.name
+            shutil.copy(sql_file, target_path)
             logger.info("created %s", target_path)
 
     except Exception as e:
@@ -397,17 +397,19 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             project_dir.mkdir(parents=True, exist_ok=True)
             logger.info("created project_dir %s", project_dir)
 
-        # 7. Clone managed repository to org directory
-        logger.info(f"Cloning managed repository to {dbtrepo_dir}")
+        # 7. Scaffold dbt project first (init + copy assets)
+        _scaffold_dbt_project(org, orgdbt, project_name, dbtrepo_dir)
+
+        # 8. Initialize git in the scaffolded project and set remote to managed repository
+        logger.info(f"Setting up git repository and connecting to managed repo")
         try:
             git_manager = GitManager(repo_local_path=str(dbtrepo_dir), pat=repo_pat)
-            git_manager.clone(remote_url=repo_url, branch="main")
+            git_manager.init_repo()
+            git_manager.set_remote(repo_url)
+            logger.info(f"Initialized git and set remote to {repo_url}")
         except Exception as err:
-            logger.error(f"Failed to clone managed repository: {str(err)}")
-            raise Exception(f"Failed to clone managed repository: {str(err)}") from err
-
-        # 8. Scaffold dbt project (init + copy assets)
-        _scaffold_dbt_project(org, orgdbt, project_name, dbtrepo_dir)
+            logger.error(f"Failed to initialize git repository: {str(err)}")
+            raise Exception(f"Failed to initialize git repository: {str(err)}") from err
 
         # 10. Set up warehouse credentials and CLI profile block
         saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
@@ -436,7 +438,7 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             logger.error(f"Failed to create .gitignore file: {str(err)}")
             raise Exception(f"Failed to create .gitignore file: {str(err)}") from err
 
-        # 12. Commit and push scaffolded project back to managed repository
+        # 12. Commit and push scaffolded project to managed repository
         try:
             logger.info("Committing and pushing scaffolded dbt project to managed repository")
             git_manager.commit_changes(message=f"Initial dbt project scaffolding for {org.name}")

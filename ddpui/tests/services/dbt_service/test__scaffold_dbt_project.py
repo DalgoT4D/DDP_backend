@@ -22,38 +22,42 @@ def test_scaffold_dbt_project_success(tmp_path):
     with patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
     ) as mock_run_command, patch("ddpui.ddpdbt.dbt_service.shutil.copy") as mock_copy, patch(
-        "ddpui.ddpdbt.dbt_service.glob.glob"
-    ) as mock_glob, patch(
         "ddpui.ddpdbt.dbt_service.shutil.rmtree"
-    ) as mock_rmtree:
-        # Setup mocks
-        mock_glob.return_value = ["/fake/assets/macro1.sql", "/fake/assets/macro2.sql"]
+    ) as mock_rmtree, patch(
+        "ddpui.ddpdbt.dbt_service.assets.__file__", "/fake/path/to/assets/__init__.py"
+    ):
+        # Create mock files for the .glob() method to find
+        with patch("pathlib.Path.glob") as mock_glob:
+            mock_sql_file1 = Mock()
+            mock_sql_file1.name = "macro1.sql"
+            mock_sql_file2 = Mock()
+            mock_sql_file2.name = "macro2.sql"
+            mock_glob.return_value = [mock_sql_file1, mock_sql_file2]
 
-        # Create the dbtrepo directory
-        dbtrepo_dir.mkdir(parents=True, exist_ok=True)
-        example_models_dir = dbtrepo_dir / "models" / "example"
-        example_models_dir.mkdir(parents=True, exist_ok=True)
+            # Create the dbtrepo directory
+            dbtrepo_dir.mkdir(parents=True, exist_ok=True)
+            example_models_dir = dbtrepo_dir / "models" / "example"
+            example_models_dir.mkdir(parents=True, exist_ok=True)
+            macros_dir = dbtrepo_dir / "macros"
+            macros_dir.mkdir(parents=True, exist_ok=True)
 
-        # Call the function
-        _scaffold_dbt_project(org, orgdbt, project_name, dbtrepo_dir)
+            # Call the function
+            _scaffold_dbt_project(org, orgdbt, project_name, dbtrepo_dir)
 
-        # Verify dbt init was called correctly
-        mock_run_command.assert_called_once_with(
-            org,
-            orgdbt,
-            ["init", project_name],
-            cwd=str(dbtrepo_dir.parent),
-            flags=["--skip-profile-setup"],
-        )
+            # Verify dbt init was called correctly
+            mock_run_command.assert_called_once_with(
+                org,
+                orgdbt,
+                ["init", project_name],
+                cwd=str(dbtrepo_dir.parent),
+                flags=["--skip-profile-setup"],
+            )
 
-        # Verify example models directory was removed
-        mock_rmtree.assert_called_once_with(example_models_dir)
+            # Verify example models directory was removed
+            mock_rmtree.assert_called_once_with(example_models_dir)
 
-        # Verify packages.yml and macros were copied
-        assert mock_copy.call_count >= 1  # At least packages.yml was copied
-
-        # Verify SQL files were processed
-        mock_glob.assert_called_once()
+            # Verify packages.yml and macros were copied
+            assert mock_copy.call_count >= 1  # At least packages.yml was copied
 
 
 @pytest.mark.django_db

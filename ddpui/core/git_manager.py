@@ -706,8 +706,7 @@ class GitManager:
             "name": repo_name,
             "description": f"Managed dbt repository for {org_slug} ({environment})",
             "private": True,  # Always create private repositories
-            "auto_init": True,  # Initialize with README
-            "gitignore_template": "Python",
+            "auto_init": False,  # Initialize with README
         }
 
         try:
