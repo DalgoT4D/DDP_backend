@@ -380,6 +380,40 @@ class TestRenderMentionEmail:
         assert "Check this number" in html_body
         assert "http://localhost:3001/reports/42" in html_body
 
+    def test_render_with_chart_name(self):
+        """Template includes chart name when provided"""
+        plain, html_body = render_mention_email(
+            author_name="Noopur Raval",
+            author_email="noopur@test.com",
+            comment_excerpt="Check the bar values",
+            snapshot_title="Q1 Report",
+            report_url="http://localhost:3001/reports/42",
+            chart_name="Revenue by Region",
+        )
+
+        # Plain text should mention chart name and report title
+        assert "Revenue by Region" in plain
+        assert "Q1 Report" in plain
+
+        # HTML should mention chart name and report title
+        assert "Revenue by Region" in html_body
+        assert "Q1 Report" in html_body
+
+    def test_render_without_chart_name(self):
+        """Template omits chart name when None (summary-level comment)"""
+        plain, html_body = render_mention_email(
+            author_name="Noopur Raval",
+            author_email="noopur@test.com",
+            comment_excerpt="Looks good",
+            snapshot_title="Q1 Report",
+            report_url="http://localhost:3001/reports/42",
+            chart_name=None,
+        )
+
+        # Should still contain the report title
+        assert "Q1 Report" in plain
+        assert "Q1 Report" in html_body
+
     def test_render_escapes_html_in_user_content(self):
         """User-generated content is HTML-escaped to prevent XSS"""
         plain, html_body = render_mention_email(

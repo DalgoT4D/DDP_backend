@@ -6,7 +6,7 @@ from typing import Optional
 
 from django.conf import settings
 
-from ddpui.models.comment import Comment
+from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -106,12 +106,26 @@ class MentionService:
         Skips self-mentions. Respects UserPreferences.enable_email_notifications.
         Email failures are logged but do not block notification creation.
         """
-        frontend_url = getattr(settings, "FRONTEND_URL_V2", None) or getattr(
-            settings, "FRONTEND_URL", "http://localhost:3001"
+        frontend_url = (
+            getattr(settings, "FRONTEND_URL_V2", None)
+            or getattr(settings, "FRONTEND_URL", None)
+            or "http://localhost:3001"
         )
         report_url = f"{frontend_url}/reports/{comment.snapshot_id}"
         snapshot_title = comment.snapshot.title if comment.snapshot else "Report"
         author_name = _get_display_name(author)
+
+        # Resolve chart name from frozen config
+        chart_name = None
+        if (
+            comment.target_type == CommentTargetType.CHART
+            and comment.snapshot_chart_id is not None
+            and comment.snapshot
+        ):
+            chart_config = (comment.snapshot.frozen_chart_configs or {}).get(
+                str(comment.snapshot_chart_id), {}
+            )
+            chart_name = chart_config.get("title")
 
         for mentioned_user in mentioned_users:
             # Skip self-mentions
@@ -138,6 +152,9 @@ class MentionService:
             user_pref, _ = UserPreferences.objects.get_or_create(orguser=mentioned_user)
             if user_pref.enable_email_notifications:
                 try:
+                    # Fetch recent thread context (up to 3 prior comments on same target)
+                    thread = MentionService._get_thread_context(comment)
+
                     excerpt = comment.content[:500]
                     if len(comment.content) > 500:
                         excerpt += "..."
@@ -148,6 +165,8 @@ class MentionService:
                         comment_excerpt=excerpt,
                         snapshot_title=snapshot_title,
                         report_url=report_url,
+                        thread=thread,
+                        chart_name=chart_name,
                     )
 
                     send_html_message(
@@ -160,3 +179,37 @@ class MentionService:
                     logger.error(
                         f"Failed to send mention email to {mentioned_user.user.email}: {e}"
                     )
+
+    @staticmethod
+    def _get_thread_context(comment: Comment, max_prior: int = 3) -> list:
+        """Fetch recent comments on the same target before this comment.
+
+        Returns list of dicts: [{"author_name": ..., "author_email": ..., "content": ...}]
+        """
+        query = Comment.objects.filter(
+            snapshot=comment.snapshot,
+            target_type=comment.target_type,
+            is_deleted=False,
+            created_at__lt=comment.created_at,
+        ).select_related("author", "author__user")
+
+        if comment.target_type == CommentTargetType.CHART:
+            query = query.filter(snapshot_chart_id=comment.snapshot_chart_id)
+
+        # Get last N comments before this one, ordered oldest first
+        prior_comments = list(query.order_by("-created_at")[:max_prior])
+        prior_comments.reverse()
+
+        thread = []
+        for c in prior_comments:
+            content = c.content[:200]
+            if len(c.content) > 200:
+                content += "..."
+            thread.append(
+                {
+                    "author_name": _get_display_name(c.author),
+                    "author_email": c.author.user.email,
+                    "content": content,
+                }
+            )
+        return thread
