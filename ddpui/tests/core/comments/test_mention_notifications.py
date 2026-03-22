@@ -368,14 +368,12 @@ class TestRenderMentionEmail:
 
         # Plain text checks
         assert "Noopur Raval" in plain
-        assert "noopur@test.com" in plain
         assert "Q1 Report" in plain
         assert "Check this number" in plain
         assert "http://localhost:3001/reports/42" in plain
 
         # HTML checks
         assert "Noopur Raval" in html_body
-        assert "noopur@test.com" in html_body
         assert "Q1 Report" in html_body
         assert "Check this number" in html_body
         assert "http://localhost:3001/reports/42" in html_body
@@ -413,6 +411,22 @@ class TestRenderMentionEmail:
         # Should still contain the report title
         assert "Q1 Report" in plain
         assert "Q1 Report" in html_body
+
+    def test_render_strips_mention_prefix(self):
+        """@email mentions have the @ prefix stripped to prevent auto-linking"""
+        plain, html_body = render_mention_email(
+            author_name="Author",
+            author_email="author@test.com",
+            comment_excerpt="Hey @mentioned@test.com check this",
+            snapshot_title="Q1 Report",
+            report_url="http://localhost:3001/reports/42",
+        )
+
+        # The @ prefix should be stripped from mentions
+        assert "@mentioned@test.com" not in plain
+        assert "mentioned@test.com" in plain
+        assert "@mentioned@test.com" not in html_body
+        assert "mentioned@test.com" in html_body
 
     def test_render_escapes_html_in_user_content(self):
         """User-generated content is HTML-escaped to prevent XSS"""

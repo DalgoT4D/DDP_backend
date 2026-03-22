@@ -1,7 +1,17 @@
 """HTML email templates for Dalgo notifications"""
 
 import html
+import re
 from typing import Optional
+
+
+def _strip_mentions(content: str) -> str:
+    """Remove @ prefix from email mentions to prevent auto-linking by email clients.
+
+    Converts @user@example.com to user@example.com so email clients
+    don't render them as clickable mailto links.
+    """
+    return re.sub(r"@([\w.+-]+@[\w.-]+\.\w+)", r"\1", content)
 
 
 def _render_thread_html(thread: list) -> str:
@@ -12,17 +22,21 @@ def _render_thread_html(thread: list) -> str:
     items = []
     for msg in thread:
         safe_name = html.escape(msg["author_name"])
-        safe_content = html.escape(msg["content"])
+        safe_content = html.escape(_strip_mentions(msg["content"]))
         items.append(
-            f'<tr><td style="padding:8px 16px;">'
-            f'<p style="margin:0 0 2px; font-size:12px; color:#6b7280; font-weight:600;">{safe_name}</p>'
-            f'<p style="margin:0; font-size:13px; color:#374151; line-height:1.4;">{safe_content}</p>'
+            f'<tr><td style="padding:10px 16px;'
+            f'{" border-top:1px solid #e5e7eb;" if items else ""}">'
+            f'<p style="margin:0 0 4px; font-size:13px; color:#6b7280; font-weight:600;">'
+            f"{safe_name}</p>"
+            f'<p style="margin:0; font-size:14px; color:#374151; line-height:1.5;">'
+            f"{safe_content}</p>"
             f"</td></tr>"
         )
 
     return (
         '<table width="100%" cellpadding="0" cellspacing="0" '
-        'style="background-color:#f9fafb; border-left:3px solid #d1d5db; border-radius:0 4px 4px 0; margin-bottom:8px;">'
+        'style="background-color:#f9fafb; border-left:3px solid #d1d5db;'
+        ' border-radius:0 4px 4px 0; margin-bottom:12px;">'
         + "".join(items)
         + "</table>"
     )
@@ -35,7 +49,7 @@ def _render_thread_plain(thread: list) -> str:
 
     lines = []
     for msg in thread:
-        lines.append(f'  {msg["author_name"]}: {msg["content"]}')
+        lines.append(f'  {msg["author_name"]}: {_strip_mentions(msg["content"])}')
     return "\n".join(lines) + "\n\n"
 
 
@@ -65,8 +79,7 @@ def render_mention_email(
     """
     # Escape user-generated content for HTML
     safe_author_name = html.escape(author_name)
-    safe_author_email = html.escape(author_email)
-    safe_excerpt = html.escape(comment_excerpt)
+    safe_excerpt = html.escape(_strip_mentions(comment_excerpt))
     safe_title = html.escape(snapshot_title)
     safe_url = html.escape(report_url)
     safe_chart_name = html.escape(chart_name) if chart_name else None
@@ -75,19 +88,24 @@ def render_mention_email(
     thread_plain = _render_thread_plain(thread)
     thread_html = _render_thread_html(thread)
 
-    # Build the "on ..." location string
+    # Build the location line (chart name + report title)
     if chart_name:
-        plain_location = f'"{chart_name}" in "{snapshot_title}"'
-        html_location = f'<strong>{safe_chart_name}</strong> in <strong>{safe_title}</strong>'
+        location_html = (
+            f'<span style="color:#00897B; font-weight:600;">{safe_chart_name}</span>'
+            f' &middot; {safe_title}'
+        )
+        plain_location = f"{chart_name} - {snapshot_title}"
     else:
-        plain_location = f'"{snapshot_title}"'
-        html_location = f'<strong>{safe_title}</strong>'
+        location_html = f'<span style="color:#00897B; font-weight:600;">{safe_title}</span>'
+        plain_location = snapshot_title
 
     plain_text = (
-        f"{author_name} ({author_email}) mentioned you in a comment on {plain_location}:\n"
+        f"{author_name} mentioned you in a comment:\n"
+        f"\n"
+        f"  Report: {plain_location}\n"
         f"\n"
         f"{thread_plain}"
-        f"  {author_name}: {comment_excerpt}\n"
+        f"  {author_name}: {_strip_mentions(comment_excerpt)}\n"
         f"\n"
         f"View the report: {report_url}\n"
         f"\n"
@@ -102,25 +120,31 @@ def render_mention_email(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:Arial, Helvetica, sans-serif;">
+<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5; padding:32px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
 
           <!-- Header -->
           <tr>
-            <td style="background-color:#00897B; padding:24px 32px;">
-              <h1 style="color:#ffffff; margin:0; font-size:20px; font-weight:600;">Dalgo</h1>
+            <td style="background-color:#00897B; padding:20px 32px;">
+              <h1 style="color:#ffffff; margin:0; font-size:18px; font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
             </td>
           </tr>
 
           <!-- Body -->
           <tr>
             <td style="padding:32px;">
-              <p style="margin:0 0 16px; font-size:16px; color:#1a1a1a;">
-                <strong>{safe_author_name}</strong> ({safe_author_email}) mentioned you in a comment on
-                {html_location}:
+
+              <!-- Headline -->
+              <p style="margin:0 0 6px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                {safe_author_name} mentioned you in a comment
+              </p>
+
+              <!-- Location badge -->
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; line-height:1.4;">
+                {location_html}
               </p>
 
               <!-- Thread context (prior comments) -->
@@ -130,20 +154,20 @@ def render_mention_email(
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td style="background-color:#f0fdfa; border-left:4px solid #00897B; padding:12px 16px; border-radius:0 4px 4px 0;">
-                    <p style="margin:0 0 2px; font-size:12px; color:#00897B; font-weight:600;">{safe_author_name}</p>
-                    <p style="margin:0; font-size:14px; color:#374151; line-height:1.5; white-space:pre-wrap;">{safe_excerpt}</p>
+                    <p style="margin:0 0 4px; font-size:13px; color:#00897B; font-weight:600;">{safe_author_name}</p>
+                    <p style="margin:0; font-size:14px; color:#1f2937; line-height:1.5;">{safe_excerpt}</p>
                   </td>
                 </tr>
               </table>
 
               <!-- CTA Button -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:28px;">
                 <tr>
                   <td>
                     <a href="{safe_url}"
                        style="display:inline-block; background-color:#00897B; color:#ffffff;
-                              padding:12px 24px; text-decoration:none; border-radius:6px;
-                              font-size:14px; font-weight:600;">
+                              padding:10px 24px; text-decoration:none; border-radius:6px;
+                              font-size:14px; font-weight:600; letter-spacing:0.3px;">
                       View Report
                     </a>
                   </td>
@@ -155,9 +179,9 @@ def render_mention_email(
           <!-- Footer -->
           <tr>
             <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
-              <p style="margin:0; font-size:12px; color:#9ca3af;">
+              <p style="margin:0; font-size:12px; color:#9ca3af; line-height:1.5;">
                 You received this email because you were mentioned in a comment on Dalgo.
-                You can manage your email notification preferences in your account settings.
+                You can manage your notification preferences in your account settings.
               </p>
             </td>
           </tr>

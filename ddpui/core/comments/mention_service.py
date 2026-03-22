@@ -111,7 +111,14 @@ class MentionService:
             or getattr(settings, "FRONTEND_URL", None)
             or "http://localhost:3001"
         )
-        report_url = f"{frontend_url}/reports/{comment.snapshot_id}"
+        # Build URL with query params so frontend auto-opens the right comment panel
+        if comment.target_type == CommentTargetType.CHART and comment.snapshot_chart_id is not None:
+            report_url = (
+                f"{frontend_url}/reports/{comment.snapshot_id}"
+                f"?commentTarget=chart&chartId={comment.snapshot_chart_id}"
+            )
+        else:
+            report_url = f"{frontend_url}/reports/{comment.snapshot_id}?commentTarget=summary"
         snapshot_title = comment.snapshot.title if comment.snapshot else "Report"
         author_name = _get_display_name(author)
 
