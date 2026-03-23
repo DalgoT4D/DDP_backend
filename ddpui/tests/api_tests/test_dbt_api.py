@@ -25,6 +25,7 @@ from ddpui.api.dbt_api import (
     post_create_elementary_profile,
     post_create_edr_sendreport_dataflow,
     post_dbt_publish_changes,
+    put_switch_git_repo,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import SECRET, DBTCLIPROFILE
@@ -896,6 +897,185 @@ def test_post_publish_changes_nothing_to_commit(seed_db, orguser: OrgUser):
             assert response["committed"] is True
             assert response["pushed"] is True
             assert response["commit_result"] == "Nothing to commit, working tree clean"
+
+    # Cleanup
+    orgdbt.delete()
+
+
+# ==================== put_switch_git_repo tests ====================
+
+
+def test_put_switch_git_repo_success_with_new_pat(seed_db, orguser: OrgUser):
+    """Test successful switch with new PAT (not masked)"""
+    request = mock_request(orguser)
+
+    # Create OrgDbt workspace
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/dalgo-managed/test-repo",
+        gitrepo_access_token_secret="existing-pat-secret",
+        is_repo_managed_by_system=True,
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/new-repo", gitrepoAccessToken="ghp_newtoken123"
+    )
+
+    with patch(
+        "ddpui.api.dbt_api.dbt_service.switch_git_repository_v1",
+        return_value={"success": True, "message": "Repository switched successfully"},
+    ) as mock_switch:
+        response = put_switch_git_repo(request, payload)
+
+        assert response["success"] is True
+        assert response["message"] == "Repository switched successfully"
+
+        # Verify the service was called with the NEW PAT (not existing one)
+        mock_switch.assert_called_once_with(orguser, payload, "ghp_newtoken123")
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_switch_git_repo_success_with_masked_pat(seed_db, orguser: OrgUser):
+    """Test successful switch with masked PAT (uses existing PAT from secrets manager)"""
+    request = mock_request(orguser)
+
+    # Create OrgDbt workspace with existing PAT secret
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/dalgo-managed/test-repo",
+        gitrepo_access_token_secret="existing-pat-secret",
+        is_repo_managed_by_system=True,
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/new-repo",
+        gitrepoAccessToken="*********",  # Masked token
+    )
+
+    with patch(
+        "ddpui.api.dbt_api.dbt_service.switch_git_repository_v1",
+        return_value={"success": True, "message": "Repository switched successfully"},
+    ) as mock_switch, patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
+        return_value="existing_pat_from_secrets",
+    ) as mock_retrieve_pat:
+        response = put_switch_git_repo(request, payload)
+
+        assert response["success"] is True
+        assert response["message"] == "Repository switched successfully"
+
+        # Verify PAT was retrieved from secrets manager
+        mock_retrieve_pat.assert_called_once_with("existing-pat-secret")
+
+        # Verify the service was called with the EXISTING PAT (not masked one)
+        mock_switch.assert_called_once_with(orguser, payload, "existing_pat_from_secrets")
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_switch_git_repo_error_masked_token_no_existing_pat(seed_db, orguser: OrgUser):
+    """Test error when using masked token but no existing PAT found"""
+    request = mock_request(orguser)
+
+    # Create OrgDbt workspace WITHOUT existing PAT secret
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/dalgo-managed/test-repo",
+        gitrepo_access_token_secret=None,  # No existing PAT
+        is_repo_managed_by_system=True,
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/new-repo",
+        gitrepoAccessToken="*********",  # Masked token
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        put_switch_git_repo(request, payload)
+
+    assert str(excinfo.value) == "Cannot use masked token - no existing PAT found"
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_switch_git_repo_error_pat_retrieval_fails(seed_db, orguser: OrgUser):
+    """Test error when PAT retrieval from secrets manager fails"""
+    request = mock_request(orguser)
+
+    # Create OrgDbt workspace with existing PAT secret
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/dalgo-managed/test-repo",
+        gitrepo_access_token_secret="existing-pat-secret",
+        is_repo_managed_by_system=True,
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/new-repo",
+        gitrepoAccessToken="*********",  # Masked token
+    )
+
+    with patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
+        return_value=None,  # PAT retrieval fails
+    ), pytest.raises(HttpError) as excinfo:
+        put_switch_git_repo(request, payload)
+
+    assert str(excinfo.value) == "Failed to retrieve existing PAT from secrets manager"
+
+    # Cleanup
+    orgdbt.delete()
+
+
+def test_put_switch_git_repo_error_no_dbt_workspace(seed_db, orguser: OrgUser):
+    """Test error when no dbt workspace exists"""
+    request = mock_request(orguser)
+
+    # No OrgDbt workspace exists
+    request.orguser.org.dbt = None
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/new-repo", gitrepoAccessToken="ghp_newtoken123"
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        put_switch_git_repo(request, payload)
+
+    assert str(excinfo.value) == "Create a dbt workspace first"
+
+
+def test_put_switch_git_repo_error_general_exception(seed_db, orguser: OrgUser):
+    """Test general exception handling when switch_git_repository_v1 fails"""
+    request = mock_request(orguser)
+
+    # Create OrgDbt workspace
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/dalgo-managed/test-repo",
+        gitrepo_access_token_secret="existing-pat-secret",
+        is_repo_managed_by_system=True,
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/user/new-repo", gitrepoAccessToken="ghp_newtoken123"
+    )
+
+    with patch(
+        "ddpui.api.dbt_api.dbt_service.switch_git_repository_v1",
+        side_effect=Exception("Repository validation failed"),
+    ), pytest.raises(HttpError) as excinfo:
+        put_switch_git_repo(request, payload)
+
+    assert str(excinfo.value) == "Repository validation failed"
 
     # Cleanup
     orgdbt.delete()
