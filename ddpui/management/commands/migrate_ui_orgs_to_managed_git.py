@@ -5,6 +5,7 @@ This converts organizations that currently use transform_type="ui" to use manage
 Usage:
     python manage.py migrate_ui_orgs_to_managed_git [--dry-run] [--org-slug <slug>]
 """
+
 import os
 from pathlib import Path
 from django.core.management.base import BaseCommand
@@ -15,7 +16,7 @@ from ddpui.models.tasks import OrgTask, Task
 from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils import secretsmanager
-from ddpui.ddpdbt.dbt_service import connect_existing_repo_to_remote
+from ddpui.ddpdbt.dbt_service import update_github_pat_storage, sync_gitignore_contents
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -98,9 +99,6 @@ class Command(BaseCommand):
                     self.style.WARNING(f"  [DRY RUN] Local repo path: {dbt_repo_dir}")
                 )
                 self.stdout.write(
-                    self.style.WARNING(f"  [DRY RUN] Would commit any uncommitted changes")
-                )
-                self.stdout.write(
                     self.style.WARNING(
                         f"  [DRY RUN] Would create repository: dbt-{org.slug}-{environment}"
                     )
@@ -141,7 +139,6 @@ class Command(BaseCommand):
         Migrate a single organization to managed Git.
         This method runs within a database transaction.
         """
-        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
 
         self.stdout.write(f"  Creating managed repository...")
 
@@ -155,70 +152,21 @@ class Command(BaseCommand):
         self.stdout.write(f"  Getting org admin PAT...")
         repo_pat = GitManager.get_org_admin_pat()
 
-        # 3. Commit any uncommitted changes in local repository
-        self.stdout.write(f"  Committing any uncommitted local changes...")
-        self._commit_local_changes(org, orgdbt, repo_pat)
-
-        # 4. Connect existing local repo to managed repository using refactored service
+        # 3. Connect existing local repo to managed repository
         self.stdout.write(f"  Connecting existing local Git repo to managed repository...")
-        connect_existing_repo_to_remote(
-            org=org, orgdbt=orgdbt, remote_repo_url=repo_url, access_token=repo_pat
-        )
+        self._connect_local_repo_to_managed_remote(org, orgdbt, repo_url, repo_pat)
 
-        # 5. Mark as managed repository (the service function doesn't set this flag)
+        # 4. Mark as managed repository (the service function doesn't set this flag)
         orgdbt.is_repo_managed_by_system = True
         orgdbt.save()
 
         self.stdout.write(f"    Connected and pushed existing commits to: {repo_url}")
 
-        # 6. Create git-pull OrgTask if not present
+        # 5. Create git-pull OrgTask if not present
         self.stdout.write(f"  Ensuring git-pull OrgTask exists...")
         self._ensure_git_pull_orgtask(org, orgdbt)
 
         logger.info(f"Successfully migrated org {org.name} to managed Git repository")
-
-    def _commit_local_changes(self, org: Org, orgdbt: OrgDbt, access_token: str):
-        """
-        Commit any uncommitted changes in the local repository before migration.
-        """
-        try:
-            dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-            if not dbt_repo_dir.exists():
-                self.stdout.write(f"    No local repo directory found at {dbt_repo_dir}")
-                return
-
-            # Create GitManager for local operations
-            git_manager = GitManager(
-                repo_local_path=str(dbt_repo_dir), pat=access_token, validate_git=True
-            )
-
-            # Check if there are any changes to commit
-            status_summary = git_manager.get_changes_summary()
-
-            if status_summary.has_changes():
-                files_to_commit = (
-                    status_summary.untracked_files
-                    + status_summary.modified_files
-                    + status_summary.deleted_files
-                )
-
-                self.stdout.write(f"    Found {len(files_to_commit)} uncommitted changes")
-
-                # Commit all changes
-                git_manager.commit_changes(
-                    message=f"Pre-migration commit for {org.name} - save current state before moving to managed Git"
-                )
-
-                self.stdout.write(f"    Committed {len(files_to_commit)} changes")
-            else:
-                self.stdout.write(f"    No uncommitted changes found")
-
-        except GitManagerError as e:
-            logger.error(f"GitManagerError during local commit for {org.name}: {e.message}")
-            raise Exception(f"Failed to commit local changes: {e.message}") from e
-        except Exception as e:
-            logger.error(f"Failed to commit local changes for {org.name}: {str(e)}")
-            raise Exception(f"Failed to commit local changes: {str(e)}") from e
 
     def _ensure_git_pull_orgtask(self, org: Org, orgdbt: OrgDbt):
         """
@@ -258,3 +206,92 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(f"    Warning: Failed to create git-pull OrgTask: {str(e)}")
             )
+
+    def _connect_local_repo_to_managed_remote(
+        self, org: Org, orgdbt: OrgDbt, remote_repo_url: str, access_token: str
+    ):
+        """
+        Connect an existing local Git repository to a managed remote repository.
+        This replaces the old connect_existing_repo_to_remote function.
+
+        Steps:
+        1. Set up Git remote to the new managed repo
+        2. Push all existing commits (models, etc.) to the managed repo
+        3. Update OrgDbt with new repo URL and PAT
+        4. Set up Prefect blocks
+        5. Sync gitignore
+        """
+        from ddpui.models.org import TransformType
+
+        # Get dbt repo directory
+        dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+        if not dbt_repo_dir.exists():
+            raise Exception("DBT repo directory does not exist")
+
+        self.stdout.write(f"    Initializing Git manager for local repo...")
+
+        # Validate git is initialized locally
+        try:
+            git_manager = GitManager(
+                repo_local_path=str(dbt_repo_dir), pat=access_token, validate_git=True
+            )
+        except GitManagerError as e:
+            logger.error(f"GitManagerError during git init validation: {e.message}")
+            raise Exception(f"Git is not initialized in the DBT project folder: {e.message}") from e
+
+        self.stdout.write(f"    Validating access to managed repository...")
+
+        # Verify remote URL is accessible with the PAT
+        try:
+            GitManager.validate_repository_access(remote_repo_url, access_token)
+        except GitManagerError as e:
+            logger.error(f"GitManagerError during remote URL verification: {e.message}")
+            raise Exception(f"{e.message}: {e.error}") from e
+
+        self.stdout.write(f"    Setting Git remote origin to managed repo...")
+
+        # Set or update the remote origin
+        try:
+            git_manager.set_remote(remote_repo_url)
+        except GitManagerError as e:
+            raise Exception(f"Failed to set remote: {e.message}") from e
+
+        self.stdout.write(f"    Pushing all existing commits (models, etc.) to managed repo...")
+
+        # Sync local default to remote (push existing commits - THIS PUSHES ALL MODELS!)
+        try:
+            git_manager.sync_local_default_to_remote()
+            self.stdout.write(f"    ✅ Successfully pushed all local commits to managed repository")
+        except GitManagerError as e:
+            raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
+
+        self.stdout.write(f"    Saving PAT to secrets manager...")
+
+        # Save PAT to secrets manager
+        pat_secret_key = secretsmanager.save_github_pat(access_token)
+
+        self.stdout.write(f"    Updating OrgDbt configuration...")
+
+        # Update OrgDbt record
+        orgdbt.gitrepo_url = remote_repo_url
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
+        orgdbt.transform_type = TransformType.GIT
+        orgdbt.save()
+
+        self.stdout.write(f"    Setting up Prefect blocks...")
+
+        # Set up Prefect blocks (dual storage - AWS + Prefect)
+        update_github_pat_storage(orgdbt, access_token)
+
+        self.stdout.write(f"    Syncing .gitignore contents...")
+
+        # Sync gitignore contents
+        try:
+            sync_gitignore_contents(dbt_repo_dir)
+        except Exception as err:
+            logger.error(f"Failed to sync .gitignore contents: {err}")
+            # Don't fail the migration for gitignore issues
+            self.stdout.write(f"    Warning: Failed to sync .gitignore: {err}")
+
+        logger.info(f"Connected git remote for org {org.slug}: {remote_repo_url}")
+        self.stdout.write(f"    ✅ Local repository successfully connected to managed remote")
