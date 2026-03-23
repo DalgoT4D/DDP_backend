@@ -35,6 +35,274 @@ class GitManagerError(Exception):
 
 
 class GitManager:
+    @staticmethod
+    def generate_oauth_url_static(repo_url: str, pat: str) -> str:
+        """
+        Generate a Git URL with OAuth token embedded for authentication.
+
+        Converts:
+          https://github.com/user/repo.git
+        To:
+          https://oauth2:<token>@github.com/user/repo.git
+        """
+        if not pat:
+            raise ValueError("PAT (Personal Access Token) is not set")
+
+        # If URL already has oauth2 credentials, return as-is
+        if "oauth2:" in repo_url:
+            return repo_url
+
+        # Handle both https:// and git@ formats
+        if repo_url.startswith("https://"):
+            # Insert oauth2:token after https://
+            return repo_url.replace("https://", f"https://oauth2:{pat}@")
+        elif repo_url.startswith("git@"):
+            # Convert git@github.com:user/repo.git to https://oauth2:<token>@github.com/user/repo.git
+            # git@github.com:user/repo.git -> github.com/user/repo.git
+            url_part = repo_url.replace("git@", "").replace(":", "/")
+            return f"https://oauth2:{pat}@{url_part}"
+        else:
+            raise ValueError(f"Unsupported URL format: {repo_url}")
+
+    @staticmethod
+    def parse_github_url_for_owner_and_repo(remote_url: str) -> tuple[str, str]:
+        """
+        Parse a GitHub URL to extract owner and repo name.
+
+        :param remote_url: GitHub URL (e.g., https://github.com/owner/repo.git)
+        :return: Tuple of (owner, repo)
+        :raises GitManagerError: If URL is not a valid GitHub URL
+        """
+        parsed = urlparse(remote_url)
+
+        if parsed.hostname not in ("github.com", "www.github.com"):
+            raise GitManagerError(
+                message="Invalid GitHub URL",
+                error="Only GitHub URLs are supported (github.com)",
+            )
+
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) < 2:
+            raise GitManagerError(
+                message="Invalid GitHub URL",
+                error="URL must be in format: https://github.com/owner/repo",
+            )
+
+        owner = path_parts[0]
+        repo = path_parts[1].removesuffix(".git")
+
+        return owner, repo
+
+    @staticmethod
+    def _github_api_request(
+        url: str, pat: str = None, timeout: int = 30, payload: dict = None, method: str = "GET"
+    ) -> dict:
+        """
+        Common function to make GitHub API requests.
+
+        :param url: The GitHub API URL to request
+        :param pat: Personal Access Token for authentication (optional)
+        :param timeout: Request timeout in seconds
+        :param payload: JSON payload for POST/PUT requests (optional)
+        :param method: HTTP method (GET, POST, PUT, DELETE)
+        :return: JSON response data
+        :raises requests.HTTPError: For HTTP errors
+        :raises requests.RequestException: For network/timeout errors
+        """
+        headers = {
+            "Accept": "application/vnd.github+json",
+        }
+        if pat:
+            headers["Authorization"] = f"Bearer {pat}"
+
+        # Choose the appropriate request method
+        if method.upper() == "GET":
+            response = requests.get(url, headers=headers, timeout=timeout)
+        elif method.upper() == "POST":
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        elif method.upper() == "PUT":
+            response = requests.put(url, headers=headers, json=payload, timeout=timeout)
+        elif method.upper() == "DELETE":
+            response = requests.delete(url, headers=headers, timeout=timeout)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+
+        response.raise_for_status()
+        return response.json()
+
+    @staticmethod
+    def check_remote_repository_empty_static(remote_url: str, pat: str = None) -> bool:
+        """
+        Check if a remote repository is "empty" from a dbt perspective -
+        meaning it doesn't contain dbt_project.yml file.
+
+        :param remote_url: The remote repository URL
+        :param pat: Personal Access Token for authentication
+        :return: True if no dbt_project.yml file found (empty), False if dbt project exists
+        :raises GitManagerError: For auth errors, network errors, or 5xx server errors
+        """
+        owner, repo = GitManager.parse_github_url_for_owner_and_repo(remote_url)
+
+        # Check for dbt_project.yml only
+        try:
+            GitManager._github_api_request(
+                f"https://api.github.com/repos/{owner}/{repo}/contents/dbt_project.yml", pat
+            )
+            # If we find dbt_project.yml, repository is NOT empty
+            return False
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 404:
+                # File doesn't exist, repository is considered empty
+                return True
+            elif status_code == 401:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error="The PAT token is invalid",
+                ) from e
+            elif status_code == 403:
+                raise GitManagerError(
+                    message="Access forbidden",
+                    error="The PAT does not have sufficient permissions to access this repository",
+                ) from e
+            elif status_code >= 500:
+                raise GitManagerError(
+                    message="GitHub server error",
+                    error=f"GitHub API returned {status_code}: {str(e)}",
+                ) from e
+            else:
+                # For other HTTP errors, consider repository empty
+                return True
+        except requests.RequestException as e:
+            raise GitManagerError(
+                message="Network error",
+                error=f"Failed to connect to GitHub API: {str(e)}",
+            ) from e
+
+    @staticmethod
+    def get_org_admin_pat() -> str:
+        """
+        Get the organization admin PAT for managed repository operations.
+
+        This PAT has organization-level permissions and is used for:
+        - Creating new repositories
+        - All Git operations on managed repositories
+
+        Note: This is a security trade-off. The PAT has broader permissions than
+        repository-specific tokens, but GitHub does not currently support
+        programmatic creation of repository-scoped PATs via REST API.
+
+        Returns:
+            Organization admin PAT token string
+
+        Raises:
+            GitManagerError: If DALGO_ORG_ADMIN_PAT is not configured
+        """
+        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
+        if not org_admin_pat:
+            raise GitManagerError("DALGO_ORG_ADMIN_PAT must be set in environment")
+        return org_admin_pat
+
+    @staticmethod
+    def create_managed_repository(org_slug: str, environment: str) -> dict:
+        """
+        Create a new private repository in the Dalgo GitHub organization.
+
+        Args:
+            org_slug: Organization slug for naming
+            environment: Environment (from settings.ENVIRONMENT)
+
+        Returns:
+            Dict containing repository data from GitHub API
+
+        Raises:
+            GitManagerError: If repository creation fails
+        """
+        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
+        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
+
+        if not dalgo_github_org or not org_admin_pat:
+            raise GitManagerError(
+                "DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set in environment"
+            )
+
+        repo_name = f"dbt-{org_slug}-{environment}"
+
+        payload = {
+            "name": repo_name,
+            "description": f"Managed dbt repository for {org_slug} ({environment})",
+            "private": True,  # Always create private repositories
+            "auto_init": False,  # Initialize with README
+        }
+
+        try:
+            repo_data = GitManager._github_api_request(
+                url=f"https://api.github.com/orgs/{dalgo_github_org}/repos",
+                pat=org_admin_pat,
+                payload=payload,
+                method="POST",
+            )
+
+            logger.info(f"Created private repository: {repo_data['full_name']}")
+            return repo_data
+
+        except Exception as e:
+            error_message = str(e)
+            if "422" in error_message:
+                raise GitManagerError(f"Repository {repo_name} already exists or name is invalid")
+            elif "401" in error_message:
+                raise GitManagerError("Authentication failed - check PAT permissions")
+            elif "403" in error_message:
+                raise GitManagerError(
+                    "Insufficient permissions to create repository in organization"
+                )
+            else:
+                raise GitManagerError(f"GitHub API error: {error_message}")
+
+    @classmethod
+    def clone(
+        cls, cwd: str, remote_repo_url: str, relative_path: str, pat: str = None
+    ) -> "GitManager":
+        """
+        Clone a repository and return a GitManager instance for it.
+
+        :param cwd: Working directory where the clone command will be executed
+        :param remote_repo_url: URL of the repository to clone
+        :param pat: Personal Access Token for authentication
+        :param relative_path: Relative path (from cwd) where the repo will be cloned
+        :return: GitManager instance for the cloned repository
+        """
+        # Build authenticated URL if PAT provided
+        clone_url = cls.generate_oauth_url_static(remote_repo_url, pat) if pat else remote_repo_url
+
+        try:
+            result = subprocess.run(
+                ["git", "clone", clone_url, relative_path],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as e:
+            raise GitManagerError(
+                message="Failed to clone repository",
+                error=str(e),
+            )
+
+        if result.returncode != 0:
+            raise GitManagerError(
+                message="Failed to clone repository",
+                error=result.stderr.strip(),
+            )
+
+        target_path = os.path.join(cwd, relative_path)
+        instance = cls(repo_local_path=target_path, pat=pat)
+
+        # Reset remote to clean URL (without credentials) if PAT was used
+        if pat:
+            instance.set_remote(remote_repo_url)
+
+        return instance
+
     def __init__(self, repo_local_path: str, pat: str = None, validate_git: bool = False):
         """
         Validate if the folder is a git repository if validate_git is True.
@@ -77,35 +345,6 @@ class GitManager:
                 error=result.stderr.strip(),
             )
         return result
-
-    @staticmethod
-    def generate_oauth_url_static(repo_url: str, pat: str) -> str:
-        """
-        Generate a Git URL with OAuth token embedded for authentication.
-
-        Converts:
-          https://github.com/user/repo.git
-        To:
-          https://oauth2:<token>@github.com/user/repo.git
-        """
-        if not pat:
-            raise ValueError("PAT (Personal Access Token) is not set")
-
-        # If URL already has oauth2 credentials, return as-is
-        if "oauth2:" in repo_url:
-            return repo_url
-
-        # Handle both https:// and git@ formats
-        if repo_url.startswith("https://"):
-            # Insert oauth2:token after https://
-            return repo_url.replace("https://", f"https://oauth2:{pat}@")
-        elif repo_url.startswith("git@"):
-            # Convert git@github.com:user/repo.git to https://oauth2:<token>@github.com/user/repo.git
-            # git@github.com:user/repo.git -> github.com/user/repo.git
-            url_part = repo_url.replace("git@", "").replace(":", "/")
-            return f"https://oauth2:{pat}@{url_part}"
-        else:
-            raise ValueError(f"Unsupported URL format: {repo_url}")
 
     def init_repo(self, default_branch: str = "main") -> str:
         """Initialize a git repository with a specified default branch"""
@@ -168,50 +407,6 @@ class GitManager:
                 message="Failed to parse ahead/behind count",
                 error=f"Unexpected output format: {result.stdout.strip()}",
             )
-
-    @classmethod
-    def clone(
-        cls, cwd: str, remote_repo_url: str, relative_path: str, pat: str = None
-    ) -> "GitManager":
-        """
-        Clone a repository and return a GitManager instance for it.
-
-        :param cwd: Working directory where the clone command will be executed
-        :param remote_repo_url: URL of the repository to clone
-        :param pat: Personal Access Token for authentication
-        :param relative_path: Relative path (from cwd) where the repo will be cloned
-        :return: GitManager instance for the cloned repository
-        """
-        # Build authenticated URL if PAT provided
-        clone_url = cls.generate_oauth_url_static(remote_repo_url, pat) if pat else remote_repo_url
-
-        try:
-            result = subprocess.run(
-                ["git", "clone", clone_url, relative_path],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-            )
-        except Exception as e:
-            raise GitManagerError(
-                message="Failed to clone repository",
-                error=str(e),
-            )
-
-        if result.returncode != 0:
-            raise GitManagerError(
-                message="Failed to clone repository",
-                error=result.stderr.strip(),
-            )
-
-        target_path = os.path.join(cwd, relative_path)
-        instance = cls(repo_local_path=target_path, pat=pat)
-
-        # Reset remote to clean URL (without credentials) if PAT was used
-        if pat:
-            instance.set_remote(remote_repo_url)
-
-        return instance
 
     def generate_oauth_url(self, repo_url: str) -> str:
         """
@@ -352,72 +547,6 @@ class GitManager:
 
         result = self._run_command(cmd)
         return result.stdout.strip()
-
-    @staticmethod
-    def parse_github_url_for_owner_and_repo(remote_url: str) -> tuple[str, str]:
-        """
-        Parse a GitHub URL to extract owner and repo name.
-
-        :param remote_url: GitHub URL (e.g., https://github.com/owner/repo.git)
-        :return: Tuple of (owner, repo)
-        :raises GitManagerError: If URL is not a valid GitHub URL
-        """
-        parsed = urlparse(remote_url)
-
-        if parsed.hostname not in ("github.com", "www.github.com"):
-            raise GitManagerError(
-                message="Invalid GitHub URL",
-                error="Only GitHub URLs are supported (github.com)",
-            )
-
-        path_parts = parsed.path.strip("/").split("/")
-        if len(path_parts) < 2:
-            raise GitManagerError(
-                message="Invalid GitHub URL",
-                error="URL must be in format: https://github.com/owner/repo",
-            )
-
-        owner = path_parts[0]
-        repo = path_parts[1].removesuffix(".git")
-
-        return owner, repo
-
-    @staticmethod
-    def _github_api_request(
-        url: str, pat: str = None, timeout: int = 30, payload: dict = None, method: str = "GET"
-    ) -> dict:
-        """
-        Common function to make GitHub API requests.
-
-        :param url: The GitHub API URL to request
-        :param pat: Personal Access Token for authentication (optional)
-        :param timeout: Request timeout in seconds
-        :param payload: JSON payload for POST/PUT requests (optional)
-        :param method: HTTP method (GET, POST, PUT, DELETE)
-        :return: JSON response data
-        :raises requests.HTTPError: For HTTP errors
-        :raises requests.RequestException: For network/timeout errors
-        """
-        headers = {
-            "Accept": "application/vnd.github+json",
-        }
-        if pat:
-            headers["Authorization"] = f"Bearer {pat}"
-
-        # Choose the appropriate request method
-        if method.upper() == "GET":
-            response = requests.get(url, headers=headers, timeout=timeout)
-        elif method.upper() == "POST":
-            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        elif method.upper() == "PUT":
-            response = requests.put(url, headers=headers, json=payload, timeout=timeout)
-        elif method.upper() == "DELETE":
-            response = requests.delete(url, headers=headers, timeout=timeout)
-        else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
-
-        response.raise_for_status()
-        return response.json()
 
     def verify_remote_url(self, remote_url: str) -> bool:
         """
@@ -627,132 +756,3 @@ class GitManager:
         self._run_command(["git", "branch", "-M", remote_default])
 
         return f"renamed local branch '{local_current}' -> '{remote_default}'"
-
-    @staticmethod
-    def check_remote_repository_empty_static(remote_url: str, pat: str = None) -> bool:
-        """
-        Check if a remote repository is "empty" from a dbt perspective -
-        meaning it doesn't contain dbt_project.yml file.
-
-        :param remote_url: The remote repository URL
-        :param pat: Personal Access Token for authentication
-        :return: True if no dbt_project.yml file found (empty), False if dbt project exists
-        :raises GitManagerError: For auth errors, network errors, or 5xx server errors
-        """
-        owner, repo = GitManager.parse_github_url_for_owner_and_repo(remote_url)
-
-        # Check for dbt_project.yml only
-        try:
-            GitManager._github_api_request(
-                f"https://api.github.com/repos/{owner}/{repo}/contents/dbt_project.yml", pat
-            )
-            # If we find dbt_project.yml, repository is NOT empty
-            return False
-        except requests.HTTPError as e:
-            status_code = e.response.status_code
-            if status_code == 404:
-                # File doesn't exist, repository is considered empty
-                return True
-            elif status_code == 401:
-                raise GitManagerError(
-                    message="Authentication failed",
-                    error="The PAT token is invalid",
-                ) from e
-            elif status_code == 403:
-                raise GitManagerError(
-                    message="Access forbidden",
-                    error="The PAT does not have sufficient permissions to access this repository",
-                ) from e
-            elif status_code >= 500:
-                raise GitManagerError(
-                    message="GitHub server error",
-                    error=f"GitHub API returned {status_code}: {str(e)}",
-                ) from e
-            else:
-                # For other HTTP errors, consider repository empty
-                return True
-        except requests.RequestException as e:
-            raise GitManagerError(
-                message="Network error",
-                error=f"Failed to connect to GitHub API: {str(e)}",
-            ) from e
-
-    @staticmethod
-    def create_managed_repository(org_slug: str, environment: str) -> dict:
-        """
-        Create a new private repository in the Dalgo GitHub organization.
-
-        Args:
-            org_slug: Organization slug for naming
-            environment: Environment (from settings.ENVIRONMENT)
-
-        Returns:
-            Dict containing repository data from GitHub API
-
-        Raises:
-            GitManagerError: If repository creation fails
-        """
-        dalgo_github_org = os.getenv("DALGO_GITHUB_ORG")
-        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
-
-        if not dalgo_github_org or not org_admin_pat:
-            raise GitManagerError(
-                "DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set in environment"
-            )
-
-        repo_name = f"dbt-{org_slug}-{environment}"
-
-        payload = {
-            "name": repo_name,
-            "description": f"Managed dbt repository for {org_slug} ({environment})",
-            "private": True,  # Always create private repositories
-            "auto_init": False,  # Initialize with README
-        }
-
-        try:
-            repo_data = GitManager._github_api_request(
-                url=f"https://api.github.com/orgs/{dalgo_github_org}/repos",
-                pat=org_admin_pat,
-                payload=payload,
-                method="POST",
-            )
-
-            logger.info(f"Created private repository: {repo_data['full_name']}")
-            return repo_data
-
-        except Exception as e:
-            error_message = str(e)
-            if "422" in error_message:
-                raise GitManagerError(f"Repository {repo_name} already exists or name is invalid")
-            elif "401" in error_message:
-                raise GitManagerError("Authentication failed - check PAT permissions")
-            elif "403" in error_message:
-                raise GitManagerError(
-                    "Insufficient permissions to create repository in organization"
-                )
-            else:
-                raise GitManagerError(f"GitHub API error: {error_message}")
-
-    @staticmethod
-    def get_org_admin_pat() -> str:
-        """
-        Get the organization admin PAT for managed repository operations.
-
-        This PAT has organization-level permissions and is used for:
-        - Creating new repositories
-        - All Git operations on managed repositories
-
-        Note: This is a security trade-off. The PAT has broader permissions than
-        repository-specific tokens, but GitHub does not currently support
-        programmatic creation of repository-scoped PATs via REST API.
-
-        Returns:
-            Organization admin PAT token string
-
-        Raises:
-            GitManagerError: If DALGO_ORG_ADMIN_PAT is not configured
-        """
-        org_admin_pat = os.getenv("DALGO_ORG_ADMIN_PAT")
-        if not org_admin_pat:
-            raise GitManagerError("DALGO_ORG_ADMIN_PAT must be set in environment")
-        return org_admin_pat
