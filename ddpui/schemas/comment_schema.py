@@ -4,6 +4,8 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from ninja import Schema, Field
 
+from ddpui.models.org_user import OrgUser
+
 
 # =============================================================================
 # Request Schemas
@@ -81,8 +83,6 @@ class CommentResponse(Schema):
         if emails:
             users_map = getattr(comment, "_mentioned_users_map", None)
             if users_map is None:
-                from ddpui.models.org_user import OrgUser
-
                 users_map = {
                     ou.user.email: ou
                     for ou in OrgUser.objects.filter(
