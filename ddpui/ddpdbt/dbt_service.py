@@ -1127,7 +1127,7 @@ def connect_existing_repo_to_remote(
 
     # Verify remote URL is accessible with the PAT
     try:
-        git_manager.verify_remote_url(remote_repo_url)
+        GitManager.validate_repository_access(remote_repo_url, access_token)
     except GitManagerError as e:
         logger.error(f"GitManagerError during remote URL verification: {e.message}")
         raise Exception(f"{e.message}: {e.error}") from e
@@ -1166,33 +1166,6 @@ def connect_existing_repo_to_remote(
     logger.info(f"Connected git remote for org {org.slug}: {remote_repo_url}")
 
 
-def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str) -> dict:
-    """
-    Handle connecting to a Git remote for the first time (UI4T → Git).
-    Uses the refactored connect_existing_repo_to_remote for core logic.
-    """
-    org: Org = orguser.org
-    orgdbt: OrgDbt = org.dbt
-
-    # Handle PAT token storage (only if not masked)
-    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
-    if not is_token_masked:
-        # Use the refactored function for core Git connection logic
-        connect_existing_repo_to_remote(
-            org=org, orgdbt=orgdbt, remote_repo_url=payload.gitrepoUrl, access_token=actual_pat
-        )
-    else:
-        # If token is masked, we can't perform the actual connection
-        raise Exception("Cannot connect with masked token")
-
-    return {
-        "success": True,
-        "gitrepo_url": payload.gitrepoUrl,
-        "message": "Successfully connected to remote git repository",
-        "repository_switched": False,
-    }
-
-
 def switch_git_repository(
     orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str
 ) -> dict:
@@ -1207,6 +1180,14 @@ def switch_git_repository(
     logger.info(
         f"Switching git repository for org {org.slug} from {orgdbt.gitrepo_url} to {payload.gitrepoUrl}"
     )
+
+    # Validate repository access first
+    try:
+        GitManager.validate_repository_access(payload.gitrepoUrl, actual_pat)
+        logger.info("Repository access validation successful")
+    except GitManagerError as e:
+        logger.error(f"Repository access validation failed: {e.message}")
+        raise Exception(f"{e.message}: {e.error}") from e
 
     # Use the provided actual_pat (already resolved in API layer)
 
@@ -1266,17 +1247,6 @@ def switch_git_repository(
         logger.error(f"Error updating CLI profile block: {e}")
         raise Exception(f"Repository switch failed: CLI profile block update error - {e}") from e
 
-    # Verify remote URL is accessible with the PAT
-    try:
-        git_manager = GitManager(
-            repo_local_path=str(dbt_project_dir), pat=actual_pat, validate_git=True
-        )
-        git_manager.verify_remote_url(payload.gitrepoUrl)
-    except GitManagerError as e:
-        logger.error(f"GitManagerError during remote URL verification: {e.message}")
-        clear_github_pat_storage(org, orgdbt.gitrepo_access_token_secret)
-        raise Exception(f"{e.message}: {e.error}") from e
-
     # Handle PAT token storage (only if not masked)
     is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
     if not is_token_masked:
@@ -1300,4 +1270,163 @@ def switch_git_repository(
         "gitrepo_url": payload.gitrepoUrl,
         "message": "Successfully switched to new git repository",
         "repository_switched": True,
+    }
+
+
+def switch_git_repository_v1(
+    orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str
+) -> dict:
+    """
+    Switch from current repository to user's external repository.
+    Handles two scenarios:
+    1. Dalgo managed -> External: Copy models if external repo is empty, otherwise clone
+    2. External A -> External B: Always clone after validation
+
+    Sets is_repo_managed_by_system = False for the new repository.
+
+    Args:
+        orguser: Organization user making the request
+        payload: Contains the new repository URL and access token
+        actual_pat: Personal Access Token for the NEW incoming repository (not current repo)
+
+    Warning: If switching from Dalgo managed to non-empty external repo,
+    existing work may be lost. Users should use empty repos or contact support.
+    """
+    org = orguser.org
+    orgdbt = org.dbt
+
+    logger.info(
+        f"Switching git repository for org {org.slug} from {orgdbt.gitrepo_url} to {payload.gitrepoUrl}"
+    )
+
+    # Validate repository access first
+    try:
+        GitManager.validate_repository_access(payload.gitrepoUrl, actual_pat)
+        logger.info("Repository access validation successful")
+    except GitManagerError as e:
+        logger.error(f"Repository access validation failed: {e.message}")
+        raise Exception(f"{e.error}") from e
+
+    # Determine current repo type
+    is_currently_managed = orgdbt.is_repo_managed_by_system
+
+    # Check if new remote repository is empty (no dbt_project.yml)
+    try:
+        is_new_repo_empty = GitManager.check_remote_repository_empty_static(
+            payload.gitrepoUrl, actual_pat
+        )
+        logger.info(f"New repository empty status: {is_new_repo_empty}")
+    except GitManagerError as e:
+        logger.warning(f"Could not check remote repository status: {e.message}")
+        # Default to treating as non-empty for safety
+        is_new_repo_empty = False
+
+    # Get paths
+    dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    org_dir = Path(DbtProjectManager.get_org_dir(org))
+
+    # Scenario 1: Dalgo managed -> External repo
+    needs_clone = False
+    if is_currently_managed:
+        if is_new_repo_empty:
+            logger.info("Scenario: Dalgo managed -> Empty external repo (copying models)")
+            # Copy current models to new empty repo
+            try:
+                # Initialize git in current directory and set new remote
+                git_manager = GitManager(repo_local_path=str(dbt_project_dir), pat=actual_pat)
+                git_manager.set_remote(payload.gitrepoUrl)
+
+                # Commit any pending changes and push current content to new remote
+                git_manager.commit_changes("Copy Dalgo managed models to external repository")
+                git_manager.push_changes()
+                logger.info("Successfully copied Dalgo managed content to external repository")
+
+            except Exception as e:
+                logger.error(f"Failed to copy models to external repo: {str(e)}")
+                raise Exception(f"Failed to copy models to external repository: {str(e)}") from e
+        else:
+            logger.warning(
+                "Scenario: Dalgo managed -> Non-empty external repo (cloning, may lose work)"
+            )
+            needs_clone = True
+
+    # Scenario 2: External A -> External B
+    else:
+        logger.info("Scenario: External A -> External B (cloning after validation)")
+        needs_clone = True
+
+    # Common cloning logic for scenarios that require it
+    if needs_clone:
+        try:
+            # Clean existing directory
+            if dbt_project_dir.exists():
+                shutil.rmtree(dbt_project_dir)
+                logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+
+            # Clone the new repository
+            GitManager.clone(
+                cwd=str(org_dir),
+                remote_repo_url=payload.gitrepoUrl,
+                relative_path="dbtrepo",
+                pat=actual_pat,
+            )
+            logger.info(f"Successfully cloned repository to {dbt_project_dir}")
+        except Exception as e:
+            logger.error(f"Failed to clone repository: {str(e)}")
+            raise Exception(f"Failed to clone repository: {str(e)}") from e
+
+    # Remove canvas nodes and edges related to the dbt project (common across all scenarios)
+    CanvasNode.objects.filter(orgdbt=orgdbt).delete()
+    logger.info("Removed canvas nodes and edges for repository switch")
+
+    # Update OrgDbt with new repo details - importantly set managed flag to False
+    orgdbt.gitrepo_url = payload.gitrepoUrl
+    orgdbt.transform_type = TransformType.GIT
+    orgdbt.is_repo_managed_by_system = False  # New repo is NOT Dalgo-managed
+    orgdbt.save()
+
+    # Update CLI profile block with new dbt_project.yml profile name
+    try:
+        warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not warehouse:
+            raise Exception("No warehouse configuration found for this organization")
+
+        creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+        # This will automatically read the new dbt_project.yml and update the profile block
+        _, error = create_or_update_org_cli_block(
+            org, warehouse, creds  # Pass the retrieved warehouse creds
+        )
+        if error:
+            logger.error(f"Failed to update CLI profile block: {error}")
+            raise Exception(f"Failed to update CLI profile block: {error}")
+
+        logger.info("CLI profile block updated with new project configuration")
+    except Exception as e:
+        logger.error(f"Error updating CLI profile block: {e}")
+        raise Exception(f"Repository switch failed: CLI profile block update error - {e}") from e
+
+    # Handle PAT token storage (only if not masked)
+    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
+    if not is_token_masked:
+        pat_secret_key = update_github_pat_storage(
+            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
+        )
+        orgdbt.gitrepo_access_token_secret = pat_secret_key
+        orgdbt.save()
+
+    # Sync .gitignore contents
+    try:
+        sync_gitignore_contents(dbt_project_dir)
+    except Exception as err:
+        logger.error(f"Failed to sync .gitignore contents: {err}")
+        logger.warning("Continuing despite gitignore sync failure")
+
+    logger.info(f"Successfully switched git repository for org {org.slug} to {payload.gitrepoUrl}")
+
+    return {
+        "success": True,
+        "gitrepo_url": payload.gitrepoUrl,
+        "repository_switched": True,
+        "message": "Successfully switched to new git repository",
     }

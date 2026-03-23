@@ -204,6 +204,116 @@ class GitManager:
         return org_admin_pat
 
     @staticmethod
+    def validate_repository_access(remote_url: str, pat: str) -> bool:
+        """
+        Verify that the PAT has push (write) access to the remote repository.
+        Uses GitHub API to check permissions directly.
+
+        :param remote_url: The remote repository URL to verify
+        :param pat: Personal Access Token for authentication
+        :return: True if the PAT has push access, raises GitManagerError otherwise
+        """
+        if not pat:
+            raise GitManagerError(
+                message="PAT not configured",
+                error="A Personal Access Token is required to verify remote URL",
+            )
+
+        owner, repo = GitManager.parse_github_url_for_owner_and_repo(remote_url)
+
+        try:
+            data = GitManager._github_api_request(
+                f"https://api.github.com/repos/{owner}/{repo}", pat
+            )
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 401:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error="The PAT token is invalid",
+                ) from e
+            if status_code == 404:
+                raise GitManagerError(
+                    message="Repository not found",
+                    error="The repository does not exist or the PAT does not have access to it",
+                ) from e
+            if status_code == 403:
+                raise GitManagerError(
+                    message="Access forbidden",
+                    error="The PAT does not have sufficient permissions",
+                ) from e
+            raise GitManagerError(
+                message="GitHub API error",
+                error=f"HTTP {status_code}: {str(e)}",
+            ) from e
+        except requests.RequestException as e:
+            raise GitManagerError(
+                message="Network error",
+                error=f"Failed to connect to GitHub API: {str(e)}",
+            ) from e
+
+        permissions = data.get("permissions", {})
+
+        if not permissions.get("push", False):
+            raise GitManagerError(
+                message="Insufficient permissions",
+                error="The PAT does not have write (push) access to this repository",
+            )
+
+        return True
+
+    @staticmethod
+    def delete_managed_repository(remote_url: str, pat: str) -> bool:
+        """
+        Delete a managed repository from GitHub.
+        Uses GitHub API to delete the repository.
+
+        :param remote_url: The remote repository URL to delete
+        :param pat: Personal Access Token for authentication
+        :return: True if repository was deleted successfully, raises GitManagerError otherwise
+        """
+        if not pat:
+            raise GitManagerError(
+                message="PAT not configured",
+                error="A Personal Access Token is required to delete repository",
+            )
+
+        owner, repo = GitManager.parse_github_url_for_owner_and_repo(remote_url)
+
+        try:
+            GitManager._github_api_request(
+                f"https://api.github.com/repos/{owner}/{repo}", pat, method="DELETE"
+            )
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 401:
+                raise GitManagerError(
+                    message="Authentication failed",
+                    error="The PAT token is invalid",
+                ) from e
+            if status_code == 404:
+                raise GitManagerError(
+                    message="Repository not found",
+                    error="The repository does not exist or has already been deleted",
+                ) from e
+            if status_code == 403:
+                raise GitManagerError(
+                    message="Access forbidden",
+                    error="The PAT does not have sufficient permissions to delete this repository",
+                ) from e
+            raise GitManagerError(
+                message="GitHub API error",
+                error=f"HTTP {status_code}: {str(e)}",
+            ) from e
+        except requests.RequestException as e:
+            raise GitManagerError(
+                message="Network error",
+                error=f"Failed to connect to GitHub API: {str(e)}",
+            ) from e
+
+        return True
+
+    @staticmethod
     def create_managed_repository(org_slug: str, environment: str) -> dict:
         """
         Create a new private repository in the Dalgo GitHub organization.
@@ -547,63 +657,6 @@ class GitManager:
 
         result = self._run_command(cmd)
         return result.stdout.strip()
-
-    def verify_remote_url(self, remote_url: str) -> bool:
-        """
-        Verify that the PAT has push (write) access to the remote repository.
-        Uses GitHub API to check permissions directly.
-
-        :param remote_url: The remote repository URL to verify
-        :return: True if the PAT has push access, raises GitManagerError otherwise
-        """
-        if not self.pat:
-            raise GitManagerError(
-                message="PAT not configured",
-                error="A Personal Access Token is required to verify remote URL",
-            )
-
-        owner, repo = self.parse_github_url_for_owner_and_repo(remote_url)
-
-        try:
-            data = self._github_api_request(
-                f"https://api.github.com/repos/{owner}/{repo}", self.pat
-            )
-        except requests.HTTPError as e:
-            status_code = e.response.status_code
-            if status_code == 401:
-                raise GitManagerError(
-                    message="Authentication failed",
-                    error="The PAT token is invalid",
-                ) from e
-            if status_code == 404:
-                raise GitManagerError(
-                    message="Repository not found",
-                    error="The repository does not exist or the PAT does not have access to it",
-                ) from e
-            if status_code == 403:
-                raise GitManagerError(
-                    message="Access forbidden",
-                    error="The PAT does not have sufficient permissions",
-                ) from e
-            raise GitManagerError(
-                message="GitHub API error",
-                error=f"HTTP {status_code}: {str(e)}",
-            ) from e
-        except requests.RequestException as e:
-            raise GitManagerError(
-                message="Network error",
-                error=f"Failed to connect to GitHub API: {str(e)}",
-            ) from e
-
-        permissions = data.get("permissions", {})
-
-        if not permissions.get("push", False):
-            raise GitManagerError(
-                message="Insufficient permissions",
-                error="The PAT does not have write (push) access to this repository",
-            )
-
-        return True
 
     def is_file_modified(self, file_path: str) -> bool:
         """

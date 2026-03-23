@@ -38,15 +38,12 @@ dbt_router = Router()
 logger = CustomLogger("ddpui")
 
 
-@dbt_router.put("/connect_git_remote/")
+@dbt_router.put("/switch_git_repo/")
 @has_permission(["can_edit_dbt_workspace"])
-def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
+def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
     """
-    Connect an existing local git repository to a remote GitHub URL.
-    Handles both new connections and repository switches.
-
-    For new connections (UI4T → Git): Sets up remote connection for existing local repo
-    For repository switches (Git A → Git B): Replaces local repo with fresh clone
+    Switch from current repository (managed or external) to user's external repository.
+    Sets is_repo_managed_by_system = False for the new repository.
     """
     orguser: OrgUser = request.orguser
     org = orguser.org
@@ -56,7 +53,7 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         raise HttpError(400, "Create a dbt workspace first")
 
     try:
-        # Determine which PAT to use for remote repository check
+        # Determine which PAT to use
         is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
 
         if is_token_masked:
@@ -68,45 +65,14 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
         else:
             actual_pat = payload.gitrepoAccessToken
 
-        # Check if remote repository has dbt_project.yml file
-        try:
-            is_remote_empty = GitManager.check_remote_repository_empty_static(
-                payload.gitrepoUrl, actual_pat
-            )
-            # If remote repository is NOT empty (has dbt_project.yml), force switch
-            force_switch = not is_remote_empty
-        except GitManagerError as e:
-            logger.warning(f"Could not check remote repository status: {e.message}")
-            # Continue with normal logic if we can't check remote status
-            force_switch = False
-
-        # Route to appropriate business logic based on operation type
-        if force_switch or dbt_service.is_git_repository_switch(orgdbt, payload.gitrepoUrl):
-            result = dbt_service.switch_git_repository(orguser, payload, actual_pat)
-        else:
-            result = dbt_service.connect_git_remote(orguser, payload, actual_pat)
+        # Call the switch_git_repo service function
+        result = dbt_service.switch_git_repository_v1(orguser, payload, actual_pat)
 
         # Create the gitpull orgtask if it doesn't exist (non-critical operation)
-        # This should not affect the success of the git operation above
         try:
-            task = Task.objects.get(type=TaskType.GIT, is_system=True)
-            if not OrgTask.objects.filter(org=org, dbt=orgdbt, task=task).exists():
-                logger.info(f"Creating OrgTask for git-pull for org {org.slug}")
-                OrgTask.objects.create(
-                    org=org,
-                    dbt=orgdbt,
-                    task=task,
-                    uuid=uuid4(),
-                    generated_by=OrgTaskGeneratedBy.SYSTEM,
-                )
-        except Task.DoesNotExist:
-            logger.warning(
-                f"Git pull task not found in database for org {org.slug}. OrgTask creation skipped."
-            )
-        except Task.MultipleObjectsReturned:
-            logger.warning(
-                f"Multiple git pull tasks found in database for org {org.slug}. OrgTask creation skipped."
-            )
+            git_task = Task.objects.filter(slug="git-pull").first()
+            if git_task and not OrgTask.objects.filter(org=org, task=git_task).exists():
+                OrgTask.objects.create(org=org, task=git_task)
         except Exception as e:
             logger.warning(
                 f"Failed to create git pull OrgTask for org {org.slug}: {str(e)}. Git operation was successful."
@@ -114,7 +80,7 @@ def put_connect_git_remote(request, payload: OrgDbtConnectGitRemote):
 
         return result
     except Exception as e:
-        logger.error(f"Git remote connection failed: {str(e)}")
+        logger.error(f"Git repository switch failed: {str(e)}")
         raise HttpError(500, str(e)) from e
 
 
