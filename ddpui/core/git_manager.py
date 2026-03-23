@@ -356,18 +356,24 @@ class GitManager:
             logger.info(f"Created private repository: {repo_data['full_name']}")
             return repo_data
 
-        except Exception as e:
-            error_message = str(e)
-            if "422" in error_message:
-                raise GitManagerError(f"Repository {repo_name} already exists or name is invalid")
-            elif "401" in error_message:
-                raise GitManagerError("Authentication failed - check PAT permissions")
-            elif "403" in error_message:
+        except requests.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 422:
+                raise GitManagerError(
+                    f"Repository {repo_name} already exists or name is invalid"
+                ) from e
+            elif status_code == 401:
+                raise GitManagerError("Authentication failed - check PAT permissions") from e
+            elif status_code == 403:
                 raise GitManagerError(
                     "Insufficient permissions to create repository in organization"
-                )
+                ) from e
             else:
-                raise GitManagerError(f"GitHub API error: {error_message}")
+                raise GitManagerError(f"GitHub API error: HTTP {status_code}: {str(e)}") from e
+        except requests.RequestException as e:
+            raise GitManagerError(
+                f"Network error: Failed to connect to GitHub API: {str(e)}"
+            ) from e
 
     @classmethod
     def clone(
