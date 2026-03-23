@@ -62,6 +62,7 @@ class CommentResponse(Schema):
     content: str
     author: CommentAuthorResponse
     is_new: bool = False
+    is_deleted: bool = False
     created_at: datetime
     updated_at: datetime
     mentions: List[CommentMentionResponse] = []
@@ -104,6 +105,7 @@ class CommentResponse(Schema):
             content=comment.content,
             author=author,
             is_new=getattr(comment, "is_new", False),
+            is_deleted=comment.is_deleted,
             created_at=comment.created_at,
             updated_at=comment.updated_at,
             mentions=mentions,

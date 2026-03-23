@@ -25,6 +25,25 @@ def send_text_message(to_email, subject, message):
     return response
 
 
+def send_html_message(to_email, subject, text_body, html_body):
+    """
+    send an email with both HTML and plain-text body using ses
+    """
+    ses = _get_ses_client()
+    response = ses.send_email(
+        Destination={"ToAddresses": [to_email]},
+        Message={
+            "Body": {
+                "Text": {"Charset": "UTF-8", "Data": text_body},
+                "Html": {"Charset": "UTF-8", "Data": html_body},
+            },
+            "Subject": {"Charset": "UTF-8", "Data": subject},
+        },
+        Source=os.getenv("SES_SENDER_EMAIL"),
+    )
+    return response
+
+
 def send_password_reset_email(to_email: str, reset_url: str) -> None:
     """send a password reset email"""
     message = f"""Hello,

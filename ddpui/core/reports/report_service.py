@@ -47,6 +47,7 @@ class ReportService:
         """Freeze dashboard layout, structure & filters into one dict."""
         filters = dashboard.filters.all().order_by("order")
         return {
+            "dashboard_id": dashboard.id,
             "title": dashboard.title,
             "description": dashboard.description,
             "grid_columns": dashboard.grid_columns,
@@ -454,6 +455,7 @@ class ReportService:
             "updated_at": snapshot.updated_at,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
+            "dashboard_id": snapshot.frozen_dashboard.get("dashboard_id"),
         }
 
         return {

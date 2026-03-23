@@ -82,11 +82,14 @@ class CommentService:
             if read_status:
                 last_read_at = read_status.last_read_at
 
-        # Annotate comments with is_new
+        # Annotate comments with is_new (own comments are never new)
         for comment in comments:
-            comment.is_new = (
-                last_read_at is None or comment.created_at > last_read_at
-            )
+            if orguser and comment.author_id == orguser.id:
+                comment.is_new = False
+            else:
+                comment.is_new = (
+                    last_read_at is None or comment.created_at > last_read_at
+                )
 
         return comments
 
@@ -140,15 +143,21 @@ class CommentService:
         """Update a comment. Author-only."""
         comment = CommentService._get_comment(comment_id, org)
 
+        if comment.is_deleted:
+            raise CommentValidationError("Cannot edit a deleted comment")
+
         if comment.author != orguser:
             raise CommentPermissionError("You can only edit your own comments")
+
+        # Capture old mentions before clearing so only NEW mentions trigger notifications
+        previous_emails = list(comment.mentioned_emails or [])
 
         comment.content = content
         comment.mentioned_emails = []
         comment.save(update_fields=["content", "updated_at", "mentioned_emails"])
 
-        # Re-process mentions
-        MentionService.process_mentions(comment, org, orguser)
+        # Re-process mentions, passing old emails so only new mentions trigger notifications
+        MentionService.process_mentions(comment, org, orguser, previous_emails=previous_emails)
 
         logger.info(f"Updated comment {comment.id}")
         return comment
@@ -159,16 +168,20 @@ class CommentService:
         org: Org,
         orguser: OrgUser,
     ) -> None:
-        """Hard-delete a comment. Author-only."""
+        """Soft-delete a comment. Author-only."""
         comment = CommentService._get_comment(comment_id, org)
 
         if comment.author != orguser:
             raise CommentPermissionError("You can only delete your own comments")
 
-        comment_id_log = comment.id
-        comment.delete()
+        comment.is_deleted = True
+        comment.content = ""
+        comment.mentioned_emails = []
+        comment.save(
+            update_fields=["is_deleted", "content", "mentioned_emails", "updated_at"]
+        )
 
-        logger.info(f"Deleted comment {comment_id_log}")
+        logger.info(f"Soft-deleted comment {comment_id}")
 
     @staticmethod
     def get_comment_states(
@@ -184,9 +197,10 @@ class CommentService:
         """
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
-        # Get all comments for this snapshot
+        # Get all non-deleted comments for this snapshot
         comments = Comment.objects.filter(
             snapshot=snapshot,
+            is_deleted=False,
         ).values_list("target_type", "snapshot_chart_id", "created_at", "id")
 
         if not comments:
@@ -205,6 +219,7 @@ class CommentService:
         mentioned_comment_ids = set(
             Comment.objects.filter(
                 snapshot=snapshot,
+                is_deleted=False,
                 mentioned_emails__contains=[user_email],
             ).values_list("id", flat=True)
         )

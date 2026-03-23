@@ -50,6 +50,8 @@ class Comment(models.Model):
     )
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
 
+    is_deleted = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
