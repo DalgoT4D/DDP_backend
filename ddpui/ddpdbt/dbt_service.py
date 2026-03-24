@@ -406,6 +406,9 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             org, warehouse, saved_creds
         )
 
+        orgdbt.cli_profile_block = cli_profile_block
+        orgdbt.save()
+
         if error:
             logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
             raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
