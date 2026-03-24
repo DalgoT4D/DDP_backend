@@ -1,12 +1,6 @@
-import os
 from unittest.mock import Mock, patch
 
-import django
 import pytest
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
-django.setup()
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -119,9 +113,9 @@ def test_build_dashboard_chat_context_for_org_skips_when_locked(orguser):
     redis_client = Mock()
     redis_client.lock.return_value = redis_lock
 
-    with patch("ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client), patch(
-        "ddpui.celeryworkers.tasks.DashboardChatIngestionService"
-    ) as ingestion_service:
+    with patch(
+        "ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client
+    ), patch("ddpui.celeryworkers.tasks.DashboardChatIngestionService") as ingestion_service:
         result = build_dashboard_chat_context_for_org.run(org.id)
 
     assert result == {"status": "skipped_locked", "org_id": org.id}
@@ -151,7 +145,9 @@ def test_build_dashboard_chat_context_for_org_runs_ingestion(orguser):
     ingestion_service = Mock()
     ingestion_service.ingest_org.return_value = result_payload
 
-    with patch("ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client), patch(
+    with patch(
+        "ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client
+    ), patch(
         "ddpui.celeryworkers.tasks.DashboardChatIngestionService",
         return_value=ingestion_service,
     ):
@@ -186,7 +182,7 @@ def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
     )
     runtime_class.return_value.run.return_value = DashboardChatResponse(
         answer_text="Funding dropped because donor inflows slowed this quarter.",
-        intent=DashboardChatIntent.DATA_QUERY,
+        intent=DashboardChatIntent.QUERY_WITH_SQL,
         warnings=["Example warning"],
         sql="SELECT 1",
         sql_results=[{"value": 1}],
@@ -229,3 +225,42 @@ def test_run_dashboard_chat_turn_publishes_error_when_runtime_fails(
 
     assert DashboardChatMessage.objects.filter(session=session, role="assistant").count() == 0
     publish_event.assert_called_once()
+
+
+@patch("ddpui.celeryworkers.tasks.publish_dashboard_chat_event")
+@patch("ddpui.celeryworkers.tasks.DashboardChatRuntime")
+def test_run_dashboard_chat_turn_reuses_existing_assistant_reply(
+    runtime_class,
+    publish_event,
+    orguser,
+):
+    _create_org_dbt(orguser.org)
+    dashboard = _create_dashboard(orguser)
+    session = DashboardChatSession.objects.create(
+        org=orguser.org,
+        orguser=orguser,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    assistant_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=2,
+        role="assistant",
+        content="Existing answer",
+        payload={"intent": "query_without_sql"},
+    )
+
+    result = run_dashboard_chat_turn(str(session.session_id), user_message.id)
+
+    assert result == {
+        "status": "skipped_existing_reply",
+        "session_id": str(session.session_id),
+        "assistant_message_id": assistant_message.id,
+    }
+    runtime_class.return_value.run.assert_not_called()
+    publish_event.assert_not_called()

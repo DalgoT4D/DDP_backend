@@ -1,12 +1,15 @@
 """Warehouse access helpers used by dashboard chat runtime."""
 
 import json
+import logging
 from typing import Any
 
 from ddpui.core.dashboard_chat.runtime_types import DashboardChatSchemaSnippet
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+
+logger = logging.getLogger(__name__)
 
 
 class DashboardChatWarehouseToolsError(Exception):
@@ -42,7 +45,16 @@ class DashboardChatWarehouseTools:
             if parsed_table is None:
                 continue
             schema_name, bare_table_name = parsed_table
-            columns = self.warehouse_client.get_table_columns(schema_name, bare_table_name)
+            try:
+                columns = self.warehouse_client.get_table_columns(schema_name, bare_table_name)
+            except Exception as error:
+                logger.warning(
+                    "dashboard chat schema lookup failed for %s.%s: %s",
+                    schema_name,
+                    bare_table_name,
+                    error,
+                )
+                continue
             if not columns:
                 continue
             snippets[table_name.lower()] = DashboardChatSchemaSnippet(

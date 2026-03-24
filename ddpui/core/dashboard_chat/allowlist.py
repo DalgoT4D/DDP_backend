@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.org import OrgDbt
@@ -185,3 +186,75 @@ class DashboardChatAllowlistBuilder:
                 nodes_by_unique_id=nodes_by_unique_id,
                 visited=visited,
             )
+
+    @classmethod
+    def build_dbt_index(
+        cls,
+        manifest_json: dict | None,
+        allowlist: DashboardChatAllowlist,
+    ) -> dict[str, Any]:
+        """Build a compact allowlisted dbt index for deterministic model-search tools."""
+        if not manifest_json:
+            return {"resources_by_unique_id": {}}
+
+        nodes_by_unique_id = cls._manifest_nodes_by_unique_id(manifest_json)
+        parent_map = manifest_json.get("parent_map") or {}
+        child_map = manifest_json.get("child_map") or {}
+        resources_by_unique_id: dict[str, dict[str, Any]] = {}
+
+        for unique_id in sorted(allowlist.allowed_unique_ids):
+            node = nodes_by_unique_id.get(unique_id)
+            if node is None:
+                continue
+
+            table_name = cls._table_name_for_node(node)
+            resources_by_unique_id[unique_id] = {
+                "unique_id": unique_id,
+                "resource_type": str(node.get("resource_type") or ""),
+                "name": str(node.get("name") or ""),
+                "schema": str(node.get("schema") or ""),
+                "database": str(node.get("database") or ""),
+                "description": str(node.get("description") or ""),
+                "table": table_name,
+                "columns": [
+                    {
+                        "name": str(column.get("name") or column_name),
+                        "type": str(column.get("data_type") or column.get("type") or ""),
+                        "description": str(column.get("description") or ""),
+                    }
+                    for column_name, column in (node.get("columns") or {}).items()
+                ],
+                "upstream": cls._lineage_entries(
+                    unique_ids=parent_map.get(unique_id) or [],
+                    nodes_by_unique_id=nodes_by_unique_id,
+                    allowlist=allowlist,
+                ),
+                "downstream": cls._lineage_entries(
+                    unique_ids=child_map.get(unique_id) or [],
+                    nodes_by_unique_id=nodes_by_unique_id,
+                    allowlist=allowlist,
+                ),
+            }
+
+        return {"resources_by_unique_id": resources_by_unique_id}
+
+    @classmethod
+    def _lineage_entries(
+        cls,
+        *,
+        unique_ids: list[str],
+        nodes_by_unique_id: dict[str, dict],
+        allowlist: DashboardChatAllowlist,
+    ) -> list[str]:
+        """Return compact allowlisted lineage labels for one dbt resource."""
+        lineage_entries: list[str] = []
+        for unique_id in unique_ids:
+            if not allowlist.is_unique_id_allowed(unique_id):
+                continue
+            node = nodes_by_unique_id.get(unique_id)
+            if node is None:
+                lineage_entries.append(unique_id)
+                continue
+            table_name = cls._table_name_for_node(node)
+            lineage_entries.append(table_name or str(node.get("name") or unique_id))
+        return lineage_entries

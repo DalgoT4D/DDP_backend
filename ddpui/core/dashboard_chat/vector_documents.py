@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import timezone
 from enum import Enum
 from hashlib import sha256
 from typing import Any
@@ -17,9 +18,38 @@ class DashboardChatSourceType(str, Enum):
     DBT_CATALOG = "dbt_catalog"
 
 
-def build_dashboard_chat_collection_name(org_id: int, prefix: str = "org_") -> str:
-    """Build the per-org Chroma collection name."""
+def build_dashboard_chat_collection_base_name(org_id: int, prefix: str = "org_") -> str:
+    """Build the unversioned base name used for one org's dashboard chat collections."""
     return f"{prefix}{org_id}"
+
+
+def build_dashboard_chat_collection_version(versioned_at: datetime | None) -> str | None:
+    """Build a stable UTC version suffix from a timestamp."""
+    if versioned_at is None:
+        return None
+    normalized = versioned_at
+    if normalized.tzinfo is None:
+        normalized = normalized.replace(tzinfo=timezone.utc)
+    normalized = normalized.astimezone(timezone.utc)
+    return normalized.strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def build_dashboard_chat_collection_name(
+    org_id: int,
+    prefix: str = "org_",
+    version: datetime | str | None = None,
+) -> str:
+    """Build the Chroma collection name for an org, optionally versioned."""
+    base_name = build_dashboard_chat_collection_base_name(org_id, prefix)
+    if version is None:
+        return base_name
+    if isinstance(version, datetime):
+        version_suffix = build_dashboard_chat_collection_version(version)
+    else:
+        version_suffix = str(version).strip() or None
+    if not version_suffix:
+        return base_name
+    return f"{base_name}__{version_suffix}"
 
 
 def compute_dashboard_chat_document_hash(content: str) -> str:

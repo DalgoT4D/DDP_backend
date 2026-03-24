@@ -6,14 +6,14 @@ from asgiref.sync import async_to_sync
 from ddpui.core.dashboard_chat.events import (
     build_dashboard_chat_event,
     dashboard_chat_group_name,
-    publish_dashboard_chat_event,
 )
 from ddpui.core.dashboard_chat.session_service import (
     DashboardChatSessionError,
-    create_dashboard_chat_user_message,
+    create_dashboard_chat_user_message_with_status,
+    find_dashboard_chat_assistant_reply,
     get_or_create_dashboard_chat_session,
+    serialize_dashboard_chat_message,
 )
-from ddpui.celeryworkers.tasks import run_dashboard_chat_turn
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.role_based_access import RolePermission
@@ -77,32 +77,75 @@ class DashboardChatConsumer(BaseConsumer):
             self._respond_error(str(error))
             return
 
-        user_message = create_dashboard_chat_user_message(
+        user_message_result = create_dashboard_chat_user_message_with_status(
             session=session,
             content=raw_message,
             client_message_id=payload.get("client_message_id"),
         )
-        try:
-            run_dashboard_chat_turn.delay(str(session.session_id), user_message.id)
-        except Exception:
-            logger.exception(
-                "dashboard chat turn could not be enqueued for session=%s",
-                session.session_id,
+        user_message = user_message_result.message
+        self._subscribe_to_session(str(session.session_id))
+
+        if not user_message_result.created:
+            assistant_message = find_dashboard_chat_assistant_reply(
+                session=session,
+                user_message=user_message,
             )
-            self._respond_error("Unable to start chat right now")
+            if assistant_message is not None:
+                self._send_event(
+                    build_dashboard_chat_event(
+                        event_type="assistant_message",
+                        session_id=str(session.session_id),
+                        dashboard_id=self.dashboard.id,
+                        message_id=str(assistant_message.id),
+                        data=serialize_dashboard_chat_message(assistant_message),
+                    ),
+                )
             return
 
-        self._subscribe_to_session(str(session.session_id))
-        publish_dashboard_chat_event(
-            str(session.session_id),
+        self._send_event(
             build_dashboard_chat_event(
                 event_type="progress",
                 session_id=str(session.session_id),
                 dashboard_id=self.dashboard.id,
                 message_id=str(user_message.id),
                 data={"label": "thinking"},
-            ),
+            )
         )
+
+        try:
+            from ddpui.celeryworkers.tasks import execute_dashboard_chat_turn
+
+            result = execute_dashboard_chat_turn(str(session.session_id), user_message.id)
+        except Exception:
+            logger.exception(
+                "dashboard chat turn failed inline for session=%s",
+                session.session_id,
+            )
+            self._respond_error("Something went wrong while generating the response")
+            return
+
+        assistant_message = result.get("assistant_message")
+        if result["status"] in {"completed", "skipped_existing_reply"} and assistant_message is not None:
+            self._send_event(
+                build_dashboard_chat_event(
+                    event_type="assistant_message",
+                    session_id=str(session.session_id),
+                    dashboard_id=self.dashboard.id,
+                    message_id=str(assistant_message.id),
+                    data=serialize_dashboard_chat_message(assistant_message),
+                )
+            )
+            return
+
+        if result["status"] == "skipped_missing_session":
+            self._respond_error("Chat session could not be found")
+            return
+
+        if result["status"] == "skipped_missing_message":
+            self._respond_error("Chat message could not be found")
+            return
+
+        self._respond_error("Something went wrong while generating the response")
 
     def websocket_disconnect(self, message):
         """Remove the socket from any joined session groups on disconnect."""
@@ -125,14 +168,18 @@ class DashboardChatConsumer(BaseConsumer):
 
     def _respond_error(self, message: str) -> None:
         """Send one direct websocket error event."""
-        self.send(
-            text_data=json.dumps(
-                build_dashboard_chat_event(
-                    event_type="error",
-                    dashboard_id=self.dashboard.id if getattr(self, "dashboard", None) else None,
-                    data={"message": message},
-                )
+        self._send_event(
+            build_dashboard_chat_event(
+                event_type="error",
+                dashboard_id=self.dashboard.id if getattr(self, "dashboard", None) else None,
+                data={"message": message},
             )
+        )
+
+    def _send_event(self, event: dict) -> None:
+        """Send one websocket event directly to the current socket."""
+        self.send(
+            text_data=json.dumps(event)
         )
 
     def _chat_available(self) -> tuple[bool, str]:

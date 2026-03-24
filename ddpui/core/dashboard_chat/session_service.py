@@ -1,5 +1,6 @@
 """Session and message persistence helpers for dashboard chat."""
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from django.db import IntegrityError
@@ -7,6 +8,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from ddpui.core.dashboard_chat.vector_documents import build_dashboard_chat_collection_name
 from ddpui.core.dashboard_chat.runtime_types import DashboardChatConversationMessage
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import (
@@ -21,6 +23,14 @@ class DashboardChatSessionError(Exception):
     """Raised when a dashboard chat session cannot be created or reused."""
 
 
+@dataclass(frozen=True)
+class DashboardChatMessageCreateResult:
+    """Outcome of creating or reusing one persisted chat message."""
+
+    message: DashboardChatMessage
+    created: bool
+
+
 def get_or_create_dashboard_chat_session(
     *,
     orguser: OrgUser,
@@ -29,10 +39,17 @@ def get_or_create_dashboard_chat_session(
 ) -> DashboardChatSession:
     """Create a new session or validate an existing one for the current dashboard."""
     if session_id is None:
+        collection_name = None
+        if orguser.org.dbt and orguser.org.dbt.vector_last_ingested_at is not None:
+            collection_name = build_dashboard_chat_collection_name(
+                orguser.org.id,
+                version=orguser.org.dbt.vector_last_ingested_at,
+            )
         return DashboardChatSession.objects.create(
             org=orguser.org,
             orguser=orguser,
             dashboard=dashboard,
+            vector_collection_name=collection_name,
         )
 
     try:
@@ -58,6 +75,20 @@ def create_dashboard_chat_user_message(
     client_message_id: str | None,
 ) -> DashboardChatMessage:
     """Persist one user message and advance the session timestamp."""
+    return create_dashboard_chat_user_message_with_status(
+        session=session,
+        content=content,
+        client_message_id=client_message_id,
+    ).message
+
+
+def create_dashboard_chat_user_message_with_status(
+    *,
+    session: DashboardChatSession,
+    content: str,
+    client_message_id: str | None,
+) -> DashboardChatMessageCreateResult:
+    """Persist one user message and report whether a new row was created."""
     return _create_dashboard_chat_message(
         session=session,
         role=DashboardChatMessageRole.USER.value,
@@ -80,7 +111,7 @@ def create_dashboard_chat_assistant_message(
         content=content,
         client_message_id=None,
         payload=payload,
-    )
+    ).message
 
 
 def list_dashboard_chat_history(
@@ -93,7 +124,11 @@ def list_dashboard_chat_history(
     if exclude_message_id is not None:
         query = query.exclude(id=exclude_message_id)
     return [
-        DashboardChatConversationMessage(role=message.role, content=message.content)
+        DashboardChatConversationMessage(
+            role=message.role,
+            content=message.content,
+            payload=message.payload or {},
+        )
         for message in query
     ]
 
@@ -109,6 +144,22 @@ def serialize_dashboard_chat_message(message: DashboardChatMessage) -> dict:
     }
 
 
+def find_dashboard_chat_assistant_reply(
+    *,
+    session: DashboardChatSession,
+    user_message: DashboardChatMessage,
+) -> DashboardChatMessage | None:
+    """Return the first assistant reply that follows a user turn, if it exists."""
+    return (
+        session.messages.filter(
+            role=DashboardChatMessageRole.ASSISTANT.value,
+            sequence_number__gt=user_message.sequence_number,
+        )
+        .order_by("sequence_number")
+        .first()
+    )
+
+
 def _create_dashboard_chat_message(
     *,
     session: DashboardChatSession,
@@ -116,8 +167,9 @@ def _create_dashboard_chat_message(
     content: str,
     client_message_id: str | None,
     payload: dict | None,
-) -> DashboardChatMessage:
+) -> DashboardChatMessageCreateResult:
     """Create a session-scoped chat message with a stable next sequence number."""
+    created = False
     with transaction.atomic():
         locked_session = DashboardChatSession.objects.select_for_update().get(id=session.id)
         if client_message_id:
@@ -126,7 +178,10 @@ def _create_dashboard_chat_message(
                 client_message_id=client_message_id,
             ).first()
             if existing_message is not None:
-                return existing_message
+                return DashboardChatMessageCreateResult(
+                    message=existing_message,
+                    created=False,
+                )
 
         next_sequence_number = (
             locked_session.messages.aggregate(max_sequence_number=Max("sequence_number"))[
@@ -143,6 +198,7 @@ def _create_dashboard_chat_message(
                 client_message_id=client_message_id,
                 payload=payload,
             )
+            created = True
         except IntegrityError:
             if not client_message_id:
                 raise
@@ -153,4 +209,4 @@ def _create_dashboard_chat_message(
             if message is None:
                 raise
         DashboardChatSession.objects.filter(id=locked_session.id).update(updated_at=timezone.now())
-    return message
+    return DashboardChatMessageCreateResult(message=message, created=created)

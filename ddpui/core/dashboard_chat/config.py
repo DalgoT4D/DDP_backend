@@ -88,9 +88,9 @@ class DashboardChatRuntimeConfig:
     """Environment-backed configuration for dashboard chat orchestration."""
 
     llm_model: str = "gpt-4o-mini"
-    llm_timeout_ms: int = 45000
+    llm_timeout_ms: int = 12000
+    llm_max_attempts: int = 1
     retrieval_limit: int = 6
-    related_dashboard_limit: int = 3
     max_query_rows: int = 200
     max_distinct_values: int = 50
     max_schema_tables: int = 4
@@ -100,11 +100,9 @@ class DashboardChatRuntimeConfig:
         """Build runtime config from environment variables."""
         return cls(
             llm_model=os.getenv("AI_DASHBOARD_CHAT_LLM_MODEL", "gpt-4o-mini"),
-            llm_timeout_ms=int(os.getenv("AI_DASHBOARD_CHAT_LLM_TIMEOUT_MS", "45000")),
+            llm_timeout_ms=int(os.getenv("AI_DASHBOARD_CHAT_LLM_TIMEOUT_MS", "12000")),
+            llm_max_attempts=int(os.getenv("AI_DASHBOARD_CHAT_LLM_MAX_ATTEMPTS", "1")),
             retrieval_limit=int(os.getenv("AI_DASHBOARD_CHAT_RETRIEVAL_LIMIT", "6")),
-            related_dashboard_limit=int(
-                os.getenv("AI_DASHBOARD_CHAT_RELATED_DASHBOARD_LIMIT", "3")
-            ),
             max_query_rows=int(os.getenv("AI_DASHBOARD_CHAT_MAX_QUERY_ROWS", "200")),
             max_distinct_values=int(
                 os.getenv("AI_DASHBOARD_CHAT_MAX_DISTINCT_VALUES", "50")

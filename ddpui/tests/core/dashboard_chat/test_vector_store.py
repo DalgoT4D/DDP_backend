@@ -116,6 +116,9 @@ class FakeChromaClient:
         self.deleted_collections.append(name)
         del self.collections[name]
 
+    def list_collections(self):
+        return list(self.collections.keys())
+
 
 def test_dashboard_chat_vector_store_config_reads_env():
     """Vector store config should read the dedicated dashboard chat env vars."""
@@ -142,6 +145,10 @@ def test_collection_name_uses_org_prefix():
     """Collections should be split by org using the configured prefix."""
     assert build_dashboard_chat_collection_name(42) == "org_42"
     assert build_dashboard_chat_collection_name(42, prefix="tenant_") == "tenant_42"
+    assert (
+        build_dashboard_chat_collection_name(42, version="20260323T120000Z")
+        == "org_42__20260323T120000Z"
+    )
 
 
 def test_vector_document_has_stable_id_and_required_metadata():
