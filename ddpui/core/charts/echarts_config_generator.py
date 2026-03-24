@@ -99,8 +99,6 @@ class EChartsConfigGenerator:
             formatted = f"{value:.{decimal_places}f}%"
         elif format_type == "currency":
             formatted = f"${value:,.{decimal_places}f}"
-        elif format_type == "comma":
-            formatted = f"{value:,.{decimal_places}f}"
         else:  # default
             if decimal_places > 0:
                 formatted = f"{value:.{decimal_places}f}"
