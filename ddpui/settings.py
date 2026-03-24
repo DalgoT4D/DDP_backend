@@ -339,6 +339,9 @@ SIMPLE_JWT = {
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
+# Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
+RENDER_SECRET = os.getenv("RENDER_SECRET")
+
 
 # Cookie settings
 COOKIE_SECURE = True
