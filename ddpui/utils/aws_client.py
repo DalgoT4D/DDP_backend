@@ -61,7 +61,7 @@ class AWSClient:
                     finally:
                         cls._locks[service_name].release()
             else:
-                raise RuntimeError(
+                logger.warning(
                     f"Timeout while acquiring lock for {service_name} session initialization"
                 )
 
