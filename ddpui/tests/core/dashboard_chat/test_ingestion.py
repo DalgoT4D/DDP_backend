@@ -1,16 +1,10 @@
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 import json
 
-import django
 import pytest
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
-django.setup()
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -22,12 +16,13 @@ from ddpui.core.dashboard_chat.dbt_docs import (
 )
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionService
+from ddpui.core.dashboard_chat.vector_documents import build_dashboard_chat_collection_name
 from ddpui.core.dashboard_chat.vector_store import DashboardChatStoredDocument
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardAIContext, OrgAIContext
-from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, TransformType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.visualization import Chart
@@ -40,9 +35,36 @@ class FakeDashboardChatVectorStore:
     """In-memory vector store used to exercise ingest diffing logic."""
 
     def __init__(self):
-        self.documents_by_org = {}
+        self.documents_by_collection = {}
         self.upsert_calls = []
         self.delete_calls = []
+
+    def collection_name(self, org_id, *, version=None):
+        return build_dashboard_chat_collection_name(org_id, version=version)
+
+    def load_collection(self, org_id, *, collection_name=None, allow_legacy_fallback=True):
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        if resolved_collection_name in self.documents_by_collection:
+            return {"name": resolved_collection_name}
+        if collection_name and allow_legacy_fallback:
+            legacy_collection_name = self.collection_name(org_id)
+            if legacy_collection_name in self.documents_by_collection:
+                return {"name": legacy_collection_name}
+        return None
+
+    def delete_collection(self, org_id, *, collection_name=None):
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        existed = resolved_collection_name in self.documents_by_collection
+        self.documents_by_collection.pop(resolved_collection_name, None)
+        return existed
+
+    def list_org_collection_names(self, org_id):
+        base_name = self.collection_name(org_id)
+        return [
+            collection_name
+            for collection_name in self.documents_by_collection
+            if collection_name == base_name or collection_name.startswith(f"{base_name}__")
+        ]
 
     def get_documents(
         self,
@@ -50,8 +72,10 @@ class FakeDashboardChatVectorStore:
         source_types=None,
         dashboard_id=None,
         include_documents=False,
+        collection_name=None,
     ):
-        rows = list(self.documents_by_org.get(org_id, {}).values())
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        rows = list(self.documents_by_collection.get(resolved_collection_name, {}).values())
         if source_types:
             allowed = {
                 source_type.value if hasattr(source_type, "value") else source_type
@@ -69,9 +93,10 @@ class FakeDashboardChatVectorStore:
             for row in rows
         ]
 
-    def upsert_documents(self, org_id, documents):
+    def upsert_documents(self, org_id, documents, collection_name=None):
         self.upsert_calls.append([document.document_id for document in documents])
-        org_documents = self.documents_by_org.setdefault(org_id, {})
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        org_documents = self.documents_by_collection.setdefault(resolved_collection_name, {})
         for document in documents:
             org_documents[document.document_id] = DashboardChatStoredDocument(
                 document_id=document.document_id,
@@ -80,16 +105,25 @@ class FakeDashboardChatVectorStore:
             )
         return [document.document_id for document in documents]
 
-    def delete_documents(self, org_id, ids=None, source_types=None, dashboard_id=None):
+    def delete_documents(
+        self,
+        org_id,
+        ids=None,
+        source_types=None,
+        dashboard_id=None,
+        collection_name=None,
+    ):
         self.delete_calls.append(
             {
                 "org_id": org_id,
                 "ids": list(ids) if ids is not None else None,
                 "source_types": source_types,
                 "dashboard_id": dashboard_id,
+                "collection_name": collection_name,
             }
         )
-        org_documents = self.documents_by_org.setdefault(org_id, {})
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        org_documents = self.documents_by_collection.setdefault(resolved_collection_name, {})
         if ids is None:
             return 0
         for document_id in ids:
@@ -250,6 +284,66 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_updates_timestamp(org, orgdb
     assert orgdbt.docs_generated_at is not None
 
 
+def test_generate_dashboard_chat_dbt_docs_artifacts_pulls_git_repo_before_generating(
+    org,
+    orgdbt,
+    tmp_path,
+):
+    """Git-backed dbt projects should refresh the local checkout before docs generation."""
+    project_dir = tmp_path / "dashchat" / "dbtrepo"
+    target_dir = project_dir / "target"
+    target_dir.mkdir(parents=True)
+    (target_dir / "manifest.json").write_text(
+        json.dumps({"metadata": {"project_name": "dashchat"}, "nodes": {}, "sources": {}}),
+        encoding="utf-8",
+    )
+    (target_dir / "catalog.json").write_text(
+        json.dumps({"nodes": {}, "sources": {}}),
+        encoding="utf-8",
+    )
+    orgdbt.transform_type = TransformType.GIT
+    orgdbt.gitrepo_access_token_secret = "pat-secret"
+    orgdbt.save(update_fields=["transform_type", "gitrepo_access_token_secret"])
+
+    mock_git_manager = Mock()
+
+    with patch(
+        "ddpui.core.dashboard_chat.dbt_docs.DbtProjectManager.gather_dbt_project_params",
+        return_value=DbtProjectParams(
+            dbt_binary="/mock/dbt",
+            dbt_env_dir="/mock/env",
+            venv_binary="/mock/bin",
+            target="analytics",
+            project_dir=str(project_dir),
+            org_project_dir=str(project_dir.parent),
+        ),
+    ), patch(
+        "ddpui.core.dashboard_chat.dbt_docs.prefect_service.get_dbt_cli_profile_block",
+        return_value={"profile": {"dashchat": {"outputs": {"dev": {"type": "postgres"}}}}},
+    ), patch(
+        "ddpui.core.dashboard_chat.dbt_docs.DbtProjectManager.run_dbt_command",
+        return_value=Mock(stdout="ok", returncode=0),
+    ), patch(
+        "ddpui.core.dashboard_chat.dbt_docs.DbtProjectManager.get_dbt_project_dir",
+        return_value=str(project_dir),
+    ), patch(
+        "ddpui.core.dashboard_chat.dbt_docs.secretsmanager.retrieve_github_pat",
+        return_value="actual-pat",
+    ) as mock_retrieve_pat, patch(
+        "ddpui.core.dashboard_chat.dbt_docs.GitManager",
+        return_value=mock_git_manager,
+    ) as mock_git_manager_class:
+        generate_dashboard_chat_dbt_docs_artifacts(org, orgdbt)
+
+    mock_retrieve_pat.assert_called_once_with("pat-secret")
+    mock_git_manager_class.assert_called_once_with(
+        repo_local_path=str(project_dir),
+        pat="actual-pat",
+        validate_git=True,
+    )
+    mock_git_manager.pull_changes.assert_called_once_with()
+
+
 def test_ingest_org_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, dashboard):
     """A repeated identical build should skip writes, and a removed source should be deleted."""
     OrgAIContext.objects.create(
@@ -330,17 +424,25 @@ def test_ingest_org_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, d
     dashboard_context.save(update_fields=["markdown", "updated_at"])
     third_result = service.ingest_org(org)
 
+    active_collection_name = build_dashboard_chat_collection_name(
+        org.id,
+        version=org.dbt.vector_last_ingested_at,
+    )
     stored_source_types = {
         document.metadata["source_type"]
-        for document in vector_store.get_documents(org.id, include_documents=False)
+        for document in vector_store.get_documents(
+            org.id,
+            include_documents=False,
+            collection_name=active_collection_name,
+        )
     }
 
     assert first_result.source_document_counts["dashboard_context"] == 1
-    assert second_result.upserted_document_ids == []
+    assert second_result.upserted_document_ids
     assert second_result.deleted_document_ids == []
-    assert len(vector_store.upsert_calls) == upsert_count_after_first_ingest
+    assert len(vector_store.upsert_calls) == upsert_count_after_first_ingest + 2
     assert third_result.source_document_counts["dashboard_context"] == 0
-    assert third_result.deleted_document_ids
+    assert third_result.deleted_document_ids == []
     assert "dashboard_context" not in stored_source_types
 
 
@@ -393,9 +495,12 @@ def test_ingest_org_keeps_collections_isolated_per_org(org, orgdbt, orguser, das
     service.ingest_org(org)
     service.ingest_org(other_org)
 
-    assert set(vector_store.documents_by_org.keys()) == {org.id, other_org.id}
-    assert vector_store.documents_by_org[org.id]
-    assert vector_store.documents_by_org[other_org.id]
+    org_collection_names = vector_store.list_org_collection_names(org.id)
+    other_collection_names = vector_store.list_org_collection_names(other_org.id)
+    assert len(org_collection_names) == 1
+    assert len(other_collection_names) == 1
+    assert vector_store.documents_by_collection[org_collection_names[0]]
+    assert vector_store.documents_by_collection[other_collection_names[0]]
 
     other_orguser.delete()
     other_user.delete()
@@ -430,7 +535,7 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
     org.ai_context.updated_at = timezone.now()
     org.ai_context.save(update_fields=["markdown", "updated_at"])
 
-    def _raise_on_upsert(org_id, documents):
+    def _raise_on_upsert(org_id, documents, collection_name=None):
         raise RuntimeError("upsert failed")
 
     vector_store.upsert_documents = _raise_on_upsert
@@ -440,7 +545,8 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
 
     remaining_ids = {
         document.document_id
-        for document in vector_store.get_documents(org.id, include_documents=False)
+        for documents in vector_store.documents_by_collection.values()
+        for document in documents.values()
     }
     assert remaining_ids == original_ids
     assert vector_store.delete_calls == []

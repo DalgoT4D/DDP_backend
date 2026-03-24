@@ -8,6 +8,7 @@ from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
 from ddpui.core.dashboard_chat.vector_documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
+    build_dashboard_chat_collection_base_name,
     build_dashboard_chat_collection_name,
 )
 
@@ -21,6 +22,9 @@ class DashboardChatEmbeddingProvider(Protocol):
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query."""
 
+    def reset_usage(self) -> None:
+        """Reset per-turn embedding usage before a new runtime invocation."""
+
 
 class OpenAIEmbeddingProvider:
     """OpenAI embeddings adapter for dashboard chat retrieval."""
@@ -33,24 +37,60 @@ class OpenAIEmbeddingProvider:
     ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model = model
+        self.usage_events: list[dict[str, Any]] = []
         if client is None:
             if not self.api_key:
                 raise ValueError("OPENAI_API_KEY must be set for dashboard chat embeddings")
             from openai import OpenAI
 
-            client = OpenAI(api_key=self.api_key)
+            client = OpenAI(api_key=self.api_key, max_retries=2)
         self.client = client
+
+    def reset_usage(self) -> None:
+        """Reset aggregated embedding usage before one new chat turn."""
+        self.usage_events = []
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of documents using OpenAI."""
         if not texts:
             return []
         response = self.client.embeddings.create(model=self.model, input=texts)
+        self._record_usage("embed_documents", response, len(texts))
         return [item.embedding for item in response.data]
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query using the document embedding path."""
         return self.embed_documents([text])[0]
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Return aggregated embedding usage for the current turn."""
+        totals = {
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+        }
+        for event in self.usage_events:
+            totals["prompt_tokens"] += event.get("prompt_tokens", 0)
+            totals["total_tokens"] += event.get("total_tokens", 0)
+        return {
+            "model": self.model,
+            "calls": list(self.usage_events),
+            "totals": totals,
+        }
+
+    def _record_usage(self, operation: str, response: Any, input_count: int) -> None:
+        """Capture embedding usage from one OpenAI embeddings response."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        self.usage_events.append(
+            {
+                "operation": operation,
+                "model": self.model,
+                "input_count": input_count,
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+            }
+        )
 
 
 @dataclass(frozen=True)
@@ -97,32 +137,96 @@ class ChromaDashboardChatVectorStore:
             ssl=self.config.chroma_ssl,
         )
 
-    def collection_name(self, org_id: int) -> str:
+    def collection_name(
+        self,
+        org_id: int,
+        *,
+        version: Any = None,
+    ) -> str:
         """Return the Chroma collection name for an org."""
-        return build_dashboard_chat_collection_name(org_id, self.config.collection_prefix)
+        return build_dashboard_chat_collection_name(
+            org_id,
+            self.config.collection_prefix,
+            version=version,
+        )
 
-    def create_collection(self, org_id: int) -> Any:
+    def create_collection(
+        self,
+        org_id: int,
+        *,
+        collection_name: str | None = None,
+    ) -> Any:
         """Create or load the Chroma collection for an org."""
+        resolved_collection_name = collection_name or self.collection_name(org_id)
         return self.client.get_or_create_collection(
-            name=self.collection_name(org_id),
+            name=resolved_collection_name,
             metadata={"org_id": str(org_id)},
         )
 
-    def load_collection(self, org_id: int) -> Any | None:
+    def load_collection(
+        self,
+        org_id: int,
+        *,
+        collection_name: str | None = None,
+        allow_legacy_fallback: bool = True,
+    ) -> Any | None:
         """Load an existing Chroma collection for an org."""
         from chromadb.errors import InvalidCollectionException
 
         try:
-            return self.client.get_collection(name=self.collection_name(org_id))
+            resolved_collection_name = collection_name or self.collection_name(org_id)
+            return self.client.get_collection(name=resolved_collection_name)
         except (InvalidCollectionException, ValueError):
-            return None
+            if collection_name is None or not allow_legacy_fallback:
+                return None
+            try:
+                return self.client.get_collection(
+                    name=build_dashboard_chat_collection_base_name(
+                        org_id,
+                        self.config.collection_prefix,
+                    )
+                )
+            except (InvalidCollectionException, ValueError):
+                return None
 
-    def delete_collection(self, org_id: int) -> bool:
+    def delete_collection(
+        self,
+        org_id: int,
+        *,
+        collection_name: str | None = None,
+    ) -> bool:
         """Delete the Chroma collection for an org if it exists."""
-        if self.load_collection(org_id) is None:
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        if self.load_collection(
+            org_id,
+            collection_name=resolved_collection_name,
+            allow_legacy_fallback=False,
+        ) is None:
             return False
-        self.client.delete_collection(name=self.collection_name(org_id))
+        self.client.delete_collection(name=resolved_collection_name)
         return True
+
+    def list_collection_names(self) -> list[str]:
+        """Return all Chroma collection names for the current client."""
+        raw_collections = self.client.list_collections()
+        collection_names: list[str] = []
+        for collection in raw_collections:
+            if isinstance(collection, str):
+                collection_names.append(collection)
+                continue
+            name = getattr(collection, "name", None)
+            if name:
+                collection_names.append(str(name))
+        return collection_names
+
+    def list_org_collection_names(self, org_id: int) -> list[str]:
+        """Return all collection names that belong to one org."""
+        base_name = build_dashboard_chat_collection_base_name(org_id, self.config.collection_prefix)
+        return [
+            collection_name
+            for collection_name in self.list_collection_names()
+            if collection_name == base_name or collection_name.startswith(f"{base_name}__")
+        ]
 
     def get_documents(
         self,
@@ -130,9 +234,10 @@ class ChromaDashboardChatVectorStore:
         source_types: list[DashboardChatSourceType | str] | None = None,
         dashboard_id: int | None = None,
         include_documents: bool = False,
+        collection_name: str | None = None,
     ) -> list[DashboardChatStoredDocument]:
         """Load stored documents for an org using metadata filters."""
-        collection = self.load_collection(org_id)
+        collection = self.load_collection(org_id, collection_name=collection_name)
         if collection is None:
             return []
 
@@ -152,9 +257,14 @@ class ChromaDashboardChatVectorStore:
         ids: list[str] | None = None,
         source_types: list[DashboardChatSourceType | str] | None = None,
         dashboard_id: int | None = None,
+        collection_name: str | None = None,
     ) -> int:
         """Delete matching documents from an org collection."""
-        collection = self.load_collection(org_id)
+        collection = self.load_collection(
+            org_id,
+            collection_name=collection_name,
+            allow_legacy_fallback=False,
+        )
         if collection is None:
             return 0
 
@@ -171,6 +281,7 @@ class ChromaDashboardChatVectorStore:
                     source_types=source_types,
                     dashboard_id=dashboard_id,
                     include_documents=False,
+                    collection_name=collection_name,
                 )
             )
         )
@@ -181,12 +292,13 @@ class ChromaDashboardChatVectorStore:
         self,
         org_id: int,
         documents: list[DashboardChatVectorDocument],
+        collection_name: str | None = None,
     ) -> list[str]:
         """Upsert documents into the org-specific Chroma collection."""
         if not documents:
             return []
 
-        collection = self.create_collection(org_id)
+        collection = self.create_collection(org_id, collection_name=collection_name)
         contents = [document.content for document in documents]
         document_ids = [document.document_id for document in documents]
         metadatas = [document.metadata() for document in documents]
@@ -200,6 +312,21 @@ class ChromaDashboardChatVectorStore:
         )
         return document_ids
 
+    def embed_query(self, query_text: str) -> list[float]:
+        """Build one query embedding that can be reused across filtered retrieval calls."""
+        return self.embedding_provider.embed_query(query_text)
+
+    def reset_usage(self) -> None:
+        """Reset embedding usage counters before one new runtime invocation."""
+        if hasattr(self.embedding_provider, "reset_usage"):
+            self.embedding_provider.reset_usage()
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Return embedding usage from the configured provider when supported."""
+        if hasattr(self.embedding_provider, "usage_summary"):
+            return self.embedding_provider.usage_summary()
+        return {}
+
     def query(
         self,
         org_id: int,
@@ -207,15 +334,17 @@ class ChromaDashboardChatVectorStore:
         n_results: int = 5,
         source_types: list[DashboardChatSourceType | str] | None = None,
         dashboard_id: int | None = None,
+        query_embedding: list[float] | None = None,
+        collection_name: str | None = None,
     ) -> list[DashboardChatVectorQueryResult]:
         """Query the org-specific Chroma collection."""
-        collection = self.load_collection(org_id)
+        collection = self.load_collection(org_id, collection_name=collection_name)
         if collection is None:
             return []
 
         where = self._build_where_clause(source_types=source_types, dashboard_id=dashboard_id)
         result = collection.query(
-            query_embeddings=[self.embedding_provider.embed_query(query_text)],
+            query_embeddings=[query_embedding or self.embed_query(query_text)],
             n_results=n_results,
             where=where,
             include=["documents", "metadatas", "distances"],

@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import timedelta
 import json
 from typing import Callable
 
@@ -18,7 +19,7 @@ from ddpui.core.dashboard_chat.vector_documents import (
 )
 from ddpui.core.dashboard_chat.vector_store import ChromaDashboardChatVectorStore
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.dashboard_chat import DashboardAIContext, OrgAIContext
+from ddpui.models.dashboard_chat import DashboardAIContext, DashboardChatSession, OrgAIContext
 from ddpui.models.org import Org
 from ddpui.models.visualization import Chart
 from ddpui.services.dashboard_service import DashboardService
@@ -115,6 +116,11 @@ class DashboardChatIngestionService:
         if org.dbt is None:
             raise DashboardChatIngestionError("dbt workspace not configured")
 
+        collection_versioned_at = timezone.now()
+        target_collection_name = self.vector_store.collection_name(
+            org.id,
+            version=collection_versioned_at,
+        )
         dbt_docs = None
         if self.source_config.is_enabled(
             DashboardChatSourceType.DBT_MANIFEST
@@ -127,29 +133,31 @@ class DashboardChatIngestionService:
             if self.source_config.is_enabled(source_type)
             for document in documents_by_source[source_type.value]
         ]
-
-        existing_documents = self.vector_store.get_documents(org.id)
-        existing_document_ids = {document.document_id for document in existing_documents}
-        desired_document_ids = {document.document_id for document in desired_documents}
-
-        new_documents = [
-            document
-            for document in desired_documents
-            if document.document_id not in existing_document_ids
-        ]
-        upserted_document_ids: list[str] = []
-        if new_documents:
-            upserted_document_ids = sorted(
-                self.vector_store.upsert_documents(org.id, new_documents)
+        if self.vector_store.load_collection(
+            org.id,
+            collection_name=target_collection_name,
+            allow_legacy_fallback=False,
+        ) is not None:
+            self.vector_store.delete_collection(
+                org.id,
+                collection_name=target_collection_name,
             )
 
-        stale_document_ids = sorted(existing_document_ids - desired_document_ids)
-        if stale_document_ids:
-            self.vector_store.delete_documents(org.id, ids=stale_document_ids)
+        upserted_document_ids = sorted(
+            self.vector_store.upsert_documents(
+                org.id,
+                desired_documents,
+                collection_name=target_collection_name,
+            )
+        )
 
-        vector_ingested_at = timezone.now()
-        org.dbt.vector_last_ingested_at = vector_ingested_at
+        vector_ingested_at = collection_versioned_at
+        org.dbt.vector_last_ingested_at = collection_versioned_at
         org.dbt.save(update_fields=["vector_last_ingested_at", "updated_at"])
+        self._garbage_collect_inactive_collections(
+            org=org,
+            active_collection_name=target_collection_name,
+        )
 
         return DashboardChatIngestionResult(
             org_id=org.id,
@@ -164,8 +172,37 @@ class DashboardChatIngestionService:
                 for source_type in INGEST_SOURCE_ORDER
             },
             upserted_document_ids=upserted_document_ids,
-            deleted_document_ids=stale_document_ids,
+            deleted_document_ids=[],
         )
+
+    def _garbage_collect_inactive_collections(
+        self,
+        *,
+        org: Org,
+        active_collection_name: str,
+    ) -> None:
+        """Delete old versioned collections that are not pinned by recent chat sessions."""
+        retention_cutoff = timezone.now() - timedelta(hours=24)
+        recent_sessions = DashboardChatSession.objects.filter(
+            org=org,
+            updated_at__gte=retention_cutoff,
+        )
+        pinned_collection_names = {
+            collection_name
+            for collection_name in recent_sessions.values_list("vector_collection_name", flat=True)
+            if collection_name
+        }
+        if recent_sessions.filter(vector_collection_name__isnull=True).exists():
+            pinned_collection_names.add(self.vector_store.collection_name(org.id))
+        pinned_collection_names.add(active_collection_name)
+
+        for collection_name in self.vector_store.list_org_collection_names(org.id):
+            if collection_name in pinned_collection_names:
+                continue
+            self.vector_store.delete_collection(
+                org.id,
+                collection_name=collection_name,
+            )
 
     def _build_documents(
         self,

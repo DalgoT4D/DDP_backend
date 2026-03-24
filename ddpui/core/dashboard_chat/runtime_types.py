@@ -2,25 +2,22 @@
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+import json
 from typing import Any
+
+from django.core.serializers.json import DjangoJSONEncoder
 
 
 class DashboardChatIntent(str, Enum):
-    """Supported high-level intents for dashboard chat."""
+    """Prototype-aligned top-level intents for dashboard chat."""
 
-    DATA_QUERY = "data_query"
-    CONTEXT_QUERY = "context_query"
+    QUERY_WITH_SQL = "query_with_sql"
+    QUERY_WITHOUT_SQL = "query_without_sql"
+    FOLLOW_UP_SQL = "follow_up_sql"
+    FOLLOW_UP_CONTEXT = "follow_up_context"
     NEEDS_CLARIFICATION = "needs_clarification"
     SMALL_TALK = "small_talk"
     IRRELEVANT = "irrelevant"
-
-
-class DashboardChatPlanMode(str, Enum):
-    """Execution modes chosen after planning."""
-
-    SQL = "sql"
-    CONTEXT = "context"
-    CLARIFY = "clarify"
 
 
 @dataclass(frozen=True)
@@ -29,6 +26,32 @@ class DashboardChatConversationMessage:
 
     role: str
     content: str
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DashboardChatConversationContext:
+    """Reusable context extracted from prior assistant turns."""
+
+    last_sql_query: str | None = None
+    last_tables_used: list[str] = field(default_factory=list)
+    last_chart_ids: list[str] = field(default_factory=list)
+    last_metrics: list[str] = field(default_factory=list)
+    last_dimensions: list[str] = field(default_factory=list)
+    last_filters: list[str] = field(default_factory=list)
+    last_response_type: str | None = None
+    last_answer_text: str | None = None
+    last_intent: str | None = None
+
+
+@dataclass(frozen=True)
+class DashboardChatFollowUpContext:
+    """Prototype-style follow-up metadata returned by the router."""
+
+    is_follow_up: bool
+    follow_up_type: str | None = None
+    reusable_elements: dict[str, Any] = field(default_factory=dict)
+    modification_instruction: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,9 +59,14 @@ class DashboardChatIntentDecision:
     """Intent-routing outcome."""
 
     intent: DashboardChatIntent
+    confidence: float
     reason: str
-    force_sql_path: bool = False
+    missing_info: list[str] = field(default_factory=list)
+    force_tool_usage: bool = False
     clarification_question: str | None = None
+    follow_up_context: DashboardChatFollowUpContext = field(
+        default_factory=lambda: DashboardChatFollowUpContext(is_follow_up=False)
+    )
 
 
 @dataclass(frozen=True)
@@ -54,56 +82,11 @@ class DashboardChatRetrievedDocument:
 
 
 @dataclass(frozen=True)
-class DashboardChatTextFilterPlan:
-    """Filter that requires a distinct-values lookup before SQL generation."""
-
-    table_name: str
-    column_name: str
-    requested_value: str
-
-
-@dataclass(frozen=True)
-class DashboardChatQueryPlan:
-    """Structured plan produced before SQL generation."""
-
-    mode: DashboardChatPlanMode
-    reason: str
-    relevant_tables: list[str] = field(default_factory=list)
-    schema_lookup_tables: list[str] = field(default_factory=list)
-    text_filters: list[DashboardChatTextFilterPlan] = field(default_factory=list)
-    answer_strategy: str | None = None
-    clarification_question: str | None = None
-
-
-@dataclass(frozen=True)
-class DashboardChatSqlDraft:
-    """LLM-produced SQL draft and metadata."""
-
-    sql: str | None
-    reason: str
-    warnings: list[str] = field(default_factory=list)
-    clarification_question: str | None = None
-
-
-@dataclass(frozen=True)
 class DashboardChatSchemaSnippet:
     """Schema description for a warehouse table."""
 
     table_name: str
     columns: list[dict[str, Any]]
-
-    def to_prompt_text(self) -> str:
-        """Format a compact schema summary for prompts."""
-        column_lines = []
-        for column in self.columns:
-            column_lines.append(
-                "- {name} ({data_type}, nullable={nullable})".format(
-                    name=column.get("name"),
-                    data_type=column.get("data_type"),
-                    nullable=column.get("nullable"),
-                )
-            )
-        return f"Table: {self.table_name}\n" + "\n".join(column_lines)
 
 
 @dataclass(frozen=True)
@@ -134,43 +117,30 @@ class DashboardChatCitation:
 
 
 @dataclass(frozen=True)
-class DashboardChatRelatedDashboard:
-    """Dashboard suggestion when the current dashboard is not sufficient."""
-
-    dashboard_id: int
-    title: str
-    reason: str
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a serializable suggestion payload."""
-        return asdict(self)
-
-
-@dataclass(frozen=True)
 class DashboardChatResponse:
     """Final runtime response returned by the LangGraph runner."""
 
     answer_text: str
     intent: DashboardChatIntent
     citations: list[DashboardChatCitation] = field(default_factory=list)
-    related_dashboards: list[DashboardChatRelatedDashboard] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     sql: str | None = None
     sql_results: list[dict[str, Any]] | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a serializable payload."""
-        return {
+        payload = {
             "answer_text": self.answer_text,
             "intent": self.intent.value,
             "citations": [citation.to_dict() for citation in self.citations],
-            "related_dashboards": [
-                related_dashboard.to_dict()
-                for related_dashboard in self.related_dashboards
-            ],
             "warnings": self.warnings,
             "sql": self.sql,
             "sql_results": self.sql_results,
+            "usage": self.usage,
+            "tool_calls": self.tool_calls,
             "metadata": self.metadata,
         }
+        return json.loads(json.dumps(payload, cls=DjangoJSONEncoder))

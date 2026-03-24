@@ -8,10 +8,12 @@ import tempfile
 import yaml
 from django.utils import timezone
 
+from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpprefect import prefect_service
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, TransformType
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import secretsmanager
 
 logger = CustomLogger("ddpui.dashboard_chat.dbt_docs")
 
@@ -30,13 +32,32 @@ class DashboardChatDbtDocsArtifacts:
     target_dir: Path
 
 
+def _refresh_git_repo_if_needed(orgdbt: OrgDbt) -> None:
+    """Pull the latest changes for git-backed dbt projects before docs generation."""
+    if orgdbt.transform_type != TransformType.GIT:
+        return
+
+    repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    pat = None
+    if orgdbt.gitrepo_access_token_secret:
+        pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+
+    try:
+        git_manager = GitManager(repo_local_path=str(repo_dir), pat=pat, validate_git=True)
+        git_manager.pull_changes()
+    except GitManagerError as error:
+        raise DashboardChatDbtDocsError(
+            f"Failed to refresh the local dbt repository for dashboard chat: {error}"
+        ) from error
+
+
 def _write_profiles_file(org: Org, orgdbt: OrgDbt, profiles_dir: Path) -> Path:
     """Write the dbt profiles.yml required for dbt CLI execution."""
     if orgdbt.cli_profile_block is None:
         raise DashboardChatDbtDocsError("dbt CLI profile block not found")
 
     try:
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
+        DbtProjectManager.gather_dbt_project_params(org, orgdbt)
         profile = prefect_service.get_dbt_cli_profile_block(orgdbt.cli_profile_block.block_name)[
             "profile"
         ]
@@ -59,6 +80,8 @@ def generate_dashboard_chat_dbt_docs_artifacts(
     """Run dbt docs generate and return the manifest/catalog payloads."""
     if orgdbt is None:
         raise DashboardChatDbtDocsError("dbt workspace not configured")
+
+    _refresh_git_repo_if_needed(orgdbt)
 
     with tempfile.TemporaryDirectory(prefix=f"dashboard-chat-dbt-{org.id}-") as profiles_dir:
         profile_path = _write_profiles_file(org, orgdbt, Path(profiles_dir))

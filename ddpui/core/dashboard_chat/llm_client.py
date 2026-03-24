@@ -1,20 +1,21 @@
 """Direct OpenAI client wrapper for dashboard chat runtime."""
 
-from collections.abc import Sequence
 import json
+import logging
 import os
+from time import sleep
 from typing import Any, Protocol
 
+from ddpui.core.dashboard_chat.prompt_store import DashboardChatPromptStore
 from ddpui.core.dashboard_chat.runtime_types import (
-    DashboardChatConversationMessage,
+    DashboardChatConversationContext,
+    DashboardChatFollowUpContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatPlanMode,
-    DashboardChatQueryPlan,
-    DashboardChatRetrievedDocument,
-    DashboardChatSqlDraft,
-    DashboardChatTextFilterPlan,
 )
+from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
+
+logger = logging.getLogger("ddpui")
 
 
 class DashboardChatLlmClient(Protocol):
@@ -23,273 +24,245 @@ class DashboardChatLlmClient(Protocol):
     def classify_intent(
         self,
         user_query: str,
-        conversation_history: Sequence[DashboardChatConversationMessage],
-        dashboard_summary: str,
+        conversation_context: DashboardChatConversationContext,
     ) -> DashboardChatIntentDecision:
         """Classify the incoming query."""
 
-    def plan_query(
-        self,
-        user_query: str,
-        conversation_history: Sequence[DashboardChatConversationMessage],
-        dashboard_summary: str,
-        retrieved_documents: Sequence[DashboardChatRetrievedDocument],
-        schema_prompt: str,
-        allowlisted_tables: Sequence[str],
-    ) -> DashboardChatQueryPlan:
-        """Build a structured plan for the query."""
+    def compose_small_talk(self, user_query: str) -> str:
+        """Compose a brief small-talk response describing dashboard chat capabilities."""
 
-    def generate_sql(
-        self,
-        user_query: str,
-        dashboard_summary: str,
-        query_plan: DashboardChatQueryPlan,
-        schema_prompt: str,
-        distinct_values: dict[str, list[str]],
-        allowlisted_tables: Sequence[str],
-    ) -> DashboardChatSqlDraft:
-        """Generate SQL from the structured plan."""
+    def get_prompt(self, prompt_key: DashboardChatPromptTemplateKey | str) -> str:
+        """Return one stored dashboard chat prompt."""
 
-    def compose_answer(
+    def reset_usage(self) -> None:
+        """Reset per-turn usage tracking before a new runtime invocation."""
+
+    def run_tool_loop_turn(
         self,
-        user_query: str,
-        dashboard_summary: str,
-        retrieved_documents: Sequence[DashboardChatRetrievedDocument],
-        sql: str | None,
-        sql_results: list[dict[str, Any]] | None,
-        warnings: Sequence[str],
-        related_dashboard_titles: Sequence[str],
-    ) -> str:
-        """Compose the final answer text."""
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Run one prototype-style tool-loop completion."""
 
 
 class OpenAIDashboardChatLlmClient:
     """Direct OpenAI SDK adapter with JSON-mode helpers."""
 
+    TECHNICAL_DIFFICULTIES_MESSAGE = (
+        "I'm experiencing technical difficulties. Please try again."
+    )
+
     def __init__(
         self,
         api_key: str | None = None,
         model: str = "gpt-4o-mini",
-        timeout_ms: int = 45000,
+        timeout_ms: int = 12000,
+        max_attempts: int = 1,
         client: Any = None,
+        prompt_store: DashboardChatPromptStore | None = None,
     ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model = model
         self.timeout_ms = timeout_ms
+        self.max_attempts = max(1, max_attempts)
+        self.prompt_store = prompt_store or DashboardChatPromptStore()
+        self.usage_events: list[dict[str, Any]] = []
         if client is None:
             if not self.api_key:
                 raise ValueError("OPENAI_API_KEY must be set for dashboard chat runtime")
             from openai import OpenAI
 
-            client = OpenAI(api_key=self.api_key, timeout=timeout_ms / 1000)
+            client = OpenAI(
+                api_key=self.api_key,
+                timeout=timeout_ms / 1000,
+                max_retries=0,
+            )
         self.client = client
+
+    def reset_usage(self) -> None:
+        """Reset aggregated OpenAI usage before one new chat turn."""
+        self.usage_events = []
 
     def classify_intent(
         self,
         user_query: str,
-        conversation_history: Sequence[DashboardChatConversationMessage],
-        dashboard_summary: str,
+        conversation_context: DashboardChatConversationContext,
     ) -> DashboardChatIntentDecision:
-        """Classify intent with lightweight conversation awareness."""
-        prompt = {
-            "dashboard_summary": dashboard_summary,
-            "conversation_history": [message.__dict__ for message in conversation_history[-6:]],
-            "user_query": user_query,
-        }
-        result = self._complete_json(
-            system_prompt=(
-                "Classify the user query for an NGO dashboard assistant. "
-                "Return JSON with keys intent, reason, force_sql_path, clarification_question. "
-                "Allowed intents: data_query, context_query, needs_clarification, small_talk, irrelevant. "
-                "Set force_sql_path=true for any query that asks for counts, trends, breakdowns, comparisons, "
-                "filters, or tabular data."
-            ),
-            user_prompt=json.dumps(prompt, ensure_ascii=True),
+        """Classify intent with prototype-style conversation awareness."""
+        system_prompt = self.prompt_store.get(
+            DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION
         )
-        intent_value = result.get("intent", DashboardChatIntent.CONTEXT_QUERY.value)
+        if conversation_context.last_sql_query or conversation_context.last_chart_ids:
+            system_prompt += (
+                "\n\nCONVERSATION CONTEXT:\n"
+                f"- Previous SQL: {conversation_context.last_sql_query or 'None'}\n"
+                f"- Previous tables: {', '.join(conversation_context.last_tables_used) or 'None'}\n"
+                f"- Previous charts: {', '.join(conversation_context.last_chart_ids) or 'None'}\n"
+                f"- Last response type: {conversation_context.last_response_type or 'None'}\n\n"
+                "Use this context to detect follow-up queries that want to modify or expand on previous results."
+            )
+        try:
+            result = self._complete_json(
+                operation="intent_classification",
+                system_prompt=system_prompt,
+                user_prompt=f"Classify this query: {user_query}",
+            )
+        except Exception:
+            logger.exception("Dashboard chat intent classification failed")
+            return DashboardChatIntentDecision(
+                intent=DashboardChatIntent.NEEDS_CLARIFICATION,
+                confidence=0.0,
+                reason="Intent classification failed",
+                clarification_question=self.TECHNICAL_DIFFICULTIES_MESSAGE,
+            )
+        intent_value = result.get("intent", DashboardChatIntent.QUERY_WITHOUT_SQL.value)
         try:
             intent = DashboardChatIntent(intent_value)
         except ValueError:
-            intent = DashboardChatIntent.CONTEXT_QUERY
+            intent = DashboardChatIntent.QUERY_WITHOUT_SQL
+        follow_up_result = result.get("follow_up_context") or {}
+        follow_up_context = DashboardChatFollowUpContext(
+            is_follow_up=bool(follow_up_result.get("is_follow_up")),
+            follow_up_type=follow_up_result.get("follow_up_type"),
+            reusable_elements=follow_up_result.get("reusable_elements") or {},
+            modification_instruction=follow_up_result.get("modification_instruction"),
+        )
         return DashboardChatIntentDecision(
             intent=intent,
+            confidence=float(result.get("confidence") or 0.0),
             reason=str(result.get("reason") or "LLM classification"),
-            force_sql_path=bool(result.get("force_sql_path", intent == DashboardChatIntent.DATA_QUERY)),
-            clarification_question=result.get("clarification_question"),
-        )
-
-    def plan_query(
-        self,
-        user_query: str,
-        conversation_history: Sequence[DashboardChatConversationMessage],
-        dashboard_summary: str,
-        retrieved_documents: Sequence[DashboardChatRetrievedDocument],
-        schema_prompt: str,
-        allowlisted_tables: Sequence[str],
-    ) -> DashboardChatQueryPlan:
-        """Generate a structured execution plan."""
-        prompt = {
-            "dashboard_summary": dashboard_summary,
-            "conversation_history": [message.__dict__ for message in conversation_history[-6:]],
-            "retrieved_documents": [
-                {
-                    "source_type": document.source_type,
-                    "source_identifier": document.source_identifier,
-                    "content": document.content[:500],
-                }
-                for document in retrieved_documents[:8]
-            ],
-            "schema_prompt": schema_prompt,
-            "allowlisted_tables": list(allowlisted_tables),
-            "user_query": user_query,
-        }
-        result = self._complete_json(
-            system_prompt=(
-                "Plan how to answer the dashboard question. "
-                "Return JSON with keys mode, reason, relevant_tables, schema_lookup_tables, text_filters, "
-                "answer_strategy, clarification_question. "
-                "Allowed modes: sql, context, clarify. "
-                "text_filters must be an array of objects with table_name, column_name, requested_value. "
-                "If the question can be answered from context or retrieved docs without SQL, choose context. "
-                "If the question needs row-level or aggregate data, choose sql."
-            ),
-            user_prompt=json.dumps(prompt, ensure_ascii=True),
-        )
-        mode_value = result.get("mode", DashboardChatPlanMode.CONTEXT.value)
-        try:
-            mode = DashboardChatPlanMode(mode_value)
-        except ValueError:
-            mode = DashboardChatPlanMode.CONTEXT
-        return DashboardChatQueryPlan(
-            mode=mode,
-            reason=str(result.get("reason") or "LLM plan"),
-            relevant_tables=_normalize_table_list(result.get("relevant_tables")),
-            schema_lookup_tables=_normalize_table_list(result.get("schema_lookup_tables")),
-            text_filters=[
-                DashboardChatTextFilterPlan(
-                    table_name=str(item.get("table_name") or "").lower(),
-                    column_name=str(item.get("column_name") or ""),
-                    requested_value=str(item.get("requested_value") or ""),
+            missing_info=[str(item) for item in result.get("missing_info", []) if item],
+            force_tool_usage=bool(
+                result.get(
+                    "force_tool_usage",
+                    intent
+                    in {
+                        DashboardChatIntent.QUERY_WITH_SQL,
+                        DashboardChatIntent.FOLLOW_UP_SQL,
+                    },
                 )
-                for item in result.get("text_filters", [])
-                if item.get("table_name") and item.get("column_name") and item.get("requested_value")
-            ],
-            answer_strategy=result.get("answer_strategy"),
-            clarification_question=result.get("clarification_question"),
-        )
-
-    def generate_sql(
-        self,
-        user_query: str,
-        dashboard_summary: str,
-        query_plan: DashboardChatQueryPlan,
-        schema_prompt: str,
-        distinct_values: dict[str, list[str]],
-        allowlisted_tables: Sequence[str],
-    ) -> DashboardChatSqlDraft:
-        """Generate a single read-only SQL statement."""
-        prompt = {
-            "dashboard_summary": dashboard_summary,
-            "query_plan": {
-                "mode": query_plan.mode.value,
-                "reason": query_plan.reason,
-                "relevant_tables": query_plan.relevant_tables,
-                "schema_lookup_tables": query_plan.schema_lookup_tables,
-                "text_filters": [text_filter.__dict__ for text_filter in query_plan.text_filters],
-                "answer_strategy": query_plan.answer_strategy,
-            },
-            "schema_prompt": schema_prompt,
-            "distinct_values": distinct_values,
-            "allowlisted_tables": list(allowlisted_tables),
-            "user_query": user_query,
-        }
-        result = self._complete_json(
-            system_prompt=(
-                "Generate one safe read-only SQL query. "
-                "Return JSON with keys sql, reason, warnings, clarification_question. "
-                "The SQL must be a single SELECT or WITH...SELECT statement that only references allowlisted tables. "
-                "Use exact values from the provided distinct_values map for text filters when available. "
-                "If the question cannot be answered safely, return sql as null and provide clarification_question."
             ),
-            user_prompt=json.dumps(prompt, ensure_ascii=True),
-        )
-        sql = result.get("sql")
-        if sql is not None:
-            sql = str(sql).strip()
-        return DashboardChatSqlDraft(
-            sql=sql or None,
-            reason=str(result.get("reason") or "LLM SQL draft"),
-            warnings=[str(warning) for warning in result.get("warnings", [])],
             clarification_question=result.get("clarification_question"),
+            follow_up_context=follow_up_context,
         )
 
-    def compose_answer(
-        self,
-        user_query: str,
-        dashboard_summary: str,
-        retrieved_documents: Sequence[DashboardChatRetrievedDocument],
-        sql: str | None,
-        sql_results: list[dict[str, Any]] | None,
-        warnings: Sequence[str],
-        related_dashboard_titles: Sequence[str],
-    ) -> str:
-        """Compose the final user-facing answer."""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0,
+    def compose_small_talk(self, user_query: str) -> str:
+        """Generate a brief friendly response using the prototype capabilities prompt."""
+        response = self._create_chat_completion(
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You answer NGO dashboard questions. "
-                        "Use plain language, cite data-backed claims carefully, and avoid exposing hidden reasoning. "
-                        "If SQL results are empty, say that no matching rows were found."
+                    "content": self.prompt_store.get(
+                        DashboardChatPromptTemplateKey.SMALL_TALK_CAPABILITIES
                     ),
                 },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "dashboard_summary": dashboard_summary,
-                            "user_query": user_query,
-                            "retrieved_documents": [
-                                {
-                                    "source_type": document.source_type,
-                                    "source_identifier": document.source_identifier,
-                                    "content": document.content[:400],
-                                }
-                                for document in retrieved_documents[:8]
-                            ],
-                            "sql": sql,
-                            "sql_results": sql_results,
-                            "warnings": list(warnings),
-                            "related_dashboards": list(related_dashboard_titles),
-                        },
-                        ensure_ascii=True,
-                    ),
-                },
+                {"role": "user", "content": user_query},
             ],
+            temperature=0.5,
+            max_tokens=80,
         )
+        self._record_usage("small_talk", response)
         answer = response.choices[0].message.content or ""
         return answer.strip()
 
-    def _complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    def get_prompt(self, prompt_key: DashboardChatPromptTemplateKey | str) -> str:
+        """Return one stored dashboard chat prompt."""
+        return self.prompt_store.get(prompt_key)
+
+    def run_tool_loop_turn(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Run one raw OpenAI tool-calling turn and normalize the response."""
+        try:
+            response = self._create_chat_completion(
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                temperature=0,
+            )
+        except Exception:
+            return {"content": self.TECHNICAL_DIFFICULTIES_MESSAGE, "tool_calls": []}
+        self._record_usage(operation, response)
+        message = response.choices[0].message
+        tool_calls: list[dict[str, Any]] = []
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                tool_calls.append(
+                    {
+                        "id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "args": tool_call.function.arguments,
+                    }
+                )
+        return {"content": message.content or "", "tool_calls": tool_calls}
+
+    def _complete_json(self, operation: str, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         """Run a JSON-mode chat completion and parse the result."""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0,
-            response_format={"type": "json_object"},
+        response = self._create_chat_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            temperature=0,
+            response_format={"type": "json_object"},
         )
+        self._record_usage(operation, response)
         content = response.choices[0].message.content or "{}"
         return json.loads(content)
 
+    def usage_summary(self) -> dict[str, Any]:
+        """Return aggregated OpenAI chat-completion usage for the current turn."""
+        totals = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+        for event in self.usage_events:
+            totals["prompt_tokens"] += event.get("prompt_tokens", 0)
+            totals["completion_tokens"] += event.get("completion_tokens", 0)
+            totals["total_tokens"] += event.get("total_tokens", 0)
+        return {
+            "model": self.model,
+            "calls": list(self.usage_events),
+            "totals": totals,
+        }
 
-def _normalize_table_list(value: Any) -> list[str]:
-    """Normalize a JSON value into a lowercased table list."""
-    if not isinstance(value, list):
-        return []
-    return [str(table_name).lower() for table_name in value if table_name]
+    def _record_usage(self, operation: str, response: Any) -> None:
+        """Capture usage data from one OpenAI response when available."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        self.usage_events.append(
+            {
+                "operation": operation,
+                "model": self.model,
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+            }
+        )
+
+    def _create_chat_completion(self, **kwargs: Any) -> Any:
+        """Run one OpenAI chat completion with a small interactive retry envelope."""
+        last_error: Exception | None = None
+        for attempt in range(self.max_attempts):
+            try:
+                return self.client.chat.completions.create(
+                    model=self.model,
+                    **kwargs,
+                )
+            except Exception as error:
+                last_error = error
+                if attempt == self.max_attempts - 1:
+                    break
+                sleep(min(2**attempt, 2))
+        assert last_error is not None
+        raise last_error

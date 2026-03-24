@@ -1,13 +1,8 @@
 """Tests for dashboard chat session creation and reuse rules."""
 
-import os
+from datetime import datetime, timezone
 
-import django
 import pytest
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
-django.setup()
 
 from django.contrib.auth.models import User
 
@@ -15,11 +10,13 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.dashboard_chat.session_service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message,
+    create_dashboard_chat_user_message_with_status,
     get_or_create_dashboard_chat_session,
 )
+from ddpui.core.dashboard_chat.vector_documents import build_dashboard_chat_collection_name
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgDbt
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.tests.api_tests.test_user_org_api import seed_db
@@ -107,6 +104,33 @@ def test_get_or_create_dashboard_chat_session_creates_new_session(session_owner,
     assert isinstance(session, DashboardChatSession)
     assert session.orguser == session_owner
     assert session.dashboard == dashboard
+    assert session.vector_collection_name is None
+
+
+def test_get_or_create_dashboard_chat_session_pins_active_vector_collection(
+    session_owner,
+    dashboard,
+):
+    """New chat sessions should pin the active org vector collection at creation time."""
+    org_dbt = OrgDbt.objects.create(
+        project_dir="client_dbt/dashchat",
+        target_type="postgres",
+        default_schema="analytics",
+        vector_last_ingested_at=datetime(2026, 3, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    session_owner.org.dbt = org_dbt
+    session_owner.org.save(update_fields=["dbt"])
+
+    session = get_or_create_dashboard_chat_session(
+        orguser=session_owner,
+        dashboard=dashboard,
+        session_id=None,
+    )
+
+    assert session.vector_collection_name == build_dashboard_chat_collection_name(
+        session_owner.org.id,
+        version=org_dbt.vector_last_ingested_at,
+    )
 
 
 def test_get_or_create_dashboard_chat_session_rejects_other_user_session(
@@ -156,3 +180,30 @@ def test_create_dashboard_chat_user_message_is_idempotent_for_client_message_id(
     assert first_message.id == second_message.id
     assert first_message.sequence_number == 1
     assert DashboardChatMessage.objects.filter(session=session).count() == 1
+
+
+def test_create_dashboard_chat_user_message_with_status_marks_reused_message(
+    session_owner,
+    dashboard,
+):
+    """The duplicate-detection path must report that the second write reused the row."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+
+    first_result = create_dashboard_chat_user_message_with_status(
+        session=session,
+        content="Why did funding drop?",
+        client_message_id="client-1",
+    )
+    second_result = create_dashboard_chat_user_message_with_status(
+        session=session,
+        content="Why did funding drop?",
+        client_message_id="client-1",
+    )
+
+    assert first_result.created is True
+    assert second_result.created is False
+    assert first_result.message.id == second_result.message.id
