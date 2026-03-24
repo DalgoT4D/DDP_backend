@@ -8,10 +8,14 @@ from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.dashboard_chat import OrgAIContext
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
+    OrgAIDashboardChatSettingsResponse,
+    UpdateOrgAIDashboardChatSchema,
+    OrgAIDashboardChatStatusResponse,
 )
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -25,8 +29,77 @@ from ddpui.ddpprefect import (
 )
 from ddpui.utils.awsses import send_text_message
 from ddpui.utils.redis_client import RedisClient
+from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 orgpreference_router = Router()
+
+
+def _get_or_create_org_preferences(org):
+    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
+    return org_preferences
+
+
+def _get_or_create_org_ai_context(org):
+    context, _ = OrgAIContext.objects.get_or_create(org=org)
+    return context
+
+
+def _is_dashboard_chat_feature_enabled(org) -> bool:
+    return get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
+
+
+def _ensure_dashboard_chat_feature_enabled(org) -> None:
+    """Hide dashboard chat management APIs unless the feature flag is enabled."""
+    if not _is_dashboard_chat_feature_enabled(org):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+
+
+def _is_dbt_configured(org) -> bool:
+    return org.dbt is not None
+
+
+def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
+    org_dbt = org.dbt
+    return OrgAIDashboardChatSettingsResponse(
+        feature_flag_enabled=_is_dashboard_chat_feature_enabled(org),
+        ai_data_sharing_enabled=bool(org_preferences.ai_data_sharing_enabled),
+        ai_data_sharing_consented_by=(
+            org_preferences.ai_data_sharing_consented_by.user.email
+            if org_preferences.ai_data_sharing_consented_by
+            else None
+        ),
+        ai_data_sharing_consented_at=org_preferences.ai_data_sharing_consented_at,
+        org_context_markdown=org_context.markdown,
+        org_context_updated_by=org_context.updated_by.user.email
+        if org_context.updated_by
+        else None,
+        org_context_updated_at=org_context.updated_at,
+        dbt_configured=_is_dbt_configured(org),
+        docs_generated_at=org_dbt.docs_generated_at if org_dbt else None,
+        vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+    )
+
+
+def _serialize_ai_dashboard_chat_status(org, org_preferences):
+    org_dbt = org.dbt
+    feature_flag_enabled = _is_dashboard_chat_feature_enabled(org)
+    ai_data_sharing_enabled = bool(org_preferences.ai_data_sharing_enabled)
+    dbt_configured = _is_dbt_configured(org)
+    vector_last_ingested_at = org_dbt.vector_last_ingested_at if org_dbt else None
+
+    return OrgAIDashboardChatStatusResponse(
+        feature_flag_enabled=feature_flag_enabled,
+        ai_data_sharing_enabled=ai_data_sharing_enabled,
+        chat_available=(
+            feature_flag_enabled
+            and ai_data_sharing_enabled
+            and dbt_configured
+            and vector_last_ingested_at is not None
+        ),
+        dbt_configured=dbt_configured,
+        docs_generated_at=org_dbt.docs_generated_at if org_dbt else None,
+        vector_last_ingested_at=vector_last_ingested_at,
+    )
 
 
 @orgpreference_router.post("/")
@@ -137,6 +210,81 @@ def get_org_preferences(request):
         org_preferences = OrgPreferences.objects.create(org=org)
 
     return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.get("/ai-dashboard-chat")
+@has_permission(["can_manage_org_settings"])
+def get_ai_dashboard_chat_settings(request):
+    """Load org-level dashboard chat settings and org AI context."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    _ensure_dashboard_chat_feature_enabled(org)
+    org_preferences = _get_or_create_org_preferences(org)
+    org_context = _get_or_create_org_ai_context(org)
+
+    return {
+        "success": True,
+        "res": _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context).dict(),
+    }
+
+
+@orgpreference_router.put("/ai-dashboard-chat")
+@has_permission(["can_manage_org_settings"])
+@transaction.atomic
+def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChatSchema):
+    """Update org-level dashboard chat consent and org AI context."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    _ensure_dashboard_chat_feature_enabled(org)
+    org_preferences = _get_or_create_org_preferences(org)
+    org_context = _get_or_create_org_ai_context(org)
+    target_ai_data_sharing_enabled = (
+        payload.ai_data_sharing_enabled
+        if payload.ai_data_sharing_enabled is not None
+        else org_preferences.ai_data_sharing_enabled
+    )
+
+    if payload.ai_data_sharing_enabled is True and org_preferences.ai_data_sharing_enabled is False:
+        org_preferences.ai_data_sharing_consented_by = orguser
+        org_preferences.ai_data_sharing_consented_at = timezone.now()
+
+    if payload.ai_data_sharing_enabled is not None:
+        org_preferences.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
+
+    if payload.org_context_markdown is not None:
+        if not target_ai_data_sharing_enabled:
+            raise HttpError(
+                409,
+                "Enable AI data sharing before updating organization AI context",
+            )
+        org_context.markdown = payload.org_context_markdown
+        org_context.updated_by = orguser
+        org_context.updated_at = timezone.now()
+        org_context.save()
+
+    org_preferences.updated_at = timezone.now()
+    org_preferences.save()
+
+    return {
+        "success": True,
+        "res": _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context).dict(),
+    }
+
+
+@orgpreference_router.get("/ai-dashboard-chat/status")
+def get_ai_dashboard_chat_status(request):
+    """Return feature readiness for dashboard chat for the current org."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = _get_or_create_org_preferences(org)
+
+    return {
+        "success": True,
+        "res": _serialize_ai_dashboard_chat_status(org, org_preferences).dict(),
+    }
 
 
 @orgpreference_router.get("/toolinfo")

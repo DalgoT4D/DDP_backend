@@ -29,6 +29,19 @@ services:
     networks:
       - dalgo-network
 
+  chroma:
+    image: chromadb/chroma:0.6.3
+    ports:
+      - "8003:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - dalgo-network
+
   backend:
     image: dalgo_backend:0.1
     restart: always
@@ -36,6 +49,8 @@ services:
       database:
         condition: service_healthy
       redis_server:
+        condition: service_started
+      chroma:
         condition: service_started
       initdb:
         condition: service_completed_successfully
@@ -94,6 +109,12 @@ services:
       - DEMO_SUPERSET_PASSWORD=${DEMO_SUPERSET_PASSWORD}
       - FIRST_USER_PASSWORD=${FIRST_USER_PASSWORD}
       - FIRST_USER_ROLE=${FIRST_USER_ROLE}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_DASHBOARD_CHAT_CHROMA_HOST=chroma
+      - AI_DASHBOARD_CHAT_CHROMA_PORT=8000
+      - AI_DASHBOARD_CHAT_CHROMA_SSL=False
+      - AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX=${AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX}
+      - AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL=${AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL}
     command: backend
     networks:
       - dalgo-network
@@ -102,6 +123,17 @@ services:
   celery_worker:
     image: dalgo_backend:0.1
     command: celery
+    depends_on:
+      backend:
+        condition: service_started
+      redis_server:
+        condition: service_started
+      chroma:
+        condition: service_started
+      initdb:
+        condition: service_completed_successfully
+    networks:
+      - dalgo-network
     environment:
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
@@ -112,15 +144,12 @@ services:
       - DBPASSWORD=${DBPASSWORD}
       - DBADMINUSER=${DBADMINUSER}
       - DBADMINPASSWORD=${DBADMINPASSWORD}
-    depends_on:
-      backend:
-        condition: service_started
-      redis_server:
-        condition: service_started
-      initdb:
-        condition: service_completed_successfully
-    networks:
-      - dalgo-network
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_DASHBOARD_CHAT_CHROMA_HOST=chroma
+      - AI_DASHBOARD_CHAT_CHROMA_PORT=8000
+      - AI_DASHBOARD_CHAT_CHROMA_SSL=False
+      - AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX=${AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX}
+      - AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL=${AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL}
   celery_beat:
     image: dalgo_backend:0.1
     command: beat
@@ -128,6 +157,8 @@ services:
       backend:
         condition: service_started
       redis_server:
+        condition: service_started
+      chroma:
         condition: service_started
       initdb:
         condition: service_completed_successfully
@@ -161,6 +192,7 @@ services:
 
 volumes:
   redis_data:
+  chroma_data:
   celerybeat_volume:
 
 networks:
