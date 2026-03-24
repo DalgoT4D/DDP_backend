@@ -4,15 +4,28 @@ Updates relevant dataflows for that org based on queue type and then updates the
 """
 
 import os
+import json
 from typing import List, Set
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from ddpui.models.org import Org, QueueConfigUpdateSchema, QueueDetailsSchema
-from ddpui.models.org import OrgDataFlowv1
-from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType
+from ddpui.models.org import (
+    Org,
+    OrgDataFlowv1,
+    OrgPrefectBlockv1,
+    QueueConfigUpdateSchema,
+    QueueDetailsSchema,
+)
+from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, Task
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
-from ddpui.utils.constants import TASK_GENERATE_EDR
+from ddpui.ddpprefect import GITPULL
+from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
+from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITPULL, TASK_GITCLONE
 from ddpui.utils.unified_logger import get_logger
+from ddpui.core.pipelinefunctions import (
+    setup_git_clone_shell_task_config,
+    setup_git_shell_task_config,
+)
+from ddpui.core.orchestrate.pipeline_service import PipelineService
 
 logger = get_logger()
 
@@ -58,6 +71,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Show what would be changed without making actual changes",
         )
+        parser.add_argument(
+            "--is-workpool-eks",
+            action="store_true",
+            help="Mark the workpool as EKS workpool (default: False)",
+        )
 
     def handle(self, *args, **options):
         org_slug: str = options["org_slug"]
@@ -65,6 +83,7 @@ class Command(BaseCommand):
         new_queue: str = options["new_queue"]
         new_workpool: str = options.get("new_workpool")
         dry_run: bool = options["dry_run"]
+        is_workpool_eks: bool = options["is_workpool_eks"]
 
         # Get the organization
         try:
@@ -84,7 +103,14 @@ class Command(BaseCommand):
 
         # Show what will be done
         self.show_migration_plan(
-            org, queue_type, new_queue, final_workpool, dataflows, dry_run, new_workpool is not None
+            org,
+            queue_type,
+            new_queue,
+            final_workpool,
+            dataflows,
+            dry_run,
+            new_workpool is not None,
+            is_workpool_eks,
         )
 
         if dry_run:
@@ -105,7 +131,9 @@ class Command(BaseCommand):
             return
 
         # Perform the migration
-        self.perform_migration(org, queue_type, new_queue, final_workpool, dataflows)
+        self.perform_migration(
+            org, queue_type, new_queue, final_workpool, dataflows, is_workpool_eks
+        )
 
     def get_dataflows_for_queue_type(self, org: Org, queue_type: str) -> List[OrgDataFlowv1]:
         """Get relevant dataflows based on queue type"""
@@ -166,6 +194,7 @@ class Command(BaseCommand):
         dataflows: List[OrgDataFlowv1],
         dry_run: bool,
         workpool_changing: bool,
+        is_workpool_eks: bool,
     ):
         """Show what the migration will do"""
         action = "Would update" if dry_run else "Will update"
@@ -179,6 +208,8 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"Workpool: {final_workpool} (unchanged)")
 
+        self.stdout.write(f"Is EKS workpool: {is_workpool_eks}")
+
         self.stdout.write(f"Relevant dataflows to update: {len(dataflows)}")
 
         # Show current vs new configuration
@@ -186,10 +217,13 @@ class Command(BaseCommand):
         current_details = getattr(current_config, queue_type)
 
         self.stdout.write("\nConfiguration change:")
+        current_eks_status = getattr(current_details, "is_workpool_eks", False)
         self.stdout.write(
-            f"  Current: queue='{current_details.name}', workpool='{current_details.workpool}'"
+            f"  Current: queue='{current_details.name}', workpool='{current_details.workpool}', is_eks={current_eks_status}"
         )
-        self.stdout.write(f"  New:     queue='{new_queue}', workpool='{final_workpool}'\n")
+        self.stdout.write(
+            f"  New:     queue='{new_queue}', workpool='{final_workpool}', is_eks={is_workpool_eks}\n"
+        )
 
         if dataflows:
             for dataflow in dataflows:
@@ -208,6 +242,7 @@ class Command(BaseCommand):
         new_queue: str,
         final_workpool: str,
         dataflows: List[OrgDataFlowv1],
+        is_workpool_eks: bool,
     ):
         """Perform the actual migration with nested queue config"""
         self.stdout.write(
@@ -220,6 +255,13 @@ class Command(BaseCommand):
 
         for dataflow in dataflows:
             try:
+                # For scheduled pipelines, also handle git step replacement
+                if queue_type == "scheduled_pipeline_queue":
+                    self.switch_git_steps_for_scheduled_dataflow(
+                        dataflow, new_queue, final_workpool, is_workpool_eks
+                    )
+
+                # Update queue/workpool for all dataflows
                 self.update_dataflow_queue(dataflow, new_queue, final_workpool)
                 self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
                 updated_count += 1
@@ -245,7 +287,9 @@ class Command(BaseCommand):
         # All dataflows updated successfully, now update database config
         try:
             # Create new queue details object
-            new_queue_details = QueueDetailsSchema(name=new_queue, workpool=final_workpool)
+            new_queue_details = QueueDetailsSchema(
+                name=new_queue, workpool=final_workpool, is_workpool_eks=is_workpool_eks
+            )
 
             # Create update schema with the new nested structure
             update_data = QueueConfigUpdateSchema()
@@ -299,3 +343,160 @@ class Command(BaseCommand):
 
         except Exception as e:
             raise Exception(f"Prefect API error: {str(e)}")
+
+    def switch_git_steps_for_scheduled_dataflow(
+        self, dataflow: OrgDataFlowv1, new_queue: str, work_pool_name: str, is_workpool_eks: bool
+    ):
+        """Switch git steps (pull <-> clone) for scheduled dataflow and update queue/workpool"""
+
+        try:
+            # Get current pipeline details
+            pipeline_details = PipelineService.get_pipeline_details(
+                dataflow.org, dataflow.deployment_id
+            )
+
+            transform_tasks = pipeline_details.get("transformTasks", [])
+
+            if not transform_tasks:
+                # No transform tasks, nothing to replace
+                self.stdout.write(f"  → No transform tasks found, no git steps to replace")
+                return
+
+            # Find and replace git pull/clone tasks in transformTasks
+            if is_workpool_eks:
+                # Replace git pull OrgTask with git clone OrgTask
+                transform_tasks = self._replace_git_pull_orgtask_with_clone(
+                    dataflow.org, transform_tasks
+                )
+                self.stdout.write(f"  → Replaced git pull OrgTask with git clone for EKS")
+            else:
+                # Replace git clone OrgTask with git pull OrgTask
+                transform_tasks = self._replace_git_clone_orgtask_with_pull(
+                    dataflow.org, transform_tasks
+                )
+                self.stdout.write(f"  → Replaced git clone OrgTask with git pull for EC2")
+
+            # Create update payload with modified transformTasks
+            update_payload = PrefectDataFlowUpdateSchema3(
+                name=pipeline_details["name"],
+                cron=pipeline_details["cron"],
+                connections=pipeline_details["connections"],
+                transformTasks=transform_tasks,  # Modified
+            )
+
+            # Update pipeline using PipelineService
+            PipelineService.update_pipeline(dataflow.org, dataflow.deployment_id, update_payload)
+
+            logger.info(
+                f"Updated dataflow {dataflow.deployment_name} with queue {new_queue} and git step replacement"
+            )
+
+        except Exception as e:
+            raise Exception(f"Migration error: {str(e)}")
+
+    def _replace_git_pull_orgtask_with_clone(self, org: Org, transform_tasks: list) -> list:
+        """Replace git pull OrgTask with git clone OrgTask for EKS migration"""
+
+        updated_tasks = []
+        git_steps_replaced = 0
+
+        for task_info in transform_tasks:
+            task_uuid = task_info["uuid"]
+            seq = task_info["seq"]
+
+            # Get the OrgTask
+            orgtask = OrgTask.objects.filter(uuid=task_uuid).first()
+            if not orgtask:
+                logger.warning(f"OrgTask with uuid {task_uuid} not found")
+                updated_tasks.append(task_info)
+                continue
+
+            # Check if this is a git pull task
+            if orgtask.task.slug == TASK_GITPULL:
+                # Find or create git clone OrgTask for this org
+                git_clone_orgtask = self._get_or_create_git_clone_orgtask(org, orgtask)
+                if git_clone_orgtask:
+                    updated_tasks.append({"uuid": git_clone_orgtask.uuid, "seq": seq})
+                    git_steps_replaced += 1
+                    logger.info(f"Replaced git pull OrgTask with git clone (seq: {seq})")
+                else:
+                    logger.warning(f"Could not create git clone OrgTask for org {org.slug}")
+                    updated_tasks.append(task_info)
+            else:
+                # Keep non-git-pull tasks as-is
+                updated_tasks.append(task_info)
+
+        if git_steps_replaced > 0:
+            logger.info(
+                f"Replaced {git_steps_replaced} git pull OrgTask(s) with git clone for org {org.slug}"
+            )
+
+        return updated_tasks
+
+    def _replace_git_clone_orgtask_with_pull(self, org: Org, transform_tasks: list) -> list:
+        """Replace git clone OrgTask with git pull OrgTask for rollback from EKS"""
+
+        updated_tasks = []
+        git_steps_replaced = 0
+
+        for task_info in transform_tasks:
+            task_uuid = task_info["uuid"]
+            seq = task_info["seq"]
+
+            # Get the OrgTask
+            orgtask = OrgTask.objects.filter(uuid=task_uuid).first()
+            if not orgtask:
+                logger.warning(f"OrgTask with uuid {task_uuid} not found")
+                updated_tasks.append(task_info)
+                continue
+
+            # Check if this is a git clone task
+            if orgtask.task.slug == TASK_GITCLONE:
+                # Find git pull OrgTask for this org
+                git_pull_orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GITPULL).first()
+
+                if git_pull_orgtask:
+                    updated_tasks.append({"uuid": git_pull_orgtask.uuid, "seq": seq})
+                    git_steps_replaced += 1
+                    logger.info(f"Replaced git clone OrgTask with git pull (seq: {seq})")
+                else:
+                    logger.warning(f"Could not find git pull OrgTask for org {org.slug}")
+                    updated_tasks.append(task_info)
+            else:
+                # Keep non-git-clone tasks as-is
+                updated_tasks.append(task_info)
+
+        if git_steps_replaced > 0:
+            logger.info(
+                f"Replaced {git_steps_replaced} git clone OrgTask(s) with git pull for org {org.slug}"
+            )
+
+        return updated_tasks
+
+    def _get_or_create_git_clone_orgtask(self, org: Org, original_git_pull_orgtask: OrgTask):
+        """Get existing git clone OrgTask or create one based on git pull OrgTask"""
+
+        # First try to find existing git clone OrgTask
+        existing_clone_orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GITCLONE).first()
+
+        if existing_clone_orgtask:
+            return existing_clone_orgtask
+
+        # Create new git clone OrgTask based on git pull OrgTask
+        try:
+            git_clone_task = Task.objects.get(slug=TASK_GITCLONE)
+
+            git_clone_orgtask = OrgTask.objects.create(
+                org=org,
+                task=git_clone_task,
+                parameters=original_git_pull_orgtask.parameters,
+                dbt_project_params=original_git_pull_orgtask.dbt_project_params,
+                connection_id=original_git_pull_orgtask.connection_id,
+            )
+
+            logger.info(f"Created new git clone OrgTask for org {org.slug}")
+            return git_clone_orgtask
+
+        except Exception as e:
+            logger.error(f"Failed to create git clone OrgTask: {str(e)}")
+            return None

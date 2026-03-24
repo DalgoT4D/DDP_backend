@@ -6,6 +6,7 @@ TASK_DBTTEST = "dbt-test"
 TASK_DBTCLEAN = "dbt-clean"
 TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = "git-pull"
+TASK_GITCLONE = "git-clone"
 TASK_DBTCLOUD_JOB = "dbt-cloud-job"  # this is task slug so it should match the seed data.
 TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"

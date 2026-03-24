@@ -166,6 +166,37 @@ def setup_git_pull_shell_task_config(
     )
 
 
+def setup_git_clone_shell_task_config(
+    org_task: OrgTask,
+    working_dir: str,
+    project_dir: str,
+    gitpull_secret_block: OrgPrefectBlockv1,
+    seq: int = 1,
+):
+    """
+    constructs the prefect payload for a git clone
+    project_dir is the relative path to clone the repo in
+    working_dir is the absolute path
+
+    eg. working_dir = /mnt/appdata/clientdbts/org1
+        project_dir = dbtrepo
+    """
+    shell_env = {"secret-git-pull-url-block": "", "project_dir": project_dir}
+
+    if gitpull_secret_block is not None:
+        shell_env["secret-git-pull-url-block"] = gitpull_secret_block.block_name
+
+    return PrefectShellTaskSetup(
+        commands=[f"git {org_task.get_task_parameters()}"],
+        working_dir=working_dir,
+        env=shell_env,
+        slug=org_task.task.slug,
+        type=SHELLOPERATION,
+        seq=seq,
+        orgtask_uuid=str(org_task.uuid),
+    )
+
+
 def setup_edr_send_report_task_config(
     org_task: OrgTask, project_dir: str, venv_binary: str, seq: int = 1
 ):

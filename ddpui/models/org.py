@@ -48,10 +48,26 @@ def get_default_queue_config():
     """Returns the new nested structure as default"""
     default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME") or "default"
     return {
-        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
-        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
-        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": default_workpool},
-        "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": default_workpool},
+        "scheduled_pipeline_queue": {
+            "name": DDP_WORK_QUEUE,
+            "workpool": default_workpool,
+            "is_workpool_eks": False,
+        },
+        "connection_sync_queue": {
+            "name": DDP_WORK_QUEUE,
+            "workpool": default_workpool,
+            "is_workpool_eks": False,
+        },
+        "transform_task_queue": {
+            "name": MANUL_DBT_WORK_QUEUE,
+            "workpool": default_workpool,
+            "is_workpool_eks": False,
+        },
+        "edr_queue": {
+            "name": EDR_WORK_QUEUE,
+            "workpool": default_workpool,
+            "is_workpool_eks": False,
+        },
     }
 
 
