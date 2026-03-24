@@ -22,14 +22,6 @@ logger = CustomLogger("ddpui.core.comments.mention")
 MENTION_REGEX = re.compile(r"@([\w.+-]+@[\w.-]+\.\w+)")
 
 
-def _get_display_name(orguser: OrgUser) -> str:
-    """Get display name for an OrgUser, falling back to email."""
-    user = orguser.user
-    parts = [user.first_name, user.last_name]
-    name = " ".join(p for p in parts if p).strip()
-    return name or user.email
-
-
 class MentionService:
     """Handles @mention parsing, storage, and notification dispatch"""
 
@@ -106,24 +98,55 @@ class MentionService:
         Skips self-mentions. Respects UserPreferences.enable_email_notifications.
         Email failures are logged but do not block notification creation.
         """
+        report_url = MentionService._build_report_url(comment)
+        snapshot_title = comment.snapshot.title if comment.snapshot else "Report"
+        author_email = author.user.email
+        chart_name = MentionService._resolve_chart_name(comment)
+
+        for mentioned_user in mentioned_users:
+            # Skip self-mentions
+            if mentioned_user.id == author.id:
+                continue
+
+            message = f'{author_email} mentioned you in a comment on "{snapshot_title}"'
+            email_subject = f"You were mentioned in a comment on {snapshot_title}"
+
+            MentionService._create_in_app_notification(
+                author=author,
+                mentioned_user=mentioned_user,
+                message=message,
+                email_subject=email_subject,
+            )
+
+            MentionService._send_email_notification(
+                comment=comment,
+                author=author,
+                mentioned_user=mentioned_user,
+                author_email=author_email,
+                email_subject=email_subject,
+                snapshot_title=snapshot_title,
+                report_url=report_url,
+                chart_name=chart_name,
+            )
+
+    @staticmethod
+    def _build_report_url(comment: Comment) -> str:
+        """Build a deep link URL that opens the correct comment panel."""
         frontend_url = (
             getattr(settings, "FRONTEND_URL_V2", None)
             or getattr(settings, "FRONTEND_URL", None)
             or "http://localhost:3001"
         )
-        # Build URL with query params so frontend auto-opens the right comment panel
         if comment.target_type == CommentTargetType.CHART and comment.snapshot_chart_id is not None:
-            report_url = (
+            return (
                 f"{frontend_url}/reports/{comment.snapshot_id}"
                 f"?commentTarget=chart&chartId={comment.snapshot_chart_id}"
             )
-        else:
-            report_url = f"{frontend_url}/reports/{comment.snapshot_id}?commentTarget=summary"
-        snapshot_title = comment.snapshot.title if comment.snapshot else "Report"
-        author_name = _get_display_name(author)
+        return f"{frontend_url}/reports/{comment.snapshot_id}?commentTarget=summary"
 
-        # Resolve chart name from frozen config
-        chart_name = None
+    @staticmethod
+    def _resolve_chart_name(comment: Comment) -> Optional[str]:
+        """Resolve chart name from the snapshot's frozen config."""
         if (
             comment.target_type == CommentTargetType.CHART
             and comment.snapshot_chart_id is not None
@@ -132,60 +155,75 @@ class MentionService:
             chart_config = (comment.snapshot.frozen_chart_configs or {}).get(
                 str(comment.snapshot_chart_id), {}
             )
-            chart_name = chart_config.get("title")
+            return chart_config.get("title")
+        return None
 
-        for mentioned_user in mentioned_users:
-            # Skip self-mentions
-            if mentioned_user.id == author.id:
-                continue
+    @staticmethod
+    def _create_in_app_notification(
+        author: OrgUser,
+        mentioned_user: OrgUser,
+        message: str,
+        email_subject: str,
+    ) -> None:
+        """Create a Notification and NotificationRecipient record."""
+        notification = Notification.objects.create(
+            author=author.user.email,
+            message=message,
+            email_subject=email_subject,
+            urgent=False,
+            sent_time=timezone.as_utc(datetime.now()),
+        )
+        NotificationRecipient.objects.create(
+            notification=notification,
+            recipient=mentioned_user,
+        )
 
-            message = f'{author_name} mentioned you in a comment on "{snapshot_title}"'
-            email_subject = f"You were mentioned in a comment on {snapshot_title}"
+    @staticmethod
+    def _send_email_notification(
+        comment: Comment,
+        author: OrgUser,
+        mentioned_user: OrgUser,
+        author_email: str,
+        email_subject: str,
+        snapshot_title: str,
+        report_url: str,
+        chart_name: Optional[str],
+    ) -> None:
+        """Send an email notification if the user has email notifications enabled.
 
-            notification = Notification.objects.create(
-                author=author.user.email,
-                message=message,
-                email_subject=email_subject,
-                urgent=False,
-                sent_time=timezone.as_utc(datetime.now()),
+        Failures are logged but do not raise.
+        """
+        user_pref, _ = UserPreferences.objects.get_or_create(orguser=mentioned_user)
+        if not user_pref.enable_email_notifications:
+            return
+
+        try:
+            thread = MentionService._get_thread_context(comment)
+
+            excerpt = comment.content[:500]
+            if len(comment.content) > 500:
+                excerpt += "..."
+
+            plain_text, html_body = render_mention_email(
+                author_name=author_email,
+                author_email=author_email,
+                comment_excerpt=excerpt,
+                snapshot_title=snapshot_title,
+                report_url=report_url,
+                thread=thread,
+                chart_name=chart_name,
             )
 
-            NotificationRecipient.objects.create(
-                notification=notification,
-                recipient=mentioned_user,
+            send_html_message(
+                to_email=mentioned_user.user.email,
+                subject=email_subject,
+                text_body=plain_text,
+                html_body=html_body,
             )
-
-            # Send email if user has email notifications enabled
-            user_pref, _ = UserPreferences.objects.get_or_create(orguser=mentioned_user)
-            if user_pref.enable_email_notifications:
-                try:
-                    # Fetch recent thread context (up to 3 prior comments on same target)
-                    thread = MentionService._get_thread_context(comment)
-
-                    excerpt = comment.content[:500]
-                    if len(comment.content) > 500:
-                        excerpt += "..."
-
-                    plain_text, html_body = render_mention_email(
-                        author_name=author_name,
-                        author_email=author.user.email,
-                        comment_excerpt=excerpt,
-                        snapshot_title=snapshot_title,
-                        report_url=report_url,
-                        thread=thread,
-                        chart_name=chart_name,
-                    )
-
-                    send_html_message(
-                        to_email=mentioned_user.user.email,
-                        subject=email_subject,
-                        text_body=plain_text,
-                        html_body=html_body,
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to send mention email to {mentioned_user.user.email}: {e}"
-                    )
+        except Exception as e:
+            logger.error(
+                f"Failed to send mention email to {mentioned_user.user.email}: {e}"
+            )
 
     @staticmethod
     def _get_thread_context(comment: Comment, max_prior: int = 3) -> list:
@@ -214,7 +252,7 @@ class MentionService:
                 content += "..."
             thread.append(
                 {
-                    "author_name": _get_display_name(c.author),
+                    "author_name": c.author.user.email,
                     "author_email": c.author.user.email,
                     "content": content,
                 }

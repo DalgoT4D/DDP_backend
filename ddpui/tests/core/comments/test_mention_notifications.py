@@ -1,9 +1,10 @@
 """Tests for mention notification dispatch in MentionService"""
 
 from datetime import date
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
+from django.conf import settings
 from django.contrib.auth.models import User
 
 from ddpui.models.org import Org
@@ -446,6 +447,430 @@ class TestRenderMentionEmail:
 
         # Plain text should have the raw content (not escaped)
         assert "<script>" in plain
+
+
+# ================================================================================
+# Tests: send_html_message
+# ================================================================================
+
+
+# ================================================================================
+# Tests: _build_report_url
+# ================================================================================
+
+
+class TestBuildReportUrl:
+    """Tests for MentionService._build_report_url"""
+
+    def test_summary_comment_url(self, snapshot, author_orguser, org):
+        """Summary comment builds URL with commentTarget=summary"""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="test",
+            author=author_orguser,
+            org=org,
+        )
+        url = MentionService._build_report_url(comment)
+        assert f"/reports/{snapshot.id}" in url
+        assert "commentTarget=summary" in url
+        comment.delete()
+
+    def test_chart_comment_url(self, snapshot, author_orguser, org):
+        """Chart comment builds URL with commentTarget=chart and chartId"""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=1,
+            content="test",
+            author=author_orguser,
+            org=org,
+        )
+        url = MentionService._build_report_url(comment)
+        assert f"/reports/{snapshot.id}" in url
+        assert "commentTarget=chart" in url
+        assert "chartId=1" in url
+        comment.delete()
+
+    @patch.object(settings, "FRONTEND_URL_V2", "https://app.dalgo.in")
+    def test_uses_frontend_url_v2(self, snapshot, author_orguser, org):
+        """Prefers FRONTEND_URL_V2 setting"""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="test",
+            author=author_orguser,
+            org=org,
+        )
+        url = MentionService._build_report_url(comment)
+        assert url.startswith("https://app.dalgo.in/")
+        comment.delete()
+
+
+# ================================================================================
+# Tests: _resolve_chart_name
+# ================================================================================
+
+
+class TestResolveChartName:
+    """Tests for MentionService._resolve_chart_name"""
+
+    def test_returns_chart_title(self, snapshot, author_orguser, org):
+        """Returns chart title from frozen_chart_configs"""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=1,
+            content="test",
+            author=author_orguser,
+            org=org,
+        )
+        result = MentionService._resolve_chart_name(comment)
+        assert result == "Chart 1"
+        comment.delete()
+
+    def test_returns_none_for_summary(self, snapshot, author_orguser, org):
+        """Returns None for summary comments"""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="test",
+            author=author_orguser,
+            org=org,
+        )
+        result = MentionService._resolve_chart_name(comment)
+        assert result is None
+        comment.delete()
+
+    def test_returns_none_for_missing_chart_id(self, snapshot, author_orguser, org):
+        """Returns None when chart_id not in frozen_chart_configs"""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=999,
+            content="test",
+            author=author_orguser,
+            org=org,
+        )
+        result = MentionService._resolve_chart_name(comment)
+        assert result is None
+        comment.delete()
+
+
+# ================================================================================
+# Tests: _create_in_app_notification
+# ================================================================================
+
+
+class TestCreateInAppNotification:
+    """Tests for MentionService._create_in_app_notification"""
+
+    def test_creates_notification_and_recipient(self, author_orguser, mentioned_orguser):
+        """Creates both Notification and NotificationRecipient records"""
+        MentionService._create_in_app_notification(
+            author=author_orguser,
+            mentioned_user=mentioned_orguser,
+            message="Test message",
+            email_subject="Test subject",
+        )
+
+        assert Notification.objects.count() == 1
+        notification = Notification.objects.first()
+        assert notification.message == "Test message"
+        assert notification.email_subject == "Test subject"
+        assert notification.author == author_orguser.user.email
+        assert notification.urgent is False
+
+        assert NotificationRecipient.objects.count() == 1
+        recipient = NotificationRecipient.objects.first()
+        assert recipient.recipient == mentioned_orguser
+        assert recipient.notification == notification
+
+
+# ================================================================================
+# Tests: _send_email_notification
+# ================================================================================
+
+
+class TestSendEmailNotification:
+    """Tests for MentionService._send_email_notification"""
+
+    @patch("ddpui.core.comments.mention_service.send_html_message")
+    def test_sends_email_when_preference_enabled(
+        self, mock_send, snapshot, author_orguser, mentioned_orguser, org
+    ):
+        """Sends email when user has email notifications enabled"""
+        UserPreferences.objects.update_or_create(
+            orguser=mentioned_orguser,
+            defaults={"enable_email_notifications": True},
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Hey check this",
+            author=author_orguser,
+            org=org,
+        )
+
+        MentionService._send_email_notification(
+            comment=comment,
+            author=author_orguser,
+            mentioned_user=mentioned_orguser,
+            author_email=author_orguser.user.email,
+            email_subject="Test subject",
+            snapshot_title="Q1 Report",
+            report_url="http://localhost:3001/reports/1",
+            chart_name=None,
+        )
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args[1]["to_email"] == mentioned_orguser.user.email
+        comment.delete()
+
+    @patch("ddpui.core.comments.mention_service.send_html_message")
+    def test_skips_email_when_preference_disabled(
+        self, mock_send, snapshot, author_orguser, mentioned_orguser, org
+    ):
+        """Does not send email when user has email notifications disabled"""
+        UserPreferences.objects.update_or_create(
+            orguser=mentioned_orguser,
+            defaults={"enable_email_notifications": False},
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Hey check this",
+            author=author_orguser,
+            org=org,
+        )
+
+        MentionService._send_email_notification(
+            comment=comment,
+            author=author_orguser,
+            mentioned_user=mentioned_orguser,
+            author_email=author_orguser.user.email,
+            email_subject="Test subject",
+            snapshot_title="Q1 Report",
+            report_url="http://localhost:3001/reports/1",
+            chart_name=None,
+        )
+
+        mock_send.assert_not_called()
+        comment.delete()
+
+    @patch(
+        "ddpui.core.comments.mention_service.send_html_message",
+        side_effect=Exception("SES down"),
+    )
+    def test_email_failure_logged_not_raised(
+        self, mock_send, snapshot, author_orguser, mentioned_orguser, org
+    ):
+        """Email failure is caught and logged, does not raise"""
+        UserPreferences.objects.update_or_create(
+            orguser=mentioned_orguser,
+            defaults={"enable_email_notifications": True},
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Hey check this",
+            author=author_orguser,
+            org=org,
+        )
+
+        # Should not raise
+        MentionService._send_email_notification(
+            comment=comment,
+            author=author_orguser,
+            mentioned_user=mentioned_orguser,
+            author_email=author_orguser.user.email,
+            email_subject="Test subject",
+            snapshot_title="Q1 Report",
+            report_url="http://localhost:3001/reports/1",
+            chart_name=None,
+        )
+        comment.delete()
+
+
+# ================================================================================
+# Tests: _get_thread_context
+# ================================================================================
+
+
+class TestGetThreadContext:
+    """Tests for MentionService._get_thread_context"""
+
+    def test_returns_prior_comments(self, snapshot, author_orguser, org):
+        """Returns prior comments on the same target, oldest first"""
+        c1 = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="First comment",
+            author=author_orguser,
+            org=org,
+        )
+        c2 = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Second comment",
+            author=author_orguser,
+            org=org,
+        )
+        current = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Current comment",
+            author=author_orguser,
+            org=org,
+        )
+
+        thread = MentionService._get_thread_context(current)
+        assert len(thread) == 2
+        assert thread[0]["content"] == "First comment"
+        assert thread[1]["content"] == "Second comment"
+
+        current.delete()
+        c2.delete()
+        c1.delete()
+
+    def test_limits_to_max_prior(self, snapshot, author_orguser, org):
+        """Respects max_prior limit, returns most recent N"""
+        comments = []
+        for i in range(5):
+            comments.append(
+                Comment.objects.create(
+                    target_type=CommentTargetType.SUMMARY,
+                    snapshot=snapshot,
+                    content=f"Comment {i}",
+                    author=author_orguser,
+                    org=org,
+                )
+            )
+        current = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Current",
+            author=author_orguser,
+            org=org,
+        )
+
+        thread = MentionService._get_thread_context(current, max_prior=2)
+        assert len(thread) == 2
+        # Should be the 2 most recent before current
+        assert thread[0]["content"] == "Comment 3"
+        assert thread[1]["content"] == "Comment 4"
+
+        current.delete()
+        for c in reversed(comments):
+            c.delete()
+
+    def test_excludes_deleted_comments(self, snapshot, author_orguser, org):
+        """Deleted comments are not included in thread context"""
+        c1 = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Visible comment",
+            author=author_orguser,
+            org=org,
+        )
+        c_deleted = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Deleted comment",
+            author=author_orguser,
+            org=org,
+            is_deleted=True,
+        )
+        current = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Current",
+            author=author_orguser,
+            org=org,
+        )
+
+        thread = MentionService._get_thread_context(current)
+        assert len(thread) == 1
+        assert thread[0]["content"] == "Visible comment"
+
+        current.delete()
+        c_deleted.delete()
+        c1.delete()
+
+    def test_truncates_long_content(self, snapshot, author_orguser, org):
+        """Content longer than 200 chars is truncated with ellipsis"""
+        c1 = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="A" * 300,
+            author=author_orguser,
+            org=org,
+        )
+        current = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Current",
+            author=author_orguser,
+            org=org,
+        )
+
+        thread = MentionService._get_thread_context(current)
+        assert len(thread) == 1
+        assert len(thread[0]["content"]) == 203  # 200 + "..."
+        assert thread[0]["content"].endswith("...")
+
+        current.delete()
+        c1.delete()
+
+    def test_empty_when_no_prior_comments(self, snapshot, author_orguser, org):
+        """Returns empty list when there are no prior comments"""
+        current = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="First ever comment",
+            author=author_orguser,
+            org=org,
+        )
+
+        thread = MentionService._get_thread_context(current)
+        assert thread == []
+
+        current.delete()
+
+    def test_chart_comments_isolated(self, snapshot, author_orguser, org):
+        """Chart thread context only includes comments on the same chart"""
+        c_other_chart = Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=99,
+            content="Other chart comment",
+            author=author_orguser,
+            org=org,
+        )
+        c_same_chart = Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=1,
+            content="Same chart comment",
+            author=author_orguser,
+            org=org,
+        )
+        current = Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=1,
+            content="Current",
+            author=author_orguser,
+            org=org,
+        )
+
+        thread = MentionService._get_thread_context(current)
+        assert len(thread) == 1
+        assert thread[0]["content"] == "Same chart comment"
+
+        current.delete()
+        c_same_chart.delete()
+        c_other_chart.delete()
 
 
 # ================================================================================
