@@ -267,9 +267,23 @@ def delete_{module}(request, id: int):
    ```python
    # ✅ GOOD
    chart = ChartService.get_chart(chart_id, orguser.org)
-   
+
    # ❌ BAD
    chart = Chart.objects.get(id=chart_id, org=orguser.org)  # Direct model access
+   ```
+
+6. **No Local Imports**: Always use global imports at the top of the file. Never use local/inline imports inside functions or methods.
+   ```python
+   # ✅ GOOD - global import at top of file
+   from django.conf import settings
+
+   def my_function():
+       url = settings.FRONTEND_URL
+
+   # ❌ BAD - local import inside function
+   def my_function():
+       from django.conf import settings
+       url = settings.FRONTEND_URL
    ```
 
 ---
