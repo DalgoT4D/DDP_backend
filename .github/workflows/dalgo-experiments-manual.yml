@@ -1,4 +1,4 @@
-name: Manual Deploy
+name: Experiments Deployment
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
 
 concurrency:
-  group: manual-deploy
+  group: experiments-deploy
   cancel-in-progress: false
 
 jobs:
