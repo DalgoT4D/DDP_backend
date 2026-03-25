@@ -17,6 +17,8 @@ from ddpui.schemas.metric_schema import (
     MetricDataPoint,
     AnnotationCreate,
     AnnotationResponse,
+    LatestAnnotationsRequest,
+    LatestAnnotationEntry,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -204,6 +206,47 @@ def delete_metric(request, metric_id: int):
 
 
 # ── Annotations ──────────────────────────────────────────────────────────────
+
+
+@metrics_router.post("/latest-annotations/", response=List[LatestAnnotationEntry])
+@has_permission(["can_view_charts"])
+def fetch_latest_annotations(request, payload: LatestAnnotationsRequest):
+    """
+    Return the most-recent annotation for each requested metric.
+    Metrics with no annotation are omitted from the response.
+    """
+    org = request.orguser.org
+
+    metrics = MetricDefinition.objects.filter(id__in=payload.metric_ids, org=org)
+
+    # Fetch all annotations for the requested metrics in one query,
+    # ordered newest-first so we can pick the first per metric.
+    annotations = (
+        MetricAnnotation.objects.filter(metric__in=metrics)
+        .order_by("metric_id", "-period_key")
+        .select_related("metric")
+    )
+
+    # Keep only the latest annotation per metric
+    seen = set()
+    results = []
+    for a in annotations:
+        if a.metric_id not in seen:
+            seen.add(a.metric_id)
+            results.append(
+                LatestAnnotationEntry(
+                    metric_id=a.metric_id,
+                    id=a.id,
+                    period_key=a.period_key,
+                    rationale=a.rationale,
+                    quote_text=a.quote_text,
+                    quote_attribution=a.quote_attribution,
+                    created_at=a.created_at,
+                    updated_at=a.updated_at,
+                )
+            )
+
+    return results
 
 
 @metrics_router.get("/{metric_id}/annotations/", response=List[AnnotationResponse])

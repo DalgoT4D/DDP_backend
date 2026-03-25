@@ -8,6 +8,7 @@ from ninja import Schema
 
 # ── Request schemas ──────────────────────────────────────────────────────────
 
+
 class MetricCreate(Schema):
     name: str
     schema_name: str
@@ -63,10 +64,18 @@ class AnnotationCreate(Schema):
 
 class MetricDataRequest(Schema):
     """Request body for bulk metric data fetch"""
+
+    metric_ids: List[int]
+
+
+class LatestAnnotationsRequest(Schema):
+    """Request body for bulk latest-annotation fetch"""
+
     metric_ids: List[int]
 
 
 # ── Response schemas ─────────────────────────────────────────────────────────
+
 
 class MetricResponse(Schema):
     id: int
@@ -100,6 +109,7 @@ class TrendPoint(Schema):
 
 class MetricDataPoint(Schema):
     """Live data for a single metric: current value + trend + RAG"""
+
     metric_id: int
     current_value: Optional[float]
     rag_status: str  # "green", "amber", "red", "grey"
@@ -109,6 +119,19 @@ class MetricDataPoint(Schema):
 
 
 class AnnotationResponse(Schema):
+    id: int
+    period_key: str
+    rationale: str
+    quote_text: str
+    quote_attribution: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LatestAnnotationEntry(Schema):
+    """Latest annotation for a single metric (used in bulk response)"""
+
+    metric_id: int
     id: int
     period_key: str
     rationale: str
