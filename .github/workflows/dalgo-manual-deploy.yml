@@ -1,0 +1,63 @@
+name: Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'The branch selected above will be deployed to the experiments EC2. Type the branch name here to confirm.'
+        required: true
+        type: string
+
+concurrency:
+  group: manual-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: experiments
+
+    steps:
+      - name: Validate and confirm
+        env:
+          BRANCH: ${{ github.ref_name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid branch name: contains disallowed characters."
+            exit 1
+          fi
+          if [[ "$BRANCH" != "$CONFIRM" ]]; then
+            echo "::error::Confirmation does not match. You typed '$CONFIRM' but selected branch is '$BRANCH'."
+            exit 1
+          fi
+
+      - name: Deploy branch to EC2
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_BRANCH: ${{ github.ref_name }}
+        with:
+          host: ${{ secrets.SERVERIP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          command_timeout: 500s
+          envs: DEPLOY_BRANCH
+          script: |
+            set -e
+            cd /home/ubuntu/DDP_backend
+            git fetch origin
+            git checkout "$DEPLOY_BRANCH"
+            git pull origin "$DEPLOY_BRANCH"
+            /home/ubuntu/.local/bin/uv sync
+            /home/ubuntu/.local/bin/uv run python manage.py migrate
+            /home/ubuntu/.local/bin/uv run python manage.py loaddata seed/*.json
+            sudo supervisorctl -c /home/ubuntu/supervisord.conf restart django-backend-asgi django-celery-worker django-canvas-dbt-worker django-celery-beat
+
+      - name: Summary
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          echo "## Manual Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** $BRANCH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
