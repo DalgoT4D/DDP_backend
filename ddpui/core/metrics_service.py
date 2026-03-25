@@ -3,10 +3,11 @@ Service layer for My Metrics feature.
 Handles warehouse queries for metric values and trend data.
 """
 
+import traceback
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from sqlalchemy import column, func, text
+from sqlalchemy import column, func, text, literal_column
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.metrics import MetricDefinition
@@ -16,19 +17,6 @@ from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
-
-
-def _get_agg_func(agg_name: str):
-    """Map aggregation name to sqlalchemy func"""
-    mapping = {
-        "sum": func.sum,
-        "avg": func.avg,
-        "count": func.count,
-        "min": func.min,
-        "max": func.max,
-        "count_distinct": lambda c: func.count(func.distinct(c)),
-    }
-    return mapping.get(agg_name.lower())
 
 
 def compute_rag_status(
@@ -59,8 +47,11 @@ def compute_rag_status(
 def fetch_current_value(
     warehouse_client,
     metric: MetricDefinition,
-) -> Optional[float]:
-    """Run a single aggregation query to get the current metric value."""
+) -> tuple:
+    """
+    Run a single aggregation query to get the current metric value.
+    Returns (value, error_string).
+    """
     try:
         builder = AggQueryBuilder()
         builder.fetch_from(metric.table_name, metric.schema_name)
@@ -68,28 +59,51 @@ def fetch_current_value(
             metric.column, metric.aggregation, alias="metric_value"
         )
         query = builder.build()
+
+        logger.info(
+            f"Metric {metric.id} ({metric.name}): "
+            f"running {metric.aggregation}({metric.column}) "
+            f"on {metric.schema_name}.{metric.table_name}"
+        )
+
         rows = warehouse_client.execute(query)
 
         if rows and len(rows) > 0:
-            val = rows[0].get("metric_value")
-            return float(val) if val is not None else None
-        return None
+            # The warehouse returns list[dict]; handle both dict key styles
+            row = rows[0]
+            val = (
+                row.get("metric_value")
+                if isinstance(row, dict)
+                else getattr(row, "metric_value", None)
+            )
+            if val is not None:
+                result = float(val)
+                logger.info(f"Metric {metric.id}: value = {result}")
+                return result, None
+            return None, "Query returned NULL"
+
+        return None, "Query returned no rows"
+
     except Exception as e:
-        logger.error(f"Error fetching current value for metric {metric.id}: {e}")
-        return None
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        logger.error(
+            f"Error fetching current value for metric {metric.id} "
+            f"({metric.name}): {error_msg}\n{traceback.format_exc()}"
+        )
+        return None, error_msg
 
 
 def fetch_trend_data(
     warehouse_client,
     metric: MetricDefinition,
     warehouse_type: str,
-) -> list:
+) -> tuple:
     """
     Fetch time-grouped aggregation for trend sparkline.
-    Returns list of {period, value} dicts.
+    Returns (list_of_trend_points, error_string).
     """
     if not metric.time_column:
-        return []
+        return [], None
 
     try:
         time_col = column(metric.time_column)
@@ -102,15 +116,24 @@ def fetch_trend_data(
             metric.column, metric.aggregation, alias="metric_value"
         )
         builder.group_cols_by(time_expr)
-        builder.order_cols_by([("period", "asc")])
+        # Use literal_column so SQLAlchemy resolves the SELECT alias
+        builder.order_by_clauses.append(literal_column("period").asc())
         builder.limit_rows(metric.trend_periods)
 
         query = builder.build()
+
+        logger.info(
+            f"Metric {metric.id} ({metric.name}): "
+            f"fetching trend ({metric.time_grain} over {metric.trend_periods} periods)"
+        )
+
         rows = warehouse_client.execute(query)
 
         trend = []
         for row in rows:
-            period_val = row.get("period")
+            row_dict = row if isinstance(row, dict) else dict(row)
+            period_val = row_dict.get("period")
+
             # Format period as string
             if period_val is not None:
                 if metric.time_grain == "month":
@@ -134,7 +157,7 @@ def fetch_trend_data(
             else:
                 period_str = "Unknown"
 
-            val = row.get("metric_value")
+            val = row_dict.get("metric_value")
             trend.append(
                 {
                     "period": period_str,
@@ -142,11 +165,16 @@ def fetch_trend_data(
                 }
             )
 
-        return trend
+        logger.info(f"Metric {metric.id}: got {len(trend)} trend points")
+        return trend, None
 
     except Exception as e:
-        logger.error(f"Error fetching trend for metric {metric.id}: {e}")
-        return []
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        logger.error(
+            f"Error fetching trend for metric {metric.id} "
+            f"({metric.name}): {error_msg}\n{traceback.format_exc()}"
+        )
+        return [], error_msg
 
 
 def fetch_metrics_data(
@@ -161,14 +189,39 @@ def fetch_metrics_data(
     if not metrics:
         return []
 
-    warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-    warehouse_type = org_warehouse.wtype
+    try:
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+    except Exception as e:
+        error_msg = f"Warehouse connection failed: {type(e).__name__}: {str(e)}"
+        logger.error(error_msg)
+        return [
+            {
+                "metric_id": m.id,
+                "current_value": None,
+                "rag_status": "grey",
+                "achievement_pct": None,
+                "trend": [],
+                "error": error_msg,
+            }
+            for m in metrics
+        ]
 
+    warehouse_type = org_warehouse.wtype
     results = {}
 
     def _process_metric(metric):
-        current_value = fetch_current_value(warehouse_client, metric)
-        trend = fetch_trend_data(warehouse_client, metric, warehouse_type)
+        errors = []
+
+        current_value, val_error = fetch_current_value(warehouse_client, metric)
+        if val_error:
+            errors.append(f"Value: {val_error}")
+
+        trend, trend_error = fetch_trend_data(
+            warehouse_client, metric, warehouse_type
+        )
+        if trend_error:
+            errors.append(f"Trend: {trend_error}")
+
         rag_status, achievement_pct = compute_rag_status(
             current_value,
             metric.target_value,
@@ -181,6 +234,7 @@ def fetch_metrics_data(
             "rag_status": rag_status,
             "achievement_pct": achievement_pct,
             "trend": trend,
+            "error": "; ".join(errors) if errors else None,
         }
 
     # Parallelize warehouse queries (max 5 concurrent to be kind to the warehouse)
@@ -193,13 +247,15 @@ def fetch_metrics_data(
             try:
                 results[metric.id] = future.result()
             except Exception as e:
-                logger.error(f"Error processing metric {metric.id}: {e}")
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error(f"Error processing metric {metric.id}: {error_msg}")
                 results[metric.id] = {
                     "metric_id": metric.id,
                     "current_value": None,
                     "rag_status": "grey",
                     "achievement_pct": None,
                     "trend": [],
+                    "error": error_msg,
                 }
 
     # Return in the order the metrics were requested

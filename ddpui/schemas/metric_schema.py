@@ -105,6 +105,7 @@ class MetricDataPoint(Schema):
     rag_status: str  # "green", "amber", "red", "grey"
     achievement_pct: Optional[float]
     trend: List[TrendPoint]
+    error: Optional[str] = None  # non-null when warehouse query failed
 
 
 class AnnotationResponse(Schema):
