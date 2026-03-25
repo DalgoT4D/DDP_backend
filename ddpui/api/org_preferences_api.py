@@ -12,6 +12,7 @@ from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
+    UpdateDashboardBrandingSchema,
 )
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -120,6 +121,27 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
     else:
         org_preferences.discord_webhook = None
         org_preferences.enable_discord_notifications = False
+
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.put("/dashboard-branding")
+@has_permission(["can_edit_org_notification_settings"])
+def update_dashboard_branding(request, payload: UpdateDashboardBrandingSchema):
+    """Updates dashboard branding settings for the organization."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    if payload.dashboard_logo_url is not None:
+        org_preferences.dashboard_logo_url = payload.dashboard_logo_url or None
+    if payload.dashboard_logo_width is not None:
+        org_preferences.dashboard_logo_width = max(40, min(200, payload.dashboard_logo_width))
 
     org_preferences.save()
 

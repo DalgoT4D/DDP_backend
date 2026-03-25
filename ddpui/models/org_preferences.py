@@ -19,6 +19,15 @@ class OrgPreferences(models.Model):
     )
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
+
+    # Dashboard branding
+    dashboard_logo_url = models.URLField(
+        blank=True, null=True, help_text="URL of logo image displayed on all native dashboards"
+    )
+    dashboard_logo_width = models.IntegerField(
+        default=80, help_text="Logo display width in pixels (40-200)"
+    )
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -36,4 +45,6 @@ class OrgPreferences(models.Model):
             "llm_optin_date": self.llm_optin_date.isoformat() if self.llm_optin_date else None,
             "enable_discord_notifications": bool(self.enable_discord_notifications),
             "discord_webhook": self.discord_webhook,
+            "dashboard_logo_url": self.dashboard_logo_url,
+            "dashboard_logo_width": self.dashboard_logo_width,
         }

@@ -41,6 +41,13 @@ class UpdateDiscordNotificationsSchema(Schema):
     discord_webhook: Optional[str]
 
 
+class UpdateDashboardBrandingSchema(Schema):
+    """Schema for updating dashboard branding settings."""
+
+    dashboard_logo_url: Optional[str] = None
+    dashboard_logo_width: Optional[int] = None
+
+
 class CreateOrgSupersetDetailsSchema(Schema):
     """Schema for creating organization superset details."""
 
