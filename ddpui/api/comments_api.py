@@ -24,7 +24,7 @@ from ddpui.schemas.comment_schema import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import ApiResponse, api_response
 
-logger = CustomLogger("ddpui.comments_api")
+logger = CustomLogger("comments")
 
 comments_router = Router()
 

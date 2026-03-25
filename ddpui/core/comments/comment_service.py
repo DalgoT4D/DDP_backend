@@ -19,7 +19,7 @@ from .exceptions import (
 )
 from .mention_service import MentionService
 
-logger = CustomLogger("ddpui.core.comments")
+logger = CustomLogger("comments")
 
 
 class CommentService:

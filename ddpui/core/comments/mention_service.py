@@ -15,7 +15,7 @@ from ddpui.utils.awsses import send_html_message
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.email_templates import render_mention_email
 
-logger = CustomLogger("ddpui.core.comments.mention")
+logger = CustomLogger("comments")
 
 
 class MentionService:
