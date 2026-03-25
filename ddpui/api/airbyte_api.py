@@ -362,6 +362,21 @@ def get_airbyte_destination(request, destination_id):
     return res
 
 
+@airbyte_router.get("/destinations/{destination_id}/specifications")
+@has_permission(["can_view_warehouse"])
+def get_airbyte_destination_specifications_for_destination(request, destination_id):
+    """
+    Fetch specifications for a specific destination instance
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res = airbyte_service.get_destination_definition_specification_for_destination(destination_id)
+    logger.debug(res)
+    return res
+
+
 @airbyte_router.get("/jobs/{job_id}")
 @has_permission(["can_view_connection"])
 def get_job_status(request, job_id):

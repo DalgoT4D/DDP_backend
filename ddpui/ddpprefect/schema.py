@@ -271,21 +271,6 @@ class PrefectSecretBlockEdit(Schema):
     block_name: str
 
 
-class OrgDbtSchema(Schema):
-    """Docstring"""
-
-    profile: DbtProfile
-    gitrepoUrl: str
-    gitrepoAccessToken: Optional[str]
-
-
-class OrgDbtGitHub(Schema):
-    """Docstring"""
-
-    gitrepoUrl: str
-    gitrepoAccessToken: Optional[str]
-
-
 class OrgDbtConnectGitRemote(Schema):
     """Schema for connecting an existing local git repo to a remote GitHub URL"""
 

@@ -23,7 +23,7 @@ from ddpui.ddpdbt.elementary_service import (
     create_elementary_profile,
 )
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DDP_WORK_QUEUE, DBTCLIPROFILE
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DDP_WORK_QUEUE, EDR_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
@@ -383,6 +383,9 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
         "version": "0.19.1",
     }
 
+    # Set environment variable to control the expected upgrade version
+    os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"] = "0.20.0"
+
     response = check_dbt_files(org)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
@@ -394,6 +397,7 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
                 "elementary_package": {
                     "package": "elementary-data/elementary",
                     "version": "0.19.1",
+                    "needs_upgrade": "0.20.0",
                 },
             },
             "missing": {
@@ -401,6 +405,9 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
             },
         },
     )
+
+    # Clean up environment variable
+    del os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"]
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -720,7 +727,7 @@ def test_create_edr_sendreport_dataflow(
     )
     mock_generate_hash_id.assert_called_once_with(8)
 
-    # The create_dataflow_v1 should be called with the org's transform_task_queue config
+    # The create_dataflow_v1 should be called with the org's edr_queue config
     expected_call_args = mock_create_dataflow_v1.call_args
 
     # Check the first argument (PrefectDataFlowCreateSchema3)
@@ -739,7 +746,7 @@ def test_create_edr_sendreport_dataflow(
     queue_details = expected_call_args[0][1]
     assert hasattr(queue_details, "name")
     assert hasattr(queue_details, "workpool")
-    assert queue_details.name == MANUL_DBT_WORK_QUEUE
+    assert queue_details.name == EDR_WORK_QUEUE
     assert queue_details.workpool == "test_workpool"
 
 
