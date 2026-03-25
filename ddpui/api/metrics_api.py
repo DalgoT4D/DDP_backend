@@ -58,6 +58,48 @@ def list_metrics(request):
     ]
 
 
+# ── Metric Data (live warehouse queries) ─────────────────────────────────────
+# NOTE: This must be defined BEFORE /{metric_id}/ routes.
+# Django Ninja 0.21 generates <metric_id> without int: converter, so the string
+# "data" would match <metric_id> before reaching this literal path if ordered after.
+
+
+@metrics_router.post("/data/", response=List[MetricDataPoint])
+@has_permission(["can_view_charts"])
+def fetch_metric_data(request, payload: MetricDataRequest):
+    """
+    Fetch current values + trend data for a list of metrics.
+    Runs warehouse queries in parallel.
+    """
+    org = request.orguser.org
+
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+
+    metrics = MetricDefinition.objects.filter(id__in=payload.metric_ids, org=org)
+
+    if not metrics.exists():
+        return []
+
+    if not org_warehouse:
+        # Return a graceful per-metric error rather than a 400 so the frontend
+        # can display "Data unavailable" on each card instead of leaving them
+        # stuck on "Awaiting data" (which happens when the whole request fails).
+        return [
+            {
+                "metric_id": m.id,
+                "current_value": None,
+                "rag_status": "grey",
+                "achievement_pct": None,
+                "trend": [],
+                "error": "No warehouse configured for this organization",
+            }
+            for m in metrics
+        ]
+
+    results = fetch_metrics_data(org_warehouse, list(metrics))
+    return results
+
+
 @metrics_router.post("/", response=MetricResponse)
 @has_permission(["can_create_charts"])
 def create_metric(request, payload: MetricCreate):
@@ -159,45 +201,6 @@ def delete_metric(request, metric_id: int):
 
     metric.delete()
     return {"success": True}
-
-
-# ── Metric Data (live warehouse queries) ─────────────────────────────────────
-
-
-@metrics_router.post("/data/", response=List[MetricDataPoint])
-@has_permission(["can_view_charts"])
-def fetch_metric_data(request, payload: MetricDataRequest):
-    """
-    Fetch current values + trend data for a list of metrics.
-    Runs warehouse queries in parallel.
-    """
-    org = request.orguser.org
-
-    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-
-    metrics = MetricDefinition.objects.filter(id__in=payload.metric_ids, org=org)
-
-    if not metrics.exists():
-        return []
-
-    if not org_warehouse:
-        # Return a graceful per-metric error rather than a 400 so the frontend
-        # can display "Data unavailable" on each card instead of leaving them
-        # stuck on "Awaiting data" (which happens when the whole request fails).
-        return [
-            {
-                "metric_id": m.id,
-                "current_value": None,
-                "rag_status": "grey",
-                "achievement_pct": None,
-                "trend": [],
-                "error": "No warehouse configured for this organization",
-            }
-            for m in metrics
-        ]
-
-    results = fetch_metrics_data(org_warehouse, list(metrics))
-    return results
 
 
 # ── Annotations ──────────────────────────────────────────────────────────────
