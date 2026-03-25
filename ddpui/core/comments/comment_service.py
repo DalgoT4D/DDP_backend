@@ -126,11 +126,9 @@ class CommentService:
         except ValueError:
             raise CommentValidationError(f"Invalid target_type: {target_type}")
 
-        if target_type == CommentTargetType.CHART and chart_id is None:
-            raise CommentValidationError("chart_id is required for chart comments")
-
-        # Validate chart_id exists in frozen_chart_configs
-        if target_type == CommentTargetType.CHART and chart_id is not None:
+        if target_type == CommentTargetType.CHART:
+            if chart_id is None:
+                raise CommentValidationError("chart_id is required for chart comments")
             if str(chart_id) not in (snapshot.frozen_chart_configs or {}):
                 raise CommentValidationError(
                     f"Chart {chart_id} not found in snapshot {snapshot_id}"
