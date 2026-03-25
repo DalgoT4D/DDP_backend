@@ -57,3 +57,26 @@ def test_quote_bigquery_table_ref_requires_project_id():
             DashboardChatWarehouseToolsError, match="BigQuery project id not configured"
         ):
             tools._quote_bigquery_table_ref("analytics", "program_reach")
+
+
+def test_quote_bigquery_table_ref_rejects_unsafe_identifier_components():
+    """BigQuery table refs should reject unsafe project/schema/table identifier text."""
+    with patch(
+        "ddpui.core.dashboard_chat.warehouse_tools.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"project_id": "analytics-project"},
+    ):
+        tools = _build_bigquery_tools()
+        with pytest.raises(
+            DashboardChatWarehouseToolsError,
+            match="Invalid table name",
+        ):
+            tools._quote_bigquery_table_ref("analytics", "program`reach")
+
+
+def test_parse_table_name_rejects_embedded_dots_and_backticks():
+    """Schema-qualified table names must normalize safely before warehouse access."""
+    with pytest.raises(
+        DashboardChatWarehouseToolsError,
+        match="Invalid table name",
+    ):
+        DashboardChatWarehouseTools._parse_table_name("analytics.program.reach")

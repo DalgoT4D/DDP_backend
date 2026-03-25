@@ -2,14 +2,18 @@
 
 import json
 import logging
+import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.runtime_types import DashboardChatSchemaSnippet
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils import secretsmanager
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse, WarehouseType
 
 logger = logging.getLogger(__name__)
+
+SAFE_WAREHOUSE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class DashboardChatWarehouseToolsError(Exception):
@@ -23,7 +27,7 @@ class DashboardChatWarehouseTools:
         self,
         org: Org,
         org_warehouse: OrgWarehouse | None = None,
-        warehouse_client: Any = None,
+        warehouse_client: Warehouse | None = None,
         max_rows: int = 200,
     ):
         self.org = org
@@ -41,7 +45,15 @@ class DashboardChatWarehouseTools:
         snippets: dict[str, DashboardChatSchemaSnippet] = {}
 
         for table_name in list(dict.fromkeys(tables)):
-            parsed_table = self._parse_table_name(table_name)
+            try:
+                parsed_table = self._parse_table_name(table_name)
+            except DashboardChatWarehouseToolsError as error:
+                logger.warning(
+                    "dashboard chat schema lookup skipped invalid table %s: %s",
+                    table_name,
+                    error,
+                )
+                continue
             if parsed_table is None:
                 continue
             schema_name, bare_table_name = parsed_table
@@ -107,7 +119,7 @@ class DashboardChatWarehouseTools:
         limit: int,
     ) -> str:
         """Build a warehouse-specific query for distinct values."""
-        if self.org_warehouse.wtype == "postgres":
+        if self.org_warehouse.wtype == WarehouseType.POSTGRES:
             quoted_column = self._quote_postgres_identifier(column_name)
             return f"""
                 SELECT DISTINCT {quoted_column} AS value
@@ -118,7 +130,7 @@ class DashboardChatWarehouseTools:
                 LIMIT {int(limit)}
             """
 
-        if self.org_warehouse.wtype == "bigquery":
+        if self.org_warehouse.wtype == WarehouseType.BIGQUERY:
             quoted_column = self._quote_bigquery_identifier(column_name)
             return f"""
                 SELECT DISTINCT {quoted_column} AS value
@@ -145,7 +157,19 @@ class DashboardChatWarehouseTools:
         project_name = self._get_bigquery_project_id()
         if not project_name:
             raise DashboardChatWarehouseToolsError("BigQuery project id not configured")
-        return f"`{project_name}.{schema_name}.{table_name}`"
+        safe_project_name = self._normalize_identifier_component(
+            project_name,
+            "BigQuery project id",
+        )
+        safe_schema_name = self._normalize_identifier_component(
+            schema_name,
+            "schema name",
+        )
+        safe_table_name = self._normalize_identifier_component(
+            table_name,
+            "table name",
+        )
+        return f"`{safe_project_name}.{safe_schema_name}.{safe_table_name}`"
 
     def _get_bigquery_project_id(self) -> str | None:
         """Read the BigQuery project id from stored warehouse credentials."""
@@ -184,6 +208,22 @@ class DashboardChatWarehouseTools:
         if not table_name or "." not in table_name:
             return None
         schema_name, bare_table_name = table_name.split(".", 1)
-        return schema_name.strip().strip('"').strip("`"), bare_table_name.strip().strip('"').strip(
-            "`"
+        return DashboardChatWarehouseTools._normalize_identifier_component(
+            schema_name,
+            "schema name",
+        ), DashboardChatWarehouseTools._normalize_identifier_component(
+            bare_table_name,
+            "table name",
         )
+
+    @staticmethod
+    def _normalize_identifier_component(component: str, component_name: str) -> str:
+        """Normalize a schema/table/project component and reject unsafe identifier text."""
+        normalized_component = component.strip().strip('"').strip("`")
+        if not normalized_component:
+            raise DashboardChatWarehouseToolsError(f"{component_name} is required")
+        if not SAFE_WAREHOUSE_IDENTIFIER_PATTERN.fullmatch(normalized_component):
+            raise DashboardChatWarehouseToolsError(
+                f"Invalid {component_name} for dashboard chat warehouse access"
+            )
+        return normalized_component

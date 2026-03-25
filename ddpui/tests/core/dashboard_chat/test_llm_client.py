@@ -2,8 +2,8 @@
 
 import json
 
-import ddpui.core.dashboard_chat.llm_client as llm_client_module
-from ddpui.core.dashboard_chat.llm_client import OpenAIDashboardChatLlmClient
+import ddpui.core.dashboard_chat.openai_llm_client as llm_client_module
+from ddpui.core.dashboard_chat.openai_llm_client import OpenAIDashboardChatLlmClient
 from ddpui.core.dashboard_chat.runtime_types import (
     DashboardChatConversationContext,
     DashboardChatIntent,

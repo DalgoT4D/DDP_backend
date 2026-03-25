@@ -13,8 +13,8 @@ def test_dashboard_chat_consumer_send_message_requires_message():
     consumer.websocket_receive({"text": json.dumps({"action": "send_message"})})
 
     payload = json.loads(consumer.send.call_args.kwargs["text_data"])
-    assert payload["event_type"] == "error"
-    assert payload["data"]["message"] == "Message is required"
+    assert payload["status"] == "error"
+    assert payload["message"] == "Message is required"
 
 
 def test_dashboard_chat_consumer_send_message_requires_available_chat():
@@ -34,8 +34,8 @@ def test_dashboard_chat_consumer_send_message_requires_available_chat():
     )
 
     payload = json.loads(consumer.send.call_args.kwargs["text_data"])
-    assert payload["event_type"] == "error"
-    assert payload["data"]["message"] == "Chat unavailable"
+    assert payload["status"] == "error"
+    assert payload["message"] == "Chat unavailable"
 
 
 @patch("ddpui.websockets.dashboard_chat_consumer.serialize_dashboard_chat_message")
@@ -82,8 +82,10 @@ def test_dashboard_chat_consumer_send_message_creates_session_and_runs_inline(
 
     first_payload = json.loads(consumer.send.call_args_list[0].kwargs["text_data"])
     second_payload = json.loads(consumer.send.call_args_list[1].kwargs["text_data"])
-    assert first_payload["event_type"] == "progress"
-    assert second_payload["event_type"] == "assistant_message"
+    assert first_payload["status"] == "success"
+    assert first_payload["data"]["event_type"] == "progress"
+    assert second_payload["status"] == "success"
+    assert second_payload["data"]["event_type"] == "assistant_message"
 
 
 @patch(
@@ -125,8 +127,8 @@ def test_dashboard_chat_consumer_send_message_returns_error_when_inline_turn_fai
     consumer._subscribe_to_session.assert_called_once_with("session-123")
 
     payload = json.loads(consumer.send.call_args_list[-1].kwargs["text_data"])
-    assert payload["event_type"] == "error"
-    assert payload["data"]["message"] == "Something went wrong while generating the response"
+    assert payload["status"] == "error"
+    assert payload["message"] == "Something went wrong while generating the response"
 
 
 @patch("ddpui.websockets.dashboard_chat_consumer.serialize_dashboard_chat_message")
@@ -150,6 +152,7 @@ def test_dashboard_chat_consumer_reuses_existing_turn_without_running_duplicate_
     consumer = DashboardChatConsumer()
     consumer.dashboard = Mock(id=42)
     consumer.orguser = Mock()
+    consumer.send = Mock()
     consumer._chat_available = Mock(return_value=(True, ""))
     consumer._subscribe_to_session = Mock()
 
@@ -167,4 +170,5 @@ def test_dashboard_chat_consumer_reuses_existing_turn_without_running_duplicate_
 
     consumer._subscribe_to_session.assert_called_once_with("session-123")
     payload = json.loads(consumer.send.call_args.kwargs["text_data"])
-    assert payload["event_type"] == "assistant_message"
+    assert payload["status"] == "success"
+    assert payload["data"]["event_type"] == "assistant_message"

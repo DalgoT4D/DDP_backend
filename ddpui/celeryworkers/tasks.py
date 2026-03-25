@@ -75,6 +75,8 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
+from ddpui.core.dashboard_chat.vector_building import DashboardChatVectorBuildService
+from ddpui.core.dashboard_chat.graph.orchestrator import get_dashboard_chat_runtime
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
@@ -1308,8 +1310,6 @@ def schedule_dashboard_chat_context_builds():
 @app.task(bind=True)
 def build_dashboard_chat_context_for_org(self, org_id: int):
     """Build dashboard chat retrieval context for one org if the org is eligible."""
-    from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionService
-
     org = (
         Org.objects.select_related("dbt", "preferences")
         .filter(id=org_id, dbt__isnull=False)
@@ -1342,7 +1342,7 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
         return {"status": "skipped_locked", "org_id": org_id}
 
     try:
-        result = DashboardChatIngestionService().ingest_org(org)
+        result = DashboardChatVectorBuildService().build_org_vector_context(org)
         return {
             "status": "completed",
             "org_id": org_id,
@@ -1448,7 +1448,6 @@ def run_dashboard_chat_turn(session_id: str, user_message_id: int):
 
 def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
     """Run one dashboard chat turn synchronously and persist the assistant reply."""
-    from ddpui.core.dashboard_chat.runtime import DashboardChatRuntime
     from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
 
     session = (
@@ -1479,7 +1478,7 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
             "assistant_message": existing_assistant_message,
         }
 
-    response = DashboardChatRuntime().run(
+    response = get_dashboard_chat_runtime().run(
         org=session.org,
         dashboard_id=session.dashboard.id,
         user_query=user_message.content,

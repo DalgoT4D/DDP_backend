@@ -1,7 +1,5 @@
 """Websocket event helpers for dashboard chat."""
 
-import json
-
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.utils import timezone
@@ -48,7 +46,7 @@ def publish_dashboard_chat_event(session_id: str, event: dict) -> None:
             dashboard_chat_group_name(session_id),
             {
                 "type": "dashboard_chat_event",
-                "event": json.dumps(event),
+                "event": event,
             },
         )
     except Exception:
