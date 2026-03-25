@@ -3,12 +3,8 @@ name: Manual Deploy
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: 'Branch to deploy'
-        required: true
-        type: string
       confirm:
-        description: 'Type the branch name again to confirm'
+        description: 'The branch selected above will be deployed to the experiments EC2. Type the branch name here to confirm.'
         required: true
         type: string
 
@@ -22,9 +18,9 @@ jobs:
     environment: experiments
 
     steps:
-      - name: Validate branch name
+      - name: Validate and confirm
         env:
-          BRANCH: ${{ inputs.branch }}
+          BRANCH: ${{ github.ref_name }}
           CONFIRM: ${{ inputs.confirm }}
         run: |
           if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
@@ -32,14 +28,14 @@ jobs:
             exit 1
           fi
           if [[ "$BRANCH" != "$CONFIRM" ]]; then
-            echo "::error::Confirmation does not match. You typed '$CONFIRM' but branch is '$BRANCH'."
+            echo "::error::Confirmation does not match. You typed '$CONFIRM' but selected branch is '$BRANCH'."
             exit 1
           fi
 
       - name: Deploy branch to EC2
         uses: appleboy/ssh-action@v1.2.0
         env:
-          DEPLOY_BRANCH: ${{ inputs.branch }}
+          DEPLOY_BRANCH: ${{ github.ref_name }}
         with:
           host: ${{ secrets.SERVERIP }}
           username: ${{ secrets.SSH_USERNAME }}
@@ -60,7 +56,7 @@ jobs:
 
       - name: Summary
         env:
-          BRANCH: ${{ inputs.branch }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           echo "## Manual Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** $BRANCH" >> $GITHUB_STEP_SUMMARY
