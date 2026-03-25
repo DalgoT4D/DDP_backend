@@ -493,8 +493,16 @@ class DashboardChatRuntime:
         state["sql_validation"] = execution_result["sql_validation"]
         state["sql_results"] = execution_result["sql_results"]
         state["warnings"] = execution_result["warnings"]
+        response_format = self._determine_response_format(
+            user_query=state["user_query"],
+            sql_results=execution_result["sql_results"],
+        )
         state["response"] = DashboardChatResponse(
-            answer_text=execution_result["answer_text"],
+            answer_text=self._compose_final_answer_text(
+                state,
+                execution_result,
+                response_format=response_format,
+            ),
             intent=state["intent_decision"].intent,
             citations=state["citations"],
             warnings=execution_result["warnings"],
@@ -502,6 +510,10 @@ class DashboardChatRuntime:
             sql_results=execution_result["sql_results"],
             usage=self._build_usage_summary(),
             tool_calls=execution_result["tool_calls"],
+            metadata={
+                "response_format": response_format,
+                "table_columns": self._sql_result_columns(execution_result["sql_results"]),
+            },
         )
         return state
 
@@ -648,13 +660,7 @@ class DashboardChatRuntime:
                 )
                 if str(tool_call.get("name") or "") == "run_sql_query" and result.get("success"):
                     return self._build_execution_result(
-                        answer_text=(
-                            result.get("data_preview")
-                            or self._fallback_answer_text(
-                                execution_context["retrieved_documents"],
-                                execution_context["last_sql_results"],
-                            )
-                        ),
+                        answer_text="",
                         execution_context=execution_context,
                         max_turns_reached=False,
                     )
@@ -1361,16 +1367,9 @@ class DashboardChatRuntime:
             )
 
         allowlist = state.get("allowlist") or DashboardChatAllowlist()
-        state["response"] = DashboardChatResponse(
-            answer_text=response.answer_text,
-            intent=response.intent,
-            citations=list(dict.fromkeys(citations)),
-            warnings=response.warnings,
-            sql=response.sql,
-            sql_results=response.sql_results,
-            usage=response.usage,
-            tool_calls=response.tool_calls,
-            metadata={
+        response_metadata = dict(response.metadata)
+        response_metadata.update(
+            {
                 "dashboard_id": state["dashboard_id"],
                 "retrieved_document_ids": [
                     document.document_id for document in state.get("retrieved_documents") or []
@@ -1380,7 +1379,18 @@ class DashboardChatRuntime:
                 "intent_reason": state["intent_decision"].reason,
                 "missing_info": state["intent_decision"].missing_info,
                 "follow_up_type": state["intent_decision"].follow_up_context.follow_up_type,
-            },
+            }
+        )
+        state["response"] = DashboardChatResponse(
+            answer_text=response.answer_text,
+            intent=response.intent,
+            citations=list(dict.fromkeys(citations)),
+            warnings=response.warnings,
+            sql=response.sql,
+            sql_results=response.sql_results,
+            usage=response.usage,
+            tool_calls=response.tool_calls,
+            metadata=response_metadata,
         )
         return state
 
@@ -2735,6 +2745,83 @@ class DashboardChatRuntime:
             "Please rephrase or ask about a metric shown on this dashboard."
         )
 
+    def _compose_final_answer_text(
+        self,
+        state: DashboardChatRuntimeState,
+        execution_result: dict[str, Any],
+        *,
+        response_format: str,
+    ) -> str:
+        """Compose one final markdown answer for all non-trivial routes."""
+        normalized_sql_results = self._normalize_sql_results_for_answer(
+            execution_result.get("sql_results")
+        )
+        draft_answer = (execution_result.get("answer_text") or "").strip() or None
+        if hasattr(self.llm_client, "compose_final_answer"):
+            try:
+                answer_text = self.llm_client.compose_final_answer(
+                    user_query=state["user_query"],
+                    intent=state["intent_decision"].intent,
+                    response_format=response_format,
+                    draft_answer=draft_answer,
+                    retrieved_documents=list(execution_result.get("retrieved_documents") or []),
+                    sql=execution_result.get("sql"),
+                    sql_results=normalized_sql_results,
+                    warnings=list(execution_result.get("warnings") or []),
+                )
+                if answer_text:
+                    return answer_text
+            except Exception:
+                logger.exception("Dashboard chat final answer composition failed")
+        return self._fallback_answer_text(
+            execution_result.get("retrieved_documents") or [],
+            normalized_sql_results,
+            response_format=response_format,
+            draft_answer=draft_answer,
+        )
+
+    @staticmethod
+    def _determine_response_format(
+        *,
+        user_query: str,
+        sql_results: list[dict[str, Any]] | None,
+    ) -> str:
+        """Return how the frontend should present the final answer."""
+        if not sql_results:
+            return "text"
+        first_row = sql_results[0] if sql_results else {}
+        column_count = len(first_row.keys()) if isinstance(first_row, dict) else 0
+        normalized_query = user_query.lower()
+        tableish_keywords = [
+            "breakdown",
+            "split by",
+            "list",
+            "table",
+            "tabular",
+            "rank",
+            "ranking",
+            "top ",
+            "bottom ",
+            "wise",
+        ]
+        if "table" in normalized_query and column_count > 0:
+            return "table"
+        if len(sql_results) > 1 and column_count > 1:
+            return "text_with_table"
+        if any(keyword in normalized_query for keyword in tableish_keywords) and column_count > 1:
+            return "text_with_table"
+        return "text"
+
+    @staticmethod
+    def _sql_result_columns(sql_results: list[dict[str, Any]] | None) -> list[str]:
+        """Return table columns for frontend rendering metadata."""
+        if not sql_results:
+            return []
+        first_row = sql_results[0]
+        if not isinstance(first_row, dict):
+            return []
+        return list(first_row.keys())
+
     def _build_usage_summary(self) -> dict[str, Any]:
         """Collect per-turn usage from the LLM client and embedding provider when supported."""
         usage: dict[str, Any] = {}
@@ -2801,15 +2888,105 @@ class DashboardChatRuntime:
     def _fallback_answer_text(
         retrieved_documents: Sequence[DashboardChatRetrievedDocument],
         sql_results: list[dict[str, Any]] | None,
+        *,
+        response_format: str = "text",
+        draft_answer: str | None = None,
     ) -> str:
         """Fallback response when the model returns no final text."""
+        if draft_answer:
+            return draft_answer
         if sql_results is not None:
             if not sql_results:
                 return "I didn't find any matching rows for that question."
-            return DashboardChatRuntime._preview_sql_rows(sql_results)
+            if response_format in {"text_with_table", "table"}:
+                return f"I found {len(sql_results)} matching rows. See the table below for the breakdown."
+            if len(sql_results) == 1:
+                return DashboardChatRuntime._single_row_summary(sql_results[0])
+            return f"I found {len(sql_results)} matching rows."
         if retrieved_documents:
             return DashboardChatRuntime._compact_snippet(retrieved_documents[0].content)
-        return "I couldn't find enough context to answer that."
+            return "I couldn't find enough context to answer that."
+
+    @staticmethod
+    def _single_row_summary(row: dict[str, Any]) -> str:
+        """Return a readable fallback when one structured row is available."""
+        parts = [
+            f"{DashboardChatRuntime._humanize_column_name(column)}: {value}"
+            for column, value in row.items()
+        ]
+        return "; ".join(parts)
+
+    @staticmethod
+    def _humanize_column_name(column_name: str) -> str:
+        """Convert snake_case warehouse columns into human labels."""
+        return str(column_name).replace("_", " ").strip().title()
+
+    @classmethod
+    def _normalize_sql_results_for_answer(
+        cls,
+        sql_results: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]] | None:
+        """Normalize SQL results into LLM-friendly values for final answer writing."""
+        if sql_results is None:
+            return None
+        normalized_rows: list[dict[str, Any]] = []
+        for row in sql_results:
+            normalized_row: dict[str, Any] = {}
+            for column_name, value in row.items():
+                normalized_row[column_name] = cls._normalize_sql_value_for_answer(
+                    column_name,
+                    value,
+                )
+            normalized_rows.append(normalized_row)
+        return normalized_rows
+
+    @classmethod
+    def _normalize_sql_value_for_answer(cls, column_name: str, value: Any) -> Any:
+        """Format warehouse values into user-friendly forms for answer composition."""
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return cls._format_numeric_answer_value(column_name, value)
+        text_value = str(value)
+        numeric_value = cls._parse_numeric_string(text_value)
+        if numeric_value is None:
+            return text_value
+        return cls._format_numeric_answer_value(column_name, numeric_value)
+
+    @classmethod
+    def _format_numeric_answer_value(cls, column_name: str, value: float | int) -> str | int | float:
+        """Format numeric values for answer composition."""
+        if cls._looks_like_rate_metric(column_name) and 0 <= float(value) <= 1:
+            percentage_value = f"{float(value) * 100:.1f}".rstrip("0").rstrip(".")
+            return f"{percentage_value}%"
+        rounded_value = round(float(value), 2)
+        if float(rounded_value).is_integer():
+            return int(rounded_value)
+        return f"{rounded_value:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _parse_numeric_string(value: str) -> float | None:
+        """Parse decimal-like strings emitted by DjangoJSONEncoder."""
+        normalized_value = value.strip()
+        if not normalized_value:
+            return None
+        if not re.fullmatch(r"-?\d+(?:\.\d+)?(?:E-?\d+)?", normalized_value, flags=re.IGNORECASE):
+            return None
+        try:
+            return float(normalized_value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _looks_like_rate_metric(column_name: str) -> bool:
+        """Return whether a metric name likely represents a percentage/rate."""
+        normalized_column = column_name.lower()
+        return any(
+            token in normalized_column
+            for token in ["rate", "ratio", "percentage", "percent", "share", "pct"]
+        )
 
     @staticmethod
     def _chart_id_from_source_identifier(source_identifier: str) -> int | None:

@@ -8,6 +8,7 @@ from ddpui.core.dashboard_chat.runtime_types import (
     DashboardChatConversationContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
+    DashboardChatRetrievedDocument,
 )
 
 
@@ -187,3 +188,110 @@ def test_reset_usage_clears_previous_usage_events():
     llm_client.reset_usage()
 
     assert llm_client.usage_summary()["totals"]["total_tokens"] == 0
+
+
+def test_compose_final_answer_uses_structured_json_summary_for_table_responses():
+    """Table-like answers should return narrative markdown and leave tabular rendering to the UI."""
+    fake_client = FakeClient()
+    fake_client.chat.completions.response_content = json.dumps(
+        {
+            "title": "Top 5 facilitators with the best outcomes in Q2 2025",
+            "summary": "All five facilitators tied at 3 improved literacy students in Q2 2025.",
+            "key_points": [
+                "No facilitator exceeded 3 improved literacy students.",
+                "The UI should render the full table separately.",
+            ],
+        }
+    )
+    llm_client = OpenAIDashboardChatLlmClient(
+        api_key="test-key",
+        client=fake_client,
+        prompt_store=FakePromptStore(),
+    )
+
+    answer = llm_client.compose_final_answer(
+        user_query="Give me a district wise pass rate breakdown",
+        intent=DashboardChatIntent.QUERY_WITH_SQL,
+        response_format="text_with_table",
+        draft_answer=None,
+        retrieved_documents=[
+            DashboardChatRetrievedDocument(
+                document_id="doc-1",
+                source_type="dashboard_export",
+                source_identifier="dashboard:1:chart:2",
+                content="District performance chart with literacy and numeracy pass rate metrics",
+            )
+        ],
+        sql="SELECT district_name, avg_literacy_pass_rate FROM analytics.district_program_performance_quarterly",
+        sql_results=[
+            {
+                "district_name": "North",
+                "avg_literacy_pass_rate": "25%",
+            }
+        ],
+        warnings=["Using current dashboard context only."],
+    )
+
+    assert answer == (
+        "### Top 5 facilitators with the best outcomes in Q2 2025\n\n"
+        "All five facilitators tied at 3 improved literacy students in Q2 2025.\n\n"
+        "- No facilitator exceeded 3 improved literacy students.\n"
+        "- The UI should render the full table separately."
+    )
+    messages = fake_client.chat.completions.calls[0]["messages"]
+    assert messages[0] == {
+        "role": "system",
+        "content": (
+            "prompt:final_answer_composition\n\n"
+            "For table-like responses, return valid JSON only with this shape:\n"
+            "{\n"
+            '  "title": "short heading or null",\n'
+            '  "summary": "1-2 sentence narrative summary",\n'
+            '  "key_points": ["short point", "short point"]\n'
+            "}\n\n"
+            "Rules:\n"
+            "- Do not include markdown tables.\n"
+            "- Do not include pipe characters or ASCII table formatting.\n"
+            "- Do not repeat every row from the result set.\n"
+            "- The UI will render the structured table separately from sql_results.\n"
+            "- Keep key_points to at most 3 concise bullets."
+        ),
+    }
+    payload = json.loads(messages[1]["content"])
+    assert payload["response_format"] == "text_with_table"
+    assert payload["row_count"] == 1
+    assert payload["retrieved_context"][0]["source_type"] == "dashboard_export"
+    assert payload["retrieved_context"][0]["content"].startswith("District performance chart")
+    assert llm_client.usage_summary()["calls"][0]["operation"] == "final_answer_table_summary"
+
+
+def test_compose_final_answer_keeps_freeform_markdown_for_text_responses():
+    """Pure text answers should continue to use the freeform markdown composer path."""
+    fake_client = FakeClient()
+    fake_client.chat.completions.response_content = "## Overview\n\nThis dashboard tracks literacy outcomes."
+    llm_client = OpenAIDashboardChatLlmClient(
+        api_key="test-key",
+        client=fake_client,
+        prompt_store=FakePromptStore(),
+    )
+
+    answer = llm_client.compose_final_answer(
+        user_query="Tell me about this dashboard",
+        intent=DashboardChatIntent.QUERY_WITHOUT_SQL,
+        response_format="text",
+        draft_answer="This dashboard tracks literacy outcomes.",
+        retrieved_documents=[],
+        sql=None,
+        sql_results=None,
+        warnings=[],
+    )
+
+    assert answer == "## Overview\n\nThis dashboard tracks literacy outcomes."
+    messages = fake_client.chat.completions.calls[0]["messages"]
+    assert messages[0] == {
+        "role": "system",
+        "content": "prompt:final_answer_composition",
+    }
+    payload = json.loads(messages[1]["content"])
+    assert payload["response_format"] == "text"
+    assert llm_client.usage_summary()["calls"][0]["operation"] == "final_answer_composition"

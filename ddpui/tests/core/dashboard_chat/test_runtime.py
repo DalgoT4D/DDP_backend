@@ -582,6 +582,46 @@ class SmallTalkLlm(PrototypeLlmBase):
         raise AssertionError("Small talk should not enter the tool loop")
 
 
+class FinalAnswerComposerLlm(PrototypeLlmBase):
+    """LLM stub that only composes the final user-facing answer."""
+
+    def __init__(self):
+        super().__init__()
+        self.compose_calls = []
+
+    def classify_intent(self, *args, **kwargs):
+        raise AssertionError("This stub is only for direct final-answer composition tests")
+
+    def run_tool_loop_turn(self, *, messages, tools, tool_choice, operation):
+        raise AssertionError("This stub should not enter the tool loop")
+
+    def compose_final_answer(
+        self,
+        *,
+        user_query,
+        intent,
+        response_format,
+        draft_answer,
+        retrieved_documents,
+        sql,
+        sql_results,
+        warnings,
+    ):
+        self.compose_calls.append(
+            {
+                "user_query": user_query,
+                "intent": intent,
+                "response_format": response_format,
+                "draft_answer": draft_answer,
+                "retrieved_documents": retrieved_documents,
+                "sql": sql,
+                "sql_results": sql_results,
+                "warnings": warnings,
+            }
+        )
+        return "## District-wise pass rates\nSee the table below for the breakdown."
+
+
 @pytest.fixture
 def org():
     organization = Org.objects.create(
@@ -1269,7 +1309,7 @@ def test_runtime_reuses_session_snapshot_across_turns(org, primary_dashboard):
     assert "WHERE program_name = 'Education'" in fake_warehouse.executed_sql[0]
     assert first_response.sql is not None
     assert second_response.sql is not None
-    assert '"beneficiary_count": 120' in first_response.answer_text
+    assert "Beneficiary Count: 120" in first_response.answer_text
     assert any(citation.source_type == "warehouse_table" for citation in first_response.citations)
     assert [call["name"] for call in first_response.tool_calls] == [
         "retrieve_docs",
@@ -1406,7 +1446,12 @@ def test_runtime_follow_up_sql_corrects_after_failed_sql_attempt(
     ]
     assert run_sql_calls[0]["success"] is False
     assert run_sql_calls[-1]["success"] is True
-    assert '"donor_type": "Grant"' in response.answer_text
+    assert response.metadata["response_format"] == "text_with_table"
+    assert response.sql_results == [
+        {"donor_type": "Grant", "beneficiary_count": 80},
+        {"donor_type": "Corporate", "beneficiary_count": 40},
+    ]
+    assert "See the table below for the breakdown" in response.answer_text
 
 
 def test_runtime_dbt_tools_use_compact_allowlisted_index():
@@ -1559,7 +1604,9 @@ def test_runtime_follow_up_sql_rejects_query_that_ignores_requested_dimension(
     assert response.sql is not None
     assert "analytics.stg_donor_funding_clean" in response.sql
     assert any(call.get("error") == "requested_dimension_missing" for call in response.tool_calls)
-    assert '"Grant"' in response.answer_text
+    assert response.metadata["response_format"] == "text_with_table"
+    assert response.sql_results[0]["donor_type"] == "Grant"
+    assert "See the table below for the breakdown" in response.answer_text
 
 
 def test_follow_up_dimension_validation_accepts_structural_granularity_change(primary_dashboard):
@@ -1881,3 +1928,91 @@ def test_sql_guard_rejects_select_into_queries():
     assert select_into_query.is_valid is False
     assert select_into_query.sanitized_sql is None
     assert "SELECT INTO is not allowed" in select_into_query.errors
+
+
+def test_compose_final_answer_text_uses_llm_and_normalizes_rate_values():
+    """Final answer composition should send normalized values and table hints to the composer."""
+    llm = FinalAnswerComposerLlm()
+    runtime = DashboardChatRuntime(
+        vector_store=FakeVectorStore([]),
+        llm_client=llm,
+    )
+    state = {
+        "user_query": "Give me a district wise pass rate breakdown",
+        "intent_decision": DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+            confidence=0.9,
+            reason="Needs grouped results",
+            force_tool_usage=True,
+        ),
+    }
+    execution_result = {
+        "answer_text": "",
+        "retrieved_documents": [
+            DashboardChatRetrievedDocument(
+                document_id="doc-chart",
+                source_type=DashboardChatSourceType.DASHBOARD_EXPORT.value,
+                source_identifier="dashboard:1:chart:2",
+                content="District pass-rate chart",
+            )
+        ],
+        "sql": (
+            "SELECT district_name, avg_literacy_pass_rate, avg_numeracy_pass_rate "
+            "FROM analytics.district_program_performance_quarterly"
+        ),
+        "sql_results": [
+            {
+                "district_name": "East",
+                "avg_literacy_pass_rate": Decimal("0E-20"),
+                "avg_numeracy_pass_rate": Decimal("0.25000000000000000000"),
+            },
+            {
+                "district_name": "South",
+                "avg_literacy_pass_rate": Decimal("0.25000000000000000000"),
+                "avg_numeracy_pass_rate": Decimal("0E-20"),
+            },
+        ],
+        "warnings": [],
+    }
+
+    answer = runtime._compose_final_answer_text(
+        state,
+        execution_result,
+        response_format="text_with_table",
+    )
+
+    assert answer == "## District-wise pass rates\nSee the table below for the breakdown."
+    assert llm.compose_calls[0]["response_format"] == "text_with_table"
+    assert llm.compose_calls[0]["sql_results"] == [
+        {
+            "district_name": "East",
+            "avg_literacy_pass_rate": "0%",
+            "avg_numeracy_pass_rate": "25%",
+        },
+        {
+            "district_name": "South",
+            "avg_literacy_pass_rate": "25%",
+            "avg_numeracy_pass_rate": "0%",
+        },
+    ]
+
+
+def test_determine_response_format_prefers_table_for_grouped_breakdowns():
+    """Grouped breakdowns should tell the frontend to render a structured table."""
+    response_format = DashboardChatRuntime._determine_response_format(
+        user_query="Give me a district wise pass rate breakdown",
+        sql_results=[
+            {
+                "district_name": "North",
+                "avg_literacy_pass_rate": "25%",
+                "avg_numeracy_pass_rate": "50%",
+            },
+            {
+                "district_name": "South",
+                "avg_literacy_pass_rate": "25%",
+                "avg_numeracy_pass_rate": "0%",
+            },
+        ],
+    )
+
+    assert response_format == "text_with_table"
