@@ -34,7 +34,6 @@ from .exceptions import (
 logger = CustomLogger("ddpui.core.reports")
 
 
-
 class ReportService:
     """Service class for snapshot operations"""
 
@@ -125,9 +124,7 @@ class ReportService:
             "default_start_date": (
                 snapshot.period_start.isoformat() if snapshot.period_start else None
             ),
-            "default_end_date": (
-                snapshot.period_end.isoformat() if snapshot.period_end else None
-            ),
+            "default_end_date": (snapshot.period_end.isoformat() if snapshot.period_end else None),
             "locked": True,
         }
 
@@ -188,9 +185,7 @@ class ReportService:
 
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:
-            raise SnapshotExternalServiceError(
-                "Warehouse", "not configured for this organization"
-            )
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
         for chart_id, config in frozen_chart_configs.items():
@@ -200,9 +195,7 @@ class ReportService:
             if chart_schema == anchor_schema and chart_table == anchor_table:
                 eligible = True
             else:
-                eligible = warehouse_client.column_exists(
-                    chart_schema, chart_table, col_name
-                )
+                eligible = warehouse_client.column_exists(chart_schema, chart_table, col_name)
 
             if not eligible:
                 continue
@@ -223,8 +216,7 @@ class ReportService:
                     {
                         "column": col_name,
                         "operator": "less_than_equal",
-                        "value": snapshot.period_end.isoformat()
-                        + "T23:59:59",
+                        "value": snapshot.period_end.isoformat() + "T23:59:59",
                     }
                 )
 
@@ -465,9 +457,7 @@ class ReportService:
         }
 
     @staticmethod
-    def update_snapshot(
-        snapshot_id: int, org: Org, data: SnapshotUpdate
-    ) -> ReportSnapshot:
+    def update_snapshot(snapshot_id: int, org: Org, data: SnapshotUpdate) -> ReportSnapshot:
         """Update mutable fields on a snapshot.
 
         Args:
@@ -518,9 +508,7 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    def discover_datetime_columns(
-        dashboard_id: int, org: Org
-    ) -> List[Dict[str, Any]]:
+    def discover_datetime_columns(dashboard_id: int, org: Org) -> List[Dict[str, Any]]:
         """Discover datetime columns from all tables used by a dashboard's charts.
 
         Warehouse introspection is needed because dashboard filters only cover
@@ -540,9 +528,7 @@ class ReportService:
             SnapshotExternalServiceError: If warehouse connection fails
         """
         try:
-            dashboard = Dashboard.objects.prefetch_related("filters").get(
-                id=dashboard_id, org=org
-            )
+            dashboard = Dashboard.objects.prefetch_related("filters").get(id=dashboard_id, org=org)
         except Dashboard.DoesNotExist:
             raise SnapshotValidationError(f"Dashboard {dashboard_id} not found")
 
@@ -586,9 +572,7 @@ class ReportService:
 
         for schema_name, table_name in table_refs:
             try:
-                columns = warehouse_client.get_table_columns(
-                    schema_name, table_name
-                )
+                columns = warehouse_client.get_table_columns(schema_name, table_name)
                 for col in columns:
                     if col.get("translated_type") == TranslateColDataType.DATETIME:
                         key = (schema_name, table_name, col["name"])
@@ -634,9 +618,7 @@ class ReportService:
     def _build_public_url(token: str) -> str:
         """Build the public share URL for a report snapshot."""
         frontend_url_v2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = frontend_url_v2 or getattr(
-            settings, "FRONTEND_URL", "http://localhost:3001"
-        )
+        frontend_url = frontend_url_v2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
         return f"{frontend_url}/share/report/{token}"
 
     @staticmethod
@@ -661,9 +643,7 @@ class ReportService:
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
         if snapshot.created_by != orguser:
-            raise SnapshotPermissionError(
-                "Only report creators can modify sharing settings"
-            )
+            raise SnapshotPermissionError("Only report creators can modify sharing settings")
 
         if is_public:
             if not snapshot.public_share_token:
@@ -707,9 +687,7 @@ class ReportService:
         return response_data
 
     @staticmethod
-    def get_sharing_status(
-        snapshot_id: int, org: Org, orguser: OrgUser
-    ) -> dict:
+    def get_sharing_status(snapshot_id: int, org: Org, orguser: OrgUser) -> dict:
         """Get sharing status for a report snapshot.
 
         Args:
@@ -727,9 +705,7 @@ class ReportService:
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
         if snapshot.created_by != orguser:
-            raise SnapshotPermissionError(
-                "Only report creators can view sharing settings"
-            )
+            raise SnapshotPermissionError("Only report creators can view sharing settings")
 
         response_data = {
             "is_public": snapshot.is_public,

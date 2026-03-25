@@ -72,9 +72,7 @@ class CommentService:
 
         users_map = {}
         if all_emails:
-            for ou in OrgUser.objects.filter(
-                user__email__in=all_emails
-            ).select_related("user"):
+            for ou in OrgUser.objects.filter(user__email__in=all_emails).select_related("user"):
                 users_map[ou.user.email] = ou
 
         for c in comments:
@@ -107,9 +105,7 @@ class CommentService:
             if orguser and comment.author_id == orguser.id:
                 comment.is_new = False
             else:
-                comment.is_new = (
-                    last_read_at is None or comment.created_at > last_read_at
-                )
+                comment.is_new = last_read_at is None or comment.created_at > last_read_at
 
     @staticmethod
     def create_comment(
@@ -195,9 +191,7 @@ class CommentService:
         comment.is_deleted = True
         comment.content = ""
         comment.mentioned_emails = []
-        comment.save(
-            update_fields=["is_deleted", "content", "mentioned_emails", "updated_at"]
-        )
+        comment.save(update_fields=["is_deleted", "content", "mentioned_emails", "updated_at"])
 
         logger.info(f"Soft-deleted comment {comment_id}")
 
@@ -220,24 +214,16 @@ class CommentService:
         comments = Comment.objects.filter(
             snapshot=snapshot,
             is_deleted=False,
-        ).values_list(
-            "target_type", "snapshot_chart_id", "created_at", "id"
-        )
+        ).values_list("target_type", "snapshot_chart_id", "created_at", "id")
 
         if not comments:
             return {}
 
-        read_statuses = CommentService._get_read_statuses(
-            orguser, snapshot
-        )
-        mentioned_ids = CommentService._get_mentioned_comment_ids(
-            snapshot, orguser.user.email
-        )
+        read_statuses = CommentService._get_read_statuses(orguser, snapshot)
+        mentioned_ids = CommentService._get_mentioned_comment_ids(snapshot, orguser.user.email)
         targets = CommentService._group_comments_by_target(comments)
 
-        return CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids
-        )
+        return CommentService._compute_target_states(targets, read_statuses, mentioned_ids)
 
     @staticmethod
     def _get_read_statuses(
@@ -250,9 +236,7 @@ class CommentService:
         """
         return {
             (rs.target_type, rs.chart_id): rs.last_read_at
-            for rs in CommentReadStatus.objects.filter(
-                user=orguser, snapshot=snapshot
-            )
+            for rs in CommentReadStatus.objects.filter(user=orguser, snapshot=snapshot)
         }
 
     @staticmethod
@@ -280,16 +264,11 @@ class CommentService:
         for target_type, chart_id, created_at, comment_id in comments:
             if target_type == CommentTargetType.SUMMARY:
                 key = CommentTargetType.SUMMARY
-            elif (
-                target_type == CommentTargetType.CHART
-                and chart_id is not None
-            ):
+            elif target_type == CommentTargetType.CHART and chart_id is not None:
                 key = str(chart_id)
             else:
                 continue
-            targets.setdefault(key, []).append(
-                (created_at, comment_id)
-            )
+            targets.setdefault(key, []).append((created_at, comment_id))
         return targets
 
     @staticmethod
@@ -318,9 +297,7 @@ class CommentService:
             unread_count = 0
             has_unread_mention = False
             for created_at, comment_id in comment_data:
-                is_unread = (
-                    last_read is None or created_at > last_read
-                )
+                is_unread = last_read is None or created_at > last_read
                 if is_unread:
                     unread_count += 1
                     if comment_id in mentioned_ids:
@@ -363,11 +340,7 @@ class CommentService:
     @staticmethod
     def get_mentionable_users(org: Org) -> list:
         """Return org users available for @mention."""
-        return list(
-            OrgUser.objects.filter(org=org)
-            .select_related("user")
-            .order_by("user__email")
-        )
+        return list(OrgUser.objects.filter(org=org).select_related("user").order_by("user__email"))
 
     # --- Private helpers ---
 

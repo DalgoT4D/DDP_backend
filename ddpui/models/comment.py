@@ -45,9 +45,7 @@ class Comment(models.Model):
     )
 
     # Author + multi-tenancy
-    author = models.ForeignKey(
-        OrgUser, on_delete=models.CASCADE, related_name="comments_authored"
-    )
+    author = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="comments_authored")
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
 
     is_deleted = models.BooleanField(default=False)

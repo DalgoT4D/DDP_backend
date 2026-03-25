@@ -114,15 +114,11 @@ class TestFetchComments:
             author=author_orguser,
             org=org,
         )
-        comments = CommentService._fetch_comments(
-            snapshot, CommentTargetType.SUMMARY, None
-        )
+        comments = CommentService._fetch_comments(snapshot, CommentTargetType.SUMMARY, None)
         assert len(comments) == 1
         assert comments[0].content == "Summary comment"
 
-    def test_returns_chart_comments_filtered_by_chart_id(
-        self, snapshot, author_orguser, org
-    ):
+    def test_returns_chart_comments_filtered_by_chart_id(self, snapshot, author_orguser, org):
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
@@ -140,17 +136,13 @@ class TestFetchComments:
             org=org,
         )
 
-        comments = CommentService._fetch_comments(
-            snapshot, CommentTargetType.CHART, chart_id=10
-        )
+        comments = CommentService._fetch_comments(snapshot, CommentTargetType.CHART, chart_id=10)
         assert len(comments) == 1
         assert comments[0].snapshot_chart_id == 10
 
     def test_chart_without_chart_id_raises(self, snapshot):
         with pytest.raises(CommentValidationError, match="chart_id is required"):
-            CommentService._fetch_comments(
-                snapshot, CommentTargetType.CHART, chart_id=None
-            )
+            CommentService._fetch_comments(snapshot, CommentTargetType.CHART, chart_id=None)
 
     def test_returns_chronological_order(self, snapshot, author_orguser, org):
         c1 = Comment.objects.create(
@@ -168,15 +160,11 @@ class TestFetchComments:
             org=org,
         )
 
-        comments = CommentService._fetch_comments(
-            snapshot, CommentTargetType.SUMMARY, None
-        )
+        comments = CommentService._fetch_comments(snapshot, CommentTargetType.SUMMARY, None)
         assert comments[0].id == c1.id
         assert comments[1].id == c2.id
 
-    def test_does_not_return_other_target_types(
-        self, snapshot, author_orguser, org
-    ):
+    def test_does_not_return_other_target_types(self, snapshot, author_orguser, org):
         Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -193,9 +181,7 @@ class TestFetchComments:
             org=org,
         )
 
-        comments = CommentService._fetch_comments(
-            snapshot, CommentTargetType.SUMMARY, None
-        )
+        comments = CommentService._fetch_comments(snapshot, CommentTargetType.SUMMARY, None)
         assert len(comments) == 1
         assert comments[0].target_type == CommentTargetType.SUMMARY
 
@@ -212,9 +198,7 @@ class TestAttachMentionedUsersMap:
         CommentService._attach_mentioned_users_map([])
         # No exception — just a no-op
 
-    def test_comments_without_mentions_get_empty_map(
-        self, snapshot, author_orguser, org
-    ):
+    def test_comments_without_mentions_get_empty_map(self, snapshot, author_orguser, org):
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -257,9 +241,7 @@ class TestAttachMentionedUsersMap:
         CommentService._attach_mentioned_users_map([comment])
         assert "ghost@example.com" not in comment._mentioned_users_map
 
-    def test_shared_map_across_comments(
-        self, snapshot, author_orguser, other_orguser, org
-    ):
+    def test_shared_map_across_comments(self, snapshot, author_orguser, other_orguser, org):
         """All comments in a batch share the same users_map instance."""
         c1 = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
@@ -290,9 +272,7 @@ class TestAttachMentionedUsersMap:
 class TestAnnotateIsNew:
     """Tests for CommentService._annotate_is_new"""
 
-    def test_all_new_when_no_read_status(
-        self, snapshot, author_orguser, other_orguser, org
-    ):
+    def test_all_new_when_no_read_status(self, snapshot, author_orguser, other_orguser, org):
         """When the user has never opened the thread, all comments are new."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
@@ -348,9 +328,7 @@ class TestAnnotateIsNew:
         )
         assert comment.is_new is False
 
-    def test_comments_after_read_cursor_are_new(
-        self, snapshot, author_orguser, other_orguser, org
-    ):
+    def test_comments_after_read_cursor_are_new(self, snapshot, author_orguser, other_orguser, org):
         """Comments created after last_read_at are new."""
         # Set read cursor in the past
         past = timezone.now() - timedelta(hours=1)
@@ -385,14 +363,10 @@ class TestAnnotateIsNew:
             org=org,
         )
 
-        CommentService._annotate_is_new(
-            [comment], snapshot, CommentTargetType.SUMMARY, None, None
-        )
+        CommentService._annotate_is_new([comment], snapshot, CommentTargetType.SUMMARY, None, None)
         assert comment.is_new is True
 
-    def test_chart_read_status_uses_chart_id(
-        self, snapshot, author_orguser, other_orguser, org
-    ):
+    def test_chart_read_status_uses_chart_id(self, snapshot, author_orguser, other_orguser, org):
         """Read status for chart comments uses the chart_id filter."""
         # Read status for chart 10 only
         CommentReadStatus.objects.create(
@@ -500,9 +474,7 @@ class TestComputeTargetStates:
                 (timezone.now() - timedelta(hours=1), 1),
             ],
         }
-        result = CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids=set()
-        )
+        result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
         assert result[CommentTargetType.SUMMARY]["state"] == "read"
         assert result[CommentTargetType.SUMMARY]["unread_count"] == 0
 
@@ -515,9 +487,7 @@ class TestComputeTargetStates:
                 (timezone.now() - timedelta(hours=1), 1),
             ],
         }
-        result = CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids=set()
-        )
+        result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
         assert result[CommentTargetType.SUMMARY]["state"] == "unread"
         assert result[CommentTargetType.SUMMARY]["unread_count"] == 1
 
@@ -530,9 +500,7 @@ class TestComputeTargetStates:
                 (timezone.now() - timedelta(hours=1), 1),
             ],
         }
-        result = CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids={1}
-        )
+        result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids={1})
         assert result[CommentTargetType.SUMMARY]["state"] == "mentioned"
 
     def test_no_read_status_all_unread(self):
@@ -560,9 +528,7 @@ class TestComputeTargetStates:
                 (timezone.now() - timedelta(hours=1), 1),
             ],
         }
-        result = CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids=set()
-        )
+        result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
         assert result["10"]["state"] == "read"
 
     def test_mention_only_counts_when_unread(self):
@@ -574,9 +540,7 @@ class TestComputeTargetStates:
             ],
         }
         # Comment 1 mentions the user but was created before read cursor
-        result = CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids={1}
-        )
+        result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids={1})
         assert result[CommentTargetType.SUMMARY]["state"] == "read"
 
     def test_multiple_targets_independent(self):
@@ -594,9 +558,7 @@ class TestComputeTargetStates:
                 (timezone.now() - timedelta(hours=1), 2),
             ],
         }
-        result = CommentService._compute_target_states(
-            targets, read_statuses, mentioned_ids=set()
-        )
+        result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
         assert result[CommentTargetType.SUMMARY]["state"] == "read"
         assert result["10"]["state"] == "unread"
 
@@ -609,9 +571,7 @@ class TestComputeTargetStates:
 class TestReadStatusesAndMentionedIds:
     """Tests for the DB-fetching helpers"""
 
-    def test_get_read_statuses_returns_dict(
-        self, snapshot, other_orguser
-    ):
+    def test_get_read_statuses_returns_dict(self, snapshot, other_orguser):
         CommentReadStatus.objects.create(
             user=other_orguser,
             snapshot=snapshot,
@@ -626,9 +586,7 @@ class TestReadStatusesAndMentionedIds:
         result = CommentService._get_read_statuses(other_orguser, snapshot)
         assert result == {}
 
-    def test_get_mentioned_comment_ids(
-        self, snapshot, author_orguser, other_orguser, org
-    ):
+    def test_get_mentioned_comment_ids(self, snapshot, author_orguser, other_orguser, org):
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -637,9 +595,7 @@ class TestReadStatusesAndMentionedIds:
             author=author_orguser,
             org=org,
         )
-        result = CommentService._get_mentioned_comment_ids(
-            snapshot, other_orguser.user.email
-        )
+        result = CommentService._get_mentioned_comment_ids(snapshot, other_orguser.user.email)
         assert comment.id in result
 
     def test_get_mentioned_comment_ids_excludes_deleted(
@@ -654,17 +610,11 @@ class TestReadStatusesAndMentionedIds:
             org=org,
             is_deleted=True,
         )
-        result = CommentService._get_mentioned_comment_ids(
-            snapshot, other_orguser.user.email
-        )
+        result = CommentService._get_mentioned_comment_ids(snapshot, other_orguser.user.email)
         assert len(result) == 0
 
-    def test_get_mentioned_comment_ids_empty(
-        self, snapshot, other_orguser
-    ):
-        result = CommentService._get_mentioned_comment_ids(
-            snapshot, other_orguser.user.email
-        )
+    def test_get_mentioned_comment_ids_empty(self, snapshot, other_orguser):
+        result = CommentService._get_mentioned_comment_ids(snapshot, other_orguser.user.email)
         assert result == set()
 
 

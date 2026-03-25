@@ -557,9 +557,7 @@ class TestDeleteSnapshot:
             delete_snapshot(request, 99999)
         assert exc_info.value.status_code == 404
 
-    def test_delete_by_non_creator_forbidden(
-        self, other_orguser, sample_snapshot, seed_db
-    ):
+    def test_delete_by_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
         """Test that a user who did not create the snapshot cannot delete it"""
         request = mock_request(other_orguser)
         with pytest.raises(HttpError) as exc_info:
@@ -601,9 +599,7 @@ class TestToggleReportSharing:
         toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
 
         # Then disable
-        response = toggle_report_sharing(
-            request, sample_snapshot.id, ShareToggle(is_public=False)
-        )
+        response = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
 
         data = response["data"]
         assert data["is_public"] is False
@@ -750,9 +746,24 @@ class TestListDashboardDatetimeColumns:
 
         mock_warehouse = MagicMock()
         mock_warehouse.get_table_columns.return_value = [
-            {"name": "created_at", "data_type": "timestamp", "translated_type": TranslateColDataType.DATETIME, "nullable": False},
-            {"name": "updated_at", "data_type": "timestamp", "translated_type": TranslateColDataType.DATETIME, "nullable": True},
-            {"name": "name", "data_type": "varchar", "translated_type": TranslateColDataType.STRING, "nullable": True},
+            {
+                "name": "created_at",
+                "data_type": "timestamp",
+                "translated_type": TranslateColDataType.DATETIME,
+                "nullable": False,
+            },
+            {
+                "name": "updated_at",
+                "data_type": "timestamp",
+                "translated_type": TranslateColDataType.DATETIME,
+                "nullable": True,
+            },
+            {
+                "name": "name",
+                "data_type": "varchar",
+                "translated_type": TranslateColDataType.STRING,
+                "nullable": True,
+            },
         ]
         mock_org_warehouse = MagicMock()
 
@@ -782,9 +793,7 @@ class TestListDashboardDatetimeColumns:
 
     def test_no_warehouse_configured(self, orguser, sample_dashboard, sample_chart, seed_db):
         """Test error when warehouse is not configured"""
-        with patch(
-            "ddpui.core.reports.report_service.OrgWarehouse.objects"
-        ) as mock_ow_objects:
+        with patch("ddpui.core.reports.report_service.OrgWarehouse.objects") as mock_ow_objects:
             mock_ow_objects.filter.return_value.first.return_value = None
 
             request = mock_request(orguser)

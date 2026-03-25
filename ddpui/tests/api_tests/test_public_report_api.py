@@ -324,9 +324,7 @@ class TestGetPublicReportChartData:
             request = _make_public_request(
                 body={"chart_type": "bar", "schema_name": "public", "table_name": "orders"}
             )
-            response = get_public_report_chart_data(
-                request, public_snapshot.public_share_token
-            )
+            response = get_public_report_chart_data(request, public_snapshot.public_share_token)
 
             assert response["is_valid"] is True
             assert response["data"] == [{"x": "Jan", "y": 100}]
@@ -384,9 +382,7 @@ class TestGetPublicReportTableData:
             request = _make_public_request(
                 body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
             )
-            response = get_public_report_table_data(
-                request, public_snapshot.public_share_token
-            )
+            response = get_public_report_table_data(request, public_snapshot.public_share_token)
 
             assert response["is_valid"] is True
             assert response["columns"] == ["id", "name"]

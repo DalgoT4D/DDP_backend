@@ -263,9 +263,7 @@ class TestMentionNotifications:
         assert Notification.objects.count() == 2
         assert NotificationRecipient.objects.count() == 2
 
-        recipients = set(
-            NotificationRecipient.objects.values_list("recipient_id", flat=True)
-        )
+        recipients = set(NotificationRecipient.objects.values_list("recipient_id", flat=True))
         assert recipients == {mentioned_orguser.id, second_mentioned_orguser.id}
 
         comment.delete()

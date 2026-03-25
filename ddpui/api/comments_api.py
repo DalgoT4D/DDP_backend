@@ -52,9 +52,7 @@ def get_comment_states(request, snapshot_id: int):
         raise HttpError(400, str(err)) from err
 
 
-@comments_router.get(
-    "/mentionable-users/", response=ApiResponse[List[MentionableUserResponse]]
-)
+@comments_router.get("/mentionable-users/", response=ApiResponse[List[MentionableUserResponse]])
 @has_permission(["can_view_dashboards"])
 def get_mentionable_users(request):
     """List org users available for @mention"""

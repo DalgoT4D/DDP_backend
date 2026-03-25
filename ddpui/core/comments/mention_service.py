@@ -221,9 +221,7 @@ class MentionService:
                 html_body=html_body,
             )
         except Exception as e:
-            logger.error(
-                f"Failed to send mention email to {mentioned_user.user.email}: {e}"
-            )
+            logger.error(f"Failed to send mention email to {mentioned_user.user.email}: {e}")
 
     @staticmethod
     def _get_thread_context(comment: Comment, max_prior: int = 3) -> list:

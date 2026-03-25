@@ -85,9 +85,7 @@ class CommentResponse(Schema):
             if users_map is None:
                 users_map = {
                     ou.user.email: ou
-                    for ou in OrgUser.objects.filter(
-                        user__email__in=emails
-                    ).select_related("user")
+                    for ou in OrgUser.objects.filter(user__email__in=emails).select_related("user")
                 }
             mentions = [
                 CommentMentionResponse(

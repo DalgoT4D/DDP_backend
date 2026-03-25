@@ -36,9 +36,7 @@ def _render_thread_html(thread: list) -> str:
     return (
         '<table width="100%" cellpadding="0" cellspacing="0" '
         'style="background-color:#f9fafb; border-left:3px solid #d1d5db;'
-        ' border-radius:0 4px 4px 0; margin-bottom:12px;">'
-        + "".join(items)
-        + "</table>"
+        ' border-radius:0 4px 4px 0; margin-bottom:12px;">' + "".join(items) + "</table>"
     )
 
 
@@ -92,7 +90,7 @@ def render_mention_email(
     if chart_name:
         location_html = (
             f'<span style="color:#00897B; font-weight:600;">{safe_chart_name}</span>'
-            f' &middot; {safe_title}'
+            f" &middot; {safe_title}"
         )
         plain_location = f"{chart_name} - {snapshot_title}"
     else:

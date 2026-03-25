@@ -222,15 +222,18 @@ class TestInjectPeriodIntoFilters:
         """When a matching datetime filter is not first, it should be moved to position 0"""
         frozen = copy.deepcopy(sample_snapshot.frozen_dashboard)
         # Insert a value filter before the datetime filter so it's not at index 0
-        frozen["filters"].insert(0, {
-            "id": 999,
-            "filter_type": "value",
-            "schema_name": "public",
-            "table_name": "orders",
-            "column_name": "status",
-            "settings": {},
-            "order": 0,
-        })
+        frozen["filters"].insert(
+            0,
+            {
+                "id": 999,
+                "filter_type": "value",
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "status",
+                "settings": {},
+                "order": 0,
+            },
+        )
         # The datetime filter is now at index 1
         assert frozen["filters"][1]["column_name"] == "created_at"
 
@@ -643,9 +646,7 @@ class TestGetSnapshotViewData:
         col_names = [f["column"] for f in filters]
         assert "updated_at" in col_names
 
-    def test_not_found(
-        self, mock_org_warehouse_model, mock_factory, org
-    ):
+    def test_not_found(self, mock_org_warehouse_model, mock_factory, org):
         """Viewing nonexistent snapshot raises SnapshotNotFoundError"""
         with pytest.raises(SnapshotNotFoundError):
             ReportService.get_snapshot_view_data(99999, org)
@@ -784,9 +785,7 @@ class TestListSnapshots:
         assert len(result) == 1
 
         # One filter mismatches -> no results
-        result = ReportService.list_snapshots(
-            org, search="Jan", dashboard_title="wrong"
-        )
+        result = ReportService.list_snapshots(org, search="Jan", dashboard_title="wrong")
         assert len(result) == 0
 
 
@@ -802,8 +801,7 @@ class TestSnapshotIsolation:
     dashboard or its charts must not affect snapshot view data."""
 
     def test_deleting_chart_does_not_affect_snapshot(
-        self, mock_org_warehouse_model, mock_factory,
-        sample_snapshot, org, sample_chart
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org, sample_chart
     ):
         """After deleting the original chart, get_snapshot_view_data still returns
         the full frozen chart config."""
@@ -828,8 +826,7 @@ class TestSnapshotIsolation:
         assert frozen_charts[str(chart_id)]["table_name"] == "orders"
 
     def test_deleting_dashboard_does_not_affect_snapshot(
-        self, mock_org_warehouse_model, mock_factory,
-        sample_snapshot, org, sample_dashboard
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org, sample_dashboard
     ):
         """After deleting the original dashboard, get_snapshot_view_data still
         returns the full frozen dashboard config."""
@@ -854,8 +851,7 @@ class TestSnapshotIsolation:
         assert rm["dashboard_title"] == original_title
 
     def test_different_datetime_columns_produce_two_filters(
-        self, mock_org_warehouse_model, mock_factory,
-        sample_snapshot, org
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
     ):
         """When the report's date_column differs from the dashboard's existing
         datetime filter, two datetime filters appear in the view data:
@@ -931,9 +927,7 @@ class TestCrossTableFilterInjection:
             },
         }
 
-        mock_org_warehouse_model.objects.filter.return_value.first.return_value = (
-            MagicMock()
-        )
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
         mock_wh_client = MagicMock()
         mock_wh_client.column_exists.return_value = True
         mock_factory.get_warehouse_client.return_value = mock_wh_client
