@@ -128,8 +128,17 @@ EMAIL_HOST_USER=your-email@gmail.com
 EMAIL_HOST_PASSWORD=your-app-password
 
 # === AWS CONFIGURATION (FOR PRODUCTION) ===
-AWS_ACCESS_KEY_ID=your-aws-access-key
-AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+# Secrets Manager credentials
+SECRETSMANAGER_ACCESS_KEY_ID=your-secretsmanager-access-key
+SECRETSMANAGER_SECRET_ACCESS_KEY=your-secretsmanager-secret-key
+
+# S3 credentials  
+S3_AWS_ACCESS_KEY_ID=your-s3-access-key
+S3_AWS_SECRET_ACCESS_KEY=your-s3-secret-key
+
+# SES credentials
+SES_ACCESS_KEY_ID=your-ses-access-key
+SES_SECRET_ACCESS_KEY=your-ses-secret-key
 AWS_DEFAULT_REGION=us-east-1
 AWS_S3_BUCKET_NAME=your-s3-bucket
 

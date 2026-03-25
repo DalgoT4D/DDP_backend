@@ -1,10 +1,96 @@
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
 from ddpui.core.dbt_automation.utils.tableutils import source_or_ref
+import sqlparse
+import re
+
+
+def _split_columns_respecting_parentheses(select_clause: str) -> list:
+    """
+    Split column expressions by comma while respecting parentheses.
+    Example: "coalesce(a, b), c, sum(x, y) as total" -> ["coalesce(a, b)", "c", "sum(x, y) as total"]
+    """
+    if not select_clause:
+        return []
+
+    parts = []
+    current = ""
+    paren_count = 0
+
+    for char in select_clause:
+        if char == "(":
+            paren_count += 1
+        elif char == ")":
+            paren_count -= 1
+        elif char == "," and paren_count == 0:
+            if current.strip():
+                parts.append(current.strip())
+            current = ""
+            continue
+
+        current += char
+
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts
+
+
+def extract_output_columns_from_select_clause(select_clause: str, source_columns: list) -> list:
+    """
+    Extract output column names from SELECT clause part only.
+    Input examples:
+    - "*"
+    - "*, func() as alias"
+    - "col1, col2"
+    - "col1, *"
+    - "count(*) as total, col1"
+    - "coalesce(a, b) as c, sum(x, y)"
+    """
+    if not select_clause:
+        return []
+
+    columns = []
+    # Use the new parentheses-aware splitting instead of simple split(",")
+    parts = _split_columns_respecting_parentheses(select_clause)
+
+    for part in parts:
+        if not part:
+            continue
+
+        # Handle *
+        if part == "*":
+            columns.extend(source_columns)
+            continue
+
+        # Handle AS aliases
+        as_match = re.search(r"^(.*?)\s+AS\s+(\w+)$", part, re.IGNORECASE)
+        if as_match:
+            columns.append(as_match.group(2))
+            continue
+
+        # Handle implicit aliases (space-separated, no AS keyword)
+        # Only if it doesn't contain parentheses (to avoid breaking function calls)
+        if " " in part and "(" not in part:
+            words = part.split()
+            if len(words) >= 2:
+                columns.append(words[-1])  # Last word is the alias
+                continue
+
+        # For functions, expressions, or simple column names
+        # Clean up for valid column name
+        clean_name = re.sub(r"[^\w]", "_", part.lower())
+        clean_name = re.sub(r"_+", "_", clean_name).strip("_")
+        if clean_name:
+            columns.append(clean_name[:50])  # Limit length
+        else:
+            columns.append(f"col_{len(columns) + 1}")
+
+    return columns
 
 
 def raw_generic_dbt_sql(
-    config: str,
+    config: dict,
     warehouse: WarehouseInterface,
 ):
     """
@@ -12,7 +98,10 @@ def raw_generic_dbt_sql(
     """
     sql_statement_1 = config.get("sql_statement_1")
     sql_statement_2 = config.get("sql_statement_2", "")
-    output_cols = []
+    source_columns = config.get("source_columns", [])
+
+    # Extract output columns from SELECT clause
+    output_cols = extract_output_columns_from_select_clause(sql_statement_1, source_columns)
 
     if not sql_statement_1:
         raise ValueError("Primary SQL statement (sql_statement_1) is required")

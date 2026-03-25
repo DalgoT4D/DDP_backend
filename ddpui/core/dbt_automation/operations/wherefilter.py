@@ -94,14 +94,26 @@ def where_filter_sql(
     if clause_type in ["and", "or"]:
         temp = []
         for clause in clauses:
-            operand = clause["operand"]
+            operator = clause["operator"]
+            column_name = quote_columnname(clause["column"], warehouse.name)
 
-            clause = (
-                f"{quote_columnname(clause['column'], warehouse.name)} "
-                + f"{clause['operator']} "
-                + f"{quote_columnname(operand['value'], warehouse.name) if operand['is_col'] else quote_constvalue(str(operand['value']), warehouse.name)} "
-            )
-            temp.append(clause)
+            # Handle NULL operators
+            if operator in ["IS NULL", "IS NOT NULL"]:
+                clause_sql = f"{column_name} {operator}"
+            else:
+                # Handle regular operators with operands
+                operand = clause["operand"]
+                if operand is None:
+                    raise ValueError(f"Operand required for operator {operator}")
+
+                operand_value = (
+                    quote_columnname(operand["value"], warehouse.name)
+                    if operand["is_col"]
+                    else quote_constvalue(str(operand["value"]), warehouse.name)
+                )
+                clause_sql = f"{column_name} {operator} {operand_value}"
+
+            temp.append(clause_sql)
 
         dbt_code += f" {clause_type.upper()} ".join(temp)
 
