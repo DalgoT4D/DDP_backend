@@ -200,14 +200,13 @@ class CommentService:
         snapshot_id: int,
         org: Org,
         orguser: OrgUser,
-    ) -> dict:
+    ) -> list:
         """Return icon state and unread count per target for the current user.
 
         State priority: mentioned > unread > read > none
 
-        Returns:
-            {"summary": {"state": "mentioned", "count": 3},
-             "42": {"state": "unread", "count": 1}}
+        Returns a list of dicts, each with target_type, chart_id, state, count,
+        and unread_count fields.
         """
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
@@ -217,7 +216,7 @@ class CommentService:
         ).values_list("target_type", "snapshot_chart_id", "created_at", "id")
 
         if not comments:
-            return {}
+            return []
 
         read_statuses = CommentService._get_read_statuses(orguser, snapshot)
         mentioned_ids = CommentService._get_mentioned_comment_ids(snapshot, orguser.user.email)
@@ -276,20 +275,26 @@ class CommentService:
         targets: dict,
         read_statuses: dict,
         mentioned_ids: set,
-    ) -> dict:
+    ) -> list:
         """Compute state and counts per target.
 
         For each target, determines:
         - "mentioned": has unread comments that @mention the user
         - "unread": has unread comments (no mentions)
         - "read": all comments have been read
+
+        Returns a list of dicts with explicit target_type and chart_id fields.
         """
-        states = {}
+        states = []
         for target_key, comment_data in targets.items():
             if target_key == CommentTargetType.SUMMARY:
                 rs_key = (CommentTargetType.SUMMARY, None)
+                target_type = CommentTargetType.SUMMARY
+                chart_id = None
             else:
-                rs_key = (CommentTargetType.CHART, int(target_key))
+                chart_id = int(target_key)
+                rs_key = (CommentTargetType.CHART, chart_id)
+                target_type = CommentTargetType.CHART
 
             last_read = read_statuses.get(rs_key)
 
@@ -310,11 +315,15 @@ class CommentService:
             else:
                 state = "read"
 
-            states[target_key] = {
-                "state": state,
-                "count": total_count,
-                "unread_count": unread_count,
-            }
+            states.append(
+                {
+                    "target_type": target_type,
+                    "chart_id": chart_id,
+                    "state": state,
+                    "count": total_count,
+                    "unread_count": unread_count,
+                }
+            )
 
         return states
 

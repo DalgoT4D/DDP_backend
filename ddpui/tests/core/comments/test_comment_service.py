@@ -466,6 +466,14 @@ class TestGroupCommentsByTarget:
 class TestComputeTargetStates:
     """Tests for CommentService._compute_target_states"""
 
+    @staticmethod
+    def _find(result, target_type, chart_id=None):
+        """Helper to find a state entry in the result list."""
+        for entry in result:
+            if entry["target_type"] == target_type and entry["chart_id"] == chart_id:
+                return entry
+        return None
+
     def test_all_read(self):
         """All comments before read cursor -> state is 'read'."""
         read_statuses = {(CommentTargetType.SUMMARY, None): timezone.now()}
@@ -475,8 +483,9 @@ class TestComputeTargetStates:
             ],
         }
         result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
-        assert result[CommentTargetType.SUMMARY]["state"] == "read"
-        assert result[CommentTargetType.SUMMARY]["unread_count"] == 0
+        entry = self._find(result, CommentTargetType.SUMMARY)
+        assert entry["state"] == "read"
+        assert entry["unread_count"] == 0
 
     def test_unread_no_mentions(self):
         """Unread comments but no mentions -> state is 'unread'."""
@@ -488,8 +497,9 @@ class TestComputeTargetStates:
             ],
         }
         result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
-        assert result[CommentTargetType.SUMMARY]["state"] == "unread"
-        assert result[CommentTargetType.SUMMARY]["unread_count"] == 1
+        entry = self._find(result, CommentTargetType.SUMMARY)
+        assert entry["state"] == "unread"
+        assert entry["unread_count"] == 1
 
     def test_mentioned_takes_priority(self):
         """Unread comment with mention -> state is 'mentioned'."""
@@ -501,7 +511,8 @@ class TestComputeTargetStates:
             ],
         }
         result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids={1})
-        assert result[CommentTargetType.SUMMARY]["state"] == "mentioned"
+        entry = self._find(result, CommentTargetType.SUMMARY)
+        assert entry["state"] == "mentioned"
 
     def test_no_read_status_all_unread(self):
         """No read cursor at all -> everything is unread."""
@@ -514,9 +525,10 @@ class TestComputeTargetStates:
         result = CommentService._compute_target_states(
             targets, read_statuses={}, mentioned_ids=set()
         )
-        assert result[CommentTargetType.SUMMARY]["state"] == "unread"
-        assert result[CommentTargetType.SUMMARY]["unread_count"] == 2
-        assert result[CommentTargetType.SUMMARY]["count"] == 2
+        entry = self._find(result, CommentTargetType.SUMMARY)
+        assert entry["state"] == "unread"
+        assert entry["unread_count"] == 2
+        assert entry["count"] == 2
 
     def test_chart_target_uses_chart_id_key(self):
         """Chart targets use (CHART, int(chart_id)) as read status key."""
@@ -529,7 +541,8 @@ class TestComputeTargetStates:
             ],
         }
         result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
-        assert result["10"]["state"] == "read"
+        entry = self._find(result, CommentTargetType.CHART, chart_id=10)
+        assert entry["state"] == "read"
 
     def test_mention_only_counts_when_unread(self):
         """A mentioned comment that's already read doesn't trigger 'mentioned'."""
@@ -541,7 +554,8 @@ class TestComputeTargetStates:
         }
         # Comment 1 mentions the user but was created before read cursor
         result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids={1})
-        assert result[CommentTargetType.SUMMARY]["state"] == "read"
+        entry = self._find(result, CommentTargetType.SUMMARY)
+        assert entry["state"] == "read"
 
     def test_multiple_targets_independent(self):
         """Each target is computed independently."""
@@ -559,8 +573,25 @@ class TestComputeTargetStates:
             ],
         }
         result = CommentService._compute_target_states(targets, read_statuses, mentioned_ids=set())
-        assert result[CommentTargetType.SUMMARY]["state"] == "read"
-        assert result["10"]["state"] == "unread"
+        summary_entry = self._find(result, CommentTargetType.SUMMARY)
+        chart_entry = self._find(result, CommentTargetType.CHART, chart_id=10)
+        assert summary_entry["state"] == "read"
+        assert chart_entry["state"] == "unread"
+
+    def test_returns_list(self):
+        """Result is a list, not a dict."""
+        targets = {
+            CommentTargetType.SUMMARY: [
+                (timezone.now(), 1),
+            ],
+        }
+        result = CommentService._compute_target_states(
+            targets, read_statuses={}, mentioned_ids=set()
+        )
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["target_type"] == CommentTargetType.SUMMARY
+        assert result[0]["chart_id"] is None
 
 
 # ================================================================================
@@ -621,6 +652,173 @@ class TestReadStatusesAndMentionedIds:
 # ================================================================================
 # Tests: list_comments (integration)
 # ================================================================================
+
+
+class TestGetCommentStates:
+    """Integration tests for CommentService.get_comment_states — array response format"""
+
+    def test_returns_list(self, snapshot, author_orguser, other_orguser, org):
+        """get_comment_states returns a list, not a dict."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="A summary comment",
+            author=author_orguser,
+            org=org,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        assert isinstance(result, list)
+
+    def test_empty_snapshot_returns_empty_list(self, snapshot, other_orguser, org):
+        """Snapshot with no comments returns []."""
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        assert result == []
+
+    def test_summary_entry_has_correct_fields(self, snapshot, author_orguser, other_orguser, org):
+        """Summary entry has target_type='summary' and chart_id=None."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Summary comment",
+            author=author_orguser,
+            org=org,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next((e for e in result if e["target_type"] == CommentTargetType.SUMMARY), None)
+        assert summary is not None
+        assert summary["chart_id"] is None
+        assert summary["count"] == 1
+        assert summary["state"] in ("unread", "read", "mentioned")
+
+    def test_chart_entry_has_correct_fields(self, snapshot, author_orguser, other_orguser, org):
+        """Chart entry has target_type='chart' and an integer chart_id."""
+        Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=10,
+            content="Chart comment",
+            author=author_orguser,
+            org=org,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        chart_entry = next((e for e in result if e["target_type"] == CommentTargetType.CHART), None)
+        assert chart_entry is not None
+        assert chart_entry["chart_id"] == 10
+        assert chart_entry["count"] == 1
+
+    def test_mixed_targets_returns_multiple_entries(
+        self, snapshot, author_orguser, other_orguser, org
+    ):
+        """Summary + two charts produce 3 entries in the list."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Summary",
+            author=author_orguser,
+            org=org,
+        )
+        Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=10,
+            content="Chart 10",
+            author=author_orguser,
+            org=org,
+        )
+        Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=20,
+            content="Chart 20",
+            author=author_orguser,
+            org=org,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        assert len(result) == 3
+        target_types = {(e["target_type"], e["chart_id"]) for e in result}
+        assert (CommentTargetType.SUMMARY, None) in target_types
+        assert (CommentTargetType.CHART, 10) in target_types
+        assert (CommentTargetType.CHART, 20) in target_types
+
+    def test_unread_state_for_never_read(self, snapshot, author_orguser, other_orguser, org):
+        """User who never opened a thread sees 'unread' state."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="First comment",
+            author=author_orguser,
+            org=org,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
+        assert summary["state"] == "unread"
+        assert summary["unread_count"] == 1
+
+    def test_read_state_after_mark_as_read(self, snapshot, author_orguser, other_orguser, org):
+        """After marking as read, state becomes 'read'."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="A comment",
+            author=author_orguser,
+            org=org,
+        )
+        CommentService.mark_as_read(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+            target_type=CommentTargetType.SUMMARY,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
+        assert summary["state"] == "read"
+        assert summary["unread_count"] == 0
+
+    def test_mentioned_state(self, snapshot, author_orguser, other_orguser, org):
+        """User mentioned in an unread comment sees 'mentioned' state."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content=f"Hey @{other_orguser.user.email}",
+            mentioned_emails=[other_orguser.user.email],
+            author=author_orguser,
+            org=org,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
+        assert summary["state"] == "mentioned"
 
 
 class TestListComments:
