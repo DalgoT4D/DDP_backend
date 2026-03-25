@@ -33,9 +33,7 @@ metrics_router = Router()
 def list_metrics(request):
     """List all metric definitions for the org"""
     org = request.orguser.org
-    metrics = MetricDefinition.objects.filter(org=org).order_by(
-        "display_order", "name"
-    )
+    metrics = MetricDefinition.objects.filter(org=org).order_by("display_order", "name")
     return [
         MetricResponse(
             id=m.id,
@@ -118,11 +116,12 @@ def update_metric(request, metric_id: int, payload: MetricUpdate):
     except MetricDefinition.DoesNotExist:
         raise HttpError(404, "Metric not found")
 
-    # Update only provided fields
+    # Update only fields that were explicitly included in the request body.
+    # Do NOT skip None values — a client sending null for an optional field
+    # (e.g. time_column) is intentionally clearing it.
     update_fields = payload.dict(exclude_unset=True)
     for field, value in update_fields.items():
-        if value is not None:
-            setattr(metric, field, value)
+        setattr(metric, field, value)
 
     metric.save()
 
@@ -175,15 +174,27 @@ def fetch_metric_data(request, payload: MetricDataRequest):
     org = request.orguser.org
 
     org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-    if not org_warehouse:
-        raise HttpError(400, "No warehouse configured for this organization")
 
-    metrics = MetricDefinition.objects.filter(
-        id__in=payload.metric_ids, org=org
-    )
+    metrics = MetricDefinition.objects.filter(id__in=payload.metric_ids, org=org)
 
     if not metrics.exists():
         return []
+
+    if not org_warehouse:
+        # Return a graceful per-metric error rather than a 400 so the frontend
+        # can display "Data unavailable" on each card instead of leaving them
+        # stuck on "Awaiting data" (which happens when the whole request fails).
+        return [
+            {
+                "metric_id": m.id,
+                "current_value": None,
+                "rag_status": "grey",
+                "achievement_pct": None,
+                "trend": [],
+                "error": "No warehouse configured for this organization",
+            }
+            for m in metrics
+        ]
 
     results = fetch_metrics_data(org_warehouse, list(metrics))
     return results
@@ -203,9 +214,7 @@ def list_annotations(request, metric_id: int):
     except MetricDefinition.DoesNotExist:
         raise HttpError(404, "Metric not found")
 
-    annotations = MetricAnnotation.objects.filter(metric=metric).order_by(
-        "-period_key"
-    )
+    annotations = MetricAnnotation.objects.filter(metric=metric).order_by("-period_key")
     return [
         AnnotationResponse(
             id=a.id,
@@ -222,9 +231,7 @@ def list_annotations(request, metric_id: int):
 
 @metrics_router.post("/{metric_id}/annotations/", response=AnnotationResponse)
 @has_permission(["can_edit_charts"])
-def create_or_update_annotation(
-    request, metric_id: int, payload: AnnotationCreate
-):
+def create_or_update_annotation(request, metric_id: int, payload: AnnotationCreate):
     """Create or update an annotation for a metric + period"""
     orguser = request.orguser
     org = orguser.org
