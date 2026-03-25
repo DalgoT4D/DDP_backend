@@ -7,7 +7,8 @@ import traceback
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from sqlalchemy import column, func, text, literal_column
+from sqlalchemy import column, func, text, literal_column, cast
+from sqlalchemy.dialects.postgresql import TIMESTAMP as PG_TIMESTAMP
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.metrics import MetricDefinition
@@ -68,9 +69,7 @@ def fetch_current_value(
     try:
         builder = AggQueryBuilder()
         builder.fetch_from(metric.table_name, metric.schema_name)
-        builder.add_aggregate_column(
-            metric.column, metric.aggregation, alias="metric_value"
-        )
+        builder.add_aggregate_column(metric.column, metric.aggregation, alias="metric_value")
         query = builder.build()
 
         logger.info(
@@ -121,14 +120,15 @@ def fetch_trend_data(
 
     try:
         time_col = column(metric.time_column)
+        # Cast to timestamp for Postgres so date_trunc works on string/varchar date columns
+        if warehouse_type.lower() in ["postgres", "postgresql"]:
+            time_col = cast(time_col, PG_TIMESTAMP)
         time_expr = apply_time_grain(time_col, metric.time_grain, warehouse_type)
 
         builder = AggQueryBuilder()
         builder.fetch_from(metric.table_name, metric.schema_name)
         builder.add_column(time_expr.label("period"))
-        builder.add_aggregate_column(
-            metric.column, metric.aggregation, alias="metric_value"
-        )
+        builder.add_aggregate_column(metric.column, metric.aggregation, alias="metric_value")
         builder.group_cols_by(time_expr)
         # Use literal_column so SQLAlchemy resolves the SELECT alias
         builder.order_by_clauses.append(literal_column("period").asc())
@@ -236,9 +236,7 @@ def fetch_metrics_data(
         if val_error:
             errors.append(f"Value: {val_error}")
 
-        trend, trend_error = fetch_trend_data(
-            warehouse_client, metric, warehouse_type
-        )
+        trend, trend_error = fetch_trend_data(warehouse_client, metric, warehouse_type)
         if trend_error:
             errors.append(f"Trend: {trend_error}")
 
@@ -259,9 +257,7 @@ def fetch_metrics_data(
 
     # Parallelize warehouse queries (max 5 concurrent to be kind to the warehouse)
     with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_metric = {
-            executor.submit(_process_metric, m): m for m in metrics
-        }
+        future_to_metric = {executor.submit(_process_metric, m): m for m in metrics}
         for future in as_completed(future_to_metric):
             metric = future_to_metric[future]
             try:
