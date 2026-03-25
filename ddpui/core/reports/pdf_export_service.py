@@ -1,6 +1,7 @@
 """PDF export service using Playwright for server-side report rendering"""
 
 from django.conf import settings
+from playwright.sync_api import sync_playwright
 
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -35,8 +36,6 @@ class PdfExportService:
             ValueError: If RENDER_SECRET is not configured
             Exception: If PDF generation fails
         """
-        from playwright.sync_api import sync_playwright
-
         render_secret = getattr(settings, "RENDER_SECRET", None)
         if not render_secret:
             raise ValueError(

@@ -664,6 +664,21 @@ class ReportService:
         return snapshot
 
     @staticmethod
+    def ensure_share_token(snapshot: ReportSnapshot) -> str:
+        """Ensure the snapshot has a share token, generating one if needed.
+
+        This does NOT make the report publicly accessible — it only ensures
+        a token exists for URL generation (e.g., PDF export).
+
+        Returns:
+            The share token string.
+        """
+        if not snapshot.public_share_token:
+            snapshot.public_share_token = secrets.token_urlsafe(48)
+            snapshot.save(update_fields=["public_share_token"])
+        return snapshot.public_share_token
+
+    @staticmethod
     def build_share_response(snapshot: ReportSnapshot) -> dict:
         """Build a share response dict from a snapshot.
 

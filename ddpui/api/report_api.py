@@ -1,6 +1,5 @@
 """Report API endpoints"""
 
-import secrets
 from typing import List
 
 from django.http import HttpResponse
@@ -144,14 +143,8 @@ def export_report_pdf(request, snapshot_id: int):
         raise HttpError(404, str(err)) from err
 
     try:
-        # Ensure the snapshot has a share token (needed for the URL).
-        # This does NOT make the report publicly accessible — Playwright
-        # authenticates via the render secret header, not is_public.
-        if not snapshot.public_share_token:
-            snapshot.public_share_token = secrets.token_urlsafe(48)
-            snapshot.save(update_fields=["public_share_token"])
-
-        pdf_bytes = PdfExportService.generate_pdf(snapshot_id, snapshot.public_share_token)
+        share_token = ReportService.ensure_share_token(snapshot)
+        pdf_bytes = PdfExportService.generate_pdf(snapshot_id, share_token)
 
         safe_title = "".join(c for c in snapshot.title if c.isalnum() or c in " -_").strip()
         filename = f"{safe_title or 'report'}.pdf"
