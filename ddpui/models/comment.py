@@ -1,18 +1,18 @@
 """Comment models for Dalgo platform"""
 
+from enum import Enum
+
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.report import ReportSnapshot
 
 
-class CommentTargetType:
+class CommentTargetType(str, Enum):
     """Application-level enum for comment target types"""
 
     CHART = "chart"
     SUMMARY = "summary"
-
-    ALL = [CHART, SUMMARY]
 
 
 class Comment(models.Model):

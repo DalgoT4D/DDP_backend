@@ -121,7 +121,9 @@ class CommentService:
         """Create a comment on a report snapshot."""
         snapshot = CommentService._get_snapshot(snapshot_id, org)
 
-        if target_type not in CommentTargetType.ALL:
+        try:
+            CommentTargetType(target_type)
+        except ValueError:
             raise CommentValidationError(f"Invalid target_type: {target_type}")
 
         if target_type == CommentTargetType.CHART and chart_id is None:

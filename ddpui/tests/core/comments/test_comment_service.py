@@ -912,6 +912,21 @@ class TestGetCommentStates:
         assert chart["state"] == "unread", "Reading summary should not mark chart as read"
 
 
+class TestCreateComment:
+    """Tests for CommentService.create_comment"""
+
+    def test_invalid_target_type_raises(self, snapshot, author_orguser, org):
+        """create_comment rejects target_type values not in CommentTargetType enum."""
+        with pytest.raises(CommentValidationError, match="Invalid target_type"):
+            CommentService.create_comment(
+                snapshot_id=snapshot.id,
+                org=org,
+                orguser=author_orguser,
+                target_type="invalid",
+                content="Hello",
+            )
+
+
 class TestListComments:
     """Integration tests for CommentService.list_comments"""
 
