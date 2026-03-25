@@ -166,8 +166,8 @@ class TestMentionNotifications:
         assert recipient.read_status is False
 
     @patch("ddpui.core.comments.mention_service.send_html_message")
-    def test_self_mention_skipped(self, mock_send, snapshot, author_orguser, org):
-        """Author mentioning themselves does not create a notification"""
+    def test_self_mention_creates_notification(self, mock_send, snapshot, author_orguser, org):
+        """Author mentioning themselves still creates a notification."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -178,14 +178,14 @@ class TestMentionNotifications:
 
         MentionService.process_mentions(comment, org, author_orguser)
 
-        assert Notification.objects.count() == 0
-        assert NotificationRecipient.objects.count() == 0
-        mock_send.assert_not_called()
+        assert Notification.objects.count() == 1
+        recipient = NotificationRecipient.objects.first()
+        assert recipient.recipient == author_orguser
 
         comment.delete()
 
     @patch("ddpui.core.comments.mention_service.send_html_message")
-    def test_update_only_notifies_new_mentions(
+    def test_update_notifies_all_mentioned_users(
         self,
         mock_send,
         snapshot,
@@ -194,7 +194,7 @@ class TestMentionNotifications:
         mentioned_orguser,
         second_mentioned_orguser,
     ):
-        """On edit, only users NOT in previous_emails trigger notifications"""
+        """On edit, all mentioned users get notifications (content may have changed)."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -203,23 +203,21 @@ class TestMentionNotifications:
             org=org,
         )
 
-        previous_emails = [mentioned_orguser.user.email]
-        MentionService.process_mentions(
-            comment, org, author_orguser, previous_emails=previous_emails
-        )
+        MentionService.process_mentions(comment, org, author_orguser)
 
-        # Only second_mentioned_orguser should get a notification
-        assert Notification.objects.count() == 1
-        recipient = NotificationRecipient.objects.first()
-        assert recipient.recipient == second_mentioned_orguser
+        # Both mentioned users should get notifications
+        assert Notification.objects.count() == 2
+        recipients = set(NotificationRecipient.objects.values_list("recipient_id", flat=True))
+        assert mentioned_orguser.id in recipients
+        assert second_mentioned_orguser.id in recipients
 
         comment.delete()
 
     @patch("ddpui.core.comments.mention_service.send_html_message")
-    def test_update_same_mentions_no_notification(
+    def test_update_same_mentions_still_notifies(
         self, mock_send, snapshot, author_orguser, org, mentioned_orguser
     ):
-        """Edit with same mentions does not create new notifications"""
+        """Edit with same mentions still creates notifications (content may have changed)."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -228,14 +226,11 @@ class TestMentionNotifications:
             org=org,
         )
 
-        previous_emails = [mentioned_orguser.user.email]
-        MentionService.process_mentions(
-            comment, org, author_orguser, previous_emails=previous_emails
-        )
+        MentionService.process_mentions(comment, org, author_orguser)
 
-        assert Notification.objects.count() == 0
-        assert NotificationRecipient.objects.count() == 0
-        mock_send.assert_not_called()
+        assert Notification.objects.count() == 1
+        recipient = NotificationRecipient.objects.first()
+        assert recipient.recipient == mentioned_orguser
 
         comment.delete()
 

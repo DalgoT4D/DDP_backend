@@ -30,7 +30,6 @@ class MentionService:
         comment: Comment,
         org: Org,
         author: OrgUser,
-        previous_emails: Optional[list] = None,
     ) -> list:
         """Parse mentions from content, store emails, and dispatch notifications.
 
@@ -38,7 +37,6 @@ class MentionService:
             comment: The comment containing @mentions
             org: The organization
             author: The comment author
-            previous_emails: If provided (on update), only NEW mentions trigger notifications
 
         Returns list of mentioned OrgUsers.
         """
@@ -48,21 +46,12 @@ class MentionService:
 
         MentionService.store_mentioned_emails(comment, mentioned_users)
 
-        # Determine which users are NEW mentions (for notifications)
-        if previous_emails is not None:
-            previous_set = set(previous_emails)
-            new_mentions = [u for u in mentioned_users if u.user.email not in previous_set]
-        else:
-            new_mentions = mentioned_users
-
-        # Dispatch notifications for new mentions
-        if new_mentions:
-            MentionService.notify_mentioned_users(
-                comment=comment,
-                org=org,
-                author=author,
-                mentioned_users=new_mentions,
-            )
+        MentionService.notify_mentioned_users(
+            comment=comment,
+            org=org,
+            author=author,
+            mentioned_users=mentioned_users,
+        )
 
         return mentioned_users
 
@@ -104,10 +93,6 @@ class MentionService:
         chart_name = MentionService._resolve_chart_name(comment)
 
         for mentioned_user in mentioned_users:
-            # Skip self-mentions
-            if mentioned_user.id == author.id:
-                continue
-
             message = f'{author_email} mentioned you in a comment on "{snapshot_title}"'
             email_subject = f"You were mentioned in a comment on {snapshot_title}"
 

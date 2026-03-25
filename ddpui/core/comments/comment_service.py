@@ -164,15 +164,12 @@ class CommentService:
         if comment.author != orguser:
             raise CommentPermissionError("You can only edit your own comments")
 
-        # Capture old mentions before clearing so only NEW mentions trigger notifications
-        previous_emails = list(comment.mentioned_emails or [])
-
         comment.content = content
         comment.mentioned_emails = []
         comment.save(update_fields=["content", "updated_at", "mentioned_emails"])
 
-        # Re-process mentions, passing old emails so only new mentions trigger notifications
-        MentionService.process_mentions(comment, org, orguser, previous_emails=previous_emails)
+        # Re-process mentions — always notify all mentioned users on edit
+        MentionService.process_mentions(comment, org, orguser)
 
         logger.info(f"Updated comment {comment.id}")
         return comment
