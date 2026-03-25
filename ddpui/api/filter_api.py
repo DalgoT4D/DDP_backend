@@ -57,7 +57,6 @@ class FilterPreviewResponse(Schema):
     stats: Optional[Dict[str, Any]] = None  # Can be numerical or datetime stats
 
 
-
 @filter_router.get("/schemas/", response=List[SchemaResponse])
 @has_permission(["can_view_warehouse_data"])
 def list_schemas(request):
@@ -167,7 +166,9 @@ def list_columns(request, schema_name: str, table_name: str):
 
     try:
         warehouse_client = get_warehouse_client(org_warehouse)
-        results = _wh_funcs.get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
+        results = _wh_funcs.get_table_columns(
+            warehouse_client, org_warehouse, schema_name, table_name
+        )
 
         if not results and org_warehouse.wtype not in ("postgres", "bigquery"):
             raise HttpError(400, f"Unsupported warehouse type: {org_warehouse.wtype}")

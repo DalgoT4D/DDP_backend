@@ -40,8 +40,7 @@ class PdfExportService:
         render_secret = getattr(settings, "RENDER_SECRET", None)
         if not render_secret:
             raise ValueError(
-                "RENDER_SECRET is not configured. "
-                "Set the RENDER_SECRET environment variable."
+                "RENDER_SECRET is not configured. " "Set the RENDER_SECRET environment variable."
             )
 
         frontend_url = getattr(settings, "FRONTEND_URL_V2", None) or getattr(
@@ -70,9 +69,7 @@ class PdfExportService:
                 page.route("**/*", _inject_render_secret)
 
                 page.goto(url, wait_until="networkidle")
-                page.wait_for_selector(
-                    "[data-pdf-ready='true']", timeout=CANVAS_TIMEOUT_MS
-                )
+                page.wait_for_selector("[data-pdf-ready='true']", timeout=CANVAS_TIMEOUT_MS)
                 try:
                     page.wait_for_selector("canvas", timeout=CANVAS_TIMEOUT_MS)
                 except Exception:
@@ -86,9 +83,7 @@ class PdfExportService:
                     print_background=True,
                     scale=1,
                 )
-                logger.info(
-                    f"PDF generated for snapshot {snapshot_id} ({len(pdf_bytes)} bytes)"
-                )
+                logger.info(f"PDF generated for snapshot {snapshot_id} ({len(pdf_bytes)} bytes)")
                 return pdf_bytes
             finally:
                 browser.close()

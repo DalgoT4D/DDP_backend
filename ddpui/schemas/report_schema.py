@@ -86,7 +86,9 @@ class SnapshotResponse(Schema):
         return cls(
             id=snapshot.id,
             title=snapshot.title,
-            dashboard_title=snapshot.frozen_dashboard.get("title") if snapshot.frozen_dashboard else None,
+            dashboard_title=snapshot.frozen_dashboard.get("title")
+            if snapshot.frozen_dashboard
+            else None,
             date_column=snapshot.date_column or None,
             period_start=snapshot.period_start,
             period_end=snapshot.period_end,
