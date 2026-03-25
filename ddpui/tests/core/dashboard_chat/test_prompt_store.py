@@ -27,10 +27,15 @@ def test_prompt_store_returns_default_when_no_db_override_exists():
     store = DashboardChatPromptStore()
 
     prompt = store.get(DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION)
+    final_answer_prompt = store.get(DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION)
 
     assert (
         prompt
         == DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION]
+    )
+    assert (
+        final_answer_prompt
+        == DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION]
     )
 
 

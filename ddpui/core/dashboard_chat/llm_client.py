@@ -12,6 +12,7 @@ from ddpui.core.dashboard_chat.runtime_types import (
     DashboardChatFollowUpContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
+    DashboardChatRetrievedDocument,
 )
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 
@@ -47,6 +48,20 @@ class DashboardChatLlmClient(Protocol):
     ) -> dict[str, Any]:
         """Run one prototype-style tool-loop completion."""
 
+    def compose_final_answer(
+        self,
+        *,
+        user_query: str,
+        intent: DashboardChatIntent,
+        response_format: str,
+        draft_answer: str | None,
+        retrieved_documents: list[DashboardChatRetrievedDocument],
+        sql: str | None,
+        sql_results: list[dict[str, Any]] | None,
+        warnings: list[str],
+    ) -> str:
+        """Compose the final user-facing markdown answer."""
+
 
 class OpenAIDashboardChatLlmClient:
     """Direct OpenAI SDK adapter with JSON-mode helpers."""
@@ -54,6 +69,21 @@ class OpenAIDashboardChatLlmClient:
     TECHNICAL_DIFFICULTIES_MESSAGE = (
         "I'm experiencing technical difficulties. Please try again."
     )
+    TABLE_SUMMARY_JSON_INSTRUCTIONS = """
+For table-like responses, return valid JSON only with this shape:
+{
+  "title": "short heading or null",
+  "summary": "1-2 sentence narrative summary",
+  "key_points": ["short point", "short point"]
+}
+
+Rules:
+- Do not include markdown tables.
+- Do not include pipe characters or ASCII table formatting.
+- Do not repeat every row from the result set.
+- The UI will render the structured table separately from sql_results.
+- Keep key_points to at most 3 concise bullets.
+""".strip()
 
     def __init__(
         self,
@@ -168,6 +198,71 @@ class OpenAIDashboardChatLlmClient:
         answer = response.choices[0].message.content or ""
         return answer.strip()
 
+    def compose_final_answer(
+        self,
+        *,
+        user_query: str,
+        intent: DashboardChatIntent,
+        response_format: str,
+        draft_answer: str | None,
+        retrieved_documents: list[DashboardChatRetrievedDocument],
+        sql: str | None,
+        sql_results: list[dict[str, Any]] | None,
+        warnings: list[str],
+    ) -> str:
+        """Compose the final user-facing markdown answer from tool-loop outputs."""
+        context_payload = {
+            "user_query": user_query,
+            "intent": intent.value,
+            "response_format": response_format,
+            "draft_answer": draft_answer or None,
+            "warnings": warnings[:5],
+            "sql": sql,
+            "sql_results": (sql_results or [])[:8],
+            "row_count": len(sql_results or []),
+            "retrieved_context": [
+                {
+                    "source_type": document.source_type,
+                    "source_identifier": document.source_identifier,
+                    "content": self._compact_snippet(document.content),
+                }
+                for document in retrieved_documents[:6]
+            ],
+        }
+        if response_format in {"text_with_table", "table"}:
+            result = self._complete_json(
+                operation="final_answer_table_summary",
+                system_prompt=(
+                    self.prompt_store.get(
+                        DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION
+                    )
+                    + "\n\n"
+                    + self.TABLE_SUMMARY_JSON_INSTRUCTIONS
+                ),
+                user_prompt=json.dumps(context_payload, ensure_ascii=False),
+            )
+            return self._format_table_summary_markdown(result)
+
+        response = self._create_chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": self.prompt_store.get(
+                        DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(context_payload, ensure_ascii=False),
+                },
+            ],
+            temperature=0.1,
+            max_tokens=400,
+        )
+        self._record_usage("final_answer_composition", response)
+        answer = response.choices[0].message.content or ""
+        return answer.strip()
+
     def get_prompt(self, prompt_key: DashboardChatPromptTemplateKey | str) -> str:
         """Return one stored dashboard chat prompt."""
         return self.prompt_store.get(prompt_key)
@@ -266,3 +361,32 @@ class OpenAIDashboardChatLlmClient:
                 sleep(min(2**attempt, 2))
         assert last_error is not None
         raise last_error
+
+    @staticmethod
+    def _compact_snippet(content: str, max_length: int = 320) -> str:
+        """Trim retrieved context before feeding it into the final answer prompt."""
+        normalized_content = " ".join(content.split())
+        if len(normalized_content) <= max_length:
+            return normalized_content
+        return normalized_content[: max_length - 1].rstrip() + "…"
+
+    @staticmethod
+    def _format_table_summary_markdown(result: dict[str, Any]) -> str:
+        """Render a structured table summary into short markdown without any table body."""
+        title = str(result.get("title") or "").strip()
+        summary = str(result.get("summary") or "").strip()
+        raw_key_points = result.get("key_points") or []
+        key_points = [
+            str(point).strip()
+            for point in raw_key_points
+            if isinstance(point, str) and point.strip()
+        ][:3]
+
+        sections: list[str] = []
+        if title:
+            sections.append(f"### {title}")
+        if summary:
+            sections.append(summary)
+        if key_points:
+            sections.append("\n".join(f"- {point}" for point in key_points))
+        return "\n\n".join(section for section in sections if section).strip()

@@ -37,6 +37,10 @@ class DashboardChatPromptTemplateKey(models.TextChoices):
         "follow_up_system",
         "Follow-up System",
     )
+    FINAL_ANSWER_COMPOSITION = (
+        "final_answer_composition",
+        "Final Answer Composition",
+    )
     SMALL_TALK_CAPABILITIES = (
         "small_talk_capabilities",
         "Small Talk Capabilities",

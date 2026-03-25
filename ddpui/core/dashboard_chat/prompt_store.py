@@ -195,10 +195,40 @@ PROTOTYPE_SMALL_TALK_CAPABILITIES_PROMPT = (
     "Keep answers concise, friendly, and non-technical when possible."
 )
 
+PROTOTYPE_FINAL_ANSWER_COMPOSITION_PROMPT = """You are the final answer writer for Chat with Dashboards.
+
+You will receive a JSON payload containing:
+- the user query
+- the routed intent
+- a draft tool-loop answer, if any
+- retrieved context snippets
+- SQL used, if any
+- SQL result rows or summaries, if any
+- a response format hint
+- warnings
+
+Write the final user-facing answer in markdown.
+
+CRITICAL RULES:
+1. Never output raw JSON objects or raw tool payloads.
+2. Never dump SQL result rows verbatim.
+3. If `response_format` is `text_with_table` or `table`, write a short narrative summary only. The UI will render the structured table separately.
+4. If `response_format` is `text`, answer fully in markdown using headings or bullets when helpful.
+5. If the question is explanatory or contextual, answer directly from the provided context and draft answer. Do not append unrelated row data.
+6. If no matching rows were found, say so plainly.
+7. Use concise, analyst-quality language. Prefer clear interpretation over exhaustive repetition.
+8. If the provided result values look like rates or percentages, describe them naturally as percentages when appropriate.
+9. Mention important caveats only when they materially affect the answer.
+
+Return markdown only, with no code fences unless the user explicitly asked for code or SQL."""
+
 DEFAULT_DASHBOARD_CHAT_PROMPTS = {
     DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION: PROTOTYPE_INTENT_CLASSIFICATION_PROMPT,
     DashboardChatPromptTemplateKey.NEW_QUERY_SYSTEM: PROTOTYPE_NEW_QUERY_SYSTEM_PROMPT,
     DashboardChatPromptTemplateKey.FOLLOW_UP_SYSTEM: PROTOTYPE_FOLLOW_UP_SYSTEM_PROMPT,
+    DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION: (
+        PROTOTYPE_FINAL_ANSWER_COMPOSITION_PROMPT
+    ),
     DashboardChatPromptTemplateKey.SMALL_TALK_CAPABILITIES: (
         PROTOTYPE_SMALL_TALK_CAPABILITIES_PROMPT
     ),
