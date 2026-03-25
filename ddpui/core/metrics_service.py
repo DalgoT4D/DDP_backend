@@ -19,6 +19,19 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 
+def _compile_and_execute(warehouse_client, query):
+    """
+    Compile a SQLAlchemy Select and execute it — mirrors the pattern
+    in charts_service.execute_query() which is known to work.
+    """
+    compiled = query.compile(
+        bind=warehouse_client.engine,
+        compile_kwargs={"literal_binds": True},
+    )
+    logger.info(f"Executing SQL: {compiled}")
+    return warehouse_client.execute(compiled)
+
+
 def compute_rag_status(
     current_value: Optional[float],
     target_value: Optional[float],
@@ -66,21 +79,22 @@ def fetch_current_value(
             f"on {metric.schema_name}.{metric.table_name}"
         )
 
-        rows = warehouse_client.execute(query)
+        rows = _compile_and_execute(warehouse_client, query)
 
         if rows and len(rows) > 0:
-            # The warehouse returns list[dict]; handle both dict key styles
             row = rows[0]
-            val = (
-                row.get("metric_value")
-                if isinstance(row, dict)
-                else getattr(row, "metric_value", None)
-            )
+            val = row.get("metric_value") if isinstance(row, dict) else None
             if val is not None:
                 result = float(val)
                 logger.info(f"Metric {metric.id}: value = {result}")
                 return result, None
-            return None, "Query returned NULL"
+            # If the alias key isn't found, log all available keys
+            keys = list(row.keys()) if isinstance(row, dict) else dir(row)
+            logger.warning(
+                f"Metric {metric.id}: 'metric_value' not in row keys: {keys}. "
+                f"Row content: {row}"
+            )
+            return None, f"Alias 'metric_value' not in result keys: {keys}"
 
         return None, "Query returned no rows"
 
@@ -127,7 +141,13 @@ def fetch_trend_data(
             f"fetching trend ({metric.time_grain} over {metric.trend_periods} periods)"
         )
 
-        rows = warehouse_client.execute(query)
+        rows = _compile_and_execute(warehouse_client, query)
+
+        if rows and len(rows) > 0:
+            # Log the first row's keys for debugging
+            first_row = rows[0]
+            keys = list(first_row.keys()) if isinstance(first_row, dict) else []
+            logger.info(f"Metric {metric.id}: trend row keys = {keys}")
 
         trend = []
         for row in rows:
