@@ -168,7 +168,7 @@ class CommentService:
 
         comment.content = content
         comment.mentioned_emails = []
-        comment.save(update_fields=["content", "updated_at", "mentioned_emails"])
+        comment.save()
 
         # Re-process mentions — always notify all mentioned users on edit
         MentionService.process_mentions(comment, org, orguser, mentioned_emails or [])
@@ -191,7 +191,7 @@ class CommentService:
         comment.is_deleted = True
         comment.content = ""
         comment.mentioned_emails = []
-        comment.save(update_fields=["is_deleted", "content", "mentioned_emails", "updated_at"])
+        comment.save()
 
         logger.info(f"Soft-deleted comment {comment_id}")
 

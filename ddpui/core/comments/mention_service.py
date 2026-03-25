@@ -66,7 +66,7 @@ class MentionService:
     def store_mentioned_emails(comment: Comment, users: list) -> None:
         """Store mentioned user emails in the comment's JSONField."""
         comment.mentioned_emails = list(set(u.user.email for u in users))
-        comment.save(update_fields=["mentioned_emails"])
+        comment.save()
 
     @staticmethod
     def notify_mentioned_users(
