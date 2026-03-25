@@ -820,6 +820,97 @@ class TestGetCommentStates:
         summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
         assert summary["state"] == "mentioned"
 
+    def test_edited_comment_stays_read(self, snapshot, author_orguser, other_orguser, org):
+        """Editing a comment (bumping updated_at) should NOT flip it back to unread.
+
+        We use created_at for the unread check, not updated_at.
+        """
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Original text",
+            author=author_orguser,
+            org=org,
+        )
+        # Mark as read
+        CommentService.mark_as_read(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+            target_type=CommentTargetType.SUMMARY,
+        )
+        # Edit the comment — this bumps updated_at but NOT created_at
+        comment.content = "Edited text"
+        comment.save(update_fields=["content", "updated_at"])
+
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
+        assert summary["state"] == "read", "Editing a comment should not make it unread again"
+        assert summary["unread_count"] == 0
+
+    def test_deleted_comments_excluded(self, snapshot, author_orguser, other_orguser, org):
+        """Soft-deleted comments should not appear in counts."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Visible comment",
+            author=author_orguser,
+            org=org,
+        )
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Deleted comment",
+            author=author_orguser,
+            org=org,
+            is_deleted=True,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
+        assert summary["count"] == 1, "Deleted comments should not be counted"
+
+    def test_read_status_does_not_cross_targets(self, snapshot, author_orguser, other_orguser, org):
+        """Reading summary should NOT affect chart unread state, and vice versa."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Summary comment",
+            author=author_orguser,
+            org=org,
+        )
+        Comment.objects.create(
+            target_type=CommentTargetType.CHART,
+            snapshot=snapshot,
+            snapshot_chart_id=10,
+            content="Chart comment",
+            author=author_orguser,
+            org=org,
+        )
+        # Only mark summary as read
+        CommentService.mark_as_read(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+            target_type=CommentTargetType.SUMMARY,
+        )
+        result = CommentService.get_comment_states(
+            snapshot_id=snapshot.id,
+            org=org,
+            orguser=other_orguser,
+        )
+        summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
+        chart = next(e for e in result if e["target_type"] == CommentTargetType.CHART)
+        assert summary["state"] == "read"
+        assert chart["state"] == "unread", "Reading summary should not mark chart as read"
+
 
 class TestListComments:
     """Integration tests for CommentService.list_comments"""

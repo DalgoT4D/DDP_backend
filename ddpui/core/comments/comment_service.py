@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from django.db import connection
 from django.db.models import Q
 from django.utils import timezone
 
@@ -195,6 +196,41 @@ class CommentService:
 
         logger.info(f"Soft-deleted comment {comment_id}")
 
+    # language=SQL
+    _COMMENT_STATES_SQL = """
+        SELECT
+            "comment".target_type,
+            "comment".snapshot_chart_id AS chart_id,
+            COUNT(*) AS total_count,
+            SUM(
+                CASE
+                    WHEN crs.last_read_at IS NULL
+                         OR "comment".created_at > crs.last_read_at
+                    THEN 1 ELSE 0
+                END
+            ) AS unread_count,
+            SUM(
+                CASE
+                    WHEN (crs.last_read_at IS NULL
+                          OR "comment".created_at > crs.last_read_at)
+                         AND "comment".mentioned_emails::jsonb @> %s::jsonb
+                    THEN 1 ELSE 0
+                END
+            ) AS unread_mentioned_count
+        FROM "comment"
+        LEFT JOIN comment_read_status crs
+            ON crs.snapshot_id = "comment".snapshot_id
+            AND crs.target_type = "comment".target_type
+            AND (crs.chart_id = "comment".snapshot_chart_id
+                 OR (crs.chart_id IS NULL
+                     AND "comment".snapshot_chart_id IS NULL))
+            AND crs.user_id = %s
+        WHERE "comment".snapshot_id = %s
+            AND "comment".is_deleted = false
+            AND "comment".target_type IN ('summary', 'chart')
+        GROUP BY "comment".target_type, "comment".snapshot_chart_id
+    """
+
     @staticmethod
     def get_comment_states(
         snapshot_id: int,
@@ -207,22 +243,45 @@ class CommentService:
 
         Returns a list of dicts, each with target_type, chart_id, state, count,
         and unread_count fields.
+
+        Uses a single raw SQL query with a LEFT JOIN to compute all counts
+        in one pass.
         """
-        snapshot = CommentService._get_snapshot(snapshot_id, org)
+        # Validate snapshot belongs to org
+        CommentService._get_snapshot(snapshot_id, org)
 
-        comments = Comment.objects.filter(
-            snapshot=snapshot,
-            is_deleted=False,
-        ).values_list("target_type", "snapshot_chart_id", "created_at", "id")
+        user_email_json = f'"{orguser.user.email}"'
 
-        if not comments:
-            return []
+        with connection.cursor() as cursor:
+            cursor.execute(
+                CommentService._COMMENT_STATES_SQL,
+                [user_email_json, orguser.id, snapshot_id],
+            )
+            rows = cursor.fetchall()
 
-        read_statuses = CommentService._get_read_statuses(orguser, snapshot)
-        mentioned_ids = CommentService._get_mentioned_comment_ids(snapshot, orguser.user.email)
-        targets = CommentService._group_comments_by_target(comments)
+        states = []
+        for target_type, chart_id, total_count, unread_count, unread_mentioned_count in rows:
+            unread = unread_count or 0
+            mentioned = unread_mentioned_count or 0
 
-        return CommentService._compute_target_states(targets, read_statuses, mentioned_ids)
+            if mentioned > 0:
+                state = "mentioned"
+            elif unread > 0:
+                state = "unread"
+            else:
+                state = "read"
+
+            states.append(
+                {
+                    "target_type": target_type,
+                    "chart_id": chart_id,
+                    "state": state,
+                    "count": total_count,
+                    "unread_count": unread,
+                }
+            )
+
+        return states
 
     @staticmethod
     def _get_read_statuses(
