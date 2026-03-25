@@ -52,7 +52,7 @@ jobs:
             /home/ubuntu/.local/bin/uv sync
             /home/ubuntu/.local/bin/uv run python manage.py migrate
             /home/ubuntu/.local/bin/uv run python manage.py loaddata seed/*.json
-            supervisorctl restart django-backend-asgi django-celery-worker django-canvas-dbt-worker django-celery-beat
+            sudo supervisorctl -c /home/ubuntu/supervisord.conf restart django-backend-asgi django-celery-worker django-canvas-dbt-worker django-celery-beat
 
       - name: Summary
         env:
