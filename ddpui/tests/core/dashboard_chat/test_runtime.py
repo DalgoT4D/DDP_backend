@@ -12,7 +12,7 @@ from ddpui.core.dashboard_chat.allowlist import (
     DashboardChatAllowlistBuilder,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.runtime import DashboardChatRuntime
+from ddpui.core.dashboard_chat.graph.orchestrator import DashboardChatRuntime
 from ddpui.core.dashboard_chat.runtime_types import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
@@ -62,15 +62,22 @@ class FakeVectorStore:
                 "org_id": org_id,
                 "query_text": query_text,
                 "n_results": n_results,
-                "source_types": list(source_types) if source_types else [],
+                "source_types": [
+                    source_type.value if hasattr(source_type, "value") else source_type
+                    for source_type in (source_types or [])
+                ],
                 "dashboard_id": dashboard_id,
                 "query_embedding": query_embedding,
                 "collection_name": collection_name,
             }
         )
         results = []
+        normalized_source_types = {
+            source_type.value if hasattr(source_type, "value") else source_type
+            for source_type in (source_types or [])
+        }
         for row in self.rows:
-            if source_types and row.metadata.get("source_type") not in source_types:
+            if normalized_source_types and row.metadata.get("source_type") not in normalized_source_types:
                 continue
             if dashboard_id is not None and row.metadata.get("dashboard_id") != dashboard_id:
                 continue
@@ -853,7 +860,7 @@ def test_get_distinct_values_returns_column_correction_for_wrong_table(primary_d
         "warehouse_tools": None,
     }
 
-    result = runtime._tool_get_distinct_values(
+    result = runtime._handle_get_distinct_values_tool(
         {
             "table": "analytics.donor_funding_quarterly",
             "column": "donor_type",
@@ -1506,12 +1513,12 @@ def test_runtime_dbt_tools_use_compact_allowlisted_index():
         "dbt_index": dbt_index,
     }
 
-    search_result = runtime._tool_search_dbt_models(
+    search_result = runtime._handle_search_dbt_models_tool(
         {"query": "program reach", "limit": 5},
         state,
         {},
     )
-    info_result = runtime._tool_get_dbt_model_info(
+    info_result = runtime._handle_get_dbt_model_info_tool(
         {"model_name": "analytics.program_reach"},
         state,
         {},
@@ -1725,8 +1732,8 @@ def test_runtime_skips_disabled_source_types_during_retrieval(org, primary_dashb
         llm_client=ContextToolLoopLlm(),
         source_config=DashboardChatSourceConfig(
             enabled_source_types=(
-                "dashboard_context",
-                "dashboard_export",
+                DashboardChatSourceType.DASHBOARD_CONTEXT,
+                DashboardChatSourceType.DASHBOARD_EXPORT,
             )
         ),
     )
@@ -1760,7 +1767,7 @@ def test_list_tables_by_keyword_matches_allowlisted_table_names_without_schema_l
     }
     execution_context = {"schema_cache": {}, "warnings": []}
 
-    result = runtime._tool_list_tables_by_keyword(
+    result = runtime._handle_list_tables_by_keyword_tool(
         {"keyword": "district_funding_efficiency_quarterly", "limit": 10},
         state,
         execution_context,
@@ -1828,7 +1835,7 @@ def test_tool_document_payload_exposes_structured_chart_metadata():
         llm_client=SmallTalkLlm(),
     )
 
-    payload = runtime._tool_document_payload(
+    payload = runtime._build_tool_document_payload(
         DashboardChatRetrievedDocument(
             document_id="doc-chart",
             source_type=DashboardChatSourceType.DASHBOARD_EXPORT.value,

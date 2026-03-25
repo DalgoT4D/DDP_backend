@@ -1,0 +1,1 @@
+"""Generic vector-database utilities."""

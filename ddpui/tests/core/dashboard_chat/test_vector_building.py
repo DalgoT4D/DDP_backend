@@ -15,8 +15,11 @@ from ddpui.core.dashboard_chat.dbt_docs import (
     generate_dashboard_chat_dbt_docs_artifacts,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionService
-from ddpui.core.dashboard_chat.vector_documents import build_dashboard_chat_collection_name
+from ddpui.core.dashboard_chat.vector_building import DashboardChatVectorBuildService
+from ddpui.core.dashboard_chat.vector_documents import (
+    DashboardChatSourceType,
+    build_dashboard_chat_collection_name,
+)
 from ddpui.core.dashboard_chat.vector_store import DashboardChatStoredDocument
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCLIPROFILE
@@ -32,7 +35,7 @@ pytestmark = pytest.mark.django_db
 
 
 class FakeDashboardChatVectorStore:
-    """In-memory vector store used to exercise ingest diffing logic."""
+    """In-memory vector store used to exercise vector build diffing logic."""
 
     def __init__(self):
         self.documents_by_collection = {}
@@ -344,7 +347,7 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_pulls_git_repo_before_genera
     mock_git_manager.pull_changes.assert_called_once_with()
 
 
-def test_ingest_org_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, dashboard):
+def test_build_org_vector_context_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, dashboard):
     """A repeated identical build should skip writes, and a removed source should be deleted."""
     OrgAIContext.objects.create(
         org=org,
@@ -410,19 +413,19 @@ def test_ingest_org_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, d
         },
         generated_at=timezone.now(),
     )
-    service = DashboardChatIngestionService(
+    service = DashboardChatVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
 
-    first_result = service.ingest_org(org)
-    upsert_count_after_first_ingest = len(vector_store.upsert_calls)
-    second_result = service.ingest_org(org)
+    first_result = service.build_org_vector_context(org)
+    upsert_count_after_first_vector_build = len(vector_store.upsert_calls)
+    second_result = service.build_org_vector_context(org)
 
     dashboard_context.markdown = ""
     dashboard_context.updated_at = timezone.now()
     dashboard_context.save(update_fields=["markdown", "updated_at"])
-    third_result = service.ingest_org(org)
+    third_result = service.build_org_vector_context(org)
 
     active_collection_name = build_dashboard_chat_collection_name(
         org.id,
@@ -440,13 +443,13 @@ def test_ingest_org_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, d
     assert first_result.source_document_counts["dashboard_context"] == 1
     assert second_result.upserted_document_ids
     assert second_result.deleted_document_ids == []
-    assert len(vector_store.upsert_calls) == upsert_count_after_first_ingest + 2
+    assert len(vector_store.upsert_calls) == upsert_count_after_first_vector_build + 2
     assert third_result.source_document_counts["dashboard_context"] == 0
     assert third_result.deleted_document_ids == []
     assert "dashboard_context" not in stored_source_types
 
 
-def test_ingest_org_keeps_collections_isolated_per_org(org, orgdbt, orguser, dashboard, seed_db):
+def test_build_org_vector_context_keeps_collections_isolated_per_org(org, orgdbt, orguser, dashboard, seed_db):
     """The context build should never mix documents between org collections."""
     other_org = Org.objects.create(
         name="Dashboard Chat Org 2",
@@ -487,13 +490,13 @@ def test_ingest_org_keeps_collections_isolated_per_org(org, orgdbt, orguser, das
         generated_at=timezone.now(),
     )
     vector_store = FakeDashboardChatVectorStore()
-    service = DashboardChatIngestionService(
+    service = DashboardChatVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
 
-    service.ingest_org(org)
-    service.ingest_org(other_org)
+    service.build_org_vector_context(org)
+    service.build_org_vector_context(other_org)
 
     org_collection_names = vector_store.list_org_collection_names(org.id)
     other_collection_names = vector_store.list_org_collection_names(other_org.id)
@@ -508,7 +511,7 @@ def test_ingest_org_keeps_collections_isolated_per_org(org, orgdbt, orguser, das
     other_org.delete()
 
 
-def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orguser, dashboard):
+def test_build_org_vector_context_keeps_last_good_context_when_upsert_fails(org, orgdbt, orguser, dashboard):
     """A failed rebuild should not delete the previously indexed documents."""
     OrgAIContext.objects.create(
         org=org,
@@ -522,12 +525,12 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
         catalog_json={"sources": {}, "nodes": {}},
         generated_at=timezone.now(),
     )
-    service = DashboardChatIngestionService(
+    service = DashboardChatVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
 
-    first_result = service.ingest_org(org)
+    first_result = service.build_org_vector_context(org)
     original_ids = set(first_result.upserted_document_ids)
     assert original_ids
 
@@ -541,7 +544,7 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
     vector_store.upsert_documents = _raise_on_upsert
 
     with pytest.raises(RuntimeError, match="upsert failed"):
-        service.ingest_org(org)
+        service.build_org_vector_context(org)
 
     remaining_ids = {
         document.document_id
@@ -552,7 +555,7 @@ def test_ingest_org_keeps_last_good_context_when_upsert_fails(org, orgdbt, orgus
     assert vector_store.delete_calls == []
 
 
-def test_ingest_org_deletes_disabled_source_documents(org, orgdbt, orguser, dashboard):
+def test_build_org_vector_context_deletes_disabled_source_documents(org, orgdbt, orguser, dashboard):
     """Disabled source types should be omitted from the target document set."""
     OrgAIContext.objects.create(
         org=org,
@@ -572,21 +575,25 @@ def test_ingest_org_deletes_disabled_source_documents(org, orgdbt, orguser, dash
         catalog_json={"sources": {}, "nodes": {}},
         generated_at=timezone.now(),
     )
-    initial_service = DashboardChatIngestionService(
+    initial_service = DashboardChatVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
-    initial_service.ingest_org(org)
+    initial_service.build_org_vector_context(org)
 
-    disabled_source_service = DashboardChatIngestionService(
+    disabled_source_service = DashboardChatVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
         source_config=DashboardChatSourceConfig(
-            enabled_source_types=("dashboard_context", "dashboard_export", "dbt_manifest")
+            enabled_source_types=(
+                DashboardChatSourceType.DASHBOARD_CONTEXT,
+                DashboardChatSourceType.DASHBOARD_EXPORT,
+                DashboardChatSourceType.DBT_MANIFEST,
+            )
         ),
     )
 
-    result = disabled_source_service.ingest_org(org)
+    result = disabled_source_service.build_org_vector_context(org)
     stored_source_types = {
         document.metadata["source_type"]
         for document in vector_store.get_documents(org.id, include_documents=False)
@@ -598,19 +605,23 @@ def test_ingest_org_deletes_disabled_source_documents(org, orgdbt, orguser, dash
     assert "dbt_catalog" not in stored_source_types
 
 
-def test_ingest_org_skips_dbt_docs_when_dbt_sources_are_disabled(org, orgdbt, dashboard):
+def test_build_org_vector_context_skips_dbt_docs_when_dbt_sources_are_disabled(org, orgdbt, dashboard):
     """Disabling both dbt sources should skip dbt docs generation entirely."""
     vector_store = FakeDashboardChatVectorStore()
     dbt_docs_generator = Mock(side_effect=AssertionError("dbt docs should not run"))
-    service = DashboardChatIngestionService(
+    service = DashboardChatVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=dbt_docs_generator,
         source_config=DashboardChatSourceConfig(
-            enabled_source_types=("org_context", "dashboard_context", "dashboard_export")
+            enabled_source_types=(
+                DashboardChatSourceType.ORG_CONTEXT,
+                DashboardChatSourceType.DASHBOARD_CONTEXT,
+                DashboardChatSourceType.DASHBOARD_EXPORT,
+            )
         ),
     )
 
-    result = service.ingest_org(org)
+    result = service.build_org_vector_context(org)
 
     dbt_docs_generator.assert_not_called()
     assert result.docs_generated_at is None

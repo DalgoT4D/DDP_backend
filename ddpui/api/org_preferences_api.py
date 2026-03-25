@@ -33,35 +33,13 @@ from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 orgpreference_router = Router()
 
-
-def _get_or_create_org_preferences(org):
-    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
-    return org_preferences
-
-
-def _get_or_create_org_ai_context(org):
-    context, _ = OrgAIContext.objects.get_or_create(org=org)
-    return context
-
-
-def _is_dashboard_chat_feature_enabled(org) -> bool:
-    return get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
-
-
-def _ensure_dashboard_chat_feature_enabled(org) -> None:
-    """Hide dashboard chat management APIs unless the feature flag is enabled."""
-    if not _is_dashboard_chat_feature_enabled(org):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-
-
-def _is_dbt_configured(org) -> bool:
-    return org.dbt is not None
-
-
 def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
     org_dbt = org.dbt
     return OrgAIDashboardChatSettingsResponse(
-        feature_flag_enabled=_is_dashboard_chat_feature_enabled(org),
+        feature_flag_enabled=get_all_feature_flags_for_org(org).get(
+            "AI_DASHBOARD_CHAT",
+            False,
+        ),
         ai_data_sharing_enabled=bool(org_preferences.ai_data_sharing_enabled),
         ai_data_sharing_consented_by=(
             org_preferences.ai_data_sharing_consented_by.user.email
@@ -74,7 +52,7 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
         if org_context.updated_by
         else None,
         org_context_updated_at=org_context.updated_at,
-        dbt_configured=_is_dbt_configured(org),
+        dbt_configured=org_dbt is not None,
         docs_generated_at=org_dbt.docs_generated_at if org_dbt else None,
         vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
     )
@@ -82,9 +60,12 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
 
 def _serialize_ai_dashboard_chat_status(org, org_preferences):
     org_dbt = org.dbt
-    feature_flag_enabled = _is_dashboard_chat_feature_enabled(org)
+    feature_flag_enabled = get_all_feature_flags_for_org(org).get(
+        "AI_DASHBOARD_CHAT",
+        False,
+    )
     ai_data_sharing_enabled = bool(org_preferences.ai_data_sharing_enabled)
-    dbt_configured = _is_dbt_configured(org)
+    dbt_configured = org_dbt is not None
     vector_last_ingested_at = org_dbt.vector_last_ingested_at if org_dbt else None
 
     return OrgAIDashboardChatStatusResponse(
@@ -219,9 +200,10 @@ def get_ai_dashboard_chat_settings(request):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    _ensure_dashboard_chat_feature_enabled(org)
-    org_preferences = _get_or_create_org_preferences(org)
-    org_context = _get_or_create_org_ai_context(org)
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
+    org_context, _ = OrgAIContext.objects.get_or_create(org=org)
 
     return {
         "success": True,
@@ -237,9 +219,10 @@ def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChat
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    _ensure_dashboard_chat_feature_enabled(org)
-    org_preferences = _get_or_create_org_preferences(org)
-    org_context = _get_or_create_org_ai_context(org)
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
+    org_context, _ = OrgAIContext.objects.get_or_create(org=org)
     target_ai_data_sharing_enabled = (
         payload.ai_data_sharing_enabled
         if payload.ai_data_sharing_enabled is not None
@@ -279,7 +262,7 @@ def get_ai_dashboard_chat_status(request):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    org_preferences = _get_or_create_org_preferences(org)
+    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
 
     return {
         "success": True,

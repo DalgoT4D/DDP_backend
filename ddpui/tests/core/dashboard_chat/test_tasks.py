@@ -11,7 +11,7 @@ from ddpui.celeryworkers.tasks import (
     run_dashboard_chat_turn,
     schedule_dashboard_chat_context_builds,
 )
-from ddpui.core.dashboard_chat.ingestion import DashboardChatIngestionResult
+from ddpui.core.dashboard_chat.vector_building import DashboardChatVectorBuildResult
 from ddpui.core.dashboard_chat.runtime_types import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.dashboard import Dashboard
@@ -115,14 +115,14 @@ def test_build_dashboard_chat_context_for_org_skips_when_locked(orguser):
 
     with patch(
         "ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client
-    ), patch("ddpui.celeryworkers.tasks.DashboardChatIngestionService") as ingestion_service:
+    ), patch("ddpui.celeryworkers.tasks.DashboardChatVectorBuildService") as vector_build_service:
         result = build_dashboard_chat_context_for_org.run(org.id)
 
     assert result == {"status": "skipped_locked", "org_id": org.id}
-    ingestion_service.assert_not_called()
+    vector_build_service.assert_not_called()
 
 
-def test_build_dashboard_chat_context_for_org_runs_ingestion(orguser):
+def test_build_dashboard_chat_context_for_org_runs_vector_build(orguser):
     org = orguser.org
     _create_org_dbt(org)
     OrgPreferences.objects.create(org=org, ai_data_sharing_enabled=True)
@@ -134,7 +134,7 @@ def test_build_dashboard_chat_context_for_org_runs_ingestion(orguser):
     redis_client = Mock()
     redis_client.lock.return_value = redis_lock
 
-    result_payload = DashboardChatIngestionResult(
+    result_payload = DashboardChatVectorBuildResult(
         org_id=org.id,
         docs_generated_at=timezone.now(),
         vector_ingested_at=timezone.now(),
@@ -142,28 +142,28 @@ def test_build_dashboard_chat_context_for_org_runs_ingestion(orguser):
         upserted_document_ids=["abc"],
         deleted_document_ids=[],
     )
-    ingestion_service = Mock()
-    ingestion_service.ingest_org.return_value = result_payload
+    vector_build_service = Mock()
+    vector_build_service.build_org_vector_context.return_value = result_payload
 
     with patch(
         "ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client
     ), patch(
-        "ddpui.celeryworkers.tasks.DashboardChatIngestionService",
-        return_value=ingestion_service,
+        "ddpui.celeryworkers.tasks.DashboardChatVectorBuildService",
+        return_value=vector_build_service,
     ):
         result = build_dashboard_chat_context_for_org.run(org.id)
 
     assert result["status"] == "completed"
     assert result["org_id"] == org.id
     assert result["source_document_counts"] == {"dashboard_export": 2}
-    ingestion_service.ingest_org.assert_called_once()
+    vector_build_service.build_org_vector_context.assert_called_once()
     redis_lock.release.assert_called_once()
 
 
 @patch("ddpui.celeryworkers.tasks.publish_dashboard_chat_event")
-@patch("ddpui.celeryworkers.tasks.DashboardChatRuntime")
+@patch("ddpui.celeryworkers.tasks.get_dashboard_chat_runtime")
 def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
-    runtime_class,
+    get_runtime,
     publish_event,
     orguser,
 ):
@@ -180,13 +180,15 @@ def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
         role="user",
         content="Why did funding drop?",
     )
-    runtime_class.return_value.run.return_value = DashboardChatResponse(
+    runtime = Mock()
+    runtime.run.return_value = DashboardChatResponse(
         answer_text="Funding dropped because donor inflows slowed this quarter.",
         intent=DashboardChatIntent.QUERY_WITH_SQL,
         warnings=["Example warning"],
         sql="SELECT 1",
         sql_results=[{"value": 1}],
     )
+    get_runtime.return_value = runtime
 
     result = run_dashboard_chat_turn(str(session.session_id), user_message.id)
 
@@ -199,9 +201,9 @@ def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
 
 
 @patch("ddpui.celeryworkers.tasks.publish_dashboard_chat_event")
-@patch("ddpui.celeryworkers.tasks.DashboardChatRuntime")
+@patch("ddpui.celeryworkers.tasks.get_dashboard_chat_runtime")
 def test_run_dashboard_chat_turn_publishes_error_when_runtime_fails(
-    runtime_class,
+    get_runtime,
     publish_event,
     orguser,
 ):
@@ -218,7 +220,9 @@ def test_run_dashboard_chat_turn_publishes_error_when_runtime_fails(
         role="user",
         content="Why did funding drop?",
     )
-    runtime_class.return_value.run.side_effect = RuntimeError("boom")
+    runtime = Mock()
+    runtime.run.side_effect = RuntimeError("boom")
+    get_runtime.return_value = runtime
 
     with pytest.raises(RuntimeError, match="boom"):
         run_dashboard_chat_turn(str(session.session_id), user_message.id)
@@ -228,9 +232,9 @@ def test_run_dashboard_chat_turn_publishes_error_when_runtime_fails(
 
 
 @patch("ddpui.celeryworkers.tasks.publish_dashboard_chat_event")
-@patch("ddpui.celeryworkers.tasks.DashboardChatRuntime")
+@patch("ddpui.celeryworkers.tasks.get_dashboard_chat_runtime")
 def test_run_dashboard_chat_turn_reuses_existing_assistant_reply(
-    runtime_class,
+    get_runtime,
     publish_event,
     orguser,
 ):
@@ -262,5 +266,5 @@ def test_run_dashboard_chat_turn_reuses_existing_assistant_reply(
         "session_id": str(session.session_id),
         "assistant_message_id": assistant_message.id,
     }
-    runtime_class.return_value.run.assert_not_called()
+    get_runtime.assert_not_called()
     publish_event.assert_not_called()

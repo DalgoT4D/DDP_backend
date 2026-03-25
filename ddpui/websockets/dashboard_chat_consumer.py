@@ -3,6 +3,7 @@ from urllib.parse import parse_qs
 
 from asgiref.sync import async_to_sync
 
+from ddpui.celeryworkers.tasks import execute_dashboard_chat_turn
 from ddpui.core.dashboard_chat.events import (
     build_dashboard_chat_event,
     dashboard_chat_group_name,
@@ -20,6 +21,7 @@ from ddpui.models.role_based_access import RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 from ddpui.websockets import BaseConsumer
+from ddpui.websockets.schemas import WebsocketResponse, WebsocketResponseStatus
 
 logger = CustomLogger("ddpui")
 
@@ -50,21 +52,45 @@ class DashboardChatConsumer(BaseConsumer):
         try:
             payload = json.loads(message["text"])
         except (KeyError, ValueError):
-            self._respond_error("Invalid websocket payload")
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Invalid websocket payload",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         if payload.get("action") != "send_message":
-            self._respond_error("Unsupported websocket action")
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Unsupported websocket action",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         raw_message = str(payload.get("message") or "").strip()
         if not raw_message:
-            self._respond_error("Message is required")
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Message is required",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         available, unavailable_message = self._chat_available()
         if not available:
-            self._respond_error(unavailable_message)
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message=unavailable_message,
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         try:
@@ -74,7 +100,13 @@ class DashboardChatConsumer(BaseConsumer):
                 session_id=payload.get("session_id"),
             )
         except DashboardChatSessionError as error:
-            self._respond_error(str(error))
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message=str(error),
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         user_message_result = create_dashboard_chat_user_message_with_status(
@@ -91,61 +123,95 @@ class DashboardChatConsumer(BaseConsumer):
                 user_message=user_message,
             )
             if assistant_message is not None:
-                self._send_event(
-                    build_dashboard_chat_event(
-                        event_type="assistant_message",
-                        session_id=str(session.session_id),
-                        dashboard_id=self.dashboard.id,
-                        message_id=str(assistant_message.id),
-                        data=serialize_dashboard_chat_message(assistant_message),
-                    ),
+                self.respond(
+                    WebsocketResponse(
+                        data=build_dashboard_chat_event(
+                            event_type="assistant_message",
+                            session_id=str(session.session_id),
+                            dashboard_id=self.dashboard.id,
+                            message_id=str(assistant_message.id),
+                            data=serialize_dashboard_chat_message(assistant_message),
+                        ),
+                        message="",
+                        status=WebsocketResponseStatus.SUCCESS,
+                    )
                 )
             return
 
-        self._send_event(
-            build_dashboard_chat_event(
-                event_type="progress",
-                session_id=str(session.session_id),
-                dashboard_id=self.dashboard.id,
-                message_id=str(user_message.id),
-                data={"label": "thinking"},
+        self.respond(
+            WebsocketResponse(
+                data=build_dashboard_chat_event(
+                    event_type="progress",
+                    session_id=str(session.session_id),
+                    dashboard_id=self.dashboard.id,
+                    message_id=str(user_message.id),
+                    data={"label": "thinking"},
+                ),
+                message="",
+                status=WebsocketResponseStatus.SUCCESS,
             )
         )
 
         try:
-            from ddpui.celeryworkers.tasks import execute_dashboard_chat_turn
-
             result = execute_dashboard_chat_turn(str(session.session_id), user_message.id)
         except Exception:
             logger.exception(
                 "dashboard chat turn failed inline for session=%s",
                 session.session_id,
             )
-            self._respond_error("Something went wrong while generating the response")
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Something went wrong while generating the response",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         assistant_message = result.get("assistant_message")
         if result["status"] in {"completed", "skipped_existing_reply"} and assistant_message is not None:
-            self._send_event(
-                build_dashboard_chat_event(
-                    event_type="assistant_message",
-                    session_id=str(session.session_id),
-                    dashboard_id=self.dashboard.id,
-                    message_id=str(assistant_message.id),
-                    data=serialize_dashboard_chat_message(assistant_message),
+            self.respond(
+                WebsocketResponse(
+                    data=build_dashboard_chat_event(
+                        event_type="assistant_message",
+                        session_id=str(session.session_id),
+                        dashboard_id=self.dashboard.id,
+                        message_id=str(assistant_message.id),
+                        data=serialize_dashboard_chat_message(assistant_message),
+                    ),
+                    message="",
+                    status=WebsocketResponseStatus.SUCCESS,
                 )
             )
             return
 
         if result["status"] == "skipped_missing_session":
-            self._respond_error("Chat session could not be found")
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Chat session could not be found",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
         if result["status"] == "skipped_missing_message":
-            self._respond_error("Chat message could not be found")
+            self.respond(
+                WebsocketResponse(
+                    data={},
+                    message="Chat message could not be found",
+                    status=WebsocketResponseStatus.ERROR,
+                )
+            )
             return
 
-        self._respond_error("Something went wrong while generating the response")
+        self.respond(
+            WebsocketResponse(
+                data={},
+                message="Something went wrong while generating the response",
+                status=WebsocketResponseStatus.ERROR,
+            )
+        )
 
     def websocket_disconnect(self, message):
         """Remove the socket from any joined session groups on disconnect."""
@@ -156,7 +222,13 @@ class DashboardChatConsumer(BaseConsumer):
 
     def dashboard_chat_event(self, event):
         """Forward dashboard chat events from the channel layer to the browser."""
-        self.send(text_data=event["event"])
+        self.respond(
+            WebsocketResponse(
+                data=event["event"],
+                message="",
+                status=WebsocketResponseStatus.SUCCESS,
+            )
+        )
 
     def _subscribe_to_session(self, session_id: str) -> None:
         """Join the session-scoped channel-layer group if not already subscribed."""
@@ -165,22 +237,6 @@ class DashboardChatConsumer(BaseConsumer):
             return
         async_to_sync(self.channel_layer.group_add)(group_name, self.channel_name)
         self.joined_session_groups.add(group_name)
-
-    def _respond_error(self, message: str) -> None:
-        """Send one direct websocket error event."""
-        self._send_event(
-            build_dashboard_chat_event(
-                event_type="error",
-                dashboard_id=self.dashboard.id if getattr(self, "dashboard", None) else None,
-                data={"message": message},
-            )
-        )
-
-    def _send_event(self, event: dict) -> None:
-        """Send one websocket event directly to the current socket."""
-        self.send(
-            text_data=json.dumps(event)
-        )
 
     def _chat_available(self) -> tuple[bool, str]:
         """Return whether the current org is ready for dashboard chat."""
