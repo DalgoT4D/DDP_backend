@@ -19,36 +19,49 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: experiments
 
     steps:
-      - name: Verify confirmation
-        if: inputs.branch != inputs.confirm
+      - name: Validate branch name
+        env:
+          BRANCH: ${{ inputs.branch }}
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          echo "::error::Confirmation does not match. You typed '${{ inputs.confirm }}' but branch is '${{ inputs.branch }}'."
-          exit 1
+          if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid branch name: contains disallowed characters."
+            exit 1
+          fi
+          if [[ "$BRANCH" != "$CONFIRM" ]]; then
+            echo "::error::Confirmation does not match. You typed '$CONFIRM' but branch is '$BRANCH'."
+            exit 1
+          fi
 
       - name: Deploy branch to EC2
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_BRANCH: ${{ inputs.branch }}
         with:
           host: ${{ secrets.SERVERIP }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           command_timeout: 500s
+          envs: DEPLOY_BRANCH
           script: |
             set -e
-            source ~/.nvm/nvm.sh
-            cd /home/ddp/DDP_backend
+            cd /home/ubuntu/DDP_backend
             git fetch origin
-            git checkout ${{ inputs.branch }}
-            git pull origin ${{ inputs.branch }}
-            /home/ddp/.local/bin/uv sync
-            /home/ddp/.local/bin/uv run python manage.py migrate
-            /home/ddp/.local/bin/uv run python manage.py loaddata seed/*.json
-            /home/ddp/.yarn/bin/pm2 restart ddp_backend-asgi
+            git checkout "$DEPLOY_BRANCH"
+            git pull origin "$DEPLOY_BRANCH"
+            /home/ubuntu/.local/bin/uv sync
+            /home/ubuntu/.local/bin/uv run python manage.py migrate
+            /home/ubuntu/.local/bin/uv run python manage.py loaddata seed/*.json
+            supervisorctl restart django-backend-asgi django-celery-worker django-canvas-dbt-worker django-celery-beat
 
       - name: Summary
+        env:
+          BRANCH: ${{ inputs.branch }}
         run: |
           echo "## Manual Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** ${{ inputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** $BRANCH" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
