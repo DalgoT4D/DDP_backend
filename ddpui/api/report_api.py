@@ -51,10 +51,7 @@ def list_snapshots(
         dashboard_title=dashboard_title,
         created_by_email=created_by,
     )
-    return api_response(
-        success=True,
-        data=[SnapshotResponse.from_model(s) for s in snapshots]
-    )
+    return api_response(success=True, data=[SnapshotResponse.from_model(s) for s in snapshots])
 
 
 @report_router.post("/", response=ApiResponse[SnapshotResponse])
@@ -74,7 +71,7 @@ def create_snapshot(request, payload: SnapshotCreate):
         return api_response(
             success=True,
             data=SnapshotResponse.from_model(s),
-            message="Snapshot created successfully"
+            message="Snapshot created successfully",
         )
     except SnapshotValidationError as err:
         raise HttpError(400, str(err)) from err
@@ -90,10 +87,7 @@ def get_snapshot_view(request, snapshot_id: int):
     orguser: OrgUser = request.orguser
     try:
         view_data = ReportService.get_snapshot_view_data(snapshot_id, orguser.org)
-        return api_response(
-            success=True,
-            data=SnapshotViewResponse.from_view_data(view_data)
-        )
+        return api_response(success=True, data=SnapshotViewResponse.from_view_data(view_data))
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
@@ -104,13 +98,11 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
     try:
-        snapshot = ReportService.update_snapshot(
-            snapshot_id, orguser.org, payload
-        )
+        snapshot = ReportService.update_snapshot(snapshot_id, orguser.org, payload)
         return api_response(
             success=True,
             data=SnapshotUpdateResponse.from_model(snapshot),
-            message="Snapshot updated successfully"
+            message="Snapshot updated successfully",
         )
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
@@ -124,9 +116,7 @@ def delete_snapshot(request, snapshot_id: int):
     try:
         ReportService.delete_snapshot(snapshot_id, orguser.org, orguser)
         return api_response(
-            success=True,
-            data=SnapshotDeleteResponse(),
-            message="Snapshot deleted successfully"
+            success=True, data=SnapshotDeleteResponse(), message="Snapshot deleted successfully"
         )
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
@@ -161,13 +151,9 @@ def export_report_pdf(request, snapshot_id: int):
             snapshot.public_share_token = secrets.token_urlsafe(48)
             snapshot.save(update_fields=["public_share_token"])
 
-        pdf_bytes = PdfExportService.generate_pdf(
-            snapshot_id, snapshot.public_share_token
-        )
+        pdf_bytes = PdfExportService.generate_pdf(snapshot_id, snapshot.public_share_token)
 
-        safe_title = "".join(
-            c for c in snapshot.title if c.isalnum() or c in " -_"
-        ).strip()
+        safe_title = "".join(c for c in snapshot.title if c.isalnum() or c in " -_").strip()
         filename = f"{safe_title or 'report'}.pdf"
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
@@ -225,9 +211,7 @@ def get_report_sharing_status(request, snapshot_id: int):
     """Get report sharing status"""
     orguser: OrgUser = request.orguser
     try:
-        status_data = ReportService.get_sharing_status(
-            snapshot_id, orguser.org, orguser
-        )
+        status_data = ReportService.get_sharing_status(snapshot_id, orguser.org, orguser)
         return api_response(success=True, data=ShareStatus(**status_data))
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err

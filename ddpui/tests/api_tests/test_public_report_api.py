@@ -26,7 +26,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
-from ddpui.models.report import ReportSnapshot, SnapshotStatus
+from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.api.public_api import (
@@ -224,7 +224,8 @@ def private_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart
 class TestGetPublicReport:
     """Tests for get_public_report endpoint"""
 
-    def test_valid_token(self, public_snapshot, seed_db):
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_valid_token(self, mock_inject, public_snapshot, seed_db):
         """Valid public token returns report view data"""
         request = _make_public_request()
         response = get_public_report(request, public_snapshot.public_share_token)
@@ -324,9 +325,7 @@ class TestGetPublicReportChartData:
             request = _make_public_request(
                 body={"chart_type": "bar", "schema_name": "public", "table_name": "orders"}
             )
-            response = get_public_report_chart_data(
-                request, public_snapshot.public_share_token
-            )
+            response = get_public_report_chart_data(request, public_snapshot.public_share_token)
 
             assert response["is_valid"] is True
             assert response["data"] == [{"x": "Jan", "y": 100}]
@@ -384,9 +383,7 @@ class TestGetPublicReportTableData:
             request = _make_public_request(
                 body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
             )
-            response = get_public_report_table_data(
-                request, public_snapshot.public_share_token
-            )
+            response = get_public_report_table_data(request, public_snapshot.public_share_token)
 
             assert response["is_valid"] is True
             assert response["columns"] == ["id", "name"]

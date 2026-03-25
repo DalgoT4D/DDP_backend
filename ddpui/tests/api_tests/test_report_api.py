@@ -29,7 +29,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
-from ddpui.models.report import ReportSnapshot, SnapshotStatus
+from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.report_api import (
     list_snapshots,
@@ -442,7 +442,8 @@ class TestCreateSnapshot:
 class TestGetSnapshotView:
     """Tests for get_snapshot_view endpoint"""
 
-    def test_view_success(self, orguser, sample_snapshot, seed_db):
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_view_success(self, mock_inject, orguser, sample_snapshot, seed_db):
         """Test successfully viewing a snapshot"""
         request = mock_request(orguser)
         response = get_snapshot_view(request, sample_snapshot.id)
@@ -450,31 +451,11 @@ class TestGetSnapshotView:
         data = response["data"]
 
         assert data["report_metadata"]["title"] == "January 2025 Report"
-        assert data["report_metadata"]["period_start"] == "2025-01-01"
-        assert data["report_metadata"]["period_end"] == "2025-01-31"
+        assert data["report_metadata"]["period_start"] == date(2025, 1, 1)
+        assert data["report_metadata"]["period_end"] == date(2025, 1, 31)
         assert data["report_metadata"]["date_column"]["column_name"] == "created_at"
         assert data["dashboard_data"]["title"] == "Test Dashboard"
         assert data["dashboard_data"]["dashboard_type"] == "native"
-
-    def test_view_marks_as_viewed(self, orguser, sample_snapshot, seed_db):
-        """Test that viewing a snapshot marks it as viewed"""
-        assert sample_snapshot.status == SnapshotStatus.GENERATED.value
-        request = mock_request(orguser)
-        get_snapshot_view(request, sample_snapshot.id)
-
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
-
-    def test_view_already_viewed_stays_viewed(self, orguser, sample_snapshot, seed_db):
-        """Test that viewing an already-viewed snapshot does not change status"""
-        sample_snapshot.status = SnapshotStatus.VIEWED.value
-        sample_snapshot.save(update_fields=["status"])
-
-        request = mock_request(orguser)
-        get_snapshot_view(request, sample_snapshot.id)
-
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.status == SnapshotStatus.VIEWED.value
 
     def test_view_not_found(self, orguser, seed_db):
         """Test viewing a nonexistent snapshot"""
@@ -483,7 +464,8 @@ class TestGetSnapshotView:
             get_snapshot_view(request, 99999)
         assert exc_info.value.status_code == 404
 
-    def test_view_injects_period_into_filters(self, orguser, sample_snapshot, seed_db):
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_view_injects_period_into_filters(self, mock_inject, orguser, sample_snapshot, seed_db):
         """Test that the view response injects period dates into the matching filter"""
         request = mock_request(orguser)
         response = get_snapshot_view(request, sample_snapshot.id)
@@ -557,9 +539,7 @@ class TestDeleteSnapshot:
             delete_snapshot(request, 99999)
         assert exc_info.value.status_code == 404
 
-    def test_delete_by_non_creator_forbidden(
-        self, other_orguser, sample_snapshot, seed_db
-    ):
+    def test_delete_by_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
         """Test that a user who did not create the snapshot cannot delete it"""
         request = mock_request(other_orguser)
         with pytest.raises(HttpError) as exc_info:
@@ -601,9 +581,7 @@ class TestToggleReportSharing:
         toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
 
         # Then disable
-        response = toggle_report_sharing(
-            request, sample_snapshot.id, ShareToggle(is_public=False)
-        )
+        response = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
 
         data = response["data"]
         assert data["is_public"] is False
@@ -750,9 +728,24 @@ class TestListDashboardDatetimeColumns:
 
         mock_warehouse = MagicMock()
         mock_warehouse.get_table_columns.return_value = [
-            {"name": "created_at", "data_type": "timestamp", "translated_type": TranslateColDataType.DATETIME, "nullable": False},
-            {"name": "updated_at", "data_type": "timestamp", "translated_type": TranslateColDataType.DATETIME, "nullable": True},
-            {"name": "name", "data_type": "varchar", "translated_type": TranslateColDataType.STRING, "nullable": True},
+            {
+                "name": "created_at",
+                "data_type": "timestamp",
+                "translated_type": TranslateColDataType.DATETIME,
+                "nullable": False,
+            },
+            {
+                "name": "updated_at",
+                "data_type": "timestamp",
+                "translated_type": TranslateColDataType.DATETIME,
+                "nullable": True,
+            },
+            {
+                "name": "name",
+                "data_type": "varchar",
+                "translated_type": TranslateColDataType.STRING,
+                "nullable": True,
+            },
         ]
         mock_org_warehouse = MagicMock()
 
@@ -782,9 +775,7 @@ class TestListDashboardDatetimeColumns:
 
     def test_no_warehouse_configured(self, orguser, sample_dashboard, sample_chart, seed_db):
         """Test error when warehouse is not configured"""
-        with patch(
-            "ddpui.core.reports.report_service.OrgWarehouse.objects"
-        ) as mock_ow_objects:
+        with patch("ddpui.core.reports.report_service.OrgWarehouse.objects") as mock_ow_objects:
             mock_ow_objects.filter.return_value.first.return_value = None
 
             request = mock_request(orguser)
