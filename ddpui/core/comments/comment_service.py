@@ -1,6 +1,6 @@
 """Comment service for report comments"""
 
-from typing import Optional
+from typing import Optional, List
 
 from django.db import connection
 from django.db.models import Q
@@ -116,6 +116,7 @@ class CommentService:
         target_type: str,
         content: str,
         chart_id: Optional[int] = None,
+        mentioned_emails: Optional[List[str]] = None,
     ) -> Comment:
         """Create a comment on a report snapshot."""
         snapshot = CommentService._get_snapshot(snapshot_id, org)
@@ -142,8 +143,8 @@ class CommentService:
             org=org,
         )
 
-        # Parse mentions and create notification
-        MentionService.process_mentions(comment, org, orguser)
+        # Process mentions and create notifications
+        MentionService.process_mentions(comment, org, orguser, mentioned_emails or [])
 
         logger.info(f"Created comment {comment.id} on {target_type} (snapshot {snapshot_id})")
         return comment
@@ -154,6 +155,7 @@ class CommentService:
         org: Org,
         orguser: OrgUser,
         content: str,
+        mentioned_emails: Optional[List[str]] = None,
     ) -> Comment:
         """Update a comment. Author-only."""
         comment = CommentService._get_comment(comment_id, org)
@@ -169,7 +171,7 @@ class CommentService:
         comment.save(update_fields=["content", "updated_at", "mentioned_emails"])
 
         # Re-process mentions — always notify all mentioned users on edit
-        MentionService.process_mentions(comment, org, orguser)
+        MentionService.process_mentions(comment, org, orguser, mentioned_emails or [])
 
         logger.info(f"Updated comment {comment.id}")
         return comment

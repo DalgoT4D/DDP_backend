@@ -19,12 +19,14 @@ class CommentCreate(Schema):
     target_type: str = Field(..., description="'summary' or 'chart'")
     chart_id: Optional[int] = Field(None, description="Required when target_type='chart'")
     content: str = Field(..., min_length=1, max_length=5000)
+    mentioned_emails: List[str] = []
 
 
 class CommentUpdate(Schema):
     """Schema for updating a comment"""
 
     content: str = Field(..., min_length=1, max_length=5000)
+    mentioned_emails: List[str] = []
 
 
 class MarkReadRequest(Schema):

@@ -151,7 +151,9 @@ class TestMentionNotifications:
         self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
     ):
         """Comment with @mention creates Notification + NotificationRecipient"""
-        MentionService.process_mentions(comment_with_mention, org, author_orguser)
+        MentionService.process_mentions(
+            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+        )
 
         assert Notification.objects.count() == 1
         assert NotificationRecipient.objects.count() == 1
@@ -176,7 +178,7 @@ class TestMentionNotifications:
             org=org,
         )
 
-        MentionService.process_mentions(comment, org, author_orguser)
+        MentionService.process_mentions(comment, org, author_orguser, [author_orguser.user.email])
 
         assert Notification.objects.count() == 1
         recipient = NotificationRecipient.objects.first()
@@ -203,7 +205,12 @@ class TestMentionNotifications:
             org=org,
         )
 
-        MentionService.process_mentions(comment, org, author_orguser)
+        MentionService.process_mentions(
+            comment,
+            org,
+            author_orguser,
+            [mentioned_orguser.user.email, second_mentioned_orguser.user.email],
+        )
 
         # Both mentioned users should get notifications
         assert Notification.objects.count() == 2
@@ -226,7 +233,9 @@ class TestMentionNotifications:
             org=org,
         )
 
-        MentionService.process_mentions(comment, org, author_orguser)
+        MentionService.process_mentions(
+            comment, org, author_orguser, [mentioned_orguser.user.email]
+        )
 
         assert Notification.objects.count() == 1
         recipient = NotificationRecipient.objects.first()
@@ -253,7 +262,12 @@ class TestMentionNotifications:
             org=org,
         )
 
-        MentionService.process_mentions(comment, org, author_orguser)
+        MentionService.process_mentions(
+            comment,
+            org,
+            author_orguser,
+            [mentioned_orguser.user.email, second_mentioned_orguser.user.email],
+        )
 
         assert Notification.objects.count() == 2
         assert NotificationRecipient.objects.count() == 2
@@ -282,7 +296,9 @@ class TestMentionEmail:
             defaults={"enable_email_notifications": True},
         )
 
-        MentionService.process_mentions(comment_with_mention, org, author_orguser)
+        MentionService.process_mentions(
+            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+        )
 
         mock_send.assert_called_once()
         call_kwargs = mock_send.call_args
@@ -299,7 +315,9 @@ class TestMentionEmail:
             defaults={"enable_email_notifications": False},
         )
 
-        MentionService.process_mentions(comment_with_mention, org, author_orguser)
+        MentionService.process_mentions(
+            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+        )
 
         mock_send.assert_not_called()
         # In-app notification should still exist
@@ -320,7 +338,9 @@ class TestMentionEmail:
         )
 
         # Should not raise
-        MentionService.process_mentions(comment_with_mention, org, author_orguser)
+        MentionService.process_mentions(
+            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+        )
 
         # Notification still created
         assert Notification.objects.count() == 1

@@ -128,6 +128,7 @@ def create_comment(request, payload: CommentCreate):
             target_type=payload.target_type,
             content=payload.content,
             chart_id=payload.chart_id,
+            mentioned_emails=payload.mentioned_emails,
         )
         return api_response(
             success=True,
@@ -153,6 +154,7 @@ def update_comment(request, comment_id: int, payload: CommentUpdate):
             org=orguser.org,
             orguser=orguser,
             content=payload.content,
+            mentioned_emails=payload.mentioned_emails,
         )
         return api_response(
             success=True,

@@ -1,8 +1,7 @@
 """Mention service for comment @mentions"""
 
-import re
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from django.conf import settings
 
@@ -18,29 +17,37 @@ from ddpui.utils.email_templates import render_mention_email
 
 logger = CustomLogger("ddpui.core.comments.mention")
 
-# Match @email patterns like @user@example.com
-MENTION_REGEX = re.compile(r"@([\w.+-]+@[\w.-]+\.\w+)")
-
 
 class MentionService:
-    """Handles @mention parsing, storage, and notification dispatch"""
+    """Handles @mention storage and notification dispatch"""
 
     @staticmethod
     def process_mentions(
         comment: Comment,
         org: Org,
         author: OrgUser,
+        mentioned_emails: List[str],
     ) -> list:
-        """Parse mentions from content, store emails, and dispatch notifications.
+        """Validate mentioned emails, store them, and dispatch notifications.
 
         Args:
             comment: The comment containing @mentions
             org: The organization
             author: The comment author
+            mentioned_emails: List of email addresses mentioned by the frontend
 
         Returns list of mentioned OrgUsers.
         """
-        mentioned_users = MentionService.parse_mentions(comment.content, org)
+        if not mentioned_emails:
+            return []
+
+        # Validate that mentioned emails belong to real org users
+        mentioned_users = list(
+            OrgUser.objects.filter(
+                org=org,
+                user__email__in=mentioned_emails,
+            ).select_related("user")
+        )
         if not mentioned_users:
             return []
 
@@ -54,20 +61,6 @@ class MentionService:
         )
 
         return mentioned_users
-
-    @staticmethod
-    def parse_mentions(content: str, org: Org) -> list:
-        """Extract @email patterns and resolve to OrgUser records."""
-        emails = MENTION_REGEX.findall(content)
-        if not emails:
-            return []
-
-        return list(
-            OrgUser.objects.filter(
-                org=org,
-                user__email__in=emails,
-            ).select_related("user")
-        )
 
     @staticmethod
     def store_mentioned_emails(comment: Comment, users: list) -> None:
