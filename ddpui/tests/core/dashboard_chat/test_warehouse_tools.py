@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ddpui.core.dashboard_chat.warehouse_tools import (
+from ddpui.core.dashboard_chat.warehouse.tools import (
     DashboardChatWarehouseTools,
     DashboardChatWarehouseToolsError,
 )
@@ -25,7 +25,7 @@ def _build_bigquery_tools():
 def test_quote_bigquery_table_ref_uses_project_id_from_credentials():
     """BigQuery table refs should use project_id from stored credentials, not dataset location."""
     with patch(
-        "ddpui.core.dashboard_chat.warehouse_tools.secretsmanager.retrieve_warehouse_credentials",
+        "ddpui.core.dashboard_chat.warehouse.tools.secretsmanager.retrieve_warehouse_credentials",
         return_value={"project_id": "analytics-project"},
     ):
         tools = _build_bigquery_tools()
@@ -37,7 +37,7 @@ def test_quote_bigquery_table_ref_uses_project_id_from_credentials():
 def test_quote_bigquery_table_ref_reads_nested_project_id_from_credentials_json():
     """credentials_json payloads should still provide the BigQuery project id."""
     with patch(
-        "ddpui.core.dashboard_chat.warehouse_tools.secretsmanager.retrieve_warehouse_credentials",
+        "ddpui.core.dashboard_chat.warehouse.tools.secretsmanager.retrieve_warehouse_credentials",
         return_value={"credentials_json": json.dumps({"project_id": "analytics-project"})},
     ):
         tools = _build_bigquery_tools()
@@ -49,7 +49,7 @@ def test_quote_bigquery_table_ref_reads_nested_project_id_from_credentials_json(
 def test_quote_bigquery_table_ref_requires_project_id():
     """A missing project id should fail explicitly."""
     with patch(
-        "ddpui.core.dashboard_chat.warehouse_tools.secretsmanager.retrieve_warehouse_credentials",
+        "ddpui.core.dashboard_chat.warehouse.tools.secretsmanager.retrieve_warehouse_credentials",
         return_value={"dataset_location": "asia-south1"},
     ):
         tools = _build_bigquery_tools()
@@ -62,7 +62,7 @@ def test_quote_bigquery_table_ref_requires_project_id():
 def test_quote_bigquery_table_ref_rejects_unsafe_identifier_components():
     """BigQuery table refs should reject unsafe project/schema/table identifier text."""
     with patch(
-        "ddpui.core.dashboard_chat.warehouse_tools.secretsmanager.retrieve_warehouse_credentials",
+        "ddpui.core.dashboard_chat.warehouse.tools.secretsmanager.retrieve_warehouse_credentials",
         return_value={"project_id": "analytics-project"},
     ):
         tools = _build_bigquery_tools()

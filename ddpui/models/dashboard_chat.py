@@ -1,14 +1,12 @@
 import uuid
 from enum import Enum
 
-from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.core.dashboard_chat.prompt_cache import build_dashboard_chat_prompt_cache_key
 
 
 class DashboardChatMessageRole(str, Enum):
@@ -61,17 +59,6 @@ class DashboardChatPromptTemplate(models.Model):
 
     class Meta:
         ordering = ["key"]
-
-    def save(self, *args, **kwargs):
-        """Persist the prompt template and invalidate its runtime cache entry."""
-        super().save(*args, **kwargs)
-        cache.delete(build_dashboard_chat_prompt_cache_key(self.key))
-
-    def delete(self, *args, **kwargs):
-        """Delete the prompt template and invalidate its runtime cache entry."""
-        cache_key = build_dashboard_chat_prompt_cache_key(self.key)
-        super().delete(*args, **kwargs)
-        cache.delete(cache_key)
 
 
 class OrgAIContext(models.Model):
@@ -143,6 +130,8 @@ class DashboardChatMessage(models.Model):
     content = models.TextField(blank=True, default="")
     client_message_id = models.CharField(max_length=100, null=True, blank=True)
     payload = models.JSONField(null=True, blank=True)
+    response_latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    timing_breakdown = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

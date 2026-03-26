@@ -11,8 +11,8 @@ from ddpui.celeryworkers.tasks import (
     run_dashboard_chat_turn,
     schedule_dashboard_chat_context_builds,
 )
-from ddpui.core.dashboard_chat.vector_building import DashboardChatVectorBuildResult
-from ddpui.core.dashboard_chat.runtime_types import DashboardChatIntent, DashboardChatResponse
+from ddpui.core.dashboard_chat.vector.building import DashboardChatVectorBuildResult
+from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
@@ -187,6 +187,12 @@ def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
         warnings=["Example warning"],
         sql="SELECT 1",
         sql_results=[{"value": 1}],
+        metadata={
+            "timing_breakdown": {
+                "runtime_total_ms": 123.4,
+                "graph_nodes_ms": {"load_context": 10.0},
+            }
+        },
     )
     get_runtime.return_value = runtime
 
@@ -196,6 +202,12 @@ def test_run_dashboard_chat_turn_persists_assistant_message_and_publishes_event(
     assert assistant_message.sequence_number == 2
     assert assistant_message.content == "Funding dropped because donor inflows slowed this quarter."
     assert assistant_message.payload["sql"] == "SELECT 1"
+    assert assistant_message.response_latency_ms is not None
+    assert assistant_message.response_latency_ms >= 0
+    assert assistant_message.timing_breakdown == {
+        "runtime_total_ms": 123.4,
+        "graph_nodes_ms": {"load_context": 10.0},
+    }
     assert result["status"] == "completed"
     publish_event.assert_called_once()
 

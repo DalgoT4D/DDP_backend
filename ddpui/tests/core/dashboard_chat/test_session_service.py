@@ -8,13 +8,13 @@ import pytest
 from django.contrib.auth.models import User
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.dashboard_chat.session_service import (
+from ddpui.core.dashboard_chat.sessions.service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message,
     create_dashboard_chat_user_message_with_status,
     get_or_create_dashboard_chat_session,
 )
-from ddpui.core.dashboard_chat.vector_documents import build_dashboard_chat_collection_name
+from ddpui.core.dashboard_chat.vector.documents import build_dashboard_chat_collection_name
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
 from ddpui.models.org import Org, OrgDbt
