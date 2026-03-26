@@ -40,7 +40,6 @@ class CommentService:
         """
         snapshot = CommentService._get_snapshot(snapshot_id, org)
         comments = CommentService._fetch_comments(snapshot, target_type, chart_id)
-        CommentService._attach_mentioned_users_map(comments)
         CommentService._annotate_is_new(comments, snapshot, target_type, chart_id, orguser)
         return comments
 
@@ -63,21 +62,6 @@ class CommentService:
             .select_related("author", "author__user")
             .order_by("created_at")
         )
-
-    @staticmethod
-    def _attach_mentioned_users_map(comments: list) -> None:
-        """Batch-resolve mentioned emails and attach the map to each comment."""
-        all_emails = set()
-        for c in comments:
-            all_emails.update(c.mentioned_emails or [])
-
-        users_map = {}
-        if all_emails:
-            for ou in OrgUser.objects.filter(user__email__in=all_emails).select_related("user"):
-                users_map[ou.user.email] = ou
-
-        for c in comments:
-            c._mentioned_users_map = users_map
 
     @staticmethod
     def _annotate_is_new(
@@ -283,122 +267,16 @@ class CommentService:
         return states
 
     @staticmethod
-    def _get_read_statuses(
-        orguser: OrgUser,
-        snapshot: ReportSnapshot,
-    ) -> dict:
-        """Get all read cursors for a user on a snapshot.
-
-        Returns: {(target_type, chart_id): last_read_at}
-        """
-        return {
-            (rs.target_type, rs.chart_id): rs.last_read_at
-            for rs in CommentReadStatus.objects.filter(user=orguser, snapshot=snapshot)
-        }
-
-    @staticmethod
-    def _get_mentioned_comment_ids(
-        snapshot: ReportSnapshot,
-        user_email: str,
-    ) -> set:
-        """Get IDs of comments that mention a specific user."""
-        return set(
-            Comment.objects.filter(
-                snapshot=snapshot,
-                is_deleted=False,
-                mentioned_emails__contains=[user_email],
-            ).values_list("id", flat=True)
-        )
-
-    @staticmethod
-    def _group_comments_by_target(comments) -> dict:
-        """Group comment tuples by target key.
-
-        Returns: {target_key: [(created_at, comment_id), ...]}
-        where target_key is "summary" or a chart_id string like "42".
-        """
-        targets = {}
-        for target_type, chart_id, created_at, comment_id in comments:
-            if target_type == CommentTargetType.SUMMARY:
-                key = CommentTargetType.SUMMARY
-            elif target_type == CommentTargetType.CHART and chart_id is not None:
-                key = str(chart_id)
-            else:
-                continue
-            targets.setdefault(key, []).append((created_at, comment_id))
-        return targets
-
-    @staticmethod
-    def _compute_target_states(
-        targets: dict,
-        read_statuses: dict,
-        mentioned_ids: set,
-    ) -> list:
-        """Compute state and counts per target.
-
-        For each target, determines:
-        - "mentioned": has unread comments that @mention the user
-        - "unread": has unread comments (no mentions)
-        - "read": all comments have been read
-
-        Returns a list of dicts with explicit target_type and chart_id fields.
-        """
-        states = []
-        for target_key, comment_data in targets.items():
-            if target_key == CommentTargetType.SUMMARY:
-                rs_key = (CommentTargetType.SUMMARY, None)
-                target_type = CommentTargetType.SUMMARY
-                chart_id = None
-            else:
-                chart_id = int(target_key)
-                rs_key = (CommentTargetType.CHART, chart_id)
-                target_type = CommentTargetType.CHART
-
-            last_read = read_statuses.get(rs_key)
-
-            total_count = len(comment_data)
-            unread_count = 0
-            has_unread_mention = False
-            for created_at, comment_id in comment_data:
-                is_unread = last_read is None or created_at > last_read
-                if is_unread:
-                    unread_count += 1
-                    if comment_id in mentioned_ids:
-                        has_unread_mention = True
-
-            if has_unread_mention:
-                state = "mentioned"
-            elif unread_count > 0:
-                state = "unread"
-            else:
-                state = "read"
-
-            states.append(
-                {
-                    "target_type": target_type,
-                    "chart_id": chart_id,
-                    "state": state,
-                    "count": total_count,
-                    "unread_count": unread_count,
-                }
-            )
-
-        return states
-
-    @staticmethod
     def mark_as_read(
         snapshot_id: int,
-        org: Org,
         orguser: OrgUser,
         target_type: str,
         chart_id: Optional[int] = None,
     ) -> None:
         """Mark a target's comments as read by upserting CommentReadStatus."""
-        snapshot = CommentService._get_snapshot(snapshot_id, org)
-
         CommentReadStatus.objects.update_or_create(
             user=orguser,
-            snapshot=snapshot,
+            snapshot_id=snapshot_id,
             target_type=target_type,
             chart_id=chart_id if target_type == CommentTargetType.CHART else None,
             defaults={"last_read_at": timezone.now()},

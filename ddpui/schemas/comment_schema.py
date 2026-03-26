@@ -1,10 +1,8 @@
 """Comment schemas for request/response validation"""
 
-from typing import Optional, List, Dict
+from typing import Optional, List
 from datetime import datetime
 from ninja import Schema, Field
-
-from ddpui.models.org_user import OrgUser
 
 
 # =============================================================================
@@ -49,13 +47,6 @@ class CommentAuthorResponse(Schema):
     name: Optional[str] = None
 
 
-class CommentMentionResponse(Schema):
-    """Mention info"""
-
-    email: str
-    name: Optional[str] = None
-
-
 class CommentResponse(Schema):
     """Schema for a single comment"""
 
@@ -69,7 +60,7 @@ class CommentResponse(Schema):
     is_deleted: bool = False
     created_at: datetime
     updated_at: datetime
-    mentions: List[CommentMentionResponse] = []
+    mentioned_emails: List[str] = []
 
     @classmethod
     def from_model(cls, comment) -> "CommentResponse":
@@ -78,24 +69,6 @@ class CommentResponse(Schema):
             email=comment.author.user.email,
             name=_get_user_name(comment.author),
         )
-
-        # Resolve mentioned emails to names
-        emails = comment.mentioned_emails or []
-        mentions = []
-        if emails:
-            users_map = getattr(comment, "_mentioned_users_map", None)
-            if users_map is None:
-                users_map = {
-                    ou.user.email: ou
-                    for ou in OrgUser.objects.filter(user__email__in=emails).select_related("user")
-                }
-            mentions = [
-                CommentMentionResponse(
-                    email=email,
-                    name=_get_user_name(users_map[email]) if email in users_map else None,
-                )
-                for email in emails
-            ]
 
         return cls(
             id=comment.id,
@@ -108,7 +81,7 @@ class CommentResponse(Schema):
             is_deleted=comment.is_deleted,
             created_at=comment.created_at,
             updated_at=comment.updated_at,
-            mentions=mentions,
+            mentioned_emails=comment.mentioned_emails or [],
         )
 
 

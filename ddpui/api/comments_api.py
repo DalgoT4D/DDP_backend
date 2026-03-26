@@ -74,7 +74,6 @@ def mark_as_read(request, payload: MarkReadRequest):
     try:
         CommentService.mark_as_read(
             snapshot_id=payload.snapshot_id,
-            org=orguser.org,
             orguser=orguser,
             target_type=payload.target_type,
             chart_id=payload.chart_id,
