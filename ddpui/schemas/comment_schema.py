@@ -40,13 +40,6 @@ class MarkReadRequest(Schema):
 # =============================================================================
 
 
-class CommentAuthorResponse(Schema):
-    """Author info for a comment"""
-
-    email: str
-    name: Optional[str] = None
-
-
 class CommentResponse(Schema):
     """Schema for a single comment"""
 
@@ -55,7 +48,7 @@ class CommentResponse(Schema):
     snapshot_id: int
     chart_id: Optional[int] = None
     content: str
-    author: CommentAuthorResponse
+    author_email: str
     is_new: bool = False
     is_deleted: bool = False
     created_at: datetime
@@ -65,18 +58,13 @@ class CommentResponse(Schema):
     @classmethod
     def from_model(cls, comment) -> "CommentResponse":
         """Create response from Comment model instance"""
-        author = CommentAuthorResponse(
-            email=comment.author.user.email,
-            name=_get_user_name(comment.author),
-        )
-
         return cls(
             id=comment.id,
             target_type=comment.target_type,
             snapshot_id=comment.snapshot_id,
             chart_id=comment.snapshot_chart_id,
             content=comment.content,
-            author=author,
+            author_email=comment.author.user.email,
             is_new=getattr(comment, "is_new", False),
             is_deleted=comment.is_deleted,
             created_at=comment.created_at,
@@ -105,24 +93,7 @@ class MentionableUserResponse(Schema):
     """Org user available for @mention"""
 
     email: str
-    name: Optional[str] = None
 
     @classmethod
     def from_orguser(cls, orguser) -> "MentionableUserResponse":
-        return cls(
-            email=orguser.user.email,
-            name=_get_user_name(orguser),
-        )
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-
-def _get_user_name(orguser) -> Optional[str]:
-    """Get display name from OrgUser"""
-    user = orguser.user
-    parts = [user.first_name, user.last_name]
-    name = " ".join(p for p in parts if p).strip()
-    return name or None
+        return cls(email=orguser.user.email)
