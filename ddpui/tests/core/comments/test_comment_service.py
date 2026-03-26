@@ -379,7 +379,6 @@ class TestGetCommentStates:
         summary = next((e for e in result if e["target_type"] == CommentTargetType.SUMMARY), None)
         assert summary is not None
         assert summary["chart_id"] is None
-        assert summary["count"] == 1
         assert summary["state"] in ("unread", "read", "mentioned")
 
     def test_chart_entry_has_correct_fields(self, snapshot, author_orguser, other_orguser, org):
@@ -400,7 +399,7 @@ class TestGetCommentStates:
         chart_entry = next((e for e in result if e["target_type"] == CommentTargetType.CHART), None)
         assert chart_entry is not None
         assert chart_entry["chart_id"] == 10
-        assert chart_entry["count"] == 1
+        assert chart_entry["state"] in ("unread", "read", "mentioned")
 
     def test_mixed_targets_returns_multiple_entries(
         self, snapshot, author_orguser, other_orguser, org
@@ -456,7 +455,6 @@ class TestGetCommentStates:
         )
         summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
         assert summary["state"] == "unread"
-        assert summary["unread_count"] == 1
 
     def test_read_state_after_mark_as_read(self, snapshot, author_orguser, other_orguser, org):
         """After marking as read, state becomes 'read'."""
@@ -479,7 +477,6 @@ class TestGetCommentStates:
         )
         summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
         assert summary["state"] == "read"
-        assert summary["unread_count"] == 0
 
     def test_mentioned_state(self, snapshot, author_orguser, other_orguser, org):
         """User mentioned in an unread comment sees 'mentioned' state."""
@@ -528,10 +525,9 @@ class TestGetCommentStates:
         )
         summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
         assert summary["state"] == "read", "Editing a comment should not make it unread again"
-        assert summary["unread_count"] == 0
 
     def test_deleted_comments_excluded(self, snapshot, author_orguser, other_orguser, org):
-        """Soft-deleted comments should not appear in counts."""
+        """Soft-deleted comments should not affect state."""
         Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -553,7 +549,7 @@ class TestGetCommentStates:
             orguser=other_orguser,
         )
         summary = next(e for e in result if e["target_type"] == CommentTargetType.SUMMARY)
-        assert summary["count"] == 1, "Deleted comments should not be counted"
+        assert summary["state"] == "unread", "Only visible comments should determine state"
 
     def test_read_status_does_not_cross_targets(self, snapshot, author_orguser, other_orguser, org):
         """Reading summary should NOT affect chart unread state, and vice versa."""

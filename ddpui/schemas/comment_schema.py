@@ -74,13 +74,11 @@ class CommentResponse(Schema):
 
 
 class CommentStateEntry(Schema):
-    """State and counts for a single target"""
+    """Icon state for a single target"""
 
     target_type: str  # "summary" | "chart"
     chart_id: Optional[int] = None  # set when target_type="chart"
     state: str  # "none" | "unread" | "read" | "mentioned"
-    count: int  # total number of comments
-    unread_count: int  # number of unread comments
 
 
 class CommentStatesResponse(Schema):

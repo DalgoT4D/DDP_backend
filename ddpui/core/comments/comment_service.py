@@ -184,22 +184,18 @@ class CommentService:
         SELECT
             "comment".target_type,
             "comment".snapshot_chart_id AS chart_id,
-            COUNT(*) AS total_count,
-            SUM(
-                CASE
-                    WHEN crs.last_read_at IS NULL
-                         OR "comment".created_at > crs.last_read_at
-                    THEN 1 ELSE 0
-                END
-            ) AS unread_count,
-            SUM(
-                CASE
-                    WHEN (crs.last_read_at IS NULL
-                          OR "comment".created_at > crs.last_read_at)
-                         AND "comment".mentioned_emails::jsonb @> %s::jsonb
-                    THEN 1 ELSE 0
-                END
-            ) AS unread_mentioned_count
+            CASE
+                WHEN bool_or(
+                    (crs.last_read_at IS NULL
+                     OR "comment".created_at > crs.last_read_at)
+                    AND "comment".mentioned_emails::jsonb @> %s::jsonb
+                ) THEN 'mentioned'
+                WHEN bool_or(
+                    crs.last_read_at IS NULL
+                    OR "comment".created_at > crs.last_read_at
+                ) THEN 'unread'
+                ELSE 'read'
+            END AS state
         FROM "comment"
         LEFT JOIN comment_read_status crs
             ON crs.snapshot_id = "comment".snapshot_id
@@ -220,14 +216,14 @@ class CommentService:
         org: Org,
         orguser: OrgUser,
     ) -> list:
-        """Return icon state and unread count per target for the current user.
+        """Return icon state per target for the current user.
 
         State priority: mentioned > unread > read > none
 
-        Returns a list of dicts, each with target_type, chart_id, state, count,
-        and unread_count fields.
+        Returns a list of dicts with target_type, chart_id, and state.
+        Threads with no comments are absent (frontend treats as 'none').
 
-        Uses a single raw SQL query with a LEFT JOIN to compute all counts
+        Uses a single raw SQL query with a LEFT JOIN to compute state
         in one pass.
         """
         # Validate snapshot belongs to org
@@ -242,29 +238,10 @@ class CommentService:
             )
             rows = cursor.fetchall()
 
-        states = []
-        for target_type, chart_id, total_count, unread_count, unread_mentioned_count in rows:
-            unread = unread_count or 0
-            mentioned = unread_mentioned_count or 0
-
-            if mentioned > 0:
-                state = "mentioned"
-            elif unread > 0:
-                state = "unread"
-            else:
-                state = "read"
-
-            states.append(
-                {
-                    "target_type": target_type,
-                    "chart_id": chart_id,
-                    "state": state,
-                    "count": total_count,
-                    "unread_count": unread,
-                }
-            )
-
-        return states
+        return [
+            {"target_type": target_type, "chart_id": chart_id, "state": state}
+            for target_type, chart_id, state in rows
+        ]
 
     @staticmethod
     def mark_as_read(
