@@ -75,7 +75,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
-from ddpui.core.dashboard_chat.vector.building import OrgVectorBuildService
+from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildService
 from ddpui.core.dashboard_chat.orchestration.orchestrator import get_dashboard_chat_runtime
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers

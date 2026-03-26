@@ -11,7 +11,7 @@ from ddpui.celeryworkers.tasks import (
     run_dashboard_chat_turn,
     schedule_dashboard_chat_context_builds,
 )
-from ddpui.core.dashboard_chat.vector.building import OrgVectorBuildResult
+from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildResult
 from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.dashboard import Dashboard

@@ -15,7 +15,7 @@ from ddpui.core.dashboard_chat.context.dbt_docs import (
     generate_dashboard_chat_dbt_docs_artifacts,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.vector.building import OrgVectorBuildService
+from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildService
 from ddpui.core.dashboard_chat.vector.documents import (
     DashboardChatSourceType,
     build_dashboard_chat_collection_name,
