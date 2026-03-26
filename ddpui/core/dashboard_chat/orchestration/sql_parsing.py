@@ -9,7 +9,7 @@ from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
 
-def _primary_table_name(sql: str) -> str | None:
+def primary_table_name(sql: str) -> str | None:
     """Return the primary FROM table for single-query correction logic."""
     table_match = re.search(r"\bFROM\s+([`\"]?)([\w\.]+)\1", sql, re.IGNORECASE)
     if not table_match:
@@ -17,7 +17,7 @@ def _primary_table_name(sql: str) -> str | None:
     return normalize_dashboard_chat_table_name(table_match.group(2))
 
 
-def _table_references(cls, sql: str) -> list[dict[str, str | None]]:
+def table_references(sql: str) -> list[dict[str, str | None]]:
     """Return normalized FROM/JOIN table references and aliases from one SQL statement."""
     references: list[dict[str, str | None]] = []
     for match in re.finditer(
@@ -39,16 +39,15 @@ def _table_references(cls, sql: str) -> list[dict[str, str | None]]:
     return references
 
 
-def _resolve_table_qualifier(
-    cls,
+def resolve_table_qualifier(
     qualifier: str,
-    table_references: Sequence[dict[str, str | None]],
+    table_refs: Sequence[dict[str, str | None]],
 ) -> str | None:
     """Resolve a qualifier like `f` or `analytics_table` to one query table."""
     normalized_qualifier = qualifier.lower().strip().strip('`"')
     matches = [
         str(reference["table_name"])
-        for reference in table_references
+        for reference in table_refs
         if normalized_qualifier
         in {
             str(reference.get("alias") or ""),
@@ -62,16 +61,14 @@ def _resolve_table_qualifier(
     return None
 
 
-def _table_columns(snippet: DashboardChatSchemaSnippet | Any) -> set[str]:
+def table_columns(snippet: DashboardChatSchemaSnippet | Any) -> set[str]:
     """Return the normalized column names available on one schema snippet."""
     return {
-        str(column.get("name") or "").lower()
-        for column in getattr(snippet, "columns", []) or []
+        str(column.get("name") or "").lower() for column in getattr(snippet, "columns", []) or []
     }
 
 
-def _tables_with_column(
-    cls,
+def tables_with_column(
     column_name: str,
     table_names: Sequence[str],
     schema_cache: dict[str, Any],
@@ -81,78 +78,36 @@ def _tables_with_column(
     return [
         table_name
         for table_name in table_names
-        if normalized_column_name in cls._table_columns(schema_cache.get(table_name))
+        if normalized_column_name in table_columns(schema_cache.get(table_name))
     ]
 
 
-def _resolve_identifier_table(
-    cls,
+def resolve_identifier_table(
     *,
     qualifier: str | None,
     column_name: str,
-    table_references: Sequence[dict[str, str | None]],
+    table_refs: Sequence[dict[str, str | None]],
     schema_cache: dict[str, Any],
 ) -> str | None:
     """Resolve one referenced column to a concrete query table when it is unambiguous."""
     if qualifier is not None:
-        resolved_table = cls._resolve_table_qualifier(qualifier, table_references)
+        resolved_table = resolve_table_qualifier(qualifier, table_refs)
         if not resolved_table:
             return None
-        if column_name.lower() in cls._table_columns(schema_cache.get(resolved_table)):
+        if column_name.lower() in table_columns(schema_cache.get(resolved_table)):
             return resolved_table
         return None
 
     query_tables = [
-        str(reference["table_name"])
-        for reference in table_references
-        if reference.get("table_name")
+        str(reference["table_name"]) for reference in table_refs if reference.get("table_name")
     ]
-    matching_tables = cls._tables_with_column(column_name, query_tables, schema_cache)
+    matching_tables = tables_with_column(column_name, query_tables, schema_cache)
     if len(matching_tables) == 1:
         return matching_tables[0]
     return None
 
 
-def _referenced_sql_identifier_refs(cls, sql: str) -> list[tuple[str | None, str]]:
-    """Extract likely physical identifier references from the outer SQL."""
-    table_aliases = {
-        alias.lower()
-        for alias in re.findall(
-            r"\b(?:FROM|JOIN)\s+[`\"]?[\w\.]+[`\"]?(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?",
-            sql,
-            flags=re.IGNORECASE,
-        )
-        if alias
-    }
-    select_aliases = cls._select_aliases(sql)
-    referenced_identifiers: list[tuple[str | None, str]] = []
-
-    select_clause = DashboardChatSqlGuard._extract_outer_select_clause(sql)
-    if select_clause:
-        for expression in DashboardChatSqlGuard._split_select_expressions(select_clause):
-            referenced_identifiers.extend(
-                cls._extract_identifier_refs_from_sql_segment(expression, table_aliases)
-            )
-
-    for pattern in [
-        r"\bWHERE\s+(.+?)(?:\bGROUP\b|\bORDER\b|\bLIMIT\b|$)",
-        r"\bGROUP\s+BY\s+(.+?)(?:\bORDER\b|\bLIMIT\b|$)",
-        r"\bORDER\s+BY\s+(.+?)(?:\bLIMIT\b|$)",
-    ]:
-        match = re.search(pattern, sql, flags=re.IGNORECASE | re.DOTALL)
-        if match:
-            referenced_identifiers.extend(
-                cls._extract_identifier_refs_from_sql_segment(
-                    match.group(1),
-                    table_aliases,
-                    ignored_identifiers=select_aliases,
-                )
-            )
-
-    return list(dict.fromkeys(referenced_identifiers))
-
-
-def _select_aliases(sql: str) -> set[str]:
+def select_aliases(sql: str) -> set[str]:
     """Return aliases introduced by the outer SELECT clause."""
     select_clause = DashboardChatSqlGuard._extract_outer_select_clause(sql)
     if not select_clause:
@@ -170,7 +125,7 @@ def _select_aliases(sql: str) -> set[str]:
     return aliases
 
 
-def _extract_identifier_refs_from_sql_segment(
+def extract_identifier_refs_from_sql_segment(
     segment: str,
     table_aliases: set[str],
     ignored_identifiers: set[str] | None = None,
@@ -236,22 +191,59 @@ def _extract_identifier_refs_from_sql_segment(
     return identifiers
 
 
-def _best_table_for_missing_columns(
+def referenced_sql_identifier_refs(sql: str) -> list[tuple[str | None, str]]:
+    """Extract likely physical identifier references from the outer SQL."""
+    table_aliases = {
+        alias.lower()
+        for alias in re.findall(
+            r"\b(?:FROM|JOIN)\s+[`\"]?[\w\.]+[`\"]?(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        if alias
+    }
+    sql_select_aliases = select_aliases(sql)
+    referenced_identifiers: list[tuple[str | None, str]] = []
+
+    select_clause = DashboardChatSqlGuard._extract_outer_select_clause(sql)
+    if select_clause:
+        for expression in DashboardChatSqlGuard._split_select_expressions(select_clause):
+            referenced_identifiers.extend(
+                extract_identifier_refs_from_sql_segment(expression, table_aliases)
+            )
+
+    for pattern in [
+        r"\bWHERE\s+(.+?)(?:\bGROUP\b|\bORDER\b|\bLIMIT\b|$)",
+        r"\bGROUP\s+BY\s+(.+?)(?:\bORDER\b|\bLIMIT\b|$)",
+        r"\bORDER\s+BY\s+(.+?)(?:\bLIMIT\b|$)",
+    ]:
+        match = re.search(pattern, sql, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            referenced_identifiers.extend(
+                extract_identifier_refs_from_sql_segment(
+                    match.group(1),
+                    table_aliases,
+                    ignored_identifiers=sql_select_aliases,
+                )
+            )
+
+    return list(dict.fromkeys(referenced_identifiers))
+
+
+def best_table_for_missing_columns(
     missing_columns: Sequence[str],
     schema_cache: dict[str, Any],
 ) -> str | None:
     """Return the first allowlisted table that covers all missing columns."""
     wanted_columns = {column_name.lower() for column_name in missing_columns}
     for table_name, snippet in schema_cache.items():
-        available_columns = {
-            str(column.get("name") or "").lower() for column in snippet.columns
-        }
+        available_columns = {str(column.get("name") or "").lower() for column in snippet.columns}
         if wanted_columns.issubset(available_columns):
             return table_name
     return None
 
 
-def _extract_text_filter_values(where_clause: str) -> list[tuple[str | None, str, str]]:
+def extract_text_filter_values(where_clause: str) -> list[tuple[str | None, str, str]]:
     """Extract quoted text filter values from one WHERE clause."""
     extracted_values: list[tuple[str | None, str, str]] = []
     for qualifier, column_name, value in re.findall(
@@ -269,13 +261,11 @@ def _extract_text_filter_values(where_clause: str) -> list[tuple[str | None, str
         qualifier = match.group(1)
         column_name = match.group(2)
         for value in re.findall(r"'([^']+)'", match.group(3)):
-            extracted_values.append(
-                (qualifier.lower() if qualifier else None, column_name, value)
-            )
+            extracted_values.append((qualifier.lower() if qualifier else None, column_name, value))
     return extracted_values
 
 
-def _find_tables_with_column(
+def find_tables_with_column(
     column_name: str,
     schema_cache: dict[str, Any],
     limit: int = 10,
@@ -294,27 +284,24 @@ def _find_tables_with_column(
     return matches
 
 
-def _structural_dimensions_from_sql(cls, sql: str) -> set[str]:
+def structural_dimensions_from_sql(sql: str) -> set[str]:
     """Return normalized non-aggregate dimensions used by one SQL statement."""
+    from .conversation import extract_dimensions_from_sql
+
     if not sql:
         return set()
 
     dimensions: set[str] = set()
-    for dimension in cls._extract_dimensions_from_sql(sql):
-        identifier_refs = cls._extract_identifier_refs_from_sql_segment(
-            dimension,
-            table_aliases=set(),
-        )
+    for dimension in extract_dimensions_from_sql(sql):
+        identifier_refs = extract_identifier_refs_from_sql_segment(dimension, table_aliases=set())
         if identifier_refs:
-            dimensions.update(
-                cls._normalize_dimension_name(column_name)
-                for _, column_name in identifier_refs
-            )
+            dimensions.update(normalize_dimension_name(col) for _, col in identifier_refs)
             continue
-        dimensions.add(cls._normalize_dimension_name(dimension))
+        dimensions.add(normalize_dimension_name(dimension))
+
     select_clause = DashboardChatSqlGuard._extract_outer_select_clause(sql)
     if not select_clause:
-        return {dimension for dimension in dimensions if dimension}
+        return {d for d in dimensions if d}
 
     for expression in DashboardChatSqlGuard._split_select_expressions(select_clause):
         normalized_expression = expression.strip()
@@ -322,16 +309,17 @@ def _structural_dimensions_from_sql(cls, sql: str) -> set[str]:
             normalized_expression
         ):
             continue
-        for _, column_name in cls._extract_identifier_refs_from_sql_segment(
+        for _, column_name in extract_identifier_refs_from_sql_segment(
             normalized_expression,
             table_aliases=set(),
-            ignored_identifiers=cls._select_aliases(sql),
+            ignored_identifiers=select_aliases(sql),
         ):
-            dimensions.add(cls._normalize_dimension_name(column_name))
-    return {dimension for dimension in dimensions if dimension}
+            dimensions.add(normalize_dimension_name(column_name))
+
+    return {d for d in dimensions if d}
 
 
-def _normalize_dimension_name(value: str) -> str:
+def normalize_dimension_name(value: str) -> str:
     """Normalize dimension names from SQL expressions and natural-language follow-ups."""
     normalized_value = value.strip().strip('`"').lower()
     normalized_value = normalized_value.split(".")[-1]

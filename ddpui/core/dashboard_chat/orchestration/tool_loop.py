@@ -9,13 +9,35 @@ from django.core.serializers.json import DjangoJSONEncoder
 
 from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseToolsError
 
+from .presentation import (
+    serialize_tool_result,
+    summarize_tool_call,
+    max_turns_message,
+    fallback_answer_text,
+)
+from .sql_execution import run_sql_with_distinct_guard
 from .state import DashboardChatRuntimeState
+from .tool_handlers import (
+    handle_retrieve_docs_tool,
+    handle_get_schema_snippets_tool,
+    handle_search_dbt_models_tool,
+    handle_get_dbt_model_info_tool,
+    handle_get_distinct_values_tool,
+    handle_list_tables_by_keyword_tool,
+    handle_check_table_row_count_tool,
+    seed_distinct_cache_from_previous_sql,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _execute_tool_loop(
-    self,
+def execute_tool_loop(
+    llm_client,
+    warehouse_tools_factory,
+    vector_store,
+    source_config,
+    runtime_config,
+    tool_specifications,
     *,
     state: DashboardChatRuntimeState,
     messages: list[dict[str, Any]],
@@ -40,14 +62,14 @@ def _execute_tool_loop(
         },
     }
     tool_loop_started_at = perf_counter()
-    self._seed_distinct_cache_from_previous_sql(state, execution_context)
+    seed_distinct_cache_from_previous_sql(state, execution_context)
     intent_decision = state["intent_decision"]
 
     for turn_index in range(max_turns):
         tool_choice = "required" if intent_decision.force_tool_usage and turn_index == 0 else "auto"
-        ai_message = self.llm_client.run_tool_loop_turn(
+        ai_message = llm_client.run_tool_loop_turn(
             messages=messages,
-            tools=self.TOOL_SPECIFICATIONS,
+            tools=tool_specifications,
             tool_choice=tool_choice,
             operation=f"tool_loop_{intent_decision.intent.value}",
         )
@@ -75,10 +97,10 @@ def _execute_tool_loop(
         messages.append(assistant_record)
 
         if not tool_calls:
-            return self._build_tool_loop_result(
+            return build_tool_loop_result(
                 answer_text=(
                     (ai_message.get("content") or "").strip()
-                    or self._fallback_answer_text(
+                    or fallback_answer_text(
                         execution_context["retrieved_documents"],
                         execution_context["last_sql_results"],
                     )
@@ -97,7 +119,11 @@ def _execute_tool_loop(
                 except json.JSONDecodeError:
                     args = {}
             tool_started_at = perf_counter()
-            result = self._execute_tool_call(
+            result = execute_tool_call(
+                warehouse_tools_factory,
+                vector_store,
+                source_config,
+                runtime_config,
                 tool_name=str(tool_call.get("name") or ""),
                 args=args,
                 state=state,
@@ -106,13 +132,10 @@ def _execute_tool_loop(
             tool_duration_ms = round((perf_counter() - tool_started_at) * 1000, 2)
             tool_name = str(tool_call.get("name") or "")
             execution_context["timing_breakdown"]["tool_calls_ms"].append(
-                {
-                    "name": tool_name,
-                    "duration_ms": tool_duration_ms,
-                }
+                {"name": tool_name, "duration_ms": tool_duration_ms}
             )
             execution_context["tool_calls"].append(
-                self._summarize_tool_call(
+                summarize_tool_call(
                     tool_name=tool_name,
                     args=args,
                     result=result,
@@ -124,21 +147,21 @@ def _execute_tool_loop(
                     "role": "tool",
                     "tool_call_id": tool_call.get("id"),
                     "content": json.dumps(
-                        self._serialize_tool_result(result),
+                        serialize_tool_result(result),
                         cls=DjangoJSONEncoder,
                     ),
                 }
             )
             if tool_name == "run_sql_query" and result.get("success"):
-                return self._build_tool_loop_result(
+                return build_tool_loop_result(
                     answer_text="",
                     execution_context=execution_context,
                     max_turns_reached=False,
                     tool_loop_started_at=tool_loop_started_at,
                 )
 
-    return self._build_tool_loop_result(
-        answer_text=self._max_turns_message(
+    return build_tool_loop_result(
+        answer_text=max_turns_message(
             state["user_query"],
             execution_context["retrieved_documents"],
         ),
@@ -148,8 +171,11 @@ def _execute_tool_loop(
     )
 
 
-def _execute_tool_call(
-    self,
+def execute_tool_call(
+    warehouse_tools_factory,
+    vector_store,
+    source_config,
+    runtime_config,
     *,
     tool_name: str,
     args: dict[str, Any],
@@ -159,21 +185,33 @@ def _execute_tool_call(
     """Execute one prototype tool against the Dalgo runtime primitives."""
     try:
         if tool_name == "retrieve_docs":
-            return self._handle_retrieve_docs_tool(args, state, execution_context)
+            return handle_retrieve_docs_tool(
+                vector_store, source_config, runtime_config, args, state, execution_context
+            )
         if tool_name == "get_schema_snippets":
-            return self._handle_get_schema_snippets_tool(args, state, execution_context)
+            return handle_get_schema_snippets_tool(
+                warehouse_tools_factory, args, state, execution_context
+            )
         if tool_name == "search_dbt_models":
-            return self._handle_search_dbt_models_tool(args, state, execution_context)
+            return handle_search_dbt_models_tool(args, state, execution_context)
         if tool_name == "get_dbt_model_info":
-            return self._handle_get_dbt_model_info_tool(args, state, execution_context)
+            return handle_get_dbt_model_info_tool(args, state, execution_context)
         if tool_name == "get_distinct_values":
-            return self._handle_get_distinct_values_tool(args, state, execution_context)
+            return handle_get_distinct_values_tool(
+                warehouse_tools_factory, args, state, execution_context
+            )
         if tool_name == "run_sql_query":
-            return self._run_sql_with_distinct_guard(args, state, execution_context)
+            return run_sql_with_distinct_guard(
+                warehouse_tools_factory, runtime_config, args, state, execution_context
+            )
         if tool_name == "list_tables_by_keyword":
-            return self._handle_list_tables_by_keyword_tool(args, state, execution_context)
+            return handle_list_tables_by_keyword_tool(
+                warehouse_tools_factory, args, state, execution_context
+            )
         if tool_name == "check_table_row_count":
-            return self._handle_check_table_row_count_tool(args, state, execution_context)
+            return handle_check_table_row_count_tool(
+                warehouse_tools_factory, args, state, execution_context
+            )
         return {"error": f"Unknown tool: {tool_name}"}
     except DashboardChatWarehouseToolsError as error:
         logger.warning("Dashboard chat tool %s failed: %s", tool_name, error)
@@ -185,8 +223,7 @@ def _execute_tool_call(
         return {"error": str(error)}
 
 
-def _build_tool_loop_result(
-    self,
+def build_tool_loop_result(
     *,
     answer_text: str,
     execution_context: dict[str, Any],

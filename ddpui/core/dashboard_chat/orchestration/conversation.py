@@ -13,11 +13,10 @@ from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 from .source_identifiers import chart_id_from_source_identifier
 
 
-def _extract_conversation_context(
-    cls,
+def extract_conversation_context(
     conversation_history: Sequence[DashboardChatConversationMessage],
 ) -> DashboardChatConversationContext:
-    """Extract reusable conversation context like the prototype conversation manager."""
+    """Extract reusable conversation context from message history."""
     context = DashboardChatConversationContext()
     recent_history = list(conversation_history)[-10:]
 
@@ -29,7 +28,7 @@ def _extract_conversation_context(
         sql = payload.get("sql")
         metadata = payload.get("metadata") or {}
         citations = payload.get("citations") or []
-        chart_ids = cls._extract_chart_ids_from_payload(payload)
+        chart_ids = extract_chart_ids_from_payload(payload)
 
         if chart_ids and context.last_sql_query and not context.last_chart_ids:
             context = DashboardChatConversationContext(
@@ -63,9 +62,9 @@ def _extract_conversation_context(
                 last_sql_query=str(sql),
                 last_tables_used=list(dict.fromkeys(tables)),
                 last_chart_ids=chart_ids,
-                last_metrics=cls._extract_metrics_from_sql(str(sql)),
-                last_dimensions=cls._extract_dimensions_from_sql(str(sql)),
-                last_filters=cls._extract_filters_from_sql(str(sql)),
+                last_metrics=extract_metrics_from_sql(str(sql)),
+                last_dimensions=extract_dimensions_from_sql(str(sql)),
+                last_filters=extract_filters_from_sql(str(sql)),
                 last_response_type="sql_result",
                 last_answer_text=message.content,
                 last_intent=str(payload.get("intent") or ""),
@@ -85,8 +84,8 @@ def _extract_conversation_context(
     return context
 
 
-def _extract_chart_ids_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract chart ids from persisted metadata/citations like the prototype chat history."""
+def extract_chart_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    """Extract chart ids from persisted metadata/citations."""
     metadata = payload.get("metadata") or {}
     chart_ids = [str(chart_id) for chart_id in metadata.get("chart_ids_used") or [] if chart_id]
     if chart_ids:
@@ -101,12 +100,11 @@ def _extract_chart_ids_from_payload(payload: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(extracted_chart_ids))
 
 
-def _build_follow_up_context_prompt(
-    cls,
+def build_follow_up_context_prompt(
     conversation_context: DashboardChatConversationContext,
     user_query: str,
 ) -> str:
-    """Build the prototype follow-up context prompt."""
+    """Build the follow-up context prompt injected into the message stack."""
     return "\n".join(
         [
             "PREVIOUS QUERY CONTEXT:",
@@ -123,8 +121,8 @@ def _build_follow_up_context_prompt(
     )
 
 
-def _detect_sql_modification_type(user_query: str) -> str:
-    """Detect the same coarse follow-up modification categories as the prototype."""
+def detect_sql_modification_type(user_query: str) -> str:
+    """Detect the coarse follow-up modification category from the user's phrasing."""
     lowered_query = user_query.lower()
     if any(keyword in lowered_query for keyword in ["by", "split by", "break down", "group by"]):
         return "add_dimension"
@@ -143,8 +141,8 @@ def _detect_sql_modification_type(user_query: str) -> str:
     return "general_modification"
 
 
-def _extract_requested_follow_up_dimension(text: str) -> str | None:
-    """Extract the requested follow-up dimension and normalize natural-language spaces."""
+def extract_requested_follow_up_dimension(text: str) -> str | None:
+    """Extract the requested follow-up dimension from the user's instruction."""
     normalized_text = text.strip().lower()
     patterns = [
         r"split\s+by\s+([a-zA-Z_][a-zA-Z0-9_\s]*)",
@@ -168,8 +166,8 @@ def _extract_requested_follow_up_dimension(text: str) -> str | None:
     return None
 
 
-def _extract_metrics_from_sql(sql: str) -> list[str]:
-    """Extract aggregate expressions from the previous SQL for follow-up prompts."""
+def extract_metrics_from_sql(sql: str) -> list[str]:
+    """Extract aggregate expressions from SQL for follow-up prompts."""
     select_clause = DashboardChatSqlGuard._extract_outer_select_clause(sql)
     if not select_clause:
         return []
@@ -183,8 +181,8 @@ def _extract_metrics_from_sql(sql: str) -> list[str]:
     return metrics[:5]
 
 
-def _extract_dimensions_from_sql(sql: str) -> list[str]:
-    """Extract GROUP BY dimensions from the previous SQL."""
+def extract_dimensions_from_sql(sql: str) -> list[str]:
+    """Extract GROUP BY dimensions from SQL."""
     match = re.search(
         r"\bGROUP\s+BY\s+(.+?)(?:\bORDER\b|\bLIMIT\b|$)",
         sql,
@@ -199,8 +197,8 @@ def _extract_dimensions_from_sql(sql: str) -> list[str]:
     ][:5]
 
 
-def _extract_filters_from_sql(sql: str) -> list[str]:
-    """Extract WHERE-clause filters from the previous SQL."""
+def extract_filters_from_sql(sql: str) -> list[str]:
+    """Extract WHERE-clause filters from SQL."""
     match = re.search(
         r"\bWHERE\s+(.+?)(?:\bGROUP\b|\bORDER\b|\bLIMIT\b|$)",
         sql,
@@ -221,3 +219,22 @@ def _extract_filters_from_sql(sql: str) -> list[str]:
             else:
                 filters.append(str(filter_match))
     return filters[:5]
+
+
+def normalize_conversation_history(
+    conversation_history: Sequence[DashboardChatConversationMessage | dict[str, Any]] | None,
+) -> list[DashboardChatConversationMessage]:
+    """Normalize stored history into the typed runtime message format."""
+    normalized_messages: list[DashboardChatConversationMessage] = []
+    for item in conversation_history or []:
+        if isinstance(item, DashboardChatConversationMessage):
+            normalized_messages.append(item)
+            continue
+        normalized_messages.append(
+            DashboardChatConversationMessage(
+                role=str(item.get("role") or "user"),
+                content=str(item.get("content") or ""),
+                payload=item.get("payload") or {},
+            )
+        )
+    return normalized_messages

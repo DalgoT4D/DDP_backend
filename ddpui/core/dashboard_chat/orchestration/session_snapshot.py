@@ -21,11 +21,11 @@ from ddpui.services.dashboard_service import DashboardService
 from .state import DashboardChatRuntimeState
 
 
-def _load_session_snapshot(self, state: DashboardChatRuntimeState) -> dict[str, Any]:
+def load_session_snapshot(state: DashboardChatRuntimeState) -> dict[str, Any]:
     """Return the current session's frozen dashboard context snapshot."""
     session_id = state.get("session_id")
     if not session_id:
-        return self._build_session_snapshot(state)
+        return build_session_snapshot(state)
 
     cache_key = build_dashboard_chat_session_snapshot_cache_key(session_id)
     cached_snapshot = cache.get(cache_key)
@@ -38,7 +38,7 @@ def _load_session_snapshot(self, state: DashboardChatRuntimeState) -> dict[str, 
             "distinct_cache": deserialize_distinct_cache(cached_snapshot.get("distinct_cache")),
         }
 
-    snapshot = self._build_session_snapshot(state)
+    snapshot = build_session_snapshot(state)
     cache.set(
         cache_key,
         {
@@ -53,7 +53,7 @@ def _load_session_snapshot(self, state: DashboardChatRuntimeState) -> dict[str, 
     return snapshot
 
 
-def _build_session_snapshot(self, state: DashboardChatRuntimeState) -> dict[str, Any]:
+def build_session_snapshot(state: DashboardChatRuntimeState) -> dict[str, Any]:
     """Build one session-stable snapshot of dashboard-specific runtime context."""
     dashboard_export = DashboardService.export_dashboard_context(
         state["dashboard_id"],
@@ -66,18 +66,14 @@ def _build_session_snapshot(self, state: DashboardChatRuntimeState) -> dict[str,
     )
     return {
         "dashboard_export": dashboard_export,
-        "dbt_index": DashboardChatAllowlistBuilder.build_dbt_index(
-            manifest_json,
-            allowlist,
-        ),
+        "dbt_index": DashboardChatAllowlistBuilder.build_dbt_index(manifest_json, allowlist),
         "allowlist": allowlist,
         "schema_cache": {},
         "distinct_cache": set(),
     }
 
 
-def _persist_session_schema_cache(
-    self,
+def persist_session_schema_cache(
     state: DashboardChatRuntimeState,
     schema_cache: dict[str, DashboardChatSchemaSnippet],
 ) -> None:
@@ -96,8 +92,7 @@ def _persist_session_schema_cache(
     state["session_schema_cache"] = dict(schema_cache)
 
 
-def _persist_session_distinct_cache(
-    self,
+def persist_session_distinct_cache(
     state: DashboardChatRuntimeState,
     distinct_cache: set[tuple[str, str, str]],
 ) -> None:
