@@ -1,9 +1,8 @@
-"""Tests for dashboard chat prompt template storage and caching."""
+"""Tests for dashboard chat prompt template lookup."""
 
 import pytest
-from django.core.cache import cache
 
-from ddpui.core.dashboard_chat.prompt_store import (
+from ddpui.core.dashboard_chat.agents.prompt_store import (
     DEFAULT_DASHBOARD_CHAT_PROMPTS,
     DashboardChatPromptStore,
 )
@@ -13,13 +12,6 @@ from ddpui.models.dashboard_chat import (
 )
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture(autouse=True)
-def clear_cache():
-    cache.clear()
-    yield
-    cache.clear()
 
 
 def test_prompt_store_returns_default_when_no_db_override_exists():
@@ -39,8 +31,8 @@ def test_prompt_store_returns_default_when_no_db_override_exists():
     )
 
 
-def test_prompt_store_uses_db_override_and_invalidates_cache_on_save():
-    """Saving a prompt template should invalidate the cached prompt immediately."""
+def test_prompt_store_uses_db_override_after_save():
+    """Saving a prompt template should update the prompt returned at runtime."""
     prompt_template = DashboardChatPromptTemplate.objects.get(
         key=DashboardChatPromptTemplateKey.FOLLOW_UP_SYSTEM,
     )
@@ -57,7 +49,7 @@ def test_prompt_store_uses_db_override_and_invalidates_cache_on_save():
 
 
 def test_prompt_store_falls_back_to_default_after_delete():
-    """Deleting a prompt template should invalidate the cache and restore the default prompt."""
+    """Deleting a prompt template should restore the default prompt text."""
     prompt_template = DashboardChatPromptTemplate.objects.get(
         key=DashboardChatPromptTemplateKey.SMALL_TALK_CAPABILITIES,
     )

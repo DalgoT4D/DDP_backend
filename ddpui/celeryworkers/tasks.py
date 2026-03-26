@@ -75,8 +75,8 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
-from ddpui.core.dashboard_chat.vector_building import DashboardChatVectorBuildService
-from ddpui.core.dashboard_chat.graph.orchestrator import get_dashboard_chat_runtime
+from ddpui.core.dashboard_chat.vector.building import DashboardChatVectorBuildService
+from ddpui.core.dashboard_chat.orchestration.orchestrator import get_dashboard_chat_runtime
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
@@ -103,7 +103,7 @@ from ddpui.core.dashboard_chat.events import (
     build_dashboard_chat_event,
     publish_dashboard_chat_event,
 )
-from ddpui.core.dashboard_chat.session_service import (
+from ddpui.core.dashboard_chat.sessions.service import (
     create_dashboard_chat_assistant_message,
     find_dashboard_chat_assistant_reply,
     list_dashboard_chat_history,
@@ -1493,11 +1493,21 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
     assistant_payload = {
         key: value for key, value in response_payload.items() if key != "answer_text"
     }
+    timing_breakdown = (
+        dict(response_payload.get("metadata") or {}).get("timing_breakdown") or {}
+    )
     assistant_message = create_dashboard_chat_assistant_message(
         session=session,
         content=response.answer_text,
         payload=assistant_payload,
+        timing_breakdown=timing_breakdown,
     )
+    response_latency_ms = max(
+        0,
+        int((assistant_message.created_at - user_message.created_at).total_seconds() * 1000),
+    )
+    assistant_message.response_latency_ms = response_latency_ms
+    assistant_message.save(update_fields=["response_latency_ms"])
     return {
         "status": "completed",
         "session": session,

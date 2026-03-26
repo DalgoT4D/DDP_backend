@@ -2,9 +2,9 @@
 
 import json
 
-import ddpui.core.dashboard_chat.openai_llm_client as llm_client_module
-from ddpui.core.dashboard_chat.openai_llm_client import OpenAIDashboardChatLlmClient
-from ddpui.core.dashboard_chat.runtime_types import (
+import ddpui.core.dashboard_chat.agents.openai as llm_client_module
+from ddpui.core.dashboard_chat.agents.openai import OpenAIDashboardChatLlmClient
+from ddpui.core.dashboard_chat.contracts import (
     DashboardChatConversationContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,

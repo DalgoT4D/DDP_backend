@@ -4,12 +4,12 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
-from ddpui.core.dashboard_chat.vector_documents import (
+from ddpui.core.dashboard_chat.vector.documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
     build_dashboard_chat_collection_name,
 )
-from ddpui.core.dashboard_chat.vector_store import ChromaDashboardChatVectorStore
+from ddpui.core.dashboard_chat.vector.store import ChromaDashboardChatVectorStore
 
 
 class FakeEmbeddingProvider:

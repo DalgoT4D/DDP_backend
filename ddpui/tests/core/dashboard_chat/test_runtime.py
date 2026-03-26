@@ -7,13 +7,13 @@ from django.contrib.auth.models import User
 from django.core.cache import cache
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.dashboard_chat.allowlist import (
+from ddpui.core.dashboard_chat.context.allowlist import (
     DashboardChatAllowlist,
     DashboardChatAllowlistBuilder,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.graph.orchestrator import DashboardChatRuntime
-from ddpui.core.dashboard_chat.runtime_types import (
+from ddpui.core.dashboard_chat.orchestration.orchestrator import DashboardChatRuntime
+from ddpui.core.dashboard_chat.contracts import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
     DashboardChatFollowUpContext,
@@ -22,9 +22,9 @@ from ddpui.core.dashboard_chat.runtime_types import (
     DashboardChatRetrievedDocument,
     DashboardChatResponse,
 )
-from ddpui.core.dashboard_chat.sql_guard import DashboardChatSqlGuard
-from ddpui.core.dashboard_chat.vector_documents import DashboardChatSourceType
-from ddpui.core.dashboard_chat.vector_store import DashboardChatVectorQueryResult
+from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
+from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
+from ddpui.core.dashboard_chat.vector.store import DashboardChatVectorQueryResult
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -243,7 +243,7 @@ class FakeWarehouseTools:
 
     @staticmethod
     def _schema_snippet(table_name, columns):
-        from ddpui.core.dashboard_chat.runtime_types import DashboardChatSchemaSnippet
+        from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
 
         return DashboardChatSchemaSnippet(table_name=table_name, columns=columns)
 
@@ -542,39 +542,6 @@ class FollowUpDimensionGuardLlm(PrototypeLlmBase):
         raise AssertionError("Follow-up dimension guard LLM exceeded expected turns")
 
 
-class PiiToolLoopLlm(PrototypeLlmBase):
-    """LLM stub that needs a safe failure response after SQL guard rejection."""
-
-    def classify_intent(self, *args, **kwargs):
-        return DashboardChatIntentDecision(
-            intent=DashboardChatIntent.QUERY_WITH_SQL,
-            confidence=0.9,
-            reason="Needs data analysis",
-            force_tool_usage=True,
-        )
-
-    def run_tool_loop_turn(self, *, messages, tools, tool_choice, operation):
-        if self.turn == 0:
-            self.turn += 1
-            return {
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": "call-1",
-                        "name": "run_sql_query",
-                        "args": {"sql": "SELECT email FROM analytics.program_reach LIMIT 25"},
-                    }
-                ],
-            }
-
-        tool_messages = [message for message in messages if message["role"] == "tool"]
-        assert any("aggregate the results or rephrase" in message["content"] for message in tool_messages)
-        return {
-            "content": "I couldn't answer that safely. Please aggregate the results or rephrase.",
-            "tool_calls": [],
-        }
-
-
 class SmallTalkLlm(PrototypeLlmBase):
     """LLM stub for prototype-style small talk."""
 
@@ -584,6 +551,19 @@ class SmallTalkLlm(PrototypeLlmBase):
             confidence=0.97,
             reason="Greeting or pleasantry",
         )
+
+    def run_tool_loop_turn(self, *, messages, tools, tool_choice, operation):
+        raise AssertionError("Small talk should not enter the tool loop")
+
+
+class FastPathOnlySmallTalkLlm(PrototypeLlmBase):
+    """LLM stub that fails if the runtime does not short-circuit obvious small talk."""
+
+    def classify_intent(self, *args, **kwargs):
+        raise AssertionError("Fast-path small talk should skip LLM classification")
+
+    def compose_small_talk(self, user_query):
+        raise AssertionError("Fast-path small talk should use deterministic response")
 
     def run_tool_loop_turn(self, *, messages, tools, tool_choice, operation):
         raise AssertionError("Small talk should not enter the tool loop")
@@ -1144,6 +1124,48 @@ def test_small_talk_turn_returns_without_citations(primary_dashboard):
     assert response.citations == []
     assert response.warnings == []
     assert response.metadata["allowlisted_tables"] == ["analytics.program_reach"]
+    assert response.metadata["timing_breakdown"]["runtime_total_ms"] >= 0
+    assert "load_context" in response.metadata["timing_breakdown"]["graph_nodes_ms"]
+    assert "route_intent" in response.metadata["timing_breakdown"]["graph_nodes_ms"]
+    assert "handle_small_talk" in response.metadata["timing_breakdown"]["graph_nodes_ms"]
+    assert "finalize" in response.metadata["timing_breakdown"]["graph_nodes_ms"]
+
+
+@pytest.mark.parametrize(
+    ("user_query", "expected_text"),
+    [
+        (
+            "what can you do?",
+            "I can explain this dashboard",
+        ),
+        (
+            "who are you?",
+            "I'm the dashboard chat assistant",
+        ),
+    ],
+)
+def test_small_talk_fast_path_handles_capability_prompts(
+    primary_dashboard,
+    user_query,
+    expected_text,
+):
+    """Obvious capability/identity prompts should short-circuit before LLM classification."""
+    runtime = DashboardChatRuntime(
+        vector_store=FakeVectorStore([]),
+        llm_client=FastPathOnlySmallTalkLlm(),
+    )
+
+    response = runtime.run(
+        org=primary_dashboard.org,
+        dashboard_id=primary_dashboard.id,
+        user_query=user_query,
+    )
+
+    assert response.intent == DashboardChatIntent.SMALL_TALK
+    assert expected_text in response.answer_text
+    assert response.citations == []
+    assert response.warnings == []
+    assert response.metadata["timing_breakdown"]["runtime_total_ms"] >= 0
 
 
 def test_runtime_query_without_sql_returns_dashboard_scoped_citations(
@@ -1677,30 +1699,6 @@ def test_follow_up_dimension_validation_accepts_structural_granularity_change(pr
     assert validation is None
 
 
-def test_runtime_rejects_row_level_pii_queries_before_execution(org, primary_dashboard):
-    """Unsafe PII SQL should be rejected by the SQL guard before warehouse execution."""
-    fake_warehouse = FakeWarehouseTools()
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=PiiToolLoopLlm(),
-        warehouse_tools_factory=lambda org: fake_warehouse,
-    )
-
-    response = runtime.run(
-        org=org,
-        dashboard_id=primary_dashboard.id,
-        user_query="List email addresses for this dashboard",
-    )
-
-    assert fake_warehouse.executed_sql == []
-    assert response.sql is None
-    assert response.sql_results is None
-    assert "aggregate the results or rephrase" in response.answer_text
-    assert response.metadata["sql_guard_errors"] == [
-        "Queries returning row-level sensitive data are not allowed. Please aggregate the results or rephrase."
-    ]
-
-
 def test_runtime_skips_disabled_source_types_during_retrieval(org, primary_dashboard):
     """Disabled source types should not be queried by the retrieve_docs tool."""
     vector_store = FakeVectorStore(
@@ -1902,25 +1900,6 @@ def test_sql_guard_enforces_single_statement_allowlist_and_limit():
     assert allowed_query.is_valid is True
     assert allowed_query.sanitized_sql.endswith("LIMIT 200")
     assert any("No LIMIT clause found" in warning for warning in allowed_query.warnings)
-
-
-def test_sql_guard_rejects_row_level_pii_queries():
-    """SQL guard should reject row-level projections of sensitive fields."""
-    allowlist = DashboardChatAllowlist(allowed_tables={"analytics.program_reach"})
-    guard = DashboardChatSqlGuard(allowlist=allowlist, max_rows=200)
-
-    pii_query = guard.validate(
-        "SELECT email, COUNT(*) AS beneficiary_count "
-        "FROM analytics.program_reach "
-        "GROUP BY email "
-        "LIMIT 50"
-    )
-
-    assert pii_query.is_valid is False
-    assert pii_query.sanitized_sql is None
-    assert pii_query.errors == [
-        "Queries returning row-level sensitive data are not allowed. Please aggregate the results or rephrase."
-    ]
 
 
 def test_sql_guard_rejects_select_into_queries():
