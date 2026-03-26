@@ -1,18 +1,25 @@
-"""Document-building helpers for dashboard chat vector context."""
+"""Vector ingestion pipeline for dashboard chat — document building and org-level rebuild."""
 
-from collections import defaultdict
 import json
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Callable, Union
 
 from django.utils import timezone
 
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.context.dbt_docs import DashboardChatDbtDocsArtifacts
+from ddpui.core.dashboard_chat.context.dbt_docs import (
+    DashboardChatDbtDocsArtifacts,
+    generate_dashboard_chat_dbt_docs_artifacts,
+)
 from ddpui.core.dashboard_chat.vector.documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
 )
+from ddpui.core.dashboard_chat.vector.store import OrgVectorStore
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.dashboard_chat import DashboardAIContext, OrgAIContext
+from ddpui.models.dashboard_chat import DashboardAIContext, DashboardChatSession, OrgAIContext
 from ddpui.models.org import Org
 from ddpui.models.visualization import Chart
 from ddpui.services.dashboard_service import DashboardService
@@ -26,6 +33,11 @@ INGEST_SOURCE_ORDER = [
     DashboardChatSourceType.DBT_MANIFEST,
     DashboardChatSourceType.DBT_CATALOG,
 ]
+
+
+# ---------------------------------------------------------------------------
+# Text chunking
+# ---------------------------------------------------------------------------
 
 
 def _normalize_text(value: str) -> str:
@@ -75,16 +87,21 @@ def chunk_dashboard_chat_text(text: str, max_chars: int = MARKDOWN_CHUNK_MAX_CHA
     return chunks
 
 
+# ---------------------------------------------------------------------------
+# Document builder — reads from DB, produces DashboardChatVectorDocument chunks
+# ---------------------------------------------------------------------------
+
+
 class DashboardChatVectorDocumentBuilder:
     """Build dashboard-chat vector documents from app context and dbt docs."""
 
-    def __init__(self, source_config: DashboardChatSourceConfig | None = None):
+    def __init__(self, source_config: Union[DashboardChatSourceConfig, None] = None):
         self.source_config = source_config or DashboardChatSourceConfig.from_env()
 
     def build_documents_by_source(
         self,
         org: Org,
-        dbt_docs: DashboardChatDbtDocsArtifacts | None,
+        dbt_docs: Union[DashboardChatDbtDocsArtifacts, None],
     ) -> dict[str, list[DashboardChatVectorDocument]]:
         """Build the full desired vector document set for an org."""
         documents_by_source: dict[str, list[DashboardChatVectorDocument]] = defaultdict(list)
@@ -171,8 +188,8 @@ class DashboardChatVectorDocumentBuilder:
         source_identifier: str,
         markdown: str,
         title: str,
-        dashboard_id: int | None = None,
-        updated_at: timezone.datetime | None = None,
+        dashboard_id: Union[int, None] = None,
+        updated_at: Union[timezone.datetime, None] = None,
     ) -> list[DashboardChatVectorDocument]:
         """Chunk a markdown source into deterministic vector documents."""
         return [
@@ -366,7 +383,7 @@ class DashboardChatVectorDocumentBuilder:
         return documents
 
     @staticmethod
-    def _include_dbt_unique_id(unique_id: str, project_name: str | None) -> bool:
+    def _include_dbt_unique_id(unique_id: str, project_name: Union[str, None]) -> bool:
         """Exclude package docs that do not belong to the org project."""
         parts = unique_id.split(".")
         if len(parts) < 2:
@@ -381,7 +398,9 @@ class DashboardChatVectorDocumentBuilder:
     @staticmethod
     def _format_manifest_source(unique_id: str, source: dict) -> str:
         """Format a manifest source entry into stable text."""
-        column_lines = DashboardChatVectorDocumentBuilder._format_columns(source.get("columns") or {})
+        column_lines = DashboardChatVectorDocumentBuilder._format_columns(
+            source.get("columns") or {}
+        )
         blocks = [
             f"dbt manifest source: {source.get('schema')}.{source.get('name')}",
             f"Unique id: {unique_id}",
@@ -404,9 +423,7 @@ class DashboardChatVectorDocumentBuilder:
         ]
         depends_on_nodes = sorted(node.get("depends_on", {}).get("nodes") or [])
         if depends_on_nodes:
-            blocks.append(
-                "Depends on:\n" + "\n".join(f"- {dependency}" for dependency in depends_on_nodes)
-            )
+            blocks.append("Depends on:\n" + "\n".join(f"- {dep}" for dep in depends_on_nodes))
         column_lines = DashboardChatVectorDocumentBuilder._format_columns(node.get("columns") or {})
         if column_lines:
             blocks.append("Columns:\n" + "\n".join(column_lines))
@@ -459,3 +476,140 @@ class DashboardChatVectorDocumentBuilder:
                 line += f": {column['comment']}"
             formatted_columns.append(line)
         return formatted_columns
+
+
+# ---------------------------------------------------------------------------
+# Build pipeline — orchestrates a full org vector rebuild
+# ---------------------------------------------------------------------------
+
+
+class OrgVectorBuildError(Exception):
+    """Raised when an org vector build cannot complete."""
+
+
+@dataclass(frozen=True)
+class OrgVectorBuildResult:
+    """Summary of one completed org vector build."""
+
+    org_id: int
+    docs_generated_at: Union[timezone.datetime, None]
+    vector_ingested_at: timezone.datetime
+    source_document_counts: dict[str, int]
+    upserted_document_ids: list[str]
+    deleted_document_ids: list[str]
+
+
+class OrgVectorBuildService:
+    """Build org-scoped dashboard-chat vector context and sync it into the vector store."""
+
+    def __init__(
+        self,
+        vector_store: Union[OrgVectorStore, None] = None,
+        dbt_docs_generator: Union[
+            Callable[[Org, object], DashboardChatDbtDocsArtifacts], None
+        ] = None,
+        source_config: Union[DashboardChatSourceConfig, None] = None,
+        document_builder: Union[DashboardChatVectorDocumentBuilder, None] = None,
+    ):
+        self.vector_store = vector_store or OrgVectorStore()
+        self.dbt_docs_generator = dbt_docs_generator or generate_dashboard_chat_dbt_docs_artifacts
+        self.source_config = source_config or DashboardChatSourceConfig.from_env()
+        self.document_builder = document_builder or DashboardChatVectorDocumentBuilder(
+            source_config=self.source_config
+        )
+
+    def build_org_vector_context(self, org: Org) -> OrgVectorBuildResult:
+        """Run dbt docs generation and rebuild the desired vector documents for an org."""
+        if org.dbt is None:
+            raise OrgVectorBuildError("dbt workspace not configured")
+
+        collection_versioned_at = timezone.now()
+        target_collection_name = self.vector_store.collection_name(
+            org.id,
+            version=collection_versioned_at,
+        )
+        dbt_docs = None
+        if self.source_config.is_enabled(
+            DashboardChatSourceType.DBT_MANIFEST
+        ) or self.source_config.is_enabled(DashboardChatSourceType.DBT_CATALOG):
+            dbt_docs = self.dbt_docs_generator(org, org.dbt)
+        documents_by_source = self.document_builder.build_documents_by_source(org, dbt_docs)
+        desired_documents = [
+            document
+            for source_type in INGEST_SOURCE_ORDER
+            if self.source_config.is_enabled(source_type)
+            for document in documents_by_source[source_type.value]
+        ]
+        if (
+            self.vector_store.load_collection(
+                org.id,
+                collection_name=target_collection_name,
+                allow_legacy_fallback=False,
+            )
+            is not None
+        ):
+            self.vector_store.delete_collection(
+                org.id,
+                collection_name=target_collection_name,
+            )
+
+        upserted_document_ids = sorted(
+            self.vector_store.upsert_documents(
+                org.id,
+                desired_documents,
+                collection_name=target_collection_name,
+            )
+        )
+
+        vector_ingested_at = collection_versioned_at
+        org.dbt.vector_last_ingested_at = collection_versioned_at
+        org.dbt.save(update_fields=["vector_last_ingested_at", "updated_at"])
+        self._garbage_collect_inactive_collections(
+            org=org,
+            active_collection_name=target_collection_name,
+        )
+
+        return OrgVectorBuildResult(
+            org_id=org.id,
+            docs_generated_at=dbt_docs.generated_at if dbt_docs else org.dbt.docs_generated_at,
+            vector_ingested_at=vector_ingested_at,
+            source_document_counts={
+                source_type.value: (
+                    len(documents_by_source[source_type.value])
+                    if self.source_config.is_enabled(source_type)
+                    else 0
+                )
+                for source_type in INGEST_SOURCE_ORDER
+            },
+            upserted_document_ids=upserted_document_ids,
+            deleted_document_ids=[],
+        )
+
+    def _garbage_collect_inactive_collections(
+        self,
+        *,
+        org: Org,
+        active_collection_name: str,
+    ) -> None:
+        """Delete old versioned collections not pinned by recent chat sessions."""
+        retention_cutoff = timezone.now() - timedelta(hours=24)
+        recent_sessions = DashboardChatSession.objects.filter(
+            org=org,
+            updated_at__gte=retention_cutoff,
+        )
+        pinned_collection_names = {
+            collection_name
+            for collection_name in recent_sessions.values_list("vector_collection_name", flat=True)
+            if collection_name
+        }
+        if recent_sessions.filter(vector_collection_name__isnull=True).exists():
+            pinned_collection_names.add(self.vector_store.collection_name(org.id))
+        pinned_collection_names.add(active_collection_name)
+
+        for collection_name in self.vector_store.list_org_collection_names(org.id):
+            if collection_name in pinned_collection_names:
+                continue
+            self.vector_store.delete_collection(
+                org.id,
+                collection_name=collection_name,
+            )
