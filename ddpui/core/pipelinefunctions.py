@@ -37,6 +37,7 @@ from ddpui.ddpprefect import (
 from ddpui.utils.constants import (
     PREFECT_AIRBYTE_TASKS_TIMEOUT,
     TASK_GITPULL,
+    TASK_GITCLONE,
     TASK_AIRBYTESYNC,
     TASK_GENERATE_EDR,
     TASK_AIRBYTERESET,
@@ -248,6 +249,21 @@ def pipeline_with_orgtasks(
                 )
             task_config = setup_git_pull_shell_task_config(
                 org_task, dbt_project_params.project_dir, gitpull_secret_block
+            ).to_json()
+        elif org_task.task.slug == TASK_GITCLONE:
+            gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=SECRET, block_name__contains="git-pull"
+            ).first()
+
+            if not gitpull_secret_block:
+                logger.info(
+                    f"secret block for {org_task.task.slug} not found in org prefect blocks;"
+                )
+            task_config = setup_git_clone_shell_task_config(
+                org_task,
+                dbt_project_params.clients_base_dir,
+                dbt_project_params.project_dir_relative,
+                gitpull_secret_block,
             ).to_json()
         elif org_task.task.slug == TASK_GENERATE_EDR:
             task_config = setup_edr_send_report_task_config(

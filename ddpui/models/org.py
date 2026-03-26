@@ -158,7 +158,9 @@ class Org(models.Model):
                 # Use default from function
                 default_data = default_config[key]
                 return QueueDetailsSchema(
-                    name=default_data["name"], workpool=default_data["workpool"]
+                    name=default_data["name"],
+                    workpool=default_data["workpool"],
+                    is_workpool_eks=False,  # Default to EC2
                 )
 
             queue_data = stored[key]
@@ -170,17 +172,31 @@ class Org(models.Model):
                     # Use the default workpool from the default config
                     default_data = default_config[key]
                     workpool = default_data["workpool"]
-                return QueueDetailsSchema(name=queue_data.get("name"), workpool=workpool)
+
+                # Get is_workpool_eks with default False
+                is_workpool_eks = queue_data.get("is_workpool_eks", False)
+
+                return QueueDetailsSchema(
+                    name=queue_data.get("name"), workpool=workpool, is_workpool_eks=is_workpool_eks
+                )
             # Handle legacy flat format (for backward compatibility during migration)
             elif isinstance(queue_data, str):
                 # Use the default workpool from the default config
                 default_data = default_config[key]
                 workpool = default_data["workpool"]
-                return QueueDetailsSchema(name=queue_data, workpool=workpool)
+                return QueueDetailsSchema(
+                    name=queue_data,
+                    workpool=workpool,
+                    is_workpool_eks=False,  # Legacy format defaults to EC2
+                )
 
             # Fallback to defaults
             default_data = default_config[key]
-            return QueueDetailsSchema(name=default_data["name"], workpool=default_data["workpool"])
+            return QueueDetailsSchema(
+                name=default_data["name"],
+                workpool=default_data["workpool"],
+                is_workpool_eks=False,  # Default to EC2
+            )
 
         return QueueConfigSchema(
             scheduled_pipeline_queue=get_queue_details("scheduled_pipeline_queue"),

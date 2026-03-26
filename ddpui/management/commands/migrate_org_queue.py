@@ -3,28 +3,19 @@ Management command to migrate a specific organization to a new queue.
 Updates relevant dataflows for that org based on queue type and then updates the org's queue config.
 """
 
-import os
-import json
 from typing import List, Set
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
 from ddpui.models.org import (
     Org,
     OrgDataFlowv1,
-    OrgPrefectBlockv1,
     QueueConfigUpdateSchema,
     QueueDetailsSchema,
 )
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, Task
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
-from ddpui.ddpprefect import GITPULL
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITPULL, TASK_GITCLONE
 from ddpui.utils.unified_logger import get_logger
-from ddpui.core.pipelinefunctions import (
-    setup_git_clone_shell_task_config,
-    setup_git_shell_task_config,
-)
 from ddpui.core.orchestrate.pipeline_service import PipelineService
 
 logger = get_logger()
@@ -249,42 +240,7 @@ class Command(BaseCommand):
             f"\nMigrating {org.slug} {queue_type} to queue '{new_queue}' and workpool '{final_workpool}'..."
         )
 
-        # Update dataflows in Prefect
-        dataflow_errors = []
-        updated_count = 0
-
-        for dataflow in dataflows:
-            try:
-                # For scheduled pipelines, also handle git step replacement
-                if queue_type == "scheduled_pipeline_queue":
-                    self.switch_git_steps_for_scheduled_dataflow(
-                        dataflow, new_queue, final_workpool, is_workpool_eks
-                    )
-
-                # Update queue/workpool for all dataflows
-                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
-                self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
-                updated_count += 1
-            except Exception as e:
-                error_msg = f"Failed to update dataflow {dataflow.deployment_name}: {str(e)}"
-                dataflow_errors.append(error_msg)
-                self.stdout.write(self.style.ERROR(f"  ✗ {error_msg}"))
-                logger.error(error_msg)
-
-        # Only update database configuration if ALL dataflows updated successfully
-        if dataflow_errors:
-            self.stdout.write(f"\nMigration failed:")
-            self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
-            self.stdout.write(
-                self.style.ERROR(f"✗ {len(dataflow_errors)} dataflow update(s) failed")
-            )
-            self.stdout.write(
-                self.style.ERROR("✗ Database config NOT updated due to dataflow failures")
-            )
-            self.stdout.write("Check logs for details.")
-            raise CommandError("Migration failed due to dataflow update errors")
-
-        # All dataflows updated successfully, now update database config
+        # First update database config so PipelineService can detect EKS properly
         try:
             # Create new queue details object
             new_queue_details = QueueDetailsSchema(
@@ -306,10 +262,41 @@ class Command(BaseCommand):
             logger.error(error_msg)
             raise CommandError(error_msg)
 
+        # Now update dataflows in Prefect (PipelineService can now detect EKS properly)
+        dataflow_errors = []
+        updated_count = 0
+
+        for dataflow in dataflows:
+            try:
+                # For scheduled pipelines, update pipeline which will handle git steps automatically
+                if queue_type == "scheduled_pipeline_queue":
+                    self.update_scheduled_pipeline(dataflow)
+
+                # Update queue/workpool for all dataflows
+                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
+                self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
+                updated_count += 1
+            except Exception as e:
+                error_msg = f"Failed to update dataflow {dataflow.deployment_name}: {str(e)}"
+                dataflow_errors.append(error_msg)
+                self.stdout.write(self.style.ERROR(f"  ✗ {error_msg}"))
+                logger.error(error_msg)
+
+        # Check if there were any dataflow update errors
+        if dataflow_errors:
+            self.stdout.write(f"\nMigration partially failed:")
+            self.stdout.write(f"✓ Database config updated")
+            self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
+            self.stdout.write(
+                self.style.ERROR(f"✗ {len(dataflow_errors)} dataflow update(s) failed")
+            )
+            self.stdout.write("Check logs for details.")
+            raise CommandError("Migration failed due to dataflow update errors")
+
         # Summary - all successful
         self.stdout.write(f"\nMigration completed successfully:")
-        self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
         self.stdout.write(f"✓ Database config updated")
+        self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
 
     def update_dataflow_queue(self, dataflow: OrgDataFlowv1, new_queue: str, work_pool_name: str):
         """Update a Prefect dataflow to use a new queue"""
@@ -344,10 +331,8 @@ class Command(BaseCommand):
         except Exception as e:
             raise Exception(f"Prefect API error: {str(e)}")
 
-    def switch_git_steps_for_scheduled_dataflow(
-        self, dataflow: OrgDataFlowv1, new_queue: str, work_pool_name: str, is_workpool_eks: bool
-    ):
-        """Switch git steps (pull <-> clone) for scheduled dataflow and update queue/workpool"""
+    def update_scheduled_pipeline(self, dataflow: OrgDataFlowv1):
+        """Update scheduled pipeline - PipelineService will handle git steps automatically"""
 
         try:
             # Get current pipeline details
@@ -358,145 +343,27 @@ class Command(BaseCommand):
             transform_tasks = pipeline_details.get("transformTasks", [])
 
             if not transform_tasks:
-                # No transform tasks, nothing to replace
-                self.stdout.write(f"  → No transform tasks found, no git steps to replace")
+                # No transform tasks, nothing to update
+                self.stdout.write(f"  → No transform tasks found")
                 return
 
-            # Find and replace git pull/clone tasks in transformTasks
-            if is_workpool_eks:
-                # Replace git pull OrgTask with git clone OrgTask
-                transform_tasks = self._replace_git_pull_orgtask_with_clone(
-                    dataflow.org, transform_tasks
-                )
-                self.stdout.write(f"  → Replaced git pull OrgTask with git clone for EKS")
-            else:
-                # Replace git clone OrgTask with git pull OrgTask
-                transform_tasks = self._replace_git_clone_orgtask_with_pull(
-                    dataflow.org, transform_tasks
-                )
-                self.stdout.write(f"  → Replaced git clone OrgTask with git pull for EC2")
+            # Convert UUIDs to strings for Pydantic validation
+            transform_tasks_str = [
+                {"uuid": str(task["uuid"]), "seq": task["seq"]} for task in transform_tasks
+            ]
 
-            # Create update payload with modified transformTasks
+            # Create update payload - PipelineService will handle git step logic automatically
             update_payload = PrefectDataFlowUpdateSchema3(
                 name=pipeline_details["name"],
                 cron=pipeline_details["cron"],
                 connections=pipeline_details["connections"],
-                transformTasks=transform_tasks,  # Modified
+                transformTasks=transform_tasks_str,
             )
 
-            # Update pipeline using PipelineService
+            # Update pipeline using PipelineService (handles git steps based on workpool)
             PipelineService.update_pipeline(dataflow.org, dataflow.deployment_id, update_payload)
 
-            logger.info(
-                f"Updated dataflow {dataflow.deployment_name} with queue {new_queue} and git step replacement"
-            )
+            logger.info(f"Updated scheduled pipeline {dataflow.deployment_name}")
 
         except Exception as e:
-            raise Exception(f"Migration error: {str(e)}")
-
-    def _replace_git_pull_orgtask_with_clone(self, org: Org, transform_tasks: list) -> list:
-        """Replace git pull OrgTask with git clone OrgTask for EKS migration"""
-
-        updated_tasks = []
-        git_steps_replaced = 0
-
-        for task_info in transform_tasks:
-            task_uuid = task_info["uuid"]
-            seq = task_info["seq"]
-
-            # Get the OrgTask
-            orgtask = OrgTask.objects.filter(uuid=task_uuid).first()
-            if not orgtask:
-                logger.warning(f"OrgTask with uuid {task_uuid} not found")
-                updated_tasks.append(task_info)
-                continue
-
-            # Check if this is a git pull task
-            if orgtask.task.slug == TASK_GITPULL:
-                # Find or create git clone OrgTask for this org
-                git_clone_orgtask = self._get_or_create_git_clone_orgtask(org, orgtask)
-                if git_clone_orgtask:
-                    updated_tasks.append({"uuid": git_clone_orgtask.uuid, "seq": seq})
-                    git_steps_replaced += 1
-                    logger.info(f"Replaced git pull OrgTask with git clone (seq: {seq})")
-                else:
-                    logger.warning(f"Could not create git clone OrgTask for org {org.slug}")
-                    updated_tasks.append(task_info)
-            else:
-                # Keep non-git-pull tasks as-is
-                updated_tasks.append(task_info)
-
-        if git_steps_replaced > 0:
-            logger.info(
-                f"Replaced {git_steps_replaced} git pull OrgTask(s) with git clone for org {org.slug}"
-            )
-
-        return updated_tasks
-
-    def _replace_git_clone_orgtask_with_pull(self, org: Org, transform_tasks: list) -> list:
-        """Replace git clone OrgTask with git pull OrgTask for rollback from EKS"""
-
-        updated_tasks = []
-        git_steps_replaced = 0
-
-        for task_info in transform_tasks:
-            task_uuid = task_info["uuid"]
-            seq = task_info["seq"]
-
-            # Get the OrgTask
-            orgtask = OrgTask.objects.filter(uuid=task_uuid).first()
-            if not orgtask:
-                logger.warning(f"OrgTask with uuid {task_uuid} not found")
-                updated_tasks.append(task_info)
-                continue
-
-            # Check if this is a git clone task
-            if orgtask.task.slug == TASK_GITCLONE:
-                # Find git pull OrgTask for this org
-                git_pull_orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GITPULL).first()
-
-                if git_pull_orgtask:
-                    updated_tasks.append({"uuid": git_pull_orgtask.uuid, "seq": seq})
-                    git_steps_replaced += 1
-                    logger.info(f"Replaced git clone OrgTask with git pull (seq: {seq})")
-                else:
-                    logger.warning(f"Could not find git pull OrgTask for org {org.slug}")
-                    updated_tasks.append(task_info)
-            else:
-                # Keep non-git-clone tasks as-is
-                updated_tasks.append(task_info)
-
-        if git_steps_replaced > 0:
-            logger.info(
-                f"Replaced {git_steps_replaced} git clone OrgTask(s) with git pull for org {org.slug}"
-            )
-
-        return updated_tasks
-
-    def _get_or_create_git_clone_orgtask(self, org: Org, original_git_pull_orgtask: OrgTask):
-        """Get existing git clone OrgTask or create one based on git pull OrgTask"""
-
-        # First try to find existing git clone OrgTask
-        existing_clone_orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GITCLONE).first()
-
-        if existing_clone_orgtask:
-            return existing_clone_orgtask
-
-        # Create new git clone OrgTask based on git pull OrgTask
-        try:
-            git_clone_task = Task.objects.get(slug=TASK_GITCLONE)
-
-            git_clone_orgtask = OrgTask.objects.create(
-                org=org,
-                task=git_clone_task,
-                parameters=original_git_pull_orgtask.parameters,
-                dbt_project_params=original_git_pull_orgtask.dbt_project_params,
-                connection_id=original_git_pull_orgtask.connection_id,
-            )
-
-            logger.info(f"Created new git clone OrgTask for org {org.slug}")
-            return git_clone_orgtask
-
-        except Exception as e:
-            logger.error(f"Failed to create git clone OrgTask: {str(e)}")
-            return None
+            raise Exception(f"Pipeline update error: {str(e)}")
