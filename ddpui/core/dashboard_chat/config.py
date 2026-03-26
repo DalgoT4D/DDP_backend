@@ -58,9 +58,7 @@ class DashboardChatSourceConfig:
         env_value = _parse_enabled_source_types_env(
             os.getenv("AI_DASHBOARD_CHAT_ENABLED_SOURCE_TYPES")
         )
-        return cls(
-            enabled_source_types=env_value or _default_enabled_source_types()
-        )
+        return cls(enabled_source_types=env_value or _default_enabled_source_types())
 
     def is_enabled(self, source_type: DashboardChatSourceType) -> bool:
         """Return whether the given source type should participate in runtime work."""
@@ -71,20 +69,16 @@ class DashboardChatSourceConfig:
         source_types: Sequence[DashboardChatSourceType],
     ) -> list[DashboardChatSourceType]:
         """Keep only the configured source types from a requested set."""
-        return [
-            source_type
-            for source_type in source_types
-            if self.is_enabled(source_type)
-        ]
+        return [source_type for source_type in source_types if self.is_enabled(source_type)]
 
 
 @dataclass(frozen=True)
 class DashboardChatVectorStoreConfig:
-    """Environment-backed configuration for the Chroma sidecar and embeddings."""
+    """Environment-backed configuration for the vector store backend and embeddings."""
 
-    chroma_host: str = "localhost"
-    chroma_port: int = 8003
-    chroma_ssl: bool = False
+    vector_store_host: str = "localhost"
+    vector_store_port: int = 8003
+    vector_store_ssl: bool = False
     collection_prefix: str = "org_"
     embedding_model: str = "text-embedding-3-small"
 
@@ -92,9 +86,9 @@ class DashboardChatVectorStoreConfig:
     def from_env(cls) -> "DashboardChatVectorStoreConfig":
         """Build vector store config from environment variables."""
         return cls(
-            chroma_host=os.getenv("AI_DASHBOARD_CHAT_CHROMA_HOST", "localhost"),
-            chroma_port=int(os.getenv("AI_DASHBOARD_CHAT_CHROMA_PORT", "8003")),
-            chroma_ssl=_parse_bool(os.getenv("AI_DASHBOARD_CHAT_CHROMA_SSL"), False),
+            vector_store_host=os.getenv("AI_DASHBOARD_CHAT_CHROMA_HOST", "localhost"),
+            vector_store_port=int(os.getenv("AI_DASHBOARD_CHAT_CHROMA_PORT", "8003")),
+            vector_store_ssl=_parse_bool(os.getenv("AI_DASHBOARD_CHAT_CHROMA_SSL"), False),
             collection_prefix=os.getenv("AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX", "org_"),
             embedding_model=os.getenv(
                 "AI_DASHBOARD_CHAT_CHROMA_EMBEDDING_MODEL",
@@ -124,8 +118,6 @@ class DashboardChatRuntimeConfig:
             llm_max_attempts=int(os.getenv("AI_DASHBOARD_CHAT_LLM_MAX_ATTEMPTS", "1")),
             retrieval_limit=int(os.getenv("AI_DASHBOARD_CHAT_RETRIEVAL_LIMIT", "6")),
             max_query_rows=int(os.getenv("AI_DASHBOARD_CHAT_MAX_QUERY_ROWS", "200")),
-            max_distinct_values=int(
-                os.getenv("AI_DASHBOARD_CHAT_MAX_DISTINCT_VALUES", "50")
-            ),
+            max_distinct_values=int(os.getenv("AI_DASHBOARD_CHAT_MAX_DISTINCT_VALUES", "50")),
             max_schema_tables=int(os.getenv("AI_DASHBOARD_CHAT_MAX_SCHEMA_TABLES", "4")),
         )

@@ -13,6 +13,8 @@ from ddpui.core.dashboard_chat.context.allowlist import (
 )
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.orchestration.orchestrator import DashboardChatRuntime
+from ddpui.core.dashboard_chat.orchestration.conversation import extract_conversation_context
+from ddpui.core.dashboard_chat.orchestration.presentation import determine_response_format
 from ddpui.core.dashboard_chat.contracts import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
@@ -24,7 +26,7 @@ from ddpui.core.dashboard_chat.contracts import (
 )
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
-from ddpui.core.dashboard_chat.vector.store import DashboardChatVectorQueryResult
+from ddpui.utils.vector.interface import VectorQueryResult as DashboardChatVectorQueryResult
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -77,7 +79,10 @@ class FakeVectorStore:
             for source_type in (source_types or [])
         }
         for row in self.rows:
-            if normalized_source_types and row.metadata.get("source_type") not in normalized_source_types:
+            if (
+                normalized_source_types
+                and row.metadata.get("source_type") not in normalized_source_types
+            ):
                 continue
             if dashboard_id is not None and row.metadata.get("dashboard_id") != dashboard_id:
                 continue
@@ -195,7 +200,10 @@ class FakeWarehouseTools:
                 {"donor_type": "Grant", "beneficiary_count": 80},
                 {"donor_type": "Corporate", "beneficiary_count": 40},
             ]
-        if "analytics.stg_donor_funding_clean" in sql and "GROUP BY quarter_label, donor_type" in sql:
+        if (
+            "analytics.stg_donor_funding_clean" in sql
+            and "GROUP BY quarter_label, donor_type" in sql
+        ):
             return [
                 {
                     "quarter_label": "2025 Q1",
@@ -315,7 +323,10 @@ class SqlToolLoopLlm(PrototypeLlmBase):
                     {
                         "id": "call-1",
                         "name": "retrieve_docs",
-                        "args": {"query": "How many beneficiaries are in Education?", "types": ["chart"]},
+                        "args": {
+                            "query": "How many beneficiaries are in Education?",
+                            "types": ["chart"],
+                        },
                     }
                 ],
             },
@@ -420,7 +431,9 @@ class FollowUpCorrectionLlm(PrototypeLlmBase):
         if self.turn == 2:
             tool_messages = [message for message in messages if message["role"] == "tool"]
             assert any("column_not_in_table" in message["content"] for message in tool_messages)
-            assert any("analytics.stg_program_reach" in message["content"] for message in tool_messages)
+            assert any(
+                "analytics.stg_program_reach" in message["content"] for message in tool_messages
+            )
             self.turn += 1
             return {
                 "content": "",
@@ -495,7 +508,9 @@ class FollowUpDimensionGuardLlm(PrototypeLlmBase):
             }
         if self.turn == 2:
             tool_messages = [message for message in messages if message["role"] == "tool"]
-            assert any("requested_dimension_missing" in message["content"] for message in tool_messages)
+            assert any(
+                "requested_dimension_missing" in message["content"] for message in tool_messages
+            )
             self.turn += 1
             return {
                 "content": "",
@@ -673,11 +688,14 @@ def primary_dashboard(org, orguser, primary_chart):
     yield dashboard
     dashboard.delete()
 
+
 def test_extract_conversation_context_reads_previous_sql_payload():
     """Follow-up routing should recover prior SQL context from assistant payloads."""
-    conversation_context = DashboardChatRuntime._extract_conversation_context(
+    conversation_context = extract_conversation_context(
         [
-            DashboardChatConversationMessage(role="user", content="How many beneficiaries do we have?"),
+            DashboardChatConversationMessage(
+                role="user", content="How many beneficiaries do we have?"
+            ),
             DashboardChatConversationMessage(
                 role="assistant",
                 content="There are 120 beneficiaries.",
@@ -710,7 +728,7 @@ def test_seed_distinct_cache_reuses_previous_text_filters(primary_dashboard):
     )
     state = {
         "dashboard_id": primary_dashboard.id,
-        "conversation_context": DashboardChatRuntime._extract_conversation_context(
+        "conversation_context": extract_conversation_context(
             [
                 DashboardChatConversationMessage(
                     role="assistant",
@@ -753,7 +771,7 @@ def test_missing_distinct_accepts_previous_filter_validation_on_upstream_table(p
                 "analytics.stg_donor_funding_clean",
             }
         ),
-        "conversation_context": DashboardChatRuntime._extract_conversation_context(
+        "conversation_context": extract_conversation_context(
             [
                 DashboardChatConversationMessage(
                     role="assistant",
@@ -825,7 +843,11 @@ def test_get_distinct_values_returns_column_correction_for_wrong_table(primary_d
                 "analytics.donor_funding_quarterly",
                 [
                     {"name": "quarter_label", "data_type": "text", "nullable": False},
-                    {"name": "total_realized_funding_usd", "data_type": "numeric", "nullable": False},
+                    {
+                        "name": "total_realized_funding_usd",
+                        "data_type": "numeric",
+                        "nullable": False,
+                    },
                 ],
             ),
             "analytics.stg_donor_funding_clean": FakeWarehouseTools._schema_snippet(
@@ -863,9 +885,7 @@ def test_missing_columns_check_ignores_boolean_literals(primary_dashboard):
         llm_client=SmallTalkLlm(),
     )
     state = {
-        "allowlist": DashboardChatAllowlist(
-            allowed_tables={"analytics.stg_donor_funding_clean"}
-        ),
+        "allowlist": DashboardChatAllowlist(allowed_tables={"analytics.stg_donor_funding_clean"}),
         "org": primary_dashboard.org,
     }
     execution_context = {
@@ -1238,7 +1258,7 @@ def test_runtime_prompt_messages_do_not_inline_raw_human_context(primary_dashboa
         {
             "user_query": "Explain that metric",
             "human_context": "Organization context: duplicated markdown",
-            "conversation_context": DashboardChatRuntime._extract_conversation_context([]),
+            "conversation_context": extract_conversation_context([]),
         }
     )
 
@@ -1306,6 +1326,7 @@ def test_runtime_reuses_session_snapshot_across_turns(org, primary_dashboard):
         ]
     )
     fake_warehouse = FakeWarehouseTools()
+
     def build_runtime():
         return DashboardChatRuntime(
             vector_store=vector_store,
@@ -1453,7 +1474,9 @@ def test_runtime_follow_up_sql_corrects_after_failed_sql_attempt(
         dashboard_id=primary_dashboard.id,
         user_query="Now split that by donor type.",
         conversation_history=[
-            DashboardChatConversationMessage(role="user", content="How many beneficiaries do we have?"),
+            DashboardChatConversationMessage(
+                role="user", content="How many beneficiaries do we have?"
+            ),
             DashboardChatConversationMessage(
                 role="assistant",
                 content="There are 120 beneficiaries.",
@@ -1547,9 +1570,10 @@ def test_runtime_dbt_tools_use_compact_allowlisted_index():
     )
 
     assert search_result["count"] >= 1
-    assert {
-        model["table"] for model in search_result["models"]
-    } <= {"analytics.program_reach", "analytics.stg_program_reach"}
+    assert {model["table"] for model in search_result["models"]} <= {
+        "analytics.program_reach",
+        "analytics.stg_program_reach",
+    }
     assert info_result["model"] == "program_reach"
     assert info_result["upstream"] == ["analytics.stg_program_reach"]
 
@@ -1609,7 +1633,9 @@ def test_runtime_follow_up_sql_rejects_query_that_ignores_requested_dimension(
         dashboard_id=primary_dashboard.id,
         user_query="Now split that by donor type.",
         conversation_history=[
-            DashboardChatConversationMessage(role="user", content="How many beneficiaries do we have?"),
+            DashboardChatConversationMessage(
+                role="user", content="How many beneficiaries do we have?"
+            ),
             DashboardChatConversationMessage(
                 role="assistant",
                 content="There are 120 beneficiaries.",
@@ -1621,9 +1647,7 @@ def test_runtime_follow_up_sql_rejects_query_that_ignores_requested_dimension(
                         "WHERE quarter_label IN ('2025 Q1', '2025 Q2') "
                         "ORDER BY quarter_label"
                     ),
-                    "metadata": {
-                        "query_plan_tables": ["analytics.donor_funding_quarterly"]
-                    },
+                    "metadata": {"query_plan_tables": ["analytics.donor_funding_quarterly"]},
                 },
             ),
         ],
@@ -1665,9 +1689,7 @@ def test_follow_up_dimension_validation_accepts_structural_granularity_change(pr
             ),
         ),
         "user_query": "Now split that by donor type.",
-        "allowlist": DashboardChatAllowlist(
-            allowed_tables={"analytics.stg_donor_funding_clean"}
-        ),
+        "allowlist": DashboardChatAllowlist(allowed_tables={"analytics.stg_donor_funding_clean"}),
         "org": primary_dashboard.org,
     }
     execution_context = {
@@ -1842,9 +1864,7 @@ def test_tool_document_payload_exposes_structured_chart_metadata():
             dashboard_id=6,
             distance=0.02,
         ),
-        DashboardChatAllowlist(
-            allowed_tables={"analytics.facilitator_effectiveness_quarterly"}
-        ),
+        DashboardChatAllowlist(allowed_tables={"analytics.facilitator_effectiveness_quarterly"}),
         {
             "dashboard": {"title": "Facilitator Effectiveness Studio"},
             "charts": [
@@ -1985,7 +2005,7 @@ def test_compose_final_answer_text_uses_llm_and_normalizes_rate_values():
 
 def test_determine_response_format_prefers_table_for_grouped_breakdowns():
     """Grouped breakdowns should tell the frontend to render a structured table."""
-    response_format = DashboardChatRuntime._determine_response_format(
+    response_format = determine_response_format(
         user_query="Give me a district wise pass rate breakdown",
         sql_results=[
             {
