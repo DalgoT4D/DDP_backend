@@ -2,18 +2,18 @@
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable
+from typing import Callable, Union
 
 from django.utils import timezone
 
+from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.context.dbt_docs import (
     DashboardChatDbtDocsArtifacts,
     generate_dashboard_chat_dbt_docs_artifacts,
 )
-from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.vector.builder import DashboardChatVectorDocumentBuilder
 from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
-from ddpui.core.dashboard_chat.vector.store import ChromaDashboardChatVectorStore
+from ddpui.core.dashboard_chat.vector.store import OrgVectorStore
 from ddpui.models.dashboard_chat import DashboardChatSession
 from ddpui.models.org import Org
 
@@ -26,43 +26,45 @@ INGEST_SOURCE_ORDER = [
 ]
 
 
-class DashboardChatVectorBuildError(Exception):
-    """Raised when the dashboard chat vector build cannot complete."""
+class OrgVectorBuildError(Exception):
+    """Raised when an org vector build cannot complete."""
 
 
 @dataclass(frozen=True)
-class DashboardChatVectorBuildResult:
+class OrgVectorBuildResult:
     """Summary of one completed org vector build."""
 
     org_id: int
-    docs_generated_at: timezone.datetime | None
+    docs_generated_at: Union[timezone.datetime, None]
     vector_ingested_at: timezone.datetime
     source_document_counts: dict[str, int]
     upserted_document_ids: list[str]
     deleted_document_ids: list[str]
 
 
-class DashboardChatVectorBuildService:
-    """Build org-scoped dashboard-chat vector context and sync it into Chroma."""
+class OrgVectorBuildService:
+    """Build org-scoped dashboard-chat vector context and sync it into the vector store."""
 
     def __init__(
         self,
-        vector_store: ChromaDashboardChatVectorStore | None = None,
-        dbt_docs_generator: Callable[[Org, object], DashboardChatDbtDocsArtifacts] | None = None,
-        source_config: DashboardChatSourceConfig | None = None,
-        document_builder: DashboardChatVectorDocumentBuilder | None = None,
+        vector_store: Union[OrgVectorStore, None] = None,
+        dbt_docs_generator: Union[
+            Callable[[Org, object], DashboardChatDbtDocsArtifacts], None
+        ] = None,
+        source_config: Union[DashboardChatSourceConfig, None] = None,
+        document_builder: Union[DashboardChatVectorDocumentBuilder, None] = None,
     ):
-        self.vector_store = vector_store or ChromaDashboardChatVectorStore()
+        self.vector_store = vector_store or OrgVectorStore()
         self.dbt_docs_generator = dbt_docs_generator or generate_dashboard_chat_dbt_docs_artifacts
         self.source_config = source_config or DashboardChatSourceConfig.from_env()
         self.document_builder = document_builder or DashboardChatVectorDocumentBuilder(
             source_config=self.source_config
         )
 
-    def build_org_vector_context(self, org: Org) -> DashboardChatVectorBuildResult:
+    def build_org_vector_context(self, org: Org) -> OrgVectorBuildResult:
         """Run dbt docs generation and rebuild the desired vector documents for an org."""
         if org.dbt is None:
-            raise DashboardChatVectorBuildError("dbt workspace not configured")
+            raise OrgVectorBuildError("dbt workspace not configured")
 
         collection_versioned_at = timezone.now()
         target_collection_name = self.vector_store.collection_name(
@@ -81,11 +83,14 @@ class DashboardChatVectorBuildService:
             if self.source_config.is_enabled(source_type)
             for document in documents_by_source[source_type.value]
         ]
-        if self.vector_store.load_collection(
-            org.id,
-            collection_name=target_collection_name,
-            allow_legacy_fallback=False,
-        ) is not None:
+        if (
+            self.vector_store.load_collection(
+                org.id,
+                collection_name=target_collection_name,
+                allow_legacy_fallback=False,
+            )
+            is not None
+        ):
             self.vector_store.delete_collection(
                 org.id,
                 collection_name=target_collection_name,
@@ -107,7 +112,7 @@ class DashboardChatVectorBuildService:
             active_collection_name=target_collection_name,
         )
 
-        return DashboardChatVectorBuildResult(
+        return OrgVectorBuildResult(
             org_id=org.id,
             docs_generated_at=dbt_docs.generated_at if dbt_docs else org.dbt.docs_generated_at,
             vector_ingested_at=vector_ingested_at,
@@ -129,7 +134,7 @@ class DashboardChatVectorBuildService:
         org: Org,
         active_collection_name: str,
     ) -> None:
-        """Delete old versioned collections that are not pinned by recent chat sessions."""
+        """Delete old versioned collections not pinned by recent chat sessions."""
         retention_cutoff = timezone.now() - timedelta(hours=24)
         recent_sessions = DashboardChatSession.objects.filter(
             org=org,

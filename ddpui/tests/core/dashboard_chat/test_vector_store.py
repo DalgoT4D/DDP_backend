@@ -9,7 +9,8 @@ from ddpui.core.dashboard_chat.vector.documents import (
     DashboardChatVectorDocument,
     build_dashboard_chat_collection_name,
 )
-from ddpui.core.dashboard_chat.vector.store import ChromaDashboardChatVectorStore
+from ddpui.utils.vector.backends.chroma import ChromaVectorStore
+from ddpui.core.dashboard_chat.vector.store import OrgVectorStore
 
 
 class FakeEmbeddingProvider:
@@ -134,9 +135,9 @@ def test_dashboard_chat_vector_store_config_reads_env():
     ):
         config = DashboardChatVectorStoreConfig.from_env()
 
-    assert config.chroma_host == "chroma.internal"
-    assert config.chroma_port == 8100
-    assert config.chroma_ssl is True
+    assert config.vector_store_host == "chroma.internal"
+    assert config.vector_store_port == 8100
+    assert config.vector_store_ssl is True
     assert config.collection_prefix == "tenant_"
     assert config.embedding_model == "text-embedding-3-large"
 
@@ -194,10 +195,10 @@ def test_vector_document_has_stable_id_and_required_metadata():
 def test_upsert_documents_uses_embeddings_and_metadata():
     """Upserts should use deterministic IDs, embeddings, and per-org collections."""
     fake_client = FakeChromaClient()
-    store = ChromaDashboardChatVectorStore(
+    store = OrgVectorStore(
         config=DashboardChatVectorStoreConfig(collection_prefix="org_"),
         embedding_provider=FakeEmbeddingProvider(),
-        client=fake_client,
+        backend=ChromaVectorStore(client=fake_client),
     )
     documents = [
         DashboardChatVectorDocument(
@@ -234,10 +235,10 @@ def test_query_scopes_to_org_collection_and_where_filters():
     """Queries should stay inside the org collection and forward source/dashboard filters."""
     fake_client = FakeChromaClient()
     fake_client.get_or_create_collection("org_3")
-    store = ChromaDashboardChatVectorStore(
+    store = OrgVectorStore(
         config=DashboardChatVectorStoreConfig(),
         embedding_provider=FakeEmbeddingProvider(),
-        client=fake_client,
+        backend=ChromaVectorStore(client=fake_client),
     )
 
     results = store.query(
@@ -262,10 +263,10 @@ def test_query_scopes_to_org_collection_and_where_filters():
 
 def test_delete_collection_returns_false_for_missing_org():
     """Deleting a missing collection should be a no-op."""
-    store = ChromaDashboardChatVectorStore(
+    store = OrgVectorStore(
         config=DashboardChatVectorStoreConfig(),
         embedding_provider=FakeEmbeddingProvider(),
-        client=FakeChromaClient(),
+        backend=ChromaVectorStore(client=FakeChromaClient()),
     )
 
     assert store.delete_collection(404) is False
@@ -274,10 +275,10 @@ def test_delete_collection_returns_false_for_missing_org():
 def test_get_documents_and_delete_documents_respect_where_filters():
     """Collection reads and deletes should honor source and dashboard scoping."""
     fake_client = FakeChromaClient()
-    store = ChromaDashboardChatVectorStore(
+    store = OrgVectorStore(
         config=DashboardChatVectorStoreConfig(),
         embedding_provider=FakeEmbeddingProvider(),
-        client=fake_client,
+        backend=ChromaVectorStore(client=fake_client),
     )
     documents = [
         DashboardChatVectorDocument(

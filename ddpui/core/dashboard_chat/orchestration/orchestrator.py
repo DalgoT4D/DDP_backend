@@ -3,7 +3,7 @@
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from time import perf_counter
-from typing import Any
+from typing import Any, Union
 
 from langgraph.graph import END, START, StateGraph
 
@@ -11,7 +11,7 @@ from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, Dashboa
 from ddpui.core.dashboard_chat.agents.interface import DashboardChatLlmClient
 from ddpui.core.dashboard_chat.agents.openai import OpenAIDashboardChatLlmClient
 from ddpui.core.dashboard_chat.contracts import DashboardChatResponse
-from ddpui.core.dashboard_chat.vector.store import ChromaDashboardChatVectorStore
+from ddpui.core.dashboard_chat.vector.store import OrgVectorStore
 from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseTools
 from ddpui.models.org import Org
 
@@ -146,15 +146,15 @@ class DashboardChatRuntime:
 
     def __init__(
         self,
-        vector_store: ChromaDashboardChatVectorStore | None = None,
-        llm_client: DashboardChatLlmClient | None = None,
-        warehouse_tools_factory: Callable[[Org], DashboardChatWarehouseTools] | None = None,
-        runtime_config: DashboardChatRuntimeConfig | None = None,
-        source_config: DashboardChatSourceConfig | None = None,
+        vector_store: Union[OrgVectorStore, None] = None,
+        llm_client: Union[DashboardChatLlmClient, None] = None,
+        warehouse_tools_factory: Union[Callable[[Org], DashboardChatWarehouseTools], None] = None,
+        runtime_config: Union[DashboardChatRuntimeConfig, None] = None,
+        source_config: Union[DashboardChatSourceConfig, None] = None,
     ):
         self.runtime_config = runtime_config or DashboardChatRuntimeConfig.from_env()
         self.source_config = source_config or DashboardChatSourceConfig.from_env()
-        self.vector_store = vector_store or ChromaDashboardChatVectorStore()
+        self.vector_store = vector_store or OrgVectorStore()
         self.llm_client = llm_client or OpenAIDashboardChatLlmClient(
             model=self.runtime_config.llm_model,
             timeout_ms=self.runtime_config.llm_timeout_ms,

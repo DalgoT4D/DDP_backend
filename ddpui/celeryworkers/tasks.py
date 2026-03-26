@@ -75,7 +75,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
-from ddpui.core.dashboard_chat.vector.building import DashboardChatVectorBuildService
+from ddpui.core.dashboard_chat.vector.building import OrgVectorBuildService
 from ddpui.core.dashboard_chat.orchestration.orchestrator import get_dashboard_chat_runtime
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
@@ -1342,7 +1342,7 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
         return {"status": "skipped_locked", "org_id": org_id}
 
     try:
-        result = DashboardChatVectorBuildService().build_org_vector_context(org)
+        result = OrgVectorBuildService().build_org_vector_context(org)
         return {
             "status": "completed",
             "org_id": org_id,
@@ -1429,9 +1429,7 @@ def run_dashboard_chat_turn(session_id: str, user_message_id: int):
             .filter(session_id=session_id)
             .first()
         )
-        user_message = (
-            DashboardChatMessage.objects.filter(id=user_message_id, role="user").first()
-        )
+        user_message = DashboardChatMessage.objects.filter(id=user_message_id, role="user").first()
         if session is not None and session.dashboard is not None and user_message is not None:
             publish_dashboard_chat_event(
                 str(session.session_id),
@@ -1493,9 +1491,7 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
     assistant_payload = {
         key: value for key, value in response_payload.items() if key != "answer_text"
     }
-    timing_breakdown = (
-        dict(response_payload.get("metadata") or {}).get("timing_breakdown") or {}
-    )
+    timing_breakdown = dict(response_payload.get("metadata") or {}).get("timing_breakdown") or {}
     assistant_message = create_dashboard_chat_assistant_message(
         session=session,
         content=response.answer_text,
