@@ -13,7 +13,7 @@ from ..presentation import (
 )
 from ..retrieval import build_citations, get_cached_query_embedding
 from ..state import DashboardChatRuntimeState
-from ..tool_loop import execute_tool_loop
+from ..tools.loop import execute_tool_loop
 from .helpers import merge_tool_loop_timing
 
 

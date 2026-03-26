@@ -26,7 +26,7 @@ from .nodes.helpers import route_after_intent
 from .nodes.load_context import load_context_node
 from .nodes.route_intent import route_intent_node
 from .state import DashboardChatRuntimeState, SMALL_TALK_FAST_PATH_PATTERN
-from .tool_specifications import DASHBOARD_CHAT_TOOL_SPECIFICATIONS
+from .tools.specifications import DASHBOARD_CHAT_TOOL_SPECIFICATIONS
 
 
 def _timed_node(node_name: str, handler):

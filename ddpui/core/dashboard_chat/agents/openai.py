@@ -1,7 +1,6 @@
 """OpenAI-backed dashboard chat LLM adapter."""
 
 import json
-import logging
 import os
 from time import sleep
 from typing import Any
@@ -23,17 +22,16 @@ from ddpui.core.dashboard_chat.contracts import (
     DashboardChatRetrievedDocument,
 )
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.openai_client import get_shared_openai_client
 
-logger = logging.getLogger("ddpui")
+logger = CustomLogger("dashboard_chat")
 
 
 class OpenAIDashboardChatLlmClient:
     """Direct OpenAI SDK adapter with JSON-mode helpers."""
 
-    TECHNICAL_DIFFICULTIES_MESSAGE = (
-        "I'm experiencing technical difficulties. Please try again."
-    )
+    TECHNICAL_DIFFICULTIES_MESSAGE = "I'm experiencing technical difficulties. Please try again."
 
     def __init__(
         self,
@@ -70,9 +68,7 @@ class OpenAIDashboardChatLlmClient:
         conversation_context: DashboardChatConversationContext,
     ) -> DashboardChatIntentDecision:
         """Classify intent with prototype-style conversation awareness."""
-        system_prompt = self.prompt_store.get(
-            DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION
-        )
+        system_prompt = self.prompt_store.get(DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION)
         if conversation_context.last_sql_query or conversation_context.last_chart_ids:
             system_prompt += (
                 "\n\nCONVERSATION CONTEXT:\n"
@@ -173,9 +169,7 @@ class OpenAIDashboardChatLlmClient:
             result = self._complete_json(
                 operation="final_answer_table_summary",
                 system_prompt=(
-                    self.prompt_store.get(
-                        DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION
-                    )
+                    self.prompt_store.get(DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION)
                     + "\n\n"
                     + TABLE_SUMMARY_JSON_INSTRUCTIONS
                 ),
@@ -239,7 +233,9 @@ class OpenAIDashboardChatLlmClient:
                 )
         return {"content": message.content or "", "tool_calls": tool_calls}
 
-    def _complete_json(self, operation: str, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    def _complete_json(
+        self, operation: str, system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
         """Run a JSON-mode chat completion and parse the result."""
         response = self._create_chat_completion(
             messages=[

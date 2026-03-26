@@ -1,23 +1,23 @@
 """Prototype-style tool-loop execution helpers for dashboard chat."""
 
 import json
-import logging
 from time import perf_counter
 from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
 from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseToolsError
+from ddpui.utils.custom_logger import CustomLogger
 
-from .presentation import (
+from ..presentation import (
     serialize_tool_result,
     summarize_tool_call,
     max_turns_message,
     fallback_answer_text,
 )
-from .sql_execution import run_sql_with_distinct_guard
-from .state import DashboardChatRuntimeState
-from .tool_handlers import (
+from ..state import DashboardChatRuntimeState
+from .cache import seed_distinct_cache_from_previous_sql
+from .handlers import (
     handle_retrieve_docs_tool,
     handle_get_schema_snippets_tool,
     handle_search_dbt_models_tool,
@@ -25,10 +25,10 @@ from .tool_handlers import (
     handle_get_distinct_values_tool,
     handle_list_tables_by_keyword_tool,
     handle_check_table_row_count_tool,
-    seed_distinct_cache_from_previous_sql,
+    handle_run_sql_query_tool,
 )
 
-logger = logging.getLogger(__name__)
+logger = CustomLogger("dashboard_chat")
 
 
 def execute_tool_loop(
@@ -201,7 +201,7 @@ def execute_tool_call(
                 warehouse_tools_factory, args, state, execution_context
             )
         if tool_name == "run_sql_query":
-            return run_sql_with_distinct_guard(
+            return handle_run_sql_query_tool(
                 warehouse_tools_factory, runtime_config, args, state, execution_context
             )
         if tool_name == "list_tables_by_keyword":
