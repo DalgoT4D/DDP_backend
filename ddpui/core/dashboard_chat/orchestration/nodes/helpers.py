@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ..state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def route_after_intent(state: DashboardChatRuntimeState) -> str:

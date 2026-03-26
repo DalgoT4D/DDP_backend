@@ -6,7 +6,7 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-from .intents import DashboardChatIntent
+from ddpui.core.dashboard_chat.contracts.intents import DashboardChatIntent
 
 
 @dataclass(frozen=True)

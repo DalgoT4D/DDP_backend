@@ -8,16 +8,19 @@ from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseTool
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 
-from ..retrieval import (
+from ddpui.core.dashboard_chat.orchestration.retrieval import (
     retrieve_vector_documents,
     filter_allowlisted_dbt_results,
     dedupe_retrieved_documents,
     build_tool_document_payload,
     get_cached_query_embedding,
 )
-from ..session_snapshot import persist_session_schema_cache, persist_session_distinct_cache
-from ..state import DashboardChatRuntimeState
-from .sql_parsing import (
+from ddpui.core.dashboard_chat.orchestration.session_snapshot import (
+    persist_session_schema_cache,
+    persist_session_distinct_cache,
+)
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.tools.sql_parsing import (
     table_references as sql_table_references,
     resolve_identifier_table,
     tables_with_column,

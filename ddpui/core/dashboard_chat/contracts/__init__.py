@@ -1,27 +1,20 @@
 """Typed contracts for dashboard chat orchestration."""
 
-from .conversation import (
+from ddpui.core.dashboard_chat.contracts.conversation import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
 )
-from .intents import (
+from ddpui.core.dashboard_chat.contracts.intents import (
     DashboardChatFollowUpContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
 )
-from .response import DashboardChatCitation, DashboardChatResponse
-from .retrieval import DashboardChatRetrievedDocument, DashboardChatSchemaSnippet
-from .sql import DashboardChatSqlValidationResult
-
-__all__ = [
-    "DashboardChatCitation",
-    "DashboardChatConversationContext",
-    "DashboardChatConversationMessage",
-    "DashboardChatFollowUpContext",
-    "DashboardChatIntent",
-    "DashboardChatIntentDecision",
-    "DashboardChatResponse",
-    "DashboardChatRetrievedDocument",
-    "DashboardChatSchemaSnippet",
-    "DashboardChatSqlValidationResult",
-]
+from ddpui.core.dashboard_chat.contracts.response import (
+    DashboardChatCitation,
+    DashboardChatResponse,
+)
+from ddpui.core.dashboard_chat.contracts.retrieval import (
+    DashboardChatRetrievedDocument,
+    DashboardChatSchemaSnippet,
+)
+from ddpui.core.dashboard_chat.contracts.sql import DashboardChatSqlValidationResult

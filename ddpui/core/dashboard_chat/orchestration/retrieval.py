@@ -13,7 +13,7 @@ from ddpui.core.dashboard_chat.contracts import (
 )
 from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
 
-from .source_identifiers import (
+from ddpui.core.dashboard_chat.orchestration.source_identifiers import (
     chart_id_from_source_identifier,
     unique_id_from_source_identifier,
 )

@@ -12,16 +12,18 @@ from ddpui.core.dashboard_chat.contracts import DashboardChatIntent
 from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
-from ..conversation import extract_requested_follow_up_dimension
-from ..retrieval import (
+from ddpui.core.dashboard_chat.orchestration.conversation import (
+    extract_requested_follow_up_dimension,
+)
+from ddpui.core.dashboard_chat.orchestration.retrieval import (
     retrieve_vector_documents,
     filter_allowlisted_dbt_results,
     dedupe_retrieved_documents,
     build_tool_document_payload,
     get_cached_query_embedding,
 )
-from ..state import DashboardChatRuntimeState
-from .cache import (
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.tools.cache import (
     get_turn_warehouse_tools,
     get_cached_schema_snippets,
     has_validated_distinct_value,
@@ -30,7 +32,7 @@ from .cache import (
     record_validated_filters_from_sql,
     dbt_resources_by_unique_id,
 )
-from .sql_parsing import (
+from ddpui.core.dashboard_chat.orchestration.tools.sql_parsing import (
     table_references,
     resolve_identifier_table,
     tables_with_column,

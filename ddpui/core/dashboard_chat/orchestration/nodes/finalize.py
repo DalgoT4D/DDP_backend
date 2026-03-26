@@ -5,7 +5,7 @@ from typing import Any
 from ddpui.core.dashboard_chat.context.allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.contracts import DashboardChatCitation, DashboardChatResponse
 
-from ..state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def finalize_node(state: DashboardChatRuntimeState) -> dict[str, Any]:

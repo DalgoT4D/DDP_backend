@@ -15,18 +15,25 @@ from ddpui.core.dashboard_chat.vector.store import ChromaDashboardChatVectorStor
 from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseTools
 from ddpui.models.org import Org
 
-from .conversation import normalize_conversation_history
-from .nodes.finalize import finalize_node
-from .nodes.handle_data_query import handle_data_query_node
-from .nodes.handle_follow_up import handle_follow_up_node
-from .nodes.handle_irrelevant import handle_irrelevant_node
-from .nodes.handle_needs_clarification import handle_needs_clarification_node
-from .nodes.handle_small_talk import handle_small_talk_node
-from .nodes.helpers import route_after_intent
-from .nodes.load_context import load_context_node
-from .nodes.route_intent import route_intent_node
-from .state import DashboardChatRuntimeState, SMALL_TALK_FAST_PATH_PATTERN
-from .tools.specifications import DASHBOARD_CHAT_TOOL_SPECIFICATIONS
+from ddpui.core.dashboard_chat.orchestration.conversation import normalize_conversation_history
+from ddpui.core.dashboard_chat.orchestration.nodes.finalize import finalize_node
+from ddpui.core.dashboard_chat.orchestration.nodes.handle_data_query import handle_data_query_node
+from ddpui.core.dashboard_chat.orchestration.nodes.handle_follow_up import handle_follow_up_node
+from ddpui.core.dashboard_chat.orchestration.nodes.handle_irrelevant import handle_irrelevant_node
+from ddpui.core.dashboard_chat.orchestration.nodes.handle_needs_clarification import (
+    handle_needs_clarification_node,
+)
+from ddpui.core.dashboard_chat.orchestration.nodes.handle_small_talk import handle_small_talk_node
+from ddpui.core.dashboard_chat.orchestration.nodes.helpers import route_after_intent
+from ddpui.core.dashboard_chat.orchestration.nodes.load_context import load_context_node
+from ddpui.core.dashboard_chat.orchestration.nodes.route_intent import route_intent_node
+from ddpui.core.dashboard_chat.orchestration.state import (
+    DashboardChatRuntimeState,
+    SMALL_TALK_FAST_PATH_PATTERN,
+)
+from ddpui.core.dashboard_chat.orchestration.tools.specifications import (
+    DASHBOARD_CHAT_TOOL_SPECIFICATIONS,
+)
 
 
 def _timed_node(node_name: str, handler):

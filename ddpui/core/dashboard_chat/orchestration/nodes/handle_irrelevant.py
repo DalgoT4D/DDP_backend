@@ -4,8 +4,8 @@ from typing import Any
 
 from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 
-from ..presentation import build_usage_summary
-from ..state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.presentation import build_usage_summary
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def handle_irrelevant_node(
