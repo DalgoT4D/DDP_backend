@@ -282,7 +282,7 @@ def test_seed_data(seed_db):
 
 def test_seed_master_tasks(seed_master_tasks_db):
     """a test to seed the database"""
-    assert Task.objects.count() == 12
+    assert Task.objects.count() == 13
 
 
 # ================================================================================
@@ -390,7 +390,7 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
     transform_tasks = OrgTask.objects.filter(
         org=request.orguser.org,
         generated_by="system",
-        task__type__in=[TaskType.DBT, TaskType.GIT],
+        task__type__in=[TaskType.DBT],  # Only DBT tasks - git tasks are now auto-managed
     ).all()
 
     payload = PrefectDataFlowCreateSchema4(
@@ -424,7 +424,7 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
         assert dataflow_task is not None
         assert dataflow_task.seq == i
 
-    seq = len(connections)
+    seq = len(connections) + 1  # +1 for automatically added git task
     for i, org_task in enumerate(transform_tasks):
         dataflow_task = DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask=org_task).first()
         assert dataflow_task is not None
@@ -569,7 +569,7 @@ def test_get_prefect_dataflow_v1_failure3(orguser_transform_tasks):
     with pytest.raises(HttpError) as excinfo:
         get_prefect_dataflow_v1(request, "test-dep-id-1")
 
-    assert str(excinfo.value) == "failed to get deploymenet from prefect-proxy"
+    assert str(excinfo.value) == "failed to get deployment from prefect-proxy"
 
     # cleanup
     OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-dep-id-1").delete()
