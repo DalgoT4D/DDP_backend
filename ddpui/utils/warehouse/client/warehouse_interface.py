@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import Enum
+from typing import Union
 
 
 class WarehouseType(str, Enum):
@@ -30,4 +31,10 @@ class Warehouse(ABC):
 
     @abstractmethod
     def column_exists(self, db_schema: str, db_table: str, column_name: str) -> bool:
+        pass
+
+    @abstractmethod
+    def get_distinct_values(
+        self, db_schema: str, db_table: str, column_name: str, limit: Union[int, None] = None
+    ) -> list[str]:
         pass
