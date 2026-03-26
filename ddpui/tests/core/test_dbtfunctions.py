@@ -12,6 +12,8 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
         target="target",
         dbt_binary="dbt_binary",
         venv_binary="path/to/venv/bin",
+        clients_base_dir="/path/to/clients_base",
+        project_dir_relative="org/dbtrepo",
     )
 
     conn_info = {"some": "random value"}
@@ -70,6 +72,8 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_ssl_params(tmpdi
         target="target",
         dbt_binary="dbt_binary",
         venv_binary="path/to/venv/bin",
+        clients_base_dir="/path/to/clients_base",
+        project_dir_relative="org/dbtrepo",
     )
 
     conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}
