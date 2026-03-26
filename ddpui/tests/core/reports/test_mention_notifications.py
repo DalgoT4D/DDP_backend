@@ -1,7 +1,7 @@
 """Tests for mention notification dispatch in MentionService"""
 
 from datetime import date
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import pytest
 from django.conf import settings
@@ -15,7 +15,7 @@ from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.comments.mention_service import MentionService
+from ddpui.core.reports.mention_service import MentionService
 from ddpui.utils.email_templates import render_mention_email
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
@@ -146,7 +146,7 @@ def comment_with_mention(snapshot, author_orguser, org, mentioned_orguser):
 class TestMentionNotifications:
     """Tests for notification dispatch when users are @mentioned"""
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_process_mentions_creates_notification(
         self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
     ):
@@ -167,7 +167,7 @@ class TestMentionNotifications:
         assert recipient.recipient == mentioned_orguser
         assert recipient.read_status is False
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_self_mention_creates_notification(self, mock_send, snapshot, author_orguser, org):
         """Author mentioning themselves still creates a notification."""
         comment = Comment.objects.create(
@@ -186,7 +186,7 @@ class TestMentionNotifications:
 
         comment.delete()
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_update_notifies_all_mentioned_users(
         self,
         mock_send,
@@ -220,7 +220,7 @@ class TestMentionNotifications:
 
         comment.delete()
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_update_same_mentions_still_notifies(
         self, mock_send, snapshot, author_orguser, org, mentioned_orguser
     ):
@@ -243,7 +243,7 @@ class TestMentionNotifications:
 
         comment.delete()
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_multiple_mentions_create_separate_notifications(
         self,
         mock_send,
@@ -286,7 +286,7 @@ class TestMentionNotifications:
 class TestMentionEmail:
     """Tests for email sending on @mention"""
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_email_sent_when_preference_enabled(
         self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
     ):
@@ -305,7 +305,7 @@ class TestMentionEmail:
         assert call_kwargs[1]["to_email"] == mentioned_orguser.user.email
         assert "mentioned" in call_kwargs[1]["subject"].lower()
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_email_not_sent_when_preference_disabled(
         self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
     ):
@@ -325,7 +325,7 @@ class TestMentionEmail:
         assert NotificationRecipient.objects.count() == 1
 
     @patch(
-        "ddpui.core.comments.mention_service.send_html_message",
+        "ddpui.core.reports.mention_service.send_html_message",
         side_effect=Exception("SES error"),
     )
     def test_email_failure_doesnt_block_notification(
@@ -460,11 +460,6 @@ class TestRenderMentionEmail:
 
         # Plain text should have the raw content (not escaped)
         assert "<script>" in plain
-
-
-# ================================================================================
-# Tests: send_html_message
-# ================================================================================
 
 
 # ================================================================================
@@ -608,7 +603,7 @@ class TestCreateInAppNotification:
 class TestSendEmailNotification:
     """Tests for MentionService._send_email_notification"""
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_sends_email_when_preference_enabled(
         self, mock_send, snapshot, author_orguser, mentioned_orguser, org
     ):
@@ -640,7 +635,7 @@ class TestSendEmailNotification:
         assert mock_send.call_args[1]["to_email"] == mentioned_orguser.user.email
         comment.delete()
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_skips_email_when_preference_disabled(
         self, mock_send, snapshot, author_orguser, mentioned_orguser, org
     ):
@@ -672,7 +667,7 @@ class TestSendEmailNotification:
         comment.delete()
 
     @patch(
-        "ddpui.core.comments.mention_service.send_html_message",
+        "ddpui.core.reports.mention_service.send_html_message",
         side_effect=Exception("SES down"),
     )
     def test_email_failure_logged_not_raised(

@@ -13,8 +13,8 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentReadStatus, CommentTargetType
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.comments.comment_service import CommentService
-from ddpui.core.comments.exceptions import CommentValidationError
+from ddpui.core.reports.comment_service import CommentService
+from ddpui.core.reports.exceptions import CommentValidationError
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -603,7 +603,7 @@ class TestCreateComment:
 class TestListComments:
     """Integration tests for CommentService.list_comments"""
 
-    @patch("ddpui.core.comments.mention_service.send_html_message")
+    @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_returns_comments_with_is_new(
         self, mock_send, snapshot, author_orguser, other_orguser, org
     ):

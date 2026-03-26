@@ -7,7 +7,11 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
+from ddpui.core.reports.comment_service import CommentService
 from ddpui.core.reports.exceptions import (
+    CommentNotFoundError,
+    CommentPermissionError,
+    CommentValidationError,
     SnapshotNotFoundError,
     SnapshotPermissionError,
     SnapshotValidationError,
@@ -18,7 +22,13 @@ from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.schemas.report_schema import (
+    CommentCreate,
+    CommentResponse,
+    CommentStatesResponse,
+    CommentUpdate,
     DatetimeColumnResponse,
+    MarkReadRequest,
+    MentionableUserResponse,
     SnapshotCreate,
     SnapshotDeleteResponse,
     SnapshotResponse,
@@ -77,6 +87,19 @@ def create_snapshot(request, payload: SnapshotCreate):
     except Exception as e:
         logger.error(f"Unexpected error creating snapshot: {e}", exc_info=True)
         raise HttpError(500, "Failed to create snapshot") from e
+
+
+@report_router.get("/mentionable-users/", response=ApiResponse[List[MentionableUserResponse]])
+@has_permission(["can_view_dashboards"])
+def get_mentionable_users(request):
+    """List org users available for @mention"""
+    orguser: OrgUser = request.orguser
+
+    users = CommentService.get_mentionable_users(orguser.org)
+    return api_response(
+        success=True,
+        data=[MentionableUserResponse.from_orguser(u) for u in users],
+    )
 
 
 @report_router.get("/{snapshot_id}/view/", response=ApiResponse[SnapshotViewResponse])
@@ -209,4 +232,144 @@ def get_report_sharing_status(request, snapshot_id: int):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
     except SnapshotPermissionError as err:
+        raise HttpError(403, str(err)) from err
+
+
+# ===== Comment Endpoints (nested under /{snapshot_id}/comments/) =====
+
+
+@report_router.get("/{snapshot_id}/comments/states/", response=ApiResponse[CommentStatesResponse])
+@has_permission(["can_view_dashboards"])
+def get_comment_states(request, snapshot_id: int):
+    """Get icon states for all targets in a snapshot"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        states = CommentService.get_comment_states(
+            snapshot_id=snapshot_id,
+            org=orguser.org,
+            orguser=orguser,
+        )
+        return api_response(
+            success=True,
+            data=CommentStatesResponse(states=states),
+        )
+    except CommentValidationError as err:
+        raise HttpError(400, str(err)) from err
+
+
+@report_router.post("/{snapshot_id}/comments/mark-read/", response=ApiResponse)
+@has_permission(["can_view_dashboards"])
+def mark_as_read(request, snapshot_id: int, payload: MarkReadRequest):
+    """Mark a target's comments as read"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        CommentService.mark_as_read(
+            snapshot_id=snapshot_id,
+            orguser=orguser,
+            target_type=payload.target_type,
+            chart_id=payload.chart_id,
+        )
+        return api_response(success=True, message="Marked as read")
+    except CommentValidationError as err:
+        raise HttpError(400, str(err)) from err
+
+
+@report_router.get("/{snapshot_id}/comments/", response=ApiResponse[List[CommentResponse]])
+@has_permission(["can_view_dashboards"])
+def list_comments(
+    request,
+    snapshot_id: int,
+    target_type: str,
+    chart_id: int = None,
+):
+    """List comments for a report target"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        comments = CommentService.list_comments(
+            snapshot_id=snapshot_id,
+            org=orguser.org,
+            target_type=target_type,
+            chart_id=chart_id,
+            orguser=orguser,
+        )
+        return api_response(
+            success=True,
+            data=[CommentResponse.from_model(c) for c in comments],
+        )
+    except CommentValidationError as err:
+        raise HttpError(400, str(err)) from err
+
+
+@report_router.post("/{snapshot_id}/comments/", response=ApiResponse[CommentResponse])
+@has_permission(["can_view_dashboards"])
+def create_comment(request, snapshot_id: int, payload: CommentCreate):
+    """Create a comment on a report snapshot"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        comment = CommentService.create_comment(
+            snapshot_id=snapshot_id,
+            org=orguser.org,
+            orguser=orguser,
+            target_type=payload.target_type,
+            content=payload.content,
+            chart_id=payload.chart_id,
+            mentioned_emails=payload.mentioned_emails,
+        )
+        return api_response(
+            success=True,
+            data=CommentResponse.from_model(comment),
+            message="Comment created",
+        )
+    except CommentValidationError as err:
+        raise HttpError(400, str(err)) from err
+    except Exception as e:
+        logger.error(f"Error creating comment: {e}", exc_info=True)
+        raise HttpError(500, "Failed to create comment") from e
+
+
+@report_router.put("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse[CommentResponse])
+@has_permission(["can_view_dashboards"])
+def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentUpdate):
+    """Update a comment (author-only)"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        comment = CommentService.update_comment(
+            comment_id=comment_id,
+            org=orguser.org,
+            orguser=orguser,
+            content=payload.content,
+            mentioned_emails=payload.mentioned_emails,
+        )
+        return api_response(
+            success=True,
+            data=CommentResponse.from_model(comment),
+            message="Comment updated",
+        )
+    except CommentNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except CommentPermissionError as err:
+        raise HttpError(403, str(err)) from err
+
+
+@report_router.delete("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse)
+@has_permission(["can_view_dashboards"])
+def delete_comment(request, snapshot_id: int, comment_id: int):
+    """Delete a comment (author-only)"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        CommentService.delete_comment(
+            comment_id=comment_id,
+            org=orguser.org,
+            orguser=orguser,
+        )
+        return api_response(success=True, message="Comment deleted")
+    except CommentNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except CommentPermissionError as err:
         raise HttpError(403, str(err)) from err
