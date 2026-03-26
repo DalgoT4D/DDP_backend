@@ -61,6 +61,7 @@ class Comment(models.Model):
         ordering = ["created_at"]
         indexes = [
             models.Index(fields=["org", "created_at"]),
+            models.Index(fields=["snapshot"]),
         ]
 
 
