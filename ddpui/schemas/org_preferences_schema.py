@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from ninja import Schema
 
@@ -46,6 +46,8 @@ class UpdateDashboardBrandingSchema(Schema):
 
     dashboard_logo_url: Optional[str] = None
     dashboard_logo_width: Optional[int] = None
+    chart_palette_name: Optional[str] = None
+    chart_palette_colors: Optional[List[str]] = None
 
 
 class CreateOrgSupersetDetailsSchema(Schema):

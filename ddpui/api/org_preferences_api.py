@@ -142,6 +142,10 @@ def update_dashboard_branding(request, payload: UpdateDashboardBrandingSchema):
         org_preferences.dashboard_logo_url = payload.dashboard_logo_url or None
     if payload.dashboard_logo_width is not None:
         org_preferences.dashboard_logo_width = max(40, min(200, payload.dashboard_logo_width))
+    if payload.chart_palette_name is not None:
+        org_preferences.chart_palette_name = payload.chart_palette_name or None
+    if payload.chart_palette_colors is not None:
+        org_preferences.chart_palette_colors = payload.chart_palette_colors or None
 
     org_preferences.save()
 

@@ -28,6 +28,19 @@ class OrgPreferences(models.Model):
         default=80, help_text="Logo display width in pixels (40-200)"
     )
 
+    # Chart color palette
+    chart_palette_name = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Name of the active color palette (preset name, 'custom', or 'logo-derived')",
+    )
+    chart_palette_colors = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="Array of hex color strings for the active chart palette",
+    )
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -47,4 +60,6 @@ class OrgPreferences(models.Model):
             "discord_webhook": self.discord_webhook,
             "dashboard_logo_url": self.dashboard_logo_url,
             "dashboard_logo_width": self.dashboard_logo_width,
+            "chart_palette_name": self.chart_palette_name,
+            "chart_palette_colors": self.chart_palette_colors,
         }
