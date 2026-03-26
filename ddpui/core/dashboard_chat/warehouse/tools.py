@@ -1,17 +1,17 @@
 """Warehouse access helpers used by dashboard chat runtime."""
 
 import json
-import logging
 import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils import secretsmanager
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse, WarehouseType
 
-logger = logging.getLogger(__name__)
+logger = CustomLogger("dashboard_chat")
 
 SAFE_WAREHOUSE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 

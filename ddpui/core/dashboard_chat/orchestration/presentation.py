@@ -1,7 +1,6 @@
 """Answer composition and display-shaping helpers for dashboard chat."""
 
 from collections.abc import Sequence
-import logging
 import re
 from typing import Any
 
@@ -10,10 +9,11 @@ from ddpui.core.dashboard_chat.contracts import (
     DashboardChatIntentDecision,
     DashboardChatRetrievedDocument,
 )
+from ddpui.utils.custom_logger import CustomLogger
 
 from .state import DashboardChatRuntimeState, SMALL_TALK_FAST_PATH_PATTERN
 
-logger = logging.getLogger(__name__)
+logger = CustomLogger("dashboard_chat")
 
 
 def serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:

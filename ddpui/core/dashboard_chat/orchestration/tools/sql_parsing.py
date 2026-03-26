@@ -286,7 +286,7 @@ def find_tables_with_column(
 
 def structural_dimensions_from_sql(sql: str) -> set[str]:
     """Return normalized non-aggregate dimensions used by one SQL statement."""
-    from .conversation import extract_dimensions_from_sql
+    from ..conversation import extract_dimensions_from_sql
 
     if not sql:
         return set()

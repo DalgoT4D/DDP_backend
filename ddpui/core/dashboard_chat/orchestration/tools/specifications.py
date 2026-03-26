@@ -85,10 +85,7 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "table": {
-                        "type": "string",
-                        "description": "Fully-qualified table name",
-                    },
+                    "table": {"type": "string", "description": "Fully-qualified table name"},
                     "column": {"type": "string", "description": "Column name"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
                 },
@@ -103,9 +100,7 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
             "description": "Execute a read-only SQL query on the database.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "sql": {"type": "string", "description": "SELECT query to execute"}
-                },
+                "properties": {"sql": {"type": "string", "description": "SELECT query to execute"}},
                 "required": ["sql"],
             },
         },
