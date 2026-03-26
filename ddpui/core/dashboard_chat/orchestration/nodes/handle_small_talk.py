@@ -4,8 +4,11 @@ from typing import Any
 
 from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 
-from ..presentation import build_usage_summary, compose_small_talk_response
-from ..state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.presentation import (
+    build_usage_summary,
+    compose_small_talk_response,
+)
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def handle_small_talk_node(

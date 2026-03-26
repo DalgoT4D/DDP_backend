@@ -2,9 +2,12 @@
 
 from typing import Any
 
-from ..conversation import extract_conversation_context
-from ..presentation import build_fast_path_intent, build_fast_path_small_talk_response
-from ..state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.conversation import extract_conversation_context
+from ddpui.core.dashboard_chat.orchestration.presentation import (
+    build_fast_path_intent,
+    build_fast_path_small_talk_response,
+)
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def route_intent_node(state: DashboardChatRuntimeState, llm_client) -> dict[str, Any]:

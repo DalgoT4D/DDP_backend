@@ -9,15 +9,17 @@ from django.core.serializers.json import DjangoJSONEncoder
 from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseToolsError
 from ddpui.utils.custom_logger import CustomLogger
 
-from ..presentation import (
+from ddpui.core.dashboard_chat.orchestration.presentation import (
     serialize_tool_result,
     summarize_tool_call,
     max_turns_message,
     fallback_answer_text,
 )
-from ..state import DashboardChatRuntimeState
-from .cache import seed_distinct_cache_from_previous_sql
-from .handlers import (
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.tools.cache import (
+    seed_distinct_cache_from_previous_sql,
+)
+from ddpui.core.dashboard_chat.orchestration.tools.handlers import (
     handle_retrieve_docs_tool,
     handle_get_schema_snippets_tool,
     handle_search_dbt_models_tool,

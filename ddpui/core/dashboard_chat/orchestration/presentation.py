@@ -11,7 +11,10 @@ from ddpui.core.dashboard_chat.contracts import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 
-from .state import DashboardChatRuntimeState, SMALL_TALK_FAST_PATH_PATTERN
+from ddpui.core.dashboard_chat.orchestration.state import (
+    DashboardChatRuntimeState,
+    SMALL_TALK_FAST_PATH_PATTERN,
+)
 
 logger = CustomLogger("dashboard_chat")
 

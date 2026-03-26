@@ -10,7 +10,9 @@ from ddpui.core.dashboard_chat.contracts import (
 )
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
-from .source_identifiers import chart_id_from_source_identifier
+from ddpui.core.dashboard_chat.orchestration.source_identifiers import (
+    chart_id_from_source_identifier,
+)
 
 
 def extract_conversation_context(

@@ -18,7 +18,7 @@ from ddpui.core.dashboard_chat.sessions.cache import (
 )
 from ddpui.services.dashboard_service import DashboardService
 
-from .state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def load_session_snapshot(state: DashboardChatRuntimeState) -> dict[str, Any]:

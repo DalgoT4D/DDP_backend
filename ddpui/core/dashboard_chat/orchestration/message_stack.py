@@ -4,8 +4,11 @@ from typing import Any
 
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 
-from .conversation import build_follow_up_context_prompt, detect_sql_modification_type
-from .state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.conversation import (
+    build_follow_up_context_prompt,
+    detect_sql_modification_type,
+)
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def build_new_query_messages(

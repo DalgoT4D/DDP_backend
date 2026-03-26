@@ -6,6 +6,7 @@ from typing import Any
 
 from ddpui.core.dashboard_chat.context.allowlist import normalize_dashboard_chat_table_name
 from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
+from ddpui.core.dashboard_chat.orchestration.conversation import extract_dimensions_from_sql
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
 
@@ -286,8 +287,6 @@ def find_tables_with_column(
 
 def structural_dimensions_from_sql(sql: str) -> set[str]:
     """Return normalized non-aggregate dimensions used by one SQL statement."""
-    from ..conversation import extract_dimensions_from_sql
-
     if not sql:
         return set()
 

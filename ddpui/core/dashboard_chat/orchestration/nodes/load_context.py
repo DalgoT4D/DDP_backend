@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from ..session_snapshot import load_session_snapshot
-from ..state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.session_snapshot import load_session_snapshot
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
 
 
 def load_context_node(state: DashboardChatRuntimeState) -> dict[str, Any]:
