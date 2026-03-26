@@ -19,8 +19,9 @@ from .source_identifiers import (
 )
 
 
-def _retrieve_vector_documents(
-    self,
+def retrieve_vector_documents(
+    vector_store,
+    runtime_config,
     *,
     org,
     collection_name: str | None,
@@ -33,10 +34,10 @@ def _retrieve_vector_documents(
     if not source_types:
         return []
 
-    results = self.vector_store.query(
+    results = vector_store.query(
         org.id,
         query_text=query_text,
-        n_results=self.runtime_config.retrieval_limit,
+        n_results=runtime_config.retrieval_limit,
         source_types=source_types,
         dashboard_id=dashboard_id,
         query_embedding=query_embedding,
@@ -55,27 +56,26 @@ def _retrieve_vector_documents(
     ]
 
 
-def _filter_allowlisted_dbt_results(
+def filter_allowlisted_dbt_results(
     results: Sequence[DashboardChatRetrievedDocument],
     allowlist: DashboardChatAllowlist,
 ) -> list[DashboardChatRetrievedDocument]:
     """Keep only dbt docs that belong to the dashboard lineage."""
     filtered_results: list[DashboardChatRetrievedDocument] = []
     for result in results:
-        unique_id = _unique_id_from_source_identifier(result.source_identifier)
+        unique_id = unique_id_from_source_identifier(result.source_identifier)
         if allowlist.is_unique_id_allowed(unique_id):
             filtered_results.append(result)
     return filtered_results
 
 
-def _dedupe_retrieved_documents(
+def dedupe_retrieved_documents(
     results: Sequence[DashboardChatRetrievedDocument],
 ) -> list[DashboardChatRetrievedDocument]:
     """Deduplicate retrieved documents while preserving better-ranked items."""
-    scored_results: list[tuple[float, DashboardChatRetrievedDocument]] = []
-    for result in results:
-        scored_results.append((result.distance if result.distance is not None else 999.0, result))
-
+    scored_results = [
+        (result.distance if result.distance is not None else 999.0, result) for result in results
+    ]
     merged_results: list[DashboardChatRetrievedDocument] = []
     seen_document_ids: set[str] = set()
     for _, result in sorted(scored_results, key=lambda item: item[0]):
@@ -86,8 +86,7 @@ def _dedupe_retrieved_documents(
     return merged_results
 
 
-def _build_citations(
-    self,
+def build_citations(
     *,
     retrieved_documents: Sequence[DashboardChatRetrievedDocument],
     dashboard_export: dict[str, Any],
@@ -112,13 +111,13 @@ def _build_citations(
             DashboardChatCitation(
                 source_type=document.source_type,
                 source_identifier=document.source_identifier,
-                title=self._citation_title(
+                title=citation_title(
                     document=document,
                     dashboard_title=dashboard_title,
                     chart_lookup=chart_lookup,
                     table_name=table_name,
                 ),
-                snippet=_compact_snippet(document.content),
+                snippet=compact_snippet(document.content),
                 dashboard_id=document.dashboard_id,
                 table_name=table_name,
             )
@@ -126,7 +125,7 @@ def _build_citations(
     return citations
 
 
-def _citation_title(
+def citation_title(
     *,
     document: DashboardChatRetrievedDocument,
     dashboard_title: str,
@@ -150,23 +149,22 @@ def _citation_title(
     return document.source_identifier
 
 
-def _compact_snippet(content: str, max_length: int = 220) -> str:
-    """Collapse whitespace and trim long snippets for citations and suggestions."""
+def compact_snippet(content: str, max_length: int = 220) -> str:
+    """Collapse whitespace and trim long snippets for citations."""
     normalized = " ".join(content.split())
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 3].rstrip() + "..."
 
 
-def _build_tool_document_payload(
-    self,
+def build_tool_document_payload(
     document: DashboardChatRetrievedDocument,
     allowlist: DashboardChatAllowlist,
     dashboard_export: dict[str, Any],
 ) -> dict[str, Any]:
-    """Convert a runtime retrieval result into the prototype tool payload shape."""
+    """Convert a runtime retrieval result into the tool payload shape."""
     metadata: dict[str, Any] = {
-        "type": self._prototype_doc_type(document.source_type),
+        "type": prototype_doc_type(document.source_type),
         "source_type": document.source_type,
         "source_identifier": document.source_identifier,
     }
@@ -174,9 +172,9 @@ def _build_tool_document_payload(
     if chart_id is not None:
         metadata["chart_id"] = chart_id
         metadata["dashboard_id"] = document.dashboard_id
-        chart_metadata = self._build_chart_tool_metadata(chart_id, dashboard_export)
-        if chart_metadata:
-            metadata.update(chart_metadata)
+        chart_meta = build_chart_tool_metadata(chart_id, dashboard_export)
+        if chart_meta:
+            metadata.update(chart_meta)
     unique_id = unique_id_from_source_identifier(document.source_identifier)
     if unique_id:
         metadata["dbt_unique_id"] = unique_id
@@ -189,18 +187,13 @@ def _build_tool_document_payload(
     }
 
 
-def _build_chart_tool_metadata(
-    cls,
+def build_chart_tool_metadata(
     chart_id: int,
     dashboard_export: dict[str, Any],
 ) -> dict[str, Any]:
     """Return structured chart metadata that nudges the tool loop toward exact chart fields."""
     chart = next(
-        (
-            candidate
-            for candidate in (dashboard_export.get("charts") or [])
-            if candidate.get("id") == chart_id
-        ),
+        (c for c in (dashboard_export.get("charts") or []) if c.get("id") == chart_id),
         None,
     )
     if chart is None:
@@ -210,25 +203,25 @@ def _build_chart_tool_metadata(
         chart.get("schema_name"),
         chart.get("table_name"),
     )
-    metric_columns = cls._chart_metric_columns(chart)
-    dimension_columns = cls._chart_dimension_columns(chart)
-    time_column = cls._chart_time_column(chart, dimension_columns)
+    metric_cols = chart_metric_columns(chart)
+    dimension_cols = chart_dimension_columns(chart)
+    time_col = chart_time_column(chart, dimension_cols)
     payload: dict[str, Any] = {
         "chart_title": str(chart.get("title") or ""),
         "chart_type": str(chart.get("chart_type") or ""),
     }
     if preferred_table:
         payload["preferred_table"] = preferred_table
-    if metric_columns:
-        payload["metric_columns"] = metric_columns
-    if dimension_columns:
-        payload["dimension_columns"] = dimension_columns
-    if time_column:
-        payload["time_column"] = time_column
+    if metric_cols:
+        payload["metric_columns"] = metric_cols
+    if dimension_cols:
+        payload["dimension_columns"] = dimension_cols
+    if time_col:
+        payload["time_column"] = time_col
     return payload
 
 
-def _prototype_doc_type(source_type: str) -> str:
+def prototype_doc_type(source_type: str) -> str:
     """Map Dalgo source types into the prototype doc-type vocabulary."""
     if source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value:
         return "chart"
@@ -240,7 +233,7 @@ def _prototype_doc_type(source_type: str) -> str:
     return "context"
 
 
-def _chart_metric_columns(cls, chart: dict[str, Any]) -> list[str]:
+def chart_metric_columns(chart: dict[str, Any]) -> list[str]:
     """Extract the most likely metric columns from one chart export payload."""
     extra_config = chart.get("extra_config") or {}
     metrics: list[str] = []
@@ -268,7 +261,7 @@ def _chart_metric_columns(cls, chart: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(metrics))
 
 
-def _chart_dimension_columns(cls, chart: dict[str, Any]) -> list[str]:
+def chart_dimension_columns(chart: dict[str, Any]) -> list[str]:
     """Extract dimension-like fields from one chart export payload."""
     extra_config = chart.get("extra_config") or {}
     dimensions: list[str] = []
@@ -282,8 +275,7 @@ def _chart_dimension_columns(cls, chart: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(dimensions))
 
 
-def _chart_time_column(
-    cls,
+def chart_time_column(
     chart: dict[str, Any],
     dimension_columns: Sequence[str],
 ) -> str | None:
@@ -294,15 +286,26 @@ def _chart_time_column(
         if isinstance(value, str) and value.strip():
             return value.strip()
     for dimension in dimension_columns:
-        if cls._looks_like_time_dimension(dimension):
+        if looks_like_time_dimension(dimension):
             return dimension
     return None
 
 
-def _looks_like_time_dimension(column_name: str) -> bool:
+def looks_like_time_dimension(column_name: str) -> bool:
     """Return whether a dimension name probably represents time bucketing."""
     normalized_column = column_name.lower()
     return any(
         token in normalized_column
         for token in ["date", "day", "week", "month", "quarter", "year", "time"]
     )
+
+
+def get_cached_query_embedding(
+    vector_store,
+    query_text: str,
+    embedding_cache: dict[str, list[float]],
+) -> list[float]:
+    """Cache embeddings per query string during one turn."""
+    if query_text not in embedding_cache:
+        embedding_cache[query_text] = vector_store.embed_query(query_text)
+    return embedding_cache[query_text]

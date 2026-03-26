@@ -1,6 +1,5 @@
 """SQL execution and guardrail helpers for dashboard chat graph execution."""
 
-from collections.abc import Sequence
 import json
 import re
 from typing import Any
@@ -11,11 +10,32 @@ from ddpui.core.dashboard_chat.context.allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.contracts import DashboardChatIntent
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
+from .conversation import extract_requested_follow_up_dimension
+from .sql_parsing import (
+    table_references,
+    resolve_identifier_table,
+    tables_with_column,
+    extract_text_filter_values,
+    find_tables_with_column,
+    primary_table_name,
+    referenced_sql_identifier_refs,
+    resolve_table_qualifier,
+    best_table_for_missing_columns,
+    structural_dimensions_from_sql,
+    normalize_dimension_name,
+)
 from .state import DashboardChatRuntimeState
+from .tool_handlers import (
+    get_turn_warehouse_tools,
+    get_cached_schema_snippets,
+    has_validated_distinct_value,
+    is_text_type,
+    record_validated_distinct_values,
+    record_validated_filters_from_sql,
+)
 
 
-def _validate_sql_allowlist(
-    self,
+def validate_sql_allowlist(
     sql: str,
     allowlist: DashboardChatAllowlist,
 ) -> dict[str, Any]:
@@ -37,8 +57,9 @@ def _validate_sql_allowlist(
     return {"valid": True, "invalid_tables": [], "message": ""}
 
 
-def _run_sql_with_distinct_guard(
-    self,
+def run_sql_with_distinct_guard(
+    warehouse_tools_factory,
+    runtime_config,
     args: dict[str, Any],
     state: DashboardChatRuntimeState,
     execution_context: dict[str, Any],
@@ -48,7 +69,7 @@ def _run_sql_with_distinct_guard(
     if not sql:
         return {"error": "sql_missing", "message": "SQL is required"}
 
-    allowlist_validation = self._validate_sql_allowlist(sql, state["allowlist"])
+    allowlist_validation = validate_sql_allowlist(sql, state["allowlist"])
     if not allowlist_validation["valid"]:
         return {
             "error": "table_not_allowed",
@@ -56,14 +77,18 @@ def _run_sql_with_distinct_guard(
             "message": allowlist_validation["message"],
         }
 
-    follow_up_dimension_validation = self._validate_follow_up_dimension_usage(
+    follow_up_dimension_validation = validate_follow_up_dimension_usage(
+        warehouse_tools_factory,
         sql=sql,
         state=state,
         execution_context=execution_context,
     )
     if follow_up_dimension_validation is not None:
         return follow_up_dimension_validation
-    missing_distinct = self._missing_distinct(sql, state, execution_context)
+
+    missing_distinct = check_missing_distinct(
+        warehouse_tools_factory, sql, state, execution_context
+    )
     if missing_distinct:
         return {
             "error": "must_fetch_distinct_values",
@@ -75,7 +100,7 @@ def _run_sql_with_distinct_guard(
 
     validation = DashboardChatSqlGuard(
         allowlist=state["allowlist"],
-        max_rows=self.runtime_config.max_query_rows,
+        max_rows=runtime_config.max_query_rows,
     ).validate(sql)
     execution_context["last_sql_validation"] = validation
     if not validation.is_valid or not validation.sanitized_sql:
@@ -85,7 +110,8 @@ def _run_sql_with_distinct_guard(
             "warnings": validation.warnings,
         }
 
-    missing_columns = self._missing_columns_in_primary_table(
+    missing_columns = missing_columns_in_primary_table(
+        warehouse_tools_factory,
         sql=validation.sanitized_sql,
         state=state,
         execution_context=execution_context,
@@ -95,14 +121,14 @@ def _run_sql_with_distinct_guard(
 
     execution_context["last_sql"] = validation.sanitized_sql
     try:
-        rows = self._get_turn_warehouse_tools(
+        rows = get_turn_warehouse_tools(
+            warehouse_tools_factory,
             execution_context,
             state["org"],
-        ).execute_sql(
-            validation.sanitized_sql
-        )
+        ).execute_sql(validation.sanitized_sql)
     except Exception as error:
-        structured_error = self._structured_sql_execution_error(
+        structured_error = structured_sql_execution_error(
+            warehouse_tools_factory,
             sql=validation.sanitized_sql,
             error=error,
             state=state,
@@ -118,7 +144,7 @@ def _run_sql_with_distinct_guard(
 
     serialized_rows = json.loads(json.dumps(rows, cls=DjangoJSONEncoder))
     execution_context["last_sql_results"] = serialized_rows
-    self._record_validated_filters_from_sql(
+    record_validated_filters_from_sql(
         state=state,
         execution_context=execution_context,
         sql=validation.sanitized_sql,
@@ -133,38 +159,37 @@ def _run_sql_with_distinct_guard(
     }
 
 
-def _missing_columns_in_primary_table(
-    self,
+def missing_columns_in_primary_table(
+    warehouse_tools_factory,
     *,
     sql: str,
     state: DashboardChatRuntimeState,
     execution_context: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Return a corrective tool error when SQL references columns absent from the referenced query tables."""
-    table_references = self._table_references(sql)
+    table_refs = table_references(sql)
     referenced_tables = [
-        reference["table_name"]
-        for reference in table_references
-        if reference.get("table_name")
+        reference["table_name"] for reference in table_refs if reference.get("table_name")
     ]
     if not referenced_tables:
         return None
 
-    schema_cache = self._get_cached_schema_snippets(
+    schema_cache = get_cached_schema_snippets(
+        warehouse_tools_factory,
         state,
         execution_context,
         tables=referenced_tables,
     )
-    all_schema_cache = self._get_cached_schema_snippets(state, execution_context)
+    all_schema_cache = get_cached_schema_snippets(warehouse_tools_factory, state, execution_context)
     missing_columns_by_table: dict[str, set[str]] = {}
     candidate_tables_by_column: dict[str, list[str]] = {}
     tables_in_query = list(dict.fromkeys(referenced_tables))
 
-    for qualifier, column_name in self._referenced_sql_identifier_refs(sql):
-        resolved_table = self._resolve_identifier_table(
+    for qualifier, column_name in referenced_sql_identifier_refs(sql):
+        resolved_table = resolve_identifier_table(
             qualifier=qualifier,
             column_name=column_name,
-            table_references=table_references,
+            table_refs=table_refs,
             schema_cache=schema_cache,
         )
         if resolved_table is not None:
@@ -172,46 +197,33 @@ def _missing_columns_in_primary_table(
 
         if qualifier is not None:
             target_table = (
-                self._resolve_table_qualifier(qualifier, table_references)
-                or self._primary_table_name(sql)
+                resolve_table_qualifier(qualifier, table_refs)
+                or primary_table_name(sql)
                 or tables_in_query[0]
             )
         else:
-            matching_tables = self._tables_with_column(
-                column_name,
-                tables_in_query,
-                schema_cache,
-            )
+            matching_tables = tables_with_column(column_name, tables_in_query, schema_cache)
             if len(matching_tables) > 1:
                 continue
-            target_table = self._primary_table_name(sql) or tables_in_query[0]
+            target_table = primary_table_name(sql) or tables_in_query[0]
 
         missing_columns_by_table.setdefault(target_table, set()).add(column_name)
-        candidate_tables_by_column[column_name] = self._find_tables_with_column(
+        candidate_tables_by_column[column_name] = find_tables_with_column(
             column_name,
             all_schema_cache,
         )
 
     missing_columns = sorted(
-        {
-            column_name
-            for columns in missing_columns_by_table.values()
-            for column_name in columns
-        }
+        {column_name for columns in missing_columns_by_table.values() for column_name in columns}
     )
     if not missing_columns:
         return None
 
-    primary_table = self._primary_table_name(sql) or tables_in_query[0]
+    primary = primary_table_name(sql) or tables_in_query[0]
     target_table = (
-        next(iter(missing_columns_by_table))
-        if len(missing_columns_by_table) == 1
-        else primary_table
+        next(iter(missing_columns_by_table)) if len(missing_columns_by_table) == 1 else primary
     )
-    best_table = self._best_table_for_missing_columns(
-        missing_columns,
-        all_schema_cache,
-    )
+    best_table = best_table_for_missing_columns(missing_columns, all_schema_cache)
     message = (
         f"Column(s) {', '.join(missing_columns)} do not exist on {target_table}. "
         "Use a table that contains the requested dimension or measure, and rewrite the SQL using columns from that table."
@@ -233,8 +245,8 @@ def _missing_columns_in_primary_table(
     return result
 
 
-def _structured_sql_execution_error(
-    self,
+def structured_sql_execution_error(
+    warehouse_tools_factory,
     *,
     sql: str,
     error: Exception,
@@ -250,11 +262,11 @@ def _structured_sql_execution_error(
     )
     if missing_column_match:
         missing_column = missing_column_match.group(1).lower()
-        schema_cache = self._get_cached_schema_snippets(state, execution_context)
-        candidate_tables = self._find_tables_with_column(missing_column, schema_cache)
+        schema_cache = get_cached_schema_snippets(warehouse_tools_factory, state, execution_context)
+        candidate_tables = find_tables_with_column(missing_column, schema_cache)
         return {
             "error": "column_not_in_table",
-            "table": self._primary_table_name(sql),
+            "table": primary_table_name(sql),
             "column": missing_column,
             "missing_columns": [missing_column],
             "candidates": candidate_tables,
@@ -269,8 +281,8 @@ def _structured_sql_execution_error(
     return None
 
 
-def _validate_follow_up_dimension_usage(
-    self,
+def validate_follow_up_dimension_usage(
+    warehouse_tools_factory,
     *,
     sql: str,
     state: DashboardChatRuntimeState,
@@ -283,25 +295,25 @@ def _validate_follow_up_dimension_usage(
     if intent_decision.follow_up_context.follow_up_type != "add_dimension":
         return None
 
-    requested_dimension = self._extract_requested_follow_up_dimension(
+    requested_dimension = extract_requested_follow_up_dimension(
         intent_decision.follow_up_context.modification_instruction or state["user_query"]
     )
     if not requested_dimension:
         return None
 
     previous_sql = state["conversation_context"].last_sql_query or ""
-    current_dimensions = self._structural_dimensions_from_sql(sql)
-    previous_dimensions = self._structural_dimensions_from_sql(previous_sql)
-    normalized_requested_dimension = self._normalize_dimension_name(requested_dimension)
+    current_dimensions = structural_dimensions_from_sql(sql)
+    previous_dimensions = structural_dimensions_from_sql(previous_sql)
+    normalized_requested_dimension = normalize_dimension_name(requested_dimension)
     if (
         normalized_requested_dimension in current_dimensions
         and normalized_requested_dimension not in previous_dimensions
     ):
         return None
 
-    candidate_tables = self._find_tables_with_column(
+    candidate_tables = find_tables_with_column(
         requested_dimension,
-        self._get_cached_schema_snippets(state, execution_context),
+        get_cached_schema_snippets(warehouse_tools_factory, state, execution_context),
     )
     return {
         "error": "requested_dimension_missing",
@@ -316,8 +328,8 @@ def _validate_follow_up_dimension_usage(
     }
 
 
-def _missing_distinct(
-    self,
+def check_missing_distinct(
+    warehouse_tools_factory,
     sql: str,
     state: DashboardChatRuntimeState,
     execution_context: dict[str, Any],
@@ -331,59 +343,51 @@ def _missing_distinct(
     if not where_match:
         return []
 
-    table_references = self._table_references(sql)
+    table_refs = table_references(sql)
     query_tables = [
-        reference["table_name"]
-        for reference in table_references
-        if reference.get("table_name")
+        reference["table_name"] for reference in table_refs if reference.get("table_name")
     ]
     if not query_tables:
         return []
-    primary_table = self._primary_table_name(sql) or query_tables[0]
+    primary = primary_table_name(sql) or query_tables[0]
 
-    full_schema_cache = self._get_cached_schema_snippets(
+    full_schema_cache = get_cached_schema_snippets(
+        warehouse_tools_factory,
         state,
         execution_context,
         tables=query_tables,
     )
-    all_schema_cache = self._get_cached_schema_snippets(state, execution_context)
+    all_schema_cache = get_cached_schema_snippets(warehouse_tools_factory, state, execution_context)
 
     column_types = {
         table_name: {
-            str(column.get("name") or "").lower(): str(
-                column.get("data_type") or column.get("type") or ""
-            ).lower()
+            str(column.get("name") or "")
+            .lower(): str(column.get("data_type") or column.get("type") or "")
+            .lower()
             for column in getattr(snippet, "columns", [])
         }
         for table_name, snippet in full_schema_cache.items()
     }
     missing: list[dict[str, Any]] = []
-    for qualifier, column_name, value in self._extract_text_filter_values(where_match.group(1)):
+    for qualifier, column_name, value in extract_text_filter_values(where_match.group(1)):
         normalized_column = column_name.lower()
-        resolved_table = self._resolve_identifier_table(
+        resolved_table = resolve_identifier_table(
             qualifier=qualifier,
             column_name=normalized_column,
-            table_references=table_references,
+            table_refs=table_refs,
             schema_cache=full_schema_cache,
         )
         if resolved_table is None and qualifier is None:
-            matching_tables = self._tables_with_column(
-                normalized_column,
-                query_tables,
-                full_schema_cache,
-            )
+            matching_tables = tables_with_column(normalized_column, query_tables, full_schema_cache)
             if len(matching_tables) > 1:
                 continue
         if resolved_table is None:
-            candidate_tables = self._find_tables_with_column(
-                normalized_column,
-                all_schema_cache,
-            )
+            candidate_tables = find_tables_with_column(normalized_column, all_schema_cache)
             if qualifier is None and candidate_tables:
                 continue
             missing.append(
                 {
-                    "table": primary_table,
+                    "table": primary,
                     "column": column_name,
                     "error": "column_not_in_table",
                     "candidates": candidate_tables,
@@ -393,127 +397,13 @@ def _missing_distinct(
         data_type = column_types.get(resolved_table, {}).get(normalized_column, "")
         if not data_type:
             continue
-        if not self._is_text_type(data_type):
+        if not is_text_type(data_type):
             continue
-        if (
-            not self._has_validated_distinct_value(
-                execution_context["distinct_cache"],
-                table_name=resolved_table,
-                column_name=normalized_column,
-                value=value,
-            )
-        ):
-            missing.append(
-                {"table": resolved_table, "column": column_name, "value": value}
-            )
-    return missing
-
-
-def _normalize_distinct_value(value: Any) -> str:
-    """Normalize one distinct value for exact cache lookups."""
-    return str(value).strip().lower()
-
-
-def _has_validated_distinct_value(
-    cls,
-    distinct_cache: set[tuple[Any, ...]],
-    *,
-    table_name: str,
-    column_name: str,
-    value: Any,
-) -> bool:
-    """Return whether this exact text filter value was already validated in-session."""
-    normalized_value = cls._normalize_distinct_value(value)
-    normalized_column = column_name.lower()
-    normalized_table = table_name.lower()
-    return (
-        (normalized_table, normalized_column, normalized_value) in distinct_cache
-        or ("*", normalized_column, normalized_value) in distinct_cache
-        or (normalized_table, normalized_column) in distinct_cache
-        or ("*", normalized_column) in distinct_cache
-    )
-
-
-def _is_text_type(data_type: str) -> bool:
-    """Treat common string-like warehouse types as requiring distinct-value lookup."""
-    return any(text_token in data_type for text_token in ["char", "text", "string", "varchar"])
-
-
-def _record_validated_distinct_values(
-    self,
-    *,
-    state: DashboardChatRuntimeState,
-    execution_context: dict[str, Any],
-    table_name: str,
-    column_name: str,
-    values: Sequence[Any],
-) -> None:
-    """Persist exact validated filter values for the current session."""
-    normalized_table = table_name.lower()
-    normalized_column = column_name.lower()
-    distinct_cache = execution_context["distinct_cache"]
-    for value in values:
-        normalized_value = self._normalize_distinct_value(value)
-        distinct_cache.add((normalized_table, normalized_column, normalized_value))
-        distinct_cache.add(("*", normalized_column, normalized_value))
-    self._persist_session_distinct_cache(state, distinct_cache)
-
-
-def _record_validated_filters_from_sql(
-    self,
-    *,
-    state: DashboardChatRuntimeState,
-    execution_context: dict[str, Any],
-    sql: str,
-) -> None:
-    """Seed exact validated filter values from a successful SQL statement."""
-    table_references = self._table_references(sql)
-    if not table_references:
-        return
-    where_match = re.search(
-        r"\bWHERE\s+(.+?)(?:\bGROUP\b|\bORDER\b|\bLIMIT\b|$)",
-        sql,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if not where_match:
-        return
-
-    query_tables = [
-        reference["table_name"]
-        for reference in table_references
-        if reference.get("table_name")
-    ]
-    schema_cache = dict(execution_context.get("schema_cache") or {})
-    values_by_target: dict[tuple[str, str], list[str]] = {}
-    for qualifier, column_name, value in self._extract_text_filter_values(where_match.group(1)):
-        normalized_column = column_name.lower()
-        resolved_table = self._resolve_identifier_table(
-            qualifier=qualifier,
+        if not has_validated_distinct_value(
+            execution_context["distinct_cache"],
+            table_name=resolved_table,
             column_name=normalized_column,
-            table_references=table_references,
-            schema_cache=schema_cache,
-        )
-        if resolved_table is None and qualifier is None:
-            if schema_cache:
-                matching_tables = self._tables_with_column(
-                    normalized_column,
-                    query_tables,
-                    schema_cache,
-                )
-                if len(matching_tables) == 1:
-                    resolved_table = matching_tables[0]
-            elif len(query_tables) == 1:
-                resolved_table = query_tables[0]
-        values_by_target.setdefault((resolved_table or "*", normalized_column), []).append(value)
-
-    if not values_by_target:
-        return
-
-    for (table_name, column_name), values in values_by_target.items():
-        self._record_validated_distinct_values(
-            state=state,
-            execution_context=execution_context,
-            table_name=table_name,
-            column_name=column_name,
-            values=values,
-        )
+            value=value,
+        ):
+            missing.append({"table": resolved_table, "column": column_name, "value": value})
+    return missing
