@@ -781,7 +781,7 @@ def test_post_airbyte_workspace_success(orguser):
         "ddpui.ddpairbyte.airbytehelpers.setup_airbyte_workspace_v1"
     ) as setup_workspace_mock:
         setup_workspace_mock.return_value = AirbyteWorkspace(
-            workspaceId=1, name="New Workspace", initialSetupComplete=True
+            workspaceId="1", name="New Workspace", initialSetupComplete=True
         )
 
         workspace = post_airbyte_workspace_v1(request, payload)

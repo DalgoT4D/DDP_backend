@@ -34,8 +34,8 @@ def api_response(
         response["message"] = message
 
     if data is not None:
-        if hasattr(data, "dict"):
-            response["data"] = data.dict()
+        if hasattr(data, "model_dump"):
+            response["data"] = data.model_dump()
         else:
             response["data"] = data
 

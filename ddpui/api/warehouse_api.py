@@ -245,7 +245,7 @@ def post_data_insights(request, payload: RequestorColumnSchema):
             }
         )
 
-        poll_for_column_insights.delay(org_warehouse.id, payload.dict(), task_id)
+        poll_for_column_insights.delay(org_warehouse.id, payload.model_dump(), task_id)
 
         return {"task_id": task_id}
     except Exception as err:
