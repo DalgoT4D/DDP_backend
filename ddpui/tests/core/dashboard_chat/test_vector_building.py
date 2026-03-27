@@ -39,11 +39,18 @@ class FakeDashboardChatVectorStore:
 
     def __init__(self):
         self.documents_by_collection = {}
+        self.created_collections = []
         self.upsert_calls = []
         self.delete_calls = []
 
     def collection_name(self, org_id, *, version=None):
         return build_dashboard_chat_collection_name(org_id, version=version)
+
+    def create_collection(self, org_id, *, collection_name=None):
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        self.created_collections.append(resolved_collection_name)
+        self.documents_by_collection.setdefault(resolved_collection_name, {})
+        return {"name": resolved_collection_name}
 
     def load_collection(self, org_id, *, collection_name=None, allow_legacy_fallback=True):
         resolved_collection_name = collection_name or self.collection_name(org_id)
@@ -98,6 +105,8 @@ class FakeDashboardChatVectorStore:
 
     def upsert_documents(self, org_id, documents, collection_name=None):
         self.upsert_calls.append([document.document_id for document in documents])
+        if not documents:
+            return []
         resolved_collection_name = collection_name or self.collection_name(org_id)
         org_documents = self.documents_by_collection.setdefault(resolved_collection_name, {})
         for document in documents:
@@ -637,3 +646,74 @@ def test_build_org_vector_context_skips_dbt_docs_when_dbt_sources_are_disabled(
     assert result.docs_generated_at is None
     assert result.source_document_counts["dbt_manifest"] == 0
     assert result.source_document_counts["dbt_catalog"] == 0
+
+
+def test_build_org_vector_context_creates_empty_collection_before_marking_version_active(
+    org,
+    orgdbt,
+):
+    """Even empty builds must materialize the target collection before pinning it as active."""
+
+    class EmptyDocumentBuilder:
+        def build_documents_by_source(self, org_instance, dbt_docs):
+            return {source_type.value: [] for source_type in DashboardChatSourceType}
+
+    vector_store = FakeDashboardChatVectorStore()
+    service = OrgVectorBuildService(
+        vector_store=vector_store,
+        dbt_docs_generator=lambda org_instance, orgdbt_instance: StoredArtifacts(
+            manifest_json={"metadata": {"project_name": "dashchat"}, "sources": {}, "nodes": {}},
+            catalog_json={"sources": {}, "nodes": {}},
+            generated_at=timezone.now(),
+        ).to_artifacts(),
+        document_builder=EmptyDocumentBuilder(),
+    )
+
+    result = service.build_org_vector_context(org)
+
+    active_collection_name = build_dashboard_chat_collection_name(
+        org.id,
+        version=result.vector_ingested_at,
+    )
+    orgdbt.refresh_from_db()
+
+    assert active_collection_name in vector_store.created_collections
+    assert active_collection_name in vector_store.documents_by_collection
+    assert orgdbt.vector_last_ingested_at == result.vector_ingested_at
+
+
+def test_build_org_vector_context_does_not_mark_version_active_when_collection_is_missing(
+    org,
+    orgdbt,
+):
+    """A build must fail before updating vector_last_ingested_at if the target collection still does not exist."""
+
+    class BrokenVectorStore(FakeDashboardChatVectorStore):
+        def create_collection(self, org_id, *, collection_name=None):
+            resolved_collection_name = collection_name or self.collection_name(org_id)
+            self.created_collections.append(resolved_collection_name)
+            return {"name": resolved_collection_name}
+
+    class EmptyDocumentBuilder:
+        def build_documents_by_source(self, org_instance, dbt_docs):
+            return {source_type.value: [] for source_type in DashboardChatSourceType}
+
+    vector_store = BrokenVectorStore()
+    service = OrgVectorBuildService(
+        vector_store=vector_store,
+        dbt_docs_generator=lambda org_instance, orgdbt_instance: StoredArtifacts(
+            manifest_json={"metadata": {"project_name": "dashchat"}, "sources": {}, "nodes": {}},
+            catalog_json={"sources": {}, "nodes": {}},
+            generated_at=timezone.now(),
+        ).to_artifacts(),
+        document_builder=EmptyDocumentBuilder(),
+    )
+
+    with pytest.raises(
+        Exception,
+        match="was not created",
+    ):
+        service.build_org_vector_context(org)
+
+    orgdbt.refresh_from_db()
+    assert orgdbt.vector_last_ingested_at is None
