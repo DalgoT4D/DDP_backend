@@ -11,7 +11,7 @@ from ddpui.celeryworkers.tasks import (
     run_dashboard_chat_turn,
     schedule_dashboard_chat_context_builds,
 )
-from ddpui.core.dashboard_chat.vector.building import DashboardChatVectorBuildResult
+from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildResult
 from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.org import Org, OrgDbt
 from ddpui.models.dashboard import Dashboard
@@ -115,7 +115,7 @@ def test_build_dashboard_chat_context_for_org_skips_when_locked(orguser):
 
     with patch(
         "ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client
-    ), patch("ddpui.celeryworkers.tasks.DashboardChatVectorBuildService") as vector_build_service:
+    ), patch("ddpui.celeryworkers.tasks.OrgVectorBuildService") as vector_build_service:
         result = build_dashboard_chat_context_for_org.run(org.id)
 
     assert result == {"status": "skipped_locked", "org_id": org.id}
@@ -134,7 +134,7 @@ def test_build_dashboard_chat_context_for_org_runs_vector_build(orguser):
     redis_client = Mock()
     redis_client.lock.return_value = redis_lock
 
-    result_payload = DashboardChatVectorBuildResult(
+    result_payload = OrgVectorBuildResult(
         org_id=org.id,
         docs_generated_at=timezone.now(),
         vector_ingested_at=timezone.now(),
@@ -148,7 +148,7 @@ def test_build_dashboard_chat_context_for_org_runs_vector_build(orguser):
     with patch(
         "ddpui.celeryworkers.tasks.RedisClient.get_instance", return_value=redis_client
     ), patch(
-        "ddpui.celeryworkers.tasks.DashboardChatVectorBuildService",
+        "ddpui.celeryworkers.tasks.OrgVectorBuildService",
         return_value=vector_build_service,
     ):
         result = build_dashboard_chat_context_for_org.run(org.id)

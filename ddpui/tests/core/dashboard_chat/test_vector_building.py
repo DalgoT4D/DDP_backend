@@ -15,12 +15,12 @@ from ddpui.core.dashboard_chat.context.dbt_docs import (
     generate_dashboard_chat_dbt_docs_artifacts,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.vector.building import DashboardChatVectorBuildService
+from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildService
 from ddpui.core.dashboard_chat.vector.documents import (
     DashboardChatSourceType,
     build_dashboard_chat_collection_name,
 )
-from ddpui.core.dashboard_chat.vector.store import DashboardChatStoredDocument
+from ddpui.utils.vector.interface import VectorStoredDocument
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.models.dashboard import Dashboard
@@ -39,11 +39,18 @@ class FakeDashboardChatVectorStore:
 
     def __init__(self):
         self.documents_by_collection = {}
+        self.created_collections = []
         self.upsert_calls = []
         self.delete_calls = []
 
     def collection_name(self, org_id, *, version=None):
         return build_dashboard_chat_collection_name(org_id, version=version)
+
+    def create_collection(self, org_id, *, collection_name=None):
+        resolved_collection_name = collection_name or self.collection_name(org_id)
+        self.created_collections.append(resolved_collection_name)
+        self.documents_by_collection.setdefault(resolved_collection_name, {})
+        return {"name": resolved_collection_name}
 
     def load_collection(self, org_id, *, collection_name=None, allow_legacy_fallback=True):
         resolved_collection_name = collection_name or self.collection_name(org_id)
@@ -88,7 +95,7 @@ class FakeDashboardChatVectorStore:
         if dashboard_id is not None:
             rows = [row for row in rows if row.metadata.get("dashboard_id") == dashboard_id]
         return [
-            DashboardChatStoredDocument(
+            VectorStoredDocument(
                 document_id=row.document_id,
                 metadata=row.metadata,
                 content=row.content if include_documents else None,
@@ -98,10 +105,12 @@ class FakeDashboardChatVectorStore:
 
     def upsert_documents(self, org_id, documents, collection_name=None):
         self.upsert_calls.append([document.document_id for document in documents])
+        if not documents:
+            return []
         resolved_collection_name = collection_name or self.collection_name(org_id)
         org_documents = self.documents_by_collection.setdefault(resolved_collection_name, {})
         for document in documents:
-            org_documents[document.document_id] = DashboardChatStoredDocument(
+            org_documents[document.document_id] = VectorStoredDocument(
                 document_id=document.document_id,
                 metadata=document.metadata(),
                 content=document.content,
@@ -347,7 +356,9 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_pulls_git_repo_before_genera
     mock_git_manager.pull_changes.assert_called_once_with()
 
 
-def test_build_org_vector_context_is_idempotent_and_removes_stale_docs(org, orgdbt, orguser, dashboard):
+def test_build_org_vector_context_is_idempotent_and_removes_stale_docs(
+    org, orgdbt, orguser, dashboard
+):
     """A repeated identical build should skip writes, and a removed source should be deleted."""
     OrgAIContext.objects.create(
         org=org,
@@ -413,7 +424,7 @@ def test_build_org_vector_context_is_idempotent_and_removes_stale_docs(org, orgd
         },
         generated_at=timezone.now(),
     )
-    service = DashboardChatVectorBuildService(
+    service = OrgVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
@@ -449,7 +460,9 @@ def test_build_org_vector_context_is_idempotent_and_removes_stale_docs(org, orgd
     assert "dashboard_context" not in stored_source_types
 
 
-def test_build_org_vector_context_keeps_collections_isolated_per_org(org, orgdbt, orguser, dashboard, seed_db):
+def test_build_org_vector_context_keeps_collections_isolated_per_org(
+    org, orgdbt, orguser, dashboard, seed_db
+):
     """The context build should never mix documents between org collections."""
     other_org = Org.objects.create(
         name="Dashboard Chat Org 2",
@@ -490,7 +503,7 @@ def test_build_org_vector_context_keeps_collections_isolated_per_org(org, orgdbt
         generated_at=timezone.now(),
     )
     vector_store = FakeDashboardChatVectorStore()
-    service = DashboardChatVectorBuildService(
+    service = OrgVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
@@ -511,7 +524,9 @@ def test_build_org_vector_context_keeps_collections_isolated_per_org(org, orgdbt
     other_org.delete()
 
 
-def test_build_org_vector_context_keeps_last_good_context_when_upsert_fails(org, orgdbt, orguser, dashboard):
+def test_build_org_vector_context_keeps_last_good_context_when_upsert_fails(
+    org, orgdbt, orguser, dashboard
+):
     """A failed rebuild should not delete the previously indexed documents."""
     OrgAIContext.objects.create(
         org=org,
@@ -525,7 +540,7 @@ def test_build_org_vector_context_keeps_last_good_context_when_upsert_fails(org,
         catalog_json={"sources": {}, "nodes": {}},
         generated_at=timezone.now(),
     )
-    service = DashboardChatVectorBuildService(
+    service = OrgVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
@@ -555,7 +570,9 @@ def test_build_org_vector_context_keeps_last_good_context_when_upsert_fails(org,
     assert vector_store.delete_calls == []
 
 
-def test_build_org_vector_context_deletes_disabled_source_documents(org, orgdbt, orguser, dashboard):
+def test_build_org_vector_context_deletes_disabled_source_documents(
+    org, orgdbt, orguser, dashboard
+):
     """Disabled source types should be omitted from the target document set."""
     OrgAIContext.objects.create(
         org=org,
@@ -575,13 +592,13 @@ def test_build_org_vector_context_deletes_disabled_source_documents(org, orgdbt,
         catalog_json={"sources": {}, "nodes": {}},
         generated_at=timezone.now(),
     )
-    initial_service = DashboardChatVectorBuildService(
+    initial_service = OrgVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
     )
     initial_service.build_org_vector_context(org)
 
-    disabled_source_service = DashboardChatVectorBuildService(
+    disabled_source_service = OrgVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=lambda org_instance, orgdbt_instance: artifacts.to_artifacts(),
         source_config=DashboardChatSourceConfig(
@@ -605,11 +622,13 @@ def test_build_org_vector_context_deletes_disabled_source_documents(org, orgdbt,
     assert "dbt_catalog" not in stored_source_types
 
 
-def test_build_org_vector_context_skips_dbt_docs_when_dbt_sources_are_disabled(org, orgdbt, dashboard):
+def test_build_org_vector_context_skips_dbt_docs_when_dbt_sources_are_disabled(
+    org, orgdbt, dashboard
+):
     """Disabling both dbt sources should skip dbt docs generation entirely."""
     vector_store = FakeDashboardChatVectorStore()
     dbt_docs_generator = Mock(side_effect=AssertionError("dbt docs should not run"))
-    service = DashboardChatVectorBuildService(
+    service = OrgVectorBuildService(
         vector_store=vector_store,
         dbt_docs_generator=dbt_docs_generator,
         source_config=DashboardChatSourceConfig(
@@ -627,3 +646,74 @@ def test_build_org_vector_context_skips_dbt_docs_when_dbt_sources_are_disabled(o
     assert result.docs_generated_at is None
     assert result.source_document_counts["dbt_manifest"] == 0
     assert result.source_document_counts["dbt_catalog"] == 0
+
+
+def test_build_org_vector_context_creates_empty_collection_before_marking_version_active(
+    org,
+    orgdbt,
+):
+    """Even empty builds must materialize the target collection before pinning it as active."""
+
+    class EmptyDocumentBuilder:
+        def build_documents_by_source(self, org_instance, dbt_docs):
+            return {source_type.value: [] for source_type in DashboardChatSourceType}
+
+    vector_store = FakeDashboardChatVectorStore()
+    service = OrgVectorBuildService(
+        vector_store=vector_store,
+        dbt_docs_generator=lambda org_instance, orgdbt_instance: StoredArtifacts(
+            manifest_json={"metadata": {"project_name": "dashchat"}, "sources": {}, "nodes": {}},
+            catalog_json={"sources": {}, "nodes": {}},
+            generated_at=timezone.now(),
+        ).to_artifacts(),
+        document_builder=EmptyDocumentBuilder(),
+    )
+
+    result = service.build_org_vector_context(org)
+
+    active_collection_name = build_dashboard_chat_collection_name(
+        org.id,
+        version=result.vector_ingested_at,
+    )
+    orgdbt.refresh_from_db()
+
+    assert active_collection_name in vector_store.created_collections
+    assert active_collection_name in vector_store.documents_by_collection
+    assert orgdbt.vector_last_ingested_at == result.vector_ingested_at
+
+
+def test_build_org_vector_context_does_not_mark_version_active_when_collection_is_missing(
+    org,
+    orgdbt,
+):
+    """A build must fail before updating vector_last_ingested_at if the target collection still does not exist."""
+
+    class BrokenVectorStore(FakeDashboardChatVectorStore):
+        def create_collection(self, org_id, *, collection_name=None):
+            resolved_collection_name = collection_name or self.collection_name(org_id)
+            self.created_collections.append(resolved_collection_name)
+            return {"name": resolved_collection_name}
+
+    class EmptyDocumentBuilder:
+        def build_documents_by_source(self, org_instance, dbt_docs):
+            return {source_type.value: [] for source_type in DashboardChatSourceType}
+
+    vector_store = BrokenVectorStore()
+    service = OrgVectorBuildService(
+        vector_store=vector_store,
+        dbt_docs_generator=lambda org_instance, orgdbt_instance: StoredArtifacts(
+            manifest_json={"metadata": {"project_name": "dashchat"}, "sources": {}, "nodes": {}},
+            catalog_json={"sources": {}, "nodes": {}},
+            generated_at=timezone.now(),
+        ).to_artifacts(),
+        document_builder=EmptyDocumentBuilder(),
+    )
+
+    with pytest.raises(
+        Exception,
+        match="was not created",
+    ):
+        service.build_org_vector_context(org)
+
+    orgdbt.refresh_from_db()
+    assert orgdbt.vector_last_ingested_at is None

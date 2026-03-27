@@ -1,0 +1,16 @@
+name: dalgo-vector-store
+
+services:
+  chroma:
+    image: chromadb/chroma:0.6.3
+    ports:
+      - "8003:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+volumes:
+  chroma_data:

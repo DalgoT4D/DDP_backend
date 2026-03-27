@@ -1,7 +1,7 @@
 """Answer composition and display-shaping helpers for dashboard chat."""
 
 from collections.abc import Sequence
-import logging
+import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.contracts import (
@@ -9,13 +9,17 @@ from ddpui.core.dashboard_chat.contracts import (
     DashboardChatIntentDecision,
     DashboardChatRetrievedDocument,
 )
+from ddpui.utils.custom_logger import CustomLogger
 
-from .state import DashboardChatRuntimeState, SMALL_TALK_FAST_PATH_PATTERN
+from ddpui.core.dashboard_chat.orchestration.state import (
+    DashboardChatRuntimeState,
+    SMALL_TALK_FAST_PATH_PATTERN,
+)
 
-logger = logging.getLogger(__name__)
+logger = CustomLogger("dashboard_chat")
 
 
-def _serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+def serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     """Trim large tool payloads before feeding them back into the model."""
     serialized = dict(result)
     docs = serialized.get("docs")
@@ -30,8 +34,7 @@ def _serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     return serialized
 
 
-def _summarize_tool_call(
-    self,
+def summarize_tool_call(
     *,
     tool_name: str,
     args: dict[str, Any],
@@ -73,12 +76,11 @@ def _summarize_tool_call(
     return entry
 
 
-def _max_turns_message(
-    self,
+def max_turns_message(
     user_query: str,
     retrieved_documents: Sequence[DashboardChatRetrievedDocument],
 ) -> str:
-    """Return a bounded fallback when the prototype tool loop exhausts its budget."""
+    """Return a bounded fallback when the tool loop exhausts its budget."""
     if retrieved_documents:
         return (
             "I found relevant dashboard context, but I couldn't complete the analysis safely. "
@@ -90,21 +92,19 @@ def _max_turns_message(
     )
 
 
-def _compose_final_answer_text(
-    self,
+def compose_final_answer_text(
+    llm_client,
     state: DashboardChatRuntimeState,
     execution_result: dict[str, Any],
     *,
     response_format: str,
 ) -> str:
     """Compose one final markdown answer for all non-trivial routes."""
-    normalized_sql_results = self._normalize_sql_results_for_answer(
-        execution_result.get("sql_results")
-    )
+    normalized_sql_results = normalize_sql_results_for_answer(execution_result.get("sql_results"))
     draft_answer = (execution_result.get("answer_text") or "").strip() or None
-    if hasattr(self.llm_client, "compose_final_answer"):
+    if hasattr(llm_client, "compose_final_answer"):
         try:
-            answer_text = self.llm_client.compose_final_answer(
+            answer_text = llm_client.compose_final_answer(
                 user_query=state["user_query"],
                 intent=state["intent_decision"].intent,
                 response_format=response_format,
@@ -118,7 +118,7 @@ def _compose_final_answer_text(
                 return answer_text
         except Exception:
             logger.exception("Dashboard chat final answer composition failed")
-    return self._fallback_answer_text(
+    return fallback_answer_text(
         execution_result.get("retrieved_documents") or [],
         normalized_sql_results,
         response_format=response_format,
@@ -126,7 +126,7 @@ def _compose_final_answer_text(
     )
 
 
-def _determine_response_format(
+def determine_response_format(
     *,
     user_query: str,
     sql_results: list[dict[str, Any]] | None,
@@ -158,7 +158,7 @@ def _determine_response_format(
     return "text"
 
 
-def _sql_result_columns(sql_results: list[dict[str, Any]] | None) -> list[str]:
+def sql_result_columns(sql_results: list[dict[str, Any]] | None) -> list[str]:
     """Return table columns for frontend rendering metadata."""
     if not sql_results:
         return []
@@ -168,32 +168,32 @@ def _sql_result_columns(sql_results: list[dict[str, Any]] | None) -> list[str]:
     return list(first_row.keys())
 
 
-def _build_usage_summary(self) -> dict[str, Any]:
-    """Collect per-turn usage from the llm client and embedding provider when supported."""
+def build_usage_summary(llm_client, vector_store) -> dict[str, Any]:
+    """Collect per-turn usage from the llm client and embedding provider."""
     usage: dict[str, Any] = {}
-    if hasattr(self.llm_client, "usage_summary"):
-        llm_usage = self.llm_client.usage_summary()
+    if hasattr(llm_client, "usage_summary"):
+        llm_usage = llm_client.usage_summary()
         if llm_usage:
             usage["llm"] = llm_usage
-    if hasattr(self.vector_store, "usage_summary"):
-        embedding_usage = self.vector_store.usage_summary()
+    if hasattr(vector_store, "usage_summary"):
+        embedding_usage = vector_store.usage_summary()
         if embedding_usage:
             usage["embeddings"] = embedding_usage
     return usage
 
 
-def _compose_small_talk_response(self, user_query: str) -> str:
-    """Generate the prototype small-talk response or fall back to a fixed helper."""
-    if hasattr(self.llm_client, "compose_small_talk"):
+def compose_small_talk_response(llm_client, user_query: str) -> str:
+    """Generate the small-talk response or fall back to a fixed helper."""
+    if hasattr(llm_client, "compose_small_talk"):
         try:
-            return self.llm_client.compose_small_talk(user_query)
+            return llm_client.compose_small_talk(user_query)
         except Exception:
             logger.exception("Dashboard chat small-talk generation failed")
     return "Hi! I can help with your program data and metrics. What would you like to know?"
 
 
-def _build_fast_path_intent(user_query: str) -> DashboardChatIntentDecision | None:
-    """Handle obvious greetings, thanks, and basic capability prompts without an llm round trip."""
+def build_fast_path_intent(user_query: str) -> DashboardChatIntentDecision | None:
+    """Handle obvious greetings without an LLM round trip."""
     if not SMALL_TALK_FAST_PATH_PATTERN.match(user_query.strip()):
         return None
     return DashboardChatIntentDecision(
@@ -203,7 +203,7 @@ def _build_fast_path_intent(user_query: str) -> DashboardChatIntentDecision | No
     )
 
 
-def _build_fast_path_small_talk_response(user_query: str) -> str:
+def build_fast_path_small_talk_response(user_query: str) -> str:
     """Keep basic small-talk replies instant and deterministic."""
     normalized_query = user_query.strip().lower()
     if "what can you do" in normalized_query:
@@ -227,8 +227,8 @@ def _build_fast_path_small_talk_response(user_query: str) -> str:
     return "Hi. Ask me anything about this dashboard or the data behind it."
 
 
-def _clarification_fallback(missing_info: Sequence[str]) -> str:
-    """Mirror the prototype's specific clarification nudges when the router omits a question."""
+def clarification_fallback(missing_info: Sequence[str]) -> str:
+    """Return a specific clarification nudge when the router omits a question."""
     missing = {item.lower() for item in missing_info}
     prompts: list[str] = []
     if "metric" in missing:
@@ -242,7 +242,7 @@ def _clarification_fallback(missing_info: Sequence[str]) -> str:
     return "Could you clarify " + ", ".join(prompts) + "?"
 
 
-def _fallback_answer_text(
+def fallback_answer_text(
     retrieved_documents: Sequence[DashboardChatRetrievedDocument],
     sql_results: list[dict[str, Any]] | None,
     *,
@@ -250,72 +250,66 @@ def _fallback_answer_text(
     draft_answer: str | None = None,
 ) -> str:
     """Fallback response when the model returns no final text."""
+    from .retrieval import compact_snippet
+
     if draft_answer:
         return draft_answer
     if sql_results is not None:
         if not sql_results:
             return "I didn't find any matching rows for that question."
         if response_format in {"text_with_table", "table"}:
-            return f"I found {len(sql_results)} matching rows. See the table below for the breakdown."
+            return (
+                f"I found {len(sql_results)} matching rows. See the table below for the breakdown."
+            )
         if len(sql_results) == 1:
-            return _single_row_summary(sql_results[0])
+            return single_row_summary(sql_results[0])
         return f"I found {len(sql_results)} matching rows."
     if retrieved_documents:
-        return _compact_snippet(retrieved_documents[0].content)
+        return compact_snippet(retrieved_documents[0].content)
     return "I couldn't find enough context to answer that."
 
 
-def _single_row_summary(row: dict[str, Any]) -> str:
+def single_row_summary(row: dict[str, Any]) -> str:
     """Return a readable fallback when one structured row is available."""
-    parts = [
-        f"{_humanize_column_name(column)}: {value}"
-        for column, value in row.items()
-    ]
+    parts = [f"{humanize_column_name(col)}: {value}" for col, value in row.items()]
     return "; ".join(parts)
 
 
-def _humanize_column_name(column_name: str) -> str:
+def humanize_column_name(column_name: str) -> str:
     """Convert snake_case warehouse columns into human labels."""
     return str(column_name).replace("_", " ").strip().title()
 
 
-def _normalize_sql_results_for_answer(
-    cls,
+def normalize_sql_results_for_answer(
     sql_results: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]] | None:
-    """Normalize SQL results into llm-friendly values for final answer writing."""
+    """Normalize SQL results into LLM-friendly values for final answer writing."""
     if sql_results is None:
         return None
-    normalized_rows: list[dict[str, Any]] = []
-    for row in sql_results:
-        normalized_row: dict[str, Any] = {}
-        for column_name, value in row.items():
-            normalized_row[column_name] = cls._normalize_sql_value_for_answer(
-                column_name,
-                value,
-            )
-        normalized_rows.append(normalized_row)
-    return normalized_rows
+    return [
+        {col: normalize_sql_value_for_answer(col, val) for col, val in row.items()}
+        for row in sql_results
+    ]
 
 
-def _normalize_sql_value_for_answer(cls, column_name: str, value: Any) -> Any:
+def normalize_sql_value_for_answer(column_name: str, value: Any) -> Any:
     """Format warehouse values into user-friendly forms for answer composition."""
     if value is None:
         return None
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
-        return cls._format_numeric_answer_value(column_name, value)
+        return format_numeric_answer_value(column_name, value)
     text_value = str(value)
-    numeric_value = cls._parse_numeric_string(text_value)
+    numeric_value = parse_numeric_string(text_value)
     if numeric_value is None:
         return text_value
-    return cls._format_numeric_answer_value(column_name, numeric_value)
+    return format_numeric_answer_value(column_name, numeric_value)
 
 
-def _format_numeric_answer_value(cls, column_name: str, value: float | int) -> str | int | float:
+def format_numeric_answer_value(column_name: str, value: float | int) -> str | int | float:
     """Format numeric values for answer composition."""
-    if cls._looks_like_rate_metric(column_name) and 0 <= float(value) <= 1:
+    if looks_like_rate_metric(column_name) and 0 <= float(value) <= 1:
         percentage_value = f"{float(value) * 100:.1f}".rstrip("0").rstrip(".")
         return f"{percentage_value}%"
     rounded_value = round(float(value), 2)
@@ -324,13 +318,11 @@ def _format_numeric_answer_value(cls, column_name: str, value: float | int) -> s
     return f"{rounded_value:.2f}".rstrip("0").rstrip(".")
 
 
-def _parse_numeric_string(value: str) -> float | None:
+def parse_numeric_string(value: str) -> float | None:
     """Parse decimal-like strings emitted by DjangoJSONEncoder."""
     normalized_value = value.strip()
     if not normalized_value:
         return None
-    import re
-
     if not re.fullmatch(r"-?\d+(?:\.\d+)?(?:E-?\d+)?", normalized_value, flags=re.IGNORECASE):
         return None
     try:
@@ -339,13 +331,10 @@ def _parse_numeric_string(value: str) -> float | None:
         return None
 
 
-def _looks_like_rate_metric(column_name: str) -> bool:
+def looks_like_rate_metric(column_name: str) -> bool:
     """Return whether a metric name likely represents a percentage/rate."""
     normalized_column = column_name.lower()
     return any(
         token in normalized_column
         for token in ["rate", "ratio", "percentage", "percent", "share", "pct"]
     )
-
-
-from .retrieval import _compact_snippet
