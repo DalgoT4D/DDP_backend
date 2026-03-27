@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
+import time
 import uuid
 
 from django.core.cache import cache
@@ -360,10 +361,19 @@ class DashboardService:
         Returns:
             Created Dashboard instance
         """
+        # Generate default tab for new dashboard
+        default_tab = {
+            "id": f"tab-{int(time.time() * 1000)}",
+            "title": "Untitled Tab 1",
+            "layout_config": [],
+            "components": {},
+        }
+
         dashboard = Dashboard.objects.create(
             title=data.title,
             description=data.description,
             grid_columns=data.grid_columns,
+            tabs=[default_tab],  # Initialize with default tab
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
@@ -414,6 +424,9 @@ class DashboardService:
             dashboard.layout_config = data.layout_config
         if data.components is not None:
             dashboard.components = data.components
+        if data.tabs is not None:
+            # Convert Pydantic models to dicts for JSON storage
+            dashboard.tabs = [tab.dict() for tab in data.tabs]
         if data.filter_layout is not None:
             dashboard.filter_layout = data.filter_layout
         if data.is_published is not None:

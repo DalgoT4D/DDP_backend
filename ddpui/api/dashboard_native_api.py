@@ -242,9 +242,43 @@ def duplicate_dashboard(request, dashboard_id: int):
 
             updated_components[new_component_id] = new_component_data
 
-        # Update the dashboard with the corrected layout_config and components
+        # Copy tabs and update filter IDs inside each tab
+        new_tabs = []
+        for tab in copy.deepcopy(original_dashboard.tabs or []):
+            # Update filter IDs in tab's layout_config
+            for layout_item in tab.get("layout_config", []):
+                item_id = layout_item.get("i", "")
+                if item_id.startswith("filter-"):
+                    old_filter_id = item_id.replace("filter-", "")
+                    if old_filter_id in filter_id_mapping:
+                        layout_item["i"] = f"filter-{filter_id_mapping[old_filter_id]}"
+
+            # Update filter IDs in tab's components
+            updated_tab_components = {}
+            for component_id, component_data in tab.get("components", {}).items():
+                new_component_id = component_id
+                new_component_data = copy.deepcopy(component_data)
+
+                if component_id.startswith("filter-"):
+                    old_filter_id = component_id.replace("filter-", "")
+                    if old_filter_id in filter_id_mapping:
+                        new_filter_id = filter_id_mapping[old_filter_id]
+                        new_component_id = f"filter-{new_filter_id}"
+                        if (
+                            "config" in new_component_data
+                            and "filterId" in new_component_data["config"]
+                        ):
+                            new_component_data["config"]["filterId"] = int(new_filter_id)
+
+                updated_tab_components[new_component_id] = new_component_data
+
+            tab["components"] = updated_tab_components
+            new_tabs.append(tab)
+
+        # Update the dashboard with the corrected layout_config, components, and tabs
         new_dashboard.layout_config = new_layout_config
         new_dashboard.components = updated_components
+        new_dashboard.tabs = new_tabs
         new_dashboard.save()
 
         logger.info(
