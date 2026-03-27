@@ -18,6 +18,9 @@ from ddpui.models.dashboard_chat import (
     DashboardChatSession,
 )
 from ddpui.models.org_user import OrgUser
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("dashboard_chat")
 
 
 class DashboardChatSessionError(Exception):
@@ -171,6 +174,74 @@ def find_dashboard_chat_assistant_reply(
         .order_by("sequence_number")
         .first()
     )
+
+
+def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
+    """Load session and message, run the runtime, persist and return the assistant reply."""
+    from ddpui.core.dashboard_chat.orchestration.orchestrator import get_dashboard_chat_runtime
+
+    session = (
+        DashboardChatSession.objects.select_related("org", "dashboard", "orguser")
+        .filter(session_id=session_id)
+        .first()
+    )
+    if session is None or session.dashboard is None:
+        return {"status": "skipped_missing_session", "session": None, "user_message": None}
+
+    user_message = DashboardChatMessage.objects.filter(
+        id=user_message_id,
+        session=session,
+        role="user",
+    ).first()
+    if user_message is None:
+        return {"status": "skipped_missing_message", "session": session, "user_message": None}
+
+    existing_assistant_message = find_dashboard_chat_assistant_reply(
+        session=session,
+        user_message=user_message,
+    )
+    if existing_assistant_message is not None:
+        return {
+            "status": "skipped_existing_reply",
+            "session": session,
+            "user_message": user_message,
+            "assistant_message": existing_assistant_message,
+        }
+
+    response = get_dashboard_chat_runtime().run(
+        org=session.org,
+        dashboard_id=session.dashboard.id,
+        user_query=user_message.content,
+        session_id=str(session.session_id),
+        vector_collection_name=session.vector_collection_name,
+        conversation_history=list_dashboard_chat_history(
+            session,
+            exclude_message_id=user_message.id,
+        ),
+    )
+    response_payload = response.to_dict()
+    assistant_payload = {
+        key: value for key, value in response_payload.items() if key != "answer_text"
+    }
+    timing_breakdown = dict(response_payload.get("metadata") or {}).get("timing_breakdown") or {}
+    assistant_message = create_dashboard_chat_assistant_message(
+        session=session,
+        content=response.answer_text,
+        payload=assistant_payload,
+        timing_breakdown=timing_breakdown,
+    )
+    response_latency_ms = max(
+        0,
+        int((assistant_message.created_at - user_message.created_at).total_seconds() * 1000),
+    )
+    assistant_message.response_latency_ms = response_latency_ms
+    assistant_message.save(update_fields=["response_latency_ms"])
+    return {
+        "status": "completed",
+        "session": session,
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+    }
 
 
 def _create_dashboard_chat_message(

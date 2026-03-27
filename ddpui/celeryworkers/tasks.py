@@ -76,7 +76,6 @@ from ddpui.utils.constants import (
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildService
-from ddpui.core.dashboard_chat.orchestration.orchestrator import get_dashboard_chat_runtime
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
@@ -99,16 +98,6 @@ from ddpui.ddpprefect import (
 )
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core import llm_service
-from ddpui.core.dashboard_chat.events import (
-    build_dashboard_chat_event,
-    publish_dashboard_chat_event,
-)
-from ddpui.core.dashboard_chat.sessions.service import (
-    create_dashboard_chat_assistant_message,
-    find_dashboard_chat_assistant_reply,
-    list_dashboard_chat_history,
-    serialize_dashboard_chat_message,
-)
 from ddpui.utils.helpers import (
     find_key_in_dictionary,
     convert_sqlalchemy_rows_to_csv_string,
@@ -1320,156 +1309,6 @@ def build_dashboard_chat_context_for_org(org_id: int):
         ),
         "vector_last_ingested_at": result.vector_ingested_at.isoformat(),
         "source_document_counts": result.source_document_counts,
-    }
-
-
-@app.task
-def run_dashboard_chat_turn(session_id: str, user_message_id: int):
-    """Run one dashboard chat turn asynchronously and emit websocket events."""
-    try:
-        result = execute_dashboard_chat_turn(session_id, user_message_id)
-        session = result["session"]
-        user_message = result["user_message"]
-        assistant_message = result.get("assistant_message")
-
-        if result["status"] == "completed" and assistant_message is not None:
-            publish_dashboard_chat_event(
-                str(session.session_id),
-                build_dashboard_chat_event(
-                    event_type="assistant_message",
-                    session_id=str(session.session_id),
-                    dashboard_id=session.dashboard.id,
-                    message_id=str(assistant_message.id),
-                    data=serialize_dashboard_chat_message(assistant_message),
-                ),
-            )
-            return {
-                "status": "completed",
-                "session_id": str(session.session_id),
-                "assistant_message_id": assistant_message.id,
-            }
-
-        if result["status"] == "skipped_existing_reply" and assistant_message is not None:
-            logger.info(
-                "dashboard chat turn reused existing assistant message for session=%s message_id=%s",
-                session_id,
-                user_message_id,
-            )
-            return {
-                "status": "skipped_existing_reply",
-                "session_id": str(session.session_id),
-                "assistant_message_id": assistant_message.id,
-            }
-
-        if result["status"] == "skipped_missing_session":
-            logger.warning(
-                "dashboard chat turn skipped because session %s was not found or has no dashboard",
-                session_id,
-            )
-            return {"status": "skipped_missing_session", "session_id": session_id}
-
-        if result["status"] == "skipped_missing_message":
-            logger.warning(
-                "dashboard chat turn skipped because message %s was not found in session %s",
-                user_message_id,
-                session_id,
-            )
-            return {"status": "skipped_missing_message", "session_id": session_id}
-
-        raise RuntimeError(f"Unexpected dashboard chat turn status: {result['status']}")
-    except Exception:
-        logger.exception(
-            "dashboard chat turn failed for session=%s message_id=%s",
-            session_id,
-            user_message_id,
-        )
-        from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
-
-        session = (
-            DashboardChatSession.objects.select_related("dashboard")
-            .filter(session_id=session_id)
-            .first()
-        )
-        user_message = DashboardChatMessage.objects.filter(id=user_message_id, role="user").first()
-        if session is not None and session.dashboard is not None and user_message is not None:
-            publish_dashboard_chat_event(
-                str(session.session_id),
-                build_dashboard_chat_event(
-                    event_type="error",
-                    session_id=str(session.session_id),
-                    dashboard_id=session.dashboard.id,
-                    message_id=str(user_message.id),
-                    data={"message": "Something went wrong while generating the response"},
-                ),
-            )
-        raise
-
-
-def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
-    """Run one dashboard chat turn synchronously and persist the assistant reply."""
-    from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
-
-    session = (
-        DashboardChatSession.objects.select_related("org", "dashboard", "orguser")
-        .filter(session_id=session_id)
-        .first()
-    )
-    if session is None or session.dashboard is None:
-        return {"status": "skipped_missing_session", "session": None, "user_message": None}
-
-    user_message = DashboardChatMessage.objects.filter(
-        id=user_message_id,
-        session=session,
-        role="user",
-    ).first()
-    if user_message is None:
-        return {"status": "skipped_missing_message", "session": session, "user_message": None}
-
-    existing_assistant_message = find_dashboard_chat_assistant_reply(
-        session=session,
-        user_message=user_message,
-    )
-    if existing_assistant_message is not None:
-        return {
-            "status": "skipped_existing_reply",
-            "session": session,
-            "user_message": user_message,
-            "assistant_message": existing_assistant_message,
-        }
-
-    response = get_dashboard_chat_runtime().run(
-        org=session.org,
-        dashboard_id=session.dashboard.id,
-        user_query=user_message.content,
-        session_id=str(session.session_id),
-        vector_collection_name=session.vector_collection_name,
-        conversation_history=list_dashboard_chat_history(
-            session,
-            exclude_message_id=user_message.id,
-        ),
-    )
-    response_payload = response.to_dict()
-    assistant_payload = {
-        key: value for key, value in response_payload.items() if key != "answer_text"
-    }
-    timing_breakdown = dict(response_payload.get("metadata") or {}).get("timing_breakdown") or {}
-    assistant_message = create_dashboard_chat_assistant_message(
-        session=session,
-        content=response.answer_text,
-        payload=assistant_payload,
-        timing_breakdown=timing_breakdown,
-    )
-    response_latency_ms = max(
-        0,
-        int((assistant_message.created_at - user_message.created_at).total_seconds() * 1000),
-    )
-    assistant_message.response_latency_ms = response_latency_ms
-    assistant_message.save(update_fields=["response_latency_ms"])
-    return {
-        "status": "completed",
-        "session": session,
-        "user_message": user_message,
-        "assistant_message": assistant_message,
     }
 
 
