@@ -112,7 +112,7 @@ class FakeChromaClient:
 
     def get_collection(self, name):
         if name not in self.collections:
-            raise ValueError("collection does not exist")
+            raise NotFoundError("collection does not exist")
         return self.collections[name]
 
     def delete_collection(self, name):
