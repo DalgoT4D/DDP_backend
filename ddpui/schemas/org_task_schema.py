@@ -5,8 +5,8 @@ from ninja import Schema
 class TaskParameters(Schema):
     """Schema to parameterize Task Runs"""
 
-    flags: list | None
-    options: dict | None
+    flags: list | None = None
+    options: dict | None = None
 
 
 class SelectedStream(Schema):
@@ -29,8 +29,8 @@ class CreateOrgTaskPayload(Schema):
     """
 
     task_slug: str
-    flags: list | None
-    options: dict | None
+    flags: list | None = None
+    options: dict | None = None
 
 
 class DbtProjectSchema(Schema):
