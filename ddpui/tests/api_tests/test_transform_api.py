@@ -57,7 +57,7 @@ from ddpui.schemas.dbt_workflow_schema import (
     TerminateChainAndCreateModelPayload,
 )
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
+from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 from ddpui.utils.warehouse.old_client.warehouse_factory import PostgresClient
 
@@ -136,7 +136,7 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
     ) as mock_create_cli_block, patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
     ) as mock_retrieve_creds:
-        setup_local_dbt_workspace(org, project_name=project_name, default_schema=default_schema)
+        setup_managed_git_workspace(org, project_name=project_name, default_schema=default_schema)
         mock_dbt_command.assert_called_once()
         mock_retrieve_creds.assert_called_once()
         mock_create_cli_block.assert_called_once()
@@ -395,14 +395,14 @@ def test_create_dbt_project_mocked_helper(orguser: OrgUser):
     payload = DbtProjectSchema(default_schema="default")
 
     with patch(
-        "ddpui.api.transform_api.setup_local_dbt_workspace",
+        "ddpui.api.transform_api.setup_managed_git_workspace",
         return_value=(None, None),
-    ) as setup_local_dbt_workspace_mock:
+    ) as setup_managed_git_workspace_mock:
         result = create_dbt_project(request, payload)
         assert isinstance(result, dict)
         assert "message" in result
         assert result["message"] == f"Project {orguser.org.slug} created successfully"
-        setup_local_dbt_workspace_mock.assert_called_once_with(
+        setup_managed_git_workspace_mock.assert_called_once_with(
             orguser.org, project_name="dbtrepo", default_schema=payload.default_schema
         )
 
