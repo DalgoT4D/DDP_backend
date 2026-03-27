@@ -341,8 +341,16 @@ FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
 
 # Cookie settings
-COOKIE_SECURE = True
-COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
-COOKIE_HTTPONLY = True
+_cookie_secure_override = os.getenv("COOKIE_SECURE")
+COOKIE_SECURE = (
+    _cookie_secure_override.lower() in {"1", "true", "yes", "on"}
+    if _cookie_secure_override is not None
+    else True
+)
+COOKIE_SAMESITE = os.getenv(
+    "COOKIE_SAMESITE",
+    "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None",
+)
+COOKIE_HTTPONLY = os.getenv("COOKIE_HTTPONLY", "true").lower() in {"1", "true", "yes", "on"}
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB

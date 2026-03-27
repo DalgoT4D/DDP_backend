@@ -6,13 +6,13 @@ from unittest.mock import patch
 from chromadb.errors import NotFoundError
 
 from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
-from ddpui.core.dashboard_chat.vector.documents import (
+from ddpui.core.dashboard_chat.vector.vector_documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
     build_dashboard_chat_collection_name,
 )
 from ddpui.utils.vector.backends.chroma import ChromaVectorStore
-from ddpui.core.dashboard_chat.vector.store import OrgVectorStore
+from ddpui.core.dashboard_chat.vector.org_vector_store import OrgVectorStore
 
 
 class FakeEmbeddingProvider:

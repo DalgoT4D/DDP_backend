@@ -63,7 +63,7 @@ dependencies = [
     "django-cors-headers==3.14.0",
     "django-extensions==3.2.3",
     "django-flags==5.0.13",
-    "django-ninja==0.21.0",
+    "django-ninja==1.6.2",
     "django-prometheus==2.3.1",
     "djangorestframework==3.14.0",
     "djangorestframework-simplejwt>=5.5.0",
@@ -119,7 +119,8 @@ dependencies = [
     "kombu==5.2.4",
     "kubernetes>=28.1.0",
     "lazy-object-proxy==1.9.0",
-    "langgraph==0.0.69",
+    "langgraph==1.1.3",
+    "langgraph-checkpoint-postgres==3.0.5",
     "leather==0.3.4",
     "logbook==1.5.3",
     "mako==1.2.4",
@@ -144,7 +145,7 @@ dependencies = [
     "onnxruntime==1.20.1",
     "openai==1.55.3",
     "ordered-set==4.1.0",
-    "orjson==3.9.12",
+    "orjson==3.11.7",
     "packaging==23.2",
     "pandas==2.2.2",
     "paramiko==3.4.0",
@@ -164,14 +165,16 @@ dependencies = [
     "proto-plus==1.23.0",
     "protobuf==4.25.3",
     "psutil==5.9.5",
-    "psycopg2-binary==2.9.6",
+    "psycopg[binary]==3.3.3",
+    "psycopg2-binary==2.9.10",
+    "psycopg-pool==3.3.0",
     "ptyprocess==0.7.0",
     "pure-eval==0.2.2",
     "pyarrow==16.1.0",
     "pyasn1==0.6.2",
     "pyasn1-modules==0.4.2",
     "pycparser==2.21",
-    "pydantic==1.10.6",
+    "pydantic==2.12.5",
     "pydeck==0.9.1",
     "pyfiglet==0.8.post1",
     "pygments==2.14.0",
@@ -235,7 +238,7 @@ dependencies = [
     "tornado==6.3.2",
     "traitlets==5.9.0",
     "typer==0.9.0",
-    "typing-extensions==4.12.2",
+    "typing-extensions==4.14.1",
     "tzdata==2022.7",
     "tzlocal==4.3",
     "urllib3==2.6.3",
@@ -261,6 +264,9 @@ pythonpath = ["."]
 DJANGO_SETTINGS_MODULE="ddpui.settings"
 testpaths = [
   "ddpui/tests"
+]
+filterwarnings = [
+  "ignore:SelectableGroups dict interface is deprecated\\. Use select\\.:DeprecationWarning:kombu\\.utils\\.compat",
 ]
 
 [tool.pylint.messages_control]

@@ -9,15 +9,15 @@ from typing import Callable, Union
 from django.utils import timezone
 
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.context.dbt_docs import (
+from ddpui.core.dashboard_chat.context.dbt_docs_artifacts import (
     DashboardChatDbtDocsArtifacts,
     generate_dashboard_chat_dbt_docs_artifacts,
 )
-from ddpui.core.dashboard_chat.vector.documents import (
+from ddpui.core.dashboard_chat.vector.vector_documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
 )
-from ddpui.core.dashboard_chat.vector.store import OrgVectorStore
+from ddpui.core.dashboard_chat.vector.org_vector_store import OrgVectorStore
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardAIContext, DashboardChatSession, OrgAIContext
 from ddpui.models.org import Org
