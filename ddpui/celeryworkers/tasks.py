@@ -113,15 +113,11 @@ from ddpui.utils.helpers import (
     find_key_in_dictionary,
     convert_sqlalchemy_rows_to_csv_string,
 )
-from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
 DASHBOARD_CHAT_CONTEXT_BUILD_INTERVAL_SECONDS = 3 * 60 * 60
-DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS = (
-    DASHBOARD_CHAT_CONTEXT_BUILD_INTERVAL_SECONDS + 5 * 60
-)
 
 
 @app.task(bind=True)
@@ -1273,8 +1269,9 @@ def clear_stuck_locks():
     return processed_count
 
 
-def _get_dashboard_chat_context_build_orgs():
-    """Return orgs that are eligible for scheduled dashboard chat context builds."""
+@app.task
+def schedule_dashboard_chat_context_builds():
+    """Fan out one dashboard chat context-build task per eligible org."""
     candidate_orgs = (
         Org.objects.select_related("dbt", "preferences")
         .filter(
@@ -1283,41 +1280,25 @@ def _get_dashboard_chat_context_build_orgs():
         )
         .order_by("id")
     )
-    return [
-        org
-        for org in candidate_orgs
-        if get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
-    ]
-
-
-def _dashboard_chat_context_build_lock_key(org_id: int) -> str:
-    """Build the Redis lock key for an org's scheduled context build."""
-    return f"dashboard_chat_context_build:{org_id}"
-
-
-@app.task
-def schedule_dashboard_chat_context_builds():
-    """Fan out one dashboard chat context-build task per eligible org."""
     enqueued_org_ids: list[int] = []
-    for org in _get_dashboard_chat_context_build_orgs():
-        build_dashboard_chat_context_for_org.delay(org.id)
-        enqueued_org_ids.append(org.id)
+    for org in candidate_orgs:
+        if get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+            build_dashboard_chat_context_for_org.delay(org.id)
+            enqueued_org_ids.append(org.id)
 
     logger.info("enqueued dashboard chat context builds for org ids=%s", enqueued_org_ids)
     return {"enqueued_org_ids": enqueued_org_ids}
 
 
-@app.task(bind=True)
-def build_dashboard_chat_context_for_org(self, org_id: int):
+@app.task
+def build_dashboard_chat_context_for_org(org_id: int):
     """Build dashboard chat retrieval context for one org if the org is eligible."""
-    org = (
-        Org.objects.select_related("dbt", "preferences")
-        .filter(id=org_id, dbt__isnull=False)
-        .first()
-    )
-    if org is None:
+    org = Org.objects.filter(id=org_id).first()
+    orgdbt = org.dbt if org else None
+    if orgdbt is None:
         logger.warning(
-            "dashboard chat context build skipped: org %s not found or missing dbt", org_id
+            "dashboard chat context build skipped: org %s not found or missing dbt",
+            org.slug if org else "unknown",
         )
         return {"status": "skipped_missing_org", "org_id": org_id}
 
@@ -1325,41 +1306,21 @@ def build_dashboard_chat_context_for_org(self, org_id: int):
     feature_enabled = get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
     if not feature_enabled or preferences is None or not preferences.ai_data_sharing_enabled:
         logger.info(
-            "dashboard chat context build skipped for org=%s because it is not eligible", org_id
+            "dashboard chat context build skipped for org=%s because it is not eligible",
+            org.slug if org else "unknown",
         )
         return {"status": "skipped_ineligible", "org_id": org_id}
 
-    redis_client = RedisClient.get_instance()
-    lock = redis_client.lock(
-        _dashboard_chat_context_build_lock_key(org_id),
-        timeout=DASHBOARD_CHAT_CONTEXT_BUILD_LOCK_TIMEOUT_SECONDS,
-    )
-    if not lock.acquire(blocking=False):
-        logger.info(
-            "dashboard chat context build skipped for org=%s because a rebuild is already running",
-            org_id,
-        )
-        return {"status": "skipped_locked", "org_id": org_id}
-
-    try:
-        result = OrgVectorBuildService().build_org_vector_context(org)
-        return {
-            "status": "completed",
-            "org_id": org_id,
-            "docs_generated_at": (
-                result.docs_generated_at.isoformat() if result.docs_generated_at else None
-            ),
-            "vector_last_ingested_at": result.vector_ingested_at.isoformat(),
-            "source_document_counts": result.source_document_counts,
-        }
-    finally:
-        try:
-            if lock.owned():
-                lock.release()
-        except Exception:
-            logger.exception(
-                "failed to release dashboard chat context build lock for org=%s", org_id
-            )
+    result = OrgVectorBuildService().build_org_vector_context(org)
+    return {
+        "status": "completed",
+        "org_id": org_id,
+        "docs_generated_at": (
+            result.docs_generated_at.isoformat() if result.docs_generated_at else None
+        ),
+        "vector_last_ingested_at": result.vector_ingested_at.isoformat(),
+        "source_document_counts": result.source_document_counts,
+    }
 
 
 @app.task
