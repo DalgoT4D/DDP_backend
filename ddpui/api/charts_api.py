@@ -565,7 +565,7 @@ def get_chart_data(request, payload: ChartDataPayload):
     except Exception as e:
         logger.error(f"Error generating chart data: {str(e)}")
         logger.error(
-            f"Error details - payload: {payload.dict() if hasattr(payload, 'dict') else payload}"
+            f"Error details - payload: {payload.model_dump() if hasattr(payload, 'model_dump') else payload}"
         )
         raise HttpError(500, f"Error generating chart data: {str(e)}")
 

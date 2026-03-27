@@ -1,5 +1,6 @@
 from ninja import Field, Schema
 from typing import Union, Any, Literal, Optional
+from pydantic import ConfigDict
 
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.models.canvas_models import CanvasNode
@@ -334,11 +335,10 @@ class ModelSrcOtherInputPayload(Schema):
 class ModelSrcInputsForMultiInputOp(Schema):
     """Schema to process inputs of multi input operations"""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     seq: int
     src_model: OrgDbtModel
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class SequencedNode(Schema):
@@ -346,11 +346,10 @@ class SequencedNode(Schema):
     Schema to process sequenced nodes
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     seq: int
     node: CanvasNode
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class CreateOperationNodePayload(Schema):
