@@ -1,6 +1,7 @@
 # pylint: disable=missing-class-docstring
 from typing import List
 from ninja import Schema
+from pydantic import RootModel
 
 
 class StorageConfig(Schema):
@@ -60,11 +61,8 @@ class GetSourceDefinitions(Schema):
     name: str
 
 
-class GetSourceDefinitionsTestResponse(Schema):
-    __root__: List[GetSourceDefinitions]
-
-    class Config:
-        extra = "allow"
+class GetSourceDefinitionsTestResponse(RootModel[List[GetSourceDefinitions]]):
+    pass
 
 
 class GetSourceSchemaCatalogTestResponse(Schema):

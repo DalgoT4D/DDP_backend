@@ -652,7 +652,7 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
             )
 
         final_op_config = {}
-        final_op_config["config"] = payload.config
+        final_op_config["config"] = payload.config.copy()
         final_op_config["config"]["source_columns"] = payload.source_columns
         if is_multi_input_op:
             # only needed for dbt automation package to compute the output columns
@@ -786,7 +786,7 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
             )
 
         final_op_config = {}
-        final_op_config["config"] = payload.config
+        final_op_config["config"] = payload.config.copy()
         final_op_config["config"]["source_columns"] = payload.source_columns
         if is_multi_input_op:
             # only needed for dbt automation package to compute the output columns

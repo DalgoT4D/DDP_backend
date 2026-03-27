@@ -26,7 +26,7 @@ class CreateDbtModelPayload(Schema):
     input_uuid: str = ""
     source_columns: list[str] = []
     other_inputs: list[InputModelPayload] = []
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class EditDbtOperationPayload(Schema):
@@ -39,7 +39,7 @@ class EditDbtOperationPayload(Schema):
     input_uuid: str = ""
     source_columns: list[str] = []
     other_inputs: list[InputModelPayload] = []
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class CompleteDbtModelPayload(Schema):
@@ -50,7 +50,7 @@ class CompleteDbtModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class SyncSourcesSchema(Schema):
@@ -58,8 +58,8 @@ class SyncSourcesSchema(Schema):
     schema to sync sources from the schema
     """
 
-    schema_name: str = None
-    source_name: str = None
+    schema_name: Optional[str] = None
+    source_name: Optional[str] = None
 
 
 class LockCanvasResponseSchema(Schema):
@@ -265,7 +265,7 @@ class UnpivotOperationConfig(Schema):
     unpivot_columns: list[str]  # columns to unpivot
     unpivot_field_name: str = "field_name"
     unpivot_value_name: str = "value"
-    cast_to: str = None  # datatype to cast the value column to
+    cast_to: Optional[str] = None  # datatype to cast the value column to
 
 
 class FilterClauseConfig(Schema):
@@ -367,7 +367,7 @@ class CreateOperationNodePayload(Schema):
     other_inputs: list[
         ModelSrcOtherInputPayload
     ] = []  # List of other CanvasNode inputs for multi-input operations
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class EditOperationNodePayload(Schema):
@@ -391,4 +391,4 @@ class TerminateChainAndCreateModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
-    rel_dir_to_models: str = None
+    rel_dir_to_models: Optional[str] = None

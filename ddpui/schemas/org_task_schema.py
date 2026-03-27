@@ -1,3 +1,4 @@
+from typing import Optional
 from ninja import Schema
 
 
@@ -12,7 +13,7 @@ class SelectedStream(Schema):
     """Schema to define a selected stream"""
 
     streamName: str
-    streamNamespace: str = None
+    streamNamespace: Optional[str] = None
 
 
 class ClearSelectedStreams(Schema):
