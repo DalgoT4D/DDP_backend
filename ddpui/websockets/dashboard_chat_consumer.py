@@ -3,12 +3,12 @@ from urllib.parse import parse_qs
 
 from asgiref.sync import async_to_sync
 
-from ddpui.core.dashboard_chat.sessions.service import execute_dashboard_chat_turn
+from ddpui.core.dashboard_chat.sessions.session_service import execute_dashboard_chat_turn
 from ddpui.core.dashboard_chat.events import (
     build_dashboard_chat_event,
     dashboard_chat_group_name,
 )
-from ddpui.core.dashboard_chat.sessions.service import (
+from ddpui.core.dashboard_chat.sessions.session_service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message_with_status,
     find_dashboard_chat_assistant_reply,

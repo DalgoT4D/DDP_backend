@@ -9,7 +9,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
-from ddpui.core.dashboard_chat.vector.documents import build_dashboard_chat_collection_name
+from ddpui.core.dashboard_chat.vector.vector_documents import build_dashboard_chat_collection_name
 from ddpui.core.dashboard_chat.contracts import DashboardChatConversationMessage
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import (

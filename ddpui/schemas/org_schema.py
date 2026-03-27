@@ -10,9 +10,9 @@ class OrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
+    viz_url: Optional[HttpUrl] = None
+    viz_login_type: Optional[str] = None
+    tnc_accepted: Optional[bool] = None
     is_demo: bool = False
 
 
@@ -22,9 +22,9 @@ class CreateOrgSchema(Schema):
     name: str
     slug: str = None
     airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
+    viz_url: Optional[HttpUrl] = None
+    viz_login_type: Optional[str] = None
+    tnc_accepted: Optional[bool] = None
     is_demo: bool = False
     base_plan: str
     can_upgrade_plan: bool

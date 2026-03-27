@@ -11,12 +11,15 @@ from ddpui.core.dashboard_chat.contracts import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.core.dashboard_chat.orchestration.state import (
-    DashboardChatRuntimeState,
-    SMALL_TALK_FAST_PATH_PATTERN,
-)
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
+from ddpui.core.dashboard_chat.orchestration.state.accessors import get_intent_decision
 
 logger = CustomLogger("dashboard_chat")
+
+SMALL_TALK_FAST_PATH_PATTERN = re.compile(
+    r"^\s*(hi|hello|hey|yo|good\s+morning|good\s+afternoon|good\s+evening|thanks|thank\s+you|what\s+can\s+you\s+do|who\s+are\s+you)\b[\s!.?]*$",
+    re.IGNORECASE,
+)
 
 
 def serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +97,7 @@ def max_turns_message(
 
 def compose_final_answer_text(
     llm_client,
-    state: DashboardChatRuntimeState,
+    state: DashboardChatGraphState,
     execution_result: dict[str, Any],
     *,
     response_format: str,
@@ -106,7 +109,7 @@ def compose_final_answer_text(
         try:
             answer_text = llm_client.compose_final_answer(
                 user_query=state["user_query"],
-                intent=state["intent_decision"].intent,
+                intent=get_intent_decision(state).intent,
                 response_format=response_format,
                 draft_answer=draft_answer,
                 retrieved_documents=list(execution_result.get("retrieved_documents") or []),
@@ -250,7 +253,7 @@ def fallback_answer_text(
     draft_answer: str | None = None,
 ) -> str:
     """Fallback response when the model returns no final text."""
-    from .retrieval import compact_snippet
+    from .retrieval_support import compact_snippet
 
     if draft_answer:
         return draft_answer

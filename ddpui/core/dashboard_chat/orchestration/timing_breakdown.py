@@ -1,20 +1,15 @@
-"""Shared helpers for dashboard chat graph nodes."""
+"""Timing-breakdown helpers for dashboard chat orchestration."""
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
-
-
-def route_after_intent(state: DashboardChatRuntimeState) -> str:
-    """Route to one explicit handler per prototype intent."""
-    return state["intent_decision"].intent.value
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 
 def merge_tool_loop_timing(
-    state: DashboardChatRuntimeState,
+    state: DashboardChatGraphState,
     execution_result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge timing from the tool loop into the state's existing timing breakdown."""
+    """Merge tool-loop timing into the current graph timing payload."""
     existing = dict(state.get("timing_breakdown") or {})
     from_loop = dict(execution_result.get("timing_breakdown") or {})
     merged = dict(existing)

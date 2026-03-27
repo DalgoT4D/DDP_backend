@@ -34,11 +34,11 @@ The feature is intentionally scoped to the current dashboard only:
            v
 +--------------------------------+
 | DashboardChatRuntime.run       |
-| - load snapshot                |
+| - load context / bootstrap     |
 | - route intent                 |
-| - retrieve / tools / SQL       |
-| - compose answer               |
-| - attach citations + metadata  |
+| - route-specific node          |
+| - compose response             |
+| - finalize metadata/citations  |
 +--------------------------------+
            |
            v
@@ -291,7 +291,7 @@ Flow:
 +----------------------------------------------+
 | handle_follow_up_sql                         |
 | -> shorter tool loop                         |
-| -> reuse conversation context + caches       |
+| -> reuse conversation context + checkpointed state |
 | -> run updated SQL                           |
 | -> compose final answer                      |
 +----------------------------------------------+
@@ -467,8 +467,8 @@ This layer knows how to talk to Chroma, but does not know anything about dashboa
 
 ### 2. Dashboard-chat vector layer
 Location:
-- [`vector/store.py`](./vector/store.py)
-- [`vector/documents.py`](./vector/documents.py)
+- [`vector/org_vector_store.py`](./vector/org_vector_store.py)
+- [`vector/vector_documents.py`](./vector/vector_documents.py)
 - [`vector/builder.py`](./vector/builder.py)
 - [`vector/building.py`](./vector/building.py)
 - [`vector/embeddings.py`](./vector/embeddings.py)
@@ -576,39 +576,30 @@ These sources are intentionally different:
 - the compact dbt index is good for deterministic dbt lookups (ex: upstream models)
 - warehouse tools are good for trustworthy data answers
 
-## Why We Cache
+## LangGraph Persistence
 
-This feature uses caching for stability and cost control
+This feature now uses official LangGraph Postgres checkpoints for session continuity.
 
-### 1. Session snapshot cache
-Location:
-- `orchestration/session_snapshot.py`
-- `sessions/cache.py`
-
-What is cached:
-- dashboard export
+What is persisted in checkpoints:
+- dashboard export payload
+- allowlist payload
 - compact dbt index
-- allowlist
-- schema snippet cache
-- validated distinct-value cache
+- schema snippet payloads
+- validated distinct-value payloads
+- turn state needed for follow-ups and resume
 
-What is not cached here:
-- prior chat turns themselves
+What is not stored there:
+- product transcript rows
 
-Previous questions and answers are persisted separately as chat messages and are passed back in as conversation history on each new turn.
-
-TTL:
-- 24 hours
+Chat history remains in `dashboard_chat_session` / `dashboard_chat_message`. LangGraph owns resumable workflow state; Django models still own the user-visible transcript.
 
 Why this exists:
-- a chat session should keep using a stable dashboard context across follow-up turns
-- other users or background refreshes should not change the dashboard/dbt context underneath an active conversation
-- schema lookups and distinct-value validations should carry across follow-ups instead of starting cold every turn
-- the runtime should not have to rebuild the same dashboard export, allowlist, and compact dbt index on every user message
+- a chat session should keep using stable dashboard/dbt context across follow-up turns
+- schema lookups and distinct validations should carry across turns
+- interrupted runs should be resumable at graph-step boundaries
+- continuity should survive process restarts without relying on Django cache
 
-This is not LangGraph checkpoint persistence. It is app-level session context freezing.
-
-### 2. Shared process-level clients
+### Shared process-level clients
 Location:
 - `orchestration/orchestrator.py`
 - `ddpui/utils/vector/chroma/client.py`
@@ -626,7 +617,7 @@ Why this exists:
 
 Prompt lookup works like this:
 - read the prompt row from the DB if present
-- otherwise fall back to the built-in default in `agents/prompt_store.py`
+- otherwise fall back to the built-in default in `agents/prompt_template_store.py`
 
 ## DB-Backed Logging / Trace
 
@@ -697,87 +688,73 @@ This is the quickest way to navigate the package.
   - websocket event helpers / channel group naming
 
 ### `agents/`
-- [`interface.py`](./agents/interface.py)
+- [`llm_client_interface.py`](./agents/llm_client_interface.py)
   - LLM client protocol used by the runtime
-- [`openai.py`](./agents/openai.py)
+- [`openai_llm_client.py`](./agents/openai_llm_client.py)
   - OpenAI-backed intent classification, tool-loop, and final-answer composition
-- [`answer_formatting.py`](./agents/answer_formatting.py)
+- [`final_answer_formatting.py`](./agents/final_answer_formatting.py)
   - helpers for structured final answer composition
-- [`prompt_store.py`](./agents/prompt_store.py)
+- [`prompt_template_store.py`](./agents/prompt_template_store.py)
   - DB-backed prompt lookup with built-in defaults
 
 ### `context/`
-- [`allowlist.py`](./context/allowlist.py)
+- [`dashboard_table_allowlist.py`](./context/dashboard_table_allowlist.py)
   - dashboard export -> allowlisted tables/dbt lineage -> compact dbt index
-- [`dbt_docs.py`](./context/dbt_docs.py)
+- [`dbt_docs_artifacts.py`](./context/dbt_docs_artifacts.py)
   - dbt docs generation/loading helpers for manifest/catalog artifacts
 
 ### `contracts/`
-- [`conversation.py`](./contracts/conversation.py)
+- [`conversation_contracts.py`](./contracts/conversation_contracts.py)
   - conversation history and follow-up context contracts
-- [`intents.py`](./contracts/intents.py)
+- [`intent_contracts.py`](./contracts/intent_contracts.py)
   - intent enums and routing decisions
-- [`response.py`](./contracts/response.py)
+- [`response_contracts.py`](./contracts/response_contracts.py)
   - final response, citations, usage, tool-call metadata
-- [`retrieval.py`](./contracts/retrieval.py)
+- [`retrieval_contracts.py`](./contracts/retrieval_contracts.py)
   - retrieved document contracts
-- [`sql.py`](./contracts/sql.py)
+- [`sql_contracts.py`](./contracts/sql_contracts.py)
   - SQL validation and schema snippet contracts
 
 ### `orchestration/`
 - [`orchestrator.py`](./orchestration/orchestrator.py)
-  - runtime entry point and shared runtime getter
-- [`definition.py`](./orchestration/definition.py)
-  - explicit LangGraph wiring
-- [`bindings.py`](./orchestration/bindings.py)
-  - binds split helper modules onto the runtime class
-- [`state.py`](./orchestration/state.py)
-  - graph state shape and lightweight constants
-- [`nodes.py`](./orchestration/nodes.py)
-  - node handlers and route-specific behavior
-- [`tool_specifications.py`](./orchestration/tool_specifications.py)
-  - tool schema exposed to the LLM
-- [`tool_loop.py`](./orchestration/tool_loop.py)
-  - bounded tool-loop execution
-- [`tool_handlers.py`](./orchestration/tool_handlers.py)
-  - implementation of each tool
-- [`retrieval.py`](./orchestration/retrieval.py)
+  - runtime entry point, shared runtime getter, and backend resume API
+- [`checkpoints.py`](./orchestration/checkpoints.py)
+  - official LangGraph Postgres checkpoint wiring
+- [`state/`](./orchestration/state)
+  - grouped graph-state definitions, payload codecs, and typed runtime accessors
+- [`nodes/`](./orchestration/nodes)
+  - graph node handlers, including explicit query/follow-up route files plus `compose_response` and `finalize`
+- [`retrieval_support.py`](./orchestration/retrieval_support.py)
   - Chroma retrieval + citations
-- [`conversation.py`](./orchestration/conversation.py)
+- [`conversation_context.py`](./orchestration/conversation_context.py)
   - conversation-context extraction and follow-up helpers
-- [`session_snapshot.py`](./orchestration/session_snapshot.py)
-  - session-stable snapshot load/persist logic
-- [`sql_parsing.py`](./orchestration/sql_parsing.py)
-  - SQL parsing helpers used during validation/execution
-- [`sql_execution.py`](./orchestration/sql_execution.py)
-  - safe SQL execution path
-- [`presentation.py`](./orchestration/presentation.py)
+- [`response_composer.py`](./orchestration/response_composer.py)
   - response format selection and final answer assembly
-- [`message_stack.py`](./orchestration/message_stack.py)
+- [`tool_loop_message_builder.py`](./orchestration/tool_loop_message_builder.py)
   - message-building helpers for the tool loop
-- [`source_identifiers.py`](./orchestration/source_identifiers.py)
+- [`source_identifier_parsing.py`](./orchestration/source_identifier_parsing.py)
   - parsing helpers for chart/dbt source identifiers
+- [`intent_routing.py`](./orchestration/intent_routing.py)
+  - graph route selection after intent classification
+- [`timing_breakdown.py`](./orchestration/timing_breakdown.py)
+  - timing merge helpers for node and tool-loop execution
+- [`llm_tools/`](./orchestration/llm_tools)
+  - `runtime/` for tool-loop execution and turn context, `implementations/` for concrete tool handlers and SQL helpers
 
 ### `sessions/`
-- [`service.py`](./sessions/service.py)
+- [`session_service.py`](./sessions/session_service.py)
   - create/reuse sessions, persist messages, serialize message payloads
-- [`cache.py`](./sessions/cache.py)
-  - cache key + serializer helpers for session snapshots
 
 ### `vector/`
-- [`documents.py`](./vector/documents.py)
+- [`vector_documents.py`](./vector/vector_documents.py)
   - vector document dataclasses, source types, collection naming helpers
-- [`embeddings.py`](./vector/embeddings.py)
-  - embedding provider protocol + OpenAI embeddings adapter
-- [`store.py`](./vector/store.py)
+- [`org_vector_store.py`](./vector/org_vector_store.py)
   - dashboard-chat adapter on top of the shared Chroma wrapper
-- [`builder.py`](./vector/builder.py)
-  - build vector documents from org/dashboard/dbt context
-- [`building.py`](./vector/building.py)
-  - end-to-end org vector rebuild workflow and collection GC
+- [`org_vector_context_build_service.py`](./vector/org_vector_context_build_service.py)
+  - document chunking, vector document building, and org-level rebuild workflow
 
 ### `warehouse/`
-- [`tools.py`](./warehouse/tools.py)
+- [`warehouse_access_tools.py`](./warehouse/warehouse_access_tools.py)
   - read-only warehouse helpers for schema, distincts, row counts, SQL execution
 - [`sql_guard.py`](./warehouse/sql_guard.py)
   - allowlist enforcement and SQL safety checks
@@ -786,7 +763,7 @@ This is the quickest way to navigate the package.
 
 Main files:
 - `ddpui/websockets/dashboard_chat_consumer.py`
-- `sessions/service.py`
+- `sessions/session_service.py`
 - `ddpui/celeryworkers/tasks.py`
 
 Important behavior:
@@ -803,7 +780,8 @@ If chat is failing, the fastest places to inspect are:
 - websocket consumer for auth/session issues
 - `execute_dashboard_chat_turn` for persistence/runtime wiring
 - `orchestrator/orchestrator.py` for runtime construction
-- `orchestration/nodes.py` for route choice and final response creation
+- `orchestration/checkpoints.py` for LangGraph Postgres persistence setup
+- `orchestration/nodes/` for route choice and final response creation
 - `vector/building.py` if retrieval data is stale or missing
 - `warehouse/sql_guard.py` if SQL is being rejected
-- `sessions/cache.py` + `orchestration/session_snapshot.py` if follow-ups behave inconsistently
+- LangGraph checkpoint tables plus `orchestration/state/` if follow-up state behaves inconsistently

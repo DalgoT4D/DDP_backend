@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from enum import Enum
 from ninja import Schema
 
@@ -19,6 +19,8 @@ class SentToEnum(str, Enum):
 class CreateNotificationPayloadSchema(BaseModel):
     """Schema for creating a new notification api."""
 
+    model_config = ConfigDict(use_enum_values=True)
+
     author: str
     message: str
     sent_to: SentToEnum
@@ -27,9 +29,6 @@ class CreateNotificationPayloadSchema(BaseModel):
     user_email: Optional[str] = None
     manager_or_above: Optional[bool] = False
     org_slug: Optional[str] = None
-
-    class Config:
-        use_enum_values = True
 
 
 class UpdateReadStatusSchema(Schema):

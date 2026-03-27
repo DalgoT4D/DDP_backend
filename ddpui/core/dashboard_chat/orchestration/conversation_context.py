@@ -10,19 +10,25 @@ from ddpui.core.dashboard_chat.contracts import (
 )
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
-from ddpui.core.dashboard_chat.orchestration.source_identifiers import (
+from ddpui.core.dashboard_chat.orchestration.source_identifier_parsing import (
     chart_id_from_source_identifier,
 )
 
 
 def extract_conversation_context(
-    conversation_history: Sequence[DashboardChatConversationMessage],
+    conversation_history: Sequence[DashboardChatConversationMessage | dict[str, Any]],
 ) -> DashboardChatConversationContext:
     """Extract reusable conversation context from message history."""
     context = DashboardChatConversationContext()
     recent_history = list(conversation_history)[-10:]
 
     for message in reversed(recent_history):
+        if isinstance(message, dict):
+            message = DashboardChatConversationMessage(
+                role=str(message.get("role") or "user"),
+                content=str(message.get("content") or ""),
+                payload=message.get("payload") or {},
+            )
         if message.role != "assistant":
             continue
 
@@ -225,18 +231,24 @@ def extract_filters_from_sql(sql: str) -> list[str]:
 
 def normalize_conversation_history(
     conversation_history: Sequence[DashboardChatConversationMessage | dict[str, Any]] | None,
-) -> list[DashboardChatConversationMessage]:
-    """Normalize stored history into the typed runtime message format."""
-    normalized_messages: list[DashboardChatConversationMessage] = []
+) -> list[dict[str, Any]]:
+    """Normalize stored history into checkpoint-safe message payloads."""
+    normalized_messages: list[dict[str, Any]] = []
     for item in conversation_history or []:
         if isinstance(item, DashboardChatConversationMessage):
-            normalized_messages.append(item)
+            normalized_messages.append(
+                {
+                    "role": item.role,
+                    "content": item.content,
+                    "payload": item.payload or {},
+                }
+            )
             continue
         normalized_messages.append(
-            DashboardChatConversationMessage(
-                role=str(item.get("role") or "user"),
-                content=str(item.get("content") or ""),
-                payload=item.get("payload") or {},
-            )
+            {
+                "role": str(item.get("role") or "user"),
+                "content": str(item.get("content") or ""),
+                "payload": item.get("payload") or {},
+            }
         )
     return normalized_messages

@@ -4,16 +4,17 @@ from typing import Any
 
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 
-from ddpui.core.dashboard_chat.orchestration.conversation import (
+from ddpui.core.dashboard_chat.orchestration.conversation_context import (
     build_follow_up_context_prompt,
     detect_sql_modification_type,
 )
-from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
+from ddpui.core.dashboard_chat.orchestration.state.accessors import get_conversation_context
 
 
 def build_new_query_messages(
     llm_client,
-    state: DashboardChatRuntimeState,
+    state: DashboardChatGraphState,
 ) -> list[dict[str, Any]]:
     """Build the new-query message stack."""
     system_prompt = llm_client.get_prompt(DashboardChatPromptTemplateKey.NEW_QUERY_SYSTEM)
@@ -25,7 +26,7 @@ def build_new_query_messages(
 
 def build_follow_up_messages(
     llm_client,
-    state: DashboardChatRuntimeState,
+    state: DashboardChatGraphState,
 ) -> list[dict[str, Any]]:
     """Build the follow-up message stack."""
     modification_type = detect_sql_modification_type(state["user_query"])
@@ -35,7 +36,7 @@ def build_follow_up_messages(
         {
             "role": "system",
             "content": build_follow_up_context_prompt(
-                state["conversation_context"],
+                get_conversation_context(state),
                 state["user_query"],
             ),
         },
