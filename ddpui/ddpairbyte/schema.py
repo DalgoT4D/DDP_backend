@@ -79,9 +79,9 @@ class AirbyteConnectionCreateResponse(Schema):
     syncCatalog: dict
     status: str
     deploymentId: Optional[str] = None
-    lastRun: Optional[dict | None]
+    lastRun: Optional[dict] = None
     destinationSchema: str = ""
-    lock: Optional[dict | None]
+    lock: Optional[dict] = None
     isRunning: bool = False
     resetConnDeploymentId: Optional[str] = None
 
@@ -95,9 +95,9 @@ class AirbyteGetConnectionsResponse(Schema):
     destination: dict
     status: str
     deploymentId: Optional[str] = None
-    lastRun: Optional[dict | None]
+    lastRun: Optional[dict] = None
     destinationSchema: str = ""
-    lock: Optional[dict | None]
+    lock: Optional[dict] = None
     isRunning: bool = False
     resetConnDeploymentId: Optional[str] = None
     clearConnDeploymentId: Optional[str] = None

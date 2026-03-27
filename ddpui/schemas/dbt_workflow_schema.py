@@ -122,7 +122,7 @@ class CaseWhenOperationConfig(Schema):
     when_clauses: list[CaseWhenClause]
     output_column_name: str
     case_type: Literal["simple", "advance"]
-    else_clause: ArithmeticOperand = None
+    else_clause: Optional[ArithmeticOperand] = None
     sql_snippet: str = ""
 
 
