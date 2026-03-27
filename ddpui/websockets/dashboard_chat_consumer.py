@@ -3,7 +3,7 @@ from urllib.parse import parse_qs
 
 from asgiref.sync import async_to_sync
 
-from ddpui.celeryworkers.tasks import execute_dashboard_chat_turn
+from ddpui.core.dashboard_chat.sessions.service import execute_dashboard_chat_turn
 from ddpui.core.dashboard_chat.events import (
     build_dashboard_chat_event,
     dashboard_chat_group_name,
@@ -169,7 +169,10 @@ class DashboardChatConsumer(BaseConsumer):
             return
 
         assistant_message = result.get("assistant_message")
-        if result["status"] in {"completed", "skipped_existing_reply"} and assistant_message is not None:
+        if (
+            result["status"] in {"completed", "skipped_existing_reply"}
+            and assistant_message is not None
+        ):
             self.respond(
                 WebsocketResponse(
                     data=build_dashboard_chat_event(
