@@ -560,6 +560,24 @@ class OrgVectorBuildService:
                 collection_name=target_collection_name,
             )
         )
+        if not desired_documents:
+            # Empty builds still need a concrete collection so later sessions never
+            # pin a version that only exists in the database.
+            self.vector_store.create_collection(
+                org.id,
+                collection_name=target_collection_name,
+            )
+
+        # Only mark the version active after the exact versioned collection exists.
+        created_collection = self.vector_store.load_collection(
+            org.id,
+            collection_name=target_collection_name,
+            allow_legacy_fallback=False,
+        )
+        if created_collection is None:
+            raise OrgVectorBuildError(
+                f"Dashboard chat vector collection {target_collection_name} was not created"
+            )
 
         vector_ingested_at = collection_versioned_at
         org.dbt.vector_last_ingested_at = collection_versioned_at

@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+from chromadb.errors import NotFoundError
+
 from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
 from ddpui.core.dashboard_chat.vector.documents import (
     DashboardChatSourceType,
@@ -270,6 +272,18 @@ def test_delete_collection_returns_false_for_missing_org():
     )
 
     assert store.delete_collection(404) is False
+
+
+def test_chroma_load_collection_treats_not_found_as_missing():
+    """Missing collections should normalize to None across Chroma error variants."""
+
+    class NotFoundClient(FakeChromaClient):
+        def get_collection(self, name):
+            raise NotFoundError(name)
+
+    backend = ChromaVectorStore(client=NotFoundClient())
+
+    assert backend.load_collection("org_404") is None
 
 
 def test_get_documents_and_delete_documents_respect_where_filters():
