@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 import os
 
-from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
+from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:

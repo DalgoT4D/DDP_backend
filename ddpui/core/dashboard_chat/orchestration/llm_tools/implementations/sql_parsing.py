@@ -4,9 +4,9 @@ from collections.abc import Sequence
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.context.allowlist import normalize_dashboard_chat_table_name
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import normalize_dashboard_chat_table_name
 from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
-from ddpui.core.dashboard_chat.orchestration.conversation import extract_dimensions_from_sql
+from ddpui.core.dashboard_chat.orchestration.conversation_context import extract_dimensions_from_sql
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
 
@@ -72,14 +72,14 @@ def table_columns(snippet: DashboardChatSchemaSnippet | Any) -> set[str]:
 def tables_with_column(
     column_name: str,
     table_names: Sequence[str],
-    schema_cache: dict[str, Any],
+    schema_snippets_by_table: dict[str, Any],
 ) -> list[str]:
     """Return the query tables that contain one column."""
     normalized_column_name = column_name.lower()
     return [
         table_name
         for table_name in table_names
-        if normalized_column_name in table_columns(schema_cache.get(table_name))
+        if normalized_column_name in table_columns(schema_snippets_by_table.get(table_name))
     ]
 
 
@@ -88,21 +88,21 @@ def resolve_identifier_table(
     qualifier: str | None,
     column_name: str,
     table_refs: Sequence[dict[str, str | None]],
-    schema_cache: dict[str, Any],
+    schema_snippets_by_table: dict[str, Any],
 ) -> str | None:
     """Resolve one referenced column to a concrete query table when it is unambiguous."""
     if qualifier is not None:
         resolved_table = resolve_table_qualifier(qualifier, table_refs)
         if not resolved_table:
             return None
-        if column_name.lower() in table_columns(schema_cache.get(resolved_table)):
+        if column_name.lower() in table_columns(schema_snippets_by_table.get(resolved_table)):
             return resolved_table
         return None
 
     query_tables = [
         str(reference["table_name"]) for reference in table_refs if reference.get("table_name")
     ]
-    matching_tables = tables_with_column(column_name, query_tables, schema_cache)
+    matching_tables = tables_with_column(column_name, query_tables, schema_snippets_by_table)
     if len(matching_tables) == 1:
         return matching_tables[0]
     return None
@@ -233,11 +233,11 @@ def referenced_sql_identifier_refs(sql: str) -> list[tuple[str | None, str]]:
 
 def best_table_for_missing_columns(
     missing_columns: Sequence[str],
-    schema_cache: dict[str, Any],
+    schema_snippets_by_table: dict[str, Any],
 ) -> str | None:
     """Return the first allowlisted table that covers all missing columns."""
     wanted_columns = {column_name.lower() for column_name in missing_columns}
-    for table_name, snippet in schema_cache.items():
+    for table_name, snippet in schema_snippets_by_table.items():
         available_columns = {str(column.get("name") or "").lower() for column in snippet.columns}
         if wanted_columns.issubset(available_columns):
             return table_name
@@ -268,13 +268,13 @@ def extract_text_filter_values(where_clause: str) -> list[tuple[str | None, str,
 
 def find_tables_with_column(
     column_name: str,
-    schema_cache: dict[str, Any],
+    schema_snippets_by_table: dict[str, Any],
     limit: int = 10,
 ) -> list[str]:
     """Find allowlisted tables that contain one column."""
     matches: list[str] = []
     normalized_column_name = column_name.lower()
-    for table_name, snippet in schema_cache.items():
+    for table_name, snippet in schema_snippets_by_table.items():
         if any(
             normalized_column_name == str(column.get("name") or "").lower()
             for column in snippet.columns

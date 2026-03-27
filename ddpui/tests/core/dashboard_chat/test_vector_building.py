@@ -10,13 +10,13 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.dashboard_chat.context.dbt_docs import (
+from ddpui.core.dashboard_chat.context.dbt_docs_artifacts import (
     DashboardChatDbtDocsArtifacts,
     generate_dashboard_chat_dbt_docs_artifacts,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatSourceConfig
-from ddpui.core.dashboard_chat.vector.ingest import OrgVectorBuildService
-from ddpui.core.dashboard_chat.vector.documents import (
+from ddpui.core.dashboard_chat.vector.org_vector_context_build_service import OrgVectorBuildService
+from ddpui.core.dashboard_chat.vector.vector_documents import (
     DashboardChatSourceType,
     build_dashboard_chat_collection_name,
 )
@@ -259,7 +259,7 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_updates_timestamp(org, orgdb
     (target_dir / "catalog.json").write_text(json.dumps(catalog_json), encoding="utf-8")
 
     with patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.DbtProjectManager.gather_dbt_project_params",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.DbtProjectManager.gather_dbt_project_params",
         return_value=DbtProjectParams(
             dbt_binary="/mock/dbt",
             dbt_env_dir="/mock/env",
@@ -269,13 +269,13 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_updates_timestamp(org, orgdb
             org_project_dir=str(project_dir.parent),
         ),
     ), patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.prefect_service.get_dbt_cli_profile_block",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.prefect_service.get_dbt_cli_profile_block",
         return_value={"profile": {"dashchat": {"outputs": {"dev": {"type": "postgres"}}}}},
     ), patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.DbtProjectManager.run_dbt_command",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.DbtProjectManager.run_dbt_command",
         return_value=Mock(stdout="ok", returncode=0),
     ) as mock_run_dbt, patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.DbtProjectManager.get_dbt_project_dir",
         return_value=str(project_dir),
     ):
         artifacts = generate_dashboard_chat_dbt_docs_artifacts(org, orgdbt)
@@ -320,7 +320,7 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_pulls_git_repo_before_genera
     mock_git_manager = Mock()
 
     with patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.DbtProjectManager.gather_dbt_project_params",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.DbtProjectManager.gather_dbt_project_params",
         return_value=DbtProjectParams(
             dbt_binary="/mock/dbt",
             dbt_env_dir="/mock/env",
@@ -330,19 +330,19 @@ def test_generate_dashboard_chat_dbt_docs_artifacts_pulls_git_repo_before_genera
             org_project_dir=str(project_dir.parent),
         ),
     ), patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.prefect_service.get_dbt_cli_profile_block",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.prefect_service.get_dbt_cli_profile_block",
         return_value={"profile": {"dashchat": {"outputs": {"dev": {"type": "postgres"}}}}},
     ), patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.DbtProjectManager.run_dbt_command",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.DbtProjectManager.run_dbt_command",
         return_value=Mock(stdout="ok", returncode=0),
     ), patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.DbtProjectManager.get_dbt_project_dir",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.DbtProjectManager.get_dbt_project_dir",
         return_value=str(project_dir),
     ), patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.secretsmanager.retrieve_github_pat",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.secretsmanager.retrieve_github_pat",
         return_value="actual-pat",
     ) as mock_retrieve_pat, patch(
-        "ddpui.core.dashboard_chat.context.dbt_docs.GitManager",
+        "ddpui.core.dashboard_chat.context.dbt_docs_artifacts.GitManager",
         return_value=mock_git_manager,
     ) as mock_git_manager_class:
         generate_dashboard_chat_dbt_docs_artifacts(org, orgdbt)

@@ -2,8 +2,8 @@
 
 import json
 
-import ddpui.core.dashboard_chat.agents.openai as llm_client_module
-from ddpui.core.dashboard_chat.agents.openai import OpenAIDashboardChatLlmClient
+import ddpui.core.dashboard_chat.agents.openai_llm_client as llm_client_module
+from ddpui.core.dashboard_chat.agents.openai_llm_client import OpenAIDashboardChatLlmClient
 from ddpui.core.dashboard_chat.contracts import (
     DashboardChatConversationContext,
     DashboardChatIntent,
@@ -120,6 +120,8 @@ def test_classify_intent_uses_prototype_router_message_shape():
             last_tables_used=["analytics.program_reach"],
             last_chart_ids=["2"],
             last_response_type="sql_result",
+            last_answer_text="Asha Menon, Farah Ali, Leela Joseph, Meera Das, and Noor Khan each improved literacy for 3 students.",
+            last_intent="query_with_sql",
         ),
     )
 
@@ -128,6 +130,9 @@ def test_classify_intent_uses_prototype_router_message_shape():
     assert messages[0]["role"] == "system"
     assert "CONVERSATION CONTEXT" in messages[0]["content"]
     assert "Previous SQL: SELECT COUNT(*) FROM analytics.program_reach" in messages[0]["content"]
+    assert "Last intent: query_with_sql" in messages[0]["content"]
+    assert "Last answer text: Asha Menon, Farah Ali, Leela Joseph" in messages[0]["content"]
+    assert '"these facilitators", "those students", "they", or "them"' in messages[0]["content"]
     assert messages[1] == {
         "role": "user",
         "content": "Classify this query: Now split that by donor type",

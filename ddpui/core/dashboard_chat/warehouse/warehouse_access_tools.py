@@ -1,11 +1,13 @@
 """Warehouse access helpers used by dashboard chat runtime."""
 
+import json
 import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import secretsmanager
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 
@@ -95,6 +97,40 @@ class DashboardChatWarehouseTools:
         """Execute a validated read-only SQL statement."""
         rows = self.warehouse_client.execute(sql)
         return list(rows[: self.max_rows])
+
+    def _quote_bigquery_table_ref(self, schema_name: str, table_name: str) -> str:
+        """Return a quoted BigQuery table ref using the configured project id."""
+        project_id = self._resolve_bigquery_project_id()
+        normalized_project_id = self._normalize_identifier_component(project_id, "project id")
+        normalized_schema_name = self._normalize_identifier_component(schema_name, "schema name")
+        normalized_table_name = self._normalize_identifier_component(table_name, "table name")
+        return (
+            f"`{normalized_project_id}.{normalized_schema_name}.{normalized_table_name}`"
+        )
+
+    def _resolve_bigquery_project_id(self) -> str:
+        """Resolve the BigQuery project id from stored warehouse credentials."""
+        if self.org_warehouse is None:
+            raise DashboardChatWarehouseToolsError("Warehouse not configured for dashboard chat")
+        credentials = secretsmanager.retrieve_warehouse_credentials(self.org_warehouse) or {}
+        project_id = credentials.get("project_id")
+        if not project_id:
+            credentials_json = credentials.get("credentials_json")
+            if credentials_json:
+                try:
+                    parsed_credentials = (
+                        json.loads(credentials_json)
+                        if isinstance(credentials_json, str)
+                        else dict(credentials_json)
+                    )
+                except Exception as error:
+                    raise DashboardChatWarehouseToolsError(
+                        "Failed to parse BigQuery credentials JSON"
+                    ) from error
+                project_id = parsed_credentials.get("project_id")
+        if not project_id:
+            raise DashboardChatWarehouseToolsError("BigQuery project id not configured")
+        return str(project_id)
 
     @staticmethod
     def _parse_table_name(table_name: str | None) -> tuple[str, str] | None:

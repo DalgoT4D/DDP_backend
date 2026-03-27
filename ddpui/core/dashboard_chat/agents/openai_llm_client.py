@@ -7,13 +7,13 @@ from typing import Any
 
 from openai import OpenAI
 
-from ddpui.core.dashboard_chat.agents.answer_formatting import (
+from ddpui.core.dashboard_chat.agents.final_answer_formatting import (
     TABLE_SUMMARY_JSON_INSTRUCTIONS,
     build_final_answer_context_payload,
     format_table_summary_markdown,
     serialize_final_answer_context_payload,
 )
-from ddpui.core.dashboard_chat.agents.prompt_store import DashboardChatPromptStore
+from ddpui.core.dashboard_chat.agents.prompt_template_store import DashboardChatPromptStore
 from ddpui.core.dashboard_chat.contracts import (
     DashboardChatConversationContext,
     DashboardChatFollowUpContext,
@@ -69,14 +69,24 @@ class OpenAIDashboardChatLlmClient:
     ) -> DashboardChatIntentDecision:
         """Classify intent with prototype-style conversation awareness."""
         system_prompt = self.prompt_store.get(DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION)
-        if conversation_context.last_sql_query or conversation_context.last_chart_ids:
+        if (
+            conversation_context.last_sql_query
+            or conversation_context.last_chart_ids
+            or conversation_context.last_answer_text
+            or conversation_context.last_intent
+        ):
             system_prompt += (
                 "\n\nCONVERSATION CONTEXT:\n"
                 f"- Previous SQL: {conversation_context.last_sql_query or 'None'}\n"
                 f"- Previous tables: {', '.join(conversation_context.last_tables_used) or 'None'}\n"
                 f"- Previous charts: {', '.join(conversation_context.last_chart_ids) or 'None'}\n"
-                f"- Last response type: {conversation_context.last_response_type or 'None'}\n\n"
-                "Use this context to detect follow-up queries that want to modify or expand on previous results."
+                f"- Last response type: {conversation_context.last_response_type or 'None'}\n"
+                f"- Last intent: {conversation_context.last_intent or 'None'}\n"
+                f"- Last answer text: {conversation_context.last_answer_text or 'None'}\n\n"
+                "Use this context to detect follow-up queries that want to modify or expand on previous results. "
+                "If the new query refers to entities returned in the immediately previous answer "
+                '(for example "these facilitators", "those students", "they", or "them"), '
+                "treat that as follow-up context rather than as missing specificity."
             )
         try:
             result = self._complete_json(

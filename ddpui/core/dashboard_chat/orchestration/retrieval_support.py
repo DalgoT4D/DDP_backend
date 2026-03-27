@@ -3,17 +3,14 @@
 from collections.abc import Sequence
 from typing import Any
 
-from ddpui.core.dashboard_chat.context.allowlist import (
-    DashboardChatAllowlist,
-    build_dashboard_chat_table_name,
-)
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist, build_dashboard_chat_table_name
 from ddpui.core.dashboard_chat.contracts import (
     DashboardChatCitation,
     DashboardChatRetrievedDocument,
 )
-from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
+from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 
-from ddpui.core.dashboard_chat.orchestration.source_identifiers import (
+from ddpui.core.dashboard_chat.orchestration.source_identifier_parsing import (
     chart_id_from_source_identifier,
     unique_id_from_source_identifier,
 )
@@ -300,12 +297,12 @@ def looks_like_time_dimension(column_name: str) -> bool:
     )
 
 
-def get_cached_query_embedding(
+def get_or_embed_query(
     vector_store,
     query_text: str,
-    embedding_cache: dict[str, list[float]],
+    query_embeddings: dict[str, list[float]],
 ) -> list[float]:
     """Cache embeddings per query string during one turn."""
-    if query_text not in embedding_cache:
-        embedding_cache[query_text] = vector_store.embed_query(query_text)
-    return embedding_cache[query_text]
+    if query_text not in query_embeddings:
+        query_embeddings[query_text] = vector_store.embed_query(query_text)
+    return query_embeddings[query_text]

@@ -6,28 +6,38 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-from ddpui.core.dashboard_chat.warehouse.tools import DashboardChatWarehouseToolsError
+from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseToolsError
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.core.dashboard_chat.orchestration.presentation import (
+from ddpui.core.dashboard_chat.orchestration.response_composer import (
     serialize_tool_result,
     summarize_tool_call,
     max_turns_message,
     fallback_answer_text,
 )
-from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
-from ddpui.core.dashboard_chat.orchestration.tools.cache import (
-    seed_distinct_cache_from_previous_sql,
-)
-from ddpui.core.dashboard_chat.orchestration.tools.handlers import (
-    handle_retrieve_docs_tool,
-    handle_get_schema_snippets_tool,
-    handle_search_dbt_models_tool,
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
+from ddpui.core.dashboard_chat.orchestration.state.accessors import get_intent_decision
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.dbt_tools import (
     handle_get_dbt_model_info_tool,
-    handle_get_distinct_values_tool,
-    handle_list_tables_by_keyword_tool,
+    handle_search_dbt_models_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.vector_retrieval_tool import (
+    handle_retrieve_docs_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.schema_tools import (
     handle_check_table_row_count_tool,
+    handle_get_distinct_values_tool,
+    handle_get_schema_snippets_tool,
+    handle_list_tables_by_keyword_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_execution_tools import (
     handle_run_sql_query_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import (
+    DashboardChatTurnContext,
+    current_validated_distinct_payloads,
+    current_schema_snippet_payloads,
+    seed_validated_distinct_values_from_previous_sql,
 )
 
 logger = CustomLogger("dashboard_chat")
@@ -41,31 +51,19 @@ def execute_tool_loop(
     runtime_config,
     tool_specifications,
     *,
-    state: DashboardChatRuntimeState,
+    state: DashboardChatGraphState,
     messages: list[dict[str, Any]],
     max_turns: int,
-    initial_embedding_cache: dict[str, list[float]] | None = None,
+    initial_query_embeddings: dict[str, list[float]] | None = None,
 ) -> dict[str, Any]:
     """Execute the prototype's iterative tool loop."""
-    execution_context: dict[str, Any] = {
-        "distinct_cache": set(state.get("session_distinct_cache") or set()),
-        "embedding_cache": dict(initial_embedding_cache or {}),
-        "schema_cache": dict(state.get("session_schema_cache") or {}),
-        "retrieved_documents": [],
-        "retrieved_document_ids": set(),
-        "tool_calls": [],
-        "warnings": list(state.get("warnings", [])),
-        "warehouse_tools": None,
-        "last_sql": None,
-        "last_sql_results": None,
-        "last_sql_validation": None,
-        "timing_breakdown": {
-            "tool_calls_ms": list((state.get("timing_breakdown") or {}).get("tool_calls_ms") or []),
-        },
-    }
+    turn_context = DashboardChatTurnContext.from_state(
+        state,
+        initial_query_embeddings=initial_query_embeddings,
+    )
     tool_loop_started_at = perf_counter()
-    seed_distinct_cache_from_previous_sql(state, execution_context)
-    intent_decision = state["intent_decision"]
+    seed_validated_distinct_values_from_previous_sql(state, turn_context)
+    intent_decision = get_intent_decision(state)
 
     for turn_index in range(max_turns):
         tool_choice = "required" if intent_decision.force_tool_usage and turn_index == 0 else "auto"
@@ -103,11 +101,11 @@ def execute_tool_loop(
                 answer_text=(
                     (ai_message.get("content") or "").strip()
                     or fallback_answer_text(
-                        execution_context["retrieved_documents"],
-                        execution_context["last_sql_results"],
+                        turn_context.retrieved_documents,
+                        turn_context.last_sql_results,
                     )
                 ),
-                execution_context=execution_context,
+                turn_context=turn_context,
                 max_turns_reached=False,
                 tool_loop_started_at=tool_loop_started_at,
             )
@@ -129,14 +127,14 @@ def execute_tool_loop(
                 tool_name=str(tool_call.get("name") or ""),
                 args=args,
                 state=state,
-                execution_context=execution_context,
+                turn_context=turn_context,
             )
             tool_duration_ms = round((perf_counter() - tool_started_at) * 1000, 2)
             tool_name = str(tool_call.get("name") or "")
-            execution_context["timing_breakdown"]["tool_calls_ms"].append(
+            turn_context.timing_breakdown["tool_calls_ms"].append(
                 {"name": tool_name, "duration_ms": tool_duration_ms}
             )
-            execution_context["tool_calls"].append(
+            turn_context.tool_calls.append(
                 summarize_tool_call(
                     tool_name=tool_name,
                     args=args,
@@ -157,7 +155,7 @@ def execute_tool_loop(
             if tool_name == "run_sql_query" and result.get("success"):
                 return build_tool_loop_result(
                     answer_text="",
-                    execution_context=execution_context,
+                    turn_context=turn_context,
                     max_turns_reached=False,
                     tool_loop_started_at=tool_loop_started_at,
                 )
@@ -165,9 +163,9 @@ def execute_tool_loop(
     return build_tool_loop_result(
         answer_text=max_turns_message(
             state["user_query"],
-            execution_context["retrieved_documents"],
+            turn_context.retrieved_documents,
         ),
-        execution_context=execution_context,
+        turn_context=turn_context,
         max_turns_reached=True,
         tool_loop_started_at=tool_loop_started_at,
     )
@@ -181,70 +179,72 @@ def execute_tool_call(
     *,
     tool_name: str,
     args: dict[str, Any],
-    state: DashboardChatRuntimeState,
-    execution_context: dict[str, Any],
+    state: DashboardChatGraphState,
+    turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Execute one prototype tool against the Dalgo runtime primitives."""
     try:
         if tool_name == "retrieve_docs":
             return handle_retrieve_docs_tool(
-                vector_store, source_config, runtime_config, args, state, execution_context
+                vector_store, source_config, runtime_config, args, state, turn_context
             )
         if tool_name == "get_schema_snippets":
             return handle_get_schema_snippets_tool(
-                warehouse_tools_factory, args, state, execution_context
+                warehouse_tools_factory, args, state, turn_context
             )
         if tool_name == "search_dbt_models":
-            return handle_search_dbt_models_tool(args, state, execution_context)
+            return handle_search_dbt_models_tool(args, state, turn_context)
         if tool_name == "get_dbt_model_info":
-            return handle_get_dbt_model_info_tool(args, state, execution_context)
+            return handle_get_dbt_model_info_tool(args, state, turn_context)
         if tool_name == "get_distinct_values":
             return handle_get_distinct_values_tool(
-                warehouse_tools_factory, args, state, execution_context
+                warehouse_tools_factory, args, state, turn_context
             )
         if tool_name == "run_sql_query":
             return handle_run_sql_query_tool(
-                warehouse_tools_factory, runtime_config, args, state, execution_context
+                warehouse_tools_factory, runtime_config, args, state, turn_context
             )
         if tool_name == "list_tables_by_keyword":
             return handle_list_tables_by_keyword_tool(
-                warehouse_tools_factory, args, state, execution_context
+                warehouse_tools_factory, args, state, turn_context
             )
         if tool_name == "check_table_row_count":
             return handle_check_table_row_count_tool(
-                warehouse_tools_factory, args, state, execution_context
+                warehouse_tools_factory, args, state, turn_context
             )
         return {"error": f"Unknown tool: {tool_name}"}
     except DashboardChatWarehouseToolsError as error:
         logger.warning("Dashboard chat tool %s failed: %s", tool_name, error)
-        execution_context["warnings"].append(str(error))
+        turn_context.warnings.append(str(error))
         return {"error": str(error)}
     except Exception as error:
         logger.exception("Dashboard chat tool %s failed", tool_name)
-        execution_context["warnings"].append(str(error))
+        turn_context.warnings.append(str(error))
         return {"error": str(error)}
 
 
 def build_tool_loop_result(
     *,
     answer_text: str,
-    execution_context: dict[str, Any],
+    turn_context: DashboardChatTurnContext,
     max_turns_reached: bool,
     tool_loop_started_at: float,
 ) -> dict[str, Any]:
     """Normalize tool-loop state into one runtime response payload."""
     if max_turns_reached:
-        execution_context["tool_calls"].append({"name": "max_turns_reached"})
-    warnings = list(dict.fromkeys(execution_context["warnings"]))
-    timing_breakdown = dict(execution_context.get("timing_breakdown") or {})
+        turn_context.tool_calls.append({"name": "max_turns_reached"})
+    warnings = list(dict.fromkeys(turn_context.warnings))
+    timing_breakdown = dict(turn_context.timing_breakdown)
     timing_breakdown["tool_loop_ms"] = round((perf_counter() - tool_loop_started_at) * 1000, 2)
     return {
         "answer_text": answer_text.strip(),
-        "retrieved_documents": execution_context["retrieved_documents"],
-        "tool_calls": execution_context["tool_calls"],
+        "retrieved_documents": turn_context.retrieved_documents,
+        "tool_calls": turn_context.tool_calls,
         "timing_breakdown": timing_breakdown,
-        "sql": execution_context["last_sql"],
-        "sql_validation": execution_context["last_sql_validation"],
-        "sql_results": execution_context["last_sql_results"],
+        "schema_snippet_payloads": current_schema_snippet_payloads(turn_context),
+        "validated_distinct_payloads": current_validated_distinct_payloads(turn_context),
+        "sql": turn_context.last_sql,
+        "sql_validation": turn_context.last_sql_validation,
+        "sql_results": turn_context.last_sql_results,
         "warnings": warnings,
     }

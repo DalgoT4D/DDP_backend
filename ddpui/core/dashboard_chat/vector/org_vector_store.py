@@ -8,7 +8,7 @@ from typing import Any, Union
 from openai import OpenAI
 
 from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
-from ddpui.core.dashboard_chat.vector.documents import (
+from ddpui.core.dashboard_chat.vector.vector_documents import (
     DashboardChatSourceType,
     DashboardChatVectorDocument,
     build_dashboard_chat_collection_base_name,

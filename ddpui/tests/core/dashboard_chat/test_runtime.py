@@ -4,17 +4,51 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
-from django.core.cache import cache
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.dashboard_chat.context.allowlist import (
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
     DashboardChatAllowlist,
     DashboardChatAllowlistBuilder,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
+from ddpui.core.dashboard_chat.orchestration.conversation_context import extract_conversation_context
+from ddpui.core.dashboard_chat.orchestration.tool_loop_message_builder import (
+    build_follow_up_messages,
+    build_new_query_messages,
+)
 from ddpui.core.dashboard_chat.orchestration.orchestrator import DashboardChatRuntime
-from ddpui.core.dashboard_chat.orchestration.conversation import extract_conversation_context
-from ddpui.core.dashboard_chat.orchestration.presentation import determine_response_format
+from ddpui.core.dashboard_chat.orchestration.response_composer import (
+    compose_final_answer_text,
+    determine_response_format,
+)
+from ddpui.core.dashboard_chat.orchestration.retrieval_support import build_tool_document_payload
+from ddpui.core.dashboard_chat.orchestration.state.payload_codec import (
+    serialize_allowlist,
+    serialize_conversation_context,
+    serialize_intent_decision,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.dbt_tools import (
+    handle_get_dbt_model_info_tool,
+    handle_search_dbt_models_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.schema_tools import (
+    handle_get_distinct_values_tool,
+    handle_list_tables_by_keyword_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_corrections import (
+    missing_columns_in_primary_table,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_execution_tools import (
+    handle_run_sql_query_tool,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_validation import (
+    find_missing_distinct_filters,
+    validate_follow_up_dimension_usage,
+)
+from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import (
+    DashboardChatTurnContext,
+    seed_validated_distinct_values_from_previous_sql,
+)
 from ddpui.core.dashboard_chat.contracts import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
@@ -25,7 +59,7 @@ from ddpui.core.dashboard_chat.contracts import (
     DashboardChatResponse,
 )
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
-from ddpui.core.dashboard_chat.vector.documents import DashboardChatSourceType
+from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 from ddpui.utils.vector.interface import VectorQueryResult as DashboardChatVectorQueryResult
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
@@ -35,6 +69,51 @@ from ddpui.models.visualization import Chart
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def build_runtime_state(
+    *,
+    org: Org | None = None,
+    allowlist: DashboardChatAllowlist | None = None,
+    conversation_context: DashboardChatConversationContext | None = None,
+    intent_decision: DashboardChatIntentDecision | None = None,
+    **extra,
+):
+    """Build a runtime-state payload that matches the post-refactor graph contract."""
+    state = dict(extra)
+    if org is not None:
+        state["org_id"] = org.id
+    if allowlist is not None:
+        state["allowlist_payload"] = serialize_allowlist(allowlist)
+    if conversation_context is not None:
+        state["conversation_context"] = serialize_conversation_context(conversation_context)
+    if intent_decision is not None:
+        state["intent_decision"] = serialize_intent_decision(intent_decision)
+    return state
+
+
+def build_turn_context(
+    *,
+    schema_snippets_by_table=None,
+    validated_distinct_values=None,
+    warehouse_tools=None,
+    warnings=None,
+    last_sql=None,
+    last_sql_results=None,
+    last_sql_validation=None,
+):
+    """Build the explicit per-turn execution context used by tool helpers."""
+    return DashboardChatTurnContext(
+        validated_distinct_values=set(validated_distinct_values or set()),
+        query_embeddings={},
+        schema_snippets_by_table=dict(schema_snippets_by_table or {}),
+        warnings=list(warnings or []),
+        warehouse_tools=warehouse_tools,
+        last_sql=last_sql,
+        last_sql_results=last_sql_results,
+        last_sql_validation=last_sql_validation,
+        timing_breakdown={"tool_calls_ms": []},
+    )
 
 
 class FakeVectorStore:
@@ -720,15 +799,11 @@ def test_extract_conversation_context_reads_previous_sql_payload():
     assert conversation_context.last_intent == "query_with_sql"
 
 
-def test_seed_distinct_cache_reuses_previous_text_filters(primary_dashboard):
+def test_seed_validated_distinct_values_reuses_previous_text_filters(primary_dashboard):
     """Follow-up turns should reuse text-filter validations from the previous successful SQL."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "dashboard_id": primary_dashboard.id,
-        "conversation_context": extract_conversation_context(
+    state = build_runtime_state(
+        dashboard_id=primary_dashboard.id,
+        conversation_context=extract_conversation_context(
             [
                 DashboardChatConversationMessage(
                     role="assistant",
@@ -745,33 +820,30 @@ def test_seed_distinct_cache_reuses_previous_text_filters(primary_dashboard):
                 )
             ]
         ),
-    }
-    execution_context = {"distinct_cache": set()}
+    )
+    turn_context = build_turn_context(validated_distinct_values=set())
 
-    runtime._seed_distinct_cache_from_previous_sql(state, execution_context)
+    seed_validated_distinct_values_from_previous_sql(state, turn_context)
 
     assert (
         "analytics.donor_funding_quarterly",
         "quarter_label",
         "2025 q1",
-    ) in execution_context["distinct_cache"]
-    assert ("*", "quarter_label", "2025 q2") in execution_context["distinct_cache"]
+    ) in turn_context.validated_distinct_values
+    assert ("*", "quarter_label", "2025 q2") in turn_context.validated_distinct_values
 
 
 def test_missing_distinct_accepts_previous_filter_validation_on_upstream_table(primary_dashboard):
     """Follow-up SQL should reuse validated text filters even after moving to an upstream table."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "allowlist": DashboardChatAllowlist(
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={
                 "analytics.donor_funding_quarterly",
                 "analytics.stg_donor_funding_clean",
             }
         ),
-        "conversation_context": extract_conversation_context(
+        conversation_context=extract_conversation_context(
             [
                 DashboardChatConversationMessage(
                     role="assistant",
@@ -788,11 +860,10 @@ def test_missing_distinct_accepts_previous_filter_validation_on_upstream_table(p
                 )
             ]
         ),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "distinct_cache": set(),
-        "schema_cache": {
+    )
+    turn_context = build_turn_context(
+        validated_distinct_values=set(),
+        schema_snippets_by_table={
             "analytics.stg_donor_funding_clean": FakeWarehouseTools._schema_snippet(
                 "analytics.stg_donor_funding_clean",
                 [
@@ -803,11 +874,11 @@ def test_missing_distinct_accepts_previous_filter_validation_on_upstream_table(p
                 ],
             )
         },
-        "warehouse_tools": None,
-    }
+    )
 
-    runtime._seed_distinct_cache_from_previous_sql(state, execution_context)
-    missing = runtime._missing_distinct(
+    seed_validated_distinct_values_from_previous_sql(state, turn_context)
+    missing = find_missing_distinct_filters(
+        lambda org: FakeWarehouseTools(),
         (
             "SELECT quarter_label, donor_type, SUM(realized_amount_usd) AS total_realized_funding_usd "
             "FROM analytics.stg_donor_funding_clean "
@@ -816,7 +887,7 @@ def test_missing_distinct_accepts_previous_filter_validation_on_upstream_table(p
             "GROUP BY quarter_label, donor_type"
         ),
         state,
-        execution_context,
+        turn_context,
     )
 
     assert missing == []
@@ -824,21 +895,17 @@ def test_missing_distinct_accepts_previous_filter_validation_on_upstream_table(p
 
 def test_get_distinct_values_returns_column_correction_for_wrong_table(primary_dashboard):
     """Follow-up correction should surface candidate tables when a distinct lookup targets the wrong table."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "allowlist": DashboardChatAllowlist(
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={
                 "analytics.donor_funding_quarterly",
                 "analytics.stg_donor_funding_clean",
             }
         ),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "schema_cache": {
+    )
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.donor_funding_quarterly": FakeWarehouseTools._schema_snippet(
                 "analytics.donor_funding_quarterly",
                 [
@@ -859,17 +926,17 @@ def test_get_distinct_values_returns_column_correction_for_wrong_table(primary_d
                 ],
             ),
         },
-        "warehouse_tools": None,
-    }
+    )
 
-    result = runtime._handle_get_distinct_values_tool(
+    result = handle_get_distinct_values_tool(
+        lambda org: FakeWarehouseTools(),
         {
             "table": "analytics.donor_funding_quarterly",
             "column": "donor_type",
             "limit": 50,
         },
         state,
-        execution_context,
+        turn_context,
     )
 
     assert result["error"] == "column_not_in_table"
@@ -880,16 +947,12 @@ def test_get_distinct_values_returns_column_correction_for_wrong_table(primary_d
 
 def test_missing_columns_check_ignores_boolean_literals(primary_dashboard):
     """Boolean literals in WHERE clauses should not be misread as missing columns."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(allowed_tables={"analytics.stg_donor_funding_clean"}),
     )
-    state = {
-        "allowlist": DashboardChatAllowlist(allowed_tables={"analytics.stg_donor_funding_clean"}),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "schema_cache": {
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.stg_donor_funding_clean": FakeWarehouseTools._schema_snippet(
                 "analytics.stg_donor_funding_clean",
                 [
@@ -901,10 +964,10 @@ def test_missing_columns_check_ignores_boolean_literals(primary_dashboard):
                 ],
             )
         },
-        "warehouse_tools": None,
-    }
+    )
 
-    missing = runtime._missing_columns_in_primary_table(
+    missing = missing_columns_in_primary_table(
+        lambda org: FakeWarehouseTools(),
         sql=(
             "SELECT quarter_label, donor_type, SUM(realized_amount_usd) AS total_realized_funding_usd, "
             "COUNT(DISTINCT donation_id) AS donor_count "
@@ -913,7 +976,7 @@ def test_missing_columns_check_ignores_boolean_literals(primary_dashboard):
             "GROUP BY quarter_label, donor_type ORDER BY quarter_label, donor_type LIMIT 200"
         ),
         state=state,
-        execution_context=execution_context,
+        turn_context=turn_context,
     )
 
     assert missing is None
@@ -921,29 +984,25 @@ def test_missing_columns_check_ignores_boolean_literals(primary_dashboard):
 
 def test_run_sql_keeps_join_tables_intact(primary_dashboard):
     """Join queries should execute the model's SQL as written and let the tool loop correct errors."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-        warehouse_tools_factory=lambda org: FakeWarehouseTools(),
-    )
-    state = {
-        "allowlist": DashboardChatAllowlist(
+    fake_warehouse = FakeWarehouseTools()
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={
                 "analytics.facilitator_effectiveness_quarterly",
                 "analytics.district_funding_efficiency_quarterly",
             }
         ),
-        "org": primary_dashboard.org,
-        "intent_decision": DashboardChatIntentDecision(
+        intent_decision=DashboardChatIntentDecision(
             intent=DashboardChatIntent.QUERY_WITH_SQL,
             confidence=0.9,
             reason="Join-heavy data analysis",
             force_tool_usage=True,
         ),
-        "user_query": "Join facilitator outcomes to district funding efficiency.",
-    }
-    execution_context = {
-        "schema_cache": {
+        user_query="Join facilitator outcomes to district funding efficiency.",
+    )
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.facilitator_effectiveness_quarterly": FakeWarehouseTools().schemas[
                 "analytics.facilitator_effectiveness_quarterly"
             ],
@@ -951,15 +1010,19 @@ def test_run_sql_keeps_join_tables_intact(primary_dashboard):
                 "analytics.district_funding_efficiency_quarterly"
             ],
         },
-        "warehouse_tools": FakeWarehouseTools(),
-        "distinct_cache": {("*", "quarter_label")},
-        "last_sql": None,
-        "last_sql_results": None,
-        "last_sql_validation": None,
-        "warnings": [],
-    }
+        warehouse_tools=fake_warehouse,
+        validated_distinct_values={("*", "quarter_label")},
+        warnings=[],
+    )
 
-    result = runtime._run_sql_with_distinct_guard(
+    result = handle_run_sql_query_tool(
+        lambda org: fake_warehouse,
+        DashboardChatRuntimeConfig(
+            retrieval_limit=6,
+            max_query_rows=200,
+            max_distinct_values=20,
+            max_schema_tables=4,
+        ),
         {
             "sql": (
                 "SELECT "
@@ -975,7 +1038,7 @@ def test_run_sql_keeps_join_tables_intact(primary_dashboard):
             )
         },
         state,
-        execution_context,
+        turn_context,
     )
 
     assert result["success"] is True
@@ -985,21 +1048,17 @@ def test_run_sql_keeps_join_tables_intact(primary_dashboard):
 
 def test_missing_distinct_resolves_join_filter_to_qualified_table(primary_dashboard):
     """Distinct validation should inspect the joined table referenced by a qualified WHERE filter."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "allowlist": DashboardChatAllowlist(
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={
                 "analytics.facilitator_effectiveness_quarterly",
                 "analytics.district_funding_efficiency_quarterly",
             }
         ),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "schema_cache": {
+    )
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.facilitator_effectiveness_quarterly": FakeWarehouseTools().schemas[
                 "analytics.facilitator_effectiveness_quarterly"
             ],
@@ -1007,11 +1066,11 @@ def test_missing_distinct_resolves_join_filter_to_qualified_table(primary_dashbo
                 "analytics.district_funding_efficiency_quarterly"
             ],
         },
-        "warehouse_tools": None,
-        "distinct_cache": set(),
-    }
+        validated_distinct_values=set(),
+    )
 
-    missing = runtime._missing_distinct(
+    missing = find_missing_distinct_filters(
+        lambda org: FakeWarehouseTools(),
         (
             "SELECT f.facilitator_name, d.spend_per_student_usd "
             "FROM analytics.facilitator_effectiveness_quarterly f "
@@ -1022,7 +1081,7 @@ def test_missing_distinct_resolves_join_filter_to_qualified_table(primary_dashbo
             "WHERE d.program_area = 'Literacy'"
         ),
         state,
-        execution_context,
+        turn_context,
     )
 
     assert missing == [
@@ -1036,21 +1095,17 @@ def test_missing_distinct_resolves_join_filter_to_qualified_table(primary_dashbo
 
 def test_missing_columns_check_is_join_aware_for_qualified_columns(primary_dashboard):
     """Qualified join columns should be validated against the referenced joined table."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "allowlist": DashboardChatAllowlist(
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={
                 "analytics.facilitator_effectiveness_quarterly",
                 "analytics.district_funding_efficiency_quarterly",
             }
         ),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "schema_cache": {
+    )
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.facilitator_effectiveness_quarterly": FakeWarehouseTools().schemas[
                 "analytics.facilitator_effectiveness_quarterly"
             ],
@@ -1058,10 +1113,10 @@ def test_missing_columns_check_is_join_aware_for_qualified_columns(primary_dashb
                 "analytics.district_funding_efficiency_quarterly"
             ],
         },
-        "warehouse_tools": None,
-    }
+    )
 
-    missing = runtime._missing_columns_in_primary_table(
+    missing = missing_columns_in_primary_table(
+        lambda org: FakeWarehouseTools(),
         sql=(
             "SELECT f.facilitator_name, d.fake_dimension "
             "FROM analytics.facilitator_effectiveness_quarterly f "
@@ -1072,7 +1127,7 @@ def test_missing_columns_check_is_join_aware_for_qualified_columns(primary_dashb
             "WHERE f.quarter_label = '2025 Q2'"
         ),
         state=state,
-        execution_context=execution_context,
+        turn_context=turn_context,
     )
 
     assert missing["error"] == "column_not_in_table"
@@ -1082,18 +1137,14 @@ def test_missing_columns_check_is_join_aware_for_qualified_columns(primary_dashb
 
 def test_missing_columns_check_ignores_order_by_select_alias(primary_dashboard):
     """ORDER BY aliases from the SELECT clause should not be treated as missing physical columns."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "allowlist": DashboardChatAllowlist(
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={"analytics.facilitator_effectiveness_quarterly"}
         ),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "schema_cache": {
+    )
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.facilitator_effectiveness_quarterly": FakeWarehouseTools._schema_snippet(
                 "analytics.facilitator_effectiveness_quarterly",
                 [
@@ -1107,10 +1158,10 @@ def test_missing_columns_check_ignores_order_by_select_alias(primary_dashboard):
                 ],
             )
         },
-        "warehouse_tools": None,
-    }
+    )
 
-    missing = runtime._missing_columns_in_primary_table(
+    missing = missing_columns_in_primary_table(
+        lambda org: FakeWarehouseTools(),
         sql=(
             "SELECT facilitator_name, AVG(cost_per_improved_outcome_usd) AS avg_cost_per_improved_outcome "
             "FROM analytics.facilitator_effectiveness_quarterly "
@@ -1120,7 +1171,7 @@ def test_missing_columns_check_ignores_order_by_select_alias(primary_dashboard):
             "LIMIT 1"
         ),
         state=state,
-        execution_context=execution_context,
+        turn_context=turn_context,
     )
 
     assert missing is None
@@ -1248,22 +1299,24 @@ def test_runtime_prompt_messages_do_not_inline_raw_human_context(primary_dashboa
         llm_client=SmallTalkLlm(),
     )
 
-    new_query_messages = runtime._build_new_query_messages(
-        {
-            "user_query": "Explain the reach metric",
-            "human_context": "Organization context: duplicated markdown",
-        }
+    new_query_messages = build_new_query_messages(
+        runtime.llm_client,
+        build_runtime_state(
+            user_query="Explain the reach metric",
+            human_context="Organization context: duplicated markdown",
+        ),
     )
-    follow_up_messages = runtime._build_follow_up_messages(
-        {
-            "user_query": "Explain that metric",
-            "human_context": "Organization context: duplicated markdown",
-            "conversation_context": extract_conversation_context([]),
-        }
+    follow_up_messages = build_follow_up_messages(
+        runtime.llm_client,
+        build_runtime_state(
+            user_query="Explain that metric",
+            human_context="Organization context: duplicated markdown",
+            conversation_context=extract_conversation_context([]),
+        ),
     )
 
     assert new_query_messages[0]["content"] == "prompt:new_query_system"
-    assert "Human context" not in follow_up_messages[0]["content"]
+    assert all("Human context" not in message["content"] for message in follow_up_messages)
 
 
 def test_runtime_query_with_sql_uses_distinct_values_before_sql_execution(
@@ -1306,129 +1359,6 @@ def test_runtime_query_with_sql_uses_distinct_values_before_sql_execution(
     )
 
     assert fake_warehouse.distinct_requests == [("analytics.program_reach", "program_name", 20)]
-
-
-def test_runtime_reuses_session_snapshot_across_turns(org, primary_dashboard):
-    """Session snapshots should freeze dashboard context and reuse schema within one chat."""
-    cache.clear()
-    vector_store = FakeVectorStore(
-        [
-            DashboardChatVectorQueryResult(
-                document_id="doc-dashboard-export",
-                content="Chart id: 1. Data source: analytics.program_reach.",
-                metadata={
-                    "source_type": "dashboard_export",
-                    "source_identifier": f"dashboard:{primary_dashboard.id}:chart:1",
-                    "dashboard_id": primary_dashboard.id,
-                },
-                distance=0.01,
-            )
-        ]
-    )
-    fake_warehouse = FakeWarehouseTools()
-
-    def build_runtime():
-        return DashboardChatRuntime(
-            vector_store=vector_store,
-            llm_client=SqlToolLoopLlm(),
-            warehouse_tools_factory=lambda org: fake_warehouse,
-            runtime_config=DashboardChatRuntimeConfig(
-                retrieval_limit=6,
-                max_query_rows=200,
-                max_distinct_values=20,
-                max_schema_tables=4,
-            ),
-        )
-
-    first_response = build_runtime().run(
-        org=org,
-        dashboard_id=primary_dashboard.id,
-        session_id="session-cache-test",
-        user_query="How many beneficiaries are in Education?",
-    )
-    second_response = build_runtime().run(
-        org=org,
-        dashboard_id=primary_dashboard.id,
-        session_id="session-cache-test",
-        user_query="How many beneficiaries are in Education?",
-    )
-
-    assert first_response.intent == DashboardChatIntent.QUERY_WITH_SQL
-    assert second_response.intent == DashboardChatIntent.QUERY_WITH_SQL
-    assert fake_warehouse.schema_requests == [["analytics.program_reach"]]
-    assert "WHERE program_name = 'Education'" in fake_warehouse.executed_sql[0]
-    assert first_response.sql is not None
-    assert second_response.sql is not None
-    assert "Beneficiary Count: 120" in first_response.answer_text
-    assert any(citation.source_type == "warehouse_table" for citation in first_response.citations)
-    assert [call["name"] for call in first_response.tool_calls] == [
-        "retrieve_docs",
-        "get_schema_snippets",
-        "get_distinct_values",
-        "run_sql_query",
-    ]
-
-
-def test_runtime_persists_distinct_validations_in_session_snapshot(org, primary_dashboard):
-    """Validated text filter values should survive across turns in the same chat session."""
-    cache.clear()
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    session_id = "session-distinct-cache-test"
-    snapshot_state = {
-        "org": org,
-        "dashboard_id": primary_dashboard.id,
-        "session_id": session_id,
-    }
-
-    snapshot = runtime._load_session_snapshot(snapshot_state)
-    state = {
-        "org": org,
-        "dashboard_id": primary_dashboard.id,
-        "session_id": session_id,
-        "allowlist": snapshot["allowlist"],
-        "session_distinct_cache": snapshot["distinct_cache"],
-    }
-    execution_context = {"distinct_cache": set(snapshot["distinct_cache"])}
-
-    runtime._record_validated_distinct_values(
-        state=state,
-        execution_context=execution_context,
-        table_name="analytics.program_reach",
-        column_name="program_name",
-        values=["Education"],
-    )
-
-    reloaded_snapshot = runtime._load_session_snapshot(snapshot_state)
-    missing = runtime._missing_distinct(
-        "SELECT COUNT(*) FROM analytics.program_reach WHERE program_name = 'Education'",
-        {
-            "allowlist": snapshot["allowlist"],
-            "org": org,
-        },
-        {
-            "distinct_cache": set(reloaded_snapshot["distinct_cache"]),
-            "schema_cache": {
-                "analytics.program_reach": FakeWarehouseTools._schema_snippet(
-                    "analytics.program_reach",
-                    [
-                        {"name": "program_name", "data_type": "text", "nullable": False},
-                        {"name": "beneficiaries", "data_type": "integer", "nullable": False},
-                    ],
-                )
-            },
-            "warehouse_tools": None,
-        },
-    )
-
-    assert (
-        "analytics.program_reach",
-        "program_name",
-        "education",
-    ) in reloaded_snapshot["distinct_cache"]
-    assert missing == []
 
 
 def test_runtime_follow_up_sql_corrects_after_failed_sql_attempt(
@@ -1553,20 +1483,20 @@ def test_runtime_dbt_tools_use_compact_allowlisted_index():
         vector_store=FakeVectorStore([]),
         llm_client=SmallTalkLlm(),
     )
-    state = {
-        "allowlist": allowlist,
-        "dbt_index": dbt_index,
-    }
+    state = build_runtime_state(
+        allowlist=allowlist,
+        dbt_index=dbt_index,
+    )
 
-    search_result = runtime._handle_search_dbt_models_tool(
+    search_result = handle_search_dbt_models_tool(
         {"query": "program reach", "limit": 5},
         state,
-        {},
+        build_turn_context(),
     )
-    info_result = runtime._handle_get_dbt_model_info_tool(
+    info_result = handle_get_dbt_model_info_tool(
         {"model_name": "analytics.program_reach"},
         state,
-        {},
+        build_turn_context(),
     )
 
     assert search_result["count"] >= 1
@@ -1664,12 +1594,10 @@ def test_runtime_follow_up_sql_rejects_query_that_ignores_requested_dimension(
 
 def test_follow_up_dimension_validation_accepts_structural_granularity_change(primary_dashboard):
     """Follow-up add-dimension validation should accept structural SQL rewrites, not only exact token reuse."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-    state = {
-        "intent_decision": DashboardChatIntentDecision(
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(allowed_tables={"analytics.stg_donor_funding_clean"}),
+        intent_decision=DashboardChatIntentDecision(
             intent=DashboardChatIntent.FOLLOW_UP_SQL,
             confidence=0.9,
             reason="Follow-up SQL",
@@ -1680,7 +1608,7 @@ def test_follow_up_dimension_validation_accepts_structural_granularity_change(pr
                 modification_instruction="Now split that by donor type.",
             ),
         ),
-        "conversation_context": DashboardChatConversationContext(
+        conversation_context=DashboardChatConversationContext(
             last_sql_query=(
                 "SELECT quarter_label, SUM(realized_amount_usd) AS total_realized_funding_usd "
                 "FROM analytics.stg_donor_funding_clean "
@@ -1688,12 +1616,10 @@ def test_follow_up_dimension_validation_accepts_structural_granularity_change(pr
                 "GROUP BY quarter_label"
             ),
         ),
-        "user_query": "Now split that by donor type.",
-        "allowlist": DashboardChatAllowlist(allowed_tables={"analytics.stg_donor_funding_clean"}),
-        "org": primary_dashboard.org,
-    }
-    execution_context = {
-        "schema_cache": {
+        user_query="Now split that by donor type.",
+    )
+    turn_context = build_turn_context(
+        schema_snippets_by_table={
             "analytics.stg_donor_funding_clean": FakeWarehouseTools._schema_snippet(
                 "analytics.stg_donor_funding_clean",
                 [
@@ -1703,10 +1629,10 @@ def test_follow_up_dimension_validation_accepts_structural_granularity_change(pr
                 ],
             )
         },
-        "warehouse_tools": None,
-    }
+    )
 
-    validation = runtime._validate_follow_up_dimension_usage(
+    validation = validate_follow_up_dimension_usage(
+        lambda org: FakeWarehouseTools(),
         sql=(
             "SELECT quarter_label, COALESCE(donor_type, 'Unknown') AS donor_type, "
             "SUM(realized_amount_usd) AS total_realized_funding_usd "
@@ -1715,7 +1641,7 @@ def test_follow_up_dimension_validation_accepts_structural_granularity_change(pr
             "GROUP BY quarter_label, COALESCE(donor_type, 'Unknown')"
         ),
         state=state,
-        execution_context=execution_context,
+        turn_context=turn_context,
     )
 
     assert validation is None
@@ -1771,26 +1697,22 @@ def test_runtime_skips_disabled_source_types_during_retrieval(org, primary_dashb
 def test_list_tables_by_keyword_matches_allowlisted_table_names_without_schema_lookup(org):
     """Keyword table lookup should work even when schema snippets are not yet cached."""
     fake_warehouse = FakeWarehouseTools()
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=ContextToolLoopLlm(),
-        warehouse_tools_factory=lambda org: fake_warehouse,
-    )
-    state = {
-        "org": org,
-        "allowlist": DashboardChatAllowlist(
+    state = build_runtime_state(
+        org=org,
+        allowlist=DashboardChatAllowlist(
             allowed_tables={
                 "analytics.district_funding_efficiency_quarterly",
                 "analytics.facilitator_effectiveness_quarterly",
             }
         ),
-    }
-    execution_context = {"schema_cache": {}, "warnings": []}
+    )
+    turn_context = build_turn_context(schema_snippets_by_table={}, warnings=[])
 
-    result = runtime._handle_list_tables_by_keyword_tool(
+    result = handle_list_tables_by_keyword_tool(
+        lambda org: fake_warehouse,
         {"keyword": "district_funding_efficiency_quarterly", "limit": 10},
         state,
-        execution_context,
+        turn_context,
     )
 
     assert result["tables"][0]["table"] == "analytics.district_funding_efficiency_quarterly"
@@ -1850,12 +1772,7 @@ def test_allowlist_adds_upstream_dbt_tables():
 
 def test_tool_document_payload_exposes_structured_chart_metadata():
     """Chart retrieval payloads should surface exact table, metric, and dimension hints."""
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=SmallTalkLlm(),
-    )
-
-    payload = runtime._build_tool_document_payload(
+    payload = build_tool_document_payload(
         DashboardChatRetrievedDocument(
             document_id="doc-chart",
             source_type=DashboardChatSourceType.DASHBOARD_EXPORT.value,
@@ -1939,19 +1856,15 @@ def test_sql_guard_rejects_select_into_queries():
 def test_compose_final_answer_text_uses_llm_and_normalizes_rate_values():
     """Final answer composition should send normalized values and table hints to the composer."""
     llm = FinalAnswerComposerLlm()
-    runtime = DashboardChatRuntime(
-        vector_store=FakeVectorStore([]),
-        llm_client=llm,
-    )
-    state = {
-        "user_query": "Give me a district wise pass rate breakdown",
-        "intent_decision": DashboardChatIntentDecision(
+    state = build_runtime_state(
+        user_query="Give me a district wise pass rate breakdown",
+        intent_decision=DashboardChatIntentDecision(
             intent=DashboardChatIntent.QUERY_WITH_SQL,
             confidence=0.9,
             reason="Needs grouped results",
             force_tool_usage=True,
         ),
-    }
+    )
     execution_result = {
         "answer_text": "",
         "retrieved_documents": [
@@ -1981,7 +1894,8 @@ def test_compose_final_answer_text_uses_llm_and_normalizes_rate_values():
         "warnings": [],
     }
 
-    answer = runtime._compose_final_answer_text(
+    answer = compose_final_answer_text(
+        llm,
         state,
         execution_result,
         response_format="text_with_table",

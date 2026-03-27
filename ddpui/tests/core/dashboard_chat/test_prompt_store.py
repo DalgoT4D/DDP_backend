@@ -2,7 +2,7 @@
 
 import pytest
 
-from ddpui.core.dashboard_chat.agents.prompt_store import (
+from ddpui.core.dashboard_chat.agents.prompt_template_store import (
     DEFAULT_DASHBOARD_CHAT_PROMPTS,
     DashboardChatPromptStore,
 )
@@ -16,6 +16,12 @@ pytestmark = pytest.mark.django_db
 
 def test_prompt_store_returns_default_when_no_db_override_exists():
     """Missing prompt rows should fall back to the built-in default prompt text."""
+    DashboardChatPromptTemplate.objects.filter(
+        key__in=[
+            DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION,
+            DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION,
+        ]
+    ).delete()
     store = DashboardChatPromptStore()
 
     prompt = store.get(DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION)
@@ -29,6 +35,9 @@ def test_prompt_store_returns_default_when_no_db_override_exists():
         final_answer_prompt
         == DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION]
     )
+    assert "Which districts are these facilitators from?" in prompt
+    assert "Which programs are those students in?" in prompt
+    assert "Which states are they from?" in prompt
 
 
 def test_prompt_store_uses_db_override_after_save():
