@@ -234,6 +234,7 @@ def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPref
 
 def create_connection(org: Org, payload: AirbyteConnectionCreate):
     """creates an airbyte connection and tracking objects in the database"""
+
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         return None, "need to set up a warehouse first"
@@ -255,6 +256,10 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     clear_task = Task.objects.filter(slug=TASK_AIRBYTECLEAR).first()
     if clear_task is None:
         return None, "clear task not supported"
+
+    # Validate description length
+    if payload.description and len(payload.description) > 100:
+        return None, "Description cannot exceed 100 characters"
 
     airbyte_conn = airbyte_service.create_connection(org.airbyte_workspace_id, payload)
 
@@ -282,7 +287,9 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
             sync_dataflow.save()
 
             ConnectionMeta.objects.create(
-                connection_id=airbyte_conn["connectionId"], connection_name=payload.name
+                connection_id=airbyte_conn["connectionId"],
+                connection_name=payload.name,
+                description=payload.description,
             )
 
     except Exception as err:
@@ -305,6 +312,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         "deploymentId": sync_dataflow.deployment_id,
         "resetConnDeploymentId": None,
         "clearConnDeploymentId": clear_dataflow.deployment_id,
+        "description": payload.description,
     }
     return res, None
 
@@ -389,6 +397,11 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
     airbyte_connections = airbyte_service.get_webbackend_connections(org.airbyte_workspace_id)
+
+    # Fetch all connection descriptions for this org's connections
+    connection_ids = [conn["connectionId"] for conn in airbyte_connections]
+    connection_metas = ConnectionMeta.objects.filter(connection_id__in=connection_ids)
+    description_map = {meta.connection_id: meta.description for meta in connection_metas}
 
     res: list[dict] = []
     connections_to_clean_up: list[str] = []
@@ -505,6 +518,7 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
                     if lock and lock["status"] == TaskLockStatus.QUEUED
                     else None
                 ),
+                "description": description_map.get(connection["connectionId"]),
             }
         )
 
@@ -584,6 +598,10 @@ def get_one_connection(org: Org, connection_id: str):
             reset_lock = TaskLock.objects.filter(orgtask=reset_dataflow_orgtask.orgtask).first()
             lock = fetch_orgtask_lock_v1(reset_dataflow_orgtask.orgtask, reset_lock)
 
+    # Fetch the description from ConnectionMeta
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    description = connection_meta.description if connection_meta else None
+
     res = {
         "name": airbyte_conn["name"],
         "connectionId": airbyte_conn["connectionId"],
@@ -602,6 +620,7 @@ def get_one_connection(org: Org, connection_id: str):
         ),
         "lock": lock,
         "resetConnDeploymentId": (reset_dataflow.deployment_id if reset_dataflow else None),
+        "description": description,
     }
 
     return res, None
@@ -627,6 +646,10 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     if len(payload.streams) == 0:
         return None, "must specify stream names"
 
+    # Validate description length
+    if payload.description and len(payload.description) > 100:
+        return None, "Description cannot exceed 100 characters"
+
     # fetch connection by id from airbyte
     connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
     if connection["status"] == AIRBYTE_CONNECTION_DEPRECATED:
@@ -645,10 +668,15 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
     # update the airbyte connection
     res = airbyte_service.update_connection(org.airbyte_workspace_id, payload, connection)
 
+    # Update ConnectionMeta with name and description
+    update_fields = {}
     if payload.name:
-        ConnectionMeta.objects.filter(connection_id=connection_id).update(
-            connection_name=connection["name"]
-        )
+        update_fields["connection_name"] = connection["name"]
+    if payload.description:
+        update_fields["description"] = payload.description
+
+    if update_fields:
+        ConnectionMeta.objects.filter(connection_id=connection_id).update(**update_fields)
 
     return res, None
 
