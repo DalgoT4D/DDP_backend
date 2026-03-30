@@ -416,6 +416,12 @@ class TestFreezeDashboard:
         assert len(frozen["filters"]) == 1
         assert frozen["filters"][0]["filter_type"] == "datetime"
 
+    def test_captures_dashboard_id(self, sample_dashboard, sample_filter):
+        """Freeze includes the source dashboard_id for linking back"""
+        frozen = ReportService._freeze_dashboard(sample_dashboard)
+
+        assert frozen["dashboard_id"] == sample_dashboard.id
+
     def test_empty_dashboard_no_filters(self, orguser, org):
         """Dashboard with no filters returns empty filters list"""
         dashboard = Dashboard.objects.create(
@@ -619,6 +625,7 @@ class TestGetSnapshotViewData:
         assert rm["period_start"] == date(2025, 1, 1)
         assert rm["period_end"] == date(2025, 1, 31)
         assert rm["dashboard_title"] == "Test Dashboard"
+        assert rm["dashboard_id"] == sample_snapshot.frozen_dashboard["dashboard_id"]
 
     def test_warehouse_discovered_column_injects_chart_filters(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
@@ -705,6 +712,7 @@ class TestCreateSnapshot:
         assert snapshot.period_start == date(2025, 1, 1)
         assert snapshot.period_end == date(2025, 3, 31)
         assert snapshot.frozen_dashboard["title"] == "Test Dashboard"
+        assert snapshot.frozen_dashboard["dashboard_id"] == sample_dashboard.id
         assert str(sample_chart.id) in snapshot.frozen_chart_configs
         snapshot.delete()
 

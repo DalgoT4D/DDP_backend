@@ -304,7 +304,7 @@ def list_comments(
 
 
 @report_router.post("/{snapshot_id}/comments/", response=ApiResponse[CommentResponse])
-@has_permission(["can_view_dashboards"])
+@has_permission(["can_edit_dashboards"])
 def create_comment(request, snapshot_id: int, payload: CommentCreate):
     """Create a comment on a report snapshot"""
     orguser: OrgUser = request.orguser
@@ -332,7 +332,7 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
 
 
 @report_router.put("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse[CommentResponse])
-@has_permission(["can_view_dashboards"])
+@has_permission(["can_edit_dashboards"])
 def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentUpdate):
     """Update a comment (author-only)"""
     orguser: OrgUser = request.orguser
@@ -357,7 +357,7 @@ def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentU
 
 
 @report_router.delete("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse)
-@has_permission(["can_view_dashboards"])
+@has_permission(["can_edit_dashboards"])
 def delete_comment(request, snapshot_id: int, comment_id: int):
     """Delete a comment (author-only)"""
     orguser: OrgUser = request.orguser
