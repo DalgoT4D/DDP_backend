@@ -46,13 +46,23 @@ class PdfExportService:
             settings, "FRONTEND_URL", "http://localhost:3001"
         )
         if not frontend_url or str(frontend_url).startswith("/"):
-            frontend_url = "http://127.0.0.1:3001"
+            frontend_url = "http://localhost:3001"
         url = f"{frontend_url.rstrip('/')}/share/report/{share_token}?print=true"
 
         logger.info(f"Generating PDF for snapshot {snapshot_id} from {url}")
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                ],
+            )
             try:
                 page = browser.new_page(
                     viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
@@ -67,16 +77,42 @@ class PdfExportService:
 
                 page.route("**/*", _inject_render_secret)
 
-                page.goto(url, wait_until="networkidle")
-                page.wait_for_selector("[data-pdf-ready='true']", timeout=CANVAS_TIMEOUT_MS)
+                # Capture console messages and failed requests for debugging
+                console_messages = []
+                failed_requests = []
+                page.on("console", lambda msg: console_messages.append(f"[{msg.type}] {msg.text}"))
+                page.on(
+                    "requestfailed",
+                    lambda req: failed_requests.append(f"{req.method} {req.url} -> {req.failure}"),
+                )
+                page.on(
+                    "response",
+                    lambda res: (
+                        failed_requests.append(f"{res.request.method} {res.url} -> {res.status}")
+                        if res.status >= 400
+                        else None
+                    ),
+                )
+
+                page.goto(url, wait_until="domcontentloaded")
+
+                try:
+                    page.wait_for_selector("[data-pdf-ready='true']", timeout=CANVAS_TIMEOUT_MS)
+                except Exception as wait_err:
+                    page_content = page.content()[:2000]
+                    logger.error(
+                        f"PDF ready selector not found for snapshot {snapshot_id}. "
+                        f"Console: {console_messages[-10:]}. "
+                        f"Failed requests: {failed_requests}. "
+                        f"Page HTML (first 2000 chars): {page_content}"
+                    )
+                    raise
                 try:
                     page.wait_for_selector("canvas", timeout=CANVAS_TIMEOUT_MS)
                 except Exception:
                     logger.warning(
                         f"No canvas found for snapshot {snapshot_id}, proceeding without charts"
                     )
-                page.wait_for_timeout(PDF_WAIT_TIMEOUT_MS)
-
                 pdf_bytes = page.pdf(
                     format="A4",
                     print_background=True,

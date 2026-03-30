@@ -22,6 +22,7 @@ class DateColumnSchema(Schema):
 class FrozenDashboardConfig(Schema):
     """Schema for frozen dashboard config stored in snapshots"""
 
+    dashboard_id: int
     title: str
     description: Optional[str] = None
     grid_columns: Optional[int] = None
