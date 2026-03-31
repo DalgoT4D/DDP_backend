@@ -216,32 +216,19 @@ def render_share_report_email(
     safe_url = html.escape(report_url)
 
     # Plain-text version
-    message_plain = f"\n\n{message}\n" if message else ""
     plain_text = (
-        f'{sender_name} has shared "{report_title}" with you.\n'
-        f"{message_plain}\n"
+        f'{sender_name} has shared "{report_title}" with you\n'
+        f"\n"
+        f"Check it out on Dalgo web for the best experience.\n"
+        f"\n"
         f"View the report: {report_url}\n"
         f"\n"
-        f"A PDF copy is also attached to this email.\n"
+        f"OR\n"
+        f"\n"
+        f"Download the attached PDF to peruse at your own pace.\n"
         f"\n"
         f"---\n"
         f"You received this email because someone shared a Dalgo report with you.\n"
-    )
-
-    # HTML version
-    safe_message = html.escape(message) if message else None
-    message_html = (
-        f'<table width="100%" cellpadding="0" cellspacing="0" '
-        f'style="margin-bottom:20px;">'
-        f"<tr><td "
-        f'style="background-color:#f9fafb; border-left:3px solid #d1d5db; '
-        f'padding:12px 16px; border-radius:0 4px 4px 0;">'
-        f'<p style="margin:0; font-size:14px; color:#374151; '
-        f'line-height:1.5; font-style:italic;">'
-        f'"{safe_message}"</p>'
-        f"</td></tr></table>"
-        if safe_message
-        else ""
     )
 
     html_body = f"""\
@@ -274,14 +261,17 @@ font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
             <td style="padding:32px;">
 
               <!-- Headline -->
-              <p style="margin:0 0 24px; font-size:17px; color:#111827; \
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; \
 font-weight:600; line-height:1.4;">
                 {safe_sender} has shared \
-&ldquo;{safe_title}&rdquo; with you
+&ldquo;{safe_title}&rdquo; with you &#10024;
               </p>
 
-              <!-- Optional message -->
-              {message_html}
+              <!-- Web experience note -->
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; \
+line-height:1.5;">
+                Check it out on <strong>Dalgo</strong> web for the best experience &#128187;
+              </p>
 
               <!-- CTA Button -->
               <table width="100%" cellpadding="0" cellspacing="0">
@@ -297,10 +287,16 @@ font-size:14px; font-weight:600; letter-spacing:0.3px;">
                 </tr>
               </table>
 
+              <!-- OR separator -->
+              <p style="margin:20px 0; font-size:13px; color:#9ca3af; \
+text-align:center; font-weight:600;">
+                OR
+              </p>
+
               <!-- Attachment note -->
-              <p style="margin:16px 0 0; font-size:13px; color:#6b7280; \
+              <p style="margin:0; font-size:13px; color:#6b7280; \
 line-height:1.5;">
-                A PDF copy is also attached to this email.
+                Download attached <strong>PDF</strong> to peruse at your own pace &#128196;
               </p>
             </td>
           </tr>
