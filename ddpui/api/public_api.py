@@ -20,7 +20,7 @@ from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
-from ddpui.api.charts_api import MapDataOverlayPayload
+from ddpui.api.charts_api import MapDataOverlayPayload, populate_from_extra_config
 from ddpui.core.charts import charts_service
 
 from ddpui.api.dashboard_native_api import (
@@ -1180,7 +1180,7 @@ def get_public_report_chart_data(request, token: str):
             raise Exception("No warehouse configured for organization")
 
         payload_data = json.loads(request.body) if request.body else {}
-        payload = ChartDataPayload(**payload_data)
+        payload = populate_from_extra_config(ChartDataPayload(**payload_data))
 
         from ddpui.api.charts_api import generate_chart_data_and_config
 
@@ -1212,7 +1212,7 @@ def get_public_report_table_data(request, token: str, page: int = 0, limit: int 
             raise Exception("No warehouse configured for organization")
 
         payload_data = json.loads(request.body) if request.body else {}
-        chart_payload = ChartDataPayload(**payload_data)
+        chart_payload = populate_from_extra_config(ChartDataPayload(**payload_data))
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1251,7 +1251,7 @@ def get_public_report_table_total_rows(request, token: str):
             raise Exception("No warehouse configured for organization")
 
         payload_data = json.loads(request.body) if request.body else {}
-        chart_payload = ChartDataPayload(**payload_data)
+        chart_payload = populate_from_extra_config(ChartDataPayload(**payload_data))
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 
@@ -1313,13 +1313,15 @@ def get_public_report_map_data(request, token: str):
 
         from ddpui.schemas.chart_schema import ExecuteChartQuery
 
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            extra_config=extra_config,
+        chart_payload = populate_from_extra_config(
+            ChartDataPayload(
+                chart_type="map",
+                schema_name=map_payload.schema_name,
+                table_name=map_payload.table_name,
+                dimension_col=map_payload.geographic_column,
+                metrics=map_payload.metrics,
+                extra_config=extra_config,
+            )
         )
 
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)

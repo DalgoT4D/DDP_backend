@@ -113,6 +113,36 @@ def has_schema_access(request, schema_name: str) -> bool:
     return True
 
 
+def populate_from_extra_config(payload: ChartDataPayload) -> ChartDataPayload:
+    """Fill top-level ChartDataPayload fields from extra_config when unset.
+
+    Ensures the payload is complete regardless of whether the caller
+    explicitly mapped every field or just sent extra_config.
+    """
+    ec = payload.extra_config or {}
+    if payload.x_axis is None:
+        payload.x_axis = ec.get("x_axis_column")
+    if payload.y_axis is None:
+        payload.y_axis = ec.get("y_axis_column")
+    if payload.dimension_col is None:
+        payload.dimension_col = ec.get("dimension_column")
+    if payload.extra_dimension is None:
+        payload.extra_dimension = ec.get("extra_dimension_column")
+    if payload.dimensions is None:
+        payload.dimensions = ec.get("dimension_columns")
+    if payload.metrics is None:
+        payload.metrics = ec.get("metrics")
+    if payload.geographic_column is None:
+        payload.geographic_column = ec.get("geographic_column")
+    if payload.value_column is None:
+        payload.value_column = ec.get("value_column")
+    if payload.selected_geojson_id is None:
+        payload.selected_geojson_id = ec.get("selected_geojson_id")
+    if payload.customizations is None:
+        payload.customizations = ec.get("customizations", {})
+    return payload
+
+
 def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> dict:
     """Generate ECharts render config from chart's extra_config"""
     logger.info(f"Generating render config for chart {chart.id}: {chart.title}")
@@ -121,22 +151,13 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
         extra_config = chart.extra_config
         logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
 
-        payload = ChartDataPayload(
-            chart_type=chart.chart_type,
-            schema_name=chart.schema_name,
-            table_name=chart.table_name,
-            x_axis=extra_config.get("x_axis_column"),
-            y_axis=extra_config.get("y_axis_column"),
-            dimension_col=extra_config.get("dimension_column"),
-            extra_dimension=extra_config.get("extra_dimension_column"),
-            dimensions=extra_config.get("dimension_columns"),
-            metrics=extra_config.get("metrics"),
-            # Map-specific fields
-            geographic_column=extra_config.get("geographic_column"),
-            value_column=extra_config.get("value_column"),
-            selected_geojson_id=extra_config.get("selected_geojson_id"),
-            customizations=extra_config.get("customizations", {}),
-            extra_config=extra_config,
+        payload = populate_from_extra_config(
+            ChartDataPayload(
+                chart_type=chart.chart_type,
+                schema_name=chart.schema_name,
+                table_name=chart.table_name,
+                extra_config=extra_config,
+            )
         )
 
         # Normalize dimensions for backward compatibility and consistency
@@ -529,6 +550,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 @has_permission(["can_view_charts"])
 def get_chart_data(request, payload: ChartDataPayload):
     """Get chart data with ECharts configuration"""
+    payload = populate_from_extra_config(payload)
     orguser = request.orguser
 
     # Log the incoming payload for debugging
@@ -582,6 +604,7 @@ def get_chart_data_preview(
     """Get paginated data preview for chart using the same query as chart data"""
     import json
 
+    payload = populate_from_extra_config(payload)
     orguser = request.orguser
 
     # Validate user has access to schema/table
@@ -705,6 +728,7 @@ def get_chart_data_preview_total_rows(
     """Get total rows for chart data preview"""
     import json
 
+    payload = populate_from_extra_config(payload)
     orguser = request.orguser
 
     # Validate user has access to schema/table
@@ -1143,29 +1167,18 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
             logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
             resolved_dashboard_filters = None
 
-    # Get existing customizations and add chart title
+    # Inject chart title into customizations
     customizations = extra_config.get("customizations", {})
-    customizations["title"] = chart.title  # Add chart title to customizations
+    customizations["title"] = chart.title
 
-    payload = ChartDataPayload(
-        chart_type=chart.chart_type,
-        schema_name=chart.schema_name,
-        table_name=chart.table_name,
-        x_axis=extra_config.get("x_axis_column"),
-        y_axis=extra_config.get("y_axis_column"),
-        dimension_col=extra_config.get("dimension_column"),
-        extra_dimension=extra_config.get("extra_dimension_column"),
-        # Multiple metrics support - CRITICAL FIX for dashboard charts
-        metrics=extra_config.get("metrics"),
-        # Map-specific fields
-        geographic_column=extra_config.get("geographic_column"),
-        value_column=extra_config.get("value_column"),
-        selected_geojson_id=extra_config.get("selected_geojson_id"),
-        customizations=extra_config.get("customizations", {}),
-        offset=0,
-        limit=100,
-        extra_config=extra_config,
-        dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
+    payload = populate_from_extra_config(
+        ChartDataPayload(
+            chart_type=chart.chart_type,
+            schema_name=chart.schema_name,
+            table_name=chart.table_name,
+            extra_config=extra_config,
+            dashboard_filters=resolved_dashboard_filters,
+        )
     )
 
     # Use the common function to generate data and config
