@@ -7,7 +7,7 @@ from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.reports.pdf_export")
 
-VIEWPORT_WIDTH = 1200
+VIEWPORT_WIDTH = 794
 VIEWPORT_HEIGHT = 800
 PDF_WAIT_TIMEOUT_MS = 2000
 CANVAS_TIMEOUT_MS = 30000
@@ -65,7 +65,8 @@ class PdfExportService:
             )
             try:
                 page = browser.new_page(
-                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
+                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+                    device_scale_factor=2,
                 )
 
                 # Intercept all requests and inject the render secret header.
