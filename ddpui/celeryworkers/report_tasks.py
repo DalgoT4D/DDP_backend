@@ -52,7 +52,7 @@ def send_report_email_task(
         message=message,
     )
 
-    subject = f'{sender_name} shared "{report_title}" with you'
+    subject = f"{report_title} \U0001f680"
 
     sent_count = 0
     for recipient in recipient_emails:
