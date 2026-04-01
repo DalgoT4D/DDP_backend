@@ -342,22 +342,16 @@ def get_public_filter_preview(
                 pass
 
         if org is None:
-            raise Dashboard.DoesNotExist()
-
-        # Get org warehouse
-        from ddpui.models.org import OrgWarehouse
-        from ddpui.api.filter_api import get_filter_preview
+            logger.warning(
+                f"Public filter preview access failed - no public dashboard or report found for token: {token}"
+            )
+            return 404, PublicErrorResponse(
+                error="Dashboard or report not found or no longer public", is_valid=False
+            )
 
         org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
-
-        # Create a mock request with orguser to reuse the authenticated filter preview logic
-        class MockRequest:
-            def __init__(self, org):
-                self.orguser = type("MockOrgUser", (), {"org": org})()
-
-        mock_request = MockRequest(org)
 
         # Use the exact same function as authenticated API
         from ddpui.core.charts.charts_service import get_warehouse_client
@@ -469,13 +463,6 @@ def get_public_filter_preview(
                 error=f"Invalid filter type: {filter_type}", is_valid=False
             )
 
-    except Dashboard.DoesNotExist:
-        logger.warning(
-            f"Public filter preview access failed - no public dashboard or report found for token: {token}"
-        )
-        return 404, PublicErrorResponse(
-            error="Dashboard or report not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public filter preview error: {str(e)}")
         return 404, PublicErrorResponse(error="Filter preview unavailable", is_valid=False)
