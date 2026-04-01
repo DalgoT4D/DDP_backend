@@ -219,7 +219,7 @@ def post_logout(request):
 @user_org_router.post("/token/refresh", auth=None)
 def post_token_refresh(request, payload: TokenRefreshPayload):
     """Refreshes the JWT token using the refresh token"""
-    serializer = CustomTokenRefreshSerializer(data=payload.dict())
+    serializer = CustomTokenRefreshSerializer(data=payload.model_dump())
     serializer.is_valid(raise_exception=True)
     token_data = serializer.validated_data
     return {"token": token_data["access"]}

@@ -64,8 +64,8 @@ class AirbyteConnectionCreate(Schema):
     streams: list
     catalogId: str
     syncCatalog: dict
-    destinationId: str = None
-    destinationSchema: str = None
+    destinationId: Optional[str] = None
+    destinationSchema: Optional[str] = None
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -78,12 +78,12 @@ class AirbyteConnectionCreateResponse(Schema):
     catalogId: str
     syncCatalog: dict
     status: str
-    deploymentId: str = None
-    lastRun: Optional[dict | None]
+    deploymentId: Optional[str] = None
+    lastRun: Optional[dict] = None
     destinationSchema: str = ""
-    lock: Optional[dict | None]
+    lock: Optional[dict] = None
     isRunning: bool = False
-    resetConnDeploymentId: str = None
+    resetConnDeploymentId: Optional[str] = None
 
 
 class AirbyteGetConnectionsResponse(Schema):
@@ -94,14 +94,14 @@ class AirbyteGetConnectionsResponse(Schema):
     source: dict
     destination: dict
     status: str
-    deploymentId: str = None
-    lastRun: Optional[dict | None]
+    deploymentId: Optional[str] = None
+    lastRun: Optional[dict] = None
     destinationSchema: str = ""
-    lock: Optional[dict | None]
+    lock: Optional[dict] = None
     isRunning: bool = False
-    resetConnDeploymentId: str = None
-    clearConnDeploymentId: str = None
-    queuedFlowRunWaitTime: DeploymentCurrentQueueTime = None
+    resetConnDeploymentId: Optional[str] = None
+    clearConnDeploymentId: Optional[str] = None
+    queuedFlowRunWaitTime: Optional[DeploymentCurrentQueueTime] = None
 
 
 class AirbyteConnectionUpdate(Schema):
@@ -111,8 +111,8 @@ class AirbyteConnectionUpdate(Schema):
     streams: list
     syncCatalog: dict
     catalogId: str
-    destinationId: str = None
-    destinationSchema: str = None
+    destinationId: Optional[str] = None
+    destinationSchema: Optional[str] = None
 
 
 # response schemas
@@ -136,4 +136,4 @@ class AirbyteConnectionSchemaUpdateSchedule(Schema):
     """Docstring"""
 
     catalogDiff: dict
-    cron: str = None
+    cron: Optional[str] = None
