@@ -37,6 +37,7 @@ from ddpui.api.public_api import (
     get_public_report_table_total_rows,
     get_public_report_map_data,
     get_public_filter_preview,
+    get_public_report_filter_preview,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
@@ -546,8 +547,8 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "shipped", "count": 10}, {"value": "pending", "count": 5}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
-        ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
+            "ddpui.api.public_api.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
             mock_exec.return_value = mock_results
@@ -572,14 +573,14 @@ class TestGetPublicFilterPreview:
         mock_results = [{"value": "active", "count": 20}, {"value": "inactive", "count": 3}]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
-        ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
+            "ddpui.api.public_api.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
             mock_exec.return_value = mock_results
 
             request = _make_public_request()
-            response = get_public_filter_preview(
+            response = get_public_report_filter_preview(
                 request,
                 token=public_snapshot.public_share_token,
                 schema_name="public",
@@ -599,14 +600,14 @@ class TestGetPublicFilterPreview:
         ]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
-        ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
+            "ddpui.api.public_api.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
             mock_exec.return_value = mock_results
 
             request = _make_public_request()
-            response = get_public_filter_preview(
+            response = get_public_report_filter_preview(
                 request,
                 token=public_snapshot.public_share_token,
                 schema_name="public",
@@ -633,14 +634,14 @@ class TestGetPublicFilterPreview:
         ]
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
-            "ddpui.core.charts.charts_service.execute_query"
-        ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
+            "ddpui.api.public_api.execute_query"
+        ) as mock_exec, patch("ddpui.api.public_api.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
             mock_wc.return_value = MagicMock()
             mock_exec.return_value = mock_results
 
             request = _make_public_request()
-            response = get_public_filter_preview(
+            response = get_public_report_filter_preview(
                 request,
                 token=public_snapshot.public_share_token,
                 schema_name="public",
