@@ -72,8 +72,7 @@ class Dashboard(models.Model):
 
     # Tabs configuration - each tab contains its own layout_config and components
     tabs = models.JSONField(
-        default=list,
-        help_text="Array of tab objects: [{id, title, layout_config, components}]"
+        default=list, help_text="Array of tab objects: [{id, title, layout_config, components}]"
     )
 
     # Filter layout configuration
