@@ -176,8 +176,12 @@ def find_dashboard_chat_assistant_reply(
     )
 
 
-def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
-    """Load session and message, run the runtime, persist and return the assistant reply."""
+def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> DashboardChatMessage:
+    """Load session and message, run the runtime, persist and return the assistant reply.
+
+    Returns the assistant DashboardChatMessage on success.
+    Raises Exception if the session or user message cannot be found.
+    """
     from ddpui.core.dashboard_chat.orchestration.orchestrator import get_dashboard_chat_runtime
 
     session = (
@@ -186,7 +190,7 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
         .first()
     )
     if session is None or session.dashboard is None:
-        return {"status": "skipped_missing_session", "session": None, "user_message": None}
+        raise Exception("Chat session could not be found")
 
     user_message = DashboardChatMessage.objects.filter(
         id=user_message_id,
@@ -194,19 +198,15 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
         role="user",
     ).first()
     if user_message is None:
-        return {"status": "skipped_missing_message", "session": session, "user_message": None}
+        raise Exception("Chat message could not be found")
 
+    # Safety net: if an assistant reply already exists, return it without re-running.
     existing_assistant_message = find_dashboard_chat_assistant_reply(
         session=session,
         user_message=user_message,
     )
     if existing_assistant_message is not None:
-        return {
-            "status": "skipped_existing_reply",
-            "session": session,
-            "user_message": user_message,
-            "assistant_message": existing_assistant_message,
-        }
+        return existing_assistant_message
 
     response = get_dashboard_chat_runtime().run(
         org=session.org,
@@ -236,12 +236,7 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> dict:
     )
     assistant_message.response_latency_ms = response_latency_ms
     assistant_message.save(update_fields=["response_latency_ms"])
-    return {
-        "status": "completed",
-        "session": session,
-        "user_message": user_message,
-        "assistant_message": assistant_message,
-    }
+    return assistant_message
 
 
 def _create_dashboard_chat_message(
