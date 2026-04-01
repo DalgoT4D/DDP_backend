@@ -257,7 +257,7 @@ class TestSchemaSerialization:
             grid_columns=24,
         )
 
-        data = dashboard.dict()
+        data = dashboard.model_dump()
 
         assert isinstance(data, dict)
         assert data["title"] == "Test Dashboard"
@@ -267,7 +267,7 @@ class TestSchemaSerialization:
         """Test DashboardUpdate dict excludes None values when specified"""
         update = DashboardUpdate(title="New Title")
 
-        data = update.dict(exclude_none=True)
+        data = update.model_dump(exclude_none=True)
 
         assert "title" in data
         assert "description" not in data
@@ -283,7 +283,7 @@ class TestSchemaSerialization:
             column_name="status",
         )
 
-        data = filter_create.dict()
+        data = filter_create.model_dump()
 
         assert data["filter_type"] == "value"
         assert data["column_name"] == "status"

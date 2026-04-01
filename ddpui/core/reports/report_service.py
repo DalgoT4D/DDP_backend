@@ -313,9 +313,9 @@ class ReportService:
 
         frozen_dashboard = FrozenDashboardConfig(
             **ReportService._freeze_dashboard(dashboard)
-        ).dict()
+        ).model_dump()
         frozen_chart_configs = {
-            k: FrozenChartConfig(**v).dict()
+            k: FrozenChartConfig(**v).model_dump()
             for k, v in ReportService._freeze_chart_configs(dashboard).items()
         }
 

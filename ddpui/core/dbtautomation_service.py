@@ -67,7 +67,7 @@ from ddpui.utils.helpers import map_airbyte_keys_to_postgres_keys
 from ddpui.celery import app
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.orgdbt_manager import DbtProjectManager
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from typing import Dict, List
 import yaml
 
@@ -92,7 +92,8 @@ class SourceGrouping(BaseModel):
 
     sources: Dict[str, Dict[str, List[str]]]
 
-    @validator("sources")
+    @field_validator("sources")
+    @classmethod
     def validate_sources_structure(cls, v):
         """Validate that sources structure is correct"""
         if not isinstance(v, dict):
@@ -119,7 +120,8 @@ class SourceGrouping(BaseModel):
 
         return v
 
-    @validator("sources")
+    @field_validator("sources")
+    @classmethod
     def validate_unique_schema_table_pairs(cls, v):
         """Validate that each (schema, table) combination appears only once across all sources"""
         seen_schema_table_pairs = set()
