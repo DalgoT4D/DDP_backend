@@ -391,7 +391,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
-    run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.dict() if payload else None)
+    run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.model_dump() if payload else None)
 
     return {"task_id": task_id}
 

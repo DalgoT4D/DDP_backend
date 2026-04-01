@@ -150,7 +150,7 @@ def post_superset_admin_creds(request, payload: SupersetDalgoUserCreds):
         raise HttpError(400, "create an organization first")
 
     # Save to secrets manager
-    secret_id = secretsmanager.save_dalgo_user_superset_credentials(payload.dict())
+    secret_id = secretsmanager.save_dalgo_user_superset_credentials(payload.model_dump())
 
     orguser.org.dalgouser_superset_creds_key = secret_id
     orguser.org.save()
