@@ -545,7 +545,7 @@ class TestGetPublicFilterPreview:
         """Public dashboard token resolves org and returns value filter options"""
         mock_results = [{"value": "shipped", "count": 10}, {"value": "pending", "count": 5}]
 
-        with patch("ddpui.models.org.OrgWarehouse.objects") as mock_ow, patch(
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.core.charts.charts_service.execute_query"
         ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
@@ -571,7 +571,7 @@ class TestGetPublicFilterPreview:
         """Public report snapshot token resolves org and returns value filter options"""
         mock_results = [{"value": "active", "count": 20}, {"value": "inactive", "count": 3}]
 
-        with patch("ddpui.models.org.OrgWarehouse.objects") as mock_ow, patch(
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.core.charts.charts_service.execute_query"
         ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
@@ -598,7 +598,7 @@ class TestGetPublicFilterPreview:
             {"min_value": 10.0, "max_value": 500.0, "avg_value": 120.5, "distinct_count": 45}
         ]
 
-        with patch("ddpui.models.org.OrgWarehouse.objects") as mock_ow, patch(
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.core.charts.charts_service.execute_query"
         ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
@@ -619,9 +619,45 @@ class TestGetPublicFilterPreview:
             assert response.stats["min_value"] == 10.0
             assert response.stats["max_value"] == 500.0
 
+    def test_report_token_datetime_filter(self, public_snapshot, seed_db):
+        """Public report token works for datetime filter type"""
+        from datetime import date as dt_date
+
+        mock_results = [
+            {
+                "min_date": dt_date(2024, 1, 1),
+                "max_date": dt_date(2025, 6, 30),
+                "distinct_days": 180,
+                "total_records": 5000,
+            }
+        ]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.core.charts.charts_service.execute_query"
+        ) as mock_exec, patch("ddpui.core.charts.charts_service.get_warehouse_client") as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = MagicMock()
+            mock_exec.return_value = mock_results
+
+            request = _make_public_request()
+            response = get_public_filter_preview(
+                request,
+                token=public_snapshot.public_share_token,
+                schema_name="public",
+                table_name="orders",
+                column_name="created_at",
+                filter_type="datetime",
+            )
+
+            assert response.is_valid is True
+            assert response.stats["min_date"] == "2024-01-01"
+            assert response.stats["max_date"] == "2025-06-30"
+            assert response.stats["distinct_days"] == 180
+            assert response.stats["total_records"] == 5000
+
     def test_report_token_no_warehouse_returns_404(self, public_snapshot, seed_db):
         """Public report token with no warehouse configured returns error"""
-        with patch("ddpui.models.org.OrgWarehouse.objects") as mock_ow:
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow:
             mock_ow.filter.return_value.first.return_value = None
 
             request = _make_public_request()
@@ -639,7 +675,7 @@ class TestGetPublicFilterPreview:
 
     def test_invalid_filter_type_returns_404(self, public_snapshot, seed_db):
         """Invalid filter_type returns 404"""
-        with patch("ddpui.models.org.OrgWarehouse.objects") as mock_ow, patch(
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.core.charts.charts_service.get_warehouse_client"
         ) as mock_wc:
             mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
