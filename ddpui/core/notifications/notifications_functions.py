@@ -27,7 +27,7 @@ def get_recipients(
     org_slug: str,
     user_email: str,
     manager_or_above: bool,
-    superset_only: bool = False,
+    superset_clients: bool = False,
 ) -> Tuple[Optional[str], Optional[List[int]]]:
     """Returns the list of recipients based on the request parameters"""
 
@@ -57,7 +57,7 @@ def get_recipients(
                 logger.error(f"Role with slug '{PIPELINE_MANAGER_ROLE}' not found")
                 return f"Role with slug '{PIPELINE_MANAGER_ROLE}' not found", None
 
-        if superset_only:
+        if superset_clients:
             queryset = queryset.filter(org__viz_url__isnull=False)
 
     recipient_ids = list(queryset.values_list("id", flat=True).distinct())

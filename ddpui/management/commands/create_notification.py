@@ -42,7 +42,7 @@ class Command(BaseCommand):
             help="Only applicable if audience = all_org_users; flag to include managers or above",
         )
         parser.add_argument(
-            "--superset_only",
+            "--superset_clients",
             action="store_true",
             help="Filter recipients to only users in orgs that have a superset viz_url configured",
         )
@@ -99,7 +99,7 @@ class Command(BaseCommand):
             options.get("org"),
             options.get("email"),
             options.get("manager_or_above", False),
-            options.get("superset_only", False),
+            options.get("superset_clients", False),
         )
 
         if error:
