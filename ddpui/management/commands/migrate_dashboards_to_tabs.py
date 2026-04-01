@@ -2,6 +2,7 @@ import time
 from django.core.management.base import BaseCommand
 from ddpui.models.dashboard import Dashboard
 
+
 class Command(BaseCommand):
     """
     Migrate existing dashboards to use tabs structure.
@@ -45,7 +46,7 @@ class Command(BaseCommand):
 
             # This dashboard needs migration
             migrated_count += 1
-            org_id = getattr(dashboard, 'org_id', 'N/A')
+            org_id = getattr(dashboard, "org_id", "N/A")
 
             if dry_run:
                 self.stdout.write(
