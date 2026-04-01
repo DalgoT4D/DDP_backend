@@ -9,11 +9,11 @@ from ddpui.core.dashboard_chat.contracts import DashboardChatIntent
 from ddpui.core.dashboard_chat.orchestration.conversation_context import (
     extract_requested_follow_up_dimension,
 )
-from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import (
-    get_conversation_context,
-    get_intent_decision,
+from ddpui.core.dashboard_chat.contracts import (
+    DashboardChatConversationContext,
+    DashboardChatIntentDecision,
 )
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
     extract_text_filter_values,
     find_tables_with_column,
@@ -63,7 +63,7 @@ def validate_follow_up_dimension_usage(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any] | None:
     """Keep add-dimension follow-ups from succeeding without changing query granularity."""
-    intent_decision = get_intent_decision(state)
+    intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
     if intent_decision.intent != DashboardChatIntent.FOLLOW_UP_SQL:
         return None
     if intent_decision.follow_up_context.follow_up_type != "add_dimension":
@@ -75,7 +75,12 @@ def validate_follow_up_dimension_usage(
     if not requested_dimension:
         return None
 
-    previous_sql = get_conversation_context(state).last_sql_query or ""
+    previous_sql = (
+        DashboardChatConversationContext.model_validate(
+            state.get("conversation_context") or {}
+        ).last_sql_query
+        or ""
+    )
     current_dimensions = structural_dimensions_from_sql(sql)
     previous_dimensions = structural_dimensions_from_sql(previous_sql)
     normalized_requested_dimension = normalize_dimension_name(requested_dimension)
@@ -131,7 +136,9 @@ def find_missing_distinct_filters(
         turn_context,
         tables=query_tables,
     )
-    all_schema_snippets_by_table = get_or_load_schema_snippets(warehouse_tools_factory, state, turn_context)
+    all_schema_snippets_by_table = get_or_load_schema_snippets(
+        warehouse_tools_factory, state, turn_context
+    )
 
     column_types = {
         table_name: {
@@ -152,11 +159,15 @@ def find_missing_distinct_filters(
             schema_snippets_by_table=full_schema_snippets_by_table,
         )
         if resolved_table is None and qualifier is None:
-            matching_tables = tables_with_column(normalized_column, query_tables, full_schema_snippets_by_table)
+            matching_tables = tables_with_column(
+                normalized_column, query_tables, full_schema_snippets_by_table
+            )
             if len(matching_tables) > 1:
                 continue
         if resolved_table is None:
-            candidate_tables = find_tables_with_column(normalized_column, all_schema_snippets_by_table)
+            candidate_tables = find_tables_with_column(
+                normalized_column, all_schema_snippets_by_table
+            )
             if qualifier is None and candidate_tables:
                 continue
             missing.append(

@@ -1,28 +1,31 @@
 """Conversation-related dashboard chat contracts."""
 
-from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
 
-@dataclass(frozen=True)
-class DashboardChatConversationMessage:
+
+class DashboardChatConversationMessage(BaseModel):
     """Single prior conversation message."""
+
+    model_config = ConfigDict(frozen=True)
 
     role: str
     content: str
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class DashboardChatConversationContext:
+class DashboardChatConversationContext(BaseModel):
     """Reusable context extracted from prior assistant turns."""
 
+    model_config = ConfigDict(frozen=True)
+
     last_sql_query: str | None = None
-    last_tables_used: list[str] = field(default_factory=list)
-    last_chart_ids: list[str] = field(default_factory=list)
-    last_metrics: list[str] = field(default_factory=list)
-    last_dimensions: list[str] = field(default_factory=list)
-    last_filters: list[str] = field(default_factory=list)
+    last_tables_used: list[str] = Field(default_factory=list)
+    last_chart_ids: list[str] = Field(default_factory=list)
+    last_metrics: list[str] = Field(default_factory=list)
+    last_dimensions: list[str] = Field(default_factory=list)
+    last_filters: list[str] = Field(default_factory=list)
     last_response_type: str | None = None
     last_answer_text: str | None = None
     last_intent: str | None = None

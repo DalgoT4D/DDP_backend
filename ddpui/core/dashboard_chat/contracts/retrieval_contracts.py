@@ -1,12 +1,14 @@
 """Retrieval-related dashboard chat contracts."""
 
-from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
 
-@dataclass(frozen=True)
-class DashboardChatRetrievedDocument:
+
+class DashboardChatRetrievedDocument(BaseModel):
     """Retrieved document returned from the vector store."""
+
+    model_config = ConfigDict(frozen=True)
 
     document_id: str
     source_type: str
@@ -16,9 +18,10 @@ class DashboardChatRetrievedDocument:
     distance: float | None = None
 
 
-@dataclass(frozen=True)
-class DashboardChatSchemaSnippet:
+class DashboardChatSchemaSnippet(BaseModel):
     """Schema description for a warehouse table."""
+
+    model_config = ConfigDict(frozen=True)
 
     table_name: str
     columns: list[dict[str, Any]]

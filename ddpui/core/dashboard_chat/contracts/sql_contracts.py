@@ -1,14 +1,15 @@
 """SQL-validation dashboard chat contracts."""
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-@dataclass(frozen=True)
-class DashboardChatSqlValidationResult:
+class DashboardChatSqlValidationResult(BaseModel):
     """Outcome of SQL guard validation."""
+
+    model_config = ConfigDict(frozen=True)
 
     is_valid: bool
     sanitized_sql: str | None
-    tables: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    tables: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)

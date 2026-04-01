@@ -12,7 +12,6 @@ from ddpui.core.dashboard_chat.contracts import (
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import get_intent_decision
 
 logger = CustomLogger("dashboard_chat")
 
@@ -109,7 +108,9 @@ def compose_final_answer_text(
         try:
             answer_text = llm_client.compose_final_answer(
                 user_query=state["user_query"],
-                intent=get_intent_decision(state).intent,
+                intent=DashboardChatIntentDecision.model_validate(
+                    state.get("intent_decision") or {}
+                ).intent,
                 response_format=response_format,
                 draft_answer=draft_answer,
                 retrieved_documents=list(execution_result.get("retrieved_documents") or []),

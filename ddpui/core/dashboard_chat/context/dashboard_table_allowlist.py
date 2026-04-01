@@ -1,9 +1,10 @@
 """Dashboard table allowlist derived from dashboard exports and dbt lineage."""
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.org import OrgDbt
@@ -27,16 +28,15 @@ def build_dashboard_chat_table_name(schema_name: str | None, table_name: str | N
     return normalize_dashboard_chat_table_name(f"{schema_name}.{table_name}")
 
 
-@dataclass
-class DashboardChatAllowlist:
+class DashboardChatAllowlist(BaseModel):
     """Allowed tables and dbt nodes for the current dashboard context."""
 
-    chart_tables: set[str] = field(default_factory=set)
-    upstream_tables: set[str] = field(default_factory=set)
-    allowed_tables: set[str] = field(default_factory=set)
-    allowed_unique_ids: set[str] = field(default_factory=set)
-    unique_id_to_table: dict[str, str] = field(default_factory=dict)
-    table_to_unique_ids: dict[str, set[str]] = field(default_factory=dict)
+    chart_tables: set[str] = Field(default_factory=set)
+    upstream_tables: set[str] = Field(default_factory=set)
+    allowed_tables: set[str] = Field(default_factory=set)
+    allowed_unique_ids: set[str] = Field(default_factory=set)
+    unique_id_to_table: dict[str, str] = Field(default_factory=dict)
+    table_to_unique_ids: dict[str, set[str]] = Field(default_factory=dict)
 
     def is_allowed(self, table_name: str | None) -> bool:
         """Return whether the table is inside the dashboard allowlist."""
@@ -57,7 +57,9 @@ class DashboardChatAllowlist:
 
     def prioritized_tables(self, limit: int | None = None) -> list[str]:
         """Return chart tables first, then lineage tables."""
-        ordered_tables = sorted(self.chart_tables) + sorted(self.upstream_tables - self.chart_tables)
+        ordered_tables = sorted(self.chart_tables) + sorted(
+            self.upstream_tables - self.chart_tables
+        )
         deduped_tables = list(dict.fromkeys(ordered_tables))
         if limit is None:
             return deduped_tables

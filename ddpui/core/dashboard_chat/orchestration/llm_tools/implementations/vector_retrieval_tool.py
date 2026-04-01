@@ -11,12 +11,12 @@ from ddpui.core.dashboard_chat.orchestration.retrieval_support import (
     get_or_embed_query,
     retrieve_vector_documents,
 )
+from ddpui.models.org import Org
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import (
-    get_runtime_allowlist,
-    get_runtime_org,
+from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import (
+    DashboardChatTurnContext,
 )
-from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import DashboardChatTurnContext
 
 
 def handle_retrieve_docs_tool(
@@ -28,8 +28,8 @@ def handle_retrieve_docs_tool(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Retrieve current-dashboard, org, and dbt context using the tool contract."""
-    org = get_runtime_org(state)
-    allowlist = get_runtime_allowlist(state)
+    org = Org.objects.select_related("dbt").get(id=int(state["org_id"]))
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     dashboard_export = state.get("dashboard_export_payload") or {}
     query = str(args.get("query") or state["user_query"]).strip()
     limit = max(1, min(int(args.get("limit", 8)), 20))

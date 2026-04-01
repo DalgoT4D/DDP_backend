@@ -1,17 +1,18 @@
 """Response-related dashboard chat contracts."""
 
-from dataclasses import asdict, dataclass, field
 import json
 from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
+from pydantic import BaseModel, ConfigDict, Field
 
 from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntent
 
 
-@dataclass(frozen=True)
-class DashboardChatCitation:
+class DashboardChatCitation(BaseModel):
     """Citation attached to a chat response."""
+
+    model_config = ConfigDict(frozen=True)
 
     source_type: str
     source_identifier: str
@@ -20,36 +21,26 @@ class DashboardChatCitation:
     dashboard_id: int | None = None
     table_name: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return a serializable citation payload."""
-        return asdict(self)
 
-
-@dataclass(frozen=True)
-class DashboardChatResponse:
+class DashboardChatResponse(BaseModel):
     """Final runtime response returned by the LangGraph runner."""
+
+    model_config = ConfigDict(frozen=True)
 
     answer_text: str
     intent: DashboardChatIntent
-    citations: list[DashboardChatCitation] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    citations: list[DashboardChatCitation] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     sql: str | None = None
     sql_results: list[dict[str, Any]] | None = None
-    usage: dict[str, Any] = field(default_factory=dict)
-    tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    usage: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a serializable payload."""
-        payload = {
-            "answer_text": self.answer_text,
-            "intent": self.intent.value,
-            "citations": [citation.to_dict() for citation in self.citations],
-            "warnings": self.warnings,
-            "sql": self.sql,
-            "sql_results": self.sql_results,
-            "usage": self.usage,
-            "tool_calls": self.tool_calls,
-            "metadata": self.metadata,
-        }
-        return json.loads(json.dumps(payload, cls=DjangoJSONEncoder))
+        """Return a serializable payload safe for JSON storage and websocket delivery.
+
+        Uses DjangoJSONEncoder to handle warehouse-specific types (Decimal, datetime, etc.)
+        that may appear in sql_results.
+        """
+        return json.loads(json.dumps(self.model_dump(mode="json"), cls=DjangoJSONEncoder))

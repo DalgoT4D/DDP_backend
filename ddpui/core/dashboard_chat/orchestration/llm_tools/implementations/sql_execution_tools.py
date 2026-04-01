@@ -7,8 +7,8 @@ from django.core.serializers.json import DjangoJSONEncoder
 
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import get_runtime_allowlist
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_corrections import (
     missing_columns_in_primary_table,
     structured_sql_execution_error,
@@ -33,7 +33,7 @@ def handle_run_sql_query_tool(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Validate SQL and let the tool loop self-correct on structured failures."""
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     sql = str(args.get("sql") or "").strip()
     if not sql:
         return {"error": "sql_missing", "message": "SQL is required"}

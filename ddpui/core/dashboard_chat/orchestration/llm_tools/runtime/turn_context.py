@@ -10,19 +10,12 @@ from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlVa
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
 from ddpui.utils.custom_logger import CustomLogger
 
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import get_or_embed_query
+from ddpui.core.dashboard_chat.contracts import DashboardChatConversationContext
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
+from ddpui.models.org import Org
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.payload_codec import (
-    deserialize_distinct_payloads,
-    deserialize_schema_snippets,
-    serialize_distinct_payloads,
-    serialize_schema_snippets,
-)
-from ddpui.core.dashboard_chat.orchestration.state.accessors import (
-    get_conversation_context,
-    get_runtime_allowlist,
-    get_runtime_org,
-)
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
     extract_text_filter_values,
     resolve_identifier_table,
@@ -79,29 +72,45 @@ def get_turn_warehouse_tools(
     """Build the warehouse tool helper lazily for the turn."""
     warehouse_tools = turn_context.warehouse_tools
     if warehouse_tools is None:
-        warehouse_tools = warehouse_tools_factory(get_runtime_org(state))
+        warehouse_tools = warehouse_tools_factory(
+            Org.objects.select_related("dbt").get(id=int(state["org_id"]))
+        )
         turn_context.warehouse_tools = warehouse_tools
     return warehouse_tools
 
 
 def hydrate_schema_snippets_by_table(state: DashboardChatGraphState) -> dict[str, Any]:
     """Rebuild schema snippets from checkpoint payloads for one turn."""
-    return deserialize_schema_snippets(state.get("schema_snippet_payloads"))
+    return {
+        k: DashboardChatSchemaSnippet.model_validate(v)
+        for k, v in (state.get("schema_snippet_payloads") or {}).items()
+    }
 
 
 def hydrate_validated_distinct_values(state: DashboardChatGraphState) -> set[tuple[str, str, str]]:
     """Rebuild validated distinct values from checkpoint payloads for one turn."""
-    return deserialize_distinct_payloads(state.get("validated_distinct_payloads"))
+    validated: set[tuple[str, str, str]] = set()
+    for table_name, column_map in (state.get("validated_distinct_payloads") or {}).items():
+        for column_name, values in (column_map or {}).items():
+            for value in values or []:
+                validated.add((str(table_name).lower(), str(column_name).lower(), str(value)))
+    return validated
 
 
 def current_schema_snippet_payloads(turn_context: DashboardChatTurnContext) -> dict[str, Any]:
     """Serialize the current turn's schema snippets back into checkpoint-safe payloads."""
-    return serialize_schema_snippets(turn_context.schema_snippets_by_table)
+    return {k: v.model_dump(mode="json") for k, v in turn_context.schema_snippets_by_table.items()}
 
 
 def current_validated_distinct_payloads(turn_context: DashboardChatTurnContext) -> dict[str, Any]:
     """Serialize the current turn's validated distinct values back into checkpoint-safe payloads."""
-    return serialize_distinct_payloads(turn_context.validated_distinct_values)
+    serialized: dict[str, dict[str, list[str]]] = {}
+    for table_name, column_name, value in turn_context.validated_distinct_values:
+        serialized.setdefault(table_name, {}).setdefault(column_name, []).append(value)
+    return {
+        table_name: {column_name: sorted(set(values)) for column_name, values in column_map.items()}
+        for table_name, column_map in serialized.items()
+    }
 
 
 def get_or_load_schema_snippets(
@@ -111,7 +120,7 @@ def get_or_load_schema_snippets(
     tables: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Load and keep schema snippets in the current turn state."""
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     requested_tables = [
         table_name.lower()
         for table_name in (tables if tables is not None else allowlist.prioritized_tables())
@@ -210,7 +219,9 @@ def record_validated_filters_from_sql(
         )
         if resolved_table is None and qualifier is None:
             if schema_snippets_by_table:
-                matching = tables_with_column(normalized_column, query_tables, schema_snippets_by_table)
+                matching = tables_with_column(
+                    normalized_column, query_tables, schema_snippets_by_table
+                )
                 if len(matching) == 1:
                     resolved_table = matching[0]
             elif len(query_tables) == 1:
@@ -231,7 +242,9 @@ def seed_validated_distinct_values_from_previous_sql(
     turn_context: DashboardChatTurnContext,
 ) -> None:
     """Treat text filters from the previous successful SQL as already validated for follow-ups."""
-    previous_sql = get_conversation_context(state).last_sql_query
+    previous_sql = DashboardChatConversationContext.model_validate(
+        state.get("conversation_context") or {}
+    ).last_sql_query
     if not previous_sql:
         return
     record_validated_filters_from_sql(
