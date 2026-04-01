@@ -1,8 +1,8 @@
-"""Tests for populate_from_extra_config helper and its integration with endpoints.
+"""Tests for ChartDataPayload auto-population from extra_config and endpoint integration.
 
 Covers:
-1. Unit tests for populate_from_extra_config — field population, no-override, edge cases
-2. Integration tests — verifying endpoints call populate_from_extra_config correctly
+1. Unit tests — ChartDataPayload auto-populates fields from extra_config via root_validator
+2. Integration tests — verifying endpoints receive correctly populated payloads
 3. Chart-type-specific tests — bar/line with time_grain, table with dimensions, map
 4. Public report endpoint integration
 """
@@ -30,7 +30,6 @@ from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from datetime import date
 from ddpui.api.charts_api import (
-    populate_from_extra_config,
     get_chart_data,
     get_chart_data_preview,
     get_chart_data_preview_total_rows,
@@ -133,12 +132,13 @@ def _make_public_request(body=None):
 
 
 # ================================================================================
-# 1. Unit Tests for populate_from_extra_config
+# 1. Unit Tests for ChartDataPayload root_validator auto-population
 # ================================================================================
 
 
 class TestPopulateFromExtraConfig:
-    """Pure unit tests — no DB, no mocks."""
+    """Pure unit tests — no DB, no mocks. Validates that ChartDataPayload's
+    root_validator auto-populates top-level fields from extra_config on construction."""
 
     def test_fills_all_fields_from_extra_config(self):
         """When all top-level fields are None, they should be populated from extra_config."""
@@ -149,18 +149,16 @@ class TestPopulateFromExtraConfig:
             extra_config=FULL_EXTRA_CONFIG,
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.x_axis == "date"
-        assert result.y_axis == "revenue"
-        assert result.dimension_col == "region"
-        assert result.extra_dimension == "product"
-        assert result.dimensions == ["region", "product"]
-        assert result.metrics == FULL_EXTRA_CONFIG["metrics"]
-        assert result.geographic_column == "country"
-        assert result.value_column == "gdp"
-        assert result.selected_geojson_id == 42
-        assert result.customizations == {"title": "My Chart", "colors": ["#ff0000"]}
+        assert payload.x_axis == "date"
+        assert payload.y_axis == "revenue"
+        assert payload.dimension_col == "region"
+        assert payload.extra_dimension == "product"
+        assert payload.dimensions == ["region", "product"]
+        assert payload.metrics == FULL_EXTRA_CONFIG["metrics"]
+        assert payload.geographic_column == "country"
+        assert payload.value_column == "gdp"
+        assert payload.selected_geojson_id == 42
+        assert payload.customizations == {"title": "My Chart", "colors": ["#ff0000"]}
 
     def test_never_overrides_explicit_values(self):
         """Explicitly set fields must NOT be overridden by extra_config values."""
@@ -181,21 +179,19 @@ class TestPopulateFromExtraConfig:
             extra_config=FULL_EXTRA_CONFIG,
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.x_axis == "explicit_x"
-        assert result.y_axis == "explicit_y"
-        assert result.dimension_col == "explicit_dim"
-        assert result.extra_dimension == "explicit_extra_dim"
-        assert result.dimensions == ["explicit_col_a"]
-        assert result.metrics == [{"column": "count_col", "aggregation": "count", "alias": "cnt"}]
-        assert result.geographic_column == "explicit_geo"
-        assert result.value_column == "explicit_val"
-        assert result.selected_geojson_id == 99
-        assert result.customizations == {"title": "Explicit Title"}
+        assert payload.x_axis == "explicit_x"
+        assert payload.y_axis == "explicit_y"
+        assert payload.dimension_col == "explicit_dim"
+        assert payload.extra_dimension == "explicit_extra_dim"
+        assert payload.dimensions == ["explicit_col_a"]
+        assert payload.metrics == [{"column": "count_col", "aggregation": "count", "alias": "cnt"}]
+        assert payload.geographic_column == "explicit_geo"
+        assert payload.value_column == "explicit_val"
+        assert payload.selected_geojson_id == 99
+        assert payload.customizations == {"title": "Explicit Title"}
 
     def test_none_extra_config_is_safe(self):
-        """Calling with extra_config=None should not crash; fields stay None."""
+        """Constructing with extra_config=None should not crash; fields stay None."""
         payload = ChartDataPayload(
             chart_type="bar",
             schema_name="public",
@@ -203,16 +199,14 @@ class TestPopulateFromExtraConfig:
             extra_config=None,
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.x_axis is None
-        assert result.y_axis is None
-        assert result.dimension_col is None
-        assert result.metrics is None
-        assert result.customizations is not None  # defaults to {}
+        assert payload.x_axis is None
+        assert payload.y_axis is None
+        assert payload.dimension_col is None
+        assert payload.metrics is None
+        assert payload.customizations is not None  # defaults to {}
 
     def test_empty_extra_config_is_safe(self):
-        """Calling with extra_config={} should not crash; fields stay None."""
+        """Constructing with extra_config={} should not crash; fields stay None."""
         payload = ChartDataPayload(
             chart_type="line",
             schema_name="public",
@@ -220,11 +214,9 @@ class TestPopulateFromExtraConfig:
             extra_config={},
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.x_axis is None
-        assert result.dimension_col is None
-        assert result.customizations == {}
+        assert payload.x_axis is None
+        assert payload.dimension_col is None
+        assert payload.customizations == {}
 
     def test_partial_extra_config(self):
         """Only fields present in extra_config are filled; others stay None."""
@@ -238,29 +230,14 @@ class TestPopulateFromExtraConfig:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.dimension_col == "category"
-        assert result.metrics == [{"column": "amount", "aggregation": "sum", "alias": "total"}]
-        assert result.x_axis is None
-        assert result.y_axis is None
-        assert result.geographic_column is None
-
-    def test_returns_same_payload_object(self):
-        """The function mutates and returns the same object (not a copy)."""
-        payload = ChartDataPayload(
-            chart_type="bar",
-            schema_name="public",
-            table_name="orders",
-            extra_config={"x_axis_column": "date"},
-        )
-
-        result = populate_from_extra_config(payload)
-
-        assert result is payload
+        assert payload.dimension_col == "category"
+        assert payload.metrics == [{"column": "amount", "aggregation": "sum", "alias": "total"}]
+        assert payload.x_axis is None
+        assert payload.y_axis is None
+        assert payload.geographic_column is None
 
     def test_preserves_extra_config_passthrough(self):
-        """extra_config itself must still be available after populate (for time_grain, filters, etc.)."""
+        """extra_config itself must still be available after construction (for time_grain, filters, etc.)."""
         payload = ChartDataPayload(
             chart_type="line",
             schema_name="public",
@@ -268,12 +245,10 @@ class TestPopulateFromExtraConfig:
             extra_config=FULL_EXTRA_CONFIG,
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.extra_config["time_grain"] == "month"
-        assert result.extra_config["filters"] == FULL_EXTRA_CONFIG["filters"]
-        assert result.extra_config["pagination"] == FULL_EXTRA_CONFIG["pagination"]
-        assert result.extra_config["sort"] == FULL_EXTRA_CONFIG["sort"]
+        assert payload.extra_config["time_grain"] == "month"
+        assert payload.extra_config["filters"] == FULL_EXTRA_CONFIG["filters"]
+        assert payload.extra_config["pagination"] == FULL_EXTRA_CONFIG["pagination"]
+        assert payload.extra_config["sort"] == FULL_EXTRA_CONFIG["sort"]
 
 
 # ================================================================================
@@ -298,11 +273,9 @@ class TestTimeGrainScenario:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.x_axis == "order_date"
-        assert result.y_axis == "amount"
-        assert result.extra_config["time_grain"] == "month"
+        assert payload.x_axis == "order_date"
+        assert payload.y_axis == "amount"
+        assert payload.extra_config["time_grain"] == "month"
 
     def test_full_payload_still_preserves_time_grain(self):
         """A dashboard-style full payload (everything set) should also keep time_grain."""
@@ -319,10 +292,8 @@ class TestTimeGrainScenario:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.x_axis == "order_date"
-        assert result.extra_config["time_grain"] == "month"
+        assert payload.x_axis == "order_date"
+        assert payload.extra_config["time_grain"] == "month"
 
 
 class TestTableDrillDownScenario:
@@ -341,10 +312,8 @@ class TestTableDrillDownScenario:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.dimensions == ["product_category"]
-        assert result.metrics == [{"column": "revenue", "aggregation": "sum", "alias": "total"}]
+        assert payload.dimensions == ["product_category"]
+        assert payload.metrics == [{"column": "revenue", "aggregation": "sum", "alias": "total"}]
 
     def test_no_dimensions_set_uses_extra_config(self):
         """When dimensions is None, auto-populate fills from dimension_columns."""
@@ -357,9 +326,7 @@ class TestTableDrillDownScenario:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.dimensions == ["region", "product_category"]
+        assert payload.dimensions == ["region", "product_category"]
 
 
 class TestMapScenario:
@@ -380,12 +347,10 @@ class TestMapScenario:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.geographic_column == "country_name"
-        assert result.value_column == "population"
-        assert result.selected_geojson_id == 5
-        assert result.extra_config["filters"][0]["value"] == "2024"
+        assert payload.geographic_column == "country_name"
+        assert payload.value_column == "population"
+        assert payload.selected_geojson_id == 5
+        assert payload.extra_config["filters"][0]["value"] == "2024"
 
     def test_map_with_explicit_dimension_col_not_overridden(self):
         """Map endpoints set dimension_col=geographic_column explicitly; must be preserved."""
@@ -401,14 +366,12 @@ class TestMapScenario:
             },
         )
 
-        result = populate_from_extra_config(payload)
-
-        assert result.dimension_col == "country_name"
-        assert result.metrics == [{"column": "population", "aggregation": "sum", "alias": "value"}]
+        assert payload.dimension_col == "country_name"
+        assert payload.metrics == [{"column": "population", "aggregation": "sum", "alias": "value"}]
 
 
 # ================================================================================
-# 3. Integration: get_chart_data endpoint calls populate_from_extra_config
+# 3. Integration: get_chart_data endpoint receives auto-populated payloads
 # ================================================================================
 
 
@@ -473,12 +436,12 @@ class TestGetChartDataIntegration:
 
 
 # ================================================================================
-# 4. Integration: get_chart_data_by_id uses populate_from_extra_config
+# 4. Integration: get_chart_data_by_id auto-populates from extra_config
 # ================================================================================
 
 
 class TestGetChartDataByIdIntegration:
-    """Verify the GET endpoint for dashboard charts uses the simplified helper."""
+    """Verify the GET endpoint for dashboard charts receives auto-populated payloads."""
 
     @patch("ddpui.api.charts_api.generate_chart_data_and_config")
     @patch("ddpui.api.charts_api.WarehouseFactory.get_warehouse_client")
@@ -724,7 +687,7 @@ def public_snapshot(
 
 
 class TestPublicReportChartDataPopulate:
-    """Verify public report endpoints call populate_from_extra_config."""
+    """Verify public report endpoints receive auto-populated payloads."""
 
     def test_minimal_payload_auto_populated(self, public_snapshot, seed_db):
         """Public chart-data endpoint should auto-populate from extra_config."""
