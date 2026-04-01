@@ -1,6 +1,7 @@
 # pylint: disable=missing-class-docstring
 from typing import List
 from ninja import Schema
+from pydantic import RootModel, ConfigDict
 
 
 class StorageConfig(Schema):
@@ -15,15 +16,14 @@ class ConnectionConfiguration(Schema):
 
 
 class CreateSourceTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     sourceDefinitionId: str
     connectionConfiguration: ConnectionConfiguration
     workspaceId: str
     name: str
     sourceId: str
     sourceName: str
-
-    class Config:
-        extra = "allow"
 
 
 class CreateSourceTestPayload(Schema):
@@ -34,16 +34,17 @@ class CreateSourceTestPayload(Schema):
 
 
 class GetWorkspaceTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     workspaceId: str
     customerId: str
     name: str
     slug: str
 
-    class Config:
-        extra = "allow"
-
 
 class GetSourceTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     sourceDefinitionId: str
     connectionConfiguration: ConnectionConfiguration
     workspaceId: str
@@ -51,20 +52,14 @@ class GetSourceTestResponse(Schema):
     sourceId: str
     sourceName: str
 
-    class Config:
-        extra = "allow"
-
 
 class GetSourceDefinitions(Schema):
     sourceDefinitionId: str
     name: str
 
 
-class GetSourceDefinitionsTestResponse(Schema):
-    __root__: List[GetSourceDefinitions]
-
-    class Config:
-        extra = "allow"
+class GetSourceDefinitionsTestResponse(RootModel[List[GetSourceDefinitions]]):
+    pass
 
 
 class GetSourceSchemaCatalogTestResponse(Schema):
@@ -72,20 +67,18 @@ class GetSourceSchemaCatalogTestResponse(Schema):
 
 
 class GetWorkspacesTestResponse(Schema):
-    workspaces: List[GetWorkspaceTestResponse]
+    model_config = ConfigDict(extra="allow")
 
-    class Config:
-        extra = "allow"
+    workspaces: List[GetWorkspaceTestResponse]
 
 
 class SetWorkspaceTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     workspaceId: str
     customerId: str
     name: str
     slug: str
-
-    class Config:
-        extra = "allow"
 
 
 class CreateWorkspaceTestPayload(Schema):
@@ -93,18 +86,16 @@ class CreateWorkspaceTestPayload(Schema):
 
 
 class CreateWorkspaceTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     name: str
     workspaceId: str
 
-    class Config:
-        extra = "allow"
-
 
 class GetSourcesTestResponse(Schema):
-    sources: List[GetSourceTestResponse]
+    model_config = ConfigDict(extra="allow")
 
-    class Config:
-        extra = "allow"
+    sources: List[GetSourceTestResponse]
 
 
 class User(Schema):
@@ -116,10 +107,9 @@ class ConnectionSpecification(Schema):
 
 
 class GetSourceDefinitionSpecificationTestResponse(Schema):
-    connectionSpecification: List[ConnectionSpecification]
+    model_config = ConfigDict(extra="allow")
 
-    class Config:
-        extra = "allow"
+    connectionSpecification: List[ConnectionSpecification]
 
 
 class DestinationConfiguration(Schema):
@@ -130,25 +120,23 @@ class DestinationConfiguration(Schema):
 
 
 class CreateDestinationTestPayload(Schema):
+    model_config = ConfigDict(extra="forbid")
+
     destinationdef_id: str
     config: DestinationConfiguration
     name: str
     workspace_id: str
 
-    class Config:
-        extra = "forbid"
-
 
 class CreateDestinationTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     destinationDefinitionId: str
     destinationId: str
     workspaceId: str
     connectionConfiguration: DestinationConfiguration
     name: str
     destinationName: str
-
-    class Config:
-        extra = "allow"
 
 
 class GetDestinationConfiguration(Schema):
@@ -159,6 +147,8 @@ class GetDestinationConfiguration(Schema):
 
 
 class GetDestinationTestResponse(Schema):
+    model_config = ConfigDict(extra="forbid")
+
     destinationDefinitionId: str
     destinationId: str
     workspaceId: str
@@ -166,9 +156,6 @@ class GetDestinationTestResponse(Schema):
     name: str
     destinationName: str
     icon: str
-
-    class Config:
-        extra = "forbid"
 
 
 class UpdateSourceTestPayload(Schema):
@@ -179,15 +166,14 @@ class UpdateSourceTestPayload(Schema):
 
 
 class UpdateSourceTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     sourceId: str
     name: str
     connectionConfiguration: ConnectionConfiguration
     sourceDefinitionId: str
     sourceName: str
     workspaceId: str
-
-    class Config:
-        extra = "allow"
 
 
 class UpdateDestinationTestPayload(Schema):
@@ -197,6 +183,8 @@ class UpdateDestinationTestPayload(Schema):
 
 
 class UpdateDestinationTestResponse(Schema):
+    model_config = ConfigDict(extra="forbid")
+
     destinationId: str
     name: str
     connectionConfiguration: DestinationConfiguration
@@ -205,50 +193,42 @@ class UpdateDestinationTestResponse(Schema):
     workspaceId: str
     icon: str
 
-    class Config:
-        extra = "forbid"
-
 
 class GetConnectionTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     connectionId: str
     name: str
     sourceId: str
     destinationId: str
-
-    class Config:
-        extra = "allow"
 
 
 # class CreateConnectionTestPayload(Schema)
 
 
 class CreateConnectionTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     connectionId: str
     name: str
     sourceId: str
     destinationId: str
-
-    class Config:
-        extra = "allow"
 
 
 class UpdateConnectionTestResponse(Schema):
+    model_config = ConfigDict(extra="allow")
+
     connectionId: str
     name: str
     sourceId: str
     destinationId: str
 
-    class Config:
-        extra = "allow"
-
 
 class CheckSourceConnectionTestResponse(Schema):
-    jobInfo: dict
+    model_config = ConfigDict(extra="allow")
 
-    class Config:
-        extra = "allow"
+    jobInfo: dict
 
 
 class CheckDestinationConnectionTestResponse(Schema):
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")

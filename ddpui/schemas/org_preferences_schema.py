@@ -6,14 +6,14 @@ from ninja import Schema
 class CreateOrgPreferencesSchema(Schema):
     """Schema for creating organization preferences."""
 
-    org: Optional[int]
-    trial_start_date: Optional[datetime]
-    trial_end_date: Optional[datetime]
+    org: Optional[int] = None
+    trial_start_date: Optional[datetime] = None
+    trial_end_date: Optional[datetime] = None
     llm_optin: Optional[bool] = False
-    llm_optin_approved_by: Optional[int]
-    llm_optin_date: Optional[datetime]
+    llm_optin_approved_by: Optional[int] = None
+    llm_optin_date: Optional[datetime] = None
     enable_discord_notifications: Optional[bool] = False
-    discord_webhook: Optional[str]
+    discord_webhook: Optional[str] = None
 
 
 class UpdateOrgPreferencesSchema(Schema):
@@ -38,11 +38,11 @@ class UpdateDiscordNotificationsSchema(Schema):
     """Schema for updating organization discord notification settings."""
 
     enable_discord_notifications: bool
-    discord_webhook: Optional[str]
+    discord_webhook: Optional[str] = None
 
 
 class CreateOrgSupersetDetailsSchema(Schema):
     """Schema for creating organization superset details."""
 
-    superset_version: Optional[str]
-    container_name: Optional[str]
+    superset_version: Optional[str] = None
+    container_name: Optional[str] = None

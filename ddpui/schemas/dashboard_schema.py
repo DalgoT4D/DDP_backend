@@ -70,7 +70,7 @@ class DashboardResponse(Schema):
 
     id: int
     title: str
-    description: Optional[str]
+    description: Optional[str] = None
     dashboard_type: str
     grid_columns: int
     target_screen_size: str
@@ -79,12 +79,12 @@ class DashboardResponse(Schema):
     components: dict
     tabs: List[DashboardTabSchema] = []  # Array of tabs
     is_published: bool
-    published_at: Optional[datetime]
+    published_at: Optional[datetime] = None
     is_locked: bool = False
     locked_by: Optional[str] = None
     created_by: str
     org_id: int
-    last_modified_by: Optional[str]
+    last_modified_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     filters: List[DashboardFilterResponse] = []
@@ -198,7 +198,7 @@ class LandingPageResponse(Schema):
 class LandingPageResolveResponse(Schema):
     """Response schema for resolved landing page"""
 
-    dashboard_id: Optional[int]
-    dashboard_title: Optional[str]
-    dashboard_type: Optional[str]
+    dashboard_id: Optional[int] = None
+    dashboard_title: Optional[str] = None
+    dashboard_type: Optional[str] = None
     source: str  # "personal", "org_default", or "none"
