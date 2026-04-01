@@ -1,20 +1,22 @@
-"""Tests for dashboard chat session creation and reuse rules."""
+"""Tests for dashboard chat session creation, reuse, and turn execution."""
 
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from django.contrib.auth.models import User
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.dashboard_chat.sessions.service import (
+from ddpui.core.dashboard_chat.sessions.session_service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message,
     create_dashboard_chat_user_message_with_status,
+    execute_dashboard_chat_turn,
     get_or_create_dashboard_chat_session,
 )
-from ddpui.core.dashboard_chat.vector.documents import build_dashboard_chat_collection_name
+from ddpui.core.dashboard_chat.vector.vector_documents import build_dashboard_chat_collection_name
+from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
 from ddpui.models.org import Org, OrgDbt
@@ -265,3 +267,106 @@ def test_create_dashboard_chat_user_message_with_status_marks_reused_message(
     assert first_result.created is True
     assert second_result.created is False
     assert first_result.message.id == second_result.message.id
+
+
+@patch("ddpui.core.dashboard_chat.orchestration.orchestrator.get_dashboard_chat_runtime")
+def test_execute_dashboard_chat_turn_persists_assistant_message(get_runtime, session_owner, dashboard):
+    """Successful turns should persist the assistant reply through the session service."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    runtime = Mock()
+    runtime.run.return_value = DashboardChatResponse(
+        answer_text="Funding dropped because donor inflows slowed this quarter.",
+        intent=DashboardChatIntent.QUERY_WITH_SQL,
+        warnings=["Example warning"],
+        sql="SELECT 1",
+        sql_results=[{"value": 1}],
+        metadata={
+            "timing_breakdown": {
+                "runtime_total_ms": 123.4,
+                "graph_nodes_ms": {"load_context": 10.0},
+            }
+        },
+    )
+    get_runtime.return_value = runtime
+
+    result = execute_dashboard_chat_turn(str(session.session_id), user_message.id)
+
+    assistant_message = DashboardChatMessage.objects.get(session=session, role="assistant")
+    assert assistant_message.sequence_number == 2
+    assert assistant_message.content == "Funding dropped because donor inflows slowed this quarter."
+    assert assistant_message.payload["sql"] == "SELECT 1"
+    assert assistant_message.response_latency_ms is not None
+    assert assistant_message.response_latency_ms >= 0
+    assert assistant_message.timing_breakdown == {
+        "runtime_total_ms": 123.4,
+        "graph_nodes_ms": {"load_context": 10.0},
+    }
+    assert result["status"] == "completed"
+    assert result["assistant_message"].id == assistant_message.id
+
+
+@patch("ddpui.core.dashboard_chat.orchestration.orchestrator.get_dashboard_chat_runtime")
+def test_execute_dashboard_chat_turn_bubbles_runtime_errors(get_runtime, session_owner, dashboard):
+    """Runtime failures should propagate without persisting an assistant reply."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    runtime = Mock()
+    runtime.run.side_effect = RuntimeError("boom")
+    get_runtime.return_value = runtime
+
+    with pytest.raises(RuntimeError, match="boom"):
+        execute_dashboard_chat_turn(str(session.session_id), user_message.id)
+
+    assert DashboardChatMessage.objects.filter(session=session, role="assistant").count() == 0
+
+
+@patch("ddpui.core.dashboard_chat.orchestration.orchestrator.get_dashboard_chat_runtime")
+def test_execute_dashboard_chat_turn_reuses_existing_assistant_reply(
+    get_runtime,
+    session_owner,
+    dashboard,
+):
+    """Duplicate execution attempts should reuse the persisted assistant reply."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    assistant_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=2,
+        role="assistant",
+        content="Existing answer",
+        payload={"intent": "query_without_sql"},
+    )
+
+    result = execute_dashboard_chat_turn(str(session.session_id), user_message.id)
+
+    assert result["status"] == "skipped_existing_reply"
+    assert result["assistant_message"].id == assistant_message.id
+    get_runtime.assert_not_called()

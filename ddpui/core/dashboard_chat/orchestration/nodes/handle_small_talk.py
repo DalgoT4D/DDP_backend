@@ -4,15 +4,15 @@ from typing import Any
 
 from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 
-from ddpui.core.dashboard_chat.orchestration.presentation import (
+from ddpui.core.dashboard_chat.orchestration.response_composer import (
     build_usage_summary,
     compose_small_talk_response,
 )
-from ddpui.core.dashboard_chat.orchestration.state import DashboardChatRuntimeState
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 
 def handle_small_talk_node(
-    state: DashboardChatRuntimeState, llm_client, vector_store
+    state: DashboardChatGraphState, llm_client, vector_store
 ) -> dict[str, Any]:
     """Handle simple social turns without any tool use."""
     return {
@@ -23,5 +23,5 @@ def handle_small_talk_node(
             ),
             intent=DashboardChatIntent.SMALL_TALK,
             usage=build_usage_summary(llm_client, vector_store),
-        )
+        ).to_dict()
     }
