@@ -160,22 +160,6 @@ def serialize_dashboard_chat_message(message: DashboardChatMessage) -> dict:
     }
 
 
-def find_dashboard_chat_assistant_reply(
-    *,
-    session: DashboardChatSession,
-    user_message: DashboardChatMessage,
-) -> DashboardChatMessage | None:
-    """Return the first assistant reply that follows a user turn, if it exists."""
-    return (
-        session.messages.filter(
-            role=DashboardChatMessageRole.ASSISTANT.value,
-            sequence_number__gt=user_message.sequence_number,
-        )
-        .order_by("sequence_number")
-        .first()
-    )
-
-
 def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> DashboardChatMessage:
     """Load session and message, run the runtime, persist and return the assistant reply.
 
@@ -201,9 +185,13 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> Dashbo
         raise Exception("Chat message could not be found")
 
     # Safety net: if an assistant reply already exists, return it without re-running.
-    existing_assistant_message = find_dashboard_chat_assistant_reply(
-        session=session,
-        user_message=user_message,
+    existing_assistant_message = (
+        session.messages.filter(
+            role=DashboardChatMessageRole.ASSISTANT.value,
+            sequence_number__gt=user_message.sequence_number,
+        )
+        .order_by("sequence_number")
+        .first()
     )
     if existing_assistant_message is not None:
         return existing_assistant_message

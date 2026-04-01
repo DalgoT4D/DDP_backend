@@ -8,8 +8,8 @@ from ddpui.core.dashboard_chat.orchestration.conversation_context import (
     build_follow_up_context_prompt,
     detect_sql_modification_type,
 )
+from ddpui.core.dashboard_chat.contracts import DashboardChatConversationContext
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import get_conversation_context
 
 
 def build_new_query_messages(
@@ -36,7 +36,9 @@ def build_follow_up_messages(
         {
             "role": "system",
             "content": build_follow_up_context_prompt(
-                get_conversation_context(state),
+                DashboardChatConversationContext.model_validate(
+                    state.get("conversation_context") or {}
+                ),
                 state["user_query"],
             ),
         },

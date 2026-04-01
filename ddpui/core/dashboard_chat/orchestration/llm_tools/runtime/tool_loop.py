@@ -6,7 +6,9 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseToolsError
+from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import (
+    DashboardChatWarehouseToolsError,
+)
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.core.dashboard_chat.orchestration.response_composer import (
@@ -15,8 +17,8 @@ from ddpui.core.dashboard_chat.orchestration.response_composer import (
     max_turns_message,
     fallback_answer_text,
 )
+from ddpui.core.dashboard_chat.contracts import DashboardChatIntentDecision
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import get_intent_decision
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.dbt_tools import (
     handle_get_dbt_model_info_tool,
     handle_search_dbt_models_tool,
@@ -63,7 +65,7 @@ def execute_tool_loop(
     )
     tool_loop_started_at = perf_counter()
     seed_validated_distinct_values_from_previous_sql(state, turn_context)
-    intent_decision = get_intent_decision(state)
+    intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
 
     for turn_index in range(max_turns):
         tool_choice = "required" if intent_decision.force_tool_usage and turn_index == 0 else "auto"

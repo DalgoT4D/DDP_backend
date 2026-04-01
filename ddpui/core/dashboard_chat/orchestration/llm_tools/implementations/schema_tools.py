@@ -5,9 +5,11 @@ from typing import Any
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 from ddpui.utils.custom_logger import CustomLogger
 
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import get_runtime_allowlist
-from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import find_tables_with_column
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
+    find_tables_with_column,
+)
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import (
     DashboardChatTurnContext,
     get_or_load_schema_snippets,
@@ -25,7 +27,7 @@ def handle_get_schema_snippets_tool(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Return schema snippets for allowlisted tables only."""
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     requested_tables = [str(table_name).lower() for table_name in args.get("tables") or []]
     allowed_tables = [
         table_name for table_name in requested_tables if allowlist.is_allowed(table_name)
@@ -58,7 +60,7 @@ def handle_get_distinct_values_tool(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Return distinct values and persist validated filter values for the session."""
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     table_name = str(args.get("table") or "").lower()
     column_name = str(args.get("column") or "")
     limit = max(1, min(int(args.get("limit", 50)), 200))
@@ -69,7 +71,9 @@ def handle_get_distinct_values_tool(
             "message": (f"Table {table_name} is not accessible in the current dashboard context."),
         }
 
-    schema_snippets_by_table = get_or_load_schema_snippets(warehouse_tools_factory, state, turn_context)
+    schema_snippets_by_table = get_or_load_schema_snippets(
+        warehouse_tools_factory, state, turn_context
+    )
     snippet = schema_snippets_by_table.get(table_name)
     normalized_column_name = column_name.lower()
     if snippet is not None and normalized_column_name not in {
@@ -117,7 +121,7 @@ def handle_list_tables_by_keyword_tool(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Search allowlisted tables by table name or column name."""
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     keyword = str(args.get("keyword") or "").strip().lower()
     limit = max(1, min(int(args.get("limit", 15)), 50))
     if not keyword:
@@ -192,7 +196,7 @@ def handle_check_table_row_count_tool(
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
     """Count rows in one allowlisted table."""
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     table_name = str(args.get("table") or "").lower()
     if not allowlist.is_allowed(table_name):
         return {

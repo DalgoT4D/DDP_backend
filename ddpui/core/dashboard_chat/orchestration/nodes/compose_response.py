@@ -2,7 +2,12 @@
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatResponse
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
+from ddpui.core.dashboard_chat.contracts import (
+    DashboardChatIntentDecision,
+    DashboardChatResponse,
+    DashboardChatRetrievedDocument,
+)
 
 from ddpui.core.dashboard_chat.orchestration.response_composer import (
     build_usage_summary,
@@ -12,16 +17,6 @@ from ddpui.core.dashboard_chat.orchestration.response_composer import (
 )
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import build_citations
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import (
-    get_intent_decision,
-    get_retrieved_documents,
-    get_runtime_allowlist,
-    get_runtime_response,
-)
-from ddpui.core.dashboard_chat.orchestration.state.payload_codec import (
-    serialize_citations,
-    serialize_response,
-)
 
 
 def compose_response_node(
@@ -31,25 +26,26 @@ def compose_response_node(
 ) -> dict[str, Any]:
     """Compose the final dashboard-chat response from state accumulated by prior nodes."""
     if state.get("response") is not None:
-        response = get_runtime_response(state)
+        response = DashboardChatResponse.model_validate(state.get("response") or {})
         return {
-            "response": serialize_response(
-                DashboardChatResponse(
-                    answer_text=response.answer_text,
-                    intent=response.intent,
-                    citations=response.citations,
-                    warnings=response.warnings,
-                    sql=response.sql,
-                    sql_results=response.sql_results,
-                    usage=response.usage,
-                    tool_calls=response.tool_calls,
-                    metadata=response.metadata,
-                )
-            )
+            "response": DashboardChatResponse(
+                answer_text=response.answer_text,
+                intent=response.intent,
+                citations=response.citations,
+                warnings=response.warnings,
+                sql=response.sql,
+                sql_results=response.sql_results,
+                usage=response.usage,
+                tool_calls=response.tool_calls,
+                metadata=response.metadata,
+            ).to_dict()
         }
 
-    allowlist = get_runtime_allowlist(state)
-    retrieved_documents = get_retrieved_documents(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
+    retrieved_documents = [
+        DashboardChatRetrievedDocument.model_validate(p)
+        for p in (state.get("retrieved_documents") or [])
+    ]
     citations = build_citations(
         retrieved_documents=retrieved_documents,
         dashboard_export=state.get("dashboard_export_payload") or {},
@@ -67,27 +63,26 @@ def compose_response_node(
         "warnings": list(state.get("warnings") or []),
         "tool_calls": list(state.get("tool_calls") or []),
     }
+    intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
     return {
-        "citations": serialize_citations(citations),
-        "response": serialize_response(
-            DashboardChatResponse(
-                answer_text=compose_final_answer_text(
-                    llm_client,
-                    state,
-                    execution_result,
-                    response_format=response_format,
-                ),
-                intent=get_intent_decision(state).intent,
-                citations=citations,
-                warnings=list(state.get("warnings") or []),
-                sql=state.get("sql"),
-                sql_results=state.get("sql_results"),
-                usage=build_usage_summary(llm_client, vector_store),
-                tool_calls=list(state.get("tool_calls") or []),
-                metadata={
-                    "response_format": response_format,
-                    "table_columns": sql_result_columns(state.get("sql_results")),
-                },
-            )
-        ),
+        "citations": [c.model_dump(mode="json") for c in citations],
+        "response": DashboardChatResponse(
+            answer_text=compose_final_answer_text(
+                llm_client,
+                state,
+                execution_result,
+                response_format=response_format,
+            ),
+            intent=intent_decision.intent,
+            citations=citations,
+            warnings=list(state.get("warnings") or []),
+            sql=state.get("sql"),
+            sql_results=state.get("sql_results"),
+            usage=build_usage_summary(llm_client, vector_store),
+            tool_calls=list(state.get("tool_calls") or []),
+            metadata={
+                "response_format": response_format,
+                "table_columns": sql_result_columns(state.get("sql_results")),
+            },
+        ).to_dict(),
     }

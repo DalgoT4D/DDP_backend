@@ -15,7 +15,9 @@ from ddpui.core.dashboard_chat.vector.org_vector_store import OrgVectorStore
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
 from ddpui.models.org import Org
 
-from ddpui.core.dashboard_chat.orchestration.conversation_context import normalize_conversation_history
+from ddpui.core.dashboard_chat.orchestration.conversation_context import (
+    normalize_conversation_history,
+)
 from ddpui.core.dashboard_chat.orchestration.checkpoints import get_dashboard_chat_checkpointer
 from ddpui.core.dashboard_chat.orchestration.nodes.compose_response import compose_response_node
 from ddpui.core.dashboard_chat.orchestration.nodes.finalize import finalize_node
@@ -42,7 +44,7 @@ from ddpui.core.dashboard_chat.orchestration.nodes.route_intent import route_int
 from ddpui.core.dashboard_chat.orchestration.state import (
     DashboardChatGraphState,
 )
-from ddpui.core.dashboard_chat.orchestration.state.accessors import get_runtime_response
+
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.tool_specifications import (
     DASHBOARD_CHAT_TOOL_SPECIFICATIONS,
 )
@@ -346,7 +348,7 @@ class DashboardChatRuntime:
                 "Resume the session from its persisted checkpoint."
             )
         runtime_total_ms = round((perf_counter() - runtime_started_at) * 1000, 2)
-        response = get_runtime_response(final_state)
+        response = DashboardChatResponse.model_validate(final_state.get("response") or {})
         timing_breakdown = dict(final_state.get("timing_breakdown") or {})
         timing_breakdown["runtime_total_ms"] = runtime_total_ms
         response_metadata = dict(response.metadata)
@@ -383,12 +385,13 @@ class DashboardChatRuntime:
         if not state_snapshot.next:
             if persisted_state.get("response") is None:
                 raise ValueError(f"Session {session_id} has no resumable or completed response")
-            return get_runtime_response(persisted_state)
+            response = DashboardChatResponse.model_validate(persisted_state.get("response") or {})
+            return response
 
         runtime_started_at = perf_counter()
         final_state = graph.invoke(None, config=config)
         runtime_total_ms = round((perf_counter() - runtime_started_at) * 1000, 2)
-        response = get_runtime_response(final_state)
+        response = DashboardChatResponse.model_validate(final_state.get("response") or {})
         timing_breakdown = dict(final_state.get("timing_breakdown") or {})
         timing_breakdown["runtime_total_ms"] = runtime_total_ms
         response_metadata = dict(response.metadata)

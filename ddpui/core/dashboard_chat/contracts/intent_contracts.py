@@ -1,8 +1,9 @@
 """Intent-routing dashboard chat contracts."""
 
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DashboardChatIntent(str, Enum):
@@ -17,26 +18,28 @@ class DashboardChatIntent(str, Enum):
     IRRELEVANT = "irrelevant"
 
 
-@dataclass(frozen=True)
-class DashboardChatFollowUpContext:
+class DashboardChatFollowUpContext(BaseModel):
     """Prototype-style follow-up metadata returned by the router."""
+
+    model_config = ConfigDict(frozen=True)
 
     is_follow_up: bool
     follow_up_type: str | None = None
-    reusable_elements: dict[str, Any] = field(default_factory=dict)
+    reusable_elements: dict[str, Any] = Field(default_factory=dict)
     modification_instruction: str | None = None
 
 
-@dataclass(frozen=True)
-class DashboardChatIntentDecision:
+class DashboardChatIntentDecision(BaseModel):
     """Intent-routing outcome."""
+
+    model_config = ConfigDict(frozen=True)
 
     intent: DashboardChatIntent
     confidence: float
     reason: str
-    missing_info: list[str] = field(default_factory=list)
+    missing_info: list[str] = Field(default_factory=list)
     force_tool_usage: bool = False
     clarification_question: str | None = None
-    follow_up_context: DashboardChatFollowUpContext = field(
+    follow_up_context: DashboardChatFollowUpContext = Field(
         default_factory=lambda: DashboardChatFollowUpContext(is_follow_up=False)
     )

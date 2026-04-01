@@ -2,24 +2,28 @@
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatCitation, DashboardChatResponse
-
-from ddpui.core.dashboard_chat.orchestration.state.payload_codec import serialize_response
-from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.state.accessors import (
-    get_intent_decision,
-    get_retrieved_documents,
-    get_runtime_allowlist,
-    get_runtime_response,
-    get_sql_validation_result,
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
+from ddpui.core.dashboard_chat.contracts import (
+    DashboardChatCitation,
+    DashboardChatIntentDecision,
+    DashboardChatResponse,
+    DashboardChatRetrievedDocument,
+    DashboardChatSqlValidationResult,
 )
+from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 
 def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
     """Attach warehouse citations and metadata to the finished response."""
-    response = get_runtime_response(state)
+    response = DashboardChatResponse.model_validate(state.get("response") or {})
     citations = list(response.citations)
-    sql_validation = get_sql_validation_result(state)
+
+    sql_validation_payload = state.get("sql_validation")
+    sql_validation = (
+        DashboardChatSqlValidationResult.model_validate(sql_validation_payload)
+        if sql_validation_payload is not None
+        else None
+    )
     if (
         sql_validation is not None
         and sql_validation.is_valid
@@ -37,31 +41,35 @@ def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
             if table_name
         )
 
-    allowlist = get_runtime_allowlist(state)
+    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
+    intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
+    retrieved_documents = [
+        DashboardChatRetrievedDocument.model_validate(p)
+        for p in (state.get("retrieved_documents") or [])
+    ]
+
     response_metadata = dict(response.metadata)
     response_metadata.update(
         {
             "dashboard_id": state["dashboard_id"],
-            "retrieved_document_ids": [document.document_id for document in get_retrieved_documents(state)],
+            "retrieved_document_ids": [doc.document_id for doc in retrieved_documents],
             "allowlisted_tables": sorted(allowlist.allowed_tables),
             "sql_guard_errors": sql_validation.errors if sql_validation is not None else [],
-            "intent_reason": get_intent_decision(state).reason,
-            "missing_info": get_intent_decision(state).missing_info,
-            "follow_up_type": get_intent_decision(state).follow_up_context.follow_up_type,
+            "intent_reason": intent_decision.reason,
+            "missing_info": intent_decision.missing_info,
+            "follow_up_type": intent_decision.follow_up_context.follow_up_type,
         }
     )
     return {
-        "response": serialize_response(
-            DashboardChatResponse(
-                answer_text=response.answer_text,
-                intent=response.intent,
-                citations=list(dict.fromkeys(citations)),
-                warnings=response.warnings,
-                sql=response.sql,
-                sql_results=response.sql_results,
-                usage=response.usage,
-                tool_calls=response.tool_calls,
-                metadata=response_metadata,
-            )
-        )
+        "response": DashboardChatResponse(
+            answer_text=response.answer_text,
+            intent=response.intent,
+            citations=list(dict.fromkeys(citations)),
+            warnings=response.warnings,
+            sql=response.sql,
+            sql_results=response.sql_results,
+            usage=response.usage,
+            tool_calls=response.tool_calls,
+            metadata=response_metadata,
+        ).to_dict()
     }
