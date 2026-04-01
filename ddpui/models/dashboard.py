@@ -140,7 +140,7 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "layout_config": self.layout_config,
             "components": self.components,
-            "tabs": self.tabs,
+            "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,
