@@ -10,11 +10,16 @@ from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org_preferences import OrgPreferences
+from ddpui.models.role_based_access import Role
+from ddpui.auth import PIPELINE_MANAGER_ROLE
 from ddpui.utils import timezone
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.awsses import send_text_message
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.moretasks import schedule_notification_task
+
+logger = CustomLogger("notifications")
 
 
 def get_recipients(
@@ -45,7 +50,12 @@ def get_recipients(
     # additional filters (not applicable to single user)
     if sent_to != SentToEnum.SINGLE_USER:
         if manager_or_above:
-            queryset = queryset.filter(new_role_id__lte=3)
+            pipeline_manager = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
+            if pipeline_manager:
+                queryset = queryset.filter(new_role__level__gte=pipeline_manager.level)
+            else:
+                logger.error(f"Role with slug '{PIPELINE_MANAGER_ROLE}' not found")
+                return f"Role with slug '{PIPELINE_MANAGER_ROLE}' not found", None
 
         if superset_only:
             queryset = queryset.filter(org__viz_url__isnull=False)
