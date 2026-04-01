@@ -36,7 +36,7 @@ from ddpui.services.dashboard_service import (
     FilterNotFoundError,
     FilterValidationError,
 )
-from ddpui.schemas.dashboard_schema import DashboardUpdate
+from ddpui.schemas.dashboard_schema import DashboardCreate, DashboardUpdate, DashboardTabSchema
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -615,3 +615,91 @@ class TestResolveDashboardFiltersForChart:
             DashboardService.resolve_dashboard_filters_for_chart(
                 "not a dict", [self._make_filter_def(1, "status")], "public", "orders"
             )
+
+
+# ================================================================================
+# Test create_dashboard default tab (NEW in feature/dashboard_tabs)
+# ================================================================================
+
+
+class TestCreateDashboardDefaultTab:
+    """Tests for DashboardService.create_dashboard() default tab generation"""
+
+    def test_create_dashboard_has_default_tab(self, orguser, seed_db):
+        """Test that a new dashboard is created with exactly one default tab"""
+        dashboard = DashboardService.create_dashboard(
+            DashboardCreate(title="Tab Test Dashboard"),
+            orguser,
+        )
+
+        assert len(dashboard.tabs) == 1
+
+        # Cleanup
+        dashboard.delete()
+
+    def test_create_dashboard_default_tab_structure(self, orguser, seed_db):
+        """Test that the default tab has the correct structure"""
+        dashboard = DashboardService.create_dashboard(
+            DashboardCreate(title="Tab Structure Dashboard"),
+            orguser,
+        )
+
+        tab = dashboard.tabs[0]
+        assert tab["title"] == "Untitled Tab 1"
+        assert tab["id"].startswith("tab-")
+        assert tab["layout_config"] == []
+        assert tab["components"] == {}
+
+        # Cleanup
+        dashboard.delete()
+
+
+# ================================================================================
+# Test update_dashboard tabs (NEW in feature/dashboard_tabs)
+# ================================================================================
+
+
+class TestUpdateDashboardTabs:
+    """Tests for DashboardService.update_dashboard() tabs handling"""
+
+    def test_update_dashboard_tabs_saves_correctly(self, orguser, sample_dashboard, seed_db):
+        """Test that providing tabs in update saves them as dicts"""
+        new_tabs = [
+            DashboardTabSchema(
+                id="tab-111",
+                title="My Tab",
+                layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 3}],
+                components={"chart-1": {"type": "chart"}},
+            )
+        ]
+
+        updated = DashboardService.update_dashboard(
+            sample_dashboard.id,
+            orguser.org,
+            orguser,
+            DashboardUpdate(tabs=new_tabs),
+        )
+
+        assert len(updated.tabs) == 1
+        assert updated.tabs[0]["id"] == "tab-111"
+        assert updated.tabs[0]["title"] == "My Tab"
+        assert updated.tabs[0]["layout_config"] == [{"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 3}]
+        assert updated.tabs[0]["components"] == {"chart-1": {"type": "chart"}}
+
+    def test_update_dashboard_without_tabs_preserves_existing(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """Test that omitting tabs in update does not overwrite existing tabs"""
+        sample_dashboard.tabs = [{"id": "tab-existing", "title": "Existing Tab", "layout_config": [], "components": {}}]
+        sample_dashboard.save()
+
+        updated = DashboardService.update_dashboard(
+            sample_dashboard.id,
+            orguser.org,
+            orguser,
+            DashboardUpdate(title="New Title Only"),
+        )
+
+        assert updated.title == "New Title Only"
+        assert len(updated.tabs) == 1
+        assert updated.tabs[0]["id"] == "tab-existing"
