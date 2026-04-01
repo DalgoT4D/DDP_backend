@@ -18,44 +18,44 @@ from ddpui.celeryworkers.moretasks import schedule_notification_task
 
 
 def get_recipients(
-    sent_to: str, org_slug: str, user_email: str, manager_or_above: bool
+    sent_to: str,
+    org_slug: str,
+    user_email: str,
+    manager_or_above: bool,
+    superset_only: bool = False,
 ) -> Tuple[Optional[str], Optional[List[int]]]:
     """Returns the list of recipients based on the request parameters"""
 
-    recipients = []
-    # send to all users
+    queryset = OrgUser.objects.all()
+
+    # audience filtering
     if sent_to == SentToEnum.ALL_USERS:
-        recipients = OrgUser.objects.all().values_list("id", flat=True)
+        pass  # no additional filter
 
-    # send to all users in an org
     elif sent_to == SentToEnum.ALL_ORG_USERS:
-        if org_slug:
-            recipients = OrgUser.objects.filter(org__slug=org_slug).values_list("id", flat=True)
-        else:
+        if not org_slug:
             return "org_slug is required to sent notification to all org users.", None
+        queryset = queryset.filter(org__slug=org_slug)
 
-    # send to a single user
     elif sent_to == SentToEnum.SINGLE_USER:
-        if user_email:
-            try:
-                recipients = OrgUser.objects.filter(user__email=user_email).values_list(
-                    "id", flat=True
-                )
-            except OrgUser.DoesNotExist:
-                return "User with the provided email does not exist", None
-        else:
+        if not user_email:
             return "user email is required to sent notification to a user.", None
+        queryset = queryset.filter(user__email=user_email)
 
-    # role based filtering
-    if manager_or_above and sent_to != SentToEnum.SINGLE_USER:
-        recipients = OrgUser.objects.filter(new_role_id__lte=3, id__in=recipients).values_list(
-            "id", flat=True
-        )
+    # additional filters (not applicable to single user)
+    if sent_to != SentToEnum.SINGLE_USER:
+        if manager_or_above:
+            queryset = queryset.filter(new_role_id__lte=3)
 
-    if not recipients:
+        if superset_only:
+            queryset = queryset.filter(org__viz_url__isnull=False)
+
+    recipient_ids = list(queryset.values_list("id", flat=True).distinct())
+
+    if not recipient_ids:
         return "No users found for the given information", None
 
-    return None, list(recipients.distinct())
+    return None, recipient_ids
 
 
 # manage recipients for a notification
