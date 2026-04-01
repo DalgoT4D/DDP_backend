@@ -98,9 +98,12 @@ class ChartDataPayload(Schema):
     limit: int = 100
 
     # -- auto-populate top-level fields from extra_config ----------------
-    # Maps extra_config keys → top-level field names.  Only fills fields
-    # that were not explicitly set (i.e. are None), so callers that pass
-    # explicit values are never overridden.
+    # Previously every endpoint manually mapped extra_config keys to
+    # top-level fields (x_axis, y_axis, etc.) — duplicated across 9+
+    # call sites.  This root_validator does it once, automatically, on
+    # every ChartDataPayload construction.  Only fills fields that were
+    # not explicitly set (i.e. are None), so callers that pass explicit
+    # values are never overridden.
     _EXTRA_CONFIG_MAP = {
         "x_axis_column": "x_axis",
         "y_axis_column": "y_axis",
