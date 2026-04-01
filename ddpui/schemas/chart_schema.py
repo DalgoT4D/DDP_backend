@@ -118,6 +118,10 @@ class ChartDataPayload(Schema):
 
     @root_validator(pre=False)
     def _populate_from_extra_config(cls, values):
+        """Reports send a minimal payload with only extra_config (the frozen
+        chart config).  Dashboard payloads set top-level fields explicitly.
+        This validator bridges the gap — if a top-level field is None, it
+        fills it from extra_config so both paths produce the same query."""
         ec = values.get("extra_config") or {}
         for ec_key, field_name in cls._EXTRA_CONFIG_MAP.items():
             if values.get(field_name) is None and ec_key in ec:
