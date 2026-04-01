@@ -328,14 +328,27 @@ def get_public_filter_preview(
 ):
     """Get public filter preview - identical to authenticated filter preview API"""
     try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        # Verify token belongs to a public dashboard or report snapshot
+        org = None
+        try:
+            dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+            org = dashboard.org
+        except Dashboard.DoesNotExist:
+            # Fall back to ReportSnapshot (public reports use report tokens)
+            try:
+                snapshot = ReportSnapshot.objects.get(public_share_token=token, is_public=True)
+                org = snapshot.org
+            except ReportSnapshot.DoesNotExist:
+                pass
+
+        if org is None:
+            raise Dashboard.DoesNotExist()
 
         # Get org warehouse
         from ddpui.models.org import OrgWarehouse
         from ddpui.api.filter_api import get_filter_preview
 
-        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
 
@@ -344,7 +357,7 @@ def get_public_filter_preview(
             def __init__(self, org):
                 self.orguser = type("MockOrgUser", (), {"org": org})()
 
-        mock_request = MockRequest(dashboard.org)
+        mock_request = MockRequest(org)
 
         # Use the exact same function as authenticated API
         from ddpui.core.charts.charts_service import get_warehouse_client
@@ -458,10 +471,10 @@ def get_public_filter_preview(
 
     except Dashboard.DoesNotExist:
         logger.warning(
-            f"Public filter preview access failed - dashboard not found for token: {token}"
+            f"Public filter preview access failed - no public dashboard or report found for token: {token}"
         )
         return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
+            error="Dashboard or report not found or no longer public", is_valid=False
         )
     except Exception as e:
         logger.error(f"Public filter preview error: {str(e)}")
