@@ -68,9 +68,7 @@ def format_table_summary_markdown(result: dict[str, Any]) -> str:
     summary = str(result.get("summary") or "").strip()
     raw_key_points = result.get("key_points") or []
     key_points = [
-        str(point).strip()
-        for point in raw_key_points
-        if isinstance(point, str) and point.strip()
+        str(point).strip() for point in raw_key_points if isinstance(point, str) and point.strip()
     ][:3]
 
     sections: list[str] = []
@@ -81,8 +79,3 @@ def format_table_summary_markdown(result: dict[str, Any]) -> str:
     if key_points:
         sections.append("\n".join(f"- {point}" for point in key_points))
     return "\n\n".join(section for section in sections if section).strip()
-
-
-def serialize_final_answer_context_payload(payload: dict[str, Any]) -> str:
-    """Serialize final answer prompt context deterministically."""
-    return json.dumps(payload, ensure_ascii=False)

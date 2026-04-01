@@ -11,7 +11,6 @@ from ddpui.core.dashboard_chat.agents.final_answer_formatting import (
     TABLE_SUMMARY_JSON_INSTRUCTIONS,
     build_final_answer_context_payload,
     format_table_summary_markdown,
-    serialize_final_answer_context_payload,
 )
 from ddpui.core.dashboard_chat.agents.prompt_template_store import DashboardChatPromptStore
 from ddpui.core.dashboard_chat.contracts import (
@@ -183,7 +182,7 @@ class OpenAIDashboardChatLlmClient:
                     + "\n\n"
                     + TABLE_SUMMARY_JSON_INSTRUCTIONS
                 ),
-                user_prompt=serialize_final_answer_context_payload(context_payload),
+                user_prompt=json.dumps(context_payload, ensure_ascii=False),
             )
             return format_table_summary_markdown(result)
 
@@ -197,7 +196,7 @@ class OpenAIDashboardChatLlmClient:
                 },
                 {
                     "role": "user",
-                    "content": serialize_final_answer_context_payload(context_payload),
+                    "content": json.dumps(context_payload, ensure_ascii=False),
                 },
             ],
             temperature=0.1,
