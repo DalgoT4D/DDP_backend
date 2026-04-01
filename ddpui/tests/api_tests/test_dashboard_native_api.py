@@ -34,6 +34,7 @@ from ddpui.api.dashboard_native_api import (
     create_dashboard,
     update_dashboard,
     delete_dashboard,
+    duplicate_dashboard,
     create_filter,
     update_filter,
     delete_filter,
@@ -591,6 +592,95 @@ class TestDeleteFilter:
             delete_filter(request, dashboard_id=sample_dashboard.id, filter_id=99999)
 
         assert excinfo.value.status_code == 404
+
+
+# ================================================================================
+# Test duplicate_dashboard tabs (NEW in feature/dashboard_tabs)
+# ================================================================================
+
+
+class TestDuplicateDashboardTabs:
+    """Tests for duplicate_dashboard() tabs copying with filter ID remapping"""
+
+    def test_duplicate_dashboard_copies_empty_tabs(self, orguser, sample_dashboard, seed_db):
+        """Test that duplicating a dashboard with no tabs results in empty tabs"""
+        sample_dashboard.tabs = []
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response.tabs == []
+
+    def test_duplicate_dashboard_copies_tabs_without_filters(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """Test that tabs without filter components are copied as-is"""
+        sample_dashboard.tabs = [
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 3}],
+                "components": {"chart-1": {"type": "chart"}},
+            }
+        ]
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert len(response.tabs) == 1
+        assert response.tabs[0].title == "Tab 1"
+        assert response.tabs[0].components == {"chart-1": {"type": "chart"}}
+
+    def test_duplicate_dashboard_tabs_filter_ids_are_remapped(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """Test that filter IDs in tab layout_config and components are remapped to new IDs"""
+        original_filter = DashboardFilter.objects.create(
+            dashboard=sample_dashboard,
+            name="State Filter",
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="state",
+            settings={},
+            order=0,
+        )
+
+        sample_dashboard.tabs = [
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": f"filter-{original_filter.id}"}],
+                "components": {
+                    f"filter-{original_filter.id}": {
+                        "type": "filter",
+                        "config": {"filterId": original_filter.id},
+                    }
+                },
+            }
+        ]
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_tab = response.tabs[0]
+        new_filter_key = list(new_tab.components.keys())[0]
+        new_filter_id = int(new_filter_key.replace("filter-", ""))
+
+        # Old filter ID must NOT appear in the new tab
+        assert f"filter-{original_filter.id}" not in [
+            item["i"] for item in new_tab.layout_config
+        ]
+        # New filter ID must appear in layout_config
+        assert f"filter-{new_filter_id}" in [item["i"] for item in new_tab.layout_config]
+        # New filter ID must appear in components config
+        assert new_tab.components[f"filter-{new_filter_id}"]["config"]["filterId"] == new_filter_id
+
+        # Cleanup
+        original_filter.delete()
 
 
 # ================================================================================
