@@ -1,13 +1,7 @@
 import json
 from urllib.parse import parse_qs
 
-from asgiref.sync import async_to_sync
-
 from ddpui.core.dashboard_chat.sessions.session_service import execute_dashboard_chat_turn
-from ddpui.core.dashboard_chat.events import (
-    build_dashboard_chat_event,
-    dashboard_chat_group_name,
-)
 from ddpui.core.dashboard_chat.sessions.session_service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message_with_status,
@@ -15,6 +9,8 @@ from ddpui.core.dashboard_chat.sessions.session_service import (
     get_or_create_dashboard_chat_session,
     serialize_dashboard_chat_message,
 )
+from django.utils import timezone
+
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.role_based_access import RolePermission
@@ -26,6 +22,27 @@ from ddpui.websockets.schemas import WebsocketResponse, WebsocketResponseStatus
 logger = CustomLogger("ddpui")
 
 
+def build_dashboard_chat_event(
+    *,
+    event_type: str,
+    dashboard_id: int,
+    data: dict,
+    session_id: str | None = None,
+    message_id: str | None = None,
+) -> dict:
+    event = {
+        "event_type": event_type,
+        "dashboard_id": dashboard_id,
+        "occurred_at": timezone.now().isoformat(),
+        "data": data,
+    }
+    if session_id is not None:
+        event["session_id"] = session_id
+    if message_id is not None:
+        event["message_id"] = message_id
+    return event
+
+
 class DashboardChatConsumer(BaseConsumer):
     """Authenticated websocket for dashboard-level chat."""
 
@@ -33,7 +50,6 @@ class DashboardChatConsumer(BaseConsumer):
         query_string = parse_qs(self.scope["query_string"].decode())
         token = query_string.get("token", [None])[0]
         orgslug = query_string.get("orgslug", [None])[0]
-        self.joined_session_groups = set()
 
         if not self.authenticate_user(token, orgslug):
             self.close()
@@ -82,12 +98,13 @@ class DashboardChatConsumer(BaseConsumer):
             )
             return
 
-        available, unavailable_message = self._chat_available()
-        if not available:
+        try:
+            self._assert_chat_available()
+        except Exception as error:
             self.respond(
                 WebsocketResponse(
                     data={},
-                    message=unavailable_message,
+                    message=str(error),
                     status=WebsocketResponseStatus.ERROR,
                 )
             )
@@ -115,7 +132,6 @@ class DashboardChatConsumer(BaseConsumer):
             client_message_id=payload.get("client_message_id"),
         )
         user_message = user_message_result.message
-        self._subscribe_to_session(str(session.session_id))
 
         if not user_message_result.created:
             assistant_message = find_dashboard_chat_assistant_reply(
@@ -216,50 +232,23 @@ class DashboardChatConsumer(BaseConsumer):
             )
         )
 
-    def websocket_disconnect(self, message):
-        """Remove the socket from any joined session groups on disconnect."""
-        if getattr(self, "channel_layer", None) is None:
-            return
-        for group_name in getattr(self, "joined_session_groups", set()):
-            async_to_sync(self.channel_layer.group_discard)(group_name, self.channel_name)
-
-    def dashboard_chat_event(self, event):
-        """Forward dashboard chat events from the channel layer to the browser."""
-        self.respond(
-            WebsocketResponse(
-                data=event["event"],
-                message="",
-                status=WebsocketResponseStatus.SUCCESS,
-            )
-        )
-
-    def _subscribe_to_session(self, session_id: str) -> None:
-        """Join the session-scoped channel-layer group if not already subscribed."""
-        group_name = dashboard_chat_group_name(session_id)
-        if group_name in self.joined_session_groups:
-            return
-        async_to_sync(self.channel_layer.group_add)(group_name, self.channel_name)
-        self.joined_session_groups.add(group_name)
-
-    def _chat_available(self) -> tuple[bool, str]:
-        """Return whether the current org is ready for dashboard chat."""
+    def _assert_chat_available(self) -> None:
+        """Raise Exception if the org is not ready for dashboard chat."""
         feature_enabled = get_all_feature_flags_for_org(self.orguser.org).get(
             "AI_DASHBOARD_CHAT", False
         )
         if not feature_enabled:
-            return False, "Chat with dashboards is not enabled for this organization"
+            raise Exception("Chat with dashboards is not enabled for this organization")
 
         org_preferences = OrgPreferences.objects.filter(org=self.orguser.org).first()
         if org_preferences is None or not org_preferences.ai_data_sharing_enabled:
-            return False, "Chat with dashboards is not enabled for this organization"
+            raise Exception("Chat with dashboards is not enabled for this organization")
 
         if self.orguser.org.dbt is None:
-            return False, "Chat with dashboards is not available because dbt is not configured"
+            raise Exception("Chat with dashboards is not available because dbt is not configured")
 
         if self.orguser.org.dbt.vector_last_ingested_at is None:
-            return False, "Chat with dashboards is still being prepared for this organization"
-
-        return True, ""
+            raise Exception("Chat with dashboards is still being prepared for this organization")
 
     def _has_permission(self, permission_slug: str) -> bool:
         """Check the authenticated orguser's role permission directly."""
