@@ -7,7 +7,6 @@ from ddpui.core.dashboard_chat.sessions.session_service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message_with_status,
     execute_dashboard_chat_turn,
-    find_dashboard_chat_assistant_reply,
     get_or_create_dashboard_chat_session,
     serialize_dashboard_chat_message,
 )
@@ -76,21 +75,11 @@ class DashboardChatConsumer(BaseConsumer):
             self._send_error(str(error))
             return
 
-        user_message_result = create_dashboard_chat_user_message_with_status(
+        user_message = create_dashboard_chat_user_message_with_status(
             session=session,
             content=raw_message,
             client_message_id=payload.get("client_message_id"),
-        )
-        user_message = user_message_result.message
-
-        if not user_message_result.created:
-            existing_reply = find_dashboard_chat_assistant_reply(
-                session=session,
-                user_message=user_message,
-            )
-            if existing_reply is not None:
-                self._send_assistant_message(session, existing_reply)
-            return
+        ).message
 
         self._send_progress(session, user_message)
 
