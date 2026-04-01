@@ -66,7 +66,7 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
 
     # push conection orgtasks in pipelin
     sync_orgtasks = []
-    if len(payload.connections) > 0:
+    if payload.connections:
         org_server_block = OrgPrefectBlockv1.objects.filter(
             org=org, block_type=AIRBYTESERVER
         ).first()
@@ -394,7 +394,7 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
     # push sync tasks to pipeline
     sync_orgtasks = []
 
-    if len(payload.connections) > 0:
+    if payload.connections:
         # check if pipeline has airbyte syncs
         org_server_block = OrgPrefectBlockv1.objects.filter(
             org=orguser.org, block_type=AIRBYTESERVER
