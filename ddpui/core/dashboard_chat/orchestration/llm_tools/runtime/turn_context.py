@@ -257,21 +257,3 @@ def dbt_resources_by_unique_id(state: DashboardChatGraphState) -> dict[str, dict
     """Return the allowlisted dbt index built at session start."""
     dbt_index = state.get("dbt_index") or {}
     return dict(dbt_index.get("resources_by_unique_id") or {})
-
-
-__all__ = [
-    "DashboardChatTurnContext",
-    "current_validated_distinct_payloads",
-    "current_schema_snippet_payloads",
-    "dbt_resources_by_unique_id",
-    "get_or_embed_query",
-    "get_or_load_schema_snippets",
-    "get_turn_warehouse_tools",
-    "has_validated_distinct_value",
-    "hydrate_validated_distinct_values",
-    "hydrate_schema_snippets_by_table",
-    "is_text_type",
-    "record_validated_distinct_values",
-    "record_validated_filters_from_sql",
-    "seed_validated_distinct_values_from_previous_sql",
-]
