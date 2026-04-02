@@ -36,7 +36,7 @@ ddpui/
 │
 ├── core/
 │   └── {module}/                    # Feature module (all business logic here)
-│       ├── __init__.py              # Keep empty (no re-exports or __all__)
+│       ├── __init__.py
 │       ├── {module}_service.py      # Business logic and orchestration
 │       ├── {module}_operations.py   # Domain operations (optional)
 │       └── exceptions.py            # Custom exceptions for this feature
@@ -272,20 +272,6 @@ def delete_{module}(request, id: int):
    chart = Chart.objects.get(id=chart_id, org=orguser.org)  # Direct model access
    ```
 
-6. **No Local Imports**: Always use global imports at the top of the file. Never use local/inline imports inside functions or methods.
-   ```python
-   # ✅ GOOD - global import at top of file
-   from django.conf import settings
-
-   def my_function():
-       url = settings.FRONTEND_URL
-
-   # ❌ BAD - local import inside function
-   def my_function():
-       from django.conf import settings
-       url = settings.FRONTEND_URL
-   ```
-
 ---
 
 ## Core Layer Design
@@ -297,7 +283,7 @@ def delete_{module}(request, id: int):
 
 ```
 ddpui/core/{module}/
-├── __init__.py              # Keep empty — do NOT add re-exports or __all__
+├── __init__.py              # Export public interfaces
 ├── {module}_service.py      # Business logic and orchestration
 ├── {module}_operations.py   # Domain-specific operations (optional)
 └── exceptions.py            # Custom exceptions
@@ -1105,9 +1091,15 @@ ddpui/
 
 #### `core/charts/__init__.py`
 ```python
-# Keep empty — all imports should use full paths like:
-# from ddpui.core.charts.chart_service import ChartService
-# Do NOT add re-exports or __all__ here.
+from .chart_service import ChartService
+from .exceptions import ChartError, ChartNotFoundError, ChartValidationError
+
+__all__ = [
+    "ChartService",
+    "ChartError",
+    "ChartNotFoundError",
+    "ChartValidationError",
+]
 ```
 
 #### `exceptions.py`
