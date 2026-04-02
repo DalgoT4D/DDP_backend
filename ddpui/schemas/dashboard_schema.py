@@ -56,7 +56,7 @@ class DashboardResponse(Schema):
 
     id: int
     title: str
-    description: Optional[str]
+    description: Optional[str] = None
     dashboard_type: str
     grid_columns: int
     target_screen_size: str
@@ -64,12 +64,12 @@ class DashboardResponse(Schema):
     layout_config: list[dict]
     components: dict
     is_published: bool
-    published_at: Optional[datetime]
+    published_at: Optional[datetime] = None
     is_locked: bool = False
     locked_by: Optional[str] = None
     created_by: str
     org_id: int
-    last_modified_by: Optional[str]
+    last_modified_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     filters: List[DashboardFilterResponse] = []
@@ -137,14 +137,14 @@ class LockResponse(Schema):
 # =============================================================================
 
 
-class DashboardShareToggle(Schema):
-    """Schema for toggling dashboard sharing"""
+class ShareToggle(Schema):
+    """Schema for toggling public sharing (used by dashboards and reports)"""
 
     is_public: bool
 
 
-class DashboardShareResponse(Schema):
-    """Schema for share response"""
+class ShareResponse(Schema):
+    """Schema for share response (used by dashboards and reports)"""
 
     is_public: bool
     public_url: Optional[str] = None
@@ -152,14 +152,20 @@ class DashboardShareResponse(Schema):
     message: str
 
 
-class DashboardShareStatus(Schema):
-    """Schema for share status response"""
+class ShareStatus(Schema):
+    """Schema for share status response (used by dashboards and reports)"""
 
     is_public: bool
     public_url: Optional[str] = None
     public_access_count: int
     last_public_accessed: Optional[datetime] = None
     public_shared_at: Optional[datetime] = None
+
+
+# Backwards-compatible aliases
+DashboardShareToggle = ShareToggle
+DashboardShareResponse = ShareResponse
+DashboardShareStatus = ShareStatus
 
 
 # =============================================================================
@@ -177,9 +183,9 @@ class LandingPageResponse(Schema):
 class LandingPageResolveResponse(Schema):
     """Response schema for resolved landing page"""
 
-    dashboard_id: Optional[int]
-    dashboard_title: Optional[str]
-    dashboard_type: Optional[str]
+    dashboard_id: Optional[int] = None
+    dashboard_title: Optional[str] = None
+    dashboard_type: Optional[str] = None
     source: str  # "personal", "org_default", or "none"
 
 

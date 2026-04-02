@@ -173,7 +173,7 @@ class Org(models.Model):
             current.edr_queue = update_data.edr_queue
 
         # Store as nested structure
-        self.queue_config = current.dict()
+        self.queue_config = current.model_dump()
         self.save()
 
     def base_plan(self):

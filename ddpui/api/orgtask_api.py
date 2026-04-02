@@ -245,6 +245,9 @@ def get_prefect_transformation_tasks(request):
     res = []
 
     for org_task in org_tasks:
+        if org_task.task.slug not in TRANSFORM_TASKS_SEQ:
+            continue
+
         # git pull               : "git" + " " + "pull"
         # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
         command = None

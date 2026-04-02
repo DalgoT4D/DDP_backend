@@ -41,7 +41,7 @@ class ChartResponse(Schema):
 
     id: int
     title: str
-    description: Optional[str]
+    description: Optional[str] = None
     chart_type: str
     schema_name: str
     table_name: str
