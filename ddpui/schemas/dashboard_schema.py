@@ -22,6 +22,19 @@ class DashboardCreate(Schema):
     grid_columns: int = 12
 
 
+class DashboardTabSchema(Schema):
+    """Schema for a dashboard tab
+
+    Each tab contains its own layout and components, allowing users
+    to organize charts into separate views within a single dashboard.
+    """
+
+    id: str  # e.g., "tab-1710901234567"
+    title: str  # e.g., "Untitled Tab 1" (max 50 chars)
+    layout_config: List[dict] = []  # Grid positions for this tab
+    components: dict = {}  # Component configs for this tab
+
+
 class DashboardUpdate(Schema):
     """Schema for updating a dashboard"""
 
@@ -31,6 +44,7 @@ class DashboardUpdate(Schema):
     target_screen_size: Optional[str] = None
     layout_config: Optional[list[dict]] = None
     components: Optional[dict] = None
+    tabs: Optional[List[DashboardTabSchema]] = None  # Array of tabs
     filter_layout: Optional[str] = None
     is_published: Optional[bool] = None
 
@@ -63,6 +77,7 @@ class DashboardResponse(Schema):
     filter_layout: str
     layout_config: list[dict]
     components: dict
+    tabs: List[DashboardTabSchema] = []  # Array of tabs
     is_published: bool
     published_at: Optional[datetime] = None
     is_locked: bool = False
