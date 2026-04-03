@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Optional, List
 
 from ninja import Schema
-from pydantic import root_validator
 
 
 class ChartMetric(Schema):
@@ -53,13 +52,7 @@ class ChartResponse(Schema):
 
 
 class ChartDataPayload(Schema):
-    """Schema for chart data request.
-
-    Top-level fields (x_axis, y_axis, etc.) are auto-populated from
-    extra_config when not explicitly provided.  This ensures payloads
-    built from frozen report configs are always complete — no manual
-    mapping required at each call site.
-    """
+    """Schema for chart data request."""
 
     chart_type: str
     schema_name: str
@@ -70,9 +63,7 @@ class ChartDataPayload(Schema):
     y_axis: Optional[str] = None
 
     # For aggregated data
-    dimension_col: Optional[
-        str
-    ] = None  # later we need to still merge dimension and extra dimension into dimensions list
+    dimension_col: Optional[str] = None
     extra_dimension: Optional[str] = None
     dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
@@ -96,39 +87,6 @@ class ChartDataPayload(Schema):
     # Pagination
     offset: int = 0
     limit: int = 100
-
-    # -- auto-populate top-level fields from extra_config ----------------
-    # Previously every endpoint manually mapped extra_config keys to
-    # top-level fields (x_axis, y_axis, etc.) — duplicated across 9+
-    # call sites.  This root_validator does it once, automatically, on
-    # every ChartDataPayload construction.  Only fills fields that were
-    # not explicitly set (i.e. are None), so callers that pass explicit
-    # values are never overridden.
-    _EXTRA_CONFIG_MAP = {
-        "x_axis_column": "x_axis",
-        "y_axis_column": "y_axis",
-        "dimension_column": "dimension_col",
-        "extra_dimension_column": "extra_dimension",
-        "dimension_columns": "dimensions",
-        "metrics": "metrics",
-        "geographic_column": "geographic_column",
-        "value_column": "value_column",
-        "selected_geojson_id": "selected_geojson_id",
-    }
-
-    @root_validator(pre=False)
-    def _populate_from_extra_config(cls, values):
-        """Reports send a minimal payload with only extra_config (the frozen
-        chart config).  Dashboard payloads set top-level fields explicitly.
-        This validator bridges the gap — if a top-level field is None, it
-        fills it from extra_config so both paths produce the same query."""
-        ec = values.get("extra_config") or {}
-        for ec_key, field_name in cls._EXTRA_CONFIG_MAP.items():
-            if values.get(field_name) is None and ec_key in ec:
-                values[field_name] = ec[ec_key]
-        if values.get("customizations") is None:
-            values["customizations"] = ec.get("customizations", {})
-        return values
 
 
 class ChartDataResponse(Schema):

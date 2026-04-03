@@ -590,6 +590,7 @@ def get_public_chart_data_preview(
             **payload,
         )
         chart_payload.dashboard_filters = resolved_dashboard_filters
+        charts_service.resolve_chart_payload(chart_payload)
 
         # Get table preview using same function as authenticated API with pagination
         preview_data = charts_service.get_chart_data_table_preview(
@@ -985,6 +986,7 @@ def download_public_chart_data_csv(request, token: str, chart_id: int, payload: 
     Returns:
         StreamingHttpResponse with CSV data
     """
+    charts_service.resolve_chart_payload(payload)
     try:
         # Verify dashboard is public and get organization
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
@@ -1103,6 +1105,7 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
         chart_payload.dashboard_filters = (
             resolved_dashboard_filters  # Add resolved dashboard filters
         )
+        charts_service.resolve_chart_payload(chart_payload)
 
         # Get total rows using same function as authenticated API
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
@@ -1205,6 +1208,7 @@ def get_public_report_chart_data(request, token: str):
 
         payload_data = json.loads(request.body) if request.body else {}
         payload = ChartDataPayload(**payload_data)
+        charts_service.resolve_chart_payload(payload)
 
         from ddpui.api.charts_api import generate_chart_data_and_config
 
@@ -1237,6 +1241,7 @@ def get_public_report_table_data(request, token: str, page: int = 0, limit: int 
 
         payload_data = json.loads(request.body) if request.body else {}
         chart_payload = ChartDataPayload(**payload_data)
+        charts_service.resolve_chart_payload(chart_payload)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1276,6 +1281,7 @@ def get_public_report_table_total_rows(request, token: str):
 
         payload_data = json.loads(request.body) if request.body else {}
         chart_payload = ChartDataPayload(**payload_data)
+        charts_service.resolve_chart_payload(chart_payload)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 

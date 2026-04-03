@@ -14,9 +14,48 @@ from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.chart_schema import (
     ChartDataPayload,
+    ChartMetric,
     ExecuteChartQuery,
     TransformDataForChart,
 )
+
+# Mapping from extra_config keys to ChartDataPayload field names
+_EXTRA_CONFIG_MAP = {
+    "x_axis_column": "x_axis",
+    "y_axis_column": "y_axis",
+    "dimension_column": "dimension_col",
+    "extra_dimension_column": "extra_dimension",
+    "dimension_columns": "dimensions",
+    "metrics": "metrics",
+    "geographic_column": "geographic_column",
+    "value_column": "value_column",
+    "selected_geojson_id": "selected_geojson_id",
+}
+
+
+def resolve_chart_payload(payload: ChartDataPayload) -> ChartDataPayload:
+    """Fill top-level fields from extra_config if not explicitly set.
+
+    Reports send a minimal payload with only extra_config (the frozen
+    chart config).  Dashboard payloads set top-level fields explicitly.
+    This function bridges the gap so both paths produce the same query.
+
+    Only fills fields that are None, so explicit values are never overridden.
+    """
+    ec = payload.extra_config or {}
+
+    for ec_key, field_name in _EXTRA_CONFIG_MAP.items():
+        if getattr(payload, field_name) is None and ec_key in ec:
+            value = ec[ec_key]
+            # Coerce raw metric dicts to ChartMetric objects
+            if field_name == "metrics" and isinstance(value, list):
+                value = [ChartMetric(**m) if isinstance(m, dict) else m for m in value]
+            setattr(payload, field_name, value)
+
+    if payload.customizations is None:
+        payload.customizations = ec.get("customizations", {})
+
+    return payload
 
 
 def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):

@@ -144,6 +144,9 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     """Generate chart data and ECharts config from payload"""
     chart_id_str = f"chart {chart_id}" if chart_id else "chart"
 
+    # Resolve extra_config into top-level fields
+    charts_service.resolve_chart_payload(payload)
+
     logger.info(f"Building query for {chart_id_str} - Type: {payload.chart_type}")
 
     # Handle maps differently
@@ -571,6 +574,7 @@ def get_chart_data_preview(
     """Get paginated data preview for chart using the same query as chart data"""
     import json
 
+    charts_service.resolve_chart_payload(payload)
     orguser = request.orguser
 
     # Validate user has access to schema/table
@@ -694,6 +698,7 @@ def get_chart_data_preview_total_rows(
     """Get total rows for chart data preview"""
     import json
 
+    charts_service.resolve_chart_payload(payload)
     orguser = request.orguser
 
     # Validate user has access to schema/table
@@ -884,6 +889,7 @@ def get_geojson_data(request, geojson_id: int):
 @has_permission(["can_view_charts"])
 def generate_map_chart_data(request, payload: ChartDataPayload):
     """Generate map chart data - simplified for basic map functionality"""
+    charts_service.resolve_chart_payload(payload)
     orguser = request.orguser
 
     # Import map services
@@ -1017,7 +1023,7 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
 @has_permission(["can_view_charts"])
 def download_chart_data_csv(request, payload: ChartDataPayload):
     """Stream and download chart data as CSV with all filters/aggregations applied (authenticated)"""
-
+    charts_service.resolve_chart_payload(payload)
     orguser: OrgUser = request.orguser
 
     # Validate user has access to schema/table
