@@ -173,6 +173,7 @@ def serialize_dashboard_chat_message(message: DashboardChatMessage) -> dict:
         "role": message.role,
         "content": message.content,
         "payload": message.payload or {},
+        "feedback": message.feedback,
         "response_latency_ms": message.response_latency_ms,
         "timing_breakdown": message.timing_breakdown or {},
         "created_at": message.created_at.isoformat(),
@@ -281,6 +282,7 @@ def publish_dashboard_chat_assistant_message(
         content=message.content,
         created_at=message.created_at,
         payload=message.payload or {},
+        feedback=message.feedback,
         response_latency_ms=message.response_latency_ms,
         timing_breakdown=message.timing_breakdown or {},
     )

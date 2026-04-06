@@ -14,6 +14,28 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import explore_table_url
 
 
+def _dedupe_citations(
+    citations: list[DashboardChatCitation],
+) -> list[DashboardChatCitation]:
+    """Collapse duplicate sources while preferring SQL-execution table citations."""
+    deduped: dict[tuple[str, str], DashboardChatCitation] = {}
+    for citation in citations:
+        key = (citation.source_type, citation.source_identifier)
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = citation
+            continue
+
+        if (
+            citation.source_type == "warehouse_table"
+            and citation.snippet.startswith("SQL executed against ")
+            and not existing.snippet.startswith("SQL executed against ")
+        ):
+            deduped[key] = citation
+
+    return list(deduped.values())
+
+
 def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
     """Attach warehouse citations and metadata to the finished response."""
     response = DashboardChatResponse.model_validate(state.get("response") or {})
@@ -66,7 +88,7 @@ def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
         "response": DashboardChatResponse(
             answer_text=response.answer_text,
             intent=response.intent,
-            citations=list(dict.fromkeys(citations)),
+            citations=_dedupe_citations(citations),
             warnings=response.warnings,
             sql=response.sql,
             sql_results=response.sql_results,

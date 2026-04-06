@@ -31,6 +31,13 @@ class DashboardChatTurnStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class DashboardChatMessageFeedback(models.TextChoices):
+    """Locked-in user feedback for one assistant answer."""
+
+    THUMBS_UP = "thumbs_up", "Thumbs Up"
+    THUMBS_DOWN = "thumbs_down", "Thumbs Down"
+
+
 class DashboardChatPromptTemplateKey(models.TextChoices):
     """Runtime-editable prompt templates used by the dashboard chat LLM client."""
 
@@ -141,6 +148,12 @@ class DashboardChatMessage(models.Model):
     content = models.TextField(blank=True, default="")
     client_message_id = models.CharField(max_length=100, null=True, blank=True)
     payload = models.JSONField(null=True, blank=True)
+    feedback = models.CharField(
+        max_length=16,
+        choices=DashboardChatMessageFeedback.choices,
+        null=True,
+        blank=True,
+    )
     response_latency_ms = models.PositiveIntegerField(null=True, blank=True)
     timing_breakdown = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)

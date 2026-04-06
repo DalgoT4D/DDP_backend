@@ -128,6 +128,7 @@ class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
     email: str
+    first_name: str | None = None
     org: Optional[OrgSchema] = None
     active: bool
     wtype: str | None

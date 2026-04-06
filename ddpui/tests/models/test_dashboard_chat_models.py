@@ -18,6 +18,7 @@ from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import (
     DashboardAIContext,
     DashboardChatMessage,
+    DashboardChatMessageFeedback,
     DashboardChatSession,
     OrgAIContext,
 )
@@ -206,3 +207,20 @@ def test_dashboard_chat_message_payload(org, orguser, dashboard):
 
     assert message.payload["citations"][0]["source_type"] == "dashboard_export"
     assert message.payload["sql"].startswith("SELECT")
+
+
+def test_dashboard_chat_message_feedback_persists_on_assistant_messages(org, orguser, dashboard):
+    session = DashboardChatSession.objects.create(
+        org=org,
+        orguser=orguser,
+        dashboard=dashboard,
+    )
+    message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=3,
+        role="assistant",
+        content="Here is the answer.",
+        feedback=DashboardChatMessageFeedback.THUMBS_UP,
+    )
+
+    assert message.feedback == DashboardChatMessageFeedback.THUMBS_UP

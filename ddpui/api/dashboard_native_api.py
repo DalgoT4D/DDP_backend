@@ -16,7 +16,12 @@ from ddpui.models.dashboard import (
     DashboardLock,
     DashboardFilterType,
 )
-from ddpui.models.dashboard_chat import DashboardAIContext
+from ddpui.models.dashboard_chat import (
+    DashboardAIContext,
+    DashboardChatMessage,
+    DashboardChatMessageRole,
+    OrgAIContext,
+)
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
@@ -51,8 +56,12 @@ from ddpui.schemas.dashboard_schema import (
     LandingPageResponse,
     LandingPageResolveResponse,
     DashboardAIContextResponse,
+    DashboardChatBootstrapResponse,
+    DashboardChatMessageFeedbackRequest,
+    DashboardChatMessageFeedbackResponse,
     UpdateDashboardAIContextSchema,
 )
+from ddpui.core.dashboard_chat.suggested_prompts import build_dashboard_suggested_prompts
 
 logger = CustomLogger("ddpui")
 
@@ -73,6 +82,21 @@ def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAICo
         dashboard_context_updated_by=context.updated_by.user.email if context.updated_by else None,
         dashboard_context_updated_at=context.updated_at,
         vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+    )
+
+
+def _serialize_dashboard_chat_bootstrap(dashboard: Dashboard) -> DashboardChatBootstrapResponse:
+    dashboard_export = DashboardService.export_dashboard_context_for_dashboard(dashboard, dashboard.org)
+    org_context, _ = OrgAIContext.objects.get_or_create(org=dashboard.org)
+    dashboard_context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
+
+    return DashboardChatBootstrapResponse(
+        dashboard_id=dashboard.id,
+        suggested_prompts=build_dashboard_suggested_prompts(
+            dashboard_export=dashboard_export,
+            org_context_markdown=org_context.markdown,
+            dashboard_context_markdown=dashboard_context.markdown,
+        ),
     )
 
 
@@ -155,6 +179,71 @@ def get_dashboard_ai_context(request, dashboard_id: int):
     context = _get_or_create_dashboard_ai_context(dashboard)
 
     return _serialize_dashboard_ai_context(dashboard, context)
+
+
+@dashboard_native_router.get(
+    "/{dashboard_id}/chat-bootstrap/",
+    response=DashboardChatBootstrapResponse,
+)
+@has_permission(["can_view_dashboards"])
+def get_dashboard_chat_bootstrap(request, dashboard_id: int):
+    """Return deterministic UI bootstrap data for dashboard chat."""
+    orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return _serialize_dashboard_chat_bootstrap(dashboard)
+
+
+@dashboard_native_router.post(
+    "/{dashboard_id}/chat/messages/{message_id}/feedback/",
+    response=DashboardChatMessageFeedbackResponse,
+)
+@has_permission(["can_view_dashboards"])
+@transaction.atomic
+def set_dashboard_chat_message_feedback(
+    request,
+    dashboard_id: int,
+    message_id: int,
+    payload: DashboardChatMessageFeedbackRequest,
+):
+    """Persist one locked thumbs-up/thumbs-down selection for an assistant answer."""
+    orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+
+    message = (
+        DashboardChatMessage.objects.select_related("session")
+        .filter(
+            id=message_id,
+            session__org=orguser.org,
+            session__orguser=orguser,
+            session__dashboard_id=dashboard_id,
+            role=DashboardChatMessageRole.ASSISTANT.value,
+        )
+        .first()
+    )
+    if message is None:
+        raise HttpError(404, "Assistant message not found")
+
+    if message.feedback is not None:
+        if message.feedback == payload.feedback:
+            return DashboardChatMessageFeedbackResponse(
+                message_id=message.id,
+                feedback=message.feedback,
+            )
+        raise HttpError(409, "Feedback has already been recorded for this message")
+
+    message.feedback = payload.feedback
+    message.save(update_fields=["feedback"])
+
+    return DashboardChatMessageFeedbackResponse(
+        message_id=message.id,
+        feedback=message.feedback,
+    )
 
 
 @dashboard_native_router.put(
