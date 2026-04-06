@@ -9,6 +9,7 @@ logger = CustomLogger("ddpui.core.reports.pdf_export")
 
 VIEWPORT_WIDTH = 1200
 VIEWPORT_HEIGHT = 800
+PDF_SCALE = 0.66
 PDF_WAIT_TIMEOUT_MS = 2000
 CANVAS_TIMEOUT_MS = 30000
 
@@ -65,7 +66,8 @@ class PdfExportService:
             )
             try:
                 page = browser.new_page(
-                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
+                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+                    device_scale_factor=2,
                 )
 
                 # Intercept all requests and inject the render secret header.
@@ -116,7 +118,7 @@ class PdfExportService:
                 pdf_bytes = page.pdf(
                     format="A4",
                     print_background=True,
-                    scale=1,
+                    scale=PDF_SCALE,
                 )
                 logger.info(f"PDF generated for snapshot {snapshot_id} ({len(pdf_bytes)} bytes)")
                 return pdf_bytes
