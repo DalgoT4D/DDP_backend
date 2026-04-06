@@ -11,6 +11,7 @@ from ddpui.core.dashboard_chat.contracts import (
     DashboardChatSqlValidationResult,
 )
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
+from ddpui.core.dashboard_chat.orchestration.retrieval_support import explore_table_url
 
 
 def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
@@ -35,6 +36,7 @@ def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
                 source_identifier=table_name,
                 title=f"Warehouse table: {table_name}",
                 snippet=f"SQL executed against {table_name}.",
+                url=explore_table_url(table_name),
                 table_name=table_name,
             )
             for table_name in sql_validation.tables

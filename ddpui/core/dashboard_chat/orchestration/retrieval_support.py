@@ -2,12 +2,11 @@
 
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlencode
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist, build_dashboard_chat_table_name
-from ddpui.core.dashboard_chat.contracts import (
-    DashboardChatCitation,
-    DashboardChatRetrievedDocument,
-)
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatCitation
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 
 from ddpui.core.dashboard_chat.orchestration.source_identifier_parsing import (
@@ -95,6 +94,7 @@ def build_citations(
         chart.get("id"): chart.get("title") or f"Chart {chart.get('id')}"
         for chart in dashboard_export.get("charts") or []
     }
+    dashboard_id = dashboard_export.get("dashboard", {}).get("id")
     citations: list[DashboardChatCitation] = []
     for document in retrieved_documents[:6]:
         table_name = None
@@ -115,6 +115,11 @@ def build_citations(
                     table_name=table_name,
                 ),
                 snippet=compact_snippet(document.content),
+                url=citation_url(
+                    document=document,
+                    dashboard_id=document.dashboard_id or dashboard_id,
+                    table_name=table_name,
+                ),
                 dashboard_id=document.dashboard_id,
                 table_name=table_name,
             )
@@ -152,6 +157,48 @@ def compact_snippet(content: str, max_length: int = 220) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 3].rstrip() + "..."
+
+
+def citation_url(
+    *,
+    document: DashboardChatRetrievedDocument,
+    dashboard_id: int | None,
+    table_name: str | None,
+) -> str | None:
+    """Build the most useful frontend destination for one citation."""
+    if document.source_type == DashboardChatSourceType.ORG_CONTEXT.value:
+        return "/settings/organization"
+
+    if document.source_type == DashboardChatSourceType.DASHBOARD_CONTEXT.value:
+        if dashboard_id is None:
+            return None
+        return f"/dashboards/{dashboard_id}"
+
+    if document.source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value:
+        chart_id = chart_id_from_source_identifier(document.source_identifier)
+        if chart_id is not None:
+            return f"/charts/{chart_id}"
+        if dashboard_id is None:
+            return None
+        return f"/dashboards/{dashboard_id}"
+
+    if document.source_type in {
+        DashboardChatSourceType.DBT_MANIFEST.value,
+        DashboardChatSourceType.DBT_CATALOG.value,
+    }:
+        if table_name is None:
+            return None
+        return explore_table_url(table_name)
+
+    return None
+
+
+def explore_table_url(table_name: str) -> str | None:
+    """Build one Explore deep link from a schema-qualified table name."""
+    schema_name, _, raw_table_name = table_name.partition(".")
+    if not schema_name or not raw_table_name:
+        return None
+    return f"/explore?{urlencode({'schema_name': schema_name, 'table_name': raw_table_name})}"
 
 
 def build_tool_document_payload(

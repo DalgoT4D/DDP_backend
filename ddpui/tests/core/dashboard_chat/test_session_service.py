@@ -8,6 +8,11 @@ import pytest
 from django.contrib.auth.models import User
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
+from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
+    DashboardChatRunCancelled,
+    publish_runtime_progress,
+)
 from ddpui.core.dashboard_chat.sessions.session_service import (
     DashboardChatSessionError,
     create_dashboard_chat_user_message,
@@ -311,8 +316,7 @@ def test_execute_dashboard_chat_turn_persists_assistant_message(get_runtime, ses
         "runtime_total_ms": 123.4,
         "graph_nodes_ms": {"load_context": 10.0},
     }
-    assert result["status"] == "completed"
-    assert result["assistant_message"].id == assistant_message.id
+    assert result.id == assistant_message.id
 
 
 @patch("ddpui.core.dashboard_chat.orchestration.orchestrator.get_dashboard_chat_runtime")
@@ -367,6 +371,87 @@ def test_execute_dashboard_chat_turn_reuses_existing_assistant_reply(
 
     result = execute_dashboard_chat_turn(str(session.session_id), user_message.id)
 
-    assert result["status"] == "skipped_existing_reply"
-    assert result["assistant_message"].id == assistant_message.id
+    assert result.id == assistant_message.id
     get_runtime.assert_not_called()
+
+
+@patch("ddpui.core.dashboard_chat.orchestration.orchestrator.get_dashboard_chat_runtime")
+def test_execute_dashboard_chat_turn_forwards_progress_updates(
+    get_runtime,
+    session_owner,
+    dashboard,
+):
+    """Runtime progress hooks should reach the session-owned progress publisher."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    progress_publisher = Mock()
+
+    runtime = Mock()
+
+    def run_with_progress(**kwargs):
+        publish_runtime_progress(
+            "Loading dashboard context",
+            DashboardChatProgressStage.LOADING_CONTEXT,
+        )
+        return DashboardChatResponse(
+            answer_text="Funding dropped because donor inflows slowed this quarter.",
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+        )
+
+    runtime.run.side_effect = run_with_progress
+    get_runtime.return_value = runtime
+
+    execute_dashboard_chat_turn(
+        str(session.session_id),
+        user_message.id,
+        progress_publisher=progress_publisher,
+    )
+
+    progress_publisher.assert_called_once_with(
+        "Loading dashboard context",
+        DashboardChatProgressStage.LOADING_CONTEXT,
+    )
+
+
+@patch("ddpui.core.dashboard_chat.orchestration.orchestrator.get_dashboard_chat_runtime")
+def test_execute_dashboard_chat_turn_stops_before_persisting_when_cancelled(
+    get_runtime,
+    session_owner,
+    dashboard,
+):
+    """A cancelled turn should not persist a new assistant reply."""
+    session = DashboardChatSession.objects.create(
+        org=session_owner.org,
+        orguser=session_owner,
+        dashboard=dashboard,
+    )
+    user_message = DashboardChatMessage.objects.create(
+        session=session,
+        sequence_number=1,
+        role="user",
+        content="Why did funding drop?",
+    )
+    runtime = Mock()
+    runtime.run.return_value = DashboardChatResponse(
+        answer_text="Funding dropped because donor inflows slowed this quarter.",
+        intent=DashboardChatIntent.QUERY_WITH_SQL,
+    )
+    get_runtime.return_value = runtime
+
+    with pytest.raises(DashboardChatRunCancelled):
+        execute_dashboard_chat_turn(
+            str(session.session_id),
+            user_message.id,
+            cancel_checker=lambda: True,
+        )
+
+    assert DashboardChatMessage.objects.filter(session=session, role="assistant").count() == 0

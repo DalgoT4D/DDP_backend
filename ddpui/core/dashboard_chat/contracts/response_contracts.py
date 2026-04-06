@@ -18,6 +18,7 @@ class DashboardChatCitation(BaseModel):
     source_identifier: str
     title: str
     snippet: str
+    url: str | None = None
     dashboard_id: int | None = None
     table_name: str | None = None
 

@@ -1,174 +1,353 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import pytest
-
+from ddpui.models.dashboard_chat import DashboardChatTurnStatus
 from ddpui.websockets.dashboard_chat_consumer import DashboardChatConsumer
 
 
-def test_dashboard_chat_consumer_send_message_requires_message():
+def build_consumer() -> DashboardChatConsumer:
     consumer = DashboardChatConsumer()
     consumer.send = Mock()
     consumer.dashboard = Mock(id=42)
+    consumer.orguser = Mock()
+    consumer.active_session_group = None
+    consumer._subscribe_to_session = Mock()
+    consumer._assert_chat_available = Mock(return_value=None)
+    return consumer
+
+
+def latest_payload(consumer: DashboardChatConsumer) -> dict:
+    return json.loads(consumer.send.call_args.kwargs["text_data"])
+
+
+def test_dashboard_chat_consumer_send_message_requires_message():
+    consumer = build_consumer()
+
     consumer.websocket_receive({"text": json.dumps({"action": "send_message"})})
 
-    payload = json.loads(consumer.send.call_args.kwargs["text_data"])
+    payload = latest_payload(consumer)
     assert payload["status"] == "error"
     assert payload["message"] == "Message is required"
 
 
 def test_dashboard_chat_consumer_send_message_requires_available_chat():
-    consumer = DashboardChatConsumer()
-    consumer.send = Mock()
-    consumer.dashboard = Mock(id=42)
-    consumer._chat_available = Mock(return_value=(False, "Chat unavailable"))
+    consumer = build_consumer()
+    consumer._assert_chat_available.side_effect = Exception("Chat unavailable")
+
     consumer.websocket_receive(
-        {
-            "text": json.dumps(
-                {
-                    "action": "send_message",
-                    "message": "Why did funding drop?",
-                }
-            )
-        }
+        {"text": json.dumps({"action": "send_message", "message": "Why did funding drop?"})}
     )
 
-    payload = json.loads(consumer.send.call_args.kwargs["text_data"])
+    payload = latest_payload(consumer)
     assert payload["status"] == "error"
     assert payload["message"] == "Chat unavailable"
 
 
-@patch("ddpui.websockets.dashboard_chat_consumer.serialize_dashboard_chat_message")
-@patch("ddpui.websockets.dashboard_chat_consumer.execute_dashboard_chat_turn")
+@patch("ddpui.websockets.dashboard_chat_consumer.start_dashboard_chat_turn_background")
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_progress")
+@patch("ddpui.websockets.dashboard_chat_consumer.update_dashboard_chat_turn")
 @patch("ddpui.websockets.dashboard_chat_consumer.create_dashboard_chat_user_message_with_status")
 @patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
-def test_dashboard_chat_consumer_send_message_creates_session_and_runs_inline(
+def test_dashboard_chat_consumer_send_message_starts_background_turn(
     mock_get_or_create_session,
     mock_create_user_message,
-    mock_execute_turn,
-    mock_serialize_message,
+    mock_update_turn,
+    mock_publish_progress,
+    mock_start_background_turn,
 ):
     session = Mock(session_id="session-123")
     user_message = Mock(id=17)
-    assistant_message = Mock(id=18)
+    turn = Mock(id=23, status=DashboardChatTurnStatus.QUEUED, assistant_message=None)
+
     mock_get_or_create_session.return_value = session
-    mock_create_user_message.return_value = Mock(message=user_message, created=True)
-    mock_execute_turn.return_value = {"status": "completed", "assistant_message": assistant_message}
-    mock_serialize_message.return_value = {"id": "18", "role": "assistant"}
+    mock_create_user_message.return_value = SimpleNamespace(message=user_message, created=True)
 
-    consumer = DashboardChatConsumer()
-    consumer.dashboard = Mock(id=42)
-    consumer.orguser = Mock()
-    consumer.send = Mock()
-    consumer._chat_available = Mock(return_value=(True, ""))
-    consumer._subscribe_to_session = Mock()
+    turn_manager = Mock()
+    turn_manager.get_or_create.return_value = (turn, True)
+    turn_manager.select_related.return_value.get.return_value = turn
 
-    consumer.websocket_receive(
-        {
-            "text": json.dumps(
-                {
-                    "action": "send_message",
-                    "message": "Why did funding drop?",
-                    "client_message_id": "ui-1",
-                }
-            )
-        }
-    )
+    consumer = build_consumer()
 
-    mock_get_or_create_session.assert_called_once()
-    mock_create_user_message.assert_called_once()
-    consumer._subscribe_to_session.assert_called_once_with("session-123")
-    mock_execute_turn.assert_called_once_with("session-123", 17)
+    with patch("ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects", turn_manager):
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "send_message",
+                        "message": "Why did funding drop?",
+                        "client_message_id": "ui-1",
+                    }
+                )
+            }
+        )
 
-    first_payload = json.loads(consumer.send.call_args_list[0].kwargs["text_data"])
-    second_payload = json.loads(consumer.send.call_args_list[1].kwargs["text_data"])
-    assert first_payload["status"] == "success"
-    assert first_payload["data"]["event_type"] == "progress"
-    assert second_payload["status"] == "success"
-    assert second_payload["data"]["event_type"] == "assistant_message"
+    consumer._subscribe_to_session.assert_called_once_with(session)
+    mock_publish_progress.assert_called_once()
+    mock_update_turn.assert_called_once_with(23, progress_label="Understanding question")
+    mock_start_background_turn.assert_called_once_with(23)
+    consumer.send.assert_not_called()
 
 
-@patch(
-    "ddpui.websockets.dashboard_chat_consumer.execute_dashboard_chat_turn",
-    side_effect=RuntimeError("inline failed"),
-)
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_assistant_message")
 @patch("ddpui.websockets.dashboard_chat_consumer.create_dashboard_chat_user_message_with_status")
 @patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
-def test_dashboard_chat_consumer_send_message_returns_error_when_inline_turn_fails(
+def test_dashboard_chat_consumer_duplicate_send_reuses_completed_turn(
     mock_get_or_create_session,
     mock_create_user_message,
-    mock_execute_turn,
+    mock_publish_assistant_message,
 ):
     session = Mock(session_id="session-123")
     user_message = Mock(id=17)
-    mock_get_or_create_session.return_value = session
-    mock_create_user_message.return_value = Mock(message=user_message, created=True)
-
-    consumer = DashboardChatConsumer()
-    consumer.dashboard = Mock(id=42)
-    consumer.orguser = Mock()
-    consumer.send = Mock()
-    consumer._chat_available = Mock(return_value=(True, ""))
-    consumer._subscribe_to_session = Mock()
-
-    consumer.websocket_receive(
-        {
-            "text": json.dumps(
-                {
-                    "action": "send_message",
-                    "message": "Why did funding drop?",
-                    "client_message_id": "ui-1",
-                }
-            )
-        }
+    assistant_message = Mock(id=31)
+    turn = Mock(
+        id=23,
+        status=DashboardChatTurnStatus.COMPLETED,
+        assistant_message=assistant_message,
     )
 
-    mock_execute_turn.assert_called_once_with("session-123", 17)
-    consumer._subscribe_to_session.assert_called_once_with("session-123")
+    mock_get_or_create_session.return_value = session
+    mock_create_user_message.return_value = SimpleNamespace(message=user_message, created=False)
 
-    payload = json.loads(consumer.send.call_args_list[-1].kwargs["text_data"])
+    turn_manager = Mock()
+    turn_manager.get_or_create.return_value = (turn, False)
+    turn_manager.select_related.return_value.get.return_value = turn
+
+    consumer = build_consumer()
+
+    with patch(
+        "ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects",
+        turn_manager,
+    ), patch(
+        "ddpui.websockets.dashboard_chat_consumer.start_dashboard_chat_turn_background"
+    ) as mock_start_background_turn:
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "send_message",
+                        "message": "Why did funding drop?",
+                        "client_message_id": "ui-1",
+                    }
+                )
+            }
+        )
+
+    mock_publish_assistant_message.assert_called_once_with(
+        session=session,
+        turn=turn,
+        message=assistant_message,
+    )
+    mock_start_background_turn.assert_not_called()
+
+
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_progress")
+@patch("ddpui.websockets.dashboard_chat_consumer.create_dashboard_chat_user_message_with_status")
+@patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
+def test_dashboard_chat_consumer_duplicate_send_reuses_in_flight_turn(
+    mock_get_or_create_session,
+    mock_create_user_message,
+    mock_publish_progress,
+):
+    session = Mock(session_id="session-123")
+    user_message = Mock(id=17)
+    turn = Mock(
+        id=23,
+        status=DashboardChatTurnStatus.RUNNING,
+        progress_label="Searching relevant sources",
+        user_message_id=17,
+    )
+
+    mock_get_or_create_session.return_value = session
+    mock_create_user_message.return_value = SimpleNamespace(message=user_message, created=False)
+
+    turn_manager = Mock()
+    turn_manager.get_or_create.return_value = (turn, False)
+    turn_manager.select_related.return_value.get.return_value = turn
+
+    consumer = build_consumer()
+
+    with patch(
+        "ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects",
+        turn_manager,
+    ), patch(
+        "ddpui.websockets.dashboard_chat_consumer.start_dashboard_chat_turn_background"
+    ) as mock_start_background_turn:
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "send_message",
+                        "message": "Why did funding drop?",
+                        "client_message_id": "ui-1",
+                    }
+                )
+            }
+        )
+
+    mock_publish_progress.assert_called_once_with(
+        session=session,
+        turn=turn,
+        label="Searching relevant sources",
+        stage=None,
+        message_id=17,
+    )
+    mock_start_background_turn.assert_not_called()
+
+
+@patch("ddpui.websockets.dashboard_chat_consumer.start_dashboard_chat_turn_background")
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_progress")
+@patch("ddpui.websockets.dashboard_chat_consumer.update_dashboard_chat_turn")
+@patch("ddpui.websockets.dashboard_chat_consumer.create_dashboard_chat_user_message_with_status")
+@patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
+def test_dashboard_chat_consumer_retry_starts_background_turn_if_turn_row_was_missing(
+    mock_get_or_create_session,
+    mock_create_user_message,
+    mock_update_turn,
+    mock_publish_progress,
+    mock_start_background_turn,
+):
+    session = Mock(session_id="session-123")
+    user_message = Mock(id=17)
+    turn = Mock(id=23, status=DashboardChatTurnStatus.QUEUED, assistant_message=None)
+
+    mock_get_or_create_session.return_value = session
+    mock_create_user_message.return_value = SimpleNamespace(message=user_message, created=False)
+
+    turn_manager = Mock()
+    turn_manager.get_or_create.return_value = (turn, True)
+    turn_manager.select_related.return_value.get.return_value = turn
+
+    consumer = build_consumer()
+
+    with patch("ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects", turn_manager):
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "send_message",
+                        "message": "Why did funding drop?",
+                        "client_message_id": "ui-1",
+                    }
+                )
+            }
+        )
+
+    mock_publish_progress.assert_called_once()
+    mock_update_turn.assert_called_once_with(23, progress_label="Understanding question")
+    mock_start_background_turn.assert_called_once_with(23)
+
+
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_cancelled")
+@patch("ddpui.websockets.dashboard_chat_consumer.update_dashboard_chat_turn")
+@patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
+def test_dashboard_chat_consumer_cancel_queued_turn_cancels_immediately(
+    mock_get_or_create_session,
+    mock_update_turn,
+    mock_publish_cancelled,
+):
+    session = Mock(session_id="session-123")
+    turn = Mock(id=23, status=DashboardChatTurnStatus.QUEUED)
+    updated_turn = Mock(id=23)
+
+    mock_get_or_create_session.return_value = session
+    mock_update_turn.return_value = updated_turn
+
+    turn_manager = Mock()
+    turn_manager.filter.return_value.filter.return_value.order_by.return_value.first.return_value = (
+        turn
+    )
+
+    consumer = build_consumer()
+
+    with patch("ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects", turn_manager):
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "cancel_message",
+                        "session_id": "session-123",
+                        "turn_id": "23",
+                    }
+                )
+            }
+        )
+
+    mock_update_turn.assert_called_once()
+    mock_publish_cancelled.assert_called_once_with(session=session, turn=updated_turn)
+
+
+@patch("ddpui.websockets.dashboard_chat_consumer.publish_dashboard_chat_progress")
+@patch("ddpui.websockets.dashboard_chat_consumer.update_dashboard_chat_turn")
+@patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
+def test_dashboard_chat_consumer_cancel_running_turn_marks_cancel_requested(
+    mock_get_or_create_session,
+    mock_update_turn,
+    mock_publish_progress,
+):
+    session = Mock(session_id="session-123")
+    turn = Mock(id=23, status=DashboardChatTurnStatus.RUNNING)
+    updated_turn = Mock(id=23)
+
+    mock_get_or_create_session.return_value = session
+    mock_update_turn.return_value = updated_turn
+
+    turn_manager = Mock()
+    turn_manager.filter.return_value.filter.return_value.order_by.return_value.first.return_value = (
+        turn
+    )
+
+    consumer = build_consumer()
+
+    with patch("ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects", turn_manager):
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "cancel_message",
+                        "session_id": "session-123",
+                        "turn_id": "23",
+                    }
+                )
+            }
+        )
+
+    mock_update_turn.assert_called_once()
+    mock_publish_progress.assert_called_once()
+
+
+def test_dashboard_chat_consumer_cancel_requires_session_id():
+    consumer = build_consumer()
+
+    consumer.websocket_receive({"text": json.dumps({"action": "cancel_message"})})
+
+    payload = latest_payload(consumer)
     assert payload["status"] == "error"
-    assert payload["message"] == "Something went wrong while generating the response"
+    assert payload["message"] == "session_id is required to cancel a message"
 
 
-@patch("ddpui.websockets.dashboard_chat_consumer.serialize_dashboard_chat_message")
-@patch("ddpui.websockets.dashboard_chat_consumer.find_dashboard_chat_assistant_reply")
-@patch("ddpui.websockets.dashboard_chat_consumer.create_dashboard_chat_user_message_with_status")
 @patch("ddpui.websockets.dashboard_chat_consumer.get_or_create_dashboard_chat_session")
-def test_dashboard_chat_consumer_reuses_existing_turn_without_running_duplicate_turn(
-    mock_get_or_create_session,
-    mock_create_user_message,
-    mock_find_assistant_reply,
-    mock_serialize_message,
-):
+def test_dashboard_chat_consumer_cancel_rejects_non_integer_turn_id(mock_get_or_create_session):
     session = Mock(session_id="session-123")
-    user_message = Mock(id=17)
-    assistant_message = Mock(id=22)
     mock_get_or_create_session.return_value = session
-    mock_create_user_message.return_value = Mock(message=user_message, created=False)
-    mock_find_assistant_reply.return_value = assistant_message
-    mock_serialize_message.return_value = {"id": "22", "role": "assistant"}
+    consumer = build_consumer()
 
-    consumer = DashboardChatConsumer()
-    consumer.dashboard = Mock(id=42)
-    consumer.orguser = Mock()
-    consumer.send = Mock()
-    consumer._chat_available = Mock(return_value=(True, ""))
-    consumer._subscribe_to_session = Mock()
+    turn_manager = Mock()
+    turn_manager.filter.return_value = turn_manager
 
-    consumer.websocket_receive(
-        {
-            "text": json.dumps(
-                {
-                    "action": "send_message",
-                    "message": "Why did funding drop?",
-                    "client_message_id": "ui-1",
-                }
-            )
-        }
-    )
+    with patch("ddpui.websockets.dashboard_chat_consumer.DashboardChatTurn.objects", turn_manager):
+        consumer.websocket_receive(
+            {
+                "text": json.dumps(
+                    {
+                        "action": "cancel_message",
+                        "session_id": "session-123",
+                        "turn_id": "not-an-int",
+                    }
+                )
+            }
+        )
 
-    consumer._subscribe_to_session.assert_called_once_with("session-123")
-    payload = json.loads(consumer.send.call_args.kwargs["text_data"])
-    assert payload["status"] == "success"
-    assert payload["data"]["event_type"] == "assistant_message"
+    payload = latest_payload(consumer)
+    assert payload["status"] == "error"
+    assert payload["message"] == "turn_id must be an integer"
