@@ -12,6 +12,7 @@ logger = CustomLogger("ddpui.core.reports.pdf_export")
 VIEWPORT_WIDTH = 1200
 VIEWPORT_HEIGHT = 800
 PDF_SCALE = 0.66
+
 # Seconds to wait after network idle for ECharts to render canvases
 POST_IDLE_WAIT_S = 1
 NETWORK_IDLE_TIMEOUT_MS = 30000

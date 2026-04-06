@@ -54,7 +54,7 @@ class BaseConsumer(WebsocketConsumer):
             return False
 
     def respond(self, message: WebsocketResponse):
-        self.send(text_data=json.dumps(message.dict()))
+        self.send(text_data=json.dumps(message.model_dump()))
 
     def connect(self):
         query_string = parse_qs(self.scope["query_string"].decode())

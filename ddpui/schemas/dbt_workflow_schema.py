@@ -1,5 +1,6 @@
 from ninja import Field, Schema
 from typing import Union, Any, Literal, Optional
+from pydantic import ConfigDict
 
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.models.canvas_models import CanvasNode
@@ -26,7 +27,7 @@ class CreateDbtModelPayload(Schema):
     input_uuid: str = ""
     source_columns: list[str] = []
     other_inputs: list[InputModelPayload] = []
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class EditDbtOperationPayload(Schema):
@@ -39,7 +40,7 @@ class EditDbtOperationPayload(Schema):
     input_uuid: str = ""
     source_columns: list[str] = []
     other_inputs: list[InputModelPayload] = []
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class CompleteDbtModelPayload(Schema):
@@ -50,7 +51,7 @@ class CompleteDbtModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class SyncSourcesSchema(Schema):
@@ -58,8 +59,8 @@ class SyncSourcesSchema(Schema):
     schema to sync sources from the schema
     """
 
-    schema_name: str = None
-    source_name: str = None
+    schema_name: Optional[str] = None
+    source_name: Optional[str] = None
 
 
 class LockCanvasResponseSchema(Schema):
@@ -122,7 +123,7 @@ class CaseWhenOperationConfig(Schema):
     when_clauses: list[CaseWhenClause]
     output_column_name: str
     case_type: Literal["simple", "advance"]
-    else_clause: ArithmeticOperand = None
+    else_clause: Optional[ArithmeticOperand] = None
     sql_snippet: str = ""
 
 
@@ -265,7 +266,7 @@ class UnpivotOperationConfig(Schema):
     unpivot_columns: list[str]  # columns to unpivot
     unpivot_field_name: str = "field_name"
     unpivot_value_name: str = "value"
-    cast_to: str = None  # datatype to cast the value column to
+    cast_to: Optional[str] = None  # datatype to cast the value column to
 
 
 class FilterClauseConfig(Schema):
@@ -334,11 +335,10 @@ class ModelSrcOtherInputPayload(Schema):
 class ModelSrcInputsForMultiInputOp(Schema):
     """Schema to process inputs of multi input operations"""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     seq: int
     src_model: OrgDbtModel
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class SequencedNode(Schema):
@@ -346,11 +346,10 @@ class SequencedNode(Schema):
     Schema to process sequenced nodes
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     seq: int
     node: CanvasNode
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class CreateOperationNodePayload(Schema):
@@ -367,7 +366,7 @@ class CreateOperationNodePayload(Schema):
     other_inputs: list[
         ModelSrcOtherInputPayload
     ] = []  # List of other CanvasNode inputs for multi-input operations
-    canvas_lock_id: str = None
+    canvas_lock_id: Optional[str] = None
 
 
 class EditOperationNodePayload(Schema):
@@ -391,4 +390,4 @@ class TerminateChainAndCreateModelPayload(Schema):
     name: str
     display_name: str
     dest_schema: str
-    rel_dir_to_models: str = None
+    rel_dir_to_models: Optional[str] = None

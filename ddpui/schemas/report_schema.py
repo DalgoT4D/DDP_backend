@@ -72,12 +72,12 @@ class SnapshotResponse(Schema):
 
     id: int
     title: str
-    dashboard_title: Optional[str]  # From frozen_dashboard, not a live FK
-    date_column: Optional[Dict[str, str]]
-    period_start: Optional[date]
+    dashboard_title: Optional[str] = None  # From frozen_dashboard, not a live FK
+    date_column: Optional[Dict[str, str]] = None
+    period_start: Optional[date] = None
     period_end: date
-    summary: Optional[str]
-    created_by: Optional[str]
+    summary: Optional[str] = None
+    created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -126,7 +126,7 @@ class DatetimeColumnResponse(Schema):
 class SnapshotUpdateResponse(Schema):
     """Schema for snapshot update response"""
 
-    summary: Optional[str]
+    summary: Optional[str] = None
 
     @classmethod
     def from_model(cls, snapshot) -> "SnapshotUpdateResponse":
@@ -223,3 +223,22 @@ class MentionableUserResponse(Schema):
     @classmethod
     def from_orguser(cls, orguser) -> "MentionableUserResponse":
         return cls(email=orguser.user.email)
+
+
+# =============================================================================
+# Share via Email Schemas
+# =============================================================================
+
+
+class ShareViaEmailRequest(Schema):
+    """Schema for sharing a report via email"""
+
+    recipient_emails: list[str] = Field(..., min_items=1, max_items=20)
+    message: Optional[str] = Field(None, max_length=1000)
+
+
+class ShareViaEmailResponse(Schema):
+    """Schema for share-via-email response"""
+
+    recipients_count: int
+    message: str

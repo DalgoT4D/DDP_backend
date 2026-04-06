@@ -33,6 +33,9 @@ from ddpui.api.filter_api import (
     FilterOptionResponse as AuthFilterOptionResponse,
 )
 from ddpui.schemas.chart_schema import ChartDataResponse, ChartDataPayload
+from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from sqlalchemy import func, column, distinct, cast, Float, Date
 
 logger = CustomLogger("ddpui")
 
@@ -313,6 +316,100 @@ def get_public_chart_data(request, token: str, chart_id: int):
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
 
 
+def _execute_filter_preview(
+    org_warehouse,
+    schema_name: str,
+    table_name: str,
+    column_name: str,
+    filter_type: str,
+    limit: int,
+):
+    """Shared logic for executing a filter preview query against the warehouse.
+
+    Returns a PublicFilterPreviewResponse on success, or raises an Exception.
+    """
+    warehouse_client = get_warehouse_client(org_warehouse)
+
+    if filter_type == "value":
+        query_builder = AggQueryBuilder()
+        query_builder.add_column(column(column_name).label("value"))
+        query_builder.add_aggregate_column(None, "count", alias="count")
+        query_builder.fetch_from(table_name, schema_name)
+        query_builder.where_clause(column(column_name).isnot(None))
+        query_builder.group_cols_by(column_name)
+        query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
+        query_builder.limit_rows(limit)
+
+        results = execute_query(warehouse_client, query_builder)
+        options = [
+            AuthFilterOptionResponse(
+                label=str(row["value"]) if row["value"] is not None else "NULL",
+                value=str(row["value"]) if row["value"] is not None else "",
+                count=int(row["count"]),
+            )
+            for row in results
+        ]
+        return PublicFilterPreviewResponse(options=options, stats=None, is_valid=True)
+
+    elif filter_type == "numerical":
+        query_builder = AggQueryBuilder()
+        query_builder.add_aggregate_column(column_name, "min", alias="min_value")
+        query_builder.add_aggregate_column(column_name, "max", alias="max_value")
+        query_builder.add_column(func.avg(cast(column(column_name), Float)).label("avg_value"))
+        query_builder.add_aggregate_column(column_name, "count_distinct", alias="distinct_count")
+        query_builder.fetch_from(table_name, schema_name)
+        query_builder.where_clause(column(column_name).isnot(None))
+
+        results = execute_query(warehouse_client, query_builder)
+        row = results[0]
+        stats = {
+            "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
+            "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
+            "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
+            "distinct_count": int(row["distinct_count"])
+            if row["distinct_count"] is not None
+            else 0,
+        }
+        return PublicFilterPreviewResponse(options=None, stats=stats, is_valid=True)
+
+    elif filter_type == "datetime":
+        query_builder = AggQueryBuilder()
+
+        if org_warehouse.wtype == "postgres":
+            query_builder.add_column(func.min(cast(column(column_name), Date)).label("min_date"))
+            query_builder.add_column(func.max(cast(column(column_name), Date)).label("max_date"))
+            query_builder.add_column(
+                func.count(distinct(func.date(column(column_name)))).label("distinct_days")
+            )
+        elif org_warehouse.wtype == "bigquery":
+            query_builder.add_column(func.min(func.date(column(column_name))).label("min_date"))
+            query_builder.add_column(func.max(func.date(column(column_name))).label("max_date"))
+            query_builder.add_column(
+                func.count(distinct(func.date(column(column_name)))).label("distinct_days")
+            )
+        else:
+            query_builder.add_aggregate_column(column_name, "min", alias="min_date")
+            query_builder.add_aggregate_column(column_name, "max", alias="max_date")
+            query_builder.add_aggregate_column(column_name, "count_distinct", alias="distinct_days")
+
+        query_builder.add_aggregate_column(None, "count", alias="total_records")
+        query_builder.fetch_from(table_name, schema_name)
+        query_builder.where_clause(column(column_name).isnot(None))
+
+        results = execute_query(warehouse_client, query_builder)
+        row = results[0]
+        stats = {
+            "min_date": row["min_date"].isoformat() if row["min_date"] else None,
+            "max_date": row["max_date"].isoformat() if row["max_date"] else None,
+            "distinct_days": int(row["distinct_days"]) if row["distinct_days"] else 0,
+            "total_records": int(row["total_records"]) if row["total_records"] else 0,
+        }
+        return PublicFilterPreviewResponse(options=None, stats=stats, is_valid=True)
+
+    else:
+        raise ValueError(f"Invalid filter type: {filter_type}")
+
+
 @public_router.get(
     "/dashboards/{token}/filters/preview/",
     response={200: PublicFilterPreviewResponse, 404: PublicErrorResponse},
@@ -326,145 +423,72 @@ def get_public_filter_preview(
     filter_type: str,
     limit: int = 100,
 ):
-    """Get public filter preview - identical to authenticated filter preview API"""
+    """Get public filter preview for a dashboard token"""
     try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        # Verify token belongs to a public dashboard
+        try:
+            dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+            org = dashboard.org
+        except Dashboard.DoesNotExist:
+            logger.warning(
+                f"Public filter preview access failed - no public dashboard found for token: {token}"
+            )
+            return 404, PublicErrorResponse(
+                error="Dashboard not found or no longer public", is_valid=False
+            )
 
-        # Get org warehouse
-        from ddpui.models.org import OrgWarehouse
-        from ddpui.api.filter_api import get_filter_preview
-
-        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
 
-        # Create a mock request with orguser to reuse the authenticated filter preview logic
-        class MockRequest:
-            def __init__(self, org):
-                self.orguser = type("MockOrgUser", (), {"org": org})()
-
-        mock_request = MockRequest(dashboard.org)
-
-        # Use the exact same function as authenticated API
-        from ddpui.core.charts.charts_service import get_warehouse_client
-        from ddpui.core.datainsights.query_builder import AggQueryBuilder
-        from ddpui.core.charts.charts_service import execute_query
-        from sqlalchemy import func, column, distinct, cast, Float, Date
-
-        warehouse_client = get_warehouse_client(org_warehouse)
-
-        if filter_type == "value":
-            # Get distinct values with counts for categorical filter - same logic as authenticated API
-            query_builder = AggQueryBuilder()
-            query_builder.add_column(column(column_name).label("value"))
-            query_builder.add_aggregate_column(None, "count", alias="count")
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-            query_builder.group_cols_by(column_name)
-            query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
-            query_builder.limit_rows(limit)
-
-            # Execute query using charts_service function
-            results = execute_query(warehouse_client, query_builder)
-
-            options = [
-                AuthFilterOptionResponse(
-                    label=str(row["value"]) if row["value"] is not None else "NULL",
-                    value=str(row["value"]) if row["value"] is not None else "",
-                    count=int(row["count"]),
-                )
-                for row in results
-            ]
-
-            response_data = {"options": options, "stats": None, "is_valid": True}
-            return PublicFilterPreviewResponse(**response_data)
-
-        elif filter_type == "numerical":
-            # Get numerical statistics - same logic as authenticated API
-            query_builder = AggQueryBuilder()
-            query_builder.add_aggregate_column(column_name, "min", alias="min_value")
-            query_builder.add_aggregate_column(column_name, "max", alias="max_value")
-            query_builder.add_column(func.avg(cast(column(column_name), Float)).label("avg_value"))
-            query_builder.add_aggregate_column(
-                column_name, "count_distinct", alias="distinct_count"
-            )
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-
-            results = execute_query(warehouse_client, query_builder)
-            row = results[0]
-
-            stats = {
-                "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
-                "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
-                "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
-                "distinct_count": (
-                    int(row["distinct_count"]) if row["distinct_count"] is not None else 0
-                ),
-            }
-
-            response_data = {"options": None, "stats": stats, "is_valid": True}
-            return PublicFilterPreviewResponse(**response_data)
-
-        elif filter_type == "datetime":
-            # Get date range - same logic as authenticated API
-            query_builder = AggQueryBuilder()
-
-            if org_warehouse.wtype == "postgres":
-                query_builder.add_column(
-                    func.min(cast(column(column_name), Date)).label("min_date")
-                )
-                query_builder.add_column(
-                    func.max(cast(column(column_name), Date)).label("max_date")
-                )
-                query_builder.add_column(
-                    func.count(distinct(func.date(column(column_name)))).label("distinct_days")
-                )
-            elif org_warehouse.wtype == "bigquery":
-                query_builder.add_column(func.min(func.date(column(column_name))).label("min_date"))
-                query_builder.add_column(func.max(func.date(column(column_name))).label("max_date"))
-                query_builder.add_column(
-                    func.count(distinct(func.date(column(column_name)))).label("distinct_days")
-                )
-            else:
-                query_builder.add_aggregate_column(column_name, "min", alias="min_date")
-                query_builder.add_aggregate_column(column_name, "max", alias="max_date")
-                query_builder.add_aggregate_column(
-                    column_name, "count_distinct", alias="distinct_days"
-                )
-
-            query_builder.add_aggregate_column(None, "count", alias="total_records")
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-
-            results = execute_query(warehouse_client, query_builder)
-            row = results[0]
-
-            stats = {
-                "min_date": row["min_date"].isoformat() if row["min_date"] else None,
-                "max_date": row["max_date"].isoformat() if row["max_date"] else None,
-                "distinct_days": int(row["distinct_days"]) if row["distinct_days"] else 0,
-                "total_records": int(row["total_records"]) if row["total_records"] else 0,
-            }
-
-            response_data = {"options": None, "stats": stats, "is_valid": True}
-            return PublicFilterPreviewResponse(**response_data)
-
-        else:
-            return 404, PublicErrorResponse(
-                error=f"Invalid filter type: {filter_type}", is_valid=False
-            )
-
-    except Dashboard.DoesNotExist:
-        logger.warning(
-            f"Public filter preview access failed - dashboard not found for token: {token}"
+        return _execute_filter_preview(
+            org_warehouse, schema_name, table_name, column_name, filter_type, limit
         )
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
+
+    except ValueError as e:
+        return 404, PublicErrorResponse(error=str(e), is_valid=False)
     except Exception as e:
         logger.error(f"Public filter preview error: {str(e)}")
+        return 404, PublicErrorResponse(error="Filter preview unavailable", is_valid=False)
+
+
+@public_router.get(
+    "/reports/{token}/filters/preview/",
+    response={200: PublicFilterPreviewResponse, 404: PublicErrorResponse},
+)
+def get_public_report_filter_preview(
+    request,
+    token: str,
+    schema_name: str,
+    table_name: str,
+    column_name: str,
+    filter_type: str,
+    limit: int = 100,
+):
+    """Get public filter preview for a report snapshot token"""
+    try:
+        try:
+            snapshot = ReportSnapshot.objects.get(public_share_token=token, is_public=True)
+        except ReportSnapshot.DoesNotExist:
+            logger.warning(
+                f"Public report filter preview failed - no public report found for token: {token}"
+            )
+            return 404, PublicErrorResponse(
+                error="Report not found or no longer public", is_valid=False
+            )
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        return _execute_filter_preview(
+            org_warehouse, schema_name, table_name, column_name, filter_type, limit
+        )
+
+    except ValueError as e:
+        return 404, PublicErrorResponse(error=str(e), is_valid=False)
+    except Exception as e:
+        logger.error(f"Public report filter preview error: {str(e)}")
         return 404, PublicErrorResponse(error="Filter preview unavailable", is_valid=False)
 
 

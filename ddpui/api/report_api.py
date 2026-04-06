@@ -21,6 +21,7 @@ from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
+from ddpui.celeryworkers.report_tasks import send_report_email_task
 from ddpui.schemas.report_schema import (
     CommentCreate,
     CommentResponse,
@@ -29,6 +30,8 @@ from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     MarkReadRequest,
     MentionableUserResponse,
+    ShareViaEmailRequest,
+    ShareViaEmailResponse,
     SnapshotCreate,
     SnapshotDeleteResponse,
     SnapshotResponse,
@@ -72,7 +75,7 @@ def create_snapshot(request, payload: SnapshotCreate):
         s = ReportService.create_snapshot(
             title=payload.title,
             dashboard_id=payload.dashboard_id,
-            date_column=payload.date_column.dict(),
+            date_column=payload.date_column.model_dump(),
             period_end=payload.period_end,
             orguser=orguser,
             period_start=payload.period_start,
@@ -233,6 +236,51 @@ def get_report_sharing_status(request, snapshot_id: int):
         raise HttpError(404, str(err)) from err
     except SnapshotPermissionError as err:
         raise HttpError(403, str(err)) from err
+
+
+# ===== Share via Email =====
+
+
+@report_router.post(
+    "/{snapshot_id}/share/email/",
+    response=ApiResponse[ShareViaEmailResponse],
+)
+@has_permission(["can_share_dashboards"])
+def share_report_via_email(request, snapshot_id: int, payload: ShareViaEmailRequest):
+    """Send the report as a PDF attachment to the given email addresses."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+
+    # Ensure a share token exists and enable public access
+    share_token = ReportService.ensure_share_token(snapshot)
+    if not snapshot.is_public:
+        snapshot.is_public = True
+        snapshot.save(update_fields=["is_public"])
+
+    report_url = ReportService._build_public_url(share_token)
+    sender_name = orguser.user.email
+
+    send_report_email_task.delay(
+        snapshot_id=snapshot.id,
+        share_token=share_token,
+        recipient_emails=payload.recipient_emails,
+        sender_name=sender_name,
+        report_title=snapshot.title,
+        report_url=report_url,
+        message=payload.message,
+    )
+
+    return api_response(
+        success=True,
+        data=ShareViaEmailResponse(
+            recipients_count=len(payload.recipient_emails),
+            message="Emails are being sent",
+        ),
+    )
 
 
 # ===== Comment Endpoints (nested under /{snapshot_id}/comments/) =====

@@ -313,9 +313,9 @@ class ReportService:
 
         frozen_dashboard = FrozenDashboardConfig(
             **ReportService._freeze_dashboard(dashboard)
-        ).dict()
+        ).model_dump()
         frozen_chart_configs = {
-            k: FrozenChartConfig(**v).dict()
+            k: FrozenChartConfig(**v).model_dump()
             for k, v in ReportService._freeze_chart_configs(dashboard).items()
         }
 
@@ -617,8 +617,11 @@ class ReportService:
     @staticmethod
     def _build_public_url(token: str) -> str:
         """Build the public share URL for a report snapshot."""
-        frontend_url_v2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = frontend_url_v2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        frontend_url = getattr(settings, "FRONTEND_URL_V2", None) or getattr(
+            settings, "FRONTEND_URL", None
+        )
+        if not frontend_url:
+            frontend_url = "http://localhost:3001"
         return f"{frontend_url}/share/report/{token}"
 
     @staticmethod
