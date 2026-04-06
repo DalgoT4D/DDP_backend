@@ -9,6 +9,7 @@ FEATURE_FLAGS = {
     "AI_DATA_ANALYSIS": "Enable data analysis using AI",
     "DATA_STATISTICS": "Enable detailed data statistics in explore",
     "AI_DASHBOARD_CHAT": "Enable chat with dashboards",
+    "REPORTS": "Enable reports feature",
 }
 
 

@@ -256,7 +256,7 @@ def test_post_organization_user_userexists_username(orguser):
         email="tempusername",
         password="userpassword",
         signupcode="right-signupcode",
-        role=2,
+        role="2",
     )
     os.environ["SIGNUPCODE"] = "right-signupcode"
     with pytest.raises(HttpError) as excinfo:
@@ -271,7 +271,7 @@ def test_post_organization_user_invalid_email(orguser):
         email="invalid_email",
         password="userpassword",
         signupcode="right-signupcode",
-        role=2,
+        role="2",
     )
     os.environ["SIGNUPCODE"] = "right-signupcode"
     with pytest.raises(HttpError) as excinfo:

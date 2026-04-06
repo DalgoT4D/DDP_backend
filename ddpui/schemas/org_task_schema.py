@@ -1,18 +1,19 @@
+from typing import Optional
 from ninja import Schema
 
 
 class TaskParameters(Schema):
     """Schema to parameterize Task Runs"""
 
-    flags: list | None
-    options: dict | None
+    flags: list | None = None
+    options: dict | None = None
 
 
 class SelectedStream(Schema):
     """Schema to define a selected stream"""
 
     streamName: str
-    streamNamespace: str = None
+    streamNamespace: Optional[str] = None
 
 
 class ClearSelectedStreams(Schema):
@@ -28,8 +29,8 @@ class CreateOrgTaskPayload(Schema):
     """
 
     task_slug: str
-    flags: list | None
-    options: dict | None
+    flags: list | None = None
+    options: dict | None = None
 
 
 class DbtProjectSchema(Schema):

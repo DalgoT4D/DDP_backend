@@ -444,7 +444,7 @@ def test_post_run_dbt_commands_with_payload(orguser: OrgUser, f_org_tasks):
 
         # Verify celery task was called with payload
         mock_run_dbt.assert_called_once_with(
-            orguser.org.id, orguser.org.dbt.id, mock_task_id, payload.dict()
+            orguser.org.id, orguser.org.dbt.id, mock_task_id, payload.model_dump()
         )
 
 
