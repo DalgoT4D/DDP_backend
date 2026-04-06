@@ -60,13 +60,11 @@ def test_build_dashboard_suggested_prompts_returns_three_grounded_questions():
                 },
             ],
         },
-        org_context_markdown="Facilitators and districts are the main operating units.",
-        dashboard_context_markdown="Use this dashboard to compare outcomes over time.",
     )
 
     assert prompts == [
-        "How have outcomes changed by quarter?",
-        "Which districts have the highest literacy efficiency?",
+        "How did outcomes change by quarter?",
+        "How does literacy efficiency compare across districts?",
         'What does the "Total Facilitators" metric represent?',
     ]
 
@@ -105,11 +103,43 @@ def test_build_dashboard_suggested_prompts_backfills_with_explanations_when_only
                 },
             ],
         },
-        org_context_markdown="Learners are the key population.",
-        dashboard_context_markdown="Use this dashboard for quick snapshot metrics.",
     )
 
     assert prompts == [
-        'What does the "Total Learners Reached" metric represent?',
         'What does the "Average Attendance Rate" metric represent?',
+        'What does the "Total Learners Reached" metric represent?',
+    ]
+
+
+def test_build_dashboard_suggested_prompts_humanizes_aggregation_labels():
+    prompts = build_dashboard_suggested_prompts(
+        dashboard_export={
+            "dashboard": {
+                "title": "Funding Overview",
+                "description": "Grant funding by quarter",
+            },
+            "charts": [
+                {
+                    "id": 4,
+                    "title": "Grant Funding by Quarter",
+                    "description": "Quarterly grant funding",
+                    "chart_type": "line",
+                    "schema_name": "analytics",
+                    "table_name": "grant_funding_quarterly",
+                    "extra_config": {
+                        "dimension_column": "quarter_label",
+                        "metrics": [
+                            {
+                                "column": "grant_funding_usd",
+                                "aggregation": "sum",
+                            }
+                        ],
+                    },
+                },
+            ],
+        },
+    )
+
+    assert prompts == [
+        "How did total grant funding usd change by quarter?",
     ]

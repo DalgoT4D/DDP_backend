@@ -20,7 +20,6 @@ from ddpui.models.dashboard_chat import (
     DashboardAIContext,
     DashboardChatMessage,
     DashboardChatMessageRole,
-    OrgAIContext,
 )
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
@@ -87,15 +86,11 @@ def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAICo
 
 def _serialize_dashboard_chat_bootstrap(dashboard: Dashboard) -> DashboardChatBootstrapResponse:
     dashboard_export = DashboardService.export_dashboard_context_for_dashboard(dashboard, dashboard.org)
-    org_context, _ = OrgAIContext.objects.get_or_create(org=dashboard.org)
-    dashboard_context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
 
     return DashboardChatBootstrapResponse(
         dashboard_id=dashboard.id,
         suggested_prompts=build_dashboard_suggested_prompts(
             dashboard_export=dashboard_export,
-            org_context_markdown=org_context.markdown,
-            dashboard_context_markdown=dashboard_context.markdown,
         ),
     )
 

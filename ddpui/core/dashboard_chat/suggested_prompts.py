@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 
 
 TIME_TOKENS = (
@@ -20,37 +19,16 @@ TIME_TOKENS = (
     "period",
 )
 
-ENTITY_LABELS = {
-    "district": "districts",
-    "facilitator": "facilitators",
-    "school": "schools",
-    "state": "states",
-    "program": "programs",
-    "block": "blocks",
-    "ward": "wards",
-    "village": "villages",
-    "student": "students",
-    "learner": "learners",
-    "teacher": "teachers",
-    "partner": "partners",
-    "organization": "organizations",
-    "org": "organizations",
-}
-
 METRIC_PREFIX_PATTERNS = (
     ("count_distinct_", "unique"),
     ("count_", "number of"),
     ("avg_", "average"),
     ("average_", "average"),
-    ("sum_", ""),
+    ("sum_", "total"),
     ("total_", "total"),
     ("max_", "highest"),
     ("min_", "lowest"),
 )
-
-
-def _normalize_text(parts: Iterable[str | None]) -> str:
-    return " ".join(part.strip() for part in parts if part and part.strip())
 
 
 def _humanize_identifier(value: str | None) -> str:
@@ -79,14 +57,6 @@ def _looks_time_like(value: str | None) -> bool:
     return any(token in normalized_value for token in TIME_TOKENS)
 
 
-def _search_entity_label(text: str) -> str | None:
-    normalized_text = text.lower()
-    for token, label in ENTITY_LABELS.items():
-        if token in normalized_text:
-            return label
-    return None
-
-
 def _metric_label_from_string(metric_name: str | None) -> str:
     normalized_metric_name = _humanize_identifier(metric_name)
     if not normalized_metric_name:
@@ -103,6 +73,32 @@ def _metric_label_from_string(metric_name: str | None) -> str:
     return normalized_metric_name
 
 
+def _metric_label_from_column(
+    column_name: str | None,
+    aggregation_name: str | None,
+) -> str:
+    column_label = _humanize_identifier(column_name)
+    aggregation_label = _humanize_identifier(aggregation_name)
+
+    if not column_label:
+        return ""
+    if not aggregation_label:
+        return column_label
+    if aggregation_label in {"avg", "average"}:
+        return f"average {column_label}"
+    if aggregation_label == "sum":
+        return f"total {column_label}"
+    if aggregation_label == "count_distinct":
+        return f"unique {_pluralize_label(column_label)}"
+    if aggregation_label == "count":
+        return f"number of {_pluralize_label(column_label)}"
+    if aggregation_label == "min":
+        return f"lowest {column_label}"
+    if aggregation_label == "max":
+        return f"highest {column_label}"
+    return f"{aggregation_label} of {column_label}"
+
+
 def _metric_label_from_chart(chart: dict) -> str:
     extra_config = chart.get("extra_config") or {}
     metrics = extra_config.get("metrics") or []
@@ -112,18 +108,8 @@ def _metric_label_from_chart(chart: dict) -> str:
             if alias:
                 return alias
             column = metric.get("column")
-            aggregation = _humanize_identifier(metric.get("aggregation"))
             if column:
-                column_label = _humanize_identifier(column)
-                if aggregation in {"avg", "average"}:
-                    return f"average {column_label}"
-                if aggregation == "count_distinct":
-                    return f"unique {_pluralize_label(column_label)}"
-                if aggregation == "count":
-                    return f"number of {_pluralize_label(column_label)}"
-                if aggregation:
-                    return f"{aggregation} {column_label}".strip()
-                return column_label
+                return _metric_label_from_column(column, metric.get("aggregation"))
         elif isinstance(metric, str):
             metric_label = _metric_label_from_string(metric)
             if metric_label:
@@ -132,16 +118,9 @@ def _metric_label_from_chart(chart: dict) -> str:
     aggregate_column = extra_config.get("aggregate_column") or extra_config.get("value_column")
     aggregate_function = extra_config.get("aggregate_function")
     if aggregate_column:
-        column_label = _humanize_identifier(aggregate_column)
-        if aggregate_function == "avg":
-            return f"average {column_label}"
-        if aggregate_function == "count_distinct":
-            return f"unique {_pluralize_label(column_label)}"
-        if aggregate_function == "count":
-            return f"number of {_pluralize_label(column_label)}"
-        if aggregate_function in {"min", "max"}:
-            return f"{aggregate_function} {column_label}"
-        return column_label
+        metric_label = _metric_label_from_column(aggregate_column, aggregate_function)
+        if metric_label:
+            return metric_label
 
     chart_title = str(chart.get("title") or "").strip()
     if chart_title:
@@ -155,9 +134,9 @@ def _metric_label_from_chart(chart: dict) -> str:
     return _humanize_identifier(chart.get("table_name")) or "this metric"
 
 
-def _dimension_label_from_chart(chart: dict, fallback_context: str) -> str | None:
+def _dimension_candidates_from_chart(chart: dict) -> list[str]:
     extra_config = chart.get("extra_config") or {}
-    dimension_candidates = []
+    dimension_candidates: list[str] = []
 
     for key in ("dimension_column", "extra_dimension_column", "geographic_column"):
         value = extra_config.get(key)
@@ -166,64 +145,43 @@ def _dimension_label_from_chart(chart: dict, fallback_context: str) -> str | Non
 
     dimensions = extra_config.get("dimensions") or []
     if isinstance(dimensions, list):
-        dimension_candidates.extend(value for value in dimensions if isinstance(value, str) and value.strip())
+        dimension_candidates.extend(
+            value for value in dimensions if isinstance(value, str) and value.strip()
+        )
 
-    for candidate in dimension_candidates:
+    return dimension_candidates
+
+
+def _dimension_label_from_chart(chart: dict) -> str | None:
+    for candidate in _dimension_candidates_from_chart(chart):
         if _looks_time_like(candidate):
             continue
         label = _humanize_identifier(candidate)
         if label:
             return _pluralize_label(label)
 
-    return _search_entity_label(fallback_context)
-
-
-def _time_label_from_chart(chart: dict, fallback_context: str) -> str | None:
-    extra_config = chart.get("extra_config") or {}
-    dimension_candidates = []
-
-    for key in ("dimension_column", "extra_dimension_column"):
-        value = extra_config.get(key)
-        if isinstance(value, str) and value.strip():
-            dimension_candidates.append(value)
-
-    dimensions = extra_config.get("dimensions") or []
-    if isinstance(dimensions, list):
-        dimension_candidates.extend(value for value in dimensions if isinstance(value, str) and value.strip())
-
-    for candidate in dimension_candidates:
-        if _looks_time_like(candidate):
-            return _humanize_identifier(candidate)
-
-    normalized_context = fallback_context.lower()
-    for token in TIME_TOKENS:
-        if token in normalized_context:
-            return token
     return None
 
 
-def _uses_plural_verb(metric_label: str) -> bool:
-    normalized_metric_label = metric_label.strip().lower()
-    if normalized_metric_label.startswith(("number of ", "average ", "highest ", "lowest ", "total ")):
-        return False
-    if normalized_metric_label.endswith("ies"):
-        return True
-    return normalized_metric_label.endswith("s") and not normalized_metric_label.endswith("ss")
+def _time_label_from_chart(chart: dict) -> str | None:
+    for candidate in _dimension_candidates_from_chart(chart):
+        if _looks_time_like(candidate):
+            return _humanize_identifier(candidate)
+    return None
 
 
 def _build_trend_prompt(chart_prompt_context: dict) -> str:
     metric_label = chart_prompt_context["metric_label"]
     time_label = chart_prompt_context["time_label"] or "time"
-    verb = "have" if _uses_plural_verb(metric_label) else "has"
     if time_label == "time":
-        return f"How {verb} {metric_label} changed over time?"
-    return f"How {verb} {metric_label} changed by {time_label}?"
+        return f"How did {metric_label} change over time?"
+    return f"How did {metric_label} change by {time_label}?"
 
 
 def _build_comparison_prompt(chart_prompt_context: dict) -> str:
     return (
-        f'Which {chart_prompt_context["dimension_label"]} have the highest '
-        f'{chart_prompt_context["metric_label"]}?'
+        f'How does {chart_prompt_context["metric_label"]} compare across '
+        f'{chart_prompt_context["dimension_label"]}?'
     )
 
 
@@ -242,7 +200,7 @@ def _build_explanation_prompt(chart_prompt_context: dict) -> str:
 
 
 def _can_build_trend_prompt(chart_prompt_context: dict) -> bool:
-    return bool(chart_prompt_context["time_label"] or chart_prompt_context["chart_type"] == "line")
+    return bool(chart_prompt_context["time_label"])
 
 
 def _can_build_comparison_prompt(chart_prompt_context: dict) -> bool:
@@ -251,38 +209,22 @@ def _can_build_comparison_prompt(chart_prompt_context: dict) -> bool:
 
 def _build_chart_prompt_contexts(
     dashboard_export: dict,
-    org_context_markdown: str,
-    dashboard_context_markdown: str,
 ) -> list[dict]:
     dashboard = dashboard_export.get("dashboard") or {}
     charts = dashboard_export.get("charts") or []
     dashboard_title = str(dashboard.get("title") or "this dashboard").strip()
-    dashboard_description = str(dashboard.get("description") or "").strip()
-    shared_context = _normalize_text(
-        [dashboard_title, dashboard_description, org_context_markdown, dashboard_context_markdown]
-    )
 
     chart_prompt_contexts = []
-    for chart in charts:
+    for chart in reversed(charts):
         chart_title = str(chart.get("title") or "").strip() or dashboard_title
-        chart_description = str(chart.get("description") or "").strip()
-        chart_context = _normalize_text(
-            [
-                chart_title,
-                chart_description,
-                str(chart.get("schema_name") or "").strip(),
-                str(chart.get("table_name") or "").replace("_", " ").strip(),
-                shared_context,
-            ]
-        )
         chart_prompt_contexts.append(
             {
                 "chart_id": chart.get("id"),
                 "chart_title": chart_title,
                 "chart_type": str(chart.get("chart_type") or "").strip().lower(),
                 "metric_label": _metric_label_from_chart(chart),
-                "dimension_label": _dimension_label_from_chart(chart, chart_context),
-                "time_label": _time_label_from_chart(chart, chart_context),
+                "dimension_label": _dimension_label_from_chart(chart),
+                "time_label": _time_label_from_chart(chart),
             }
         )
 
@@ -296,30 +238,25 @@ def _select_prompt(
     prompt_builder,
     predicate,
 ) -> str | None:
-    for prefer_unused_chart in (True, False):
-        for chart_prompt_context in chart_prompt_contexts:
-            chart_id = chart_prompt_context["chart_id"]
-            if prefer_unused_chart and chart_id in used_chart_ids:
-                continue
-            if not predicate(chart_prompt_context):
-                continue
-            prompt = prompt_builder(chart_prompt_context)
-            if not prompt:
-                continue
-            used_chart_ids.add(chart_id)
-            return prompt
+    for chart_prompt_context in chart_prompt_contexts:
+        chart_id = chart_prompt_context["chart_id"]
+        if chart_id in used_chart_ids:
+            continue
+        if not predicate(chart_prompt_context):
+            continue
+        prompt = prompt_builder(chart_prompt_context)
+        if not prompt:
+            continue
+        used_chart_ids.add(chart_id)
+        return prompt
     return None
 
 
 def build_dashboard_suggested_prompts(
     dashboard_export: dict,
-    org_context_markdown: str,
-    dashboard_context_markdown: str,
 ) -> list[str]:
     chart_prompt_contexts = _build_chart_prompt_contexts(
         dashboard_export=dashboard_export,
-        org_context_markdown=org_context_markdown,
-        dashboard_context_markdown=dashboard_context_markdown,
     )
 
     suggested_prompts: list[str] = []
@@ -347,7 +284,7 @@ def build_dashboard_suggested_prompts(
         chart_prompt_contexts,
         used_chart_ids,
         prompt_builder=_build_explanation_prompt,
-        predicate=lambda chart_prompt_context: True,
+        predicate=lambda chart_prompt_context: bool(chart_prompt_context["chart_title"]),
     )
     if explanation_prompt and explanation_prompt not in suggested_prompts:
         suggested_prompts.append(explanation_prompt)
@@ -355,20 +292,13 @@ def build_dashboard_suggested_prompts(
     for chart_prompt_context in chart_prompt_contexts:
         if len(suggested_prompts) == 3:
             break
-        if chart_prompt_context["chart_id"] in used_chart_ids:
+        chart_id = chart_prompt_context["chart_id"]
+        if chart_id in used_chart_ids:
             continue
         explanation_prompt = _build_explanation_prompt(chart_prompt_context)
         if explanation_prompt in suggested_prompts:
             continue
-        used_chart_ids.add(chart_prompt_context["chart_id"])
+        used_chart_ids.add(chart_id)
         suggested_prompts.append(explanation_prompt)
 
-    if suggested_prompts:
-        return suggested_prompts[:3]
-
-    dashboard_title = str((dashboard_export.get("dashboard") or {}).get("title") or "this dashboard").strip()
-    return [
-        f'What does the "{dashboard_title}" dashboard measure?',
-        f'Which metrics stand out on the "{dashboard_title}" dashboard?',
-        f'How are results grouped on the "{dashboard_title}" dashboard?',
-    ]
+    return suggested_prompts[:3]
