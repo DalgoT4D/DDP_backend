@@ -8,6 +8,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
+from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_corrections import (
     missing_columns_in_primary_table,
@@ -22,6 +23,10 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     DashboardChatTurnContext,
     get_turn_warehouse_tools,
     record_validated_filters_from_sql,
+)
+from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
+    publish_runtime_progress,
+    raise_if_runtime_cancelled,
 )
 
 
@@ -92,6 +97,12 @@ def handle_run_sql_query_tool(
         return missing_columns
 
     turn_context.last_sql = validation.sanitized_sql
+    table_label = ", ".join(validation.tables[:2]) if validation.tables else "allowlisted table"
+    publish_runtime_progress(
+        f"Querying data from {table_label}",
+        DashboardChatProgressStage.QUERYING_DATA,
+    )
+    raise_if_runtime_cancelled()
     try:
         rows = get_turn_warehouse_tools(
             warehouse_tools_factory,

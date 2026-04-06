@@ -17,7 +17,8 @@ from ddpui.core.dashboard_chat.orchestration.response_composer import (
     max_turns_message,
     fallback_answer_text,
 )
-from ddpui.core.dashboard_chat.contracts import DashboardChatIntentDecision
+from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.dbt_tools import (
     handle_get_dbt_model_info_tool,
@@ -41,8 +42,39 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     current_schema_snippet_payloads,
     seed_validated_distinct_values_from_previous_sql,
 )
+from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
+    publish_runtime_progress,
+    raise_if_runtime_cancelled,
+)
 
 logger = CustomLogger("dashboard_chat")
+
+TOOL_PROGRESS = {
+    "retrieve_docs": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Searching relevant sources",
+    ),
+    "get_schema_snippets": (
+        DashboardChatProgressStage.VALIDATING_QUERY,
+        "Validating query",
+    ),
+    "get_distinct_values": (
+        DashboardChatProgressStage.VALIDATING_QUERY,
+        "Validating filters",
+    ),
+    "list_tables_by_keyword": (
+        DashboardChatProgressStage.VALIDATING_QUERY,
+        "Validating query",
+    ),
+    "check_table_row_count": (
+        DashboardChatProgressStage.VALIDATING_QUERY,
+        "Validating query",
+    ),
+    "run_sql_query": (
+        DashboardChatProgressStage.VALIDATING_QUERY,
+        "Validating query",
+    ),
+}
 
 
 def execute_tool_loop(
@@ -68,6 +100,7 @@ def execute_tool_loop(
     intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
 
     for turn_index in range(max_turns):
+        raise_if_runtime_cancelled()
         tool_choice = "required" if intent_decision.force_tool_usage and turn_index == 0 else "auto"
         ai_message = llm_client.run_tool_loop_turn(
             messages=messages,
@@ -113,6 +146,7 @@ def execute_tool_loop(
             )
 
         for tool_call in tool_calls:
+            raise_if_runtime_cancelled()
             raw_args = tool_call.get("args") or {}
             args = raw_args
             if isinstance(raw_args, str):
@@ -154,6 +188,7 @@ def execute_tool_loop(
                     ),
                 }
             )
+            raise_if_runtime_cancelled()
             if tool_name == "run_sql_query" and result.get("success"):
                 return build_tool_loop_result(
                     answer_text="",
@@ -186,6 +221,9 @@ def execute_tool_call(
 ) -> dict[str, Any]:
     """Execute one prototype tool against the Dalgo runtime primitives."""
     try:
+        progress = TOOL_PROGRESS.get(tool_name)
+        if progress is not None:
+            publish_runtime_progress(progress[1], progress[0])
         if tool_name == "retrieve_docs":
             return handle_retrieve_docs_tool(
                 vector_store, source_config, runtime_config, args, state, turn_context

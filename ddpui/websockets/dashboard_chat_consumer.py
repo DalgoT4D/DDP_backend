@@ -1,17 +1,27 @@
 import json
 from urllib.parse import parse_qs
 
+from asgiref.sync import async_to_sync
 from django.utils import timezone
 
+from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
 from ddpui.core.dashboard_chat.sessions.session_service import (
     DashboardChatSessionError,
+    DASHBOARD_CHAT_SESSION_GROUP_PREFIX,
     create_dashboard_chat_user_message_with_status,
-    execute_dashboard_chat_turn,
     get_or_create_dashboard_chat_session,
-    serialize_dashboard_chat_message,
+    publish_dashboard_chat_assistant_message,
+    publish_dashboard_chat_cancelled,
+    publish_dashboard_chat_progress,
+    start_dashboard_chat_turn_background,
+    update_dashboard_chat_turn,
 )
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
+from ddpui.models.dashboard_chat import (
+    DashboardChatSession,
+    DashboardChatTurn,
+    DashboardChatTurnStatus,
+)
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.role_based_access import RolePermission
 from ddpui.utils.custom_logger import CustomLogger
@@ -26,6 +36,7 @@ class DashboardChatConsumer(BaseConsumer):
     """Authenticated websocket for dashboard-level chat."""
 
     def connect(self):
+        self.active_session_group = None
         query_string = parse_qs(self.scope["query_string"].decode())
         token = query_string.get("token", [None])[0]
         orgslug = query_string.get("orgslug", [None])[0]
@@ -50,9 +61,36 @@ class DashboardChatConsumer(BaseConsumer):
             self._send_error("Invalid websocket payload")
             return
 
-        if payload.get("action") != "send_message":
+        action = payload.get("action")
+        if action == "send_message":
+            self._handle_send_message(payload)
+            return
+        if action == "cancel_message":
+            self._handle_cancel_message(payload)
+            return
+        if action != "send_message":
             self._send_error("Unsupported websocket action")
             return
+
+    def disconnect(self, code):
+        if self.active_session_group is not None:
+            async_to_sync(self.channel_layer.group_discard)(
+                self.active_session_group,
+                self.channel_name,
+            )
+        super().disconnect(code)
+
+    def dashboard_chat_event(self, event):
+        self.respond(
+            WebsocketResponse(
+                status=event["status"],
+                message=event["message"],
+                data=event["data"],
+            )
+        )
+
+    def _handle_send_message(self, payload: dict) -> None:
+        """Persist one user message, start one background turn, and stream progress via channels."""
 
         raw_message = str(payload.get("message") or "").strip()
         if not raw_message:
@@ -75,59 +113,134 @@ class DashboardChatConsumer(BaseConsumer):
             self._send_error(str(error))
             return
 
-        user_message = create_dashboard_chat_user_message_with_status(
+        self._subscribe_to_session(session)
+
+        user_message_result = create_dashboard_chat_user_message_with_status(
             session=session,
             content=raw_message,
             client_message_id=payload.get("client_message_id"),
-        ).message
+        )
+        turn, turn_created = DashboardChatTurn.objects.get_or_create(
+            session=session,
+            user_message=user_message_result.message,
+            defaults={"status": DashboardChatTurnStatus.QUEUED},
+        )
+        turn = DashboardChatTurn.objects.select_related("assistant_message").get(id=turn.id)
+        if not user_message_result.created and not turn_created:
+            self._handle_existing_turn(session, turn)
+            return
+        publish_dashboard_chat_progress(
+            session=session,
+            turn=turn,
+            label="Understanding question",
+            stage=DashboardChatProgressStage.UNDERSTANDING_QUESTION,
+            message_id=user_message_result.message.id,
+        )
+        update_dashboard_chat_turn(
+            turn.id,
+            progress_label="Understanding question",
+        )
+        start_dashboard_chat_turn_background(turn.id)
 
-        self._send_progress(session, user_message)
+    def _handle_cancel_message(self, payload: dict) -> None:
+        """Mark one queued/running dashboard-chat turn as cancelled or cancel-requested."""
 
+        session_id = payload.get("session_id")
+        if not session_id:
+            self._send_error("session_id is required to cancel a message")
+            return
         try:
-            assistant_message = execute_dashboard_chat_turn(
-                str(session.session_id), user_message.id
+            session = get_or_create_dashboard_chat_session(
+                orguser=self.orguser,
+                dashboard=self.dashboard,
+                session_id=session_id,
             )
-        except Exception:
-            logger.exception("dashboard chat turn failed for session=%s", session.session_id)
-            self._send_error("Something went wrong while generating the response")
+        except DashboardChatSessionError as error:
+            self._send_error(str(error))
             return
 
-        self._send_assistant_message(session, assistant_message)
+        turn_id = payload.get("turn_id")
+        turn_query = DashboardChatTurn.objects.filter(session=session)
+        if turn_id is not None:
+            try:
+                turn_query = turn_query.filter(id=int(turn_id))
+            except (TypeError, ValueError):
+                self._send_error("turn_id must be an integer")
+                return
+        turn = turn_query.order_by("-created_at").first()
+        if turn is None:
+            self._send_error("No active chat turn found for this session")
+            return
+
+        if turn.status == DashboardChatTurnStatus.QUEUED:
+            cancelled_turn = update_dashboard_chat_turn(
+                turn.id,
+                status=DashboardChatTurnStatus.CANCELLED,
+                progress_label="Generation stopped",
+                cancel_requested_at=timezone.now(),
+                completed_at=timezone.now(),
+            )
+            publish_dashboard_chat_cancelled(session=session, turn=cancelled_turn)
+            return
+
+        if turn.status != DashboardChatTurnStatus.RUNNING:
+            self._send_error("This chat turn can no longer be cancelled")
+            return
+
+        updated_turn = update_dashboard_chat_turn(
+            turn.id,
+            status=DashboardChatTurnStatus.CANCEL_REQUESTED,
+            progress_label="Stopping...",
+            cancel_requested_at=timezone.now(),
+        )
+        publish_dashboard_chat_progress(
+            session=session,
+            turn=updated_turn,
+            label="Stopping...",
+            stage=DashboardChatProgressStage.CANCELLING,
+        )
+
+    def _handle_existing_turn(
+        self,
+        session: DashboardChatSession,
+        turn: DashboardChatTurn,
+    ) -> None:
+        """Reuse the existing turn state for duplicate client-message retries."""
+
+        if (
+            turn.status == DashboardChatTurnStatus.COMPLETED
+            and turn.assistant_message is not None
+        ):
+            publish_dashboard_chat_assistant_message(
+                session=session,
+                turn=turn,
+                message=turn.assistant_message,
+            )
+            return
+
+        if turn.status in {
+            DashboardChatTurnStatus.QUEUED,
+            DashboardChatTurnStatus.RUNNING,
+            DashboardChatTurnStatus.CANCEL_REQUESTED,
+        }:
+            publish_dashboard_chat_progress(
+                session=session,
+                turn=turn,
+                label=turn.progress_label or "Understanding question",
+                stage=None,
+                message_id=turn.user_message_id,
+            )
+            return
+
+        if turn.status == DashboardChatTurnStatus.CANCELLED:
+            publish_dashboard_chat_cancelled(session=session, turn=turn)
+            return
+
+        self._send_error("This chat turn can no longer be retried")
 
     # -------------------------------------------------------------------------
     # Response helpers
     # -------------------------------------------------------------------------
-
-    def _send_progress(self, session: DashboardChatSession, user_message: DashboardChatMessage):
-        self.respond(
-            WebsocketResponse(
-                status=WebsocketResponseStatus.SUCCESS,
-                message="",
-                data={
-                    "event_type": "progress",
-                    "session_id": str(session.session_id),
-                    "message_id": str(user_message.id),
-                    "dashboard_id": self.dashboard.id,
-                    "occurred_at": timezone.now().isoformat(),
-                },
-            )
-        )
-
-    def _send_assistant_message(self, session: DashboardChatSession, message: DashboardChatMessage):
-        self.respond(
-            WebsocketResponse(
-                status=WebsocketResponseStatus.SUCCESS,
-                message="",
-                data={
-                    "event_type": "assistant_message",
-                    "session_id": str(session.session_id),
-                    "message_id": str(message.id),
-                    "dashboard_id": self.dashboard.id,
-                    "occurred_at": timezone.now().isoformat(),
-                    **serialize_dashboard_chat_message(message),
-                },
-            )
-        )
 
     def _send_error(self, message: str):
         self.respond(
@@ -166,3 +279,15 @@ class DashboardChatConsumer(BaseConsumer):
             role=self.orguser.new_role,
             permission__slug=permission_slug,
         ).exists()
+
+    def _subscribe_to_session(self, session: DashboardChatSession) -> None:
+        session_group = f"{DASHBOARD_CHAT_SESSION_GROUP_PREFIX}{session.session_id}"
+        if self.active_session_group == session_group:
+            return
+        if self.active_session_group is not None:
+            async_to_sync(self.channel_layer.group_discard)(
+                self.active_session_group,
+                self.channel_name,
+            )
+        async_to_sync(self.channel_layer.group_add)(session_group, self.channel_name)
+        self.active_session_group = session_group

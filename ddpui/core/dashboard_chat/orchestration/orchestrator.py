@@ -10,7 +10,8 @@ from langgraph.graph import END, START, StateGraph
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
 from ddpui.core.dashboard_chat.agents.llm_client_interface import DashboardChatLlmClient
 from ddpui.core.dashboard_chat.agents.openai_llm_client import OpenAIDashboardChatLlmClient
-from ddpui.core.dashboard_chat.contracts import DashboardChatResponse
+from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
 from ddpui.core.dashboard_chat.vector.org_vector_store import OrgVectorStore
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
 from ddpui.models.org import Org
@@ -44,16 +45,72 @@ from ddpui.core.dashboard_chat.orchestration.nodes.route_intent import route_int
 from ddpui.core.dashboard_chat.orchestration.state import (
     DashboardChatGraphState,
 )
+from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
+    publish_runtime_progress,
+    raise_if_runtime_cancelled,
+)
 
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.tool_specifications import (
     DASHBOARD_CHAT_TOOL_SPECIFICATIONS,
 )
 
 
+NODE_PROGRESS = {
+    "load_context": (
+        DashboardChatProgressStage.LOADING_CONTEXT,
+        "Loading dashboard context",
+    ),
+    "route_intent": (
+        DashboardChatProgressStage.UNDERSTANDING_QUESTION,
+        "Understanding question",
+    ),
+    "handle_query_with_sql": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Searching relevant sources",
+    ),
+    "handle_query_without_sql": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Searching relevant sources",
+    ),
+    "handle_follow_up_sql": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Searching relevant sources",
+    ),
+    "handle_follow_up_context": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Searching relevant sources",
+    ),
+    "handle_small_talk": (
+        DashboardChatProgressStage.PREPARING_ANSWER,
+        "Preparing answer",
+    ),
+    "handle_irrelevant": (
+        DashboardChatProgressStage.PREPARING_ANSWER,
+        "Preparing answer",
+    ),
+    "handle_needs_clarification": (
+        DashboardChatProgressStage.PREPARING_ANSWER,
+        "Preparing answer",
+    ),
+    "compose_response": (
+        DashboardChatProgressStage.PREPARING_ANSWER,
+        "Preparing answer",
+    ),
+    "finalize": (
+        DashboardChatProgressStage.PREPARING_ANSWER,
+        "Preparing answer",
+    ),
+}
+
+
 def _timed_node(node_name: str, handler):
     """Wrap one graph node so per-node duration is recorded in timing_breakdown."""
 
     def wrapped(state: DashboardChatGraphState) -> dict:
+        raise_if_runtime_cancelled()
+        progress = NODE_PROGRESS.get(node_name)
+        if progress is not None:
+            publish_runtime_progress(progress[1], progress[0])
         started_at = perf_counter()
         updates = handler(state)
         elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
@@ -63,6 +120,7 @@ def _timed_node(node_name: str, handler):
         graph_nodes_ms[node_name] = elapsed_ms
         new_timing["graph_nodes_ms"] = graph_nodes_ms
         updates["timing_breakdown"] = new_timing
+        raise_if_runtime_cancelled()
         return updates
 
     return wrapped

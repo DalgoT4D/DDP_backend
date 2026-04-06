@@ -20,6 +20,17 @@ class DashboardChatMessageRole(str, Enum):
         return [(key.value, key.name) for key in cls]
 
 
+class DashboardChatTurnStatus(models.TextChoices):
+    """Lifecycle states for one dashboard-chat turn."""
+
+    QUEUED = "queued", "Queued"
+    RUNNING = "running", "Running"
+    CANCEL_REQUESTED = "cancel_requested", "Cancel Requested"
+    CANCELLED = "cancelled", "Cancelled"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+
+
 class DashboardChatPromptTemplateKey(models.TextChoices):
     """Runtime-editable prompt templates used by the dashboard chat LLM client."""
 
@@ -146,4 +157,46 @@ class DashboardChatMessage(models.Model):
                 condition=models.Q(client_message_id__isnull=False),
                 name="dchat_message_session_client_msg_unique",
             ),
+        ]
+
+
+class DashboardChatTurn(models.Model):
+    """Runtime state for one queued/running/completed dashboard-chat turn."""
+
+    session = models.ForeignKey(
+        DashboardChatSession,
+        on_delete=models.CASCADE,
+        related_name="turns",
+    )
+    user_message = models.OneToOneField(
+        DashboardChatMessage,
+        on_delete=models.CASCADE,
+        related_name="turn",
+    )
+    assistant_message = models.OneToOneField(
+        DashboardChatMessage,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assistant_turn",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=DashboardChatTurnStatus.choices,
+        default=DashboardChatTurnStatus.QUEUED,
+    )
+    progress_label = models.CharField(max_length=255, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    cancel_requested_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dashboard_chat_turn"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["session", "status"], name="dchat_turn_session_status_idx"),
+            models.Index(fields=["created_at"], name="dchat_turn_created_idx"),
         ]
