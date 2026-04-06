@@ -5,7 +5,7 @@ import re
 import sqlparse
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
-from ddpui.core.dashboard_chat.contracts import DashboardChatSqlValidationResult
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlValidationResult
 
 FORBIDDEN_SQL_KEYWORDS = {
     "INTO",

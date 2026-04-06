@@ -15,12 +15,12 @@ from ddpui.core.dashboard_chat.orchestration.orchestrator import DashboardChatRu
 from ddpui.core.dashboard_chat.orchestration.state.payload_codec import (
     serialize_sql_validation_result,
 )
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatFollowUpContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatSqlValidationResult,
 )
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlValidationResult
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser

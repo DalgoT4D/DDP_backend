@@ -9,6 +9,8 @@ from django.contrib.auth.models import User
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntent
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
 from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
     DashboardChatRunCancelled,
     publish_runtime_progress,
@@ -21,7 +23,6 @@ from ddpui.core.dashboard_chat.sessions.session_service import (
     get_or_create_dashboard_chat_session,
 )
 from ddpui.core.dashboard_chat.vector.vector_documents import build_dashboard_chat_collection_name
-from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
 from ddpui.models.org import Org, OrgDbt

@@ -4,14 +4,16 @@ import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
-from ddpui.core.dashboard_chat.contracts import DashboardChatIntent
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
+    DashboardChatConversationContext,
+)
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
+    DashboardChatIntent,
+    DashboardChatIntentDecision,
+)
 
 from ddpui.core.dashboard_chat.orchestration.conversation_context import (
     extract_requested_follow_up_dimension,
-)
-from ddpui.core.dashboard_chat.contracts import (
-    DashboardChatConversationContext,
-    DashboardChatIntentDecision,
 )
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (

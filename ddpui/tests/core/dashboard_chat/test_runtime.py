@@ -49,15 +49,17 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     DashboardChatTurnContext,
     seed_validated_distinct_values_from_previous_sql,
 )
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
+)
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatFollowUpContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatRetrievedDocument,
-    DashboardChatResponse,
 )
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 from ddpui.utils.vector.interface import VectorQueryResult as DashboardChatVectorQueryResult
@@ -330,7 +332,7 @@ class FakeWarehouseTools:
 
     @staticmethod
     def _schema_snippet(table_name, columns):
-        from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
+        from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
 
         return DashboardChatSchemaSnippet(table_name=table_name, columns=columns)
 

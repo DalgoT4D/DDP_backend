@@ -338,10 +338,10 @@ def _run_dashboard_chat_turn_in_background(turn_id: int) -> None:
             logger.warning("dashboard chat turn %s not found", turn_id)
             return
 
-        if turn.status in {
-            DashboardChatTurnStatus.CANCEL_REQUESTED,
-            DashboardChatTurnStatus.CANCELLED,
-        }:
+        if turn.status == DashboardChatTurnStatus.CANCELLED:
+            return
+
+        if turn.status == DashboardChatTurnStatus.CANCEL_REQUESTED:
             cancelled_turn = update_dashboard_chat_turn(
                 turn.id,
                 status=DashboardChatTurnStatus.CANCELLED,

@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatIntent, DashboardChatResponse
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntent
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
 
 from ddpui.core.dashboard_chat.orchestration.response_composer import build_usage_summary
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState

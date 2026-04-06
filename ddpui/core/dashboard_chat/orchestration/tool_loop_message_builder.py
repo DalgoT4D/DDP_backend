@@ -8,7 +8,9 @@ from ddpui.core.dashboard_chat.orchestration.conversation_context import (
     build_follow_up_context_prompt,
     detect_sql_modification_type,
 )
-from ddpui.core.dashboard_chat.contracts import DashboardChatConversationContext
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
+    DashboardChatConversationContext,
+)
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 

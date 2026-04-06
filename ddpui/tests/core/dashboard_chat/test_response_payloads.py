@@ -1,10 +1,10 @@
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntent
+from ddpui.core.dashboard_chat.contracts.response_contracts import (
     DashboardChatCitation,
-    DashboardChatIntent,
     DashboardChatResponse,
-    DashboardChatRetrievedDocument,
 )
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import (
     build_citations,
     explore_table_url,

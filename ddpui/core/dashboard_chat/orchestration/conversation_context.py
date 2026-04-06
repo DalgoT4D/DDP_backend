@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
 )

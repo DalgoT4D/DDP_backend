@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatResponse,
 )
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
 from ddpui.core.dashboard_chat.orchestration.response_composer import (
     build_usage_summary,
     clarification_fallback,
