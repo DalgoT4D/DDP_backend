@@ -63,5 +63,6 @@ class DashboardChatAssistantMessageEvent(BaseModel):
     content: str
     created_at: datetime
     payload: dict
+    feedback: Literal["thumbs_up", "thumbs_down"] | None = None
     response_latency_ms: int | None = None
     timing_breakdown: dict | None = None
