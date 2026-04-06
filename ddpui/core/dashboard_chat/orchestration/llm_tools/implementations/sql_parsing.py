@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import normalize_dashboard_chat_table_name
-from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
 from ddpui.core.dashboard_chat.orchestration.conversation_context import extract_dimensions_from_sql
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 

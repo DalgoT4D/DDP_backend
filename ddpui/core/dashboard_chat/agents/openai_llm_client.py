@@ -13,13 +13,15 @@ from ddpui.core.dashboard_chat.agents.final_answer_formatting import (
     format_table_summary_markdown,
 )
 from ddpui.core.dashboard_chat.agents.prompt_template_store import DashboardChatPromptStore
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationContext,
+)
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatFollowUpContext,
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatRetrievedDocument,
 )
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.openai_client import get_shared_openai_client

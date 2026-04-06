@@ -3,13 +3,13 @@
 from typing import Any
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
+from ddpui.core.dashboard_chat.contracts.response_contracts import (
     DashboardChatCitation,
-    DashboardChatIntentDecision,
     DashboardChatResponse,
-    DashboardChatRetrievedDocument,
-    DashboardChatSqlValidationResult,
 )
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlValidationResult
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import explore_table_url
 

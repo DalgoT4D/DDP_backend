@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatSchemaSnippet
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager

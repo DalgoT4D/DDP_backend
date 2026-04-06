@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 
 TABLE_SUMMARY_JSON_INSTRUCTIONS = """
 For table-like responses, return valid JSON only with this shape:
