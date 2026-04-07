@@ -76,6 +76,7 @@ class DashboardChatPromptTemplate(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "dashboard_chat_prompt_template"
         ordering = ["key"]
 
 
@@ -92,6 +93,9 @@ class OrgAIContext(models.Model):
         related_name="org_ai_context_updates",
     )
     updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "org_ai_context"
 
 
 class DashboardAIContext(models.Model):
@@ -111,6 +115,9 @@ class DashboardAIContext(models.Model):
         related_name="dashboard_ai_context_updates",
     )
     updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "dashboard_ai_context"
 
 
 class DashboardChatSession(models.Model):
@@ -159,6 +166,7 @@ class DashboardChatMessage(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
+        db_table = "dashboard_chat_message"
         ordering = ["sequence_number"]
         constraints = [
             models.UniqueConstraint(
