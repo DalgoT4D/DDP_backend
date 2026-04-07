@@ -53,8 +53,7 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
         else None,
         org_context_updated_at=org_context.updated_at,
         dbt_configured=org_dbt is not None,
-        docs_generated_at=org_dbt.docs_generated_at if org_dbt else None,
-        vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+        ai_context_refreshed_at=org_dbt.vector_last_ingested_at if org_dbt else None,
     )
 
 
@@ -78,8 +77,7 @@ def _serialize_ai_dashboard_chat_status(org, org_preferences):
             and vector_last_ingested_at is not None
         ),
         dbt_configured=dbt_configured,
-        docs_generated_at=org_dbt.docs_generated_at if org_dbt else None,
-        vector_last_ingested_at=vector_last_ingested_at,
+        ai_context_refreshed_at=vector_last_ingested_at,
     )
 
 

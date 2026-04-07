@@ -52,8 +52,7 @@ class OrgAIDashboardChatSettingsResponse(Schema):
     org_context_updated_by: Optional[str]
     org_context_updated_at: Optional[datetime]
     dbt_configured: bool
-    docs_generated_at: Optional[datetime]
-    vector_last_ingested_at: Optional[datetime]
+    ai_context_refreshed_at: Optional[datetime]
 
 
 class UpdateOrgAIDashboardChatSchema(Schema):
@@ -70,8 +69,7 @@ class OrgAIDashboardChatStatusResponse(Schema):
     ai_data_sharing_enabled: bool
     chat_available: bool
     dbt_configured: bool
-    docs_generated_at: Optional[datetime]
-    vector_last_ingested_at: Optional[datetime]
+    ai_context_refreshed_at: Optional[datetime]
 
 
 class CreateOrgSupersetDetailsSchema(Schema):
