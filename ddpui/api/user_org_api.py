@@ -113,7 +113,6 @@ def get_current_user_v2(request, org_slug: str = None):
         res.append(
             OrgUserResponse(
                 email=user.email,
-                first_name=user.first_name or None,
                 org=curr_orguser.org,
                 active=user.is_active,
                 new_role_slug=curr_orguser.new_role.slug,
