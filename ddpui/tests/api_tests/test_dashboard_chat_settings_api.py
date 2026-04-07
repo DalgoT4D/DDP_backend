@@ -201,8 +201,7 @@ def test_get_ai_dashboard_chat_status_reports_chat_available(orguser, seed_db):
     assert response["res"]["ai_data_sharing_enabled"] is True
     assert response["res"]["dbt_configured"] is True
     assert response["res"]["chat_available"] is True
-    assert response["res"]["docs_generated_at"] == generated_at
-    assert response["res"]["vector_last_ingested_at"] == ingested_at
+    assert response["res"]["ai_context_refreshed_at"] == ingested_at
 
 
 def test_get_ai_dashboard_chat_settings_requires_permission(guest_orguser, seed_db):
@@ -225,7 +224,7 @@ def test_get_dashboard_ai_context_returns_direct_payload(orguser, dashboard, see
     assert response.dashboard_title == dashboard.title
     assert response.dashboard_context_markdown == ""
     assert response.dashboard_context_updated_by is None
-    assert response.vector_last_ingested_at is None
+    assert response.ai_context_refreshed_at is None
 
 
 def test_update_dashboard_ai_context_persists_context(orguser, dashboard, seed_db):

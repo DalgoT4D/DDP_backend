@@ -80,7 +80,7 @@ def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAICo
         dashboard_context_markdown=context.markdown,
         dashboard_context_updated_by=context.updated_by.user.email if context.updated_by else None,
         dashboard_context_updated_at=context.updated_at,
-        vector_last_ingested_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+        ai_context_refreshed_at=org_dbt.vector_last_ingested_at if org_dbt else None,
     )
 
 
