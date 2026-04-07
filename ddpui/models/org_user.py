@@ -134,7 +134,6 @@ class OrgUserResponse(Schema):
 
     user_id: int
     email: str
-    first_name: str | None = None
     org: Optional[OrgSchema] = None
     active: bool
     wtype: str | None
