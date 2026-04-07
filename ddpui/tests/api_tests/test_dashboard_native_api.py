@@ -26,6 +26,11 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
+from ddpui.models.dashboard_chat import (
+    DashboardChatMessage,
+    DashboardChatMessageFeedback,
+    DashboardChatSession,
+)
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_native_api import (
@@ -38,12 +43,14 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
+    set_dashboard_chat_message_feedback,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     FilterCreate,
     FilterUpdate,
+    DashboardChatMessageFeedbackRequest,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -707,3 +714,74 @@ class TestDeleteFilter:
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
     assert Role.objects.count() == 5
+
+
+class TestDashboardChatMessageFeedback:
+    """Tests for locking thumbs feedback onto assistant answers."""
+
+    @patch("ddpui.api.dashboard_native_api.get_all_feature_flags_for_org")
+    def test_set_dashboard_chat_message_feedback_success(
+        self,
+        mock_feature_flags,
+        orguser,
+        sample_dashboard,
+        seed_db,
+    ):
+        mock_feature_flags.return_value = {"AI_DASHBOARD_CHAT": True}
+        request = mock_request(orguser)
+        session = DashboardChatSession.objects.create(
+            org=orguser.org,
+            orguser=orguser,
+            dashboard=sample_dashboard,
+        )
+        message = DashboardChatMessage.objects.create(
+            session=session,
+            sequence_number=1,
+            role="assistant",
+            content="Top facilitators are listed below.",
+        )
+
+        response = set_dashboard_chat_message_feedback(
+            request,
+            dashboard_id=sample_dashboard.id,
+            message_id=message.id,
+            payload=DashboardChatMessageFeedbackRequest(feedback="thumbs_up"),
+        )
+
+        message.refresh_from_db()
+        assert response.message_id == message.id
+        assert response.feedback == "thumbs_up"
+        assert message.feedback == DashboardChatMessageFeedback.THUMBS_UP
+
+    @patch("ddpui.api.dashboard_native_api.get_all_feature_flags_for_org")
+    def test_set_dashboard_chat_message_feedback_is_locked_after_first_selection(
+        self,
+        mock_feature_flags,
+        orguser,
+        sample_dashboard,
+        seed_db,
+    ):
+        mock_feature_flags.return_value = {"AI_DASHBOARD_CHAT": True}
+        request = mock_request(orguser)
+        session = DashboardChatSession.objects.create(
+            org=orguser.org,
+            orguser=orguser,
+            dashboard=sample_dashboard,
+        )
+        message = DashboardChatMessage.objects.create(
+            session=session,
+            sequence_number=1,
+            role="assistant",
+            content="Top facilitators are listed below.",
+            feedback=DashboardChatMessageFeedback.THUMBS_UP,
+        )
+
+        with pytest.raises(HttpError) as excinfo:
+            set_dashboard_chat_message_feedback(
+                request,
+                dashboard_id=sample_dashboard.id,
+                message_id=message.id,
+                payload=DashboardChatMessageFeedbackRequest(feedback="thumbs_down"),
+            )
+
+        assert excinfo.value.status_code == 409

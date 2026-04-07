@@ -3,14 +3,37 @@
 from typing import Any
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
+from ddpui.core.dashboard_chat.contracts.response_contracts import (
     DashboardChatCitation,
-    DashboardChatIntentDecision,
     DashboardChatResponse,
-    DashboardChatRetrievedDocument,
-    DashboardChatSqlValidationResult,
 )
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlValidationResult
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
+from ddpui.core.dashboard_chat.orchestration.retrieval_support import explore_table_url
+
+
+def _dedupe_citations(
+    citations: list[DashboardChatCitation],
+) -> list[DashboardChatCitation]:
+    """Collapse duplicate sources while preferring SQL-execution table citations."""
+    deduped: dict[tuple[str, str], DashboardChatCitation] = {}
+    for citation in citations:
+        key = (citation.source_type, citation.source_identifier)
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = citation
+            continue
+
+        if (
+            citation.source_type == "warehouse_table"
+            and citation.snippet.startswith("SQL executed against ")
+            and not existing.snippet.startswith("SQL executed against ")
+        ):
+            deduped[key] = citation
+
+    return list(deduped.values())
 
 
 def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
@@ -35,6 +58,7 @@ def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
                 source_identifier=table_name,
                 title=f"Warehouse table: {table_name}",
                 snippet=f"SQL executed against {table_name}.",
+                url=explore_table_url(table_name),
                 table_name=table_name,
             )
             for table_name in sql_validation.tables
@@ -64,7 +88,7 @@ def finalize_node(state: DashboardChatGraphState) -> dict[str, Any]:
         "response": DashboardChatResponse(
             answer_text=response.answer_text,
             intent=response.intent,
-            citations=list(dict.fromkeys(citations)),
+            citations=_dedupe_citations(citations),
             warnings=response.warnings,
             sql=response.sql,
             sql_results=response.sql_results,

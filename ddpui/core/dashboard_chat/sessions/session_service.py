@@ -1,8 +1,12 @@
 """Session and message persistence helpers for dashboard chat."""
 
 from dataclasses import dataclass
+from threading import Thread
 from uuid import UUID
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+from django.db import close_old_connections
 from django.db import IntegrityError
 from django.db import transaction
 from django.db.models import Max
@@ -10,17 +14,32 @@ from django.utils import timezone
 
 from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
 from ddpui.core.dashboard_chat.vector.vector_documents import build_dashboard_chat_collection_name
-from ddpui.core.dashboard_chat.contracts import DashboardChatConversationMessage
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
+    DashboardChatConversationMessage,
+)
+from ddpui.core.dashboard_chat.contracts.event_contracts import (
+    DashboardChatAssistantMessageEvent,
+    DashboardChatCancelledEvent,
+    DashboardChatProgressEvent,
+    DashboardChatProgressStage,
+)
+from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
+    dashboard_chat_runtime_hooks,
+    DashboardChatRunCancelled,
+)
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import (
     DashboardChatMessage,
     DashboardChatMessageRole,
     DashboardChatSession,
+    DashboardChatTurn,
+    DashboardChatTurnStatus,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("dashboard_chat")
+DASHBOARD_CHAT_SESSION_GROUP_PREFIX = "dashboard_chat_session_"
 
 
 class DashboardChatSessionError(Exception):
@@ -154,13 +173,294 @@ def serialize_dashboard_chat_message(message: DashboardChatMessage) -> dict:
         "role": message.role,
         "content": message.content,
         "payload": message.payload or {},
+        "feedback": message.feedback,
         "response_latency_ms": message.response_latency_ms,
         "timing_breakdown": message.timing_breakdown or {},
         "created_at": message.created_at.isoformat(),
     }
 
 
-def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> DashboardChatMessage:
+def update_dashboard_chat_turn(
+    turn_id: int,
+    *,
+    status: DashboardChatTurnStatus | None = None,
+    progress_label: str | None = None,
+    assistant_message: DashboardChatMessage | None = None,
+    error_message: str | None = None,
+    started_at=None,
+    completed_at=None,
+    cancel_requested_at=None,
+) -> DashboardChatTurn:
+    """Persist one dashboard-chat turn status transition and return the refreshed row."""
+
+    update_fields: dict = {}
+    if status is not None:
+        update_fields["status"] = status
+    if progress_label is not None:
+        update_fields["progress_label"] = progress_label
+    if assistant_message is not None:
+        update_fields["assistant_message"] = assistant_message
+    if error_message is not None:
+        update_fields["error_message"] = error_message
+    if started_at is not None:
+        update_fields["started_at"] = started_at
+    if completed_at is not None:
+        update_fields["completed_at"] = completed_at
+    if cancel_requested_at is not None:
+        update_fields["cancel_requested_at"] = cancel_requested_at
+    if update_fields:
+        DashboardChatTurn.objects.filter(id=turn_id).update(**update_fields)
+    return DashboardChatTurn.objects.select_related("session", "user_message").get(id=turn_id)
+
+
+def publish_dashboard_chat_progress(
+    *,
+    session: DashboardChatSession,
+    turn: DashboardChatTurn,
+    label: str,
+    stage: DashboardChatProgressStage | None,
+    message_id: int | None = None,
+) -> None:
+    """Publish one progress update to all websocket listeners for the current session."""
+
+    event = DashboardChatProgressEvent(
+        session_id=str(session.session_id),
+        turn_id=str(turn.id),
+        dashboard_id=session.dashboard_id or 0,
+        occurred_at=timezone.now(),
+        label=label,
+        stage=stage,
+        message_id=str(message_id) if message_id is not None else None,
+    )
+    _publish_dashboard_chat_event(
+        session_id=str(session.session_id),
+        status="success",
+        message="",
+        data=event.model_dump(mode="json"),
+    )
+
+
+def publish_dashboard_chat_cancelled(
+    *,
+    session: DashboardChatSession,
+    turn: DashboardChatTurn,
+    label: str = "Generation stopped",
+) -> None:
+    """Publish a cancelled event to the active dashboard-chat websocket session."""
+
+    event = DashboardChatCancelledEvent(
+        session_id=str(session.session_id),
+        turn_id=str(turn.id),
+        dashboard_id=session.dashboard_id or 0,
+        occurred_at=timezone.now(),
+        label=label,
+    )
+    _publish_dashboard_chat_event(
+        session_id=str(session.session_id),
+        status="success",
+        message="",
+        data=event.model_dump(mode="json"),
+    )
+
+
+def publish_dashboard_chat_assistant_message(
+    *,
+    session: DashboardChatSession,
+    turn: DashboardChatTurn,
+    message: DashboardChatMessage,
+) -> None:
+    """Publish the completed assistant reply for one dashboard-chat turn."""
+
+    event = DashboardChatAssistantMessageEvent(
+        session_id=str(session.session_id),
+        turn_id=str(turn.id),
+        message_id=str(message.id),
+        dashboard_id=session.dashboard_id or 0,
+        occurred_at=timezone.now(),
+        id=str(message.id),
+        role="assistant",
+        content=message.content,
+        created_at=message.created_at,
+        payload=message.payload or {},
+        feedback=message.feedback,
+        response_latency_ms=message.response_latency_ms,
+        timing_breakdown=message.timing_breakdown or {},
+    )
+    _publish_dashboard_chat_event(
+        session_id=str(session.session_id),
+        status="success",
+        message="",
+        data=event.model_dump(mode="json"),
+    )
+
+
+def publish_dashboard_chat_error(
+    *,
+    session: DashboardChatSession,
+    message: str,
+) -> None:
+    """Publish one terminal error envelope to the current dashboard-chat websocket session."""
+
+    _publish_dashboard_chat_event(
+        session_id=str(session.session_id),
+        status="error",
+        message=message,
+        data={},
+    )
+
+
+def start_dashboard_chat_turn_background(turn_id: int) -> None:
+    """Run one dashboard-chat turn in a background thread without blocking the websocket."""
+
+    Thread(
+        target=_run_dashboard_chat_turn_in_background,
+        kwargs={"turn_id": turn_id},
+        daemon=True,
+        name=f"dashboard-chat-turn-{turn_id}",
+    ).start()
+
+
+def _run_dashboard_chat_turn_in_background(turn_id: int) -> None:
+    """Own execution, progress, and cancellation for one dashboard-chat turn."""
+
+    close_old_connections()
+    try:
+        turn = (
+            DashboardChatTurn.objects.select_related(
+                "session",
+                "session__dashboard",
+                "session__org",
+                "session__orguser",
+                "user_message",
+            )
+            .filter(id=turn_id)
+            .first()
+        )
+        if turn is None or turn.session is None or turn.user_message is None:
+            logger.warning("dashboard chat turn %s not found", turn_id)
+            return
+
+        if turn.status == DashboardChatTurnStatus.CANCELLED:
+            return
+
+        if turn.status == DashboardChatTurnStatus.CANCEL_REQUESTED:
+            cancelled_turn = update_dashboard_chat_turn(
+                turn.id,
+                status=DashboardChatTurnStatus.CANCELLED,
+                progress_label="Generation stopped",
+                completed_at=timezone.now(),
+            )
+            publish_dashboard_chat_cancelled(
+                session=cancelled_turn.session,
+                turn=cancelled_turn,
+            )
+            return
+
+        running_turn = update_dashboard_chat_turn(
+            turn.id,
+            status=DashboardChatTurnStatus.RUNNING,
+            progress_label="Understanding question",
+            started_at=timezone.now(),
+            error_message="",
+        )
+
+        def progress_publisher(
+            label: str,
+            stage: DashboardChatProgressStage | None,
+        ) -> None:
+            refreshed_turn = update_dashboard_chat_turn(
+                running_turn.id,
+                progress_label=label,
+            )
+            publish_dashboard_chat_progress(
+                session=refreshed_turn.session,
+                turn=refreshed_turn,
+                label=label,
+                stage=stage,
+                message_id=refreshed_turn.user_message_id,
+            )
+
+        def cancel_checker() -> bool:
+            status = (
+                DashboardChatTurn.objects.filter(id=running_turn.id)
+                .values_list("status", flat=True)
+                .first()
+            )
+            return status in {
+                DashboardChatTurnStatus.CANCEL_REQUESTED,
+                DashboardChatTurnStatus.CANCELLED,
+            }
+
+        try:
+            if cancel_checker():
+                cancelled_turn = update_dashboard_chat_turn(
+                    running_turn.id,
+                    status=DashboardChatTurnStatus.CANCELLED,
+                    progress_label="Generation stopped",
+                    completed_at=timezone.now(),
+                )
+                publish_dashboard_chat_cancelled(
+                    session=cancelled_turn.session,
+                    turn=cancelled_turn,
+                )
+                return
+
+            assistant_message = execute_dashboard_chat_turn(
+                str(running_turn.session.session_id),
+                running_turn.user_message_id,
+                progress_publisher=progress_publisher,
+                cancel_checker=cancel_checker,
+            )
+        except DashboardChatRunCancelled:
+            cancelled_turn = update_dashboard_chat_turn(
+                running_turn.id,
+                status=DashboardChatTurnStatus.CANCELLED,
+                progress_label="Generation stopped",
+                completed_at=timezone.now(),
+            )
+            publish_dashboard_chat_cancelled(
+                session=cancelled_turn.session,
+                turn=cancelled_turn,
+            )
+            return
+        except Exception:
+            logger.exception("dashboard chat turn %s failed", turn_id)
+            failed_turn = update_dashboard_chat_turn(
+                running_turn.id,
+                status=DashboardChatTurnStatus.FAILED,
+                progress_label="",
+                error_message="Something went wrong while generating the response",
+                completed_at=timezone.now(),
+            )
+            publish_dashboard_chat_error(
+                session=failed_turn.session,
+                message="Something went wrong while generating the response",
+            )
+            return
+
+        completed_turn = update_dashboard_chat_turn(
+            running_turn.id,
+            status=DashboardChatTurnStatus.COMPLETED,
+            progress_label="",
+            assistant_message=assistant_message,
+            completed_at=timezone.now(),
+        )
+        publish_dashboard_chat_assistant_message(
+            session=completed_turn.session,
+            turn=completed_turn,
+            message=assistant_message,
+        )
+    finally:
+        close_old_connections()
+
+
+def execute_dashboard_chat_turn(
+    session_id: str,
+    user_message_id: int,
+    *,
+    progress_publisher=None,
+    cancel_checker=None,
+) -> DashboardChatMessage:
     """Load session and message, run the runtime, persist and return the assistant reply.
 
     Returns the assistant DashboardChatMessage on success.
@@ -196,17 +496,23 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> Dashbo
     if existing_assistant_message is not None:
         return existing_assistant_message
 
-    response = get_dashboard_chat_runtime().run(
-        org=session.org,
-        dashboard_id=session.dashboard.id,
-        user_query=user_message.content,
-        session_id=str(session.session_id),
-        vector_collection_name=session.vector_collection_name,
-        conversation_history=list_dashboard_chat_history(
-            session,
-            exclude_message_id=user_message.id,
-        ),
-    )
+    with dashboard_chat_runtime_hooks(
+        progress_publisher=progress_publisher,
+        cancel_checker=cancel_checker,
+    ):
+        response = get_dashboard_chat_runtime().run(
+            org=session.org,
+            dashboard_id=session.dashboard.id,
+            user_query=user_message.content,
+            session_id=str(session.session_id),
+            vector_collection_name=session.vector_collection_name,
+            conversation_history=list_dashboard_chat_history(
+                session,
+                exclude_message_id=user_message.id,
+            ),
+        )
+        if cancel_checker is not None and cancel_checker():
+            raise DashboardChatRunCancelled()
     response_payload = response.to_dict()
     assistant_payload = {
         key: value for key, value in response_payload.items() if key != "answer_text"
@@ -225,6 +531,29 @@ def execute_dashboard_chat_turn(session_id: str, user_message_id: int) -> Dashbo
     assistant_message.response_latency_ms = response_latency_ms
     assistant_message.save(update_fields=["response_latency_ms"])
     return assistant_message
+
+
+def _publish_dashboard_chat_event(
+    *,
+    session_id: str,
+    status: str,
+    message: str,
+    data: dict,
+) -> None:
+    """Send one event envelope to all websocket listeners for one chat session."""
+
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    async_to_sync(channel_layer.group_send)(
+        f"{DASHBOARD_CHAT_SESSION_GROUP_PREFIX}{session_id}",
+        {
+            "type": "dashboard_chat_event",
+            "status": status,
+            "message": message,
+            "data": data,
+        },
+    )
 
 
 def _create_dashboard_chat_message(

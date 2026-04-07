@@ -4,7 +4,7 @@ This module contains all Pydantic schemas for dashboard-related API endpoints.
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from ninja import Schema
 
@@ -209,10 +209,30 @@ class DashboardAIContextResponse(Schema):
     dashboard_context_markdown: str
     dashboard_context_updated_by: Optional[str]
     dashboard_context_updated_at: Optional[datetime]
-    vector_last_ingested_at: Optional[datetime]
+    ai_context_refreshed_at: Optional[datetime]
 
 
 class UpdateDashboardAIContextSchema(Schema):
     """Request schema for dashboard-level AI context updates."""
 
     dashboard_context_markdown: str
+
+
+class DashboardChatBootstrapResponse(Schema):
+    """Response schema for chat bootstrap UI state."""
+
+    dashboard_id: int
+    suggested_prompts: List[str]
+
+
+class DashboardChatMessageFeedbackRequest(Schema):
+    """Request schema for locked feedback on one assistant answer."""
+
+    feedback: Literal["thumbs_up", "thumbs_down"]
+
+
+class DashboardChatMessageFeedbackResponse(Schema):
+    """Response schema for stored feedback on one assistant answer."""
+
+    message_id: int
+    feedback: Literal["thumbs_up", "thumbs_down"]

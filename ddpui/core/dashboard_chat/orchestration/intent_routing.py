@@ -1,6 +1,6 @@
 """Graph intent-routing helpers for dashboard chat orchestration."""
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatIntentDecision
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 

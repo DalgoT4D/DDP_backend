@@ -2,12 +2,14 @@
 
 from typing import Any, Protocol
 
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationContext,
+)
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatRetrievedDocument,
 )
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 
 

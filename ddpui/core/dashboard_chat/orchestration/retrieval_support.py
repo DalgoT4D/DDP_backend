@@ -2,12 +2,11 @@
 
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlencode
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist, build_dashboard_chat_table_name
-from ddpui.core.dashboard_chat.contracts import (
-    DashboardChatCitation,
-    DashboardChatRetrievedDocument,
-)
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatCitation
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 
 from ddpui.core.dashboard_chat.orchestration.source_identifier_parsing import (
@@ -95,30 +94,58 @@ def build_citations(
         chart.get("id"): chart.get("title") or f"Chart {chart.get('id')}"
         for chart in dashboard_export.get("charts") or []
     }
+    dashboard_id = dashboard_export.get("dashboard", {}).get("id")
     citations: list[DashboardChatCitation] = []
+    seen_sources: set[tuple[str, str]] = set()
     for document in retrieved_documents[:6]:
-        table_name = None
         if document.source_type in {
             DashboardChatSourceType.DBT_MANIFEST.value,
             DashboardChatSourceType.DBT_CATALOG.value,
         }:
-            unique_id = unique_id_from_source_identifier(document.source_identifier)
-            table_name = allowlist.unique_id_to_table.get(unique_id) if unique_id else None
+            continue
+
+        if (
+            document.source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value
+            and chart_id_from_source_identifier(document.source_identifier) is None
+        ):
+            continue
+
+        table_name = None
+        source_type = document.source_type
+        source_identifier = document.source_identifier
+        title = citation_title(
+            document=document,
+            dashboard_title=dashboard_title,
+            chart_lookup=chart_lookup,
+            table_name=table_name,
+        )
+        snippet = citation_snippet(
+            document=document,
+            dashboard_title=dashboard_title,
+            chart_lookup=chart_lookup,
+        )
+        url = citation_url(
+            document=document,
+            dashboard_id=document.dashboard_id or dashboard_id,
+            table_name=table_name,
+        )
+
+        source_key = (source_type, source_identifier)
+        if source_key in seen_sources:
+            continue
+
         citations.append(
             DashboardChatCitation(
-                source_type=document.source_type,
-                source_identifier=document.source_identifier,
-                title=citation_title(
-                    document=document,
-                    dashboard_title=dashboard_title,
-                    chart_lookup=chart_lookup,
-                    table_name=table_name,
-                ),
-                snippet=compact_snippet(document.content),
+                source_type=source_type,
+                source_identifier=source_identifier,
+                title=title,
+                snippet=snippet,
+                url=url,
                 dashboard_id=document.dashboard_id,
                 table_name=table_name,
             )
         )
+        seen_sources.add(source_key)
     return citations
 
 
@@ -131,9 +158,9 @@ def citation_title(
 ) -> str:
     """Map a retrieved document into a human-readable citation title."""
     if document.source_type == DashboardChatSourceType.ORG_CONTEXT.value:
-        return "Organization context"
+        return "Organization context file"
     if document.source_type == DashboardChatSourceType.DASHBOARD_CONTEXT.value:
-        return f"Dashboard context: {dashboard_title}"
+        return f"Dashboard context file: {dashboard_title}"
     if document.source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value:
         chart_id = chart_id_from_source_identifier(document.source_identifier)
         if chart_id is not None and chart_id in chart_lookup:
@@ -152,6 +179,70 @@ def compact_snippet(content: str, max_length: int = 220) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 3].rstrip() + "..."
+
+
+def citation_snippet(
+    *,
+    document: DashboardChatRetrievedDocument,
+    dashboard_title: str,
+    chart_lookup: dict[int, str],
+) -> str:
+    """Return the user-facing source subtitle for supported citation types."""
+    if document.source_type == DashboardChatSourceType.ORG_CONTEXT.value:
+        return "Studied context about the organization from the organization context file."
+
+    if document.source_type == DashboardChatSourceType.DASHBOARD_CONTEXT.value:
+        return f'Studied context about "{dashboard_title}" from the dashboard context file.'
+
+    if document.source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value:
+        chart_id = chart_id_from_source_identifier(document.source_identifier)
+        chart_title = chart_lookup.get(chart_id)
+        if chart_title:
+            return f'Reviewed chart configuration and metadata for "{chart_title}".'
+
+    return compact_snippet(document.content)
+
+
+def citation_url(
+    *,
+    document: DashboardChatRetrievedDocument,
+    dashboard_id: int | None,
+    table_name: str | None,
+) -> str | None:
+    """Build the most useful frontend destination for one citation."""
+    if document.source_type == DashboardChatSourceType.ORG_CONTEXT.value:
+        return "/settings/organization"
+
+    if document.source_type == DashboardChatSourceType.DASHBOARD_CONTEXT.value:
+        if dashboard_id is None:
+            return "/settings/organization"
+        return f"/settings/organization?dashboard_id={dashboard_id}"
+
+    if document.source_type == DashboardChatSourceType.DASHBOARD_EXPORT.value:
+        chart_id = chart_id_from_source_identifier(document.source_identifier)
+        if chart_id is not None:
+            return f"/charts/{chart_id}"
+        if dashboard_id is None:
+            return None
+        return f"/dashboards/{dashboard_id}"
+
+    if document.source_type in {
+        DashboardChatSourceType.DBT_MANIFEST.value,
+        DashboardChatSourceType.DBT_CATALOG.value,
+    }:
+        if table_name is None:
+            return None
+        return explore_table_url(table_name)
+
+    return None
+
+
+def explore_table_url(table_name: str) -> str | None:
+    """Build one Explore deep link from a schema-qualified table name."""
+    schema_name, _, raw_table_name = table_name.partition(".")
+    if not schema_name or not raw_table_name:
+        return None
+    return f"/explore?{urlencode({'schema_name': schema_name, 'table_name': raw_table_name})}"
 
 
 def build_tool_document_payload(

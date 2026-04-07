@@ -5,14 +5,18 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
+    DashboardChatConversationContext,
+)
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import (
+    DashboardChatRetrievedDocument,
+    DashboardChatSchemaSnippet,
+)
 from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlValidationResult
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import get_or_embed_query
-from ddpui.core.dashboard_chat.contracts import DashboardChatConversationContext
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.models.org import Org
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState

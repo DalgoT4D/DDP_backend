@@ -3,11 +3,9 @@
 from typing import Any
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
-from ddpui.core.dashboard_chat.contracts import (
-    DashboardChatIntentDecision,
-    DashboardChatResponse,
-    DashboardChatRetrievedDocument,
-)
+from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
+from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 
 from ddpui.core.dashboard_chat.orchestration.response_composer import (
     build_usage_summary,

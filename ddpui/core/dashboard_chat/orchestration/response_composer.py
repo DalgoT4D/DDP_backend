@@ -4,11 +4,11 @@ from collections.abc import Sequence
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.contracts import (
+from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntent,
     DashboardChatIntentDecision,
-    DashboardChatRetrievedDocument,
 )
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState

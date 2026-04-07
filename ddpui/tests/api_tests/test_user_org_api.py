@@ -180,7 +180,7 @@ def test_can_manage_org_settings_seeded_for_admin_roles(seed_db):
     assert GUEST_ROLE not in role_slugs
 
 
-def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_workspace):
+def test_get_current_userv2_has_user(seed_db, authuser, org_with_workspace, org_without_workspace):
     """tests /worksspace/detatch/"""
     orguser1 = OrgUser.objects.create(
         user=authuser,
@@ -194,6 +194,7 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     )
 
     request = mock_request(orguser2)
+    request.permissions = ["can_view_orgusers"]
 
     response = get_current_user_v2(request)
 
