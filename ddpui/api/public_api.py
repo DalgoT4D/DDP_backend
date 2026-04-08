@@ -330,9 +330,9 @@ def _execute_filter_preview(
             "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
             "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
             "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
-            "distinct_count": int(row["distinct_count"])
-            if row["distinct_count"] is not None
-            else 0,
+            "distinct_count": (
+                int(row["distinct_count"]) if row["distinct_count"] is not None else 0
+            ),
         }
         return PublicFilterPreviewResponse(options=None, stats=stats, is_valid=True)
 
@@ -520,7 +520,9 @@ def get_public_chart_data_preview(
         if dashboard_filters:
             filter_values = json.loads(dashboard_filters)
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            filter_defs = DashboardFilter.objects.filter(
+                id__in=filter_values.keys(), dashboard=dashboard
+            )
             resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
                 filter_values,
                 [f.to_json() for f in filter_defs],
