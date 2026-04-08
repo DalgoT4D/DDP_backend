@@ -1149,6 +1149,26 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
             token, chart_id, request
         )
 
+        # Resolve dashboard filters from frozen config (same pattern as public dashboard)
+        resolved_filters = None
+        filters_param = request.GET.get("dashboard_filters")
+        if filters_param:
+            try:
+                filter_values = json.loads(filters_param)
+            except json.JSONDecodeError:
+                filter_values = None
+
+            if filter_values:
+                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    frozen_filters,
+                    chart_config["schema_name"],
+                    chart_config["table_name"],
+                    warehouse_client,
+                )
+
         config = ChartConfig(
             chart_type=chart_config["chart_type"],
             schema_name=chart_config["schema_name"],
@@ -1156,7 +1176,7 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
-        payload = charts_service.build_chart_data_payload(config)
+        payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         from ddpui.api.charts_api import generate_chart_data_and_config
 
