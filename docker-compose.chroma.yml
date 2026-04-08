@@ -2,7 +2,7 @@ name: dalgo-vector-store
 
 services:
   chroma:
-    image: chromadb/chroma:0.6.3
+    image: chromadb/chroma:1.5.6
     ports:
       - "8003:8000"
     volumes:
