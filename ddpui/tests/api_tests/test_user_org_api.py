@@ -15,6 +15,8 @@ django.setup()
 from ddpui.api.user_org_api import (
     get_current_user_v2,
     post_organization_user,
+    post_login,
+    post_login_v2,
     get_organization_users,
     delete_organization_users_v1,
     put_organization_user_self_v1,
@@ -49,6 +51,7 @@ from ddpui.models.org_user import (
     ResetPasswordSchema,
     VerifyEmailSchema,
     DeleteOrgUserPayload,
+    LoginPayload,
 )
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.auth import (
@@ -328,6 +331,53 @@ def test_post_organization_user_success_lowercase_email(orguser):
     the_authuser = User.objects.filter(email=payload.email).first()
     if the_authuser:
         the_authuser.delete()
+
+
+# ================================================================================
+def test_post_login_strips_username_whitespace():
+    request = mock_request()
+    payload = LoginPayload(username=" tempuseremail ", password="tempuserpassword")
+    serializer = Mock()
+    serializer.validated_data = {"access": "access-token", "refresh": "refresh-token"}
+
+    with patch("ddpui.api.user_org_api.CustomTokenObtainSerializer", return_value=serializer) as mock_serializer:
+        with patch(
+            "ddpui.api.user_org_api.orguserfunctions.lookup_user",
+            return_value={"email": "tempuseremail"},
+        ) as mock_lookup_user:
+            response = post_login(request, payload)
+
+    mock_serializer.assert_called_once_with(
+        data={"username": "tempuseremail", "password": "tempuserpassword"}
+    )
+    serializer.is_valid.assert_called_once_with(raise_exception=True)
+    mock_lookup_user.assert_called_once_with("tempuseremail")
+    assert response["email"] == "tempuseremail"
+    assert response["token"] == "access-token"
+    assert response["refresh_token"] == "refresh-token"
+
+
+def test_post_login_v2_strips_username_whitespace():
+    request = mock_request()
+    payload = LoginPayload(username=" tempuseremail ", password="tempuserpassword")
+    serializer = Mock()
+    serializer.validated_data = {"access": "access-token", "refresh": "refresh-token"}
+
+    with patch("ddpui.api.user_org_api.CustomTokenObtainSerializer", return_value=serializer) as mock_serializer:
+        with patch(
+            "ddpui.api.user_org_api.orguserfunctions.lookup_user",
+            return_value={"email": "tempuseremail"},
+        ) as mock_lookup_user:
+            response = post_login_v2(request, payload)
+
+    mock_serializer.assert_called_once_with(
+        data={"username": "tempuseremail", "password": "tempuserpassword"}
+    )
+    serializer.is_valid.assert_called_once_with(raise_exception=True)
+    mock_lookup_user.assert_called_once_with("tempuseremail")
+    assert response.status_code == 200
+    assert response.cookies["access_token"].value == "access-token"
+    assert response.cookies["refresh_token"].value == "refresh-token"
 
 
 # ================================================================================
