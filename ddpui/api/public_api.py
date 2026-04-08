@@ -32,7 +32,8 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schema import ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schema import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from sqlalchemy import func, column, distinct, cast, Float, Date
@@ -269,31 +270,14 @@ def get_public_chart_data(request, token: str, chart_id: int):
 
             resolved_dashboard_filters = resolved_filters
 
-        # Add chart title to customizations like authenticated API
-        customizations = extra_config.get("customizations", {})
-        customizations["title"] = chart.title  # Add chart title to customizations
-
-        # Use the exact same payload structure as authenticated API
-        payload = ChartDataPayload(
+        config = ChartConfig(
+            chart_type=chart.chart_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
-            chart_type=chart.chart_type,
-            x_axis=extra_config.get("x_axis_column"),  # Match authenticated API field names
-            y_axis=extra_config.get("y_axis_column"),
-            dimension_col=extra_config.get("dimension_column"),
-            extra_dimension=extra_config.get("extra_dimension_column"),
-            # Multiple metrics support - CRITICAL FIX for public API charts
-            metrics=extra_config.get("metrics"),
-            # Map-specific fields for consistency
-            geographic_column=extra_config.get("geographic_column"),
-            value_column=extra_config.get("value_column"),
-            selected_geojson_id=extra_config.get("selected_geojson_id"),
-            customizations=customizations,
-            offset=0,
-            limit=100,
+            title=chart.title,
             extra_config=extra_config,
-            dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
         )
+        payload = charts_service.build_chart_data_payload(config, resolved_dashboard_filters)
 
         # Generate chart data and config using exact same function as authenticated API
         chart_data = generate_chart_data_and_config(payload, org_warehouse, chart_id)
@@ -1190,25 +1174,57 @@ def get_public_report(request, token: str):
         return 404, PublicErrorResponse(error="Report not accessible", is_valid=False)
 
 
-@public_router.post(
-    "/reports/{token}/chart-data/",
+def _get_frozen_chart_for_public_report(token, chart_id, request):
+    """Shared helper: look up frozen chart config for a public report.
+
+    Returns (snapshot, chart_config_with_period_injected, org_warehouse).
+    Raises ReportSnapshot.DoesNotExist or Exception on failure.
+    """
+    snapshot = _get_public_report_snapshot(token, request=request)
+
+    org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+    if not org_warehouse:
+        raise Exception("No warehouse configured for organization")
+
+    frozen_charts = snapshot.frozen_chart_configs or {}
+    chart_config = frozen_charts.get(str(chart_id))
+    if not chart_config:
+        raise Exception(f"Chart {chart_id} not found in report")
+
+    chart_config = copy.deepcopy(chart_config)
+
+    # Inject period date filters
+    from ddpui.core.reports.report_service import ReportService
+
+    temp_configs = {str(chart_id): chart_config}
+    ReportService._inject_period_into_chart_configs(temp_configs, snapshot)
+
+    return snapshot, chart_config, org_warehouse
+
+
+@public_router.get(
+    "/reports/{token}/charts/{chart_id}/data/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_chart_data(request, token: str):
+def get_public_report_chart_data(request, token: str, chart_id: int):
     """Get chart data for a public report (bar/line/pie/number charts)"""
     try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
-
-        payload_data = json.loads(request.body) if request.body else {}
-        payload = ChartDataPayload(**payload_data)
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        payload = charts_service.build_chart_data_payload(config)
 
         from ddpui.api.charts_api import generate_chart_data_and_config
 
-        chart_data = generate_chart_data_and_config(payload, org_warehouse)
+        chart_data = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart_id)
 
         return {**chart_data, "is_valid": True}
 
@@ -1222,21 +1238,27 @@ def get_public_report_chart_data(request, token: str):
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
 
 
-@public_router.post(
-    "/reports/{token}/chart-data-preview/",
+@public_router.get(
+    "/reports/{token}/charts/{chart_id}/data-preview/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_data(request, token: str, page: int = 0, limit: int = 100):
+def get_public_report_table_data(
+    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+):
     """Get table chart data for a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
-
-        payload_data = json.loads(request.body) if request.body else {}
-        chart_payload = ChartDataPayload(**payload_data)
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        chart_payload = charts_service.build_chart_data_payload(config)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1261,21 +1283,25 @@ def get_public_report_table_data(request, token: str, page: int = 0, limit: int 
         return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
 
 
-@public_router.post(
-    "/reports/{token}/chart-data-preview/total-rows/",
+@public_router.get(
+    "/reports/{token}/charts/{chart_id}/total-rows/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_total_rows(request, token: str):
+def get_public_report_table_total_rows(request, token: str, chart_id: int):
     """Get total row count for table chart in a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
-
-        payload_data = json.loads(request.body) if request.body else {}
-        chart_payload = ChartDataPayload(**payload_data)
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        chart_payload = charts_service.build_chart_data_payload(config)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 
@@ -1349,8 +1375,6 @@ def get_public_report_map_data(request, token: str):
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         if map_payload.filters:
-            from sqlalchemy import column, func
-
             for filter_column, filter_value in map_payload.filters.items():
                 query_builder.where_clause(
                     func.upper(column(filter_column)) == str(filter_value).upper()

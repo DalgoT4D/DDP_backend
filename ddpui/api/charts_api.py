@@ -28,6 +28,7 @@ from ddpui.services.chart_service import (
     ChartPermissionError,
 )
 from ddpui.schemas.chart_schema import (
+    ChartConfig,
     ChartCreate,
     ChartMetric,
     ChartUpdate,
@@ -118,29 +119,15 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
     logger.info(f"Generating render config for chart {chart.id}: {chart.title}")
 
     try:
-        extra_config = chart.extra_config
-        logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
+        logger.debug(f"Chart {chart.id} extra_config: {chart.extra_config}")
 
-        payload = ChartDataPayload(
+        config = ChartConfig(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
-            x_axis=extra_config.get("x_axis_column"),
-            y_axis=extra_config.get("y_axis_column"),
-            dimension_col=extra_config.get("dimension_column"),
-            extra_dimension=extra_config.get("extra_dimension_column"),
-            dimensions=extra_config.get("dimension_columns"),
-            metrics=extra_config.get("metrics"),
-            # Map-specific fields
-            geographic_column=extra_config.get("geographic_column"),
-            value_column=extra_config.get("value_column"),
-            selected_geojson_id=extra_config.get("selected_geojson_id"),
-            customizations=extra_config.get("customizations", {}),
-            extra_config=extra_config,
+            extra_config=chart.extra_config,
         )
-
-        # Normalize dimensions for backward compatibility and consistency
-        payload.dimensions = charts_service.normalize_dimensions(payload)
+        payload = charts_service.build_chart_data_payload(config)
 
         # Use the common function to generate config and data
         result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
@@ -1143,30 +1130,14 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
             logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
             resolved_dashboard_filters = None
 
-    # Get existing customizations and add chart title
-    customizations = extra_config.get("customizations", {})
-    customizations["title"] = chart.title  # Add chart title to customizations
-
-    payload = ChartDataPayload(
+    config = ChartConfig(
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
-        x_axis=extra_config.get("x_axis_column"),
-        y_axis=extra_config.get("y_axis_column"),
-        dimension_col=extra_config.get("dimension_column"),
-        extra_dimension=extra_config.get("extra_dimension_column"),
-        # Multiple metrics support - CRITICAL FIX for dashboard charts
-        metrics=extra_config.get("metrics"),
-        # Map-specific fields
-        geographic_column=extra_config.get("geographic_column"),
-        value_column=extra_config.get("value_column"),
-        selected_geojson_id=extra_config.get("selected_geojson_id"),
-        customizations=extra_config.get("customizations", {}),
-        offset=0,
-        limit=100,
+        title=chart.title,
         extra_config=extra_config,
-        dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
     )
+    payload = charts_service.build_chart_data_payload(config, resolved_dashboard_filters)
 
     # Use the common function to generate data and config
     try:
