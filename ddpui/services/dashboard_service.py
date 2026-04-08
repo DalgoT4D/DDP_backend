@@ -167,7 +167,13 @@ class DashboardService:
 
         Returns:
             List of resolved filter dicts, or None if no filters resolved.
+
+        Raises:
+            ValueError: If filter_values is not a dict.
         """
+        if not isinstance(filter_values, dict):
+            raise ValueError(f"filter_values must be a dict, got {type(filter_values).__name__}")
+
         filter_lookup = {str(f["id"]): f for f in filter_definitions}
 
         resolved = []

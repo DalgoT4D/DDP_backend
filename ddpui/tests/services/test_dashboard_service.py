@@ -601,3 +601,17 @@ class TestResolveDashboardFiltersForChart:
         )
 
         assert result is None
+
+    def test_non_dict_filter_values_raises(self):
+        """Non-dict filter_values raises ValueError"""
+        with pytest.raises(ValueError, match="filter_values must be a dict"):
+            DashboardService.resolve_dashboard_filters_for_chart(
+                [1, 2, 3], [self._make_filter_def(1, "status")], "public", "orders"
+            )
+
+    def test_string_filter_values_raises(self):
+        """String filter_values raises ValueError"""
+        with pytest.raises(ValueError, match="filter_values must be a dict"):
+            DashboardService.resolve_dashboard_filters_for_chart(
+                "not a dict", [self._make_filter_def(1, "status")], "public", "orders"
+            )
