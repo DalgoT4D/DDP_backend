@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Any, Union
 
 from chromadb import ClientAPI, Collection, HttpClient
-from chromadb.errors import InvalidCollectionException, NotFoundError
+from chromadb.errors import NotFoundError
 
 from ddpui.utils.vector.interface import VectorStore, VectorQueryResult, VectorStoredDocument
 
@@ -39,12 +39,10 @@ class ChromaVectorStore(VectorStore):
     def load_collection(self, name: str) -> Union[Collection, None]:
         try:
             return self.client.get_collection(name=name)
-        # In chromadb==0.6.3, get_collection() can raise:
-        # - InvalidCollectionException when the named collection does not exist
-        # - NotFoundError when the HTTP/sysdb layer reports a missing resource
-        #   while resolving that collection lookup
-        # For our store interface, both cases mean "this collection is absent".
-        except (InvalidCollectionException, NotFoundError):
+        # In chromadb==1.5.6, a missing collection resolves as NotFoundError in
+        # both the local Segment API and the HTTP client error mapper.
+        # For our store interface, that means "this collection is absent".
+        except NotFoundError:
             return None
 
     def delete_collection(self, name: str) -> bool:
