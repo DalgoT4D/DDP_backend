@@ -9,7 +9,7 @@ from django.db import models
 from django.contrib.auth.models import User
 
 from ninja import Schema
-from pydantic import SecretStr, BaseModel, field_validator
+from pydantic import SecretStr, BaseModel
 
 from ddpui.models.org import Org
 from ddpui.models.role_based_access import Role
@@ -215,11 +215,6 @@ class LoginPayload(BaseModel):
 
     username: str
     password: str
-
-    @field_validator("username")
-    @classmethod
-    def strip_username_whitespace(cls, value: str) -> str:
-        return value.strip()
 
 
 class LogoutPayload(BaseModel):
