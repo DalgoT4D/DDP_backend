@@ -238,37 +238,17 @@ def get_public_chart_data(request, token: str, chart_id: int):
         # Build payload from chart config - reuse exact logic from authenticated endpoint
         extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
-        # Parse and resolve dashboard filters if provided - same logic as authenticated API
+        # Parse and resolve dashboard filters if provided
+        # Uses schema/table match (no warehouse_client) to check filter applicability
         resolved_dashboard_filters = None
         if filters:
-            # Resolve filter configurations to get column information - same as authenticated API
-            resolved_filters = []
-
-            for filter_id, value in filters.items():
-                if value is not None:  # Skip filters with no value
-                    try:
-                        dashboard_filter = DashboardFilter.objects.get(
-                            id=int(filter_id), dashboard=dashboard
-                        )
-                        # Only apply this filter if it applies to the same table as the chart (same as authenticated API)
-                        if (
-                            dashboard_filter.schema_name == chart.schema_name
-                            and dashboard_filter.table_name == chart.table_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,  # Use "column" key as expected
-                                    "type": dashboard_filter.filter_type,  # Use "type" key as expected
-                                    "value": value,
-                                    "settings": dashboard_filter.settings
-                                    or {},  # Use actual settings
-                                }
-                            )
-                    except (DashboardFilter.DoesNotExist, ValueError):
-                        logger.warning(f"Public API: Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
+            filter_defs = DashboardFilter.objects.filter(id__in=filters.keys(), dashboard=dashboard)
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filters,
+                [f.to_json() for f in filter_defs],
+                chart.schema_name,
+                chart.table_name,
+            )
 
         config = ChartConfig(
             chart_type=chart.chart_type,
@@ -535,39 +515,19 @@ def get_public_chart_data_preview(
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Parse and resolve dashboard filters if provided (same logic as public chart data endpoint)
+        # Parse and resolve dashboard filters if provided
         resolved_dashboard_filters = None
         if dashboard_filters:
-            # Resolve filter configurations to get column information
             filter_values = json.loads(dashboard_filters)
-
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            resolved_filters = []
-
-            for filter_id, filter_value in filter_values.items():
-                if filter_value is not None:
-                    try:
-                        # Get the filter configuration from the database
-                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
-
-                        # Only apply this filter if it applies to the same table as the chart
-                        # Use warehouse client to check column existence
-                        if warehouse_client.column_exists(
-                            chart.schema_name, chart.table_name, dashboard_filter.column_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,
-                                    "type": dashboard_filter.filter_type,
-                                    "value": filter_value,
-                                    "settings": dashboard_filter.settings,
-                                }
-                            )
-                    except (DashboardFilter.DoesNotExist, ValueError):
-                        logger.warning(f"Public API: Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
+            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                chart.schema_name,
+                chart.table_name,
+                warehouse_client,
+            )
 
         # Convert payload to ChartDataPayload with resolved dashboard filters
         chart_payload = ChartDataPayload(
@@ -738,41 +698,17 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         # Handle dashboard filters (same logic as private API)
         resolved_dashboard_filters = None
         if map_payload.dashboard_filters:
-            try:
-                # Import dashboard filter model
-                from ddpui.models.dashboard import DashboardFilter
-
-                resolved_filters = []
-
-                for filter_id, filter_value in map_payload.dashboard_filters.items():
-                    if filter_id and filter_value is not None:
-                        try:
-                            dashboard_filter = DashboardFilter.objects.get(
-                                id=filter_id, dashboard__org=dashboard.org
-                            )
-                            # Only apply this filter if it applies to the same table as the chart
-                            if warehouse_client.column_exists(
-                                map_payload.schema_name,
-                                map_payload.table_name,
-                                dashboard_filter.column_name,
-                            ):
-                                resolved_filters.append(
-                                    {
-                                        "filter_id": filter_id,
-                                        "column": dashboard_filter.column_name,
-                                        "type": dashboard_filter.filter_type,
-                                        "value": filter_value,
-                                        "settings": dashboard_filter.settings or {},
-                                    }
-                                )
-                        except DashboardFilter.DoesNotExist:
-                            logger.warning(f"Dashboard filter {filter_id} not found")
-
-                resolved_dashboard_filters = resolved_filters
-
-            except Exception as e:
-                logger.error(f"Error resolving dashboard filters: {str(e)}")
-                resolved_dashboard_filters = None
+            filter_defs = DashboardFilter.objects.filter(
+                id__in=map_payload.dashboard_filters.keys(),
+                dashboard__org=dashboard.org,
+            )
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                map_payload.dashboard_filters,
+                [f.to_json() for f in filter_defs],
+                map_payload.schema_name,
+                map_payload.table_name,
+                warehouse_client,
+            )
 
         # Build chart payload for map data query (same logic as private API)
         from ddpui.schemas.chart_schema import ChartDataPayload, ExecuteChartQuery

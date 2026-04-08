@@ -25,6 +25,7 @@ from ddpui.schemas.report_schema import (
     SnapshotUpdate,
 )
 from ddpui.core.charts.charts_service import build_chart_data_payload
+from ddpui.services.dashboard_service import DashboardService
 from ddpui.api.charts_api import generate_chart_data_and_config
 
 from .exceptions import (
@@ -231,45 +232,6 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    def _resolve_frozen_dashboard_filters(
-        frozen_dashboard: Dict[str, Any],
-        filter_values: Dict[str, Any],
-        chart_schema: str,
-        chart_table: str,
-        warehouse_client,
-    ) -> Optional[List[Dict[str, Any]]]:
-        """Resolve dashboard filter values from frozen dashboard config.
-
-        Mirrors the dashboard filter resolution in get_chart_data_by_id but
-        looks up filter definitions from the frozen config instead of the DB,
-        since the original DashboardFilter rows may have been modified or
-        deleted after the snapshot was created.
-        """
-        frozen_filters = frozen_dashboard.get("filters", [])
-        filter_lookup = {str(f["id"]): f for f in frozen_filters}
-
-        resolved = []
-        for filter_id, value in filter_values.items():
-            if value is None:
-                continue
-            filter_def = filter_lookup.get(str(filter_id))
-            if not filter_def:
-                logger.warning(f"Frozen dashboard filter {filter_id} not found")
-                continue
-            if warehouse_client.column_exists(chart_schema, chart_table, filter_def["column_name"]):
-                resolved.append(
-                    {
-                        "filter_id": filter_id,
-                        "column": filter_def["column_name"],
-                        "type": filter_def["filter_type"],
-                        "value": value,
-                        "settings": filter_def.get("settings") or {},
-                    }
-                )
-
-        return resolved if resolved else None
-
-    @staticmethod
     def get_report_chart_data(
         snapshot_id: int,
         chart_id: int,
@@ -307,9 +269,10 @@ class ReportService:
         resolved_filters = None
         if dashboard_filters:
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            resolved_filters = ReportService._resolve_frozen_dashboard_filters(
-                snapshot.frozen_dashboard,
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
                 dashboard_filters,
+                frozen_filters,
                 chart_config["schema_name"],
                 chart_config["table_name"],
                 warehouse_client,
