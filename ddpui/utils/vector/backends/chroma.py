@@ -39,7 +39,8 @@ class ChromaVectorStore(VectorStore):
     def load_collection(self, name: str) -> Union[Collection, None]:
         try:
             return self.client.get_collection(name=name)
-        # In recent Chroma releases, a missing collection resolves as NotFoundError.
+        # In chromadb==1.5.6, a missing collection resolves as NotFoundError in
+        # both the local Segment API and the HTTP client error mapper.
         # For our store interface, that means "this collection is absent".
         except NotFoundError:
             return None
