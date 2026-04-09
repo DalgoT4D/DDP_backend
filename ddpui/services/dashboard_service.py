@@ -340,6 +340,20 @@ class DashboardService:
             dashboard.is_published = data.is_published
             if data.is_published:
                 dashboard.published_at = timezone.now()
+        if data.theme_background_color is not None:
+            dashboard.theme_background_color = data.theme_background_color
+        if data.theme_background_gradient is not None:
+            dashboard.theme_background_gradient = data.theme_background_gradient
+        if data.theme_background_image_url is not None:
+            dashboard.theme_background_image_url = data.theme_background_image_url
+        if data.theme_background_image_blur is not None:
+            dashboard.theme_background_image_blur = data.theme_background_image_blur
+        if data.theme_chart_opacity is not None:
+            dashboard.theme_chart_opacity = data.theme_chart_opacity
+        if data.theme_overlay_color is not None:
+            dashboard.theme_overlay_color = data.theme_overlay_color
+        if data.theme_overlay_opacity is not None:
+            dashboard.theme_overlay_opacity = data.theme_overlay_opacity
 
         dashboard.last_modified_by = orguser
         dashboard.save()

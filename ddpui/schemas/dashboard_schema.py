@@ -33,6 +33,13 @@ class DashboardUpdate(Schema):
     components: Optional[dict] = None
     filter_layout: Optional[str] = None
     is_published: Optional[bool] = None
+    theme_background_color: Optional[str] = None
+    theme_background_gradient: Optional[dict] = None
+    theme_background_image_url: Optional[str] = None
+    theme_background_image_blur: Optional[int] = None
+    theme_chart_opacity: Optional[float] = None
+    theme_overlay_color: Optional[str] = None
+    theme_overlay_opacity: Optional[float] = None
 
 
 class DashboardFilterResponse(Schema):
@@ -73,6 +80,13 @@ class DashboardResponse(Schema):
     created_at: datetime
     updated_at: datetime
     filters: List[DashboardFilterResponse] = []
+    theme_background_color: Optional[str] = None
+    theme_background_gradient: Optional[dict] = None
+    theme_background_image_url: Optional[str] = None
+    theme_background_image_blur: Optional[int] = None
+    theme_chart_opacity: Optional[float] = None
+    theme_overlay_color: Optional[str] = None
+    theme_overlay_opacity: Optional[float] = None
 
 
 # =============================================================================

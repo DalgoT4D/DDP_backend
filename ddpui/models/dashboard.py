@@ -108,6 +108,42 @@ class Dashboard(models.Model):
         help_text="If True, this dashboard is the organization's default landing page",
     )
 
+    # Dashboard theming
+    theme_background_color = models.CharField(
+        max_length=7,
+        blank=True,
+        null=True,
+        help_text="Background color in hex format (e.g., #ffffff)",
+    )
+    theme_background_gradient = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="Background gradient configuration as JSON object with type, colors, and direction",
+    )
+    theme_background_image_url = models.URLField(
+        blank=True,
+        null=True,
+        help_text="URL of background image for the dashboard",
+    )
+    theme_background_image_blur = models.IntegerField(
+        default=0,
+        help_text="Blur intensity for background image (0-20)",
+    )
+    theme_chart_opacity = models.FloatField(
+        default=1.0,
+        help_text="Opacity of chart components (0.0-1.0)",
+    )
+    theme_overlay_color = models.CharField(
+        max_length=7,
+        blank=True,
+        null=True,
+        help_text="Overlay color in hex format for translucent effect",
+    )
+    theme_overlay_opacity = models.FloatField(
+        default=0.0,
+        help_text="Opacity of overlay (0.0-1.0)",
+    )
+
     # Metadata
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, db_column="created_by")
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
@@ -144,6 +180,13 @@ class Dashboard(models.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "is_org_default": self.is_org_default,
+            "theme_background_color": self.theme_background_color,
+            "theme_background_gradient": self.theme_background_gradient,
+            "theme_background_image_url": self.theme_background_image_url,
+            "theme_background_image_blur": self.theme_background_image_blur,
+            "theme_chart_opacity": self.theme_chart_opacity,
+            "theme_overlay_color": self.theme_overlay_color,
+            "theme_overlay_opacity": self.theme_overlay_opacity,
         }
 
     class Meta:
