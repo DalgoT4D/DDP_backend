@@ -112,35 +112,40 @@ class TestSendEmailWithAttachment:
 class TestRenderShareReportEmail:
     """Tests for the share report email template"""
 
-    def test_renders_without_message(self):
+    def test_renders_with_private_url_only(self):
         from ddpui.utils.email_templates import render_share_report_email
 
         plain, html = render_share_report_email(
             sender_name="Alice",
             report_title="Q1 Report",
-            report_url="https://app.dalgo.org/share/report/token123",
+            private_url="https://app.dalgo.org/reports/1",
         )
 
         assert 'Alice has shared "Q1 Report" with you' in plain
-        assert "View the report:" in plain
-        assert "PDF copy is also attached" in plain
+        assert "login required" in plain
+        assert "https://app.dalgo.org/reports/1" in plain
         assert "Alice" in html
         assert "Q1 Report" in html
         assert "View Report" in html
-        assert "token123" in html
+        # No public link when public_url is not provided
+        assert "Public Link" not in html
 
-    def test_renders_with_message(self):
+    def test_renders_with_public_url(self):
         from ddpui.utils.email_templates import render_share_report_email
 
         plain, html = render_share_report_email(
             sender_name="Bob",
             report_title="Monthly Summary",
-            report_url="https://app.dalgo.org/share/report/abc",
-            message="Please review by Friday",
+            private_url="https://app.dalgo.org/reports/2",
+            public_url="https://app.dalgo.org/share/report/abc",
         )
 
-        assert "Please review by Friday" in plain
-        assert "Please review by Friday" in html
+        # Both URLs in plain text
+        assert "https://app.dalgo.org/reports/2" in plain
+        assert "https://app.dalgo.org/share/report/abc" in plain
+        # Public link in HTML
+        assert "Public Link" in html
+        assert "abc" in html
 
     def test_escapes_html_in_user_content(self):
         from ddpui.utils.email_templates import render_share_report_email
@@ -148,13 +153,11 @@ class TestRenderShareReportEmail:
         _, html = render_share_report_email(
             sender_name="<script>alert('xss')</script>",
             report_title='Report "with quotes"',
-            report_url="https://example.com",
-            message="<b>bold</b>",
+            private_url="https://example.com/reports/1",
         )
 
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
-        assert "&lt;b&gt;bold&lt;/b&gt;" in html
 
 
 # ================================================================================
@@ -167,32 +170,84 @@ class TestSendReportEmailTask:
 
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
-    def test_generates_pdf_and_sends_to_all_recipients(self, mock_generate_pdf, mock_send_email):
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    def test_generates_pdf_and_sends_to_all_recipients(
+        self,
+        mock_private_url,
+        mock_ensure_token,
+        mock_generate_pdf,
+        mock_send_email,
+        snapshot,
+        orguser,
+    ):
         from ddpui.celeryworkers.report_tasks import send_report_email_task
 
+        mock_private_url.return_value = "https://app.dalgo.org/reports/1"
+        mock_ensure_token.return_value = "token123"
         mock_generate_pdf.return_value = b"%PDF-1.4 content"
 
         send_report_email_task(
-            snapshot_id=1,
-            share_token="token123",
+            snapshot_id=snapshot.id,
+            orguser_id=orguser.id,
             recipient_emails=["a@test.com", "b@test.com"],
-            sender_name="Alice",
-            report_title="Q1 Report",
-            report_url="https://app.dalgo.org/share/report/token123",
         )
 
-        mock_generate_pdf.assert_called_once_with(1, "token123")
+        mock_generate_pdf.assert_called_once_with(snapshot.id, "token123")
         assert mock_send_email.call_count == 2
 
         first_call = mock_send_email.call_args_list[0]
         assert first_call[1]["to_email"] == "a@test.com"
         assert first_call[1]["attachment_filename"] == "Q1 Report.pdf"
+        # Default subject when none provided
+        assert first_call[1]["subject"] == "Report: Q1 Report"
 
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
-    def test_continues_on_individual_email_failure(self, mock_generate_pdf, mock_send_email):
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    def test_uses_custom_subject(
+        self,
+        mock_private_url,
+        mock_ensure_token,
+        mock_generate_pdf,
+        mock_send_email,
+        snapshot,
+        orguser,
+    ):
         from ddpui.celeryworkers.report_tasks import send_report_email_task
 
+        mock_private_url.return_value = "https://app.dalgo.org/reports/1"
+        mock_ensure_token.return_value = "token123"
+        mock_generate_pdf.return_value = b"%PDF-1.4 content"
+
+        send_report_email_task(
+            snapshot_id=snapshot.id,
+            orguser_id=orguser.id,
+            recipient_emails=["a@test.com"],
+            subject="Custom Subject Line",
+        )
+
+        first_call = mock_send_email.call_args_list[0]
+        assert first_call[1]["subject"] == "Custom Subject Line"
+
+    @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
+    @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    def test_continues_on_individual_email_failure(
+        self,
+        mock_private_url,
+        mock_ensure_token,
+        mock_generate_pdf,
+        mock_send_email,
+        snapshot,
+        orguser,
+    ):
+        from ddpui.celeryworkers.report_tasks import send_report_email_task
+
+        mock_private_url.return_value = "https://app.dalgo.org/reports/1"
+        mock_ensure_token.return_value = "token123"
         mock_generate_pdf.return_value = b"%PDF-1.4 content"
         mock_send_email.side_effect = [
             Exception("SES error"),
@@ -201,31 +256,69 @@ class TestSendReportEmailTask:
 
         # Should not raise even though the first email fails
         send_report_email_task(
-            snapshot_id=1,
-            share_token="token123",
+            snapshot_id=snapshot.id,
+            orguser_id=orguser.id,
             recipient_emails=["fail@test.com", "success@test.com"],
-            sender_name="Alice",
-            report_title="Q1 Report",
-            report_url="https://example.com",
         )
 
         assert mock_send_email.call_count == 2
 
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
-    def test_raises_when_pdf_generation_fails(self, mock_generate_pdf):
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    def test_raises_when_pdf_generation_fails(
+        self, mock_private_url, mock_ensure_token, mock_generate_pdf, snapshot, orguser
+    ):
         from ddpui.celeryworkers.report_tasks import send_report_email_task
 
+        mock_private_url.return_value = "https://app.dalgo.org/reports/1"
+        mock_ensure_token.return_value = "token123"
         mock_generate_pdf.side_effect = Exception("Playwright error")
 
         with pytest.raises(Exception, match="Playwright error"):
             send_report_email_task(
-                snapshot_id=1,
-                share_token="token123",
+                snapshot_id=snapshot.id,
+                orguser_id=orguser.id,
                 recipient_emails=["a@test.com"],
-                sender_name="Alice",
-                report_title="Q1 Report",
-                report_url="https://example.com",
             )
+
+    @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
+    @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_public_url")
+    def test_includes_public_url_when_report_is_public(
+        self,
+        mock_public_url,
+        mock_private_url,
+        mock_ensure_token,
+        mock_generate_pdf,
+        mock_send_email,
+        snapshot,
+        orguser,
+    ):
+        from ddpui.celeryworkers.report_tasks import send_report_email_task
+
+        # Make the snapshot public
+        snapshot.is_public = True
+        snapshot.public_share_token = "public-token-abc"
+        snapshot.save(update_fields=["is_public", "public_share_token"])
+
+        mock_private_url.return_value = "https://app.dalgo.org/reports/1"
+        mock_public_url.return_value = "https://app.dalgo.org/share/report/public-token-abc"
+        mock_ensure_token.return_value = "public-token-abc"
+        mock_generate_pdf.return_value = b"%PDF-1.4 content"
+
+        send_report_email_task(
+            snapshot_id=snapshot.id,
+            orguser_id=orguser.id,
+            recipient_emails=["a@test.com"],
+        )
+
+        mock_public_url.assert_called_once_with("public-token-abc")
+        # Email body should contain the public URL
+        first_call = mock_send_email.call_args_list[0]
+        assert "public-token-abc" in first_call[1]["html_body"]
 
 
 # ================================================================================
@@ -237,36 +330,17 @@ class TestShareViaEmailEndpoint:
     """Tests for the API endpoint logic"""
 
     @patch("ddpui.api.report_api.send_report_email_task")
-    def test_dispatches_celery_task_and_enables_public(self, mock_task, snapshot, orguser):
-        from ddpui.core.reports.report_service import ReportService
-
-        assert not snapshot.is_public
-        assert not snapshot.public_share_token
-
-        # Simulate what the endpoint does
-        share_token = ReportService.ensure_share_token(snapshot)
-        if not snapshot.is_public:
-            snapshot.is_public = True
-            snapshot.save(update_fields=["is_public"])
-
-        report_url = ReportService._build_public_url(share_token)
-
+    def test_dispatches_celery_task(self, mock_task, snapshot, orguser):
         mock_task.delay(
             snapshot_id=snapshot.id,
-            share_token=share_token,
+            orguser_id=orguser.id,
             recipient_emails=["test@example.com"],
-            sender_name=orguser.user.email,
-            report_title=snapshot.title,
-            report_url=report_url,
-            message="Check this out",
+            subject="Report: Q1 Report",
         )
-
-        snapshot.refresh_from_db()
-        assert snapshot.is_public is True
-        assert snapshot.public_share_token is not None
 
         mock_task.delay.assert_called_once()
         call_kwargs = mock_task.delay.call_args[1]
+        assert call_kwargs["snapshot_id"] == snapshot.id
+        assert call_kwargs["orguser_id"] == orguser.id
         assert call_kwargs["recipient_emails"] == ["test@example.com"]
-        assert call_kwargs["report_title"] == "Q1 Report"
-        assert call_kwargs["message"] == "Check this out"
+        assert call_kwargs["subject"] == "Report: Q1 Report"
