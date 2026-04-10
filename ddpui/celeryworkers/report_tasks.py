@@ -4,6 +4,9 @@ import re
 
 from ddpui.celery import app
 from ddpui.core.reports.pdf_export_service import PdfExportService
+from ddpui.core.reports.report_service import ReportService
+from ddpui.models.org_user import OrgUser
+from ddpui.models.report import ReportSnapshot
 from ddpui.utils.awsses import send_email_with_attachment
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.email_templates import render_share_report_email
@@ -15,24 +18,35 @@ logger = CustomLogger("ddpui.celeryworkers.report_tasks")
 def send_report_email_task(
     self,
     snapshot_id,
-    share_token,
+    orguser_id,
     recipient_emails,
-    sender_name,
-    report_title,
-    report_url,
-    message=None,
+    subject=None,
 ):
     """Generate a PDF of the report and email it to all recipients.
 
     Args:
-        snapshot_id: The snapshot ID (for PDF generation)
-        share_token: The snapshot's public_share_token
+        snapshot_id: The snapshot ID
+        orguser_id: The ID of the OrgUser who triggered the share
         recipient_emails: List of email addresses to send to
-        sender_name: Display name of the person sharing
-        report_title: Title of the report
-        report_url: Public URL to view the report
-        message: Optional personal message from the sender
+        subject: Optional custom email subject line
     """
+    snapshot = ReportSnapshot.objects.get(id=snapshot_id)
+    orguser = OrgUser.objects.select_related("user").get(id=orguser_id)
+
+    sender_name = orguser.user.email
+    report_title = snapshot.title
+
+    # Always include the private (authenticated) URL
+    private_url = ReportService._build_private_url(snapshot_id)
+
+    # Include the public URL only if the report is publicly shared
+    public_url = None
+    if snapshot.is_public and snapshot.public_share_token:
+        public_url = ReportService._build_public_url(snapshot.public_share_token)
+
+    # Ensure a share token exists for PDF generation
+    share_token = ReportService.ensure_share_token(snapshot)
+
     # Generate PDF once for all recipients
     logger.info(
         f"Generating PDF for snapshot {snapshot_id} "
@@ -48,18 +62,18 @@ def send_report_email_task(
     plain_text, html_body = render_share_report_email(
         sender_name=sender_name,
         report_title=report_title,
-        report_url=report_url,
-        message=message,
+        private_url=private_url,
+        public_url=public_url,
     )
 
-    subject = f"{report_title} \U0001f680"
+    email_subject = subject if subject else f"Report: {report_title}"
 
     sent_count = 0
     for recipient in recipient_emails:
         try:
             send_email_with_attachment(
                 to_email=recipient,
-                subject=subject,
+                subject=email_subject,
                 text_body=plain_text,
                 html_body=html_body,
                 attachment_bytes=pdf_bytes,

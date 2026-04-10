@@ -197,23 +197,23 @@ def render_mention_email(
 def render_share_report_email(
     sender_name: str,
     report_title: str,
-    report_url: str,
-    message: Optional[str] = None,
+    private_url: str,
+    public_url: Optional[str] = None,
 ) -> tuple:
     """Render HTML + plain-text email for sharing a report.
 
     Args:
         sender_name: Display name of the person sharing
         report_title: Title of the report
-        report_url: Public URL to view the report
-        message: Optional personal message from the sender
+        private_url: Authenticated URL to view the report (requires login)
+        public_url: Optional public URL (included only if report is public)
 
     Returns:
         (plain_text_body, html_body) tuple
     """
     safe_sender = html.escape(sender_name)
     safe_title = html.escape(report_title)
-    safe_url = html.escape(report_url)
+    safe_private_url = html.escape(private_url)
 
     # Plain-text version
     plain_text = (
@@ -221,7 +221,11 @@ def render_share_report_email(
         f"\n"
         f"Check it out on Dalgo web for the best experience.\n"
         f"\n"
-        f"View the report: {report_url}\n"
+        f"View the report (login required): {private_url}\n"
+    )
+    if public_url:
+        plain_text += f"\nPublic link (no login required): {public_url}\n"
+    plain_text += (
         f"\n"
         f"OR\n"
         f"\n"
@@ -230,6 +234,20 @@ def render_share_report_email(
         f"---\n"
         f"You received this email because someone shared a Dalgo report with you.\n"
     )
+
+    # Public link HTML block (only if public)
+    public_link_html = ""
+    if public_url:
+        safe_public_url = html.escape(public_url)
+        public_link_html = f"""\
+
+              <!-- Public link -->
+              <p style="margin:16px 0 0; font-size:13px; color:#6b7280; \
+line-height:1.5;">
+                Or view without logging in: \
+<a href="{safe_public_url}" style="color:#00897B; text-decoration:underline;">\
+Public Link</a>
+              </p>"""
 
     html_body = f"""\
 <!DOCTYPE html>
@@ -273,11 +291,11 @@ line-height:1.5;">
                 Check it out on <strong>Dalgo</strong> web for the best experience &#128187;
               </p>
 
-              <!-- CTA Button -->
+              <!-- CTA Button (private URL - requires login) -->
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td>
-                    <a href="{safe_url}"
+                    <a href="{safe_private_url}"
                        style="display:inline-block; background-color:#00897B; \
 color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; \
 font-size:14px; font-weight:600; letter-spacing:0.3px;">
@@ -285,7 +303,7 @@ font-size:14px; font-weight:600; letter-spacing:0.3px;">
                     </a>
                   </td>
                 </tr>
-              </table>
+              </table>{public_link_html}
 
               <!-- OR separator -->
               <p style="margin:20px 0; font-size:13px; color:#9ca3af; \

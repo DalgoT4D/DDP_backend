@@ -32,8 +32,8 @@ from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     MarkReadRequest,
     MentionableUserResponse,
-    ShareViaEmailRequest,
-    ShareViaEmailResponse,
+    ReportShareViaEmailRequest,
+    ReportShareViaEmailResponse,
     SnapshotCreate,
     SnapshotDeleteResponse,
     SnapshotResponse,
@@ -275,10 +275,10 @@ def get_report_sharing_status(request, snapshot_id: int):
 
 @report_router.post(
     "/{snapshot_id}/share/email/",
-    response=ApiResponse[ShareViaEmailResponse],
+    response=ApiResponse[ReportShareViaEmailResponse],
 )
 @has_permission(["can_share_dashboards"])
-def share_report_via_email(request, snapshot_id: int, payload: ShareViaEmailRequest):
+def share_report_via_email(request, snapshot_id: int, payload: ReportShareViaEmailRequest):
     """Send the report as a PDF attachment to the given email addresses."""
     orguser: OrgUser = request.orguser
 
@@ -287,28 +287,16 @@ def share_report_via_email(request, snapshot_id: int, payload: ShareViaEmailRequ
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
-    # Ensure a share token exists and enable public access
-    share_token = ReportService.ensure_share_token(snapshot)
-    if not snapshot.is_public:
-        snapshot.is_public = True
-        snapshot.save(update_fields=["is_public"])
-
-    report_url = ReportService._build_public_url(share_token)
-    sender_name = orguser.user.email
-
     send_report_email_task.delay(
         snapshot_id=snapshot.id,
-        share_token=share_token,
+        orguser_id=orguser.id,
         recipient_emails=payload.recipient_emails,
-        sender_name=sender_name,
-        report_title=snapshot.title,
-        report_url=report_url,
-        message=payload.message,
+        subject=payload.subject,
     )
 
     return api_response(
         success=True,
-        data=ShareViaEmailResponse(
+        data=ReportShareViaEmailResponse(
             recipients_count=len(payload.recipient_emails),
             message="Emails are being sent",
         ),

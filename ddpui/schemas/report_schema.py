@@ -230,14 +230,14 @@ class MentionableUserResponse(Schema):
 # =============================================================================
 
 
-class ShareViaEmailRequest(Schema):
+class ReportShareViaEmailRequest(Schema):
     """Schema for sharing a report via email"""
 
     recipient_emails: list[str] = Field(..., min_items=1, max_items=20)
-    message: Optional[str] = Field(None, max_length=1000)
+    subject: Optional[str] = Field(None, max_length=255)
 
 
-class ShareViaEmailResponse(Schema):
+class ReportShareViaEmailResponse(Schema):
     """Schema for share-via-email response"""
 
     recipients_count: int

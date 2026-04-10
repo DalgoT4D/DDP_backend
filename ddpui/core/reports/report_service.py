@@ -683,14 +683,24 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    def _build_public_url(token: str) -> str:
-        """Build the public share URL for a report snapshot."""
+    def _get_frontend_url() -> str:
+        """Get the frontend base URL."""
         frontend_url = getattr(settings, "FRONTEND_URL_V2", None) or getattr(
             settings, "FRONTEND_URL", None
         )
         if not frontend_url:
             frontend_url = "http://localhost:3001"
-        return f"{frontend_url}/share/report/{token}"
+        return frontend_url
+
+    @staticmethod
+    def _build_public_url(token: str) -> str:
+        """Build the public share URL for a report snapshot."""
+        return f"{ReportService._get_frontend_url()}/share/report/{token}"
+
+    @staticmethod
+    def _build_private_url(snapshot_id: int) -> str:
+        """Build the authenticated URL for a report snapshot."""
+        return f"{ReportService._get_frontend_url()}/reports/{snapshot_id}"
 
     @staticmethod
     def toggle_sharing(
