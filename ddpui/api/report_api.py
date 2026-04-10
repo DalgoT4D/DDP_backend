@@ -23,6 +23,7 @@ from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schema import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
+from ddpui.celeryworkers.report_tasks import send_report_email_task
 from ddpui.schemas.report_schema import (
     CommentCreate,
     CommentResponse,
@@ -31,6 +32,8 @@ from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     MarkReadRequest,
     MentionableUserResponse,
+    ReportShareViaEmailRequest,
+    ReportShareViaEmailResponse,
     SnapshotCreate,
     SnapshotDeleteResponse,
     SnapshotResponse,
@@ -265,6 +268,39 @@ def get_report_sharing_status(request, snapshot_id: int):
         raise HttpError(404, str(err)) from err
     except SnapshotPermissionError as err:
         raise HttpError(403, str(err)) from err
+
+
+# ===== Share via Email =====
+
+
+@report_router.post(
+    "/{snapshot_id}/share/email/",
+    response=ApiResponse[ReportShareViaEmailResponse],
+)
+@has_permission(["can_share_dashboards"])
+def share_report_via_email(request, snapshot_id: int, payload: ReportShareViaEmailRequest):
+    """Send the report as a PDF attachment to the given email addresses."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+
+    send_report_email_task.delay(
+        snapshot_id=snapshot.id,
+        orguser_id=orguser.id,
+        recipient_emails=payload.recipient_emails,
+        subject=payload.subject,
+    )
+
+    return api_response(
+        success=True,
+        data=ReportShareViaEmailResponse(
+            recipients_count=len(payload.recipient_emails),
+            message="Emails are being sent",
+        ),
+    )
 
 
 # ===== Comment Endpoints (nested under /{snapshot_id}/comments/) =====

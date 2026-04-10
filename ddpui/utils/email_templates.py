@@ -192,3 +192,149 @@ def render_mention_email(
 </html>"""
 
     return plain_text, html_body
+
+
+def render_share_report_email(
+    sender_name: str,
+    report_title: str,
+    private_url: str,
+    public_url: Optional[str] = None,
+) -> tuple:
+    """Render HTML + plain-text email for sharing a report.
+
+    Args:
+        sender_name: Display name of the person sharing
+        report_title: Title of the report
+        private_url: Authenticated URL to view the report (requires login)
+        public_url: Optional public URL (included only if report is public)
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    safe_sender = html.escape(sender_name)
+    safe_title = html.escape(report_title)
+    safe_private_url = html.escape(private_url)
+
+    # Plain-text version
+    plain_text = (
+        f'{sender_name} has shared "{report_title}" with you\n'
+        f"\n"
+        f"Check it out on Dalgo web for the best experience.\n"
+        f"\n"
+        f"View the report (login required): {private_url}\n"
+    )
+    if public_url:
+        plain_text += f"\nPublic link (no login required): {public_url}\n"
+    plain_text += (
+        f"\n"
+        f"OR\n"
+        f"\n"
+        f"Download the attached PDF to peruse at your own pace.\n"
+        f"\n"
+        f"---\n"
+        f"You received this email because someone shared a Dalgo report with you.\n"
+    )
+
+    # Public link HTML block (only if public)
+    public_link_html = ""
+    if public_url:
+        safe_public_url = html.escape(public_url)
+        public_link_html = f"""\
+
+              <!-- Public link -->
+              <p style="margin:16px 0 0; font-size:13px; color:#6b7280; \
+line-height:1.5;">
+                Or view without logging in: \
+<a href="{safe_public_url}" style="color:#00897B; text-decoration:underline;">\
+Public Link</a>
+              </p>"""
+
+    html_body = f"""\
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; background-color:#f4f4f5; \
+font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" \
+style="background-color:#f4f4f5; padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" \
+style="background-color:#ffffff; border-radius:8px; overflow:hidden; \
+box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#00897B; padding:20px 32px;">
+              <h1 style="color:#ffffff; margin:0; font-size:18px; \
+font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+
+              <!-- Headline -->
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; \
+font-weight:600; line-height:1.4;">
+                {safe_sender} has shared \
+&ldquo;{safe_title}&rdquo; with you &#10024;
+              </p>
+
+              <!-- Web experience note -->
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; \
+line-height:1.5;">
+                Check it out on <strong>Dalgo</strong> web for the best experience &#128187;
+              </p>
+
+              <!-- CTA Button (private URL - requires login) -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <a href="{safe_private_url}"
+                       style="display:inline-block; background-color:#00897B; \
+color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; \
+font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                      View Report
+                    </a>
+                  </td>
+                </tr>
+              </table>{public_link_html}
+
+              <!-- OR separator -->
+              <p style="margin:20px 0; font-size:13px; color:#9ca3af; \
+text-align:center; font-weight:600;">
+                OR
+              </p>
+
+              <!-- Attachment note -->
+              <p style="margin:0; font-size:13px; color:#6b7280; \
+line-height:1.5;">
+                Download attached <strong>PDF</strong> to peruse at your own pace &#128196;
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
+              <p style="margin:0; font-size:12px; color:#9ca3af; \
+line-height:1.5;">
+                You received this email because someone shared \
+a Dalgo report with you.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+    return plain_text, html_body
