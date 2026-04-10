@@ -33,10 +33,8 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardLock
 from ddpui.models.visualization import Chart
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.services.dashboard_service import (
     DashboardService,
     DashboardData,
@@ -51,91 +49,8 @@ from ddpui.services.dashboard_service import (
     delete_dashboard_safely,
 )
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
-from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
-
-
-# ================================================================================
-# Fixtures
-# ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    """A django User object"""
-    user = User.objects.create(
-        username="dashserviceuser", email="dashserviceuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def authuser2():
-    """A second django User object for permission testing"""
-    user = User.objects.create(
-        username="dashserviceuser2", email="dashserviceuser2@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    """An Org object"""
-    org = Org.objects.create(
-        name="Dashboard Service Test Org",
-        slug="dash-svc-test-org",  # max_length=20
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    """An OrgUser with account manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
-
-
-@pytest.fixture
-def orguser2(authuser2, org):
-    """A second OrgUser for permission testing"""
-    orguser = OrgUser.objects.create(
-        user=authuser2,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
-
-
-@pytest.fixture
-def sample_dashboard(orguser, org):
-    """A sample dashboard for testing"""
-    dashboard = Dashboard.objects.create(
-        title="Test Dashboard",
-        description="Test Description",
-        dashboard_type="native",
-        grid_columns=12,
-        layout_config=[],
-        components={},
-        created_by=orguser,
-        org=org,
-    )
-    yield dashboard
-    try:
-        dashboard.refresh_from_db()
-        dashboard.delete()
-    except Dashboard.DoesNotExist:
-        pass
 
 
 # ================================================================================

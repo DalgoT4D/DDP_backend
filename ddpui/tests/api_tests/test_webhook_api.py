@@ -37,7 +37,6 @@ from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLock
 
 from ddpui.settings import PRODUCTION
-from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 from ddpui.ddpprefect import (
     FLOW_RUN_PENDING_STATE_TYPE,

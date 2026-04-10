@@ -80,7 +80,7 @@ from ddpui.schemas.report_schema import (
     MarkReadRequest,
 )
 from ddpui.schemas.dashboard_schema import ShareToggle
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 

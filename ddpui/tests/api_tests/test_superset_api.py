@@ -10,9 +10,7 @@ django.setup()
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 from ninja.errors import HttpError
-from django.contrib.auth.models import User
-
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -27,7 +25,7 @@ from ddpui.api.superset_api import (
     SupersetDalgoUserCreds,
     ThumbnailRequestPayload,
 )
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -38,44 +36,11 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="superset_testuser",
-        email="superset_testuser@test.com",
-        password="testpassword",
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Superset Test Org",
-        slug="superset-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
 def org_with_viz(org):
     org.viz_url = "http://superset.example.com/"
     org.dalgouser_superset_creds_key = "test-secret-key"
     org.save()
     yield org
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture

@@ -3,7 +3,6 @@ from unittest.mock import Mock, patch, MagicMock
 from ninja.errors import HttpError
 import pytest
 from django.contrib.auth.models import User
-from django.core.management import call_command
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role, RolePermission
@@ -19,15 +18,6 @@ from rest_framework.authtoken.models import Token
 from rest_framework_simplejwt.tokens import AccessToken
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture(scope="session")
-def seed_db(django_db_setup, django_db_blocker):
-    with django_db_blocker.unblock():
-        # Run the loaddata command to load the fixture
-        call_command("loaddata", "001_roles.json")
-        call_command("loaddata", "002_permissions.json")
-        call_command("loaddata", "003_role_permissions.json")
 
 
 @pytest.fixture

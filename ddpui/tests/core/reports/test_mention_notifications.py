@@ -1,23 +1,22 @@
 """Tests for mention notification dispatch in MentionService"""
 
-from datetime import date
 from unittest.mock import patch, MagicMock
 
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
 
-from ddpui.models.org import Org
+from datetime import date
+
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
-from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.models.notifications import Notification, NotificationRecipient
+from ddpui.models.report import ReportSnapshot
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.mention_service import MentionService
 from ddpui.utils.email_templates import render_mention_email
-from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
 
@@ -28,35 +27,20 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Comment Test Org", slug="comment-test-org", airbyte_workspace_id="workspace-id"
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def author_user():
-    user = User.objects.create(
-        username="commentauthor",
-        email="author@test.com",
-        first_name="Author",
-        last_name="User",
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def author_orguser(author_user, org, seed_db):
-    orguser = OrgUser.objects.create(
-        user=author_user,
+def snapshot(org, orguser):
+    """Override conftest snapshot with title and chart configs expected by these tests."""
+    snap = ReportSnapshot.objects.create(
+        title="Test Report Q1",
+        date_column={},
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        frozen_dashboard={},
+        frozen_chart_configs={"1": {"title": "Chart 1"}},
+        created_by=orguser,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
     )
-    yield orguser
-    orguser.delete()
+    yield snap
+    snap.delete()
 
 
 @pytest.fixture
@@ -106,28 +90,12 @@ def second_mentioned_orguser(second_mentioned_user, org, seed_db):
 
 
 @pytest.fixture
-def snapshot(org, author_orguser):
-    snapshot = ReportSnapshot.objects.create(
-        title="Test Report Q1",
-        date_column={},
-        period_start=date(2026, 1, 1),
-        period_end=date(2026, 3, 31),
-        frozen_dashboard={},
-        frozen_chart_configs={"1": {"chartType": "bar", "title": "Chart 1"}},
-        created_by=author_orguser,
-        org=org,
-    )
-    yield snapshot
-    snapshot.delete()
-
-
-@pytest.fixture
-def comment_with_mention(snapshot, author_orguser, org, mentioned_orguser):
+def comment_with_mention(snapshot, orguser, org, mentioned_orguser):
     comment = Comment.objects.create(
         target_type=CommentTargetType.SUMMARY,
         snapshot=snapshot,
         content=f"Check this out @{mentioned_orguser.user.email}",
-        author=author_orguser,
+        author=orguser,
         org=org,
     )
     yield comment
@@ -148,11 +116,11 @@ class TestMentionNotifications:
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_process_mentions_creates_notification(
-        self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
+        self, mock_send, comment_with_mention, org, orguser, mentioned_orguser
     ):
         """Comment with @mention creates Notification + NotificationRecipient"""
         MentionService.process_mentions(
-            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+            comment_with_mention, org, orguser, [mentioned_orguser.user.email]
         )
 
         assert Notification.objects.count() == 1
@@ -161,28 +129,28 @@ class TestMentionNotifications:
         notification = Notification.objects.first()
         assert "mentioned you" in notification.message
         assert "Test Report Q1" in notification.message
-        assert notification.author == author_orguser.user.email
+        assert notification.author == orguser.user.email
 
         recipient = NotificationRecipient.objects.first()
         assert recipient.recipient == mentioned_orguser
         assert recipient.read_status is False
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
-    def test_self_mention_creates_notification(self, mock_send, snapshot, author_orguser, org):
+    def test_self_mention_creates_notification(self, mock_send, snapshot, orguser, org):
         """Author mentioning themselves still creates a notification."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
-            content=f"Note to self @{author_orguser.user.email}",
-            author=author_orguser,
+            content=f"Note to self @{orguser.user.email}",
+            author=orguser,
             org=org,
         )
 
-        MentionService.process_mentions(comment, org, author_orguser, [author_orguser.user.email])
+        MentionService.process_mentions(comment, org, orguser, [orguser.user.email])
 
         assert Notification.objects.count() == 1
         recipient = NotificationRecipient.objects.first()
-        assert recipient.recipient == author_orguser
+        assert recipient.recipient == orguser
 
         comment.delete()
 
@@ -191,7 +159,7 @@ class TestMentionNotifications:
         self,
         mock_send,
         snapshot,
-        author_orguser,
+        orguser,
         org,
         mentioned_orguser,
         second_mentioned_orguser,
@@ -201,14 +169,14 @@ class TestMentionNotifications:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content=f"Hey @{mentioned_orguser.user.email} and @{second_mentioned_orguser.user.email}",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
         MentionService.process_mentions(
             comment,
             org,
-            author_orguser,
+            orguser,
             [mentioned_orguser.user.email, second_mentioned_orguser.user.email],
         )
 
@@ -222,20 +190,18 @@ class TestMentionNotifications:
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_update_same_mentions_still_notifies(
-        self, mock_send, snapshot, author_orguser, org, mentioned_orguser
+        self, mock_send, snapshot, orguser, org, mentioned_orguser
     ):
         """Edit with same mentions still creates notifications (content may have changed)."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content=f"Hey @{mentioned_orguser.user.email}",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
-        MentionService.process_mentions(
-            comment, org, author_orguser, [mentioned_orguser.user.email]
-        )
+        MentionService.process_mentions(comment, org, orguser, [mentioned_orguser.user.email])
 
         assert Notification.objects.count() == 1
         recipient = NotificationRecipient.objects.first()
@@ -248,7 +214,7 @@ class TestMentionNotifications:
         self,
         mock_send,
         snapshot,
-        author_orguser,
+        orguser,
         org,
         mentioned_orguser,
         second_mentioned_orguser,
@@ -258,14 +224,14 @@ class TestMentionNotifications:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content=f"Hey @{mentioned_orguser.user.email} and @{second_mentioned_orguser.user.email}",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
         MentionService.process_mentions(
             comment,
             org,
-            author_orguser,
+            orguser,
             [mentioned_orguser.user.email, second_mentioned_orguser.user.email],
         )
 
@@ -288,7 +254,7 @@ class TestMentionEmail:
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_email_sent_when_preference_enabled(
-        self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
+        self, mock_send, comment_with_mention, org, orguser, mentioned_orguser
     ):
         """Email is sent when user has enable_email_notifications=True"""
         UserPreferences.objects.update_or_create(
@@ -297,7 +263,7 @@ class TestMentionEmail:
         )
 
         MentionService.process_mentions(
-            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+            comment_with_mention, org, orguser, [mentioned_orguser.user.email]
         )
 
         mock_send.assert_called_once()
@@ -307,7 +273,7 @@ class TestMentionEmail:
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_email_not_sent_when_preference_disabled(
-        self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
+        self, mock_send, comment_with_mention, org, orguser, mentioned_orguser
     ):
         """No email when enable_email_notifications=False, but in-app notification still created"""
         UserPreferences.objects.update_or_create(
@@ -316,7 +282,7 @@ class TestMentionEmail:
         )
 
         MentionService.process_mentions(
-            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+            comment_with_mention, org, orguser, [mentioned_orguser.user.email]
         )
 
         mock_send.assert_not_called()
@@ -329,7 +295,7 @@ class TestMentionEmail:
         side_effect=Exception("SES error"),
     )
     def test_email_failure_doesnt_block_notification(
-        self, mock_send, comment_with_mention, org, author_orguser, mentioned_orguser
+        self, mock_send, comment_with_mention, org, orguser, mentioned_orguser
     ):
         """Email send failure does not prevent notification record creation"""
         UserPreferences.objects.update_or_create(
@@ -339,7 +305,7 @@ class TestMentionEmail:
 
         # Should not raise
         MentionService.process_mentions(
-            comment_with_mention, org, author_orguser, [mentioned_orguser.user.email]
+            comment_with_mention, org, orguser, [mentioned_orguser.user.email]
         )
 
         # Notification still created
@@ -470,13 +436,13 @@ class TestRenderMentionEmail:
 class TestBuildReportUrl:
     """Tests for MentionService._build_report_url"""
 
-    def test_summary_comment_url(self, snapshot, author_orguser, org):
+    def test_summary_comment_url(self, snapshot, orguser, org):
         """Summary comment builds URL with commentTarget=summary"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="test",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         url = MentionService._build_report_url(comment)
@@ -484,14 +450,14 @@ class TestBuildReportUrl:
         assert "commentTarget=summary" in url
         comment.delete()
 
-    def test_chart_comment_url(self, snapshot, author_orguser, org):
+    def test_chart_comment_url(self, snapshot, orguser, org):
         """Chart comment builds URL with commentTarget=chart and chartId"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
             snapshot_chart_id=1,
             content="test",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         url = MentionService._build_report_url(comment)
@@ -501,13 +467,13 @@ class TestBuildReportUrl:
         comment.delete()
 
     @patch.object(settings, "FRONTEND_URL_V2", "https://app.dalgo.in")
-    def test_uses_frontend_url_v2(self, snapshot, author_orguser, org):
+    def test_uses_frontend_url_v2(self, snapshot, orguser, org):
         """Prefers FRONTEND_URL_V2 setting"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="test",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         url = MentionService._build_report_url(comment)
@@ -523,41 +489,41 @@ class TestBuildReportUrl:
 class TestResolveChartName:
     """Tests for MentionService._resolve_chart_name"""
 
-    def test_returns_chart_title(self, snapshot, author_orguser, org):
+    def test_returns_chart_title(self, snapshot, orguser, org):
         """Returns chart title from frozen_chart_configs"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
             snapshot_chart_id=1,
             content="test",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         result = MentionService._resolve_chart_name(comment)
         assert result == "Chart 1"
         comment.delete()
 
-    def test_returns_none_for_summary(self, snapshot, author_orguser, org):
+    def test_returns_none_for_summary(self, snapshot, orguser, org):
         """Returns None for summary comments"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="test",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         result = MentionService._resolve_chart_name(comment)
         assert result is None
         comment.delete()
 
-    def test_returns_none_for_missing_chart_id(self, snapshot, author_orguser, org):
+    def test_returns_none_for_missing_chart_id(self, snapshot, orguser, org):
         """Returns None when chart_id not in frozen_chart_configs"""
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
             snapshot_chart_id=999,
             content="test",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         result = MentionService._resolve_chart_name(comment)
@@ -573,10 +539,10 @@ class TestResolveChartName:
 class TestCreateInAppNotification:
     """Tests for MentionService._create_in_app_notification"""
 
-    def test_creates_notification_and_recipient(self, author_orguser, mentioned_orguser):
+    def test_creates_notification_and_recipient(self, orguser, mentioned_orguser):
         """Creates both Notification and NotificationRecipient records"""
         MentionService._create_in_app_notification(
-            author=author_orguser,
+            author=orguser,
             mentioned_user=mentioned_orguser,
             message="Test message",
             email_subject="Test subject",
@@ -586,7 +552,7 @@ class TestCreateInAppNotification:
         notification = Notification.objects.first()
         assert notification.message == "Test message"
         assert notification.email_subject == "Test subject"
-        assert notification.author == author_orguser.user.email
+        assert notification.author == orguser.user.email
         assert notification.urgent is False
 
         assert NotificationRecipient.objects.count() == 1
@@ -605,7 +571,7 @@ class TestSendEmailNotification:
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_sends_email_when_preference_enabled(
-        self, mock_send, snapshot, author_orguser, mentioned_orguser, org
+        self, mock_send, snapshot, orguser, mentioned_orguser, org
     ):
         """Sends email when user has email notifications enabled"""
         UserPreferences.objects.update_or_create(
@@ -616,15 +582,15 @@ class TestSendEmailNotification:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Hey check this",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
         MentionService._send_email_notification(
             comment=comment,
-            author=author_orguser,
+            author=orguser,
             mentioned_user=mentioned_orguser,
-            author_email=author_orguser.user.email,
+            author_email=orguser.user.email,
             email_subject="Test subject",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/1",
@@ -637,7 +603,7 @@ class TestSendEmailNotification:
 
     @patch("ddpui.core.reports.mention_service.send_html_message")
     def test_skips_email_when_preference_disabled(
-        self, mock_send, snapshot, author_orguser, mentioned_orguser, org
+        self, mock_send, snapshot, orguser, mentioned_orguser, org
     ):
         """Does not send email when user has email notifications disabled"""
         UserPreferences.objects.update_or_create(
@@ -648,15 +614,15 @@ class TestSendEmailNotification:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Hey check this",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
         MentionService._send_email_notification(
             comment=comment,
-            author=author_orguser,
+            author=orguser,
             mentioned_user=mentioned_orguser,
-            author_email=author_orguser.user.email,
+            author_email=orguser.user.email,
             email_subject="Test subject",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/1",
@@ -671,7 +637,7 @@ class TestSendEmailNotification:
         side_effect=Exception("SES down"),
     )
     def test_email_failure_logged_not_raised(
-        self, mock_send, snapshot, author_orguser, mentioned_orguser, org
+        self, mock_send, snapshot, orguser, mentioned_orguser, org
     ):
         """Email failure is caught and logged, does not raise"""
         UserPreferences.objects.update_or_create(
@@ -682,16 +648,16 @@ class TestSendEmailNotification:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Hey check this",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
         # Should not raise
         MentionService._send_email_notification(
             comment=comment,
-            author=author_orguser,
+            author=orguser,
             mentioned_user=mentioned_orguser,
-            author_email=author_orguser.user.email,
+            author_email=orguser.user.email,
             email_subject="Test subject",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/1",
@@ -708,27 +674,27 @@ class TestSendEmailNotification:
 class TestGetThreadContext:
     """Tests for MentionService._get_thread_context"""
 
-    def test_returns_prior_comments(self, snapshot, author_orguser, org):
+    def test_returns_prior_comments(self, snapshot, orguser, org):
         """Returns prior comments on the same target, oldest first"""
         c1 = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="First comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         c2 = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Second comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         current = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Current comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
@@ -741,7 +707,7 @@ class TestGetThreadContext:
         c2.delete()
         c1.delete()
 
-    def test_limits_to_max_prior(self, snapshot, author_orguser, org):
+    def test_limits_to_max_prior(self, snapshot, orguser, org):
         """Respects max_prior limit, returns most recent N"""
         comments = []
         for i in range(5):
@@ -750,7 +716,7 @@ class TestGetThreadContext:
                     target_type=CommentTargetType.SUMMARY,
                     snapshot=snapshot,
                     content=f"Comment {i}",
-                    author=author_orguser,
+                    author=orguser,
                     org=org,
                 )
             )
@@ -758,7 +724,7 @@ class TestGetThreadContext:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Current",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
@@ -772,20 +738,20 @@ class TestGetThreadContext:
         for c in reversed(comments):
             c.delete()
 
-    def test_excludes_deleted_comments(self, snapshot, author_orguser, org):
+    def test_excludes_deleted_comments(self, snapshot, orguser, org):
         """Deleted comments are not included in thread context"""
         c1 = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Visible comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         c_deleted = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Deleted comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
             is_deleted=True,
         )
@@ -793,7 +759,7 @@ class TestGetThreadContext:
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Current",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
@@ -805,20 +771,20 @@ class TestGetThreadContext:
         c_deleted.delete()
         c1.delete()
 
-    def test_truncates_long_content(self, snapshot, author_orguser, org):
+    def test_truncates_long_content(self, snapshot, orguser, org):
         """Content longer than 200 chars is truncated with ellipsis"""
         c1 = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="A" * 300,
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         current = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="Current",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
@@ -830,13 +796,13 @@ class TestGetThreadContext:
         current.delete()
         c1.delete()
 
-    def test_empty_when_no_prior_comments(self, snapshot, author_orguser, org):
+    def test_empty_when_no_prior_comments(self, snapshot, orguser, org):
         """Returns empty list when there are no prior comments"""
         current = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
             content="First ever comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 
@@ -845,14 +811,14 @@ class TestGetThreadContext:
 
         current.delete()
 
-    def test_chart_comments_isolated(self, snapshot, author_orguser, org):
+    def test_chart_comments_isolated(self, snapshot, orguser, org):
         """Chart thread context only includes comments on the same chart"""
         c_other_chart = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
             snapshot_chart_id=99,
             content="Other chart comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         c_same_chart = Comment.objects.create(
@@ -860,7 +826,7 @@ class TestGetThreadContext:
             snapshot=snapshot,
             snapshot_chart_id=1,
             content="Same chart comment",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
         current = Comment.objects.create(
@@ -868,7 +834,7 @@ class TestGetThreadContext:
             snapshot=snapshot,
             snapshot_chart_id=1,
             content="Current",
-            author=author_orguser,
+            author=orguser,
             org=org,
         )
 

@@ -3,11 +3,6 @@ import django
 import pytest
 from unittest.mock import patch, MagicMock
 from ninja.errors import HttpError
-from ddpui.models.org import Org
-from ddpui.models.role_based_access import Role
-from ddpui.models.org_user import OrgUser
-from ddpui import auth
-from django.contrib.auth.models import User
 from ddpui.api.notifications_api import (
     mark_all_notifications_as_read,
     post_create_notification,
@@ -26,36 +21,6 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org_without_workspace():
-    """a pytest fixture which creates an Org without an airbyte workspace"""
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org_without_workspace):
-    """a pytest fixture representing an OrgUser having the account-manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org_without_workspace,
-        new_role=Role.objects.filter(slug=auth.ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @patch("ddpui.core.notifications.notifications_functions.get_recipients")

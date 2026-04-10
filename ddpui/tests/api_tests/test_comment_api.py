@@ -42,7 +42,7 @@ from ddpui.api.report_api import (
     delete_comment,
 )
 from ddpui.schemas.report_schema import CommentCreate, CommentUpdate, MarkReadRequest
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -50,37 +50,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="cmtapiuser", email="cmtapiuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Comment API Test Org",
-        slug="cmt-api-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org, seed_db):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture
@@ -93,7 +62,7 @@ def other_authuser():
 
 
 @pytest.fixture
-def other_orguser(other_authuser, org, seed_db):
+def other_orguser(other_authuser, org):
     orguser = OrgUser.objects.create(
         user=other_authuser,
         org=org,

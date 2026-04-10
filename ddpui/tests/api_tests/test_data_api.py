@@ -7,17 +7,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 import pytest
 from ninja.errors import HttpError
-from django.contrib.auth.models import User
 
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.tasks import Task, TaskType
 from ddpui.models.llm import UserPrompt
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.api.data_api import (
     get_tasks,
@@ -26,7 +22,7 @@ from ddpui.api.data_api import (
     get_user_prompts,
     get_row_limit,
 )
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -34,39 +30,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="data_api_testuser",
-        email="data_api_testuser@test.com",
-        password="testpassword",
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Data API Test Org",
-        slug="data-api-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture

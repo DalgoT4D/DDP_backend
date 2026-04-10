@@ -2,7 +2,6 @@ import uuid
 import os
 import django
 from datetime import datetime
-from django.core.management import call_command
 
 from unittest.mock import Mock, patch, MagicMock
 import pytest
@@ -68,36 +67,7 @@ pytestmark = pytest.mark.django_db
 logger = CustomLogger("ddpui-pytest")
 
 
-@pytest.fixture(scope="session")
-def seed_db(django_db_setup, django_db_blocker):
-    with django_db_blocker.unblock():
-        # Run the loaddata command to load the fixture
-        call_command("loaddata", "001_roles.json")
-        call_command("loaddata", "002_permissions.json")
-        call_command("loaddata", "003_role_permissions.json")
-
-
 # ================================================================================
-@pytest.fixture
-def org_without_workspace():
-    """a pytest fixture which creates an Org without an airbyte workspace"""
-    org = Org.objects.create(
-        airbyte_workspace_id=None, slug="test-org-WO-slug", name="test-org-WO-name"
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def org_with_workspace():
-    """a pytest fixture which creates an Org having an airbyte workspace"""
-    org = Org.objects.create(
-        name="org-name",
-        airbyte_workspace_id="FAKE-WORKSPACE-ID",
-        slug="test-org-W-slug",
-    )
-    yield org
-    org.delete()
 
 
 @pytest.fixture

@@ -2,13 +2,9 @@ import os
 import django
 import pytest
 from ninja.errors import HttpError
-from ddpui.models.org import Org
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.models.userpreferences import UserPreferences
-from ddpui.models.org_user import OrgUser
-from ddpui import auth
-from django.contrib.auth.models import User
-from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 from ddpui.api.user_preferences_api import (
     create_user_preferences,
     get_user_preferences,
@@ -24,36 +20,6 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org_without_workspace():
-    """a pytest fixture which creates an Org without an airbyte workspace"""
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org_without_workspace):
-    """a pytest fixture representing an OrgUser having the account-manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org_without_workspace,
-        new_role=Role.objects.filter(slug=auth.ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture

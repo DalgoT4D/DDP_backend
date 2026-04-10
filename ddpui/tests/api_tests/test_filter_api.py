@@ -7,22 +7,19 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 import pytest
 from ninja.errors import HttpError
-from django.contrib.auth.models import User
 
-from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org import OrgWarehouse
 from ddpui.models.role_based_access import Role
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.filter_api import (
     list_schemas,
     list_tables,
     list_columns,
     get_filter_preview,
 )
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -30,39 +27,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="filter_api_testuser",
-        email="filter_api_testuser@test.com",
-        password="testpassword",
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Filter API Test Org",
-        slug="filter-api-test",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture

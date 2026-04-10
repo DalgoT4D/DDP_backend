@@ -2,7 +2,6 @@ import pytest
 from pathlib import Path
 import os, json
 from django.apps import apps
-from django.contrib.auth.models import User
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 
@@ -34,16 +33,6 @@ def seed_master_tasks():
     tasks = json.load(f)
     for task in tasks:
         Task.objects.create(**task["fields"])
-
-
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
 
 
 @pytest.fixture

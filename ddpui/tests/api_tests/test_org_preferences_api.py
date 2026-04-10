@@ -7,19 +7,15 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 import pytest
 from ninja.errors import HttpError
-from django.contrib.auth.models import User
 
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.role_based_access import Role
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
@@ -34,7 +30,7 @@ from ddpui.api.org_preferences_api import (
     get_org_plans,
     initiate_upgrade_dalgo_plan,
 )
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -42,39 +38,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="orgpref_testuser",
-        email="orgpref_testuser@test.com",
-        password="testpassword",
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="OrgPref Test Org",
-        slug="orgpref-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 # ================================================================================

@@ -20,15 +20,10 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.contrib.auth.models import User
 from django.test import RequestFactory
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.api.public_api import (
     get_public_report,
@@ -39,7 +34,6 @@ from ddpui.api.public_api import (
     get_public_filter_preview,
     get_public_report_filter_preview,
 )
-from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
 
@@ -67,41 +61,11 @@ def _make_public_request(body=None):
 
 
 @pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="pubreportuser", email="pubreportuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Public Report Test Org",
-        slug="pub-rpt-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
-
-
-@pytest.fixture
 def sample_dashboard(orguser, org):
+    """A sample dashboard with components for snapshot testing"""
     dashboard = Dashboard.objects.create(
         title="Test Dashboard",
-        description="Test",
+        description="Test Description",
         dashboard_type="native",
         grid_columns=12,
         layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
@@ -109,7 +73,7 @@ def sample_dashboard(orguser, org):
             "chart-1": {
                 "id": "chart-1",
                 "type": "chart",
-                "config": {"chartId": 1, "chartType": "bar", "title": "Bar"},
+                "config": {"chartId": 1, "chartType": "bar", "title": "Bar Chart"},
             }
         },
         created_by=orguser,
@@ -125,6 +89,7 @@ def sample_dashboard(orguser, org):
 
 @pytest.fixture
 def sample_filter(sample_dashboard):
+    """A sample datetime filter for snapshot testing"""
     f = DashboardFilter.objects.create(
         dashboard=sample_dashboard,
         name="Date Filter",
@@ -132,7 +97,7 @@ def sample_filter(sample_dashboard):
         schema_name="public",
         table_name="orders",
         column_name="created_at",
-        settings={},
+        settings={"default_start_date": "2024-01-01"},
         order=0,
     )
     yield f
@@ -145,13 +110,18 @@ def sample_filter(sample_dashboard):
 
 @pytest.fixture
 def sample_chart(orguser, org):
+    """A sample chart referenced by the dashboard"""
     chart = Chart.objects.create(
         id=1,
         title="Bar Chart",
+        description="A test chart",
         chart_type="bar",
         schema_name="public",
         table_name="orders",
-        extra_config={"x_axis": "created_at"},
+        extra_config={
+            "x_axis": "created_at",
+            "metrics": [{"column": "amount", "aggregation": "SUM"}],
+        },
         created_by=orguser,
         org=org,
     )
@@ -234,7 +204,7 @@ class TestGetPublicReport:
         response = get_public_report(request, public_snapshot.public_share_token)
 
         assert response["is_valid"] is True
-        assert response["org_name"] == "Public Report Test Org"
+        assert response["org_name"] == "Test Org"
         assert "dashboard_data" in response
         assert "report_metadata" in response
         assert response["report_metadata"]["title"] == "Public Report"

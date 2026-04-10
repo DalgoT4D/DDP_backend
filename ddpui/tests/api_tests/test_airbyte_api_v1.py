@@ -13,7 +13,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.contrib.auth.models import User
 from ddpui import ddpprefect
 from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
 from ddpui.api.airbyte_api import (
@@ -44,20 +43,12 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
 
 # ================================================================================
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
 
 
 @pytest.fixture
