@@ -52,20 +52,27 @@ def compute_rag_status(
         return "grey", None
 
     if direction == "decrease":
-        # Lower is better — at or below target = 100% achievement
-        if current_value <= target_value:
-            achievement_pct = 100.0
+        # Lower is better.
+        # Thresholds mean "current must be ≤ X% of target":
+        #   green when current/target*100 <= green_pct
+        #   amber when current/target*100 <= amber_pct
+        ratio_pct = round((current_value / target_value) * 100, 1)
+        if ratio_pct <= green_pct:
+            return "green", ratio_pct
+        elif ratio_pct <= amber_pct:
+            return "amber", ratio_pct
         else:
-            achievement_pct = round((target_value / current_value) * 100, 1)
+            return "red", ratio_pct
     else:
+        # Higher is better.
+        # Thresholds mean "current must be ≥ X% of target".
         achievement_pct = round((current_value / target_value) * 100, 1)
-
-    if achievement_pct >= green_pct:
-        return "green", achievement_pct
-    elif achievement_pct >= amber_pct:
-        return "amber", achievement_pct
-    else:
-        return "red", achievement_pct
+        if achievement_pct >= green_pct:
+            return "green", achievement_pct
+        elif achievement_pct >= amber_pct:
+            return "amber", achievement_pct
+        else:
+            return "red", achievement_pct
 
 
 def fetch_current_value(
