@@ -421,3 +421,23 @@ def create_entry(request, metric_id: int, payload: EntryCreate):
         created_by_name=orguser.user.email,
         created_at=entry.created_at,
     )
+
+
+@metrics_router.delete("/{metric_id}/entries/{entry_id}/")
+@has_permission(["can_edit_charts"])
+def delete_entry(request, metric_id: int, entry_id: int):
+    """Delete a timeline entry"""
+    org = request.orguser.org
+
+    try:
+        metric = MetricDefinition.objects.get(id=metric_id, org=org)
+    except MetricDefinition.DoesNotExist:
+        raise HttpError(404, "Metric not found")
+
+    try:
+        entry = MetricEntry.objects.get(id=entry_id, metric=metric)
+    except MetricEntry.DoesNotExist:
+        raise HttpError(404, "Entry not found")
+
+    entry.delete()
+    return {"success": True}
