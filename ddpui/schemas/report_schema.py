@@ -223,3 +223,22 @@ class MentionableUserResponse(Schema):
     @classmethod
     def from_orguser(cls, orguser) -> "MentionableUserResponse":
         return cls(email=orguser.user.email)
+
+
+# =============================================================================
+# Share via Email Schemas
+# =============================================================================
+
+
+class ReportShareViaEmailRequest(Schema):
+    """Schema for sharing a report via email"""
+
+    recipient_emails: list[str] = Field(..., min_items=1, max_items=20)
+    subject: Optional[str] = Field(None, max_length=255)
+
+
+class ReportShareViaEmailResponse(Schema):
+    """Schema for share-via-email response"""
+
+    recipients_count: int
+    message: str

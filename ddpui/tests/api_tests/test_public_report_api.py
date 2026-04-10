@@ -255,14 +255,12 @@ class TestGetPublicReport:
 
 
 class TestGetPublicReportChartData:
-    """Tests for get_public_report_chart_data endpoint"""
+    """Tests for get_public_report_chart_data endpoint (GET with chart_id)"""
 
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
-        request = _make_public_request(
-            body={"chart_type": "bar", "schema_name": "public", "table_name": "orders"}
-        )
-        status, response = get_public_report_chart_data(request, "bad-token")
+        request = _make_public_request()
+        status, response = get_public_report_chart_data(request, "bad-token", chart_id=1)
 
         assert status == 404
         assert response.is_valid is False
@@ -272,11 +270,9 @@ class TestGetPublicReportChartData:
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow:
             mock_ow.filter.return_value.first.return_value = None
 
-            request = _make_public_request(
-                body={"chart_type": "bar", "schema_name": "public", "table_name": "orders"}
-            )
+            request = _make_public_request()
             status, response = get_public_report_chart_data(
-                request, public_snapshot.public_share_token
+                request, public_snapshot.public_share_token, chart_id=1
             )
 
             assert status == 404
@@ -291,14 +287,16 @@ class TestGetPublicReportChartData:
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.api.charts_api.generate_chart_data_and_config"
-        ) as mock_gen:
+        ) as mock_gen, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
             mock_ow.filter.return_value.first.return_value = MagicMock()
             mock_gen.return_value = mock_chart_result
 
-            request = _make_public_request(
-                body={"chart_type": "bar", "schema_name": "public", "table_name": "orders"}
+            request = _make_public_request()
+            response = get_public_report_chart_data(
+                request, public_snapshot.public_share_token, chart_id=1
             )
-            response = get_public_report_chart_data(request, public_snapshot.public_share_token)
 
             assert response["is_valid"] is True
             assert response["data"] == [{"x": "Jan", "y": 100}]
@@ -310,14 +308,12 @@ class TestGetPublicReportChartData:
 
 
 class TestGetPublicReportTableData:
-    """Tests for get_public_report_table_data endpoint"""
+    """Tests for get_public_report_table_data endpoint (GET with chart_id)"""
 
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
-        request = _make_public_request(
-            body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
-        )
-        status, response = get_public_report_table_data(request, "bad-token")
+        request = _make_public_request()
+        status, response = get_public_report_table_data(request, "bad-token", chart_id=1)
 
         assert status == 404
         assert response.is_valid is False
@@ -327,11 +323,9 @@ class TestGetPublicReportTableData:
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow:
             mock_ow.filter.return_value.first.return_value = None
 
-            request = _make_public_request(
-                body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
-            )
+            request = _make_public_request()
             status, response = get_public_report_table_data(
-                request, public_snapshot.public_share_token
+                request, public_snapshot.public_share_token, chart_id=1
             )
 
             assert status == 404
@@ -349,14 +343,16 @@ class TestGetPublicReportTableData:
 
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
-        ) as mock_preview_fn:
+        ) as mock_preview_fn, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
             mock_ow.filter.return_value.first.return_value = MagicMock()
             mock_preview_fn.return_value = mock_preview
 
-            request = _make_public_request(
-                body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
+            request = _make_public_request()
+            response = get_public_report_table_data(
+                request, public_snapshot.public_share_token, chart_id=1
             )
-            response = get_public_report_table_data(request, public_snapshot.public_share_token)
 
             assert response["is_valid"] is True
             assert response["columns"] == ["id", "name"]
@@ -369,14 +365,12 @@ class TestGetPublicReportTableData:
 
 
 class TestGetPublicReportTableTotalRows:
-    """Tests for get_public_report_table_total_rows endpoint"""
+    """Tests for get_public_report_table_total_rows endpoint (GET with chart_id)"""
 
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
-        request = _make_public_request(
-            body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
-        )
-        status, response = get_public_report_table_total_rows(request, "bad-token")
+        request = _make_public_request()
+        status, response = get_public_report_table_total_rows(request, "bad-token", chart_id=1)
 
         assert status == 404
         assert response.is_valid is False
@@ -385,15 +379,15 @@ class TestGetPublicReportTableTotalRows:
         """Valid token returns total row count"""
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
-        ) as mock_total:
+        ) as mock_total, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
             mock_ow.filter.return_value.first.return_value = MagicMock()
             mock_total.return_value = 42
 
-            request = _make_public_request(
-                body={"chart_type": "table", "schema_name": "public", "table_name": "orders"}
-            )
+            request = _make_public_request()
             response = get_public_report_table_total_rows(
-                request, public_snapshot.public_share_token
+                request, public_snapshot.public_share_token, chart_id=1
             )
 
             assert response["is_valid"] is True
