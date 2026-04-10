@@ -168,16 +168,18 @@ class TestRenderShareReportEmail:
 class TestSendReportEmailTask:
     """Tests for the Celery task"""
 
+    @patch("ddpui.celeryworkers.report_tasks.create_notification")
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
-    def test_generates_pdf_and_sends_to_all_recipients(
+    def test_sends_to_all_recipients_no_notification(
         self,
         mock_private_url,
         mock_ensure_token,
         mock_generate_pdf,
         mock_send_email,
+        mock_create_notification,
         snapshot,
         orguser,
     ):
@@ -199,9 +201,12 @@ class TestSendReportEmailTask:
         first_call = mock_send_email.call_args_list[0]
         assert first_call[1]["to_email"] == "a@test.com"
         assert first_call[1]["attachment_filename"] == "Q1 Report.pdf"
-        # Default subject when none provided
         assert first_call[1]["subject"] == "Report: Q1 Report"
 
+        # No notification when all emails succeed
+        mock_create_notification.assert_not_called()
+
+    @patch("ddpui.celeryworkers.report_tasks.create_notification")
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
@@ -212,6 +217,7 @@ class TestSendReportEmailTask:
         mock_ensure_token,
         mock_generate_pdf,
         mock_send_email,
+        mock_create_notification,
         snapshot,
         orguser,
     ):
@@ -231,16 +237,18 @@ class TestSendReportEmailTask:
         first_call = mock_send_email.call_args_list[0]
         assert first_call[1]["subject"] == "Custom Subject Line"
 
+    @patch("ddpui.celeryworkers.report_tasks.create_notification")
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
-    def test_continues_on_individual_email_failure(
+    def test_partial_failure_notifies_with_failed_recipients(
         self,
         mock_private_url,
         mock_ensure_token,
         mock_generate_pdf,
         mock_send_email,
+        mock_create_notification,
         snapshot,
         orguser,
     ):
@@ -254,7 +262,6 @@ class TestSendReportEmailTask:
             None,
         ]
 
-        # Should not raise even though the first email fails
         send_report_email_task(
             snapshot_id=snapshot.id,
             orguser_id=orguser.id,
@@ -263,11 +270,25 @@ class TestSendReportEmailTask:
 
         assert mock_send_email.call_count == 2
 
+        # Notification sent for the failed recipient only
+        mock_create_notification.assert_called_once()
+        notification_data = mock_create_notification.call_args[0][0]
+        assert "fail@test.com" in notification_data.message
+        assert "success@test.com" not in notification_data.message
+        assert notification_data.recipients == [orguser.id]
+
+    @patch("ddpui.celeryworkers.report_tasks.create_notification")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
     @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
-    def test_raises_when_pdf_generation_fails(
-        self, mock_private_url, mock_ensure_token, mock_generate_pdf, snapshot, orguser
+    def test_pdf_failure_notifies_with_all_recipients(
+        self,
+        mock_private_url,
+        mock_ensure_token,
+        mock_generate_pdf,
+        mock_create_notification,
+        snapshot,
+        orguser,
     ):
         from ddpui.celeryworkers.report_tasks import send_report_email_task
 
@@ -275,13 +296,21 @@ class TestSendReportEmailTask:
         mock_ensure_token.return_value = "token123"
         mock_generate_pdf.side_effect = Exception("Playwright error")
 
-        with pytest.raises(Exception, match="Playwright error"):
-            send_report_email_task(
-                snapshot_id=snapshot.id,
-                orguser_id=orguser.id,
-                recipient_emails=["a@test.com"],
-            )
+        # Should not raise — catches the error and notifies
+        send_report_email_task(
+            snapshot_id=snapshot.id,
+            orguser_id=orguser.id,
+            recipient_emails=["a@test.com", "b@test.com"],
+        )
 
+        # Notification lists all recipients since none were sent
+        mock_create_notification.assert_called_once()
+        notification_data = mock_create_notification.call_args[0][0]
+        assert "a@test.com" in notification_data.message
+        assert "b@test.com" in notification_data.message
+        assert notification_data.recipients == [orguser.id]
+
+    @patch("ddpui.celeryworkers.report_tasks.create_notification")
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
@@ -294,6 +323,7 @@ class TestSendReportEmailTask:
         mock_ensure_token,
         mock_generate_pdf,
         mock_send_email,
+        mock_create_notification,
         snapshot,
         orguser,
     ):
@@ -316,7 +346,6 @@ class TestSendReportEmailTask:
         )
 
         mock_public_url.assert_called_once_with("public-token-abc")
-        # Email body should contain the public URL
         first_call = mock_send_email.call_args_list[0]
         assert "public-token-abc" in first_call[1]["html_body"]
 
