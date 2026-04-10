@@ -7,8 +7,12 @@ from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.models.org import OrgWarehouse
-from ddpui.models.metrics import MetricDefinition, MetricAnnotation
-from ddpui.core.metrics_service import fetch_metrics_data
+from ddpui.models.metrics import MetricDefinition, MetricAnnotation, MetricEntry
+from ddpui.core.metrics_service import (
+    fetch_metrics_data,
+    fetch_current_value,
+    compute_rag_status,
+)
 from ddpui.schemas.metric_schema import (
     MetricCreate,
     MetricUpdate,
@@ -19,6 +23,8 @@ from ddpui.schemas.metric_schema import (
     AnnotationResponse,
     LatestAnnotationsRequest,
     LatestAnnotationEntry,
+    EntryCreate,
+    EntryResponse,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -117,6 +123,7 @@ def create_metric(request, payload: MetricCreate):
         table_name=payload.table_name,
         column=payload.column,
         aggregation=payload.aggregation,
+        direction=payload.direction,
         time_column=payload.time_column,
         time_grain=payload.time_grain,
         target_value=payload.target_value,
@@ -309,4 +316,108 @@ def create_or_update_annotation(request, metric_id: int, payload: AnnotationCrea
         quote_attribution=annotation.quote_attribution,
         created_at=annotation.created_at,
         updated_at=annotation.updated_at,
+    )
+
+
+# ── Metric Entries (timeline) ──────────────────────────────────────────────
+
+
+@metrics_router.get("/{metric_id}/entries/", response=List[EntryResponse])
+@has_permission(["can_view_charts"])
+def list_entries(request, metric_id: int):
+    """List all timeline entries for a metric, newest first"""
+    org = request.orguser.org
+
+    try:
+        metric = MetricDefinition.objects.get(id=metric_id, org=org)
+    except MetricDefinition.DoesNotExist:
+        raise HttpError(404, "Metric not found")
+
+    entries = (
+        MetricEntry.objects.filter(metric=metric)
+        .select_related("created_by__user")
+        .order_by("-created_at")
+    )
+
+    return [
+        EntryResponse(
+            id=e.id,
+            entry_type=e.entry_type,
+            period_key=e.period_key,
+            content=e.content,
+            attribution=e.attribution,
+            snapshot_value=e.snapshot_value,
+            snapshot_rag=e.snapshot_rag,
+            snapshot_achievement_pct=e.snapshot_achievement_pct,
+            created_by_name=e.created_by.user.email,
+            created_at=e.created_at,
+        )
+        for e in entries
+    ]
+
+
+@metrics_router.post("/{metric_id}/entries/", response=EntryResponse)
+@has_permission(["can_edit_charts"])
+def create_entry(request, metric_id: int, payload: EntryCreate):
+    """
+    Create a timeline entry for a metric.
+    Captures a snapshot of the metric's current value and RAG status.
+    """
+    orguser = request.orguser
+    org = orguser.org
+
+    try:
+        metric = MetricDefinition.objects.get(id=metric_id, org=org)
+    except MetricDefinition.DoesNotExist:
+        raise HttpError(404, "Metric not found")
+
+    # Capture snapshot — fetch live metric value from warehouse
+    snapshot_value = None
+    snapshot_rag = "grey"
+    snapshot_achievement_pct = None
+
+    try:
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if org_warehouse:
+            from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            current_value, val_error = fetch_current_value(warehouse_client, metric)
+            if current_value is not None:
+                snapshot_value = current_value
+                snapshot_rag, snapshot_achievement_pct = compute_rag_status(
+                    current_value,
+                    metric.target_value,
+                    metric.amber_threshold_pct,
+                    metric.green_threshold_pct,
+                    getattr(metric, "direction", "increase"),
+                )
+    except Exception as exc:
+        logger.warning(
+            f"Could not capture snapshot for metric {metric_id}: {exc}"
+        )
+
+    entry = MetricEntry.objects.create(
+        metric=metric,
+        entry_type=payload.entry_type,
+        period_key=payload.period_key,
+        content=payload.content,
+        attribution=payload.attribution,
+        snapshot_value=snapshot_value,
+        snapshot_rag=snapshot_rag,
+        snapshot_achievement_pct=snapshot_achievement_pct,
+        created_by=orguser,
+    )
+
+    return EntryResponse(
+        id=entry.id,
+        entry_type=entry.entry_type,
+        period_key=entry.period_key,
+        content=entry.content,
+        attribution=entry.attribution,
+        snapshot_value=entry.snapshot_value,
+        snapshot_rag=entry.snapshot_rag,
+        snapshot_achievement_pct=entry.snapshot_achievement_pct,
+        created_by_name=orguser.user.email,
+        created_at=entry.created_at,
     )

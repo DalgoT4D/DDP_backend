@@ -118,3 +118,44 @@ class MetricAnnotation(models.Model):
 
     def __str__(self):
         return f"Annotation for {self.metric.name} @ {self.period_key}"
+
+
+ENTRY_TYPE_CHOICES = [
+    ("comment", "Comment"),
+    ("quote", "Beneficiary Quote"),
+]
+
+
+class MetricEntry(models.Model):
+    """
+    Timeline entry for a metric — either a comment or a beneficiary quote.
+    Multiple entries per metric per period are allowed (append model).
+    Each entry captures a snapshot of the metric's state at creation time.
+    """
+
+    metric = models.ForeignKey(
+        MetricDefinition, on_delete=models.CASCADE, related_name="entries"
+    )
+    entry_type = models.CharField(max_length=10, choices=ENTRY_TYPE_CHOICES)
+    period_key = models.CharField(max_length=20)  # "2026-03", "2026-Q1", "2026"
+
+    content = models.TextField()  # comment text or quote text
+    attribution = models.CharField(
+        max_length=255, blank=True, default=""
+    )  # only for quotes
+
+    # Snapshot of metric state at time of entry creation
+    snapshot_value = models.FloatField(null=True, blank=True)
+    snapshot_rag = models.CharField(max_length=10, blank=True, default="")
+    snapshot_achievement_pct = models.FloatField(null=True, blank=True)
+
+    created_by = models.ForeignKey(
+        OrgUser, on_delete=models.CASCADE, related_name="created_entries"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.entry_type} for {self.metric.name} @ {self.period_key}"

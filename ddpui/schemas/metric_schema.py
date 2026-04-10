@@ -142,3 +142,30 @@ class LatestAnnotationEntry(Schema):
     quote_attribution: str
     created_at: datetime
     updated_at: datetime
+
+
+# ── Metric Entries (timeline) ───────────────────────────────────────────────
+
+
+class EntryCreate(Schema):
+    """Request body for creating a timeline entry"""
+
+    entry_type: str  # "comment" or "quote"
+    period_key: str  # "2026-03", "2026-Q1", "2026"
+    content: str
+    attribution: str = ""  # only relevant for quotes
+
+
+class EntryResponse(Schema):
+    """A single timeline entry with its metric snapshot"""
+
+    id: int
+    entry_type: str
+    period_key: str
+    content: str
+    attribution: str
+    snapshot_value: Optional[float]
+    snapshot_rag: str
+    snapshot_achievement_pct: Optional[float]
+    created_by_name: str
+    created_at: datetime
