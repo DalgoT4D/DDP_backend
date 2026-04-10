@@ -12,7 +12,7 @@ import os
 import django
 import pytest
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -435,3 +435,183 @@ class TestDataClasses:
         assert data.name is None
         assert data.settings is None
         assert data.order == 0  # Default
+
+
+# ================================================================================
+# Test resolve_dashboard_filters_for_chart
+# ================================================================================
+
+
+class TestResolveDashboardFiltersForChart:
+    """Tests for DashboardService.resolve_dashboard_filters_for_chart()"""
+
+    def _make_filter_def(
+        self,
+        filter_id,
+        column_name,
+        filter_type="value",
+        schema_name="public",
+        table_name="orders",
+        settings=None,
+    ):
+        """Helper to build a filter definition dict (same shape as DashboardFilter.to_json())"""
+        return {
+            "id": filter_id,
+            "dashboard_id": 1,
+            "name": f"Filter {filter_id}",
+            "filter_type": filter_type,
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "column_name": column_name,
+            "settings": settings or {},
+            "order": 0,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    def test_resolves_matching_filter_with_warehouse_client(self):
+        """With warehouse_client, resolves filter when column_exists returns True"""
+        warehouse_client = MagicMock()
+        warehouse_client.column_exists.return_value = True
+
+        filter_defs = [self._make_filter_def(1, "status")]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": "active"}, filter_defs, "public", "orders", warehouse_client
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["column"] == "status"
+        assert result[0]["type"] == "value"
+        assert result[0]["value"] == "active"
+        warehouse_client.column_exists.assert_called_once_with("public", "orders", "status")
+
+    def test_skips_filter_when_column_not_exists(self):
+        """With warehouse_client, skips filter when column_exists returns False"""
+        warehouse_client = MagicMock()
+        warehouse_client.column_exists.return_value = False
+
+        filter_defs = [self._make_filter_def(1, "status")]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": "active"}, filter_defs, "public", "orders", warehouse_client
+        )
+
+        assert result is None
+
+    def test_resolves_matching_filter_with_schema_table_match(self):
+        """Without warehouse_client, resolves filter when schema/table matches"""
+        filter_defs = [
+            self._make_filter_def(1, "status", schema_name="public", table_name="orders")
+        ]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": "active"}, filter_defs, "public", "orders"
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["column"] == "status"
+
+    def test_skips_filter_when_schema_table_mismatch(self):
+        """Without warehouse_client, skips filter when schema/table doesn't match"""
+        filter_defs = [self._make_filter_def(1, "status", schema_name="public", table_name="users")]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": "active"}, filter_defs, "public", "orders"
+        )
+
+        assert result is None
+
+    def test_skips_none_values(self):
+        """Filters with None values are skipped"""
+        warehouse_client = MagicMock()
+        warehouse_client.column_exists.return_value = True
+
+        filter_defs = [self._make_filter_def(1, "status")]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": None}, filter_defs, "public", "orders", warehouse_client
+        )
+
+        assert result is None
+        warehouse_client.column_exists.assert_not_called()
+
+    def test_skips_unknown_filter_ids(self):
+        """Filter IDs not found in definitions are skipped"""
+        warehouse_client = MagicMock()
+
+        filter_defs = [self._make_filter_def(1, "status")]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"999": "active"}, filter_defs, "public", "orders", warehouse_client
+        )
+
+        assert result is None
+
+    def test_multiple_filters_mixed_results(self):
+        """Multiple filters: some resolve, some don't"""
+        warehouse_client = MagicMock()
+        warehouse_client.column_exists.side_effect = [True, False]
+
+        filter_defs = [
+            self._make_filter_def(1, "status"),
+            self._make_filter_def(2, "missing_col"),
+        ]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": "active", "2": "value"}, filter_defs, "public", "orders", warehouse_client
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["filter_id"] == "1"
+
+    def test_settings_included_in_result(self):
+        """Filter settings are passed through to resolved dict"""
+        warehouse_client = MagicMock()
+        warehouse_client.column_exists.return_value = True
+
+        filter_defs = [
+            self._make_filter_def(
+                1,
+                "created_at",
+                filter_type="datetime",
+                settings={"default_start_date": "2025-01-01"},
+            )
+        ]
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": {"start_date": "2025-01-01", "end_date": "2025-01-31"}},
+            filter_defs,
+            "public",
+            "orders",
+            warehouse_client,
+        )
+
+        assert result is not None
+        assert result[0]["settings"] == {"default_start_date": "2025-01-01"}
+        assert result[0]["type"] == "datetime"
+
+    def test_empty_filter_values(self):
+        """Empty filter_values returns None"""
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {}, [self._make_filter_def(1, "status")], "public", "orders"
+        )
+
+        assert result is None
+
+    def test_empty_filter_definitions(self):
+        """Empty filter_definitions returns None (all IDs unmatched)"""
+        result = DashboardService.resolve_dashboard_filters_for_chart(
+            {"1": "active"}, [], "public", "orders"
+        )
+
+        assert result is None
+
+    def test_non_dict_filter_values_raises(self):
+        """Non-dict filter_values raises ValueError"""
+        with pytest.raises(ValueError, match="filter_values must be a dict"):
+            DashboardService.resolve_dashboard_filters_for_chart(
+                [1, 2, 3], [self._make_filter_def(1, "status")], "public", "orders"
+            )
+
+    def test_string_filter_values_raises(self):
+        """String filter_values raises ValueError"""
+        with pytest.raises(ValueError, match="filter_values must be a dict"):
+            DashboardService.resolve_dashboard_filters_for_chart(
+                "not a dict", [self._make_filter_def(1, "status")], "public", "orders"
+            )

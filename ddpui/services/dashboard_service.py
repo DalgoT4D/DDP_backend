@@ -27,6 +27,7 @@ from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.core.charts.charts_service import (
     get_warehouse_client,
     execute_chart_query,
@@ -130,6 +131,85 @@ class LockInfo:
 
 class DashboardService:
     """Service class for dashboard-related operations"""
+
+    # =========================================================================
+    # Dashboard Filter Resolution
+    # =========================================================================
+
+    @staticmethod
+    def resolve_dashboard_filters_for_chart(
+        filter_values: Dict[str, Any],
+        filter_definitions: List[Dict[str, Any]],
+        chart_schema: str,
+        chart_table: str,
+        warehouse_client: Optional[Warehouse] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Resolve dashboard filter values against filter definitions for a chart.
+
+        Shared logic for both dashboards (filter defs from DB) and reports
+        (filter defs from frozen config). Both use DashboardFilter.to_json()
+        format for filter_definitions.
+
+        Applicability check:
+        - When warehouse_client is provided, uses column_exists() to check
+          if the filter's column exists in the chart's table.
+        - When warehouse_client is None, falls back to schema_name/table_name
+          match between the filter definition and the chart.
+
+        Args:
+            filter_values: {filter_id: value} dict (already parsed from JSON).
+            filter_definitions: list of filter dicts with keys id, column_name,
+                filter_type, schema_name, table_name, settings
+                (from DashboardFilter.to_json() or frozen config).
+            chart_schema: the chart's schema_name.
+            chart_table: the chart's table_name.
+            warehouse_client: warehouse client for column_exists() check.
+
+        Returns:
+            List of resolved filter dicts, or None if no filters resolved.
+
+        Raises:
+            ValueError: If filter_values is not a dict.
+        """
+        if not isinstance(filter_values, dict):
+            raise ValueError(f"filter_values must be a dict, got {type(filter_values).__name__}")
+
+        filter_lookup = {str(f["id"]): f for f in filter_definitions}
+
+        resolved = []
+        for filter_id, value in filter_values.items():
+            if value is None:
+                continue
+            filter_def = filter_lookup.get(str(filter_id))
+            if not filter_def:
+                logger.warning(f"Dashboard filter {filter_id} not found in definitions")
+                continue
+
+            # Check if this filter applies to the chart's table
+            if warehouse_client:
+                if not warehouse_client.column_exists(
+                    chart_schema, chart_table, filter_def["column_name"]
+                ):
+                    continue
+            else:
+                # Fall back to schema/table match
+                if (
+                    filter_def.get("schema_name") != chart_schema
+                    or filter_def.get("table_name") != chart_table
+                ):
+                    continue
+
+            resolved.append(
+                {
+                    "filter_id": filter_id,
+                    "column": filter_def["column_name"],
+                    "type": filter_def["filter_type"],
+                    "value": value,
+                    "settings": filter_def.get("settings") or {},
+                }
+            )
+
+        return resolved if resolved else None
 
     # =========================================================================
     # CRUD Operations

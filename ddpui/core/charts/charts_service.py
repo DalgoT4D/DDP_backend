@@ -13,10 +13,13 @@ from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.chart_schema import (
+    ChartConfig,
     ChartDataPayload,
     ExecuteChartQuery,
     TransformDataForChart,
 )
+
+logger = CustomLogger("ddpui.charts")
 
 
 def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):
@@ -159,7 +162,48 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     return final_dims
 
 
-logger = CustomLogger("ddpui.charts")
+def build_chart_data_payload(
+    chart_config: ChartConfig,
+    resolved_dashboard_filters: Optional[List[Dict[str, Any]]] = None,
+) -> ChartDataPayload:
+    """Build a ChartDataPayload from a ChartConfig.
+
+    Common function used by dashboards and reports to build the payload
+    for generating chart data from a chart's stored configuration.
+
+    Args:
+        chart_config: Chart configuration (from Chart model or frozen report config).
+        resolved_dashboard_filters: Optional list of resolved dashboard filter dicts.
+    """
+    ec = chart_config.extra_config or {}
+    customizations = ec.get("customizations", {})
+    if chart_config.title:
+        customizations["title"] = chart_config.title
+
+    payload = ChartDataPayload(
+        chart_type=chart_config.chart_type,
+        schema_name=chart_config.schema_name,
+        table_name=chart_config.table_name,
+        x_axis=ec.get("x_axis_column"),
+        y_axis=ec.get("y_axis_column"),
+        dimension_col=ec.get("dimension_column"),
+        extra_dimension=ec.get("extra_dimension_column"),
+        dimensions=ec.get("dimension_columns"),
+        metrics=ec.get("metrics"),
+        geographic_column=ec.get("geographic_column"),
+        value_column=ec.get("value_column"),
+        selected_geojson_id=ec.get("selected_geojson_id"),
+        customizations=customizations,
+        offset=0,
+        limit=100,
+        extra_config=ec,
+        dashboard_filters=resolved_dashboard_filters,
+    )
+
+    payload.dimensions = normalize_dimensions(payload)
+
+    return payload
+
 
 # Global configuration for null value handling
 NULL_VALUE_LABEL = "Unknown"
