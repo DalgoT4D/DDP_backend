@@ -21,13 +21,14 @@ class MetricCreate(Schema):
     time_grain: str = "month"  # month, quarter, year
 
     # Target & RAG
+    direction: str = "increase"  # "increase" or "decrease"
     target_value: Optional[float] = None
     amber_threshold_pct: float = 80
     green_threshold_pct: float = 100
 
     # Tags
     program_tag: str = ""
-    metric_type_tag: str = ""
+    metric_type_tag: str = ""  # Input, Output, Outcome, Impact
 
     # Trend
     trend_periods: int = 12
@@ -44,6 +45,7 @@ class MetricUpdate(Schema):
     time_column: Optional[str] = None
     time_grain: Optional[str] = None
 
+    direction: Optional[str] = None
     target_value: Optional[float] = None
     amber_threshold_pct: Optional[float] = None
     green_threshold_pct: Optional[float] = None
@@ -88,6 +90,7 @@ class MetricResponse(Schema):
     time_column: Optional[str]
     time_grain: str
 
+    direction: str
     target_value: Optional[float]
     amber_threshold_pct: float
     green_threshold_pct: float

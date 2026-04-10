@@ -38,9 +38,12 @@ def compute_rag_status(
     target_value: Optional[float],
     amber_pct: float,
     green_pct: float,
+    direction: str = "increase",
 ) -> tuple:
     """
     Returns (rag_status, achievement_pct).
+    For 'increase' metrics: higher current_value is better.
+    For 'decrease' metrics: lower current_value is better.
     """
     if target_value is None or target_value == 0:
         return "grey", None
@@ -48,7 +51,14 @@ def compute_rag_status(
     if current_value is None:
         return "grey", None
 
-    achievement_pct = round((current_value / target_value) * 100, 1)
+    if direction == "decrease":
+        # Lower is better — at or below target = 100% achievement
+        if current_value <= target_value:
+            achievement_pct = 100.0
+        else:
+            achievement_pct = round((target_value / current_value) * 100, 1)
+    else:
+        achievement_pct = round((current_value / target_value) * 100, 1)
 
     if achievement_pct >= green_pct:
         return "green", achievement_pct
@@ -245,6 +255,7 @@ def fetch_metrics_data(
             metric.target_value,
             metric.amber_threshold_pct,
             metric.green_threshold_pct,
+            getattr(metric, "direction", "increase"),
         )
         return {
             "metric_id": metric.id,

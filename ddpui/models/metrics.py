@@ -20,6 +20,18 @@ TIME_GRAIN_CHOICES = [
     ("year", "Year"),
 ]
 
+DIRECTION_CHOICES = [
+    ("increase", "Increase"),
+    ("decrease", "Decrease"),
+]
+
+METRIC_TYPE_CHOICES = [
+    ("Input", "Input"),
+    ("Output", "Output"),
+    ("Outcome", "Outcome"),
+    ("Impact", "Impact"),
+]
+
 
 class MetricDefinition(models.Model):
     """
@@ -46,6 +58,9 @@ class MetricDefinition(models.Model):
     )
 
     # Target & RAG
+    direction = models.CharField(
+        max_length=10, choices=DIRECTION_CHOICES, default="increase"
+    )
     target_value = models.FloatField(null=True, blank=True)
     amber_threshold_pct = models.FloatField(default=80)  # >= 80% of target = amber
     green_threshold_pct = models.FloatField(default=100)  # >= 100% = green
@@ -53,8 +68,9 @@ class MetricDefinition(models.Model):
 
     # Tags (flexible, not enforced hierarchy)
     program_tag = models.CharField(max_length=255, blank=True, default="")
-    metric_type_tag = models.CharField(max_length=100, blank=True, default="")
-    # e.g. "Output", "Outcome", "Input", "Impact" — or custom
+    metric_type_tag = models.CharField(
+        max_length=100, blank=True, default="", choices=METRIC_TYPE_CHOICES
+    )
 
     # Trend config
     trend_periods = models.IntegerField(default=12)  # how many periods to show
