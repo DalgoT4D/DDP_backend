@@ -1,6 +1,7 @@
 """Report API endpoints"""
 
-from typing import List
+import json
+from typing import List, Optional
 
 from django.http import HttpResponse
 from ninja import Router
@@ -20,6 +21,7 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
+from ddpui.schemas.chart_schema import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.celeryworkers.report_tasks import send_report_email_task
 from ddpui.schemas.report_schema import (
@@ -115,6 +117,36 @@ def get_snapshot_view(request, snapshot_id: int):
         return api_response(success=True, data=SnapshotViewResponse.from_view_data(view_data))
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+
+
+@report_router.get("/{snapshot_id}/charts/{chart_id}/data/", response=ChartDataResponse)
+@has_permission(["can_view_dashboards"])
+def get_report_chart_data(
+    request, snapshot_id: int, chart_id: int, dashboard_filters: Optional[str] = None
+):
+    """Get chart data for a specific chart in a report snapshot."""
+    orguser: OrgUser = request.orguser
+    try:
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+
+        result = ReportService.get_report_chart_data(
+            snapshot_id, chart_id, orguser.org, parsed_filters
+        )
+        return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
+    except SnapshotExternalServiceError as err:
+        raise HttpError(502, str(err)) from err
+    except Exception as e:
+        logger.error(f"Error getting report chart data: {e}", exc_info=True)
+        raise HttpError(500, "Failed to get chart data") from e
 
 
 @report_router.put("/{snapshot_id}/", response=ApiResponse[SnapshotUpdateResponse])

@@ -17,12 +17,16 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
+from ddpui.schemas.chart_schema import ChartConfig
 from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     FrozenChartConfig,
     FrozenDashboardConfig,
     SnapshotUpdate,
 )
+from ddpui.core.charts.charts_service import build_chart_data_payload
+from ddpui.services.dashboard_service import DashboardService
+from ddpui.api.charts_api import generate_chart_data_and_config
 
 from .exceptions import (
     SnapshotNotFoundError,
@@ -222,6 +226,70 @@ class ReportService:
 
             extra_config["filters"] = filters
             config["extra_config"] = extra_config
+
+    # =========================================================================
+    # Chart Data for Report Rendering
+    # =========================================================================
+
+    @staticmethod
+    def get_report_chart_data(
+        snapshot_id: int,
+        chart_id: int,
+        org: Org,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Get chart data for a specific chart in a report snapshot.
+
+        Uses the same flow as dashboard chart rendering:
+        1. Look up chart config from frozen configs
+        2. Inject period date filters
+        3. Resolve dashboard filters from frozen config
+        4. Build ChartDataPayload via shared helper
+        5. Generate chart data and config
+        """
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        frozen_charts = snapshot.frozen_chart_configs or {}
+        chart_config = frozen_charts.get(str(chart_id))
+        if not chart_config:
+            raise SnapshotValidationError(f"Chart {chart_id} not found in snapshot {snapshot_id}")
+
+        chart_config = copy.deepcopy(chart_config)
+
+        # Inject period date filters into this chart's extra_config
+        temp_configs = {str(chart_id): chart_config}
+        ReportService._inject_period_into_chart_configs(temp_configs, snapshot)
+
+        # Get warehouse
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        # Resolve dashboard filters from frozen config
+        resolved_filters = None
+        if dashboard_filters:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                dashboard_filters,
+                frozen_filters,
+                chart_config["schema_name"],
+                chart_config["table_name"],
+                warehouse_client,
+            )
+
+        # Build payload using shared helper
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        payload = build_chart_data_payload(config, resolved_filters)
+
+        # Generate chart data using same function as dashboards
+        return generate_chart_data_and_config(payload, org_warehouse, chart_id=chart_id)
 
     # =========================================================================
     # Snapshot CRUD
