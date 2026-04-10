@@ -9,8 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.contrib.auth.models import User
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.api.airbyte_api import (
     get_airbyte_source_definitions,
@@ -42,7 +41,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui import ddpprefect
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 from ddpui.utils.custom_logger import CustomLogger
 
 
@@ -52,30 +51,6 @@ pytestmark = pytest.mark.django_db
 
 
 # ================================================================================
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org_without_workspace():
-    """a pytest fixture which creates an Org without an airbyte workspace"""
-    org = Org.objects.create(airbyte_workspace_id=None, slug="test-org-slug")
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def org_with_workspace():
-    """a pytest fixture which creates an Org having an airbyte workspace"""
-    org = Org.objects.create(airbyte_workspace_id="FAKE-WORKSPACE-ID", slug="test-org-slug")
-    yield org
-    org.delete()
 
 
 @pytest.fixture

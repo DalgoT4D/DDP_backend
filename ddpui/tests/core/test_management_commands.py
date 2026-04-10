@@ -15,15 +15,6 @@ from ddpui.models.role_based_access import Role
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(scope="session")
-def seed_db(django_db_setup, django_db_blocker):
-    """Seed the database with roles and permissions"""
-    with django_db_blocker.unblock():
-        call_command("loaddata", "001_roles.json")
-        call_command("loaddata", "002_permissions.json")
-        call_command("loaddata", "003_role_permissions.json")
-
-
 class TestCreateOrgAndUserCommand:
     """Test cases for the createorganduser management command"""
 

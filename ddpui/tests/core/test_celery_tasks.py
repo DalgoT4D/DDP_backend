@@ -15,12 +15,9 @@ from ddpui.models.org import Org, OrgDbt, OrgWarehouse, TransformType, OrgSchema
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.tests.api_tests.test_user_org_api import (
-    seed_db,
     orguser,
     nonadminorguser,
     mock_request,
-    authuser,
-    org_without_workspace,
 )
 from ddpui.ddpprefect.schema import DbtProfile
 from ddpui.celeryworkers.tasks import (

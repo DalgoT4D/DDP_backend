@@ -9,8 +9,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.contrib.auth.models import User
-
 from ddpui.api.dbt_api import (
     dbt_delete,
     get_dbt_workspace,
@@ -40,7 +38,7 @@ from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskType
-from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.org_task_schema import TaskParameters
 from ddpui.utils.constants import TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN
@@ -60,16 +58,6 @@ def org_with_workspace():
     yield org
     print("deleting org_with_workspace")
     org.delete()
-
-
-@pytest.fixture
-def authuser():
-    """a django User object"""
-    user = User.objects.create(
-        username="tempusername", email="tempuseremail", password="tempuserpassword"
-    )
-    yield user
-    user.delete()
 
 
 @pytest.fixture

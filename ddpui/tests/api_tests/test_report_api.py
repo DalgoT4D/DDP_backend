@@ -24,7 +24,6 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -43,7 +42,7 @@ from ddpui.api.report_api import (
 )
 from ddpui.schemas.report_schema import SnapshotCreate, SnapshotUpdate, DateColumnSchema
 from ddpui.schemas.dashboard_schema import ShareToggle
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -51,40 +50,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    """A django User object"""
-    user = User.objects.create(
-        username="reportapiuser", email="reportapiuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    """An Org object"""
-    org = Org.objects.create(
-        name="Report API Test Org",
-        slug="rpt-api-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    """An OrgUser with account manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture
@@ -277,7 +242,7 @@ class TestListSnapshots:
         """Test listing with created_by filter"""
         request = mock_request(orguser)
 
-        response = list_snapshots(request, created_by="reportapiuser@test.com")
+        response = list_snapshots(request, created_by="testuser@example.com")
         assert len(response["data"]) == 1
 
         response = list_snapshots(request, created_by="nobody")

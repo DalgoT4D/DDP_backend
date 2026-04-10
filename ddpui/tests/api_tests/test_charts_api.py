@@ -22,7 +22,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.visualization import Chart
@@ -40,7 +40,7 @@ from ddpui.api.charts_api import (
     BulkDeleteRequest,
 )
 from ddpui.schemas.chart_schema import ChartCreate, ChartUpdate, ChartDataPayload
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 
@@ -48,78 +48,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    """A django User object"""
-    user = User.objects.create(
-        username="chartapiuser", email="chartapiuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    """An Org object"""
-    org = Org.objects.create(
-        name="Chart API Test Org",
-        slug="chart-api-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def org_warehouse(org):
-    """An OrgWarehouse object"""
-    warehouse = OrgWarehouse.objects.create(
-        org=org,
-        wtype="postgres",
-        name="Test Warehouse",
-        airbyte_destination_id="dest-id",
-    )
-    yield warehouse
-    warehouse.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    """An OrgUser with account manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
-
-
-@pytest.fixture
-def sample_chart(orguser, org):
-    """A sample chart for testing"""
-    chart = Chart.objects.create(
-        title="Test Chart",
-        description="Test Description",
-        chart_type="bar",
-        schema_name="public",
-        table_name="users",
-        extra_config={
-            "dimension_column": "category",
-            "metrics": [{"column": "revenue", "aggregation": "sum"}],
-        },
-        created_by=orguser,
-        last_modified_by=orguser,
-        org=org,
-    )
-    yield chart
-    try:
-        chart.refresh_from_db()
-        chart.delete()
-    except Chart.DoesNotExist:
-        pass
 
 
 # ================================================================================

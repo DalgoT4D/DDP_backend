@@ -17,13 +17,9 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import Role
 from ddpui.models.visualization import Chart
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.services.chart_service import (
     ChartService,
     ChartData,
@@ -32,7 +28,6 @@ from ddpui.services.chart_service import (
     ChartPermissionError,
 )
 from ddpui.services.warehouse_service import WarehouseService
-from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
 
@@ -40,38 +35,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    """A django User object"""
-    user = User.objects.create(
-        username="chartserviceuser", email="chartserviceuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def authuser2():
-    """A second django User object for permission testing"""
-    user = User.objects.create(
-        username="chartserviceuser2", email="chartserviceuser2@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    """An Org object"""
-    org = Org.objects.create(
-        name="Chart Service Test Org",
-        slug="chart-svc-test-org",  # max_length=20
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
 
 
 @pytest.fixture
@@ -84,30 +47,6 @@ def other_org():
     )
     yield org
     org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    """An OrgUser with account manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
-
-
-@pytest.fixture
-def orguser2(authuser2, org):
-    """A second OrgUser for permission testing"""
-    orguser = OrgUser.objects.create(
-        user=authuser2,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture

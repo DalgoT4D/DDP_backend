@@ -18,73 +18,15 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import Role
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.charts_api import (
     get_chart_data,
     get_chart_data_preview,
     generate_chart_data_and_config,
 )
 from ddpui.schemas.chart_schema import ChartDataPayload, ChartMetric
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
-
-
-# ================================================================================
-# Fixtures
-# ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    """A django User object"""
-    from django.contrib.auth.models import User
-
-    user = User.objects.create(
-        username="multidimuser", email="multidimuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    """An Org object"""
-    org = Org.objects.create(
-        name="MultiDim Test Org",
-        slug="multidim-test-org",
-        airbyte_workspace_id="workspace-id",
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def org_warehouse(org):
-    """An OrgWarehouse object"""
-    warehouse = OrgWarehouse.objects.create(
-        org=org,
-        wtype="postgres",
-        name="Test Warehouse",
-        airbyte_destination_id="dest-id",
-    )
-    yield warehouse
-    warehouse.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    """An OrgUser with account manager role"""
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 # ================================================================================

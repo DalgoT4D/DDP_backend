@@ -21,7 +21,7 @@ from ddpui.core.notifications.notifications_functions import (
     mark_all_notifications_as_read,
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
-from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 from django.contrib.auth.models import User
 

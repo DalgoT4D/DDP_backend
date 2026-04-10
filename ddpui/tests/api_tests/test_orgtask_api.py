@@ -27,7 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskType
 from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL, TASK_GENERATE_EDR
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 

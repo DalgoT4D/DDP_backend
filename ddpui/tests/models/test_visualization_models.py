@@ -22,7 +22,7 @@ from ddpui.models.visualization import (
     AGGREGATE_FUNC_CHOICES,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.tests.api_tests.test_user_org_api import seed_db
+
 
 pytestmark = pytest.mark.django_db
 

@@ -15,21 +15,16 @@ import os
 import copy
 import django
 from datetime import date
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.contrib.auth.models import User
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
@@ -37,7 +32,6 @@ from ddpui.core.reports.exceptions import (
     SnapshotValidationError,
     SnapshotPermissionError,
 )
-from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
 
@@ -45,55 +39,6 @@ pytestmark = pytest.mark.django_db
 # ================================================================================
 # Fixtures
 # ================================================================================
-
-
-@pytest.fixture
-def authuser():
-    user = User.objects.create(
-        username="svcreportuser", email="svcreportuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def org():
-    org = Org.objects.create(
-        name="Service Test Org", slug="svc-test-org", airbyte_workspace_id="workspace-id"
-    )
-    yield org
-    org.delete()
-
-
-@pytest.fixture
-def orguser(authuser, org):
-    orguser = OrgUser.objects.create(
-        user=authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
-
-
-@pytest.fixture
-def other_authuser():
-    user = User.objects.create(
-        username="svcotherrptuser", email="svcotherrptuser@test.com", password="testpassword"
-    )
-    yield user
-    user.delete()
-
-
-@pytest.fixture
-def other_orguser(other_authuser, org):
-    orguser = OrgUser.objects.create(
-        user=other_authuser,
-        org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-    )
-    yield orguser
-    orguser.delete()
 
 
 @pytest.fixture
@@ -776,10 +721,10 @@ class TestListSnapshots:
 
     def test_list_filter_by_created_by_email(self, org, sample_snapshot):
         """Filter by created_by_email matches creator's email"""
-        result = ReportService.list_snapshots(org, created_by_email="svcreportuser@test.com")
+        result = ReportService.list_snapshots(org, created_by_email="testuser@example.com")
         assert len(result) == 1
 
-        result = ReportService.list_snapshots(org, created_by_email="svcreport")
+        result = ReportService.list_snapshots(org, created_by_email="testuser")
         assert len(result) == 1  # icontains
 
         result = ReportService.list_snapshots(org, created_by_email="nobody@test.com")
@@ -788,7 +733,7 @@ class TestListSnapshots:
     def test_list_combined_filters(self, org, sample_snapshot):
         """Multiple filters are combined with AND"""
         result = ReportService.list_snapshots(
-            org, search="Jan", dashboard_title="Test", created_by_email="svcreport"
+            org, search="Jan", dashboard_title="Test", created_by_email="testuser"
         )
         assert len(result) == 1
 

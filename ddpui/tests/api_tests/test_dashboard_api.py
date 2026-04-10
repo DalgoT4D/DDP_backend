@@ -14,7 +14,7 @@ from ddpui.models.tasks import Task, DataflowOrgTask, TaskLock, OrgTask, OrgData
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_api import get_dashboard_v1
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 

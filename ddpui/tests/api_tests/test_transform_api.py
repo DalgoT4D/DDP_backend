@@ -28,12 +28,9 @@ from ddpui.schemas.org_task_schema import DbtProjectSchema
 from ddpui.ddpprefect.schema import DbtProfile
 from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.tests.api_tests.test_user_org_api import (
-    seed_db,
     orguser,
     nonadminorguser,
     mock_request,
-    authuser,
-    org_without_workspace,
 )
 from ddpui.api.transform_api import (
     create_dbt_project,

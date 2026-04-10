@@ -53,7 +53,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.constants import TASK_DBTRUN
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.api_tests.test_user_org_api import mock_request
 
 pytestmark = pytest.mark.django_db
 

@@ -8,11 +8,8 @@ from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import (
-    seed_db,
     orguser,
     mock_request,
-    authuser,
-    org_without_workspace,
 )
 from ddpui.api.warehouse_api import (
     get_schema,
