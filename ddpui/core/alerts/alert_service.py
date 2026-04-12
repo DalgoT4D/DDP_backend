@@ -11,6 +11,9 @@ from ddpui.core.alerts.exceptions import (
     AlertValidationError,
     AlertWarehouseError,
 )
+from django.db import models as db_models
+from django.db.models import Max, Q
+
 from ddpui.models.alert import Alert, AlertEvaluation, AlertQueryConfig
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -26,22 +29,34 @@ class AlertService:
 
     @staticmethod
     def list_alerts(org: Org, page: int = 1, page_size: int = 10):
-        """List alerts for org with computed fields"""
-        queryset = Alert.objects.filter(org=org).order_by("-updated_at")
+        """List alerts for org, sorted by last fired (most recent first)"""
+        queryset = (
+            Alert.objects.filter(org=org)
+            .annotate(
+                _last_evaluated_at=Max("evaluations__created_at"),
+                _last_fired_at=Max(
+                    "evaluations__created_at",
+                    filter=Q(evaluations__fired=True),
+                ),
+            )
+            .order_by(
+                db_models.F("_last_fired_at").desc(nulls_last=True),
+                db_models.F("_last_evaluated_at").desc(nulls_last=True),
+            )
+        )
+
         total = queryset.count()
         offset = (page - 1) * page_size
         alerts = list(queryset[offset : offset + page_size])
 
         results = []
         for alert in alerts:
-            last_eval = AlertEvaluation.objects.filter(alert=alert).first()
-            last_fired = AlertEvaluation.objects.filter(alert=alert, fired=True).first()
             streak = AlertService.compute_fire_streak(alert)
             results.append(
                 {
                     "alert": alert,
-                    "last_evaluated_at": last_eval.created_at if last_eval else None,
-                    "last_fired_at": last_fired.created_at if last_fired else None,
+                    "last_evaluated_at": alert._last_evaluated_at,
+                    "last_fired_at": alert._last_fired_at,
                     "fire_streak": streak,
                 }
             )
