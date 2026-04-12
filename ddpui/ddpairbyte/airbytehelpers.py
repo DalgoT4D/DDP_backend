@@ -763,6 +763,10 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         dbt_credentials["dataset_location"] = payload.config["dataset_location"]
         dbt_credentials["transformation_priority"] = payload.config["transformation_priority"]
 
+        if warehouse.bq_location != payload.config["dataset_location"]:
+            warehouse.bq_location = payload.config["dataset_location"]
+            warehouse.save()
+
     elif warehouse.wtype == "snowflake":
         dbt_credentials = update_dict_but_not_stars(payload.config)
 
