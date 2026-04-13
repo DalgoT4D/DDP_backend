@@ -259,6 +259,14 @@ class Command(BaseCommand):
         except GitManagerError as e:
             raise Exception(f"Failed to set remote: {e.message}") from e
 
+        # Sync .gitignore before committing so it's included in the push
+        self.stdout.write(f"    Syncing .gitignore contents...")
+        try:
+            sync_gitignore_contents(dbt_repo_dir)
+        except Exception as err:
+            logger.error(f"Failed to sync .gitignore contents: {err}")
+            self.stdout.write(f"    Warning: Failed to sync .gitignore: {err}")
+
         # Commit any uncommitted changes (UI orgs may have model changes not yet committed)
         self.stdout.write(f"    Committing any uncommitted changes...")
         try:
@@ -302,16 +310,6 @@ class Command(BaseCommand):
 
         # Set up Prefect blocks (dual storage - AWS + Prefect)
         update_github_pat_storage(org, remote_repo_url, access_token)
-
-        self.stdout.write(f"    Syncing .gitignore contents...")
-
-        # Sync gitignore contents
-        try:
-            sync_gitignore_contents(dbt_repo_dir)
-        except Exception as err:
-            logger.error(f"Failed to sync .gitignore contents: {err}")
-            # Don't fail the migration for gitignore issues
-            self.stdout.write(f"    Warning: Failed to sync .gitignore: {err}")
 
         logger.info(f"Connected git remote for org {org.slug}: {remote_repo_url}")
         self.stdout.write(f"    ✅ Local repository successfully connected to managed remote")
