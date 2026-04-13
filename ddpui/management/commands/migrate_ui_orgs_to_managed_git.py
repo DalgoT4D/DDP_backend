@@ -259,14 +259,31 @@ class Command(BaseCommand):
         except GitManagerError as e:
             raise Exception(f"Failed to set remote: {e.message}") from e
 
-        self.stdout.write(f"    Pushing all existing commits (models, etc.) to managed repo...")
-
-        # Sync local default to remote (push existing commits - THIS PUSHES ALL MODELS!)
+        # Commit any uncommitted changes (UI orgs may have model changes not yet committed)
+        self.stdout.write(f"    Committing any uncommitted changes...")
         try:
-            git_manager.sync_local_default_to_remote()
-            self.stdout.write(f"    ✅ Successfully pushed all local commits to managed repository")
+            commit_result = git_manager.commit_changes(
+                message="System: Migration to managed Git repository"
+            )
+            self.stdout.write(f"    {commit_result}")
+        except GitManagerError as e:
+            raise Exception(f"Failed to commit changes: {e.error}") from e
+
+        # Sync local branch name to match remote default branch
+        self.stdout.write(f"    Syncing local branch name with remote...")
+        try:
+            sync_result = git_manager.sync_local_default_to_remote()
+            self.stdout.write(f"    {sync_result}")
         except GitManagerError as e:
             raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
+
+        # Push all commits to the managed repository
+        self.stdout.write(f"    Pushing all commits to managed repo...")
+        try:
+            git_manager.push_changes()
+            self.stdout.write(f"    ✅ Successfully pushed all local commits to managed repository")
+        except GitManagerError as e:
+            raise Exception(f"Failed to push commits to managed repository: {e.error}") from e
 
         self.stdout.write(f"    Saving PAT to secrets manager...")
 
