@@ -110,10 +110,10 @@ class Dashboard(models.Model):
 
     # Dashboard theming
     theme_background_color = models.CharField(
-        max_length=7,
+        max_length=9,
         blank=True,
         null=True,
-        help_text="Background color in hex format (e.g., #ffffff)",
+        help_text="Background color in hex format (e.g., #ffffff or #ffffffff)",
     )
     theme_background_gradient = models.JSONField(
         blank=True,
