@@ -68,14 +68,17 @@ class Command(BaseCommand):
             return
 
         # Find UI organizations that need migration
-        ui_orgdbt_query = OrgDbt.objects.filter(transform_type=TransformType.UI)
+        # The FK is Org.dbt -> OrgDbt, so query from Org side
+        org_query = Org.objects.filter(
+            dbt__isnull=False, dbt__transform_type=TransformType.UI
+        ).select_related("dbt")
 
         if target_org_slug:
-            ui_orgdbt_query = ui_orgdbt_query.filter(org__slug=target_org_slug)
+            org_query = org_query.filter(slug=target_org_slug)
 
-        ui_orgdbts = list(ui_orgdbt_query.select_related("org"))
+        orgs = list(org_query)
 
-        if not ui_orgdbts:
+        if not orgs:
             if target_org_slug:
                 self.stdout.write(
                     self.style.WARNING(f"No UI organization found with slug: {target_org_slug}")
@@ -84,13 +87,13 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS("No UI organizations found to migrate"))
             return
 
-        self.stdout.write(f"Found {len(ui_orgdbts)} UI organization(s) to migrate")
+        self.stdout.write(f"Found {len(orgs)} UI organization(s) to migrate")
 
         success_count = 0
         error_count = 0
 
-        for orgdbt in ui_orgdbts:
-            org = orgdbt.org
+        for org in orgs:
+            orgdbt = org.dbt
             self.stdout.write(f"\\nProcessing organization: {org.name} (slug: {org.slug})")
 
             if dry_run:
@@ -129,7 +132,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Successfully migrated: {success_count}")
         if error_count > 0:
             self.stdout.write(f"  Failed migrations: {error_count}")
-        self.stdout.write(f"  Total processed: {len(ui_orgdbts)}")
+        self.stdout.write(f"  Total processed: {len(orgs)}")
 
         if dry_run:
             self.stdout.write("\\nTo perform actual migration, run without --dry-run flag")
