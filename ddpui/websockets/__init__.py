@@ -1,4 +1,5 @@
 import json
+from http.cookies import SimpleCookie
 from channels.generic.websocket import WebsocketConsumer
 from rest_framework_simplejwt.tokens import AccessToken
 from urllib.parse import parse_qs
@@ -56,13 +57,24 @@ class BaseConsumer(WebsocketConsumer):
     def respond(self, message: WebsocketResponse):
         self.send(text_data=json.dumps(message.model_dump()))
 
+    def _get_cookie(self, name: str) -> str | None:
+        """Extract a cookie value from the WebSocket scope headers."""
+        for header_name, header_value in self.scope.get("headers", []):
+            if header_name == b"cookie":
+                cookie = SimpleCookie(header_value.decode())
+                if name in cookie:
+                    return cookie[name].value
+        return None
+
     def connect(self):
         query_string = parse_qs(self.scope["query_string"].decode())
-        token = query_string.get("token", [None])[0]
         orgslug = query_string.get("orgslug", [None])[0]
 
-        if self.authenticate_user(token, orgslug):
-            logger.info("User authenticated, establishing connection")
+        # Read JWT from the access_token httpOnly cookie
+        token = self._get_cookie("access_token")
+
+        if token and self.authenticate_user(token, orgslug):
+            logger.info("User authenticated via cookie, establishing connection")
             self.accept()
         else:
             logger.info("Authentication failed, closing connection")
