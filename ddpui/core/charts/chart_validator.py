@@ -16,7 +16,7 @@ class ChartValidator:
     """Validates chart configurations based on chart type"""
 
     # Valid chart types
-    VALID_CHART_TYPES = ["bar", "pie", "line", "number", "map", "table"]
+    VALID_CHART_TYPES = ["bar", "pie", "line", "number", "map", "table", "pivot_table"]
 
     # Valid aggregate functions
     VALID_AGGREGATE_FUNCTIONS = ["sum", "avg", "count", "min", "max", "count_distinct"]

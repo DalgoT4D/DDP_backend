@@ -19,6 +19,7 @@ from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.core.charts.chart_validator import ChartValidator
+from ddpui.core.charts.pivot_service import get_pivot_table_data
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -148,6 +149,14 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     # Handle maps differently
     if payload.chart_type == "map":
         return generate_map_data_and_config(payload, org_warehouse, chart_id)
+
+    # Handle pivot tables — completely separate pipeline with ROLLUP and rotation
+    if payload.chart_type == "pivot_table":
+        page = payload.extra_config.get("page", 1) if payload.extra_config else 1
+        page_size = payload.extra_config.get("page_size", 50) if payload.extra_config else 50
+        pivot_data = get_pivot_table_data(org_warehouse, payload, page, page_size)
+        logger.info(f"Successfully generated pivot table data for {chart_id_str}")
+        return {"data": pivot_data, "echarts_config": {}}
 
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
@@ -600,11 +609,29 @@ def get_chart_data_preview(
         limit=payload.limit,
         extra_config=payload.extra_config,
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
+        # Pivot table fields
+        row_dimensions=payload.row_dimensions,
+        column_dimensions=payload.column_dimensions,
+        column_time_grains=payload.column_time_grains,
+        show_row_subtotals=payload.show_row_subtotals,
+        show_grand_total=payload.show_grand_total,
     )
 
     logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
     try:
+        # Pivot tables use the /chart-data/ endpoint, not preview
+        # Return an empty valid response so the preview hook doesn't error
+        if modified_payload.chart_type == "pivot_table":
+            return DataPreviewResponse(
+                columns=[],
+                column_types={},
+                data=[],
+                page=0,
+                page_size=50,
+                total_rows=0,
+            )
+
         # Get table preview using the same query builder as chart data
         # This ensures preview shows exactly what will be used for the chart
         preview_data = charts_service.get_chart_data_table_preview(
@@ -700,7 +727,17 @@ def get_chart_data_preview_total_rows(
         limit=payload.limit,
         extra_config=payload.extra_config,
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
+        # Pivot table fields
+        row_dimensions=payload.row_dimensions,
+        column_dimensions=payload.column_dimensions,
+        column_time_grains=payload.column_time_grains,
+        show_row_subtotals=payload.show_row_subtotals,
+        show_grand_total=payload.show_grand_total,
     )
+
+    # Pivot tables handle their own pagination — return 0 for the generic total-rows endpoint
+    if modified_payload.chart_type == "pivot_table":
+        return 0
 
     # Get total rows using the same query builder as chart data
     total_rows = charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
