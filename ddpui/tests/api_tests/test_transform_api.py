@@ -2,7 +2,7 @@ import os, glob, uuid
 from pathlib import Path
 import django.core
 import django.core.exceptions
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from pydantic import ValidationError as PydanticValidationError
 import django
 import pydantic
 import pytest

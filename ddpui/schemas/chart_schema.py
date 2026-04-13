@@ -41,7 +41,7 @@ class ChartResponse(Schema):
 
     id: int
     title: str
-    description: Optional[str]
+    description: Optional[str] = None
     chart_type: str
     schema_name: str
     table_name: str
@@ -49,6 +49,19 @@ class ChartResponse(Schema):
     # Note: render_config removed - charts fetch fresh config via /data endpoint
     created_at: datetime
     updated_at: datetime
+
+
+class ChartConfig(Schema):
+    """Chart configuration used to build a ChartDataPayload.
+
+    Works for both Chart model instances and frozen report configs.
+    """
+
+    chart_type: str
+    schema_name: str
+    table_name: str
+    title: Optional[str] = None
+    extra_config: Optional[dict] = None
 
 
 class ChartDataPayload(Schema):

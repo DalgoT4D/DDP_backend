@@ -8,11 +8,11 @@ class OrgSchema(Schema):
     """Docstring"""
 
     name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
+    slug: Optional[str] = None
+    airbyte_workspace_id: Optional[str] = None
+    viz_url: Optional[HttpUrl] = None
+    viz_login_type: Optional[str] = None
+    tnc_accepted: Optional[bool] = None
     is_demo: bool = False
 
 
@@ -20,18 +20,18 @@ class CreateOrgSchema(Schema):
     """payload for org creation"""
 
     name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
+    slug: Optional[str] = None
+    airbyte_workspace_id: Optional[str] = None
+    viz_url: Optional[HttpUrl] = None
+    viz_login_type: Optional[str] = None
+    tnc_accepted: Optional[bool] = None
     is_demo: bool = False
     base_plan: str
     can_upgrade_plan: bool
     subscription_duration: str
     superset_included: bool
-    start_date: Optional[str]
-    end_date: Optional[str]
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     website: Optional[HttpUrl] = None
 
 

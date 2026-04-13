@@ -32,7 +32,11 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schema import ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schema import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.core.charts import charts_service
+from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from sqlalchemy import func, column, distinct, cast, Float, Date
 
 logger = CustomLogger("ddpui")
 
@@ -234,63 +238,26 @@ def get_public_chart_data(request, token: str, chart_id: int):
         # Build payload from chart config - reuse exact logic from authenticated endpoint
         extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
-        # Parse and resolve dashboard filters if provided - same logic as authenticated API
+        # Parse and resolve dashboard filters if provided
+        # Uses schema/table match (no warehouse_client) to check filter applicability
         resolved_dashboard_filters = None
         if filters:
-            # Resolve filter configurations to get column information - same as authenticated API
-            resolved_filters = []
+            filter_defs = DashboardFilter.objects.filter(id__in=filters.keys(), dashboard=dashboard)
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filters,
+                [f.to_json() for f in filter_defs],
+                chart.schema_name,
+                chart.table_name,
+            )
 
-            for filter_id, value in filters.items():
-                if value is not None:  # Skip filters with no value
-                    try:
-                        dashboard_filter = DashboardFilter.objects.get(
-                            id=int(filter_id), dashboard=dashboard
-                        )
-                        # Only apply this filter if it applies to the same table as the chart (same as authenticated API)
-                        if (
-                            dashboard_filter.schema_name == chart.schema_name
-                            and dashboard_filter.table_name == chart.table_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,  # Use "column" key as expected
-                                    "type": dashboard_filter.filter_type,  # Use "type" key as expected
-                                    "value": value,
-                                    "settings": dashboard_filter.settings
-                                    or {},  # Use actual settings
-                                }
-                            )
-                    except (DashboardFilter.DoesNotExist, ValueError):
-                        logger.warning(f"Public API: Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
-
-        # Add chart title to customizations like authenticated API
-        customizations = extra_config.get("customizations", {})
-        customizations["title"] = chart.title  # Add chart title to customizations
-
-        # Use the exact same payload structure as authenticated API
-        payload = ChartDataPayload(
+        config = ChartConfig(
+            chart_type=chart.chart_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
-            chart_type=chart.chart_type,
-            x_axis=extra_config.get("x_axis_column"),  # Match authenticated API field names
-            y_axis=extra_config.get("y_axis_column"),
-            dimension_col=extra_config.get("dimension_column"),
-            extra_dimension=extra_config.get("extra_dimension_column"),
-            # Multiple metrics support - CRITICAL FIX for public API charts
-            metrics=extra_config.get("metrics"),
-            # Map-specific fields for consistency
-            geographic_column=extra_config.get("geographic_column"),
-            value_column=extra_config.get("value_column"),
-            selected_geojson_id=extra_config.get("selected_geojson_id"),
-            customizations=customizations,
-            offset=0,
-            limit=100,
+            title=chart.title,
             extra_config=extra_config,
-            dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
         )
+        payload = charts_service.build_chart_data_payload(config, resolved_dashboard_filters)
 
         # Generate chart data and config using exact same function as authenticated API
         chart_data = generate_chart_data_and_config(payload, org_warehouse, chart_id)
@@ -313,6 +280,100 @@ def get_public_chart_data(request, token: str, chart_id: int):
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
 
 
+def _execute_filter_preview(
+    org_warehouse,
+    schema_name: str,
+    table_name: str,
+    column_name: str,
+    filter_type: str,
+    limit: int,
+):
+    """Shared logic for executing a filter preview query against the warehouse.
+
+    Returns a PublicFilterPreviewResponse on success, or raises an Exception.
+    """
+    warehouse_client = get_warehouse_client(org_warehouse)
+
+    if filter_type == "value":
+        query_builder = AggQueryBuilder()
+        query_builder.add_column(column(column_name).label("value"))
+        query_builder.add_aggregate_column(None, "count", alias="count")
+        query_builder.fetch_from(table_name, schema_name)
+        query_builder.where_clause(column(column_name).isnot(None))
+        query_builder.group_cols_by(column_name)
+        query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
+        query_builder.limit_rows(limit)
+
+        results = execute_query(warehouse_client, query_builder)
+        options = [
+            AuthFilterOptionResponse(
+                label=str(row["value"]) if row["value"] is not None else "NULL",
+                value=str(row["value"]) if row["value"] is not None else "",
+                count=int(row["count"]),
+            )
+            for row in results
+        ]
+        return PublicFilterPreviewResponse(options=options, stats=None, is_valid=True)
+
+    elif filter_type == "numerical":
+        query_builder = AggQueryBuilder()
+        query_builder.add_aggregate_column(column_name, "min", alias="min_value")
+        query_builder.add_aggregate_column(column_name, "max", alias="max_value")
+        query_builder.add_column(func.avg(cast(column(column_name), Float)).label("avg_value"))
+        query_builder.add_aggregate_column(column_name, "count_distinct", alias="distinct_count")
+        query_builder.fetch_from(table_name, schema_name)
+        query_builder.where_clause(column(column_name).isnot(None))
+
+        results = execute_query(warehouse_client, query_builder)
+        row = results[0]
+        stats = {
+            "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
+            "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
+            "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
+            "distinct_count": (
+                int(row["distinct_count"]) if row["distinct_count"] is not None else 0
+            ),
+        }
+        return PublicFilterPreviewResponse(options=None, stats=stats, is_valid=True)
+
+    elif filter_type == "datetime":
+        query_builder = AggQueryBuilder()
+
+        if org_warehouse.wtype == "postgres":
+            query_builder.add_column(func.min(cast(column(column_name), Date)).label("min_date"))
+            query_builder.add_column(func.max(cast(column(column_name), Date)).label("max_date"))
+            query_builder.add_column(
+                func.count(distinct(func.date(column(column_name)))).label("distinct_days")
+            )
+        elif org_warehouse.wtype == "bigquery":
+            query_builder.add_column(func.min(func.date(column(column_name))).label("min_date"))
+            query_builder.add_column(func.max(func.date(column(column_name))).label("max_date"))
+            query_builder.add_column(
+                func.count(distinct(func.date(column(column_name)))).label("distinct_days")
+            )
+        else:
+            query_builder.add_aggregate_column(column_name, "min", alias="min_date")
+            query_builder.add_aggregate_column(column_name, "max", alias="max_date")
+            query_builder.add_aggregate_column(column_name, "count_distinct", alias="distinct_days")
+
+        query_builder.add_aggregate_column(None, "count", alias="total_records")
+        query_builder.fetch_from(table_name, schema_name)
+        query_builder.where_clause(column(column_name).isnot(None))
+
+        results = execute_query(warehouse_client, query_builder)
+        row = results[0]
+        stats = {
+            "min_date": row["min_date"].isoformat() if row["min_date"] else None,
+            "max_date": row["max_date"].isoformat() if row["max_date"] else None,
+            "distinct_days": int(row["distinct_days"]) if row["distinct_days"] else 0,
+            "total_records": int(row["total_records"]) if row["total_records"] else 0,
+        }
+        return PublicFilterPreviewResponse(options=None, stats=stats, is_valid=True)
+
+    else:
+        raise ValueError(f"Invalid filter type: {filter_type}")
+
+
 @public_router.get(
     "/dashboards/{token}/filters/preview/",
     response={200: PublicFilterPreviewResponse, 404: PublicErrorResponse},
@@ -326,145 +387,72 @@ def get_public_filter_preview(
     filter_type: str,
     limit: int = 100,
 ):
-    """Get public filter preview - identical to authenticated filter preview API"""
+    """Get public filter preview for a dashboard token"""
     try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        # Verify token belongs to a public dashboard
+        try:
+            dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+            org = dashboard.org
+        except Dashboard.DoesNotExist:
+            logger.warning(
+                f"Public filter preview access failed - no public dashboard found for token: {token}"
+            )
+            return 404, PublicErrorResponse(
+                error="Dashboard not found or no longer public", is_valid=False
+            )
 
-        # Get org warehouse
-        from ddpui.models.org import OrgWarehouse
-        from ddpui.api.filter_api import get_filter_preview
-
-        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
 
-        # Create a mock request with orguser to reuse the authenticated filter preview logic
-        class MockRequest:
-            def __init__(self, org):
-                self.orguser = type("MockOrgUser", (), {"org": org})()
-
-        mock_request = MockRequest(dashboard.org)
-
-        # Use the exact same function as authenticated API
-        from ddpui.core.charts.charts_service import get_warehouse_client
-        from ddpui.core.datainsights.query_builder import AggQueryBuilder
-        from ddpui.core.charts.charts_service import execute_query
-        from sqlalchemy import func, column, distinct, cast, Float, Date
-
-        warehouse_client = get_warehouse_client(org_warehouse)
-
-        if filter_type == "value":
-            # Get distinct values with counts for categorical filter - same logic as authenticated API
-            query_builder = AggQueryBuilder()
-            query_builder.add_column(column(column_name).label("value"))
-            query_builder.add_aggregate_column(None, "count", alias="count")
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-            query_builder.group_cols_by(column_name)
-            query_builder.order_cols_by([("count", "desc"), ("value", "asc")])
-            query_builder.limit_rows(limit)
-
-            # Execute query using charts_service function
-            results = execute_query(warehouse_client, query_builder)
-
-            options = [
-                AuthFilterOptionResponse(
-                    label=str(row["value"]) if row["value"] is not None else "NULL",
-                    value=str(row["value"]) if row["value"] is not None else "",
-                    count=int(row["count"]),
-                )
-                for row in results
-            ]
-
-            response_data = {"options": options, "stats": None, "is_valid": True}
-            return PublicFilterPreviewResponse(**response_data)
-
-        elif filter_type == "numerical":
-            # Get numerical statistics - same logic as authenticated API
-            query_builder = AggQueryBuilder()
-            query_builder.add_aggregate_column(column_name, "min", alias="min_value")
-            query_builder.add_aggregate_column(column_name, "max", alias="max_value")
-            query_builder.add_column(func.avg(cast(column(column_name), Float)).label("avg_value"))
-            query_builder.add_aggregate_column(
-                column_name, "count_distinct", alias="distinct_count"
-            )
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-
-            results = execute_query(warehouse_client, query_builder)
-            row = results[0]
-
-            stats = {
-                "min_value": float(row["min_value"]) if row["min_value"] is not None else 0.0,
-                "max_value": float(row["max_value"]) if row["max_value"] is not None else 100.0,
-                "avg_value": float(row["avg_value"]) if row["avg_value"] is not None else 50.0,
-                "distinct_count": (
-                    int(row["distinct_count"]) if row["distinct_count"] is not None else 0
-                ),
-            }
-
-            response_data = {"options": None, "stats": stats, "is_valid": True}
-            return PublicFilterPreviewResponse(**response_data)
-
-        elif filter_type == "datetime":
-            # Get date range - same logic as authenticated API
-            query_builder = AggQueryBuilder()
-
-            if org_warehouse.wtype == "postgres":
-                query_builder.add_column(
-                    func.min(cast(column(column_name), Date)).label("min_date")
-                )
-                query_builder.add_column(
-                    func.max(cast(column(column_name), Date)).label("max_date")
-                )
-                query_builder.add_column(
-                    func.count(distinct(func.date(column(column_name)))).label("distinct_days")
-                )
-            elif org_warehouse.wtype == "bigquery":
-                query_builder.add_column(func.min(func.date(column(column_name))).label("min_date"))
-                query_builder.add_column(func.max(func.date(column(column_name))).label("max_date"))
-                query_builder.add_column(
-                    func.count(distinct(func.date(column(column_name)))).label("distinct_days")
-                )
-            else:
-                query_builder.add_aggregate_column(column_name, "min", alias="min_date")
-                query_builder.add_aggregate_column(column_name, "max", alias="max_date")
-                query_builder.add_aggregate_column(
-                    column_name, "count_distinct", alias="distinct_days"
-                )
-
-            query_builder.add_aggregate_column(None, "count", alias="total_records")
-            query_builder.fetch_from(table_name, schema_name)
-            query_builder.where_clause(column(column_name).isnot(None))
-
-            results = execute_query(warehouse_client, query_builder)
-            row = results[0]
-
-            stats = {
-                "min_date": row["min_date"].isoformat() if row["min_date"] else None,
-                "max_date": row["max_date"].isoformat() if row["max_date"] else None,
-                "distinct_days": int(row["distinct_days"]) if row["distinct_days"] else 0,
-                "total_records": int(row["total_records"]) if row["total_records"] else 0,
-            }
-
-            response_data = {"options": None, "stats": stats, "is_valid": True}
-            return PublicFilterPreviewResponse(**response_data)
-
-        else:
-            return 404, PublicErrorResponse(
-                error=f"Invalid filter type: {filter_type}", is_valid=False
-            )
-
-    except Dashboard.DoesNotExist:
-        logger.warning(
-            f"Public filter preview access failed - dashboard not found for token: {token}"
+        return _execute_filter_preview(
+            org_warehouse, schema_name, table_name, column_name, filter_type, limit
         )
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
+
+    except ValueError as e:
+        return 404, PublicErrorResponse(error=str(e), is_valid=False)
     except Exception as e:
         logger.error(f"Public filter preview error: {str(e)}")
+        return 404, PublicErrorResponse(error="Filter preview unavailable", is_valid=False)
+
+
+@public_router.get(
+    "/reports/{token}/filters/preview/",
+    response={200: PublicFilterPreviewResponse, 404: PublicErrorResponse},
+)
+def get_public_report_filter_preview(
+    request,
+    token: str,
+    schema_name: str,
+    table_name: str,
+    column_name: str,
+    filter_type: str,
+    limit: int = 100,
+):
+    """Get public filter preview for a report snapshot token"""
+    try:
+        try:
+            snapshot = ReportSnapshot.objects.get(public_share_token=token, is_public=True)
+        except ReportSnapshot.DoesNotExist:
+            logger.warning(
+                f"Public report filter preview failed - no public report found for token: {token}"
+            )
+            return 404, PublicErrorResponse(
+                error="Report not found or no longer public", is_valid=False
+            )
+
+        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+        if not org_warehouse:
+            raise Exception("No warehouse configured for organization")
+
+        return _execute_filter_preview(
+            org_warehouse, schema_name, table_name, column_name, filter_type, limit
+        )
+
+    except ValueError as e:
+        return 404, PublicErrorResponse(error=str(e), is_valid=False)
+    except Exception as e:
+        logger.error(f"Public report filter preview error: {str(e)}")
         return 404, PublicErrorResponse(error="Filter preview unavailable", is_valid=False)
 
 
@@ -527,39 +515,21 @@ def get_public_chart_data_preview(
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Parse and resolve dashboard filters if provided (same logic as public chart data endpoint)
+        # Parse and resolve dashboard filters if provided
         resolved_dashboard_filters = None
         if dashboard_filters:
-            # Resolve filter configurations to get column information
             filter_values = json.loads(dashboard_filters)
-
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            resolved_filters = []
-
-            for filter_id, filter_value in filter_values.items():
-                if filter_value is not None:
-                    try:
-                        # Get the filter configuration from the database
-                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
-
-                        # Only apply this filter if it applies to the same table as the chart
-                        # Use warehouse client to check column existence
-                        if warehouse_client.column_exists(
-                            chart.schema_name, chart.table_name, dashboard_filter.column_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,
-                                    "type": dashboard_filter.filter_type,
-                                    "value": filter_value,
-                                    "settings": dashboard_filter.settings,
-                                }
-                            )
-                    except (DashboardFilter.DoesNotExist, ValueError):
-                        logger.warning(f"Public API: Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
+            filter_defs = DashboardFilter.objects.filter(
+                id__in=filter_values.keys(), dashboard=dashboard
+            )
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                chart.schema_name,
+                chart.table_name,
+                warehouse_client,
+            )
 
         # Convert payload to ChartDataPayload with resolved dashboard filters
         chart_payload = ChartDataPayload(
@@ -730,41 +700,17 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         # Handle dashboard filters (same logic as private API)
         resolved_dashboard_filters = None
         if map_payload.dashboard_filters:
-            try:
-                # Import dashboard filter model
-                from ddpui.models.dashboard import DashboardFilter
-
-                resolved_filters = []
-
-                for filter_id, filter_value in map_payload.dashboard_filters.items():
-                    if filter_id and filter_value is not None:
-                        try:
-                            dashboard_filter = DashboardFilter.objects.get(
-                                id=filter_id, dashboard__org=dashboard.org
-                            )
-                            # Only apply this filter if it applies to the same table as the chart
-                            if warehouse_client.column_exists(
-                                map_payload.schema_name,
-                                map_payload.table_name,
-                                dashboard_filter.column_name,
-                            ):
-                                resolved_filters.append(
-                                    {
-                                        "filter_id": filter_id,
-                                        "column": dashboard_filter.column_name,
-                                        "type": dashboard_filter.filter_type,
-                                        "value": filter_value,
-                                        "settings": dashboard_filter.settings or {},
-                                    }
-                                )
-                        except DashboardFilter.DoesNotExist:
-                            logger.warning(f"Dashboard filter {filter_id} not found")
-
-                resolved_dashboard_filters = resolved_filters
-
-            except Exception as e:
-                logger.error(f"Error resolving dashboard filters: {str(e)}")
-                resolved_dashboard_filters = None
+            filter_defs = DashboardFilter.objects.filter(
+                id__in=map_payload.dashboard_filters.keys(),
+                dashboard__org=dashboard.org,
+            )
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                map_payload.dashboard_filters,
+                [f.to_json() for f in filter_defs],
+                map_payload.schema_name,
+                map_payload.table_name,
+                warehouse_client,
+            )
 
         # Build chart payload for map data query (same logic as private API)
         from ddpui.schemas.chart_schema import ChartDataPayload, ExecuteChartQuery
@@ -1166,25 +1112,77 @@ def get_public_report(request, token: str):
         return 404, PublicErrorResponse(error="Report not accessible", is_valid=False)
 
 
-@public_router.post(
-    "/reports/{token}/chart-data/",
+def _get_frozen_chart_for_public_report(token, chart_id, request):
+    """Shared helper: look up frozen chart config for a public report.
+
+    Returns (snapshot, chart_config_with_period_injected, org_warehouse).
+    Raises ReportSnapshot.DoesNotExist or Exception on failure.
+    """
+    snapshot = _get_public_report_snapshot(token, request=request)
+
+    org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
+    if not org_warehouse:
+        raise Exception("No warehouse configured for organization")
+
+    frozen_charts = snapshot.frozen_chart_configs or {}
+    chart_config = frozen_charts.get(str(chart_id))
+    if not chart_config:
+        raise Exception(f"Chart {chart_id} not found in report")
+
+    chart_config = copy.deepcopy(chart_config)
+
+    # Inject period date filters
+    from ddpui.core.reports.report_service import ReportService
+
+    temp_configs = {str(chart_id): chart_config}
+    ReportService._inject_period_into_chart_configs(temp_configs, snapshot)
+
+    return snapshot, chart_config, org_warehouse
+
+
+@public_router.get(
+    "/reports/{token}/charts/{chart_id}/data/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_chart_data(request, token: str):
+def get_public_report_chart_data(request, token: str, chart_id: int):
     """Get chart data for a public report (bar/line/pie/number charts)"""
     try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
+        # Resolve dashboard filters from frozen config (same pattern as public dashboard)
+        resolved_filters = None
+        filters_param = request.GET.get("dashboard_filters")
+        if filters_param:
+            try:
+                filter_values = json.loads(filters_param)
+            except json.JSONDecodeError:
+                filter_values = None
 
-        payload_data = json.loads(request.body) if request.body else {}
-        payload = ChartDataPayload(**payload_data)
+            if filter_values:
+                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    frozen_filters,
+                    chart_config["schema_name"],
+                    chart_config["table_name"],
+                    warehouse_client,
+                )
+
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         from ddpui.api.charts_api import generate_chart_data_and_config
 
-        chart_data = generate_chart_data_and_config(payload, org_warehouse)
+        chart_data = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart_id)
 
         return {**chart_data, "is_valid": True}
 
@@ -1198,21 +1196,27 @@ def get_public_report_chart_data(request, token: str):
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
 
 
-@public_router.post(
-    "/reports/{token}/chart-data-preview/",
+@public_router.get(
+    "/reports/{token}/charts/{chart_id}/data-preview/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_data(request, token: str, page: int = 0, limit: int = 100):
+def get_public_report_table_data(
+    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+):
     """Get table chart data for a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
-
-        payload_data = json.loads(request.body) if request.body else {}
-        chart_payload = ChartDataPayload(**payload_data)
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        chart_payload = charts_service.build_chart_data_payload(config)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1237,21 +1241,25 @@ def get_public_report_table_data(request, token: str, page: int = 0, limit: int 
         return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
 
 
-@public_router.post(
-    "/reports/{token}/chart-data-preview/total-rows/",
+@public_router.get(
+    "/reports/{token}/charts/{chart_id}/total-rows/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_total_rows(request, token: str):
+def get_public_report_table_total_rows(request, token: str, chart_id: int):
     """Get total row count for table chart in a public report"""
     try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
-
-        payload_data = json.loads(request.body) if request.body else {}
-        chart_payload = ChartDataPayload(**payload_data)
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        chart_payload = charts_service.build_chart_data_payload(config)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 
@@ -1325,8 +1333,6 @@ def get_public_report_map_data(request, token: str):
         query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
 
         if map_payload.filters:
-            from sqlalchemy import column, func
-
             for filter_column, filter_value in map_payload.filters.items():
                 query_builder.where_clause(
                     func.upper(column(filter_column)) == str(filter_value).upper()
