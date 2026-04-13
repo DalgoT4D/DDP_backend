@@ -301,7 +301,7 @@ class Command(BaseCommand):
         self.stdout.write(f"    Setting up Prefect blocks...")
 
         # Set up Prefect blocks (dual storage - AWS + Prefect)
-        update_github_pat_storage(orgdbt, access_token)
+        update_github_pat_storage(org, remote_repo_url, access_token)
 
         self.stdout.write(f"    Syncing .gitignore contents...")
 
