@@ -233,6 +233,7 @@ def get_dbt_workspace(request):
         "target_type": orgdbt.target_type,
         "default_schema": orgdbt.default_schema,
         "transform_type": orgdbt.transform_type,
+        "is_repo_managed_by_system": orgdbt.is_repo_managed_by_system,
     }
 
 
