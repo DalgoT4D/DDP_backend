@@ -82,6 +82,13 @@ class OrgDbt(models.Model):
         null=True,
         related_name="dbtcloud_creds_block",
     )
+
+    # Managed Git Repository fields
+    is_repo_managed_by_system = models.BooleanField(
+        default=False,
+        help_text="True if this repository is created and managed by the system, False if it's a user-owned repository",
+    )
+
     docs_generated_at = models.DateTimeField(null=True, blank=True)
     vector_last_ingested_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
