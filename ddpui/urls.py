@@ -22,9 +22,28 @@ def healthcheck(request):  # pylint:disable=unused-argument
     return HttpResponse("OK")
 
 
+def memory_snapshot(request):
+    import tracemalloc, os, psutil
+
+    process = psutil.Process(os.getpid())
+    rss = process.memory_info().rss / 1024 / 1024  # MB
+
+    if not tracemalloc.is_tracing():
+        tracemalloc.start()
+        return {"rss_mb": rss, "status": "tracing started, call again after spike"}
+
+    snapshot = tracemalloc.take_snapshot()
+    top = snapshot.statistics("lineno")[:30]
+    return {
+        "rss_mb": rss,
+        "top_allocations": [str(s) for s in top],
+    }
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("healthcheck", healthcheck),
+    path("debug/memory", memory_snapshot),
     path("docs/<tokenhex>/", get_dbt_docs),
     path("elementary/<tokenhex>/", get_elementary_report),
     path("prometheus/", include("django_prometheus.urls")),
