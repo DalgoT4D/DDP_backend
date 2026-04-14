@@ -494,14 +494,12 @@ class TestDeleteComment:
             author=orguser,
             org=org,
         )
+        comment_id = comment.id
         request = mock_request(orguser)
-        response = delete_comment(request, snapshot.id, comment.id)
+        response = delete_comment(request, snapshot.id, comment_id)
         assert response["success"] is True
-        comment.refresh_from_db()
-        assert comment.is_deleted is True
-        assert comment.content == ""
-        assert comment.mentioned_emails == []
-        comment.delete()
+        # sole author in thread => hard-delete
+        assert not Comment.objects.filter(id=comment_id).exists()
 
     def test_delete_other_forbidden(self, orguser, other_orguser, snapshot, org):
         comment = Comment.objects.create(
