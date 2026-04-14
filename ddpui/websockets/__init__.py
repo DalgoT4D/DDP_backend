@@ -5,7 +5,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from urllib.parse import parse_qs
 from django.contrib.auth.models import User
 
-from ddpui.websockets.schemas import WebsocketResponse
+from ddpui.websockets.schemas import WebsocketResponse, WebsocketCloseCodes
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -73,9 +73,14 @@ class BaseConsumer(WebsocketConsumer):
         # Read JWT from the access_token httpOnly cookie
         token = self._get_cookie("access_token")
 
-        if token and self.authenticate_user(token, orgslug):
+        if not token:
+            logger.info("No access_token cookie found, closing connection")
+            self.accept()
+            self.close(code=WebsocketCloseCodes.NO_TOKEN)
+        elif not self.authenticate_user(token, orgslug):
+            logger.info("Authentication failed (invalid/expired token), closing connection")
+            self.accept()
+            self.close(code=WebsocketCloseCodes.INVALID_TOKEN)
+        else:
             logger.info("User authenticated via cookie, establishing connection")
             self.accept()
-        else:
-            logger.info("Authentication failed, closing connection")
-            self.close()
