@@ -166,18 +166,37 @@ class CommentService:
         org: Org,
         orguser: OrgUser,
     ) -> None:
-        """Soft-delete a comment. Author-only."""
+        """Delete a comment. Author-only.
+
+        Hard-deletes if no other user has commented in the thread (same
+        snapshot + target_type + chart_id). Soft-deletes otherwise so the
+        "This message was deleted" placeholder is shown alongside others'
+        comments.
+        """
         comment = CommentService._get_comment(comment_id, org)
 
         if comment.author != orguser:
             raise CommentPermissionError("You can only delete your own comments")
 
-        comment.is_deleted = True
-        comment.content = ""
-        comment.mentioned_emails = []
-        comment.save()
+        # Check if another author has commented in this thread
+        thread_query = Q(
+            snapshot=comment.snapshot,
+            target_type=comment.target_type,
+        )
+        if comment.target_type == CommentTargetType.CHART:
+            thread_query &= Q(snapshot_chart_id=comment.snapshot_chart_id)
 
-        logger.info(f"Soft-deleted comment {comment_id}")
+        has_other_authors = Comment.objects.filter(thread_query).exclude(author=orguser).exists()
+
+        if has_other_authors:
+            comment.is_deleted = True
+            comment.content = ""
+            comment.mentioned_emails = []
+            comment.save()
+            logger.info(f"Soft-deleted comment {comment_id}")
+        else:
+            comment.delete()
+            logger.info(f"Hard-deleted comment {comment_id}")
 
     # language=SQL
     _COMMENT_STATES_SQL = """

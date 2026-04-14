@@ -209,7 +209,8 @@ class TestUpdateComment:
 class TestDeleteComment:
     """Tests for CommentService.delete_comment"""
 
-    def test_success(self, snapshot, author_orguser, org):
+    def test_hard_deletes_sole_comment(self, snapshot, author_orguser, org):
+        """Only comment in thread, only author — hard-delete."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -218,16 +219,67 @@ class TestDeleteComment:
             author=author_orguser,
             org=org,
         )
+        comment_id = comment.id
         CommentService.delete_comment(
-            comment_id=comment.id,
+            comment_id=comment_id,
             org=org,
             orguser=author_orguser,
         )
-        comment.refresh_from_db()
-        assert comment.is_deleted is True
-        assert comment.content == ""
-        assert comment.mentioned_emails == []
-        comment.delete()
+        assert not Comment.objects.filter(id=comment_id).exists()
+
+    def test_hard_deletes_multiple_own_comments(self, snapshot, author_orguser, org):
+        """Multiple comments in thread but ALL by the same author — hard-delete."""
+        c1 = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="My first",
+            author=author_orguser,
+            org=org,
+        )
+        c2 = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="My second",
+            author=author_orguser,
+            org=org,
+        )
+        c2_id = c2.id
+        CommentService.delete_comment(
+            comment_id=c2_id,
+            org=org,
+            orguser=author_orguser,
+        )
+        assert not Comment.objects.filter(id=c2_id).exists()
+        c1.delete()
+
+    def test_soft_deletes_when_other_author_exists(
+        self, snapshot, author_orguser, other_orguser, org
+    ):
+        """Another user has commented in the thread — soft-delete."""
+        Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Other person's comment",
+            author=other_orguser,
+            org=org,
+        )
+        my_comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Delete me",
+            mentioned_emails=["someone@test.com"],
+            author=author_orguser,
+            org=org,
+        )
+        CommentService.delete_comment(
+            comment_id=my_comment.id,
+            org=org,
+            orguser=author_orguser,
+        )
+        my_comment.refresh_from_db()
+        assert my_comment.is_deleted is True
+        assert my_comment.content == ""
+        assert my_comment.mentioned_emails == []
 
     def test_non_author_raises(self, snapshot, author_orguser, other_orguser, org):
         comment = Comment.objects.create(

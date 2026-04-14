@@ -4,7 +4,6 @@ import uuid
 import json
 from django.db import transaction
 
-import glob
 import os
 import shutil
 import subprocess
@@ -30,6 +29,7 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
 from ddpui.core.git_manager import GitManager, GitManagerError
+from ddpui.utils import secretsmanager
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import PrefectSecretBlockEdit, OrgDbtConnectGitRemote
@@ -43,8 +43,8 @@ DBT_GITIGNORE_CONTENT = [
     ".venv/",
     "venv/",
     "profiles/",
-    "*/profiles.yml",
-    "profiles.yaml",
+    "**/profiles.yml",
+    "**/profiles.yaml",
     ".user.yml",
     "package-lock.yml",
     ".env*",
@@ -53,6 +53,64 @@ DBT_GITIGNORE_CONTENT = [
     "*.html",  # ignore elementary reports
     "edr_target/",
 ]
+
+
+def _scaffold_dbt_project(org: Org, orgdbt: OrgDbt, project_name: str, dbtrepo_dir: Path):
+    """
+    Initialize a new dbt project with scaffolding and copy required asset files.
+    Private function for internal use in dbt_service.py only.
+
+    Args:
+        org: Organization instance
+        orgdbt: OrgDbt instance
+        project_name: Name of the dbt project
+        dbtrepo_dir: Path to the dbt repository directory
+
+    Raises:
+        Exception: If dbt init fails or asset file copying fails
+    """
+    logger.info(f"Starting to scaffold dbt project at {dbtrepo_dir}")
+
+    # Run dbt init to create project structure
+    try:
+        DbtProjectManager.run_dbt_command(
+            org,
+            orgdbt,
+            ["init", project_name],
+            cwd=str(dbtrepo_dir.parent),
+            flags=["--skip-profile-setup"],
+        )
+
+        # Delete example models
+        example_models_dir = dbtrepo_dir / "models" / "example"
+        if example_models_dir.exists():
+            shutil.rmtree(example_models_dir)
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt init failed with {e.returncode}")
+        raise Exception(f"dbt init failed: {e}") from e
+
+    # Copy asset files
+    try:
+        # Copy packages.yml
+        logger.info("copying packages.yml from assets")
+        target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
+        assets_module_path = Path(assets.__file__).parent
+        source_packages_yml = assets_module_path / "packages.yml"
+        shutil.copy(source_packages_yml, target_packages_yml)
+
+        # Copy all macros with .sql extension from assets
+        macros_dir = Path(dbtrepo_dir) / "macros"
+        macros_dir.mkdir(exist_ok=True)  # Ensure macros directory exists
+
+        for sql_file in assets_module_path.glob("*.sql"):
+            target_path = macros_dir / sql_file.name
+            shutil.copy(sql_file, target_path)
+            logger.info("created %s", target_path)
+
+    except Exception as e:
+        logger.error(f"failed to copy asset files: {e}")
+        raise Exception(f"Something went wrong while copying asset files : {e}")
 
 
 def update_github_pat_storage(
@@ -132,27 +190,6 @@ def clear_github_pat_storage(org: Org, pat_secret_key: str = None) -> None:
             logger.info(f"Deleted PAT from secrets manager: {pat_secret_key}")
         except Exception as e:
             logger.warning(f"Failed to delete PAT from secrets manager: {str(e)}")
-
-
-def is_git_repository_switch(orgdbt: OrgDbt, new_repo_url: str) -> bool:
-    """
-    Determine if this is a Git repository switch vs new connection.
-
-    Returns True for: Git Repo A → Git Repo B
-    Returns False for: UI4T → Git Repo A or Git Repo A → Git Repo A
-
-    Args:
-        orgdbt: The OrgDbt instance
-        new_repo_url: The new repository URL to connect to
-
-    Returns:
-        bool: True if this is a repository switch, False otherwise
-    """
-    return (
-        orgdbt.gitrepo_url is not None
-        and orgdbt.transform_type == TransformType.GIT
-        and orgdbt.gitrepo_url != new_repo_url
-    )
 
 
 def delete_dbt_workspace(org: Org):
@@ -267,8 +304,11 @@ def sync_gitignore_contents(
     logger.info(f"Synced .gitignore at {gitignore_path} with new entries.")
 
 
-def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
-    """sets up an org's dbt workspace, recreating it if it already exists"""
+def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str):
+    """
+    Creates a Dalgo-managed Git repository and sets up dbt workspace.
+    This replaces the UI-based local storage approach with managed Git repositories.
+    """
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
     if not warehouse:
@@ -278,124 +318,124 @@ def setup_local_dbt_workspace(org: Org, project_name: str, default_schema: str):
         org.slug = slugify(org.name)
         org.save()
 
-    project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
-    dbtrepo_dir: Path = project_dir / project_name
+    # Get environment for repository naming
+    environment = os.getenv("ENVIRONMENT", "development")
 
-    orgdbt = org.dbt
-    if not orgdbt:
-        dbt = OrgDbt(
-            project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
-            dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
-            target_type=warehouse.wtype,
-            default_schema=default_schema,
-            transform_type=TransformType.UI,
+    try:
+        logger.info(f"Creating managed Git repository for org {org.name}")
+
+        # 1. Create managed repository using GitManager
+        repo_data = GitManager.create_managed_repository(org_slug=org.slug, environment=environment)
+        repo_url = repo_data["clone_url"]
+
+        logger.info(f"Created repository: {repo_data['full_name']}")
+
+        # 2. Get org admin PAT and set up storage (both AWS + Prefect)
+        repo_pat = GitManager.get_org_admin_pat()
+        pat_secret_key = update_github_pat_storage(org, repo_url, repo_pat)
+
+        # 4. Set up local paths (same as original function)
+        project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
+        dbtrepo_dir: Path = project_dir / project_name
+
+        # 5. Create or update OrgDbt record
+        orgdbt = org.dbt
+        if not orgdbt:
+            dbt = OrgDbt(
+                project_dir=DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir),
+                dbt_venv=DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH,
+                target_type=warehouse.wtype,
+                default_schema=default_schema,
+                transform_type=TransformType.GIT,  # Set to GIT instead of UI
+                gitrepo_url=repo_url,
+                gitrepo_access_token_secret=pat_secret_key,
+                is_repo_managed_by_system=True,  # Mark as managed
+            )
+            dbt.save()
+            logger.info("created managed git orgdbt for org %s", org.name)
+            org.dbt = dbt
+            org.save()
+            logger.info("set org.dbt for org %s", org.name)
+            orgdbt = dbt
+        else:
+            # Update existing OrgDbt to use managed Git
+            orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir)
+            orgdbt.target_type = warehouse.wtype
+            orgdbt.default_schema = default_schema
+            orgdbt.transform_type = TransformType.GIT
+            orgdbt.gitrepo_url = repo_url
+            orgdbt.gitrepo_access_token_secret = pat_secret_key
+            orgdbt.is_repo_managed_by_system = True
+            orgdbt.save()
+
+        # 6. Check if project already exists
+        if dbtrepo_dir.exists():
+            raise Exception(f"Project {project_name} already exists")
+
+        if not project_dir.exists():
+            project_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("created project_dir %s", project_dir)
+
+        # 7. Scaffold dbt project first (init + copy assets)
+        _scaffold_dbt_project(org, orgdbt, project_name, dbtrepo_dir)
+
+        # 8. Initialize git in the scaffolded project and set remote to managed repository
+        logger.info(f"Setting up git repository and connecting to managed repo")
+        try:
+            git_manager = GitManager(repo_local_path=str(dbtrepo_dir), pat=repo_pat)
+            git_manager.init_repo()
+            git_manager.set_remote(repo_url)
+            logger.info(f"Initialized git and set remote to {repo_url}")
+        except Exception as err:
+            logger.error(f"Failed to initialize git repository: {str(err)}")
+            raise Exception(f"Failed to initialize git repository: {str(err)}") from err
+
+        # 10. Set up warehouse credentials and CLI profile block
+        saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+        if saved_creds is None:
+            logger.error(
+                "failed to retrieve warehouse credentials for org %s to create dbt profile",
+                org.name,
+            )
+            raise Exception(
+                "failed to retrieve warehouse credentials for org %s to create dbt profile"
+                % org.name
+            )
+
+        (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+            org, warehouse, saved_creds
         )
-        dbt.save()
-        logger.info("created orgdbt for org %s", org.name)
-        org.dbt = dbt
-        org.save()
-        logger.info("set org.dbt for org %s", org.name)
-        orgdbt = dbt
-    else:
-        orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(dbtrepo_dir)
-        orgdbt.target_type = warehouse.wtype
-        orgdbt.default_schema = default_schema
-        orgdbt.transform_type = TransformType.UI
-        orgdbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+
+        orgdbt.cli_profile_block = cli_profile_block
         orgdbt.save()
 
-    # this client's dbt setup happens here
-    if dbtrepo_dir.exists():
-        raise Exception(f"Project {project_name} already exists")
+        if error:
+            logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
+            raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
 
-    if not project_dir.exists():
-        project_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("created project_dir %s", project_dir)
+        # 11. Create .gitignore file
+        try:
+            sync_gitignore_contents(dbtrepo_dir)
+        except Exception as err:
+            logger.error(f"Failed to create .gitignore file: {str(err)}")
+            raise Exception(f"Failed to create .gitignore file: {str(err)}") from err
 
-    logger.info(f"starting to setup local dbt workspace at {project_dir}")
+        # 12. Commit and push scaffolded project to managed repository
+        try:
+            logger.info("Committing and pushing scaffolded dbt project to managed repository")
+            git_manager.commit_changes(message=f"Initial dbt project scaffolding for {org.name}")
+            git_manager.push_changes()
+            logger.info("Successfully pushed scaffolded project to managed repository")
 
-    # dbt init
-    try:
-        # dbt init must run from parent directory (project_dir) because it creates the dbtrepo folder
-        DbtProjectManager.run_dbt_command(
-            org,
-            orgdbt,
-            [
-                "init",
-                project_name,
-            ],
-            cwd=str(project_dir),
-            flags=["--skip-profile-setup"],
-        )
+        except Exception as err:
+            logger.error(f"Failed to commit/push scaffolded project: {str(err)}")
+            raise Exception(f"Failed to commit/push scaffolded project: {str(err)}") from err
 
-        # Delete example models
-        example_models_dir = dbtrepo_dir / "models" / "example"
-        if example_models_dir.exists():
-            shutil.rmtree(example_models_dir)
+        logger.info(f"Successfully set up managed Git workspace for org {org.name}")
 
-    except subprocess.CalledProcessError as e:
-        logger.error(f"dbt init failed with {e.returncode}")
-        raise Exception(f"dbt init failed: {e}") from e
-
-    try:
-        # copy packages.yml
-        logger.info("copying packages.yml from assets")
-        target_packages_yml = Path(dbtrepo_dir) / "packages.yml"
-        source_packages_yml = os.path.abspath(
-            os.path.join(os.path.abspath(assets.__file__), "..", "packages.yml")
-        )
-        shutil.copy(source_packages_yml, target_packages_yml)
-
-        # copy all macros with .sql extension from assets
-        assets_dir = assets.__path__[0]
-
-        for sql_file_path in glob.glob(os.path.join(assets_dir, "*.sql")):
-            # Get the target path in the project_dir/macros directory
-            target_path = Path(dbtrepo_dir) / "macros" / Path(sql_file_path).name
-
-            # Copy the .sql file to the target path
-            shutil.copy(sql_file_path, target_path)
-
-            # Log the creation of the file
-            logger.info("created %s", target_path)
     except Exception as e:
-        logger.error(f"failed to copy asset files: {e}")
-        raise Exception(f"Something went wrong while copying asset files : {e}")
-
-    saved_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
-    if saved_creds is None:
-        logger.error(
-            "failed to retrieve warehouse credentials for org %s to create dbt profile", org.name
-        )
-        raise Exception(
-            "failed to retrieve warehouse credentials for org %s to create dbt profile" % org.name
-        )
-
-    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
-        org, warehouse, saved_creds
-    )
-
-    if error:
-        logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
-        raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
-
-    # initializing it as git repo
-    logger.info("initializing dbt workspace as git repo")
-    try:
-        git_manager = GitManager(repo_local_path=dbtrepo_dir)
-        git_manager.init_repo()
-    except Exception as err:
-        logger.error(f"Failed to initialize git repo: {str(err)}")
-        raise Exception(f"Failed to initialize git repo: {str(err)}") from err
-
-    # create .gitignore file
-    try:
-        sync_gitignore_contents(dbtrepo_dir)
-    except Exception as err:
-        logger.error(f"Failed to create .gitignore file: {str(err)}")
-        raise Exception(f"Failed to create .gitignore file: {str(err)}") from err
-
-    logger.info("set dbt workspace completed for org %s", org.name)
+        logger.error(f"Failed to set up managed Git workspace for org {org.name}: {str(e)}")
+        raise Exception(f"Failed to set up managed Git workspace: {str(e)}")
 
 
 def convert_github_url(url: str) -> str:
@@ -1040,88 +1080,24 @@ def cleanup_unused_sources(org: Org, orgdbt: OrgDbt, manifest_json=None):
     return results
 
 
-def connect_git_remote(orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str) -> dict:
-    """
-    Handle connecting to a Git remote for the first time (UI4T → Git).
-
-    This abstracts the existing logic from put_connect_git_remote into a
-    clean, testable function.
-    """
-    org: Org = orguser.org
-    orgdbt: OrgDbt = org.dbt
-
-    # Get dbt repo directory
-    dbt_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
-    if not dbt_repo_dir.exists():
-        raise Exception("DBT repo directory does not exist")
-
-    # Use the provided actual_pat (already resolved in API layer)
-
-    # Validate git is initialized locally
-    try:
-        git_manager = GitManager(
-            repo_local_path=str(dbt_repo_dir), pat=actual_pat, validate_git=True
-        )
-    except GitManagerError as e:
-        logger.error(f"GitManagerError during git init validation: {e.message}")
-        raise Exception(f"Git is not initialized in the DBT project folder: {e.message}") from e
-
-    # Verify remote URL is accessible with the PAT
-    try:
-        git_manager.verify_remote_url(payload.gitrepoUrl)
-    except GitManagerError as e:
-        logger.error(f"GitManagerError during remote URL verification: {e.message}")
-        raise Exception(f"{e.message}: {e.error}") from e
-
-    # Set or update the remote origin
-    try:
-        git_manager.set_remote(payload.gitrepoUrl)
-    except GitManagerError as e:
-        raise Exception(f"Failed to set remote: {e.message}") from e
-
-    # sync local default to remote
-    try:
-        git_manager.sync_local_default_to_remote()
-    except GitManagerError as e:
-        raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
-
-    # Handle PAT token storage (only if not masked)
-    is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
-    if not is_token_masked:
-        pat_secret_key = update_github_pat_storage(
-            org, payload.gitrepoUrl, payload.gitrepoAccessToken, orgdbt.gitrepo_access_token_secret
-        )
-        orgdbt.gitrepo_access_token_secret = pat_secret_key
-
-    # Update OrgDbt with the new gitrepo_url
-    orgdbt.gitrepo_url = payload.gitrepoUrl
-    orgdbt.transform_type = TransformType.GIT
-    orgdbt.save()
-
-    logger.info(f"Connected git remote for org {org.slug}: {payload.gitrepoUrl}")
-
-    # sync gitignore contents
-    try:
-        sync_gitignore_contents(dbt_repo_dir)
-    except Exception as err:
-        logger.error(f"Failed to sync .gitignore contents: {err}")
-        raise Exception(f"Failed to sync .gitignore contents: {err}") from err
-
-    return {
-        "success": True,
-        "gitrepo_url": payload.gitrepoUrl,
-        "message": "Successfully connected to remote git repository",
-        "repository_switched": False,
-    }
-
-
-def switch_git_repository(
+def switch_git_repository_v1(
     orguser: OrgUser, payload: OrgDbtConnectGitRemote, actual_pat: str
 ) -> dict:
     """
-    Handle switching from one Git repository to another (Git A → Git B).
+    Switch from current repository to user's external repository.
+    Handles two scenarios:
+    1. Dalgo managed -> External: Copy models if external repo is empty, otherwise clone
+    2. External A -> External B: Always clone after validation
 
-    Complete replacement of the local repository with a fresh clone.
+    Sets is_repo_managed_by_system = False for the new repository.
+
+    Args:
+        orguser: Organization user making the request
+        payload: Contains the new repository URL and access token
+        actual_pat: Personal Access Token for the NEW incoming repository (not current repo)
+
+    Warning: If switching from Dalgo managed to non-empty external repo,
+    existing work may be lost. Users should use empty repos or contact support.
     """
     org = orguser.org
     orgdbt = org.dbt
@@ -1130,41 +1106,90 @@ def switch_git_repository(
         f"Switching git repository for org {org.slug} from {orgdbt.gitrepo_url} to {payload.gitrepoUrl}"
     )
 
-    # Use the provided actual_pat (already resolved in API layer)
+    # Validate repository access first
+    try:
+        GitManager.validate_repository_access(payload.gitrepoUrl, actual_pat)
+        logger.info("Repository access validation successful")
+    except GitManagerError as e:
+        logger.error(f"Repository access validation failed: {e.message}")
+        raise Exception(f"{e.error}") from e
+
+    # Determine current repo type
+    is_currently_managed = orgdbt.is_repo_managed_by_system
+
+    # Check if new remote repository is empty (no dbt_project.yml)
+    try:
+        is_new_repo_empty = GitManager.check_remote_repository_empty_static(
+            payload.gitrepoUrl, actual_pat
+        )
+        logger.info(f"New repository empty status: {is_new_repo_empty}")
+    except GitManagerError as e:
+        logger.warning(f"Could not check remote repository status: {e.message}")
+        # Default to treating as non-empty for safety
+        is_new_repo_empty = False
 
     # Get paths
     dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     org_dir = Path(DbtProjectManager.get_org_dir(org))
 
-    # Clean existing references
-    try:
-        if dbt_project_dir.exists():
-            shutil.rmtree(dbt_project_dir)
-            logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+    # Scenario 1: Dalgo managed -> External repo
+    needs_clone = False
+    if is_currently_managed:
+        if is_new_repo_empty:
+            logger.info("Scenario: Dalgo managed -> Empty external repo (copying models)")
+            # Copy current models to new empty repo
+            try:
+                # Initialize git in current directory and set new remote
+                git_manager = GitManager(repo_local_path=str(dbt_project_dir), pat=actual_pat)
+                git_manager.set_remote(payload.gitrepoUrl)
 
-        # remove canvas nodes and edges related to the dbt project
-        CanvasNode.objects.filter(orgdbt=orgdbt).delete()
+                # Commit any pending changes and push current content to new remote
+                git_manager.commit_changes("Copy Dalgo managed models to external repository")
+                git_manager.push_changes()
+                logger.info("Successfully copied Dalgo managed content to external repository")
 
-    except Exception as e:
-        logger.error(f"Failed to clean up existing directory: {e}")
-        raise Exception(f"Failed to clean up existing repository: {e}") from e
+            except Exception as e:
+                logger.error(f"Failed to copy models to external repo: {str(e)}")
+                raise Exception(f"Failed to copy models to external repository: {str(e)}") from e
+        else:
+            logger.warning(
+                "Scenario: Dalgo managed -> Non-empty external repo (cloning, may lose work)"
+            )
+            needs_clone = True
 
-    # Clone the new repository using GitManager
-    try:
-        GitManager.clone(
-            cwd=str(org_dir),
-            remote_repo_url=payload.gitrepoUrl,
-            relative_path="dbtrepo",
-            pat=actual_pat,
-        )
-        logger.info(f"Successfully cloned new repository to {dbt_project_dir}")
-    except GitManagerError as e:
-        logger.error(f"Failed to clone new repository: {e.message}")
-        raise Exception(f"Failed to clone new repository: {e.message}") from e
+    # Scenario 2: External A -> External B
+    else:
+        logger.info("Scenario: External A -> External B (cloning after validation)")
+        needs_clone = True
 
-    # Update OrgDbt with the new gitrepo_url BEFORE cloning
+    # Common cloning logic for scenarios that require it
+    if needs_clone:
+        try:
+            # Clean existing directory
+            if dbt_project_dir.exists():
+                shutil.rmtree(dbt_project_dir)
+                logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+
+            # Clone the new repository
+            GitManager.clone(
+                cwd=str(org_dir),
+                remote_repo_url=payload.gitrepoUrl,
+                relative_path="dbtrepo",
+                pat=actual_pat,
+            )
+            logger.info(f"Successfully cloned repository to {dbt_project_dir}")
+        except Exception as e:
+            logger.error(f"Failed to clone repository: {str(e)}")
+            raise Exception(f"Failed to clone repository: {str(e)}") from e
+
+    # Remove canvas nodes and edges related to the dbt project (common across all scenarios)
+    CanvasNode.objects.filter(orgdbt=orgdbt).delete()
+    logger.info("Removed canvas nodes and edges for repository switch")
+
+    # Update OrgDbt with new repo details - importantly set managed flag to False
     orgdbt.gitrepo_url = payload.gitrepoUrl
     orgdbt.transform_type = TransformType.GIT
+    orgdbt.is_repo_managed_by_system = False  # New repo is NOT Dalgo-managed
     orgdbt.save()
 
     # Update CLI profile block with new dbt_project.yml profile name
@@ -1176,7 +1201,7 @@ def switch_git_repository(
         creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
         # This will automatically read the new dbt_project.yml and update the profile block
-        cli_profile_result, error = create_or_update_org_cli_block(
+        _, error = create_or_update_org_cli_block(
             org, warehouse, creds  # Pass the retrieved warehouse creds
         )
         if error:
@@ -1187,17 +1212,6 @@ def switch_git_repository(
     except Exception as e:
         logger.error(f"Error updating CLI profile block: {e}")
         raise Exception(f"Repository switch failed: CLI profile block update error - {e}") from e
-
-    # Verify remote URL is accessible with the PAT
-    try:
-        git_manager = GitManager(
-            repo_local_path=str(dbt_project_dir), pat=actual_pat, validate_git=True
-        )
-        git_manager.verify_remote_url(payload.gitrepoUrl)
-    except GitManagerError as e:
-        logger.error(f"GitManagerError during remote URL verification: {e.message}")
-        clear_github_pat_storage(org, orgdbt.gitrepo_access_token_secret)
-        raise Exception(f"{e.message}: {e.error}") from e
 
     # Handle PAT token storage (only if not masked)
     is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
@@ -1220,6 +1234,6 @@ def switch_git_repository(
     return {
         "success": True,
         "gitrepo_url": payload.gitrepoUrl,
-        "message": "Successfully switched to new git repository",
         "repository_switched": True,
+        "message": "Successfully switched to new git repository",
     }
