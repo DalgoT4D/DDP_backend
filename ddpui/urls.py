@@ -1,7 +1,7 @@
 # main urls
 from django.contrib import admin
 from django.urls import include, path
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 
 from ddpui.routes import src_api, public_api
 from ddpui.html.docs import get_dbt_docs
@@ -30,14 +30,16 @@ def memory_snapshot(request):
 
     if not tracemalloc.is_tracing():
         tracemalloc.start()
-        return {"rss_mb": rss, "status": "tracing started, call again after spike"}
+        return JsonResponse({"rss_mb": rss, "status": "tracing started, call again after spike"})
 
     snapshot = tracemalloc.take_snapshot()
     top = snapshot.statistics("lineno")[:30]
-    return {
-        "rss_mb": rss,
-        "top_allocations": [str(s) for s in top],
-    }
+    return JsonResponse(
+        {
+            "rss_mb": rss,
+            "top_allocations": [str(s) for s in top],
+        }
+    )
 
 
 urlpatterns = [
