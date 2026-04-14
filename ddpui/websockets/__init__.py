@@ -70,8 +70,12 @@ class BaseConsumer(WebsocketConsumer):
         query_string = parse_qs(self.scope["query_string"].decode())
         orgslug = query_string.get("orgslug", [None])[0]
 
-        # Read JWT from the access_token httpOnly cookie
+        # Read JWT from the access_token httpOnly cookie (webapp_v2)
         token = self._get_cookie("access_token")
+
+        # TODO: remove this fallback once webapp_v1 is fully deprecated
+        if not token:
+            token = query_string.get("token", [None])[0]
 
         if not token:
             logger.info("No access_token cookie found, closing connection")
