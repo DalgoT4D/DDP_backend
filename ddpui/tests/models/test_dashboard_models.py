@@ -294,6 +294,35 @@ def test_dashboard_to_json_with_published(orguser, org, seed_db):
     dashboard.delete()
 
 
+def test_dashboard_to_json_includes_theme_fields(orguser, org, seed_db):
+    """Test to_json includes dashboard background theme fields"""
+    gradient = {
+        "type": "linear",
+        "direction": "135deg",
+        "colors": ["#dcfce7ff", "#cffafeff"],
+    }
+    dashboard = Dashboard.objects.create(
+        title="Theme Dashboard",
+        theme_background_color="#11223380",
+        theme_background_gradient=gradient,
+        theme_background_image_url="https://example.com/background.jpg",
+        theme_background_image_blur=6,
+        theme_chart_opacity=0.85,
+        created_by=orguser,
+        org=org,
+    )
+
+    json_data = dashboard.to_json()
+
+    assert json_data["theme_background_color"] == "#11223380"
+    assert json_data["theme_background_gradient"] == gradient
+    assert json_data["theme_background_image_url"] == "https://example.com/background.jpg"
+    assert json_data["theme_background_image_blur"] == 6
+    assert json_data["theme_chart_opacity"] == 0.85
+
+    dashboard.delete()
+
+
 # ================================================================================
 # Test Dashboard Relationships
 # ================================================================================

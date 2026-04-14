@@ -308,6 +308,13 @@ class TestCreateDashboard:
         assert response.title == "Minimal Dashboard"
         assert response.description is None
         assert response.grid_columns == 12  # Default
+        assert response.theme_background_color is None
+        assert response.theme_background_gradient is None
+        assert response.theme_background_image_url is None
+        assert response.theme_background_image_blur == 0
+        assert response.theme_chart_opacity == 1.0
+        assert response.theme_overlay_color is None
+        assert response.theme_overlay_opacity == 0.0
 
         # Cleanup
         Dashboard.objects.filter(id=response.id).delete()
@@ -347,6 +354,34 @@ class TestUpdateDashboard:
 
         assert response.title == original_title
         assert response.description == "Only description updated"
+
+    def test_update_dashboard_theme_fields(self, orguser, sample_dashboard, seed_db):
+        """Test updating dashboard background theme fields"""
+        request = mock_request(orguser)
+        gradient = {
+            "type": "linear",
+            "direction": "135deg",
+            "colors": ["#dcfce7ff", "#cffafeff"],
+        }
+
+        payload = DashboardUpdate(
+            theme_background_gradient=gradient,
+            theme_background_image_url="https://example.com/background.jpg",
+            theme_background_image_blur=8,
+            theme_chart_opacity=0.72,
+        )
+
+        response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
+        sample_dashboard.refresh_from_db()
+
+        assert response.theme_background_gradient == gradient
+        assert response.theme_background_image_url == "https://example.com/background.jpg"
+        assert response.theme_background_image_blur == 8
+        assert response.theme_chart_opacity == 0.72
+        assert sample_dashboard.theme_background_gradient == gradient
+        assert sample_dashboard.theme_background_image_url == "https://example.com/background.jpg"
+        assert sample_dashboard.theme_background_image_blur == 8
+        assert sample_dashboard.theme_chart_opacity == 0.72
 
     def test_update_dashboard_not_found(self, orguser, seed_db):
         """Test updating non-existent dashboard returns 404"""

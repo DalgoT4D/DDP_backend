@@ -39,6 +39,16 @@ from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
 logger = CustomLogger("ddpui.dashboard_service")
 
+DEFAULT_DASHBOARD_THEME_VALUES = {
+    "theme_background_color": None,
+    "theme_background_gradient": None,
+    "theme_background_image_url": None,
+    "theme_background_image_blur": 0,
+    "theme_chart_opacity": 1.0,
+    "theme_overlay_color": None,
+    "theme_overlay_opacity": 0.0,
+}
+
 
 # =============================================================================
 # Custom Exceptions
@@ -284,6 +294,7 @@ class DashboardService:
             title=data.title,
             description=data.description,
             grid_columns=data.grid_columns,
+            **DEFAULT_DASHBOARD_THEME_VALUES,
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,

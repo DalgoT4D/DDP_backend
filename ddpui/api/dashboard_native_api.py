@@ -23,6 +23,7 @@ from ddpui.services.dashboard_service import (
     DashboardService,
     DashboardData,
     FilterData,
+    DEFAULT_DASHBOARD_THEME_VALUES,
     DashboardNotFoundError,
     DashboardLockedError,
     DashboardPermissionError,
@@ -183,6 +184,25 @@ def duplicate_dashboard(request, dashboard_id: int):
             target_screen_size=original_dashboard.target_screen_size,
             layout_config=[],  # Will be updated after filter duplication
             components={},  # Will be updated after filter duplication
+            theme_background_color=original_dashboard.theme_background_color,
+            theme_background_gradient=original_dashboard.theme_background_gradient,
+            theme_background_image_url=original_dashboard.theme_background_image_url,
+            theme_background_image_blur=(
+                original_dashboard.theme_background_image_blur
+                if original_dashboard.theme_background_image_blur is not None
+                else DEFAULT_DASHBOARD_THEME_VALUES["theme_background_image_blur"]
+            ),
+            theme_chart_opacity=(
+                original_dashboard.theme_chart_opacity
+                if original_dashboard.theme_chart_opacity is not None
+                else DEFAULT_DASHBOARD_THEME_VALUES["theme_chart_opacity"]
+            ),
+            theme_overlay_color=original_dashboard.theme_overlay_color,
+            theme_overlay_opacity=(
+                original_dashboard.theme_overlay_opacity
+                if original_dashboard.theme_overlay_opacity is not None
+                else DEFAULT_DASHBOARD_THEME_VALUES["theme_overlay_opacity"]
+            ),
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
