@@ -25,6 +25,7 @@ from ddpui.api.filter_api import filter_router
 from ddpui.api.public_api import public_router
 from ddpui.api.report_api import report_router
 from ddpui.api.alert_api import alert_router
+from ddpui.api.metrics_api import metrics_router
 
 
 src_api = NinjaAPI(
@@ -89,6 +90,7 @@ filter_router.tags = ["Filters"]
 public_router.tags = ["Public"]
 report_router.tags = ["Reports"]
 alert_router.tags = ["Alerts"]
+metrics_router.tags = ["Metrics"]
 
 # mount all the module routes
 src_api.add_router("/api/airbyte/", airbyte_router)
@@ -111,6 +113,7 @@ src_api.add_router("/api/dashboards/", dashboard_native_router)
 src_api.add_router("/api/filters/", filter_router)
 src_api.add_router("/api/reports/", report_router)
 src_api.add_router("/api/alerts/", alert_router)
+src_api.add_router("/api/metrics/", metrics_router)
 
 # Public API without authentication
 public_api = NinjaAPI(
