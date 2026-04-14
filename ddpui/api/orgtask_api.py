@@ -24,7 +24,7 @@ from ddpui.models.tasks import (
     TaskType,
 )
 from ddpui.ddpprefect.schema import (
-    PrefectSecretBlockCreate,
+    PrefectSecretBlockEdit,
 )
 from ddpui.ddpdbt.schema import DbtProjectParams, DbtCloudJobParams
 from ddpui.schemas.org_task_schema import CreateOrgTaskPayload, TaskParameters
@@ -153,23 +153,25 @@ def post_system_transformation_tasks(request):
     if orguser.org.dbt is None:
         raise HttpError(400, "create a dbt workspace first")
 
-    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    org = orguser.org
+
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
     if warehouse is None:
         raise HttpError(400, "need to set up a warehouse first")
     credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
-    if orguser.org.dbt.dbt_venv is None:
-        orguser.org.dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
-        orguser.org.dbt.save()
+    if org.dbt.dbt_venv is None:
+        org.dbt.dbt_venv = DbtProjectManager.DEFAULT_DBT_VENV_REL_PATH
+        org.dbt.save()
 
     # create a secret block to save the github endpoint url along with token
     try:
         gitrepo_access_token = None
-        if orguser.org.dbt.gitrepo_access_token_secret:
+        if org.dbt.gitrepo_access_token_secret:
             gitrepo_access_token = secretsmanager.retrieve_github_pat(
-                orguser.org.dbt.gitrepo_access_token_secret
+                org.dbt.gitrepo_access_token_secret
             )
-        gitrepo_url = orguser.org.dbt.gitrepo_url
+        gitrepo_url = org.dbt.gitrepo_url
 
         if gitrepo_access_token is not None and gitrepo_access_token != "":
             gitrepo_url = gitrepo_url.replace(
@@ -177,19 +179,21 @@ def post_system_transformation_tasks(request):
             )
 
             # store the git oauth endpoint with token in a prefect secret block
-            secret_block = PrefectSecretBlockCreate(
-                block_name=f"{orguser.org.slug}-git-pull-url",
+            secret_block = PrefectSecretBlockEdit(
+                block_name=f"{org.slug}-git-pull-url",
                 secret=gitrepo_url,
             )
-            block_response = prefect_service.create_secret_block(secret_block)
+            block_response = prefect_service.upsert_secret_block(secret_block)
 
-            # store secret block name block_response["block_name"] in orgdbt
-            OrgPrefectBlockv1.objects.create(
-                org=orguser.org,
-                block_type=SECRET,
-                block_id=block_response["block_id"],
-                block_name=block_response["block_name"],
-            )
+            if not OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=SECRET, block_name=secret_block.block_name
+            ).exists():
+                OrgPrefectBlockv1.objects.create(
+                    org=org,
+                    block_type=SECRET,
+                    block_name=secret_block.block_name,
+                    block_id=block_response["block_id"],
+                )
 
     except Exception as error:
         logger.exception(error)
@@ -197,13 +201,13 @@ def post_system_transformation_tasks(request):
 
     # create a dbt cli profile block
     (cli_profile_block, dbt_project_params), error = dbthelpers.create_or_update_org_cli_block(
-        orguser.org, warehouse, credentials
+        org, warehouse, credentials
     )
     if error:
         raise HttpError(400, error)
 
     # create org tasks for the transformation page
-    _, error = create_default_transform_tasks(orguser.org, cli_profile_block, dbt_project_params)
+    _, error = create_default_transform_tasks(org, cli_profile_block, dbt_project_params)
     if error:
         raise HttpError(400, error)
 

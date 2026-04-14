@@ -834,6 +834,9 @@ def test_update_destination_bigquery_config(
     )
     mock_create_or_update_org_cli_block.assert_called_once()
 
+    warehouse.refresh_from_db()
+    assert warehouse.bq_location == "LOCATION"
+
 
 @patch(
     "ddpui.ddpairbyte.airbyte_service.update_destination",
