@@ -450,6 +450,44 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
         )
 
 
+def test_completed_webhook_invokes_alert_evaluation():
+    org = Org.objects.create(name="temp", slug="temp")
+    deployment_id = "test-deployment-id"
+    flow_run = {
+        "parameters": {
+            "config": {"org_slug": org.slug},
+        },
+        "deployment_id": deployment_id,
+        "id": "test-run-id",
+        "name": "test-flow-run-name",
+        "start_time": str(datetime.now()),
+        "expected_start_time": str(datetime.now()),
+        "total_run_time": 12,
+        "status": FLOW_RUN_COMPLETED_STATE_TYPE,
+        "state_name": FLOW_RUN_COMPLETED_STATE_NAME,
+    }
+    OrgDataFlowv1.objects.create(
+        org=org,
+        name=deployment_id,
+        dataflow_type="manual",
+        deployment_id=deployment_id,
+    )
+
+    with patch("ddpui.ddpprefect.prefect_service.get_flow_run_poll") as mock_get_flow_run, patch(
+        "ddpui.core.webhooks.webhook_functions.AlertService.evaluate_alerts_for_completed_flow"
+    ) as mock_evaluate_alerts:
+        mock_get_flow_run.return_value = flow_run
+        mock_evaluate_alerts.return_value = {"evaluated": 1, "fired": 1}
+
+        do_handle_prefect_webhook(flow_run["id"], flow_run["state_name"])
+
+        mock_evaluate_alerts.assert_called_once_with(
+            org=org,
+            deployment_id=deployment_id,
+            trigger_flow_run_id=flow_run["id"],
+        )
+
+
 def test_notify_platform_admins():
     """tests notify_platform_admins"""
     with patch(

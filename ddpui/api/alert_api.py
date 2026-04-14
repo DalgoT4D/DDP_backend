@@ -21,6 +21,7 @@ from ddpui.schemas.alert_schema import (
     AlertResponse,
     AlertEvaluationResponse,
     AlertTestResponse,
+    TriggeredAlertEventResponse,
 )
 
 logger = CustomLogger("ddpui.alert_api")
@@ -30,11 +31,16 @@ alert_router = Router()
 
 @alert_router.get("/")
 @has_permission(["can_view_alerts"])
-def list_alerts(request, page: int = 1, page_size: int = 10):
+def list_alerts(request, page: int = 1, page_size: int = 10, metric_id: int | None = None):
     """List alerts for the org with pagination"""
     orguser: OrgUser = request.orguser
 
-    results, total = AlertService.list_alerts(org=orguser.org, page=page, page_size=page_size)
+    results, total = AlertService.list_alerts(
+        org=orguser.org,
+        page=page,
+        page_size=page_size,
+        metric_id=metric_id,
+    )
 
     return api_response(
         success=True,
@@ -48,6 +54,30 @@ def list_alerts(request, page: int = 1, page_size: int = 10):
                 ).dict()
                 for r in results
             ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        },
+    )
+
+
+@alert_router.get("/fired/")
+@has_permission(["can_view_alerts"])
+def list_fired_alerts(request, page: int = 1, page_size: int = 20, metric_id: int | None = None):
+    """List recent fired alert evaluations for the org."""
+    orguser: OrgUser = request.orguser
+
+    evaluations, total = AlertService.list_fired_evaluations(
+        org=orguser.org,
+        page=page,
+        page_size=page_size,
+        metric_id=metric_id,
+    )
+
+    return api_response(
+        success=True,
+        data={
+            "data": [TriggeredAlertEventResponse.from_model(e).dict() for e in evaluations],
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -124,6 +154,7 @@ def test_alert(request, payload: AlertTestRequest):
                 page=result["page"],
                 page_size=result["page_size"],
                 query_executed=result["query_executed"],
+                rendered_message=result["rendered_message"],
             ).dict(),
         )
     except AlertWarehouseError as err:

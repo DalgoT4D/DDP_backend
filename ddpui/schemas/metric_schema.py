@@ -1,7 +1,7 @@
 """Pydantic schemas for the My Metrics API"""
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from ninja import Schema
 
@@ -21,6 +21,7 @@ class MetricCreate(Schema):
     time_grain: str = "month"  # month, quarter, year
 
     # Target & RAG
+    direction: Literal["increase", "decrease"] = "increase"
     target_value: Optional[float] = None
     amber_threshold_pct: float = 80
     green_threshold_pct: float = 100
@@ -44,6 +45,7 @@ class MetricUpdate(Schema):
     time_column: Optional[str] = None
     time_grain: Optional[str] = None
 
+    direction: Optional[Literal["increase", "decrease"]] = None
     target_value: Optional[float] = None
     amber_threshold_pct: Optional[float] = None
     green_threshold_pct: Optional[float] = None
@@ -88,6 +90,7 @@ class MetricResponse(Schema):
     time_column: Optional[str]
     time_grain: str
 
+    direction: Literal["increase", "decrease"]
     target_value: Optional[float]
     amber_threshold_pct: float
     green_threshold_pct: float

@@ -1311,12 +1311,3 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         sync_airbyte_job_stats_for_all_connections.s(last_n_days=2),
         name="sync airbyte job stats for all connections",
     )
-
-    # check and fire alerts; every 5 minutes
-    from ddpui.celeryworkers.alert_tasks import check_and_fire_alerts
-
-    sender.add_periodic_task(
-        300.0,
-        check_and_fire_alerts.s(),
-        name="check and fire alerts",
-    )

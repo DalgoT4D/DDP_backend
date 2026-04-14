@@ -36,6 +36,7 @@ from ddpui.core.notifications.delivery import (
     notify_org_managers,
     notify_platform_admins,
 )
+from ddpui.core.alerts.alert_service import AlertService
 
 logger = CustomLogger("ddpui")
 
@@ -357,6 +358,18 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                     # odf might be None!
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
                     notify_users_about_failed_run(org, odf, flow_run, state)
+                elif state == FLOW_RUN_COMPLETED_STATE_NAME:
+                    alert_summary = AlertService.evaluate_alerts_for_completed_flow(
+                        org=org,
+                        deployment_id=deployment_id,
+                        trigger_flow_run_id=flow_run_id,
+                    )
+                    logger.info(
+                        "Completed flow run %s evaluated %s alerts and fired %s",
+                        flow_run_id,
+                        alert_summary["evaluated"],
+                        alert_summary["fired"],
+                    )
 
     except Exception as err:
         logger.error(

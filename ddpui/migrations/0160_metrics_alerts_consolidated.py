@@ -1,0 +1,215 @@
+"""Squashed metrics + alerts migration for the combined repo-native feature."""
+
+import django.db.models.deletion
+import django.utils.timezone
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    replaces = [
+        ("ddpui", "0153_metric_definition_and_annotation"),
+        ("ddpui", "0157_create_alert_models"),
+        ("ddpui", "0158_alerts_metrics_repo_native_foundation"),
+        ("ddpui", "0159_alert_group_message"),
+    ]
+
+    dependencies = [
+        ("ddpui", "0156_add_comment_snapshot_index"),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name="MetricDefinition",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=255)),
+                ("schema_name", models.CharField(max_length=255)),
+                ("table_name", models.CharField(max_length=255)),
+                ("column", models.CharField(max_length=255)),
+                (
+                    "aggregation",
+                    models.CharField(
+                        choices=[
+                            ("sum", "SUM"),
+                            ("avg", "AVG"),
+                            ("count", "COUNT"),
+                            ("min", "MIN"),
+                            ("max", "MAX"),
+                            ("count_distinct", "COUNT DISTINCT"),
+                        ],
+                        max_length=20,
+                    ),
+                ),
+                ("time_column", models.CharField(blank=True, max_length=255, null=True)),
+                (
+                    "time_grain",
+                    models.CharField(
+                        choices=[
+                            ("month", "Month"),
+                            ("quarter", "Quarter"),
+                            ("year", "Year"),
+                        ],
+                        default="month",
+                        max_length=20,
+                    ),
+                ),
+                (
+                    "direction",
+                    models.CharField(
+                        choices=[("increase", "Increase"), ("decrease", "Decrease")],
+                        default="increase",
+                        max_length=20,
+                    ),
+                ),
+                ("target_value", models.FloatField(blank=True, null=True)),
+                ("amber_threshold_pct", models.FloatField(default=80)),
+                ("green_threshold_pct", models.FloatField(default=100)),
+                ("program_tag", models.CharField(blank=True, default="", max_length=255)),
+                ("metric_type_tag", models.CharField(blank=True, default="", max_length=100)),
+                ("trend_periods", models.IntegerField(default=12)),
+                ("display_order", models.IntegerField(default=0)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="created_metrics",
+                        to="ddpui.orguser",
+                    ),
+                ),
+                (
+                    "org",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="metrics",
+                        to="ddpui.org",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["display_order", "name"],
+            },
+        ),
+        migrations.CreateModel(
+            name="Alert",
+            fields=[
+                (
+                    "created_at",
+                    models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
+                ),
+                ("id", models.BigAutoField(primary_key=True, serialize=False)),
+                ("name", models.CharField(max_length=255)),
+                ("query_config", models.JSONField()),
+                ("recipients", models.JSONField(default=list)),
+                ("message", models.TextField()),
+                ("group_message", models.TextField(default="")),
+                ("message_placeholders", models.JSONField(default=list)),
+                ("is_active", models.BooleanField(default=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        db_column="created_by",
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="alerts_created",
+                        to="ddpui.orguser",
+                    ),
+                ),
+                (
+                    "metric",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="alerts",
+                        to="ddpui.metricdefinition",
+                    ),
+                ),
+                (
+                    "org",
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
+                ),
+            ],
+            options={
+                "db_table": "alert",
+                "ordering": ["-updated_at"],
+            },
+        ),
+        migrations.CreateModel(
+            name="MetricAnnotation",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("period_key", models.CharField(max_length=20)),
+                ("rationale", models.TextField(blank=True, default="")),
+                ("quote_text", models.TextField(blank=True, default="")),
+                ("quote_attribution", models.CharField(blank=True, default="", max_length=255)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="created_annotations",
+                        to="ddpui.orguser",
+                    ),
+                ),
+                (
+                    "metric",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="annotations",
+                        to="ddpui.metricdefinition",
+                    ),
+                ),
+            ],
+            options={
+                "unique_together": {("metric", "period_key")},
+            },
+        ),
+        migrations.CreateModel(
+            name="AlertEvaluation",
+            fields=[
+                ("id", models.BigAutoField(primary_key=True, serialize=False)),
+                ("query_config", models.JSONField()),
+                ("query_executed", models.TextField()),
+                ("recipients", models.JSONField(default=list)),
+                ("message", models.TextField(default="")),
+                ("fired", models.BooleanField()),
+                ("rows_returned", models.IntegerField(default=0)),
+                ("result_preview", models.JSONField(default=list)),
+                ("rendered_message", models.TextField(default="")),
+                ("trigger_flow_run_id", models.TextField(blank=True, null=True)),
+                ("error_message", models.TextField(blank=True, null=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "alert",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="evaluations",
+                        to="ddpui.alert",
+                    ),
+                ),
+            ],
+            options={
+                "db_table": "alert_evaluation",
+                "ordering": ["-created_at"],
+            },
+        ),
+    ]

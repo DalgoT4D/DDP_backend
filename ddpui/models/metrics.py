@@ -20,6 +20,11 @@ TIME_GRAIN_CHOICES = [
     ("year", "Year"),
 ]
 
+DIRECTION_CHOICES = [
+    ("increase", "Increase"),
+    ("decrease", "Decrease"),
+]
+
 
 class MetricDefinition(models.Model):
     """
@@ -41,11 +46,10 @@ class MetricDefinition(models.Model):
 
     # Time (optional — skip trend if null)
     time_column = models.CharField(max_length=255, null=True, blank=True)
-    time_grain = models.CharField(
-        max_length=20, choices=TIME_GRAIN_CHOICES, default="month"
-    )
+    time_grain = models.CharField(max_length=20, choices=TIME_GRAIN_CHOICES, default="month")
 
     # Target & RAG
+    direction = models.CharField(max_length=20, choices=DIRECTION_CHOICES, default="increase")
     target_value = models.FloatField(null=True, blank=True)
     amber_threshold_pct = models.FloatField(default=80)  # >= 80% of target = amber
     green_threshold_pct = models.FloatField(default=100)  # >= 100% = green

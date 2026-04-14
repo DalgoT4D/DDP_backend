@@ -5,7 +5,11 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import column, func, and_, or_, cast, Date
 
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
-from ddpui.models.alert import AlertQueryConfig, AlertFilterConfig
+from ddpui.models.alert import (
+    AlertQueryConfig,
+    AlertFilterConfig,
+    AlertMessagePlaceholderConfig,
+)
 
 
 CONDITION_OPERATORS = {
@@ -18,7 +22,10 @@ CONDITION_OPERATORS = {
 }
 
 
-def build_alert_query_builder(config: AlertQueryConfig) -> AggQueryBuilder:
+def build_alert_query_builder(
+    config: AlertQueryConfig,
+    placeholders: list[AlertMessagePlaceholderConfig] | None = None,
+) -> AggQueryBuilder:
     """
     Build an AggQueryBuilder from typed AlertQueryConfig.
 
@@ -28,15 +35,17 @@ def build_alert_query_builder(config: AlertQueryConfig) -> AggQueryBuilder:
     - Wrap it in another subquery for COUNT(*)
 
     Query pattern:
-      SELECT [group_col,] computed
+      SELECT [group_col,] alert_value
       FROM (
-        SELECT [group_col,] AGG(measure_col) AS computed
+        SELECT [group_col,] AGG(measure_col) AS alert_value
         FROM schema.table
         WHERE <filters>
         GROUP BY group_col
       ) AS cte
-      WHERE computed <op> <value>
+      WHERE alert_value <op> <value>
     """
+    placeholders = placeholders or []
+
     # --- Inner query: aggregation + filters ---
     inner_qb = AggQueryBuilder()
     inner_qb.fetch_from(config.table_name, config.schema_name)
@@ -47,8 +56,15 @@ def build_alert_query_builder(config: AlertQueryConfig) -> AggQueryBuilder:
     inner_qb.add_aggregate_column(
         config.measure_column,
         config.aggregation.lower(),
-        "computed",
+        "alert_value",
     )
+
+    for placeholder in placeholders:
+        inner_qb.add_aggregate_column(
+            placeholder.column,
+            placeholder.aggregation.lower(),
+            placeholder.key,
+        )
 
     if config.filters:
         filter_clauses = [_build_filter_clause(f) for f in config.filters]
@@ -69,13 +85,15 @@ def build_alert_query_builder(config: AlertQueryConfig) -> AggQueryBuilder:
     if config.group_by_column:
         outer_qb.add_column(column(config.group_by_column))
 
-    outer_qb.add_column(column("computed"))
+    outer_qb.add_column(column("alert_value"))
+    for placeholder in placeholders:
+        outer_qb.add_column(column(placeholder.key))
 
     op_func = CONDITION_OPERATORS.get(config.condition_operator)
     if not op_func:
         raise ValueError(f"Unsupported condition operator: {config.condition_operator}")
 
-    outer_qb.where_clause(op_func(column("computed"), config.condition_value))
+    outer_qb.where_clause(op_func(column("alert_value"), config.condition_value))
 
     return outer_qb
 

@@ -1,6 +1,6 @@
 """Alert schemas for request/response validation"""
 
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from ninja import Schema, Field
 
@@ -30,6 +30,14 @@ class AlertQueryConfigSchema(Schema):
     condition_value: float
 
 
+class AlertMessagePlaceholderSchema(Schema):
+    """Additional aggregated value used in alert messages."""
+
+    key: str = Field(..., pattern="^[A-Za-z_][A-Za-z0-9_]*$")
+    aggregation: str = Field(..., pattern="^(SUM|AVG|COUNT|MIN|MAX)$")
+    column: Optional[str] = None
+
+
 # --- Request Schemas ---
 
 
@@ -37,27 +45,35 @@ class AlertCreate(Schema):
     """Schema for creating an alert"""
 
     name: str = Field(..., min_length=1, max_length=255)
+    metric_id: Optional[int] = None
     query_config: AlertQueryConfigSchema
-    cron: str = Field(..., min_length=1)
     recipients: List[str] = Field(..., min_length=1)  # at least one email required
-    message: str = Field(..., min_length=1)
+    message: str = ""
+    group_message: str = ""
+    message_placeholders: List[AlertMessagePlaceholderSchema] = []
 
 
 class AlertUpdate(Schema):
     """Schema for updating an alert (all fields optional)"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    metric_id: Optional[int] = None
     query_config: Optional[AlertQueryConfigSchema] = None
-    cron: Optional[str] = None
     recipients: Optional[List[str]] = None
     message: Optional[str] = None
+    group_message: Optional[str] = None
+    message_placeholders: Optional[List[AlertMessagePlaceholderSchema]] = None
     is_active: Optional[bool] = None
 
 
 class AlertTestRequest(Schema):
     """For the Test Alert button — query config only with pagination"""
 
+    metric_id: Optional[int] = None
     query_config: AlertQueryConfigSchema
+    message: str = ""
+    group_message: str = ""
+    message_placeholders: List[AlertMessagePlaceholderSchema] = []
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
 
@@ -70,10 +86,13 @@ class AlertResponse(Schema):
 
     id: int
     name: str
-    query_config: dict
-    cron: str
-    recipients: list
+    metric_id: Optional[int] = None
+    metric_name: Optional[str] = None
+    query_config: AlertQueryConfigSchema
+    recipients: List[str]
     message: str
+    group_message: str = ""
+    message_placeholders: List[AlertMessagePlaceholderSchema] = []
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -92,10 +111,16 @@ class AlertResponse(Schema):
         return cls(
             id=alert.id,
             name=alert.name,
-            query_config=alert.query_config,
-            cron=alert.cron,
+            metric_id=alert.metric_id,
+            metric_name=alert.metric.name if alert.metric_id else None,
+            query_config=AlertQueryConfigSchema(**alert.query_config),
             recipients=alert.recipients,
             message=alert.message,
+            group_message=alert.group_message,
+            message_placeholders=[
+                AlertMessagePlaceholderSchema(**placeholder)
+                for placeholder in (alert.message_placeholders or [])
+            ],
             is_active=alert.is_active,
             created_at=alert.created_at,
             updated_at=alert.updated_at,
@@ -109,14 +134,16 @@ class AlertEvaluationResponse(Schema):
     """Schema for alert evaluation response"""
 
     id: int
-    query_config: dict
+    query_config: AlertQueryConfigSchema
     query_executed: str
-    cron: str
-    recipients: list
+    recipients: List[str]
     num_recipients: int
     message: str
     fired: bool
     rows_returned: int
+    result_preview: List[dict[str, Any]]
+    rendered_message: str
+    trigger_flow_run_id: Optional[str]
     error_message: Optional[str]
     created_at: datetime
 
@@ -124,14 +151,16 @@ class AlertEvaluationResponse(Schema):
     def from_model(cls, evaluation):
         return cls(
             id=evaluation.id,
-            query_config=evaluation.query_config,
+            query_config=AlertQueryConfigSchema(**evaluation.query_config),
             query_executed=evaluation.query_executed,
-            cron=evaluation.cron,
             recipients=evaluation.recipients,
             num_recipients=len(evaluation.recipients) if evaluation.recipients else 0,
             message=evaluation.message,
             fired=evaluation.fired,
             rows_returned=evaluation.rows_returned,
+            result_preview=evaluation.result_preview or [],
+            rendered_message=evaluation.rendered_message,
+            trigger_flow_run_id=evaluation.trigger_flow_run_id,
             error_message=evaluation.error_message,
             created_at=evaluation.created_at,
         )
@@ -142,7 +171,41 @@ class AlertTestResponse(Schema):
 
     would_fire: bool
     total_rows: int
-    results: list
+    results: List[dict[str, Any]]
     page: int
     page_size: int
     query_executed: str
+    rendered_message: str
+
+
+class TriggeredAlertEventResponse(Schema):
+    """Recent fired alert event across the org."""
+
+    id: int
+    alert_id: int
+    alert_name: str
+    metric_id: Optional[int] = None
+    metric_name: Optional[str] = None
+    rows_returned: int
+    num_recipients: int
+    rendered_message: str
+    result_preview: List[dict[str, Any]]
+    trigger_flow_run_id: Optional[str]
+    created_at: datetime
+
+    @classmethod
+    def from_model(cls, evaluation):
+        alert = evaluation.alert
+        return cls(
+            id=evaluation.id,
+            alert_id=alert.id,
+            alert_name=alert.name,
+            metric_id=alert.metric_id,
+            metric_name=alert.metric.name if alert.metric_id else None,
+            rows_returned=evaluation.rows_returned,
+            num_recipients=len(evaluation.recipients) if evaluation.recipients else 0,
+            rendered_message=evaluation.rendered_message,
+            result_preview=evaluation.result_preview or [],
+            trigger_flow_run_id=evaluation.trigger_flow_run_id,
+            created_at=evaluation.created_at,
+        )

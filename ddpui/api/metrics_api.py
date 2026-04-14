@@ -8,6 +8,7 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.metrics import MetricDefinition, MetricAnnotation
+from ddpui.core.alerts.alert_service import AlertService
 from ddpui.core.metrics_service import fetch_metrics_data
 from ddpui.schemas.metric_schema import (
     MetricCreate,
@@ -46,6 +47,7 @@ def list_metrics(request):
             aggregation=m.aggregation,
             time_column=m.time_column,
             time_grain=m.time_grain,
+            direction=m.direction,
             target_value=m.target_value,
             amber_threshold_pct=m.amber_threshold_pct,
             green_threshold_pct=m.green_threshold_pct,
@@ -118,6 +120,7 @@ def create_metric(request, payload: MetricCreate):
         aggregation=payload.aggregation,
         time_column=payload.time_column,
         time_grain=payload.time_grain,
+        direction=payload.direction,
         target_value=payload.target_value,
         amber_threshold_pct=payload.amber_threshold_pct,
         green_threshold_pct=payload.green_threshold_pct,
@@ -137,6 +140,7 @@ def create_metric(request, payload: MetricCreate):
         aggregation=metric.aggregation,
         time_column=metric.time_column,
         time_grain=metric.time_grain,
+        direction=metric.direction,
         target_value=metric.target_value,
         amber_threshold_pct=metric.amber_threshold_pct,
         green_threshold_pct=metric.green_threshold_pct,
@@ -164,10 +168,16 @@ def update_metric(request, metric_id: int, payload: MetricUpdate):
     # Do NOT skip None values — a client sending null for an optional field
     # (e.g. time_column) is intentionally clearing it.
     update_fields = payload.dict(exclude_unset=True)
+    if update_fields.get(
+        "aggregation"
+    ) == "count_distinct" and AlertService.metric_has_linked_alerts(metric):
+        raise HttpError(400, "Linked alerts do not support COUNT DISTINCT metrics")
+
     for field, value in update_fields.items():
         setattr(metric, field, value)
 
     metric.save()
+    AlertService.sync_alerts_for_metric(metric)
 
     return MetricResponse(
         id=metric.id,
@@ -178,6 +188,7 @@ def update_metric(request, metric_id: int, payload: MetricUpdate):
         aggregation=metric.aggregation,
         time_column=metric.time_column,
         time_grain=metric.time_grain,
+        direction=metric.direction,
         target_value=metric.target_value,
         amber_threshold_pct=metric.amber_threshold_pct,
         green_threshold_pct=metric.green_threshold_pct,
@@ -200,6 +211,12 @@ def delete_metric(request, metric_id: int):
         metric = MetricDefinition.objects.get(id=metric_id, org=org)
     except MetricDefinition.DoesNotExist:
         raise HttpError(404, "Metric not found")
+
+    if AlertService.metric_has_linked_alerts(metric):
+        raise HttpError(
+            400,
+            "This metric is linked to one or more alerts. Remove or relink those alerts first.",
+        )
 
     metric.delete()
     return {"success": True}

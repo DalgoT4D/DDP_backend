@@ -38,6 +38,7 @@ def compute_rag_status(
     target_value: Optional[float],
     amber_pct: float,
     green_pct: float,
+    direction: str,
 ) -> tuple:
     """
     Returns (rag_status, achievement_pct).
@@ -50,12 +51,18 @@ def compute_rag_status(
 
     achievement_pct = round((current_value / target_value) * 100, 1)
 
+    if direction == "decrease":
+        if achievement_pct <= green_pct:
+            return "green", achievement_pct
+        if achievement_pct <= amber_pct:
+            return "amber", achievement_pct
+        return "red", achievement_pct
+
     if achievement_pct >= green_pct:
         return "green", achievement_pct
-    elif achievement_pct >= amber_pct:
+    if achievement_pct >= amber_pct:
         return "amber", achievement_pct
-    else:
-        return "red", achievement_pct
+    return "red", achievement_pct
 
 
 def fetch_current_value(
@@ -245,6 +252,7 @@ def fetch_metrics_data(
             metric.target_value,
             metric.amber_threshold_pct,
             metric.green_threshold_pct,
+            metric.direction,
         )
         return {
             "metric_id": metric.id,

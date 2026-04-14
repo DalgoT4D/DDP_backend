@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.metrics import MetricDefinition
 
 
 @dataclass
@@ -58,6 +59,28 @@ class AlertQueryConfig:
         )
 
 
+@dataclass
+class AlertMessagePlaceholderConfig:
+    """Additional aggregated value computed for alert message context."""
+
+    key: str
+    aggregation: str  # SUM, AVG, COUNT, MIN, MAX
+    column: Optional[str] = None  # null for COUNT(*)
+
+    def to_dict(self) -> dict:
+        """Serialize to dict for JSONField storage"""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AlertMessagePlaceholderConfig":
+        """Deserialize from JSONField dict"""
+        return cls(
+            key=data["key"],
+            aggregation=data["aggregation"],
+            column=data.get("column"),
+        )
+
+
 class Alert(models.Model):
     """Alert configuration"""
 
@@ -70,16 +93,22 @@ class Alert(models.Model):
         db_column="created_by",
         related_name="alerts_created",
     )
+    metric = models.ForeignKey(
+        MetricDefinition,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alerts",
+    )
 
     # Typed via AlertQueryConfig dataclass — see get/set methods below
     query_config = models.JSONField()
 
-    # Scheduling — cron expression (same pattern as orchestrate pipelines)
-    cron = models.CharField(max_length=100)
-
     # Delivery
     recipients = models.JSONField(default=list)
     message = models.TextField()
+    group_message = models.TextField(default="")
+    message_placeholders = models.JSONField(default=list)
 
     # Status
     is_active = models.BooleanField(default=True)
@@ -103,6 +132,14 @@ class Alert(models.Model):
         """Serialize typed dataclass into query_config JSON"""
         self.query_config = config.to_dict()
 
+    def get_message_placeholders(self) -> list[AlertMessagePlaceholderConfig]:
+        """Deserialize placeholder configs into typed dataclasses."""
+        return [AlertMessagePlaceholderConfig.from_dict(p) for p in self.message_placeholders or []]
+
+    def set_message_placeholders(self, placeholders: list[AlertMessagePlaceholderConfig]):
+        """Serialize placeholder configs into JSONField storage."""
+        self.message_placeholders = [placeholder.to_dict() for placeholder in placeholders]
+
 
 class AlertEvaluation(models.Model):
     """Log of each alert evaluation — fully self-contained with config + query snapshots"""
@@ -113,13 +150,15 @@ class AlertEvaluation(models.Model):
     # Full snapshot of alert config at evaluation time
     query_config = models.JSONField()
     query_executed = models.TextField()
-    cron = models.CharField(max_length=100, default="")
     recipients = models.JSONField(default=list)
     message = models.TextField(default="")
 
     # Result
     fired = models.BooleanField()
     rows_returned = models.IntegerField(default=0)
+    result_preview = models.JSONField(default=list)
+    rendered_message = models.TextField(default="")
+    trigger_flow_run_id = models.TextField(null=True, blank=True)
 
     # Error tracking
     error_message = models.TextField(null=True, blank=True)
