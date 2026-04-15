@@ -1,6 +1,9 @@
 """PDF export service using Playwright for server-side report rendering"""
 
+import time
+
 from django.conf import settings
+from playwright.sync_api import sync_playwright
 
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -8,8 +11,11 @@ logger = CustomLogger("ddpui.core.reports.pdf_export")
 
 VIEWPORT_WIDTH = 1200
 VIEWPORT_HEIGHT = 800
-PDF_WAIT_TIMEOUT_MS = 2000
-CANVAS_TIMEOUT_MS = 30000
+PDF_SCALE = 0.66
+
+# Seconds to wait after network idle for ECharts to render canvases
+POST_IDLE_WAIT_S = 1
+NETWORK_IDLE_TIMEOUT_MS = 30000
 
 
 class PdfExportService:
@@ -35,8 +41,6 @@ class PdfExportService:
             ValueError: If RENDER_SECRET is not configured
             Exception: If PDF generation fails
         """
-        from playwright.sync_api import sync_playwright
-
         render_secret = getattr(settings, "RENDER_SECRET", None)
         if not render_secret:
             raise ValueError(
@@ -47,41 +51,68 @@ class PdfExportService:
             settings, "FRONTEND_URL", "http://localhost:3001"
         )
         if not frontend_url or str(frontend_url).startswith("/"):
-            frontend_url = "http://127.0.0.1:3001"
+            frontend_url = "http://localhost:3001"
         url = f"{frontend_url.rstrip('/')}/share/report/{share_token}?print=true"
 
         logger.info(f"Generating PDF for snapshot {snapshot_id} from {url}")
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                ],
+            )
             try:
                 page = browser.new_page(
-                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
+                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+                    device_scale_factor=2,
                 )
 
-                # Intercept all requests and inject the render secret header.
-                # This lets the backend's public report endpoints serve data
-                # without the snapshot needing is_public=True.
                 def _inject_render_secret(route):
                     headers = {**route.request.headers, "x-render-secret": render_secret}
                     route.continue_(headers=headers)
 
                 page.route("**/*", _inject_render_secret)
 
-                page.goto(url, wait_until="networkidle")
-                page.wait_for_selector("[data-pdf-ready='true']", timeout=CANVAS_TIMEOUT_MS)
-                try:
-                    page.wait_for_selector("canvas", timeout=CANVAS_TIMEOUT_MS)
-                except Exception:
+                console_messages = []
+                failed_requests = []
+                page.on("console", lambda msg: console_messages.append(f"[{msg.type}] {msg.text}"))
+                page.on(
+                    "requestfailed",
+                    lambda req: failed_requests.append(f"{req.method} {req.url} -> {req.failure}"),
+                )
+                page.on(
+                    "response",
+                    lambda res: (
+                        failed_requests.append(f"{res.request.method} {res.url} -> {res.status}")
+                        if res.status >= 400
+                        else None
+                    ),
+                )
+
+                # Load page fast, then wait for all API calls to finish separately
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+
+                # Brief wait for ECharts to render canvases from received data
+                time.sleep(POST_IDLE_WAIT_S)
+
+                if failed_requests:
                     logger.warning(
-                        f"No canvas found for snapshot {snapshot_id}, proceeding without charts"
+                        f"Failed requests during PDF generation for snapshot {snapshot_id}: "
+                        f"{failed_requests}"
                     )
-                page.wait_for_timeout(PDF_WAIT_TIMEOUT_MS)
 
                 pdf_bytes = page.pdf(
                     format="A4",
                     print_background=True,
-                    scale=1,
+                    scale=PDF_SCALE,
                 )
                 logger.info(f"PDF generated for snapshot {snapshot_id} ({len(pdf_bytes)} bytes)")
                 return pdf_bytes

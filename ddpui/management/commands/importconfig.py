@@ -80,7 +80,7 @@ class Command(BaseCommand):
             name=name,
             destinationDefId=warehousedef_id,
             airbyteConfig=airbyte_config,
-        ).dict()
+        ).model_dump()
 
         response = ngoClient.clientpost("organizations/warehouse/", json=payload)
 
@@ -113,7 +113,7 @@ class Command(BaseCommand):
             name=name,
             sourceDefId=sourceDefId,
             config=config["connectionConfiguration"],
-        ).dict()
+        ).model_dump()
 
         response = ngoClient.clientpost("airbyte/sources/", json=payload)
 
@@ -138,7 +138,7 @@ class Command(BaseCommand):
             sourceId=source_id,
             destinationSchema=config["destinationSchema"],
             streams=streams,
-        ).dict()
+        ).model_dump()
 
         response = ngoClient.clientpost("airbyte/v1/connections/", json=payload, timeout=60)
 

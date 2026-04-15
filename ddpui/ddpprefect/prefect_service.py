@@ -753,7 +753,7 @@ def cancel_queued_manual_job(flow_run_id: str, payload):
 
 
 def get_late_flow_runs(payload: FilterLateFlowRunsRequest) -> list[dict]:
-    res = prefect_post("flow_runs/late", payload.dict())
+    res = prefect_post("flow_runs/late", payload.model_dump())
 
     return res["flow_runs"]
 

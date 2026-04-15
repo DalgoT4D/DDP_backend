@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.db import transaction
 from django.utils import timezone
 
-from ddpui.ddpdbt.dbt_service import setup_local_dbt_workspace
+from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgDbt, OrgWarehouse, TransformType, OrgDataFlowv1
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
@@ -66,7 +66,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
     org_dir = Path(DbtProjectManager.get_org_dir(org))
     org_dir.mkdir(parents=True, exist_ok=True)
 
-    setup_local_dbt_workspace(org, project_name="dbtrepo", default_schema=payload.default_schema)
+    setup_managed_git_workspace(org, project_name="dbtrepo", default_schema=payload.default_schema)
 
     return {"message": f"Project {org.slug} created successfully"}
 
@@ -652,7 +652,7 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
             )
 
         final_op_config = {}
-        final_op_config["config"] = payload.config
+        final_op_config["config"] = payload.config.copy()
         final_op_config["config"]["source_columns"] = payload.source_columns
         if is_multi_input_op:
             # only needed for dbt automation package to compute the output columns
@@ -786,7 +786,7 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
             )
 
         final_op_config = {}
-        final_op_config["config"] = payload.config
+        final_op_config["config"] = payload.config.copy()
         final_op_config["config"]["source_columns"] = payload.source_columns
         if is_multi_input_op:
             # only needed for dbt automation package to compute the output columns

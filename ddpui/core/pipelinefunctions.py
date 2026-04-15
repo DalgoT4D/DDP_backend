@@ -81,7 +81,7 @@ def setup_airbyte_clear_streams_task_config(
         connection_id=org_task.connection_id,
         timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
-        streams=[stream.dict() for stream in streams],
+        streams=[stream.model_dump() for stream in streams],
     )
 
 

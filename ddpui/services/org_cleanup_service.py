@@ -13,6 +13,7 @@ from ddpui.ddpprefect import prefect_service
 
 from ddpui.ddpprefect import AIRBYTESERVER, DBTCLIPROFILE, SECRET
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.git_manager import GitManager, GitManagerError
 
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.custom_logger import CustomLogger
@@ -123,6 +124,34 @@ class OrgCleanupService:
             orgdbt = None
             logger.info("No existing dbt workspace found")
             return
+
+        # delete managed GitHub repository if it exists (before deleting PAT)
+        if (
+            orgdbt
+            and orgdbt.is_repo_managed_by_system
+            and orgdbt.gitrepo_url
+            and orgdbt.gitrepo_access_token_secret
+        ):
+            logger.info(f"will delete managed GitHub repository: {orgdbt.gitrepo_url}")
+            if not self.dry_run:
+                try:
+                    # Get PAT from secrets manager
+                    pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+                    if pat:
+                        # Delete the repository using the static method
+                        GitManager.delete_managed_repository(orgdbt.gitrepo_url, pat)
+                        logger.info(f"deleted managed GitHub repository: {orgdbt.gitrepo_url}")
+                    else:
+                        logger.warning(
+                            "could not retrieve PAT from secrets manager, skipping repository deletion"
+                        )
+
+                except GitManagerError as e:
+                    logger.warning(f"failed to delete managed GitHub repository: {e.message}")
+                    # Continue with cleanup even if GitHub deletion fails
+                except Exception as e:
+                    logger.warning(f"failed to delete managed GitHub repository: {str(e)}")
+                    # Continue with cleanup even if GitHub deletion fails
 
         for secret_block in OrgPrefectBlockv1.objects.filter(org=self.org, block_type=SECRET).all():
             logger.info(f"will delete secret block {secret_block.block_name} from prefect & DB")

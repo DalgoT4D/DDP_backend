@@ -1,7 +1,7 @@
 from ninja import NinjaAPI
 from ninja.errors import ValidationError
 from ninja.responses import Response
-from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from pydantic import ValidationError as PydanticValidationError
 
 from ddpui import auth
 from ddpui.api.airbyte_api import airbyte_router
