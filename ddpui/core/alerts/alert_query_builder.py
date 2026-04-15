@@ -8,7 +8,6 @@ from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.models.alert import (
     AlertQueryConfig,
     AlertFilterConfig,
-    AlertMessagePlaceholderConfig,
 )
 
 
@@ -24,7 +23,6 @@ CONDITION_OPERATORS = {
 
 def build_alert_query_builder(
     config: AlertQueryConfig,
-    placeholders: list[AlertMessagePlaceholderConfig] | None = None,
 ) -> AggQueryBuilder:
     """
     Build an AggQueryBuilder from typed AlertQueryConfig.
@@ -44,8 +42,6 @@ def build_alert_query_builder(
       ) AS cte
       WHERE alert_value <op> <value>
     """
-    placeholders = placeholders or []
-
     # --- Inner query: aggregation + filters ---
     inner_qb = AggQueryBuilder()
     inner_qb.fetch_from(config.table_name, config.schema_name)
@@ -58,13 +54,6 @@ def build_alert_query_builder(
         config.aggregation.lower(),
         "alert_value",
     )
-
-    for placeholder in placeholders:
-        inner_qb.add_aggregate_column(
-            placeholder.column,
-            placeholder.aggregation.lower(),
-            placeholder.key,
-        )
 
     if config.filters:
         filter_clauses = [_build_filter_clause(f) for f in config.filters]
@@ -86,8 +75,6 @@ def build_alert_query_builder(
         outer_qb.add_column(column(config.group_by_column))
 
     outer_qb.add_column(column("alert_value"))
-    for placeholder in placeholders:
-        outer_qb.add_column(column(placeholder.key))
 
     op_func = CONDITION_OPERATORS.get(config.condition_operator)
     if not op_func:

@@ -11,6 +11,7 @@ django.setup()
 
 from ddpui.api.alert_api import create_alert, list_alerts, list_fired_alerts
 from ddpui.api.metrics_api import update_metric, delete_metric
+from ddpui.core.alerts.alert_service import AlertService
 from ddpui.models.alert import Alert, AlertEvaluation, AlertQueryConfig
 from ddpui.models.metrics import MetricDefinition
 from ddpui.models.org import Org
@@ -64,10 +65,11 @@ def create_metric(orguser: OrgUser, **overrides) -> MetricDefinition:
     return MetricDefinition.objects.create(**defaults)
 
 
-def build_alert_payload(metric_id: int | None = None) -> AlertCreate:
+def build_alert_payload(metric_id: int | None = None, metric_rag_level: str | None = None) -> AlertCreate:
     return AlertCreate(
         name="Attendance threshold alert",
         metric_id=metric_id,
+        metric_rag_level=metric_rag_level,
         query_config={
             "schema_name": "wrong_schema",
             "table_name": "wrong_table",
@@ -80,62 +82,53 @@ def build_alert_payload(metric_id: int | None = None) -> AlertCreate:
             "condition_value": 10,
         },
         recipients=["ops@example.com"],
-        message="The following {{group_by_column}} values failed {{alert_name}}.",
-        group_message="{{group_by_value}} {{alert_value}} {{sum_enrolled}}",
-        message_placeholders=[
-            {
-                "key": "sum_enrolled",
-                "aggregation": "SUM",
-                "column": "enrolled",
-            }
-        ],
+        message="Alert body",
+        group_message="",
     )
 
 
 def create_metric_backed_alert(orguser: OrgUser, metric: MetricDefinition) -> Alert:
-    alert = Alert.objects.create(
+    return Alert.objects.create(
         name="Linked alert",
         org=orguser.org,
         created_by=orguser,
         metric=metric,
-        query_config=AlertQueryConfig(
-            schema_name=metric.schema_name,
-            table_name=metric.table_name,
-            aggregation=metric.aggregation.upper(),
-            measure_column=metric.column,
-            group_by_column="district_name",
-            condition_operator="<",
-            condition_value=10,
-        ).to_dict(),
+        metric_rag_level="amber",
+        query_config=AlertService._build_metric_backed_query_config(metric).to_dict(),
         recipients=["ops@example.com"],
         message="Alert body",
-        group_message="{{group_by_value}} {{alert_value}}",
-        message_placeholders=[],
+        group_message="",
     )
-    return alert
 
 
 def test_create_and_list_metric_backed_alert_uses_metric_owned_query_fields(api_request, orguser):
     metric = create_metric(orguser)
 
-    response = create_alert.__wrapped__(api_request, build_alert_payload(metric_id=metric.id))
+    response = create_alert.__wrapped__(
+        api_request,
+        build_alert_payload(metric_id=metric.id, metric_rag_level="red"),
+    )
     alert = Alert.objects.get(id=response["data"]["id"])
     config = alert.get_query_config()
 
     assert response["success"] is True
     assert response["data"]["metric_id"] == metric.id
     assert response["data"]["metric_name"] == metric.name
+    assert response["data"]["metric_rag_level"] == "red"
     assert config.schema_name == metric.schema_name
     assert config.table_name == metric.table_name
     assert config.aggregation == "SUM"
     assert config.measure_column == metric.column
-    assert config.group_by_column == "district_name"
+    assert config.group_by_column is None
+    assert config.condition_operator == "="
+    assert config.condition_value == 0
 
     list_response = list_alerts.__wrapped__(api_request, metric_id=metric.id)
     assert list_response["data"]["total"] == 1
     listed = list_response["data"]["data"][0]
     assert listed["name"] == alert.name
     assert listed["metric_name"] == metric.name
+    assert listed["metric_rag_level"] == "red"
     assert listed["query_config"]["schema_name"] == metric.schema_name
 
 
@@ -179,13 +172,20 @@ def test_fired_alert_history_returns_rendered_message_and_trigger_flow_context(
     AlertEvaluation.objects.create(
         alert=alert,
         query_config=alert.query_config,
-        query_executed="select * from attendance_fact",
+        query_executed="Metric RAG evaluation",
         recipients=alert.recipients,
         message=alert.message,
         fired=True,
-        rows_returned=2,
-        result_preview=[{"district_name": "North", "alert_value": 8, "sum_enrolled": 24}],
-        rendered_message="North attendance: 8, enrolled: 24",
+        rows_returned=1,
+        result_preview=[
+            {
+                "alert_value": 72.0,
+                "rag_status": "amber",
+                "achievement_pct": 72.0,
+                "selected_rag_level": "amber",
+            }
+        ],
+        rendered_message="Attendance metric is amber at 72.0",
         trigger_flow_run_id="flow-run-123",
     )
 
@@ -196,5 +196,6 @@ def test_fired_alert_history_returns_rendered_message_and_trigger_flow_context(
     event = response["data"]["data"][0]
     assert event["alert_id"] == alert.id
     assert event["metric_name"] == metric.name
-    assert event["rendered_message"] == "North attendance: 8, enrolled: 24"
+    assert event["metric_rag_level"] == "amber"
+    assert event["rendered_message"] == "Attendance metric is amber at 72.0"
     assert event["trigger_flow_run_id"] == "flow-run-123"

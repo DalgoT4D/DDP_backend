@@ -1,6 +1,7 @@
 """Alert business logic and CRUD operations"""
 
 from dataclasses import replace
+from typing import Literal
 
 from ddpui.core.alerts.alert_query_builder import (
     build_alert_query_builder,
@@ -22,27 +23,19 @@ from ddpui.models.alert import (
     Alert,
     AlertEvaluation,
     AlertQueryConfig,
-    AlertMessagePlaceholderConfig,
 )
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metrics import MetricDefinition
 from ddpui.models.tasks import DataflowOrgTask, TaskType
+from ddpui.core.metrics_service import compute_rag_status, fetch_current_value
 from ddpui.schemas.alert_schema import AlertCreate, AlertUpdate, AlertTestRequest
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui.core.alerts")
 
-RESERVED_PLACEHOLDER_KEYS = {
-    "alert_name",
-    "alert_value",
-    "metric_name",
-    "table_name",
-    "group_by_column",
-    "group_by_value",
-    "failing_group_count",
-}
+MetricRagLevel = Literal["red", "amber", "green"]
 
 
 class AlertService:
@@ -101,19 +94,24 @@ class AlertService:
         """Create alert from validated schema"""
         config = AlertQueryConfig.from_dict(data.query_config.dict())
         metric = AlertService._resolve_metric(orguser.org, data.metric_id)
-        config = AlertService._apply_metric_to_query_config(config, metric)
-        placeholders = AlertService._build_message_placeholders(data.message_placeholders)
+        metric_rag_level = data.metric_rag_level
+        AlertService._validate_metric_rag_configuration(metric, metric_rag_level, creating=True)
+        config = (
+            AlertService._build_metric_backed_query_config(metric)
+            if metric and metric_rag_level
+            else AlertService._apply_metric_to_query_config(config, metric)
+        )
 
         alert = Alert.objects.create(
             name=data.name,
             org=orguser.org,
             created_by=orguser,
             metric=metric,
+            metric_rag_level=metric_rag_level,
             query_config=config.to_dict(),
             recipients=data.recipients,
             message=data.message,
             group_message=data.group_message,
-            message_placeholders=[placeholder.to_dict() for placeholder in placeholders],
         )
         return alert
 
@@ -129,10 +127,21 @@ class AlertService:
         if data.query_config is not None:
             config = AlertQueryConfig.from_dict(data.query_config.dict())
         metric = alert.metric
+        metric_rag_level = alert.metric_rag_level
         if "metric_id" in payload:
             metric = AlertService._resolve_metric(org, data.metric_id)
             alert.metric = metric
-        config = AlertService._apply_metric_to_query_config(config, metric)
+            if metric is None:
+                metric_rag_level = None
+        if "metric_rag_level" in payload:
+            metric_rag_level = data.metric_rag_level
+        AlertService._validate_metric_rag_configuration(metric, metric_rag_level, creating=False)
+        config = (
+            AlertService._build_metric_backed_query_config(metric)
+            if metric and metric_rag_level
+            else AlertService._apply_metric_to_query_config(config, metric)
+        )
+        alert.metric_rag_level = metric_rag_level
         alert.set_query_config(config)
         if data.recipients is not None:
             alert.recipients = data.recipients
@@ -140,9 +149,6 @@ class AlertService:
             alert.message = data.message
         if data.group_message is not None:
             alert.group_message = data.group_message
-        if data.message_placeholders is not None:
-            placeholders = AlertService._build_message_placeholders(data.message_placeholders)
-            alert.message_placeholders = [placeholder.to_dict() for placeholder in placeholders]
         if data.is_active is not None:
             alert.is_active = data.is_active
 
@@ -172,11 +178,22 @@ class AlertService:
         wclient = AlertService._get_warehouse_client(org)
         config = AlertQueryConfig.from_dict(data.query_config.dict())
         metric = AlertService._resolve_metric(org, data.metric_id)
+        metric_rag_level = data.metric_rag_level
+        AlertService._validate_metric_rag_configuration(metric, metric_rag_level, creating=False)
+        if metric and metric_rag_level:
+            return AlertService._test_metric_rag_alert(
+                metric=metric,
+                metric_rag_level=metric_rag_level,
+                org=org,
+                message=data.message,
+                group_message=data.group_message,
+                page=data.page,
+                page_size=data.page_size,
+            )
         config = AlertService._apply_metric_to_query_config(config, metric)
-        placeholders = AlertService._build_message_placeholders(data.message_placeholders)
 
         # Build base query builder
-        base_qb = build_alert_query_builder(config, placeholders)
+        base_qb = build_alert_query_builder(config)
         base_sql = compile_query(base_qb, wclient)
 
         # Count total matching rows
@@ -201,7 +218,6 @@ class AlertService:
             message=data.message,
             group_message=data.group_message,
             rows=normalized_results,
-            placeholders=placeholders,
             table_name=config.table_name,
             metric_name=metric.name if metric else "",
             group_by_column=config.group_by_column,
@@ -225,7 +241,6 @@ class AlertService:
         Evaluate a single alert: build SQL, execute, log result.
         Returns (fired: bool, rows_count: int, rendered_message: str)
         """
-        wclient = AlertService._get_warehouse_client(alert.org)
         if (
             trigger_flow_run_id
             and AlertEvaluation.objects.filter(
@@ -243,10 +258,16 @@ class AlertService:
                 latest.rendered_message if latest else "",
             )
 
-        config: AlertQueryConfig = AlertService.get_effective_query_config(alert)
-        placeholders = alert.get_message_placeholders()
+        if alert.metric_id and alert.metric_rag_level:
+            return AlertService._evaluate_metric_rag_alert(
+                alert,
+                trigger_flow_run_id=trigger_flow_run_id,
+            )
 
-        base_qb = build_alert_query_builder(config, placeholders)
+        wclient = AlertService._get_warehouse_client(alert.org)
+        config: AlertQueryConfig = AlertService.get_effective_query_config(alert)
+
+        base_qb = build_alert_query_builder(config)
         sql = compile_query(base_qb, wclient)
 
         try:
@@ -259,7 +280,6 @@ class AlertService:
                 message=alert.message,
                 group_message=alert.group_message,
                 rows=normalized_results,
-                placeholders=placeholders,
                 table_name=config.table_name,
                 metric_name=alert.metric.name if alert.metric_id else "",
                 group_by_column=config.group_by_column,
@@ -381,6 +401,8 @@ class AlertService:
     @staticmethod
     def get_effective_query_config(alert: Alert) -> AlertQueryConfig:
         """Read an alert query config with current metric-owned fields applied."""
+        if alert.metric and alert.metric_rag_level:
+            return AlertService._build_metric_backed_query_config(alert.metric)
         return AlertService._apply_metric_to_query_config(alert.get_query_config(), alert.metric)
 
     @staticmethod
@@ -416,6 +438,36 @@ class AlertService:
         return metric
 
     @staticmethod
+    def _validate_metric_rag_configuration(
+        metric: MetricDefinition | None,
+        metric_rag_level: MetricRagLevel | None,
+        *,
+        creating: bool,
+    ):
+        """Validate metric-backed RAG alert constraints."""
+        if metric_rag_level and not metric:
+            raise AlertValidationError("Metric RAG alerts require a selected metric")
+        if metric and creating and not metric_rag_level:
+            raise AlertValidationError("Choose Red, Amber, or Green for metric-backed alerts")
+        if metric and metric_rag_level and metric.target_value in (None, 0):
+            raise AlertValidationError("Metric-backed alerts require the metric to have a target")
+
+    @staticmethod
+    def _build_metric_backed_query_config(metric: MetricDefinition) -> AlertQueryConfig:
+        """Store the metric-owned source config for metric-backed alerts."""
+        return AlertQueryConfig(
+            schema_name=metric.schema_name,
+            table_name=metric.table_name,
+            aggregation=metric.aggregation.upper(),
+            measure_column=metric.column,
+            group_by_column=None,
+            filters=[],
+            filter_connector="AND",
+            condition_operator="=",
+            condition_value=0,
+        )
+
+    @staticmethod
     def _apply_metric_to_query_config(
         config: AlertQueryConfig, metric: MetricDefinition | None
     ) -> AlertQueryConfig:
@@ -432,30 +484,119 @@ class AlertService:
         )
 
     @staticmethod
-    def _build_message_placeholders(
-        placeholder_payloads,
-    ) -> list[AlertMessagePlaceholderConfig]:
-        """Validate and convert placeholder payloads into typed configs."""
-        placeholders: list[AlertMessagePlaceholderConfig] = []
-        seen_keys: set[str] = set()
-
-        for payload in placeholder_payloads or []:
-            placeholder = AlertMessagePlaceholderConfig.from_dict(payload.dict())
-            if placeholder.key in RESERVED_PLACEHOLDER_KEYS:
-                raise AlertValidationError(f"Placeholder key '{placeholder.key}' is reserved")
-            if placeholder.key in seen_keys:
-                raise AlertValidationError(f"Duplicate placeholder key '{placeholder.key}'")
-            if placeholder.aggregation != "COUNT" and not placeholder.column:
-                raise AlertValidationError(f"Placeholder '{placeholder.key}' must select a column")
-            seen_keys.add(placeholder.key)
-            placeholders.append(placeholder)
-
-        return placeholders
-
-    @staticmethod
     def _deployment_has_transform_tasks(deployment_id: str) -> bool:
         """Alerts only evaluate after successful transform runs."""
         return DataflowOrgTask.objects.filter(
             dataflow__deployment_id=deployment_id,
             orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD],
         ).exists()
+
+    @staticmethod
+    def _get_metric_rag_state(metric: MetricDefinition, org: Org) -> dict:
+        """Fetch the current metric value and compute its live RAG status."""
+        wclient = AlertService._get_warehouse_client(org)
+        current_value, error = fetch_current_value(wclient, metric)
+        if error:
+            raise AlertWarehouseError(f"Metric evaluation failed: {error}")
+
+        rag_status, achievement_pct = compute_rag_status(
+            current_value,
+            metric.target_value,
+            metric.amber_threshold_pct,
+            metric.green_threshold_pct,
+            metric.direction,
+        )
+
+        return {
+            "alert_value": current_value,
+            "rag_status": rag_status,
+            "achievement_pct": achievement_pct,
+            "target_value": metric.target_value,
+            "selected_rag_level": None,
+        }
+
+    @staticmethod
+    def _build_metric_rag_query_summary(metric: MetricDefinition, metric_rag_level: MetricRagLevel) -> str:
+        """Readable evaluation summary for metric-backed alerts."""
+        return (
+            f"Metric RAG evaluation for {metric.name} "
+            f"({metric.schema_name}.{metric.table_name}) "
+            f"targeting {metric_rag_level}"
+        )
+
+    @staticmethod
+    def _test_metric_rag_alert(
+        *,
+        metric: MetricDefinition,
+        metric_rag_level: MetricRagLevel,
+        org: Org,
+        message: str,
+        group_message: str,
+        page: int,
+        page_size: int,
+    ) -> dict:
+        """Preview a metric-backed alert using the metric's current RAG state."""
+        state = AlertService._get_metric_rag_state(metric, org)
+        state["selected_rag_level"] = metric_rag_level
+        would_fire = state["rag_status"] == metric_rag_level
+        rows = [state]
+        rendered_message = render_alert_message(
+            alert_name="Alert preview",
+            message=message,
+            group_message=group_message,
+            rows=rows,
+            table_name=metric.table_name,
+            metric_name=metric.name,
+            group_by_column=None,
+        )
+
+        return {
+            "would_fire": would_fire,
+            "total_rows": len(rows),
+            "results": rows,
+            "page": page,
+            "page_size": page_size,
+            "query_executed": AlertService._build_metric_rag_query_summary(metric, metric_rag_level),
+            "rendered_message": rendered_message,
+        }
+
+    @staticmethod
+    def _evaluate_metric_rag_alert(
+        alert: Alert,
+        *,
+        trigger_flow_run_id: str | None = None,
+    ) -> tuple[bool, int, str]:
+        """Evaluate a metric-backed alert against the metric's current RAG state."""
+        metric = alert.metric
+        if not metric or not alert.metric_rag_level:
+            raise AlertValidationError("Metric-backed alert is missing its metric or RAG level")
+
+        state = AlertService._get_metric_rag_state(metric, alert.org)
+        state["selected_rag_level"] = alert.metric_rag_level
+        fired = state["rag_status"] == alert.metric_rag_level
+        rows = [state] if fired else []
+        sql = AlertService._build_metric_rag_query_summary(metric, alert.metric_rag_level)
+        rendered_message = render_alert_message(
+            alert_name=alert.name,
+            message=alert.message,
+            group_message=alert.group_message,
+            rows=[state],
+            table_name=metric.table_name,
+            metric_name=metric.name,
+            group_by_column=None,
+        )
+
+        AlertEvaluation.objects.create(
+            alert=alert,
+            query_config=AlertService.get_effective_query_config(alert).to_dict(),
+            query_executed=sql,
+            recipients=alert.recipients,
+            message=alert.message,
+            fired=fired,
+            rows_returned=len(rows),
+            result_preview=rows[:25],
+            rendered_message=rendered_message,
+            trigger_flow_run_id=trigger_flow_run_id,
+        )
+
+        return fired, len(rows), rendered_message

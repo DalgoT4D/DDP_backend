@@ -6,9 +6,6 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-from ddpui.models.alert import AlertMessagePlaceholderConfig
-
-
 TOKEN_PATTERN = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_]*)\s*}}")
 
 
@@ -26,7 +23,6 @@ def render_alert_message(
     message: str,
     group_message: str,
     rows: list[dict[str, Any]],
-    placeholders: list[AlertMessagePlaceholderConfig],
     table_name: str,
     metric_name: str = "",
     group_by_column: str | None = None,
@@ -54,7 +50,6 @@ def render_alert_message(
                 group_by_column=group_by_column,
                 failing_group_count=len(rows),
                 row=rows[0],
-                placeholders=placeholders,
             ),
         )
 
@@ -69,7 +64,7 @@ def render_alert_message(
         ),
     ).strip()
 
-    template = group_message.strip() or _default_group_template(placeholders)
+    template = group_message.strip() or _default_group_template()
     group_sections = [
         _render_template(
             template,
@@ -80,7 +75,6 @@ def render_alert_message(
                 group_by_column=group_by_column,
                 failing_group_count=len(rows),
                 row=row,
-                placeholders=placeholders,
             ),
         ).strip()
         for row in rows
@@ -119,7 +113,6 @@ def _build_row_context(
     group_by_column: str | None,
     failing_group_count: int,
     row: dict[str, Any],
-    placeholders: list[AlertMessagePlaceholderConfig],
 ) -> dict[str, Any]:
     context = _build_global_context(
         alert_name=alert_name,
@@ -130,8 +123,6 @@ def _build_row_context(
     )
     context["alert_value"] = row.get("alert_value", "")
     context["group_by_value"] = row.get(group_by_column, "") if group_by_column else ""
-    for placeholder in placeholders:
-        context[placeholder.key] = row.get(placeholder.key, "")
     return context
 
 
@@ -144,11 +135,9 @@ def _render_template(template: str, context: dict[str, Any]) -> str:
     return TOKEN_PATTERN.sub(replace_token, template or "")
 
 
-def _default_group_template(placeholders: list[AlertMessagePlaceholderConfig]) -> str:
+def _default_group_template() -> str:
     lines = [
         "{{group_by_column}}: {{group_by_value}}",
         "Alert value: {{alert_value}}",
     ]
-    for placeholder in placeholders:
-        lines.append(f"{placeholder.key}: {{{{{placeholder.key}}}}}")
     return "\n".join(lines)

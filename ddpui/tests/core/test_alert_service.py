@@ -12,7 +12,8 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from ddpui.core.alerts.alert_service import AlertService
-from ddpui.models.alert import Alert, AlertEvaluation, AlertMessagePlaceholderConfig, AlertQueryConfig
+from ddpui.models.alert import Alert, AlertEvaluation, AlertQueryConfig
+from ddpui.models.metrics import MetricDefinition
 from ddpui.models.org import Org, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
@@ -35,6 +36,29 @@ def orguser(org, seed_db):
 
 
 @pytest.fixture
+def metric(orguser):
+    return MetricDefinition.objects.create(
+        name="Attendance metric",
+        schema_name="analytics",
+        table_name="attendance_fact",
+        column="attendance",
+        aggregation="avg",
+        direction="increase",
+        time_column=None,
+        time_grain="month",
+        target_value=1.0,
+        amber_threshold_pct=80,
+        green_threshold_pct=100,
+        program_tag="Health",
+        metric_type_tag="Output",
+        trend_periods=12,
+        display_order=0,
+        created_by=orguser,
+        org=orguser.org,
+    )
+
+
+@pytest.fixture
 def active_alert(orguser):
     return Alert.objects.create(
         name="Attendance alert",
@@ -52,7 +76,6 @@ def active_alert(orguser):
         recipients=["ops@example.com"],
         message="Alert body",
         group_message="",
-        message_placeholders=[],
         is_active=True,
     )
 
@@ -128,8 +151,6 @@ def test_evaluate_alert_serializes_decimal_result_preview(orguser, active_alert)
                 {
                     "district_name": "North",
                     "alert_value": Decimal("0.6666666667"),
-                    "avg_numeracy_score": Decimal("51.0000000000"),
-                    "count_rows": 12,
                 }
             ]
 
@@ -145,27 +166,8 @@ def test_evaluate_alert_serializes_decimal_result_preview(orguser, active_alert)
             filters=[],
         )
     )
-    active_alert.set_message_placeholders(
-        [
-            AlertMessagePlaceholderConfig(
-                key="avg_numeracy_score",
-                aggregation="AVG",
-                column="numeracy_score",
-            ),
-            AlertMessagePlaceholderConfig(
-                key="count_rows",
-                aggregation="COUNT",
-                column=None,
-            ),
-        ]
-    )
     active_alert.message = "The following {{group_by_column}} values failed {{alert_name}}."
-    active_alert.group_message = (
-        "District: {{group_by_value}}\n"
-        "Attendance: {{alert_value}}\n"
-        "Numeracy: {{avg_numeracy_score}}\n"
-        "Rows: {{count_rows}}"
-    )
+    active_alert.group_message = "District: {{group_by_value}}\nAttendance: {{alert_value}}"
     active_alert.save()
 
     with patch.object(AlertService, "_get_warehouse_client", return_value=FakeWarehouseClient()):
@@ -186,7 +188,55 @@ def test_evaluate_alert_serializes_decimal_result_preview(orguser, active_alert)
         {
             "district_name": "North",
             "alert_value": "0.6666666667",
-            "avg_numeracy_score": "51.0000000000",
-            "count_rows": 12,
+        }
+    ]
+
+
+def test_metric_rag_alert_fires_when_metric_matches_selected_level(orguser, metric):
+    alert = Alert.objects.create(
+        name="Attendance metric is red",
+        org=orguser.org,
+        created_by=orguser,
+        metric=metric,
+        metric_rag_level="red",
+        query_config=AlertService._build_metric_backed_query_config(metric).to_dict(),
+        recipients=["ops@example.com"],
+        message="{{alert_name}} at {{alert_value}}.",
+        group_message="",
+        is_active=True,
+    )
+
+    with patch.object(
+        AlertService,
+        "_get_metric_rag_state",
+        return_value={
+            "alert_value": 0.7,
+            "rag_status": "red",
+            "achievement_pct": 70.0,
+            "target_value": 1.0,
+            "selected_rag_level": None,
+        },
+    ):
+        fired, rows_count, rendered_message = AlertService.evaluate_alert(
+            alert,
+            trigger_flow_run_id="metric-rag-run",
+        )
+
+    evaluation = AlertEvaluation.objects.get(
+        alert=alert,
+        trigger_flow_run_id="metric-rag-run",
+    )
+
+    assert fired is True
+    assert rows_count == 1
+    assert "Attendance metric is red at 0.7." in rendered_message
+    assert evaluation.rows_returned == 1
+    assert evaluation.result_preview == [
+        {
+            "alert_value": 0.7,
+            "rag_status": "red",
+            "achievement_pct": 70.0,
+            "target_value": 1.0,
+            "selected_rag_level": "red",
         }
     ]

@@ -1,6 +1,6 @@
 """Alert schemas for request/response validation"""
 
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 from datetime import datetime
 from ninja import Schema, Field
 
@@ -30,12 +30,7 @@ class AlertQueryConfigSchema(Schema):
     condition_value: float
 
 
-class AlertMessagePlaceholderSchema(Schema):
-    """Additional aggregated value used in alert messages."""
-
-    key: str = Field(..., pattern="^[A-Za-z_][A-Za-z0-9_]*$")
-    aggregation: str = Field(..., pattern="^(SUM|AVG|COUNT|MIN|MAX)$")
-    column: Optional[str] = None
+MetricRagLevel = Literal["red", "amber", "green"]
 
 
 # --- Request Schemas ---
@@ -46,11 +41,11 @@ class AlertCreate(Schema):
 
     name: str = Field(..., min_length=1, max_length=255)
     metric_id: Optional[int] = None
+    metric_rag_level: Optional[MetricRagLevel] = None
     query_config: AlertQueryConfigSchema
     recipients: List[str] = Field(..., min_length=1)  # at least one email required
     message: str = ""
     group_message: str = ""
-    message_placeholders: List[AlertMessagePlaceholderSchema] = []
 
 
 class AlertUpdate(Schema):
@@ -58,11 +53,11 @@ class AlertUpdate(Schema):
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     metric_id: Optional[int] = None
+    metric_rag_level: Optional[MetricRagLevel] = None
     query_config: Optional[AlertQueryConfigSchema] = None
     recipients: Optional[List[str]] = None
     message: Optional[str] = None
     group_message: Optional[str] = None
-    message_placeholders: Optional[List[AlertMessagePlaceholderSchema]] = None
     is_active: Optional[bool] = None
 
 
@@ -70,10 +65,10 @@ class AlertTestRequest(Schema):
     """For the Test Alert button — query config only with pagination"""
 
     metric_id: Optional[int] = None
+    metric_rag_level: Optional[MetricRagLevel] = None
     query_config: AlertQueryConfigSchema
     message: str = ""
     group_message: str = ""
-    message_placeholders: List[AlertMessagePlaceholderSchema] = []
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
 
@@ -88,11 +83,11 @@ class AlertResponse(Schema):
     name: str
     metric_id: Optional[int] = None
     metric_name: Optional[str] = None
+    metric_rag_level: Optional[MetricRagLevel] = None
     query_config: AlertQueryConfigSchema
     recipients: List[str]
     message: str
     group_message: str = ""
-    message_placeholders: List[AlertMessagePlaceholderSchema] = []
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -113,14 +108,11 @@ class AlertResponse(Schema):
             name=alert.name,
             metric_id=alert.metric_id,
             metric_name=alert.metric.name if alert.metric_id else None,
+            metric_rag_level=alert.metric_rag_level,
             query_config=AlertQueryConfigSchema(**alert.query_config),
             recipients=alert.recipients,
             message=alert.message,
             group_message=alert.group_message,
-            message_placeholders=[
-                AlertMessagePlaceholderSchema(**placeholder)
-                for placeholder in (alert.message_placeholders or [])
-            ],
             is_active=alert.is_active,
             created_at=alert.created_at,
             updated_at=alert.updated_at,
@@ -186,6 +178,7 @@ class TriggeredAlertEventResponse(Schema):
     alert_name: str
     metric_id: Optional[int] = None
     metric_name: Optional[str] = None
+    metric_rag_level: Optional[MetricRagLevel] = None
     rows_returned: int
     num_recipients: int
     rendered_message: str
@@ -202,6 +195,7 @@ class TriggeredAlertEventResponse(Schema):
             alert_name=alert.name,
             metric_id=alert.metric_id,
             metric_name=alert.metric.name if alert.metric_id else None,
+            metric_rag_level=alert.metric_rag_level,
             rows_returned=evaluation.rows_returned,
             num_recipients=len(evaluation.recipients) if evaluation.recipients else 0,
             rendered_message=evaluation.rendered_message,

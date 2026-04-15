@@ -59,28 +59,6 @@ class AlertQueryConfig:
         )
 
 
-@dataclass
-class AlertMessagePlaceholderConfig:
-    """Additional aggregated value computed for alert message context."""
-
-    key: str
-    aggregation: str  # SUM, AVG, COUNT, MIN, MAX
-    column: Optional[str] = None  # null for COUNT(*)
-
-    def to_dict(self) -> dict:
-        """Serialize to dict for JSONField storage"""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "AlertMessagePlaceholderConfig":
-        """Deserialize from JSONField dict"""
-        return cls(
-            key=data["key"],
-            aggregation=data["aggregation"],
-            column=data.get("column"),
-        )
-
-
 class Alert(models.Model):
     """Alert configuration"""
 
@@ -100,6 +78,7 @@ class Alert(models.Model):
         blank=True,
         related_name="alerts",
     )
+    metric_rag_level = models.CharField(max_length=10, null=True, blank=True)
 
     # Typed via AlertQueryConfig dataclass — see get/set methods below
     query_config = models.JSONField()
@@ -108,7 +87,6 @@ class Alert(models.Model):
     recipients = models.JSONField(default=list)
     message = models.TextField()
     group_message = models.TextField(default="")
-    message_placeholders = models.JSONField(default=list)
 
     # Status
     is_active = models.BooleanField(default=True)
@@ -131,14 +109,6 @@ class Alert(models.Model):
     def set_query_config(self, config: AlertQueryConfig):
         """Serialize typed dataclass into query_config JSON"""
         self.query_config = config.to_dict()
-
-    def get_message_placeholders(self) -> list[AlertMessagePlaceholderConfig]:
-        """Deserialize placeholder configs into typed dataclasses."""
-        return [AlertMessagePlaceholderConfig.from_dict(p) for p in self.message_placeholders or []]
-
-    def set_message_placeholders(self, placeholders: list[AlertMessagePlaceholderConfig]):
-        """Serialize placeholder configs into JSONField storage."""
-        self.message_placeholders = [placeholder.to_dict() for placeholder in placeholders]
 
 
 class AlertEvaluation(models.Model):
