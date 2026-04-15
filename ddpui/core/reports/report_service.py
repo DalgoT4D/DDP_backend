@@ -428,7 +428,7 @@ class ReportService:
             query &= Q(created_by__user__email__icontains=created_by_email)
         return list(
             ReportSnapshot.objects.filter(query)
-            .select_related("created_by__user")
+            .select_related("created_by__user", "last_modified_by__user")
             .order_by("-created_at")
         )
 
@@ -447,9 +447,9 @@ class ReportService:
             SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
         """
         try:
-            return ReportSnapshot.objects.select_related("created_by__user").get(
-                id=snapshot_id, org=org
-            )
+            return ReportSnapshot.objects.select_related(
+                "created_by__user", "last_modified_by__user"
+            ).get(id=snapshot_id, org=org)
         except ReportSnapshot.DoesNotExist:
             raise SnapshotNotFoundError(snapshot_id)
 
@@ -514,6 +514,9 @@ class ReportService:
             "created_at": snapshot.created_at,
             "updated_at": snapshot.updated_at,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
+            "last_modified_by": (
+                snapshot.last_modified_by.user.email if snapshot.last_modified_by else None
+            ),
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
             "dashboard_id": snapshot.frozen_dashboard.get("dashboard_id"),
         }
@@ -525,13 +528,16 @@ class ReportService:
         }
 
     @staticmethod
-    def update_snapshot(snapshot_id: int, org: Org, data: SnapshotUpdate) -> ReportSnapshot:
+    def update_snapshot(
+        snapshot_id: int, org: Org, data: SnapshotUpdate, orguser: OrgUser
+    ) -> ReportSnapshot:
         """Update mutable fields on a snapshot.
 
         Args:
             snapshot_id: The snapshot ID to update
             org: The organization to filter by
             data: Validated update payload
+            orguser: The user making the update
 
         Returns:
             ReportSnapshot: The updated snapshot instance
@@ -542,7 +548,8 @@ class ReportService:
         snapshot = ReportService.get_snapshot(snapshot_id, org)
         if data.summary is not None:
             snapshot.summary = data.summary
-            snapshot.save(update_fields=["summary"])
+            snapshot.last_modified_by = orguser
+            snapshot.save(update_fields=["summary", "last_modified_by", "updated_at"])
         return snapshot
 
     @staticmethod
