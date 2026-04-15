@@ -97,6 +97,7 @@ class ChartDataPayload(Schema):
         Dict[str, str]
     ] = None  # {column_name: grain} e.g. {"enrollment_date": "month"}
     show_row_subtotals: bool = False
+    show_column_subtotals: bool = False
     show_grand_total: bool = True
 
     # Customizations

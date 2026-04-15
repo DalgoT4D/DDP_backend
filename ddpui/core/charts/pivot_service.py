@@ -190,6 +190,7 @@ def get_pivot_table_data(
         page=page,
         page_size=page_size,
         metric_display_names=metric_display_names,
+        show_column_subtotals=payload.show_column_subtotals,
     )
 
     result["total_row_groups"] = total_groups

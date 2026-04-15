@@ -208,6 +208,7 @@ def build_chart_data_payload(
         payload.column_dimensions = ec.get("column_dimensions", [])
         payload.column_time_grains = ec.get("column_time_grains", {})
         payload.show_row_subtotals = ec.get("show_row_subtotals", True)
+        payload.show_column_subtotals = ec.get("show_column_subtotals", False)
         payload.show_grand_total = ec.get("show_grand_total", True)
 
     return payload
