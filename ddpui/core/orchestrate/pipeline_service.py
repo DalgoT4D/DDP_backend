@@ -4,7 +4,7 @@ This module encapsulates all pipeline/dataflow-related business logic,
 separating it from the API layer for better testability and maintainability.
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 
 from django.utils import timezone as djantotimezone
 
@@ -12,14 +12,11 @@ from ddpui.models.org import Org, OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, TaskLock, TaskLockStatus, Task
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.ddpprefect import prefect_service, AIRBYTESERVER, DBTCLIPROFILE, DBTCLOUDCREDS
+from ddpui.ddpprefect import prefect_service, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
     PrefectDataFlowCreateSchema4,
     PrefectDataFlowUpdateSchema3,
-    PrefectFlowRunSchema,
-    PrefectGetDataflowsResponse,
-    TaskStateSchema,
 )
 from ddpui.schemas.org_task_schema import TaskParameters, ClearSelectedStreams
 from ddpui.ddpairbyte import airbyte_service
@@ -39,7 +36,6 @@ from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_airbyte_clear_streams_task_config,
     fetch_pipeline_lock_v1,
-    setup_git_clone_shell_task_config,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 
