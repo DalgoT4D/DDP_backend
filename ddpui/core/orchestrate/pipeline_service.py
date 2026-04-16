@@ -166,6 +166,41 @@ class PipelineService:
         return task_configs, map_org_tasks
 
     @staticmethod
+    def _build_sync_tasks(org: Org, connections: List) -> tuple[List[OrgTask], OrgPrefectBlockv1]:
+        """Build Airbyte sync task configurations"""
+
+        sync_orgtasks = []
+        airbyte_server_block = None
+
+        if len(connections) > 0:
+            airbyte_server_block = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=AIRBYTESERVER
+            ).first()
+            if not airbyte_server_block:
+                raise PipelineConfigurationError("airbyte server block not found")
+
+            logger.info("Connections being pushed to the pipeline")
+
+            # only connections with org task will be pushed to pipeline
+            connections.sort(key=lambda conn: conn.seq)
+            for connection in connections:
+                logger.info(connection)
+                org_task = OrgTask.objects.filter(
+                    org=org,
+                    connection_id=connection.id,
+                    task__slug=TASK_AIRBYTESYNC,
+                ).first()
+                if org_task is None:
+                    logger.info(
+                        f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
+                    )
+                    continue
+                # map this org task to dataflow
+                sync_orgtasks.append(org_task)
+
+        return sync_orgtasks, airbyte_server_block
+
+    @staticmethod
     def create_pipeline(org: Org, payload: PrefectDataFlowCreateSchema4) -> Dict[str, Any]:
         """Create a new pipeline/dataflow"""
 
@@ -287,41 +322,6 @@ class PipelineService:
         org_data_flow.save()
 
         return {"success": 1}
-
-    @staticmethod
-    def _build_sync_tasks(org: Org, connections: List) -> tuple[List[OrgTask], OrgPrefectBlockv1]:
-        """Build Airbyte sync task configurations"""
-
-        sync_orgtasks = []
-        airbyte_server_block = None
-
-        if len(connections) > 0:
-            airbyte_server_block = OrgPrefectBlockv1.objects.filter(
-                org=org, block_type=AIRBYTESERVER
-            ).first()
-            if not airbyte_server_block:
-                raise PipelineConfigurationError("airbyte server block not found")
-
-            logger.info("Connections being pushed to the pipeline")
-
-            # only connections with org task will be pushed to pipeline
-            connections.sort(key=lambda conn: conn.seq)
-            for connection in connections:
-                logger.info(connection)
-                org_task = OrgTask.objects.filter(
-                    org=org,
-                    connection_id=connection.id,
-                    task__slug=TASK_AIRBYTESYNC,
-                ).first()
-                if org_task is None:
-                    logger.info(
-                        f"connection id {connection.id} not found in org tasks; ignoring this airbyte sync"
-                    )
-                    continue
-                # map this org task to dataflow
-                sync_orgtasks.append(org_task)
-
-        return sync_orgtasks, airbyte_server_block
 
     @staticmethod
     def get_pipelines(org: Org) -> List[Dict[str, Any]]:
