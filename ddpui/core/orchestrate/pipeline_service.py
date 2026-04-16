@@ -79,14 +79,101 @@ class PipelineService:
     """Service class for pipeline orchestration business logic"""
 
     @staticmethod
+    def _build_transform_tasks(
+        org: Org, transform_tasks_payload: List, existing_task_configs: List
+    ) -> tuple[List, List[OrgTask]]:
+        """
+        Build transform task configs and collect org tasks for mapping.
+        Resolves transform tasks from payload, auto-adds the appropriate git step,
+        and returns deployment task configs + ordered org tasks.
+
+        Returns:
+            tuple of (task_configs, map_org_tasks)
+        """
+        if not transform_tasks_payload:
+            return [], []
+
+        logger.info("Transform tasks being pushed to the pipeline")
+
+        orgdbt = org.dbt
+        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
+
+        dbt_orgtasks = []
+        git_orgtasks = []
+        dbt_cloud_orgtasks = []
+
+        transform_tasks_payload.sort(key=lambda task: task.seq)
+
+        for transform_task in transform_tasks_payload:
+            org_task = OrgTask.objects.filter(uuid=transform_task.uuid, org=org).first()
+            if org_task is None:
+                raise PipelineValidationError(
+                    f"transform task with uuid {transform_task.uuid} not found"
+                )
+
+            if org_task.task.type == TaskType.DBT:
+                dbt_orgtasks.append(org_task)
+            elif org_task.task.type == TaskType.GIT:
+                # Skip git tasks - they should not come from frontend anymore
+                logger.warning(
+                    f"Ignoring git task {org_task.task.slug} from frontend - git tasks are auto-managed"
+                )
+                continue
+            elif org_task.task.type == TaskType.DBTCLOUD:
+                dbt_cloud_orgtasks.append(org_task)
+
+        logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
+        logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
+
+        # Add git step automatically based on workpool type
+        if len(dbt_orgtasks) > 0:
+            if PipelineService._is_workpool_eks(org):
+                logger.info("EKS workpool detected, adding git clone step before DBT tasks")
+                git_clone_orgtask = PipelineService._get_or_create_git_clone_orgtask(org)
+                git_orgtasks.insert(0, git_clone_orgtask)
+            else:
+                logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
+                git_pull_orgtask = PipelineService._get_or_create_git_pull_orgtask(org)
+                git_orgtasks.insert(0, git_pull_orgtask)
+
+        # dbt cli profile block - only needed if we have DBT tasks
+        cli_block = None
+        if len(dbt_orgtasks) > 0:
+            cli_block = orgdbt.cli_profile_block if orgdbt else None
+            if not cli_block:
+                raise PipelineConfigurationError("dbt cli profile not found")
+
+        # dbt cloud creds block
+        dbt_cloud_creds_block = None
+        if len(dbt_cloud_orgtasks) > 0:
+            dbt_cloud_creds_block = orgdbt.dbtcloud_creds_block if orgdbt else None
+            if not dbt_cloud_creds_block:
+                raise PipelineConfigurationError("dbt cloud creds block not found")
+
+        # get the deployment task configs
+        task_configs, error = pipeline_with_orgtasks(
+            org,
+            git_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks,
+            cli_block=cli_block,
+            dbt_project_params=dbt_project_params,
+            start_seq=len(existing_task_configs),
+            dbt_cloud_creds_block=dbt_cloud_creds_block,
+        )
+        if error:
+            raise PipelineConfigurationError(error)
+
+        map_org_tasks = git_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks
+        return task_configs, map_org_tasks
+
+    @staticmethod
     def create_pipeline(org: Org, payload: PrefectDataFlowCreateSchema4) -> Dict[str, Any]:
         """Create a new pipeline/dataflow"""
 
         if payload.name in [None, ""]:
             raise PipelineValidationError("must provide a name for the flow")
 
-        tasks = []  # Main task array- containing airbyte and dbt task both.
-        map_org_tasks = []  # seq of org tasks to be mapped in pipeline/dataflow
+        tasks = []
+        map_org_tasks = []
 
         # Handle connection sync tasks
         sync_orgtasks, airbyte_server_block = PipelineService._build_sync_tasks(
@@ -104,82 +191,11 @@ class PipelineService:
         logger.info(f"Pipeline has {len(sync_orgtasks)} airbyte syncs")
 
         # Handle transform tasks
-        dbt_project_params = None
-        dbt_orgtasks = []
-        git_orgtasks = []
-        dbt_cloud_orgtasks = []
-        orgdbt = org.dbt
-
-        if payload.transformTasks and len(payload.transformTasks) > 0:
-            logger.info("Transform tasks being pushed to the pipeline")
-
-            # dbt params
-            dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
-
-            payload.transformTasks.sort(key=lambda task: task.seq)
-
-            for transform_task in payload.transformTasks:
-                org_task = OrgTask.objects.filter(uuid=transform_task.uuid, org=org).first()
-                if org_task is None:
-                    raise PipelineValidationError(
-                        f"transform task with uuid {transform_task.uuid} not found"
-                    )
-
-                if org_task.task.type == TaskType.DBT:
-                    dbt_orgtasks.append(org_task)
-                elif org_task.task.type == TaskType.GIT:
-                    # Skip git tasks - they should not come from frontend anymore
-                    logger.warning(
-                        f"Ignoring git task {org_task.task.slug} from frontend - git tasks are auto-managed"
-                    )
-                    continue
-                elif org_task.task.type == TaskType.DBTCLOUD:
-                    dbt_cloud_orgtasks.append(org_task)
-
-            logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
-            logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
-
-            # Add git step automatically based on workpool type
-            if len(dbt_orgtasks) > 0:
-                if PipelineService._is_workpool_eks(org):
-                    logger.info("EKS workpool detected, adding git clone step before DBT tasks")
-                    git_clone_orgtask = PipelineService._get_or_create_git_clone_orgtask(org)
-                    git_orgtasks.insert(0, git_clone_orgtask)
-                else:
-                    logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
-                    git_pull_orgtask = PipelineService._get_or_create_git_pull_orgtask(org)
-                    git_orgtasks.insert(0, git_pull_orgtask)
-
-            # dbt cli profile block - only needed if we have DBT tasks
-            cli_block = None
-            if len(dbt_orgtasks) > 0:
-                cli_block = orgdbt.cli_profile_block if orgdbt else None
-                if not cli_block:
-                    raise PipelineConfigurationError("dbt cli profile not found")
-
-            # dbt cloud creds block
-            dbt_cloud_creds_block = None
-            if len(dbt_cloud_orgtasks) > 0:
-                dbt_cloud_creds_block = orgdbt.dbtcloud_creds_block if orgdbt else None
-                if not dbt_cloud_creds_block:
-                    raise PipelineConfigurationError("dbt cloud creds block not found")
-
-            # get the deployment task configs
-            task_configs, error = pipeline_with_orgtasks(
-                org,
-                git_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks,
-                cli_block=cli_block,
-                dbt_project_params=dbt_project_params,
-                start_seq=len(tasks),
-                dbt_cloud_creds_block=dbt_cloud_creds_block,
-            )
-            if error:
-                raise PipelineConfigurationError(error)
-            tasks += task_configs
-
-            map_org_tasks += git_orgtasks
-            map_org_tasks += dbt_orgtasks
-            map_org_tasks += dbt_cloud_orgtasks
+        transform_task_configs, transform_org_tasks = PipelineService._build_transform_tasks(
+            org, payload.transformTasks, tasks
+        )
+        tasks += transform_task_configs
+        map_org_tasks += transform_org_tasks
 
         # create deployment
         try:
@@ -193,7 +209,7 @@ class PipelineService:
                     deployment_params={"config": {"tasks": tasks, "org_slug": org.slug}},
                     cron=payload.cron,
                 ),
-                org.get_queue_config().scheduled_pipeline_queue,  # queue for running scheduled pipelines
+                org.get_queue_config().scheduled_pipeline_queue,
             )
         except Exception as error:
             logger.exception(error)
@@ -224,14 +240,12 @@ class PipelineService:
     ) -> Dict[str, Any]:
         """Update an existing pipeline"""
 
-        # Find the org data flow
         org_data_flow = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
-
         if not org_data_flow:
             raise PipelineNotFoundError(deployment_id)
 
         tasks = []
-        map_org_tasks = []  # seq of org tasks to be mapped in pipeline/dataflow
+        map_org_tasks = []
 
         # Handle connection sync tasks
         sync_orgtasks, airbyte_server_block = PipelineService._build_sync_tasks(
@@ -249,79 +263,11 @@ class PipelineService:
         logger.info(f"Updating pipeline to have {len(sync_orgtasks)} airbyte syncs")
 
         # Handle transform tasks
-        dbt_project_params = None
-        dbt_orgtasks = []
-        git_orgtasks = []
-        dbt_cloud_orgtasks = []
-        orgdbt = org.dbt
-
-        if payload.transformTasks and len(payload.transformTasks) > 0:
-            logger.info("Transform tasks being pushed to the pipeline")
-
-            # dbt params
-            dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
-
-            payload.transformTasks.sort(key=lambda task: task.seq)
-
-            for transform_task in payload.transformTasks:
-                org_task = OrgTask.objects.filter(uuid=transform_task.uuid, org=org).first()
-                if org_task is None:
-                    raise PipelineValidationError(
-                        f"transform task with uuid {transform_task.uuid} not found"
-                    )
-
-                if org_task.task.type == TaskType.DBT:
-                    dbt_orgtasks.append(org_task)
-                elif org_task.task.type == TaskType.GIT:
-                    # Skip git tasks - they should not come from frontend anymore
-                    logger.warning(
-                        f"Ignoring git task {org_task.task.slug} from frontend - git tasks are auto-managed"
-                    )
-                    continue
-                elif org_task.task.type == TaskType.DBTCLOUD:
-                    dbt_cloud_orgtasks.append(org_task)
-
-            # Add git step automatically based on workpool type
-            if len(dbt_orgtasks) > 0:
-                if PipelineService._is_workpool_eks(org):
-                    logger.info("EKS workpool detected, adding git clone step before DBT tasks")
-                    git_clone_orgtask = PipelineService._get_or_create_git_clone_orgtask(org)
-                    git_orgtasks.insert(0, git_clone_orgtask)
-                else:
-                    logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
-                    git_pull_orgtask = PipelineService._get_or_create_git_pull_orgtask(org)
-                    git_orgtasks.insert(0, git_pull_orgtask)
-
-            # dbt cli profile block - only needed if we have DBT tasks
-            cli_block = None
-            if len(dbt_orgtasks) > 0:
-                cli_block = orgdbt.cli_profile_block if orgdbt else None
-                if not cli_block:
-                    raise PipelineConfigurationError("dbt cli profile not found")
-
-            # dbt cloud creds block
-            dbt_cloud_creds_block = None
-            if len(dbt_cloud_orgtasks) > 0:
-                dbt_cloud_creds_block = orgdbt.dbtcloud_creds_block if orgdbt else None
-                if not dbt_cloud_creds_block:
-                    raise PipelineConfigurationError("dbt cloud creds block not found")
-
-            # get the deployment task configs
-            task_configs, error = pipeline_with_orgtasks(
-                org,
-                git_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks,
-                cli_block=cli_block,
-                dbt_project_params=dbt_project_params,
-                start_seq=len(tasks),
-                dbt_cloud_creds_block=dbt_cloud_creds_block,
-            )
-            if error:
-                raise PipelineConfigurationError(error)
-            tasks += task_configs
-
-            map_org_tasks += git_orgtasks
-            map_org_tasks += dbt_orgtasks
-            map_org_tasks += dbt_cloud_orgtasks
+        transform_task_configs, transform_org_tasks = PipelineService._build_transform_tasks(
+            org, payload.transformTasks, tasks
+        )
+        tasks += transform_task_configs
+        map_org_tasks += transform_org_tasks
 
         # update deployment
         payload.deployment_params = {"config": {"tasks": tasks, "org_slug": org.slug}}
@@ -331,10 +277,8 @@ class PipelineService:
             logger.exception(error)
             raise PipelineServiceError("failed to update a pipeline") from error
 
-        # Delete mapping
+        # Delete mapping and re-map orgtasks to dataflow
         DataflowOrgTask.objects.filter(dataflow=org_data_flow).delete()
-
-        # re-map orgtasks to dataflow
         for idx, org_task in enumerate(map_org_tasks):
             DataflowOrgTask.objects.create(dataflow=org_data_flow, orgtask=org_task, seq=idx)
 
