@@ -45,7 +45,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowOrgTasks,
     TaskStateSchema,
 )
-from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgDataFlowv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock, TaskType
@@ -926,11 +926,17 @@ def test_post_deployment_set_schedule_failure2(orguser_transform_tasks):
 def test_post_deployment_set_schedule_failure3(orguser_transform_tasks):
     """tests failure in setting schedule for dataflow due to error from prefect"""
     request = mock_request(orguser_transform_tasks)
+    org = orguser_transform_tasks.org
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org, name="test-flow", deployment_name="test-deploy", deployment_id="deployment-id"
+    )
 
     with pytest.raises(HttpError) as excinfo:
         post_deployment_set_schedule(request, "deployment-id", "active")
 
     assert str(excinfo.value) == "failed to change flow state"
+    dataflow.delete()
 
 
 @patch.multiple(
@@ -940,10 +946,16 @@ def test_post_deployment_set_schedule_failure3(orguser_transform_tasks):
 def test_post_deployment_set_schedule_success(orguser_transform_tasks):
     """tests success in setting schedule for dataflow"""
     request = mock_request(orguser_transform_tasks)
+    org = orguser_transform_tasks.org
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org, name="test-flow", deployment_name="test-deploy", deployment_id="deployment-id"
+    )
 
     res = post_deployment_set_schedule(request, "deployment-id", "active")
 
     assert res["success"] == 1
+    dataflow.delete()
 
 
 @patch.multiple(
