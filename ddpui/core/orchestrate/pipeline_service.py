@@ -119,10 +119,11 @@ class PipelineService:
             payload.transformTasks.sort(key=lambda task: task.seq)
 
             for transform_task in payload.transformTasks:
-                org_task = OrgTask.objects.filter(uuid=transform_task.uuid).first()
+                org_task = OrgTask.objects.filter(uuid=transform_task.uuid, org=org).first()
                 if org_task is None:
-                    logger.error(f"org task with {transform_task.uuid} not found")
-                    continue
+                    raise PipelineValidationError(
+                        f"transform task with uuid {transform_task.uuid} not found"
+                    )
 
                 if org_task.task.type == TaskType.DBT:
                     dbt_orgtasks.append(org_task)
@@ -263,10 +264,11 @@ class PipelineService:
             payload.transformTasks.sort(key=lambda task: task.seq)
 
             for transform_task in payload.transformTasks:
-                org_task = OrgTask.objects.filter(uuid=transform_task.uuid).first()
+                org_task = OrgTask.objects.filter(uuid=transform_task.uuid, org=org).first()
                 if org_task is None:
-                    logger.error(f"org task with {transform_task.uuid} not found")
-                    continue
+                    raise PipelineValidationError(
+                        f"transform task with uuid {transform_task.uuid} not found"
+                    )
 
                 if org_task.task.type == TaskType.DBT:
                     dbt_orgtasks.append(org_task)
@@ -540,6 +542,10 @@ class PipelineService:
             or (status not in ["active", "inactive"])
         ):
             raise PipelineValidationError("incorrect status value")
+
+        org_data_flow = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
+        if org_data_flow is None:
+            raise PipelineNotFoundError(deployment_id)
 
         try:
             prefect_service.set_deployment_schedule(deployment_id, status)
