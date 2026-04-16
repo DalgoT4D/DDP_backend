@@ -38,6 +38,7 @@ from ddpui.api.public_api import (
     get_public_report_map_data,
     get_public_filter_preview,
     get_public_report_filter_preview,
+    get_public_map_data_overlay,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
@@ -459,6 +460,119 @@ class TestGetPublicReportMapData:
 
             assert status == 404
             assert response.is_valid is False
+
+    def test_count_metric_falls_back_to_geographic_column(self, public_snapshot, seed_db):
+        """COUNT with null value_column substitutes geographic_column into metrics"""
+        captured = {}
+
+        def build_chart_query_side_effect(p, _):
+            captured.update({"metrics": p.metrics})
+            raise Exception("stop")
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.charts_service.build_chart_query",
+            side_effect=build_chart_query_side_effect,
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            request = _make_public_request(
+                body={
+                    "schema_name": "public",
+                    "table_name": "state_population",
+                    "geographic_column": "State",
+                    "value_column": None,
+                    "aggregate_function": "count",
+                }
+            )
+            get_public_report_map_data(request, public_snapshot.public_share_token)
+
+        assert captured["metrics"][0].column == "State"
+        assert captured["metrics"][0].aggregation == "count"
+
+
+# ================================================================================
+# Test get_public_map_data_overlay — COUNT fallback fix
+# ================================================================================
+
+
+@pytest.fixture
+def public_map_dashboard(orguser, org):
+    import uuid
+    dashboard = Dashboard.objects.create(
+        title="Public Map Dashboard",
+        description="Test",
+        dashboard_type="native",
+        grid_columns=12,
+        layout_config=[],
+        components={},
+        created_by=orguser,
+        org=org,
+        is_public=True,
+        public_share_token=str(uuid.uuid4()),
+    )
+    yield dashboard
+    try:
+        dashboard.refresh_from_db()
+        dashboard.delete()
+    except Dashboard.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def map_chart_count(orguser, org):
+    chart = Chart.objects.create(
+        title="Map Count Chart",
+        chart_type="map",
+        schema_name="public",
+        table_name="state_population",
+        extra_config={"metrics": [{"column": None, "aggregation": "count", "alias": "value"}]},
+        created_by=orguser,
+        org=org,
+    )
+    yield chart
+    try:
+        chart.refresh_from_db()
+        chart.delete()
+    except Chart.DoesNotExist:
+        pass
+
+
+class TestGetPublicMapDataOverlay:
+    """Tests for COUNT fallback fix in get_public_map_data_overlay"""
+
+    def test_count_metric_from_extra_config_uses_geographic_column(
+        self, public_map_dashboard, map_chart_count, seed_db
+    ):
+        """COUNT with null column in chart.extra_config falls back to geographic_column"""
+        captured = {}
+
+        def build_chart_query_side_effect(p, _):
+            captured.update({"metrics": p.metrics})
+            raise Exception("stop")
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.charts_service.build_chart_query",
+            side_effect=build_chart_query_side_effect,
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            request = _make_public_request(
+                body={
+                    "schema_name": "public",
+                    "table_name": "state_population",
+                    "geographic_column": "State",
+                    "value_column": None,
+                    "aggregate_function": "count",
+                }
+            )
+            get_public_map_data_overlay(
+                request, public_map_dashboard.public_share_token, map_chart_count.id
+            )
+
+        assert captured["metrics"][0].column == "State"
+        assert captured["metrics"][0].aggregation == "count"
 
 
 # ================================================================================

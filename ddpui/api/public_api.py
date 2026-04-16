@@ -660,19 +660,34 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         if "metrics" not in payload and chart.extra_config.get("metrics"):
             # Transform metrics to use 'value' alias (same as private API)
             original_metrics = chart.extra_config["metrics"]
+            orig_col = original_metrics[0]["column"]
+            orig_agg = original_metrics[0]["aggregation"]
+            # For count without a column, fall back to geographic_column.
+            # Mirrors the useMapDataOverlay hook's COUNT fallback in the frontend.
+            if orig_col is None and orig_agg and str(orig_agg).lower() == "count":
+                orig_col = payload.get("geographic_column")
+                payload["value_column"] = orig_col
             payload["metrics"] = [
                 {
-                    "column": original_metrics[0]["column"],
-                    "aggregation": original_metrics[0]["aggregation"],
+                    "column": orig_col,
+                    "aggregation": orig_agg,
                     "alias": "value",  # Force alias to 'value' like private API
                 }
             ]
         elif "metrics" not in payload:
             # Fallback: create a metric from value_column and aggregate_function
+            agg_function = payload.get("aggregate_function", "sum")
+            value_col = payload.get("value_column")
+            geographic_col = payload.get("geographic_column")
+            # For count without a column, fall back to geographic_column.
+            # Mirrors the useMapDataOverlay hook's COUNT fallback in the frontend.
+            if not value_col and str(agg_function).lower() == "count" and geographic_col:
+                value_col = geographic_col
+                payload["value_column"] = geographic_col
             payload["metrics"] = [
                 {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
+                    "column": value_col,
+                    "aggregation": agg_function,
                     "alias": "value",  # Force alias to 'value' like private API
                 }
             ]
@@ -1293,14 +1308,23 @@ def get_public_report_map_data(request, token: str):
         payload = json.loads(request.body) if request.body else {}
 
         # Add metrics from payload if not provided (same logic as dashboard map endpoint)
-        if "metrics" not in payload and payload.get("value_column"):
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",
-                }
-            ]
+        if "metrics" not in payload:
+            agg_function = payload.get("aggregate_function", "sum")
+            value_col = payload.get("value_column")
+            geographic_col = payload.get("geographic_column")
+            # For count without a column, fall back to geographic_column.
+            # Mirrors the useMapDataOverlay hook's COUNT fallback in the frontend.
+            if not value_col and str(agg_function).lower() == "count" and geographic_col:
+                value_col = geographic_col
+                payload["value_column"] = geographic_col
+            if value_col:
+                payload["metrics"] = [
+                    {
+                        "column": value_col,
+                        "aggregation": agg_function,
+                        "alias": "value",
+                    }
+                ]
 
         map_payload = MapDataOverlayPayload(**payload)
 
