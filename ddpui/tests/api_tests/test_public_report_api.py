@@ -465,11 +465,15 @@ class TestGetPublicReportMapData:
         """COUNT with null value_column substitutes geographic_column into metrics"""
         captured = {}
 
+        def build_chart_query_side_effect(p, _):
+            captured.update({"metrics": p.metrics})
+            raise Exception("stop")
+
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
         ), patch(
             "ddpui.api.public_api.charts_service.build_chart_query",
-            side_effect=lambda p, _: captured.update({"metrics": p.metrics}) or (_ for _ in ()).throw(Exception("stop")),
+            side_effect=build_chart_query_side_effect,
         ):
             mock_ow.filter.return_value.first.return_value = MagicMock()
             request = _make_public_request(
@@ -543,11 +547,15 @@ class TestGetPublicMapDataOverlay:
         """COUNT with null column in chart.extra_config falls back to geographic_column"""
         captured = {}
 
+        def build_chart_query_side_effect(p, _):
+            captured.update({"metrics": p.metrics})
+            raise Exception("stop")
+
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
             "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
         ), patch(
             "ddpui.api.public_api.charts_service.build_chart_query",
-            side_effect=lambda p, _: captured.update({"metrics": p.metrics}) or (_ for _ in ()).throw(Exception("stop")),
+            side_effect=build_chart_query_side_effect,
         ):
             mock_ow.filter.return_value.first.return_value = MagicMock()
             request = _make_public_request(
