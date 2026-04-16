@@ -94,7 +94,7 @@ def poll_for_column_insights(
     Wait for results
     Return results if all queries are completed; else return a status of error
     """
-    requestor_col: RequestorColumnSchema = RequestorColumnSchema.parse_obj(requestor_col)
+    requestor_col: RequestorColumnSchema = RequestorColumnSchema.model_validate(requestor_col)
 
     taskprogress = TaskProgress(task_id, TaskProgressHashPrefix.DATAINSIGHTS, 10 * 60)
     taskprogress.add(

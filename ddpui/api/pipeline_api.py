@@ -347,7 +347,7 @@ def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
         if dataflow is None:
             raise HttpError(403, "You don't have access to this flow run")
 
-        cancellation_params = {"state": payload.state.dict(), "force": str(payload.force)}
+        cancellation_params = {"state": payload.state.model_dump(), "force": str(payload.force)}
         res = prefect_service.cancel_queued_manual_job(flow_run_id, cancellation_params)
     except HttpError as http_error:
         # We handle HttpError separately to ensure the correct message is raised

@@ -204,7 +204,7 @@ class TestSchemaSerialization:
             extra_config={"key": "value"},
         )
 
-        data = chart.dict()
+        data = chart.model_dump()
 
         assert isinstance(data, dict)
         assert data["title"] == "Test"
@@ -214,7 +214,7 @@ class TestSchemaSerialization:
         """Test ChartUpdate dict excludes None values when specified"""
         update = ChartUpdate(title="New Title")
 
-        data = update.dict(exclude_none=True)
+        data = update.model_dump(exclude_none=True)
 
         assert "title" in data
         assert "description" not in data
@@ -227,7 +227,7 @@ class TestSchemaSerialization:
             echarts_config={"type": "bar"},
         )
 
-        data = response.dict()
+        data = response.model_dump()
 
         assert data["data"]["labels"] == ["A", "B"]
         assert data["echarts_config"]["type"] == "bar"

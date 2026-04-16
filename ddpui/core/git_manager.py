@@ -775,8 +775,19 @@ class GitManager:
 
         :return: Branch name or None if remote is empty
         """
+        # Use authenticated URL if PAT is available, same as push/pull
+        if self.pat:
+            result = self._run_command(["git", "remote", "get-url", remote], check=False)
+            remote_ref = (
+                self.generate_oauth_url(result.stdout.strip()) if result.returncode == 0 else remote
+            )
+        else:
+            remote_ref = remote
+
         # Try parsing via git ls-remote --symref
-        result = self._run_command(["git", "ls-remote", "--symref", remote, "HEAD"], check=False)
+        result = self._run_command(
+            ["git", "ls-remote", "--symref", remote_ref, "HEAD"], check=False
+        )
         if result.returncode == 0 and result.stdout:
             for line in result.stdout.splitlines():
                 line = line.strip()

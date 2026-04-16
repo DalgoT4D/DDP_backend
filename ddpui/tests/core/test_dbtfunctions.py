@@ -5,7 +5,7 @@ from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profi
 def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tmpdir):
     """Tests all the success cases"""
     dbt_project_params = DbtProjectParams(
-        org_project_dir=tmpdir,
+        org_project_dir=str(tmpdir),
         dbt_env_dir="/path/to/dbt_venv",
         dbt_repo_dir="/path/to/dbt_repo",
         project_dir="/path/to/project_dir",
@@ -65,7 +65,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
 def test_map_airbyte_destination_spec_to_dbtcli_profile_success_ssl_params(tmpdir):
     """Tests all the success cases"""
     dbt_project_params = DbtProjectParams(
-        org_project_dir=tmpdir,
+        org_project_dir=str(tmpdir),
         dbt_env_dir="/path/to/dbt_venv",
         dbt_repo_dir="/path/to/dbt_repo",
         project_dir="/path/to/project_dir",

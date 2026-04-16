@@ -190,7 +190,7 @@ class TestAirbyteSource:
         """tests retrieval of source definitions"""
         try:
             res = get_source_definitions(workspace_id=test_workspace_id)["sourceDefinitions"]
-            GetSourceDefinitionsTestResponse(__root__=res)
+            GetSourceDefinitionsTestResponse(root=res)
         except ValidationError as error:
             raise ValueError(f"Response validation failed: {error.errors()}") from error
 

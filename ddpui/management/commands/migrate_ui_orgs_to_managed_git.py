@@ -68,14 +68,17 @@ class Command(BaseCommand):
             return
 
         # Find UI organizations that need migration
-        ui_orgdbt_query = OrgDbt.objects.filter(transform_type=TransformType.UI)
+        # The FK is Org.dbt -> OrgDbt, so query from Org side
+        org_query = Org.objects.filter(
+            dbt__isnull=False, dbt__transform_type=TransformType.UI
+        ).select_related("dbt")
 
         if target_org_slug:
-            ui_orgdbt_query = ui_orgdbt_query.filter(org__slug=target_org_slug)
+            org_query = org_query.filter(slug=target_org_slug)
 
-        ui_orgdbts = list(ui_orgdbt_query.select_related("org"))
+        orgs = list(org_query)
 
-        if not ui_orgdbts:
+        if not orgs:
             if target_org_slug:
                 self.stdout.write(
                     self.style.WARNING(f"No UI organization found with slug: {target_org_slug}")
@@ -84,13 +87,13 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS("No UI organizations found to migrate"))
             return
 
-        self.stdout.write(f"Found {len(ui_orgdbts)} UI organization(s) to migrate")
+        self.stdout.write(f"Found {len(orgs)} UI organization(s) to migrate")
 
         success_count = 0
         error_count = 0
 
-        for orgdbt in ui_orgdbts:
-            org = orgdbt.org
+        for org in orgs:
+            orgdbt = org.dbt
             self.stdout.write(f"\\nProcessing organization: {org.name} (slug: {org.slug})")
 
             if dry_run:
@@ -129,7 +132,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Successfully migrated: {success_count}")
         if error_count > 0:
             self.stdout.write(f"  Failed migrations: {error_count}")
-        self.stdout.write(f"  Total processed: {len(ui_orgdbts)}")
+        self.stdout.write(f"  Total processed: {len(orgs)}")
 
         if dry_run:
             self.stdout.write("\\nTo perform actual migration, run without --dry-run flag")
@@ -256,14 +259,39 @@ class Command(BaseCommand):
         except GitManagerError as e:
             raise Exception(f"Failed to set remote: {e.message}") from e
 
-        self.stdout.write(f"    Pushing all existing commits (models, etc.) to managed repo...")
-
-        # Sync local default to remote (push existing commits - THIS PUSHES ALL MODELS!)
+        # Sync .gitignore before committing so it's included in the push
+        self.stdout.write(f"    Syncing .gitignore contents...")
         try:
-            git_manager.sync_local_default_to_remote()
-            self.stdout.write(f"    ✅ Successfully pushed all local commits to managed repository")
+            sync_gitignore_contents(dbt_repo_dir)
+        except Exception as err:
+            logger.error(f"Failed to sync .gitignore contents: {err}")
+            self.stdout.write(f"    Warning: Failed to sync .gitignore: {err}")
+
+        # Commit any uncommitted changes (UI orgs may have model changes not yet committed)
+        self.stdout.write(f"    Committing any uncommitted changes...")
+        try:
+            commit_result = git_manager.commit_changes(
+                message="System: Migration to managed Git repository"
+            )
+            self.stdout.write(f"    {commit_result}")
+        except GitManagerError as e:
+            raise Exception(f"Failed to commit changes: {e.error}") from e
+
+        # Sync local branch name to match remote default branch
+        self.stdout.write(f"    Syncing local branch name with remote...")
+        try:
+            sync_result = git_manager.sync_local_default_to_remote()
+            self.stdout.write(f"    {sync_result}")
         except GitManagerError as e:
             raise Exception(f"Failed to sync local branch with remote: {e.error}") from e
+
+        # Push all commits to the managed repository
+        self.stdout.write(f"    Pushing all commits to managed repo...")
+        try:
+            git_manager.push_changes()
+            self.stdout.write(f"    ✅ Successfully pushed all local commits to managed repository")
+        except GitManagerError as e:
+            raise Exception(f"Failed to push commits to managed repository: {e.error}") from e
 
         self.stdout.write(f"    Saving PAT to secrets manager...")
 
@@ -281,17 +309,7 @@ class Command(BaseCommand):
         self.stdout.write(f"    Setting up Prefect blocks...")
 
         # Set up Prefect blocks (dual storage - AWS + Prefect)
-        update_github_pat_storage(orgdbt, access_token)
-
-        self.stdout.write(f"    Syncing .gitignore contents...")
-
-        # Sync gitignore contents
-        try:
-            sync_gitignore_contents(dbt_repo_dir)
-        except Exception as err:
-            logger.error(f"Failed to sync .gitignore contents: {err}")
-            # Don't fail the migration for gitignore issues
-            self.stdout.write(f"    Warning: Failed to sync .gitignore: {err}")
+        update_github_pat_storage(org, remote_repo_url, access_token)
 
         logger.info(f"Connected git remote for org {org.slug}: {remote_repo_url}")
         self.stdout.write(f"    ✅ Local repository successfully connected to managed remote")

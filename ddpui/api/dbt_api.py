@@ -233,6 +233,7 @@ def get_dbt_workspace(request):
         "target_type": orgdbt.target_type,
         "default_schema": orgdbt.default_schema,
         "transform_type": orgdbt.transform_type,
+        "is_repo_managed_by_system": orgdbt.is_repo_managed_by_system,
     }
 
 
@@ -357,7 +358,7 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
-    run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.dict() if payload else None)
+    run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.model_dump() if payload else None)
 
     return {"task_id": task_id}
 

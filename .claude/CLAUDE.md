@@ -36,7 +36,7 @@ ddpui/
 │
 ├── core/
 │   └── {module}/                    # Feature module (all business logic here)
-│       ├── __init__.py
+│       ├── __init__.py              # Keep empty (no re-exports or __all__)
 │       ├── {module}_service.py      # Business logic and orchestration
 │       ├── {module}_operations.py   # Domain operations (optional)
 │       └── exceptions.py            # Custom exceptions for this feature
@@ -297,7 +297,7 @@ def delete_{module}(request, id: int):
 
 ```
 ddpui/core/{module}/
-├── __init__.py              # Export public interfaces
+├── __init__.py              # Keep empty — do NOT add re-exports or __all__
 ├── {module}_service.py      # Business logic and orchestration
 ├── {module}_operations.py   # Domain-specific operations (optional)
 └── exceptions.py            # Custom exceptions
@@ -1105,15 +1105,9 @@ ddpui/
 
 #### `core/charts/__init__.py`
 ```python
-from .chart_service import ChartService
-from .exceptions import ChartError, ChartNotFoundError, ChartValidationError
-
-__all__ = [
-    "ChartService",
-    "ChartError",
-    "ChartNotFoundError",
-    "ChartValidationError",
-]
+# Keep empty — all imports should use full paths like:
+# from ddpui.core.charts.chart_service import ChartService
+# Do NOT add re-exports or __all__ here.
 ```
 
 #### `exceptions.py`

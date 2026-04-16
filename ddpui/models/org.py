@@ -104,15 +104,6 @@ class OrgDbt(models.Model):
         default=False,
         help_text="True if this repository is created and managed by the system, False if it's a user-owned repository",
     )
-    ownership_transfer_requested = models.BooleanField(
-        default=False,
-        help_text="True if the organization has requested to transfer ownership of the managed repository",
-    )
-    ownership_transfer_requested_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Timestamp when ownership transfer was requested",
-    )
 
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -219,7 +210,7 @@ class Org(models.Model):
             current.edr_queue = update_data.edr_queue
 
         # Store as nested structure
-        self.queue_config = current.dict()
+        self.queue_config = current.model_dump()
         self.save()
 
     def base_plan(self):
