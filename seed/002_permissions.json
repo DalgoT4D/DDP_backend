@@ -582,5 +582,37 @@
             "name": "Can Manage Organization Default Dashboard",
             "slug": "can_manage_org_default_dashboard"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 74,
+        "fields": {
+            "name": "Can View Alerts",
+            "slug": "can_view_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 75,
+        "fields": {
+            "name": "Can Create Alerts",
+            "slug": "can_create_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 76,
+        "fields": {
+            "name": "Can Edit Alerts",
+            "slug": "can_edit_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 77,
+        "fields": {
+            "name": "Can Delete Alerts",
+            "slug": "can_delete_alerts"
+        }
     }
 ]
