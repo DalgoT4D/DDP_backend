@@ -386,11 +386,7 @@ class PipelineService:
                         else False
                     ),
                     "lock": lock,
-                    "queuedFlowRunWaitTime": (
-                        prefect_service.estimate_time_for_next_queued_run_of_dataflow(flow)
-                        if lock and (lock["status"] == TaskLockStatus.QUEUED)
-                        else None
-                    ),
+                    "queuedFlowRunWaitTime": None,
                 }
             )
 
