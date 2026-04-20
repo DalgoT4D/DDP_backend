@@ -121,8 +121,8 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
     ):
         mock_instance = Mock()
 
-        # Make get_schemas raise an exception when it's called
-        mock_instance.get_schemas.side_effect = Exception("get_schemas failed")
+        # Make schema SQL execution raise an exception
+        mock_instance.execute.side_effect = Exception("schema fetch failed")
 
         # Make _get_wclient return the mock instance
         get_wclient_mock.return_value = mock_instance
@@ -130,7 +130,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         with pytest.raises(Exception) as exc:
             sync_sources_for_warehouse_v2(orgdbt.id, warehouse.id, "task-id", "hashkey")
 
-        assert exc.value.args[0] == f"Error syncing sources: get_schemas failed"
+        assert exc.value.args[0] == "Error syncing sources: schema fetch failed"
         add_progress_mock.assert_has_calls(
             [
                 call(
@@ -141,7 +141,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
                 ),
                 call(
                     {
-                        "message": "Error syncing sources: get_schemas failed",
+                        "message": "Error syncing sources: schema fetch failed",
                         "status": TaskProgressStatus.FAILED,
                     }
                 ),
@@ -191,10 +191,14 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
         "ddpui.core.dbtautomation_service._get_wclient",
-    ) as get_wclient_mock:
+    ) as get_wclient_mock, patch(
+        "ddpui.core.dbtautomation_service.list_table_names",
+        side_effect=lambda _client, _wtype, schema: SCHEMAS_TABLES[schema],
+    ):
         mock_instance = Mock()
-        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
-        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+        mock_instance.execute.return_value = [
+            {"schema_name": schema_name} for schema_name in SCHEMAS_TABLES.keys()
+        ]
 
         # Make _get_wclient return the mock instance
         get_wclient_mock.return_value = mock_instance
@@ -306,10 +310,14 @@ def test_sync_sources_v2_with_existing_models_update_columns(orguser: OrgUser, t
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
         "ddpui.core.dbtautomation_service._get_wclient",
-    ) as get_wclient_mock:
+    ) as get_wclient_mock, patch(
+        "ddpui.core.dbtautomation_service.list_table_names",
+        side_effect=lambda _client, _wtype, schema: SCHEMAS_TABLES[schema],
+    ):
         mock_instance = Mock()
-        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
-        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+        mock_instance.execute.return_value = [
+            {"schema_name": schema_name} for schema_name in SCHEMAS_TABLES.keys()
+        ]
         mock_instance.get_table_columns.side_effect = lambda schema, table: [
             {"name": f"{table}_col1"},
             {"name": f"{table}_col2"},
@@ -373,10 +381,14 @@ def test_sync_sources_v2_column_fetch_error_handling(orguser: OrgUser, tmp_path)
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch("os.getenv", return_value=tmp_path), patch(
         "ddpui.core.dbtautomation_service._get_wclient",
-    ) as get_wclient_mock:
+    ) as get_wclient_mock, patch(
+        "ddpui.core.dbtautomation_service.list_table_names",
+        side_effect=lambda _client, _wtype, schema: SCHEMAS_TABLES[schema],
+    ):
         mock_instance = Mock()
-        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
-        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+        mock_instance.execute.return_value = [
+            {"schema_name": schema_name} for schema_name in SCHEMAS_TABLES.keys()
+        ]
         # Simulate error when getting columns
         mock_instance.get_table_columns.side_effect = Exception("Column fetch failed")
 
@@ -417,7 +429,7 @@ def test_sync_sources_v2_empty_warehouse(orguser: OrgUser, tmp_path):
         "ddpui.core.dbtautomation_service._get_wclient",
     ) as get_wclient_mock:
         mock_instance = Mock()
-        mock_instance.get_schemas.return_value = []  # Empty warehouse
+        mock_instance.execute.return_value = []  # Empty warehouse
 
         get_wclient_mock.return_value = mock_instance
 

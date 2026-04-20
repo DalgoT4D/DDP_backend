@@ -7,7 +7,8 @@ from pathlib import Path
 from logging import basicConfig, getLogger, INFO
 from google.cloud import bigquery
 from dotenv import load_dotenv
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 from ddpui.core.dbt_automation import seeds
 
 
@@ -55,7 +56,7 @@ for json_file, tablename in zip(
         }
         schema = os.getenv("TEST_PG_DBSCHEMA_SRC")
 
-        wc_client = get_client(args.warehouse, conn_info)
+        wc_client = WarehouseFactory.connect(conn_info, WarehouseType.POSTGRES)
 
         create_schema_query = f"""
             CREATE SCHEMA IF NOT EXISTS {schema};
@@ -72,9 +73,15 @@ for json_file, tablename in zip(
             TRUNCATE TABLE {schema}."{tablename}";
         """
 
-        wc_client.runcmd(create_schema_query)
-        wc_client.runcmd(create_table_query)
-        wc_client.runcmd(truncate_table_query)
+        logger.info("Starting transaction for schema/table setup and truncate")
+        wc_client.execute_transaction(
+            [
+                (create_schema_query, None),
+                (create_table_query, None),
+                (truncate_table_query, None),
+            ]
+        )
+        logger.info("Completed transaction for schema/table setup and truncate")
 
         """
         INSERT INTO your_table_name (column1, column2, column3, ...)
@@ -82,10 +89,29 @@ for json_file, tablename in zip(
         """
         # seed sample json data into the newly table created
         logger.info("seeding sample json data")
+        insert_query = f"""
+            INSERT INTO {schema}."{tablename}" ({', '.join(columns)})
+            VALUES (:airbyte_ab_id, CAST(:airbyte_data AS jsonb), :airbyte_emitted_at)
+        """
+
+        insert_params = []
         for row in data:
-            # Execute the insert query with the data from the CSV
-            insert_query = f"""INSERT INTO {schema}."{tablename}" ({', '.join(columns)}) VALUES ('{row['_airbyte_ab_id']}', JSON '{row['_airbyte_data']}', '{row['_airbyte_emitted_at']}')"""
-            wc_client.runcmd(insert_query)
+            raw_airbyte_data = row["_airbyte_data"]
+            insert_params.append(
+                {
+                    "airbyte_ab_id": row["_airbyte_ab_id"],
+                    "airbyte_data": (
+                        raw_airbyte_data
+                        if isinstance(raw_airbyte_data, str)
+                        else json.dumps(raw_airbyte_data)
+                    ),
+                    "airbyte_emitted_at": row["_airbyte_emitted_at"],
+                }
+            )
+
+        logger.info("Starting bulk insert transaction for %s rows", len(insert_params))
+        inserted_rows = wc_client.execute_many(insert_query, insert_params)
+        logger.info("Completed bulk insert transaction. rows=%s", inserted_rows)
 
     if args.warehouse == "bigquery":
         logger.info("Found bigquery warehouse")
@@ -93,15 +119,16 @@ for json_file, tablename in zip(
         location = os.getenv("TEST_BG_LOCATION")
         test_dataset = os.getenv("TEST_BG_DATASET_SRC")
 
-        wc_client = get_client(args.warehouse, conn_info)
+        wc_client = WarehouseFactory.connect(conn_info, WarehouseType.BIGQUERY, location)
+        bqclient = bigquery.Client.from_service_account_info(conn_info)
 
         # create the dataset if it does not exist
         dataset = bigquery.Dataset(f"{conn_info['project_id']}.{test_dataset}")
         dataset.location = location
 
-        logger.info("creating the dataset")
-        dataset = wc_client.bqclient.create_dataset(dataset, timeout=30, exists_ok=True)
-        logger.info("created dataset: %s", dataset.dataset_id)
+        logger.info("Executing query: create dataset if not exists")
+        dataset = bqclient.create_dataset(dataset, timeout=30, exists_ok=True)
+        logger.info("Finished query: create dataset if not exists -> %s", dataset.dataset_id)
 
         # create the staging table if its does not exist
         table_schema = [
@@ -113,7 +140,9 @@ for json_file, tablename in zip(
             f"{conn_info['project_id']}.{dataset.dataset_id}.{tablename}",
             schema=table_schema,
         )
-        wc_client.bqclient.create_table(table, exists_ok=True)
+        logger.info("Executing query: create table if not exists")
+        bqclient.create_table(table, exists_ok=True)
+        logger.info("Finished query: create table if not exists")
 
         # truncate data to (re-)seed fresh data
         truncate_table_query = f"""
@@ -121,7 +150,9 @@ for json_file, tablename in zip(
             WHERE true;
         """
 
+        logger.info("Executing query: truncate existing rows")
         wc_client.execute(truncate_table_query)
+        logger.info("Finished query: truncate existing rows")
 
         # seed data
         insert_query = f"""
@@ -136,7 +167,9 @@ for json_file, tablename in zip(
         )
         insert_query += insert_query_values
 
+        logger.info("Executing query: bulk insert rows")
         wc_client.execute(insert_query)
+        logger.info("Finished query: bulk insert rows")
 
 
 wc_client.close()

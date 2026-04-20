@@ -5,7 +5,11 @@ from pathlib import Path
 import math
 import json
 import subprocess
+import shutil
+import yaml
+import pytest
 from logging import basicConfig, getLogger, INFO
+from ddpui.core.dbt_automation import assets
 from ddpui.core.dbt_automation.operations.droprenamecolumns import rename_columns, drop_columns
 from ddpui.core.dbt_automation.operations.flattenjson import flattenjson
 from ddpui.core.dbt_automation.operations.generic import generic_function
@@ -13,7 +17,7 @@ from ddpui.core.dbt_automation.operations.mergeoperations import (
     merge_operations,
 )
 from ddpui.core.dbt_automation.operations.rawsql import generic_sql_function
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbt_automation.operations.syncsources import sync_sources
 from ddpui.core.dbt_automation.operations.flattenairbyte import flatten_operation
@@ -27,10 +31,113 @@ from ddpui.core.dbt_automation.operations.aggregate import aggregate
 from ddpui.core.dbt_automation.operations.casewhen import casewhen
 from ddpui.core.dbt_automation.operations.pivot import pivot
 from ddpui.core.dbt_automation.operations.unpivot import unpivot
+from ddpui.utils.warehouse.client.table_queries import list_table_names
 
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def _load_bigquery_credentials() -> dict:
+    """Load and validate BigQuery credentials for integration tests."""
+    raw_creds = os.getenv("TEST_BG_SERVICEJSON")
+    if not raw_creds:
+        pytest.skip(
+            "Skipping BigQuery tests: TEST_BG_SERVICEJSON credentials not provided",
+            allow_module_level=True,
+        )
+
+    try:
+        creds = json.loads(raw_creds)
+    except json.JSONDecodeError:
+        pytest.skip(
+            "Skipping BigQuery tests: TEST_BG_SERVICEJSON is not valid JSON",
+            allow_module_level=True,
+        )
+
+    required_keys = ("type", "project_id", "private_key", "client_email", "token_uri")
+    missing_keys = [
+        key
+        for key in required_keys
+        if not isinstance(creds.get(key), str) or not creds.get(key).strip()
+    ]
+    if missing_keys:
+        pytest.skip(
+            "Skipping BigQuery tests: TEST_BG_SERVICEJSON missing required keys",
+            allow_module_level=True,
+        )
+
+    # Prevent accidental placeholder credentials from breaking collection.
+    if (
+        creds["project_id"].strip() == "..."
+        or creds["client_email"].strip() == "..."
+        or "\n...\n" in creds["private_key"]
+    ):
+        pytest.skip(
+            "Skipping BigQuery tests: TEST_BG_SERVICEJSON appears to be placeholder data",
+            allow_module_level=True,
+        )
+
+    if creds["type"].strip() != "service_account":
+        pytest.skip(
+            "Skipping BigQuery tests: TEST_BG_SERVICEJSON type must be service_account",
+            allow_module_level=True,
+        )
+
+    return creds
+
+
+TEST_BG_CREDS = _load_bigquery_credentials()
+
+
+def scaffold(config, _warehouse, tmpdir):
+    """Create a dbt project for integration tests and write a bigquery profile."""
+    project_name = config["project_name"]
+    default_schema = config["default_schema"]
+    project_root = Path(tmpdir)
+    dbt_bin = shutil.which("dbt")
+    if not dbt_bin:
+        raise RuntimeError("dbt binary is not available on PATH")
+
+    subprocess.check_call(
+        [dbt_bin, "init", project_name, "--skip-profile-setup"],
+        cwd=project_root,
+    )
+
+    project_dir = project_root / project_name
+
+    example_models_dir = project_dir / "models" / "example"
+    if example_models_dir.exists():
+        shutil.rmtree(example_models_dir)
+
+    assets_module_path = Path(assets.__file__).parent
+    shutil.copy(assets_module_path / "packages.yml", project_dir / "packages.yml")
+    macros_dir = project_dir / "macros"
+    macros_dir.mkdir(exist_ok=True)
+    for sql_file in assets_module_path.glob("*.sql"):
+        shutil.copy(sql_file, macros_dir / sql_file.name)
+
+    service_json = TEST_BG_CREDS
+    profile = {
+        project_name: {
+            "target": "dev",
+            "outputs": {
+                "dev": {
+                    "type": "bigquery",
+                    "method": "service-account-json",
+                    "project": service_json["project_id"],
+                    "dataset": default_schema,
+                    "threads": 4,
+                    "timeout_seconds": 300,
+                    "location": os.environ.get("TEST_BG_LOCATION", "us-central1"),
+                    "priority": "interactive",
+                    "keyfile_json": service_json,
+                }
+            },
+        }
+    }
+    with open(project_dir / "profiles.yml", "w", encoding="utf-8") as profile_file:
+        yaml.safe_dump(profile, profile_file, sort_keys=False)
 
 
 class TestBigqueryOperations:
@@ -39,20 +146,25 @@ class TestBigqueryOperations:
     warehouse = "bigquery"
     test_project_dir = None
 
-    wc_client = get_client(
-        "bigquery",
-        json.loads(os.getenv("TEST_BG_SERVICEJSON")),
-        os.environ.get("TEST_BG_LOCATION"),
+    wc_client = WarehouseFactory.connect(
+        TEST_BG_CREDS, "bigquery", os.environ.get("TEST_BG_LOCATION")
     )
     schema = os.environ.get("TEST_BG_DATASET_SRC")  # source schema where the raw data lies
 
     @staticmethod
     def execute_dbt(cmd: str, select_model: str = None):
         try:
+            dbt_bin = Path(TestBigqueryOperations.test_project_dir) / "venv" / "bin" / "dbt"
+            if not dbt_bin.exists():
+                dbt_path = shutil.which("dbt")
+                if not dbt_path:
+                    raise RuntimeError("dbt binary is not available on PATH")
+                dbt_bin = Path(dbt_path)
+
             select_cli = ["--select", select_model] if select_model is not None else []
             subprocess.check_call(
                 [
-                    Path(TestBigqueryOperations.test_project_dir) / "venv" / "bin" / "dbt",
+                    str(dbt_bin),
                     cmd,
                 ]
                 + select_cli
@@ -75,7 +187,6 @@ class TestBigqueryOperations:
             "project_name": project_name,
             "default_schema": TestBigqueryOperations.schema,
         }
-        # TODO: need to change this
         scaffold(config, TestBigqueryOperations.wc_client, tmpdir)
         TestBigqueryOperations.test_project_dir = Path(tmpdir) / project_name
         TestBigqueryOperations.execute_dbt("deps")
@@ -118,12 +229,13 @@ class TestBigqueryOperations:
         TestBigqueryOperations.execute_dbt("run", "_airbyte_raw_Sheet2")
         logger.info("inside test flatten")
         logger.info(f"inside project directory : {TestBigqueryOperations.test_project_dir}")
-        assert "_airbyte_raw_Sheet1" in TestBigqueryOperations.wc_client.get_tables(
-            "pytest_intermediate"
+        tables = list_table_names(
+            TestBigqueryOperations.wc_client,
+            TestBigqueryOperations.warehouse,
+            "pytest_intermediate",
         )
-        assert "_airbyte_raw_Sheet1" in TestBigqueryOperations.wc_client.get_tables(
-            "pytest_intermediate"
-        )
+        assert "_airbyte_raw_Sheet1" in tables
+        assert "_airbyte_raw_Sheet2" in tables
 
     def test_rename_columns(self):
         """test rename_columns for sample seed data"""

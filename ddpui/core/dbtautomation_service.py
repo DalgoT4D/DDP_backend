@@ -3,6 +3,7 @@ from pathlib import Path
 from collections import deque
 from ninja import Schema
 
+from django.db import transaction
 from django.db.models import Q
 from ninja.errors import HttpError
 from ddpui.core.dbt_automation.operations.arithmetic import arithmetic, arithmetic_dbt_sql
@@ -39,7 +40,11 @@ from ddpui.core.dbt_automation.operations.joins import join, joins_sql
 from ddpui.core.dbt_automation.operations.groupby import groupby, groupby_dbt_sql
 from ddpui.core.dbt_automation.operations.wherefilter import where_filter, where_filter_sql
 from ddpui.core.dbt_automation.operations.mergetables import union_tables, union_tables_sql
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.schema_queries import get_schema_query
+from ddpui.utils.warehouse.client.table_queries import list_table_names
+from ddpui.core.dbt_automation.warehouse_types import WAREHOUSE_SUPPORTED_TYPES
+from ddpui.core.dbt_automation.json_keys_sql import infer_json_keys
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
 from ddpui.core.dbt_automation.operations.replace import replace, replace_dbt_sql
@@ -360,10 +365,15 @@ logger = CustomLogger("ddpui")
 
 def _get_wclient(org_warehouse: OrgWarehouse):
     """Connect to a warehouse and return the client"""
+    logger.info("Initializing unified warehouse client for warehouse type=%s", org_warehouse.wtype)
+
     credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
     if org_warehouse.wtype == "postgres":
         credentials = map_airbyte_keys_to_postgres_keys(credentials)
-    return get_client(org_warehouse.wtype, credentials, org_warehouse.bq_location)
+
+    wclient = WarehouseFactory.connect(credentials, org_warehouse.wtype, org_warehouse.bq_location)
+    logger.info("Using warehouse client implementation=%s", type(wclient).__name__)
+    return wclient
 
 
 def _get_merge_operation_config(
@@ -700,16 +710,56 @@ def sync_sources_for_warehouse_v2(
     try:
         wclient = _get_wclient(org_warehouse)
 
-        create_source_model_for_tables: list[tuple] = []
-        for schema in wclient.get_schemas():
+        logger.info("Warehouse query [1] start: fetch schemas via SQL")
+        schema_query = get_schema_query(org_warehouse.wtype)
+        schema_rows = wclient.execute(schema_query)
+        schemas = [row["schema_name"] for row in schema_rows if row.get("schema_name")]
+        logger.info("Warehouse query [1] end: schema fetch, total=%s", len(schemas))
+
+        create_source_model_for_tables: list[tuple[str, str, list[str] | None]] = []
+        existing_model_updates: list[tuple[OrgDbtModel, list[str]]] = []
+
+        for schema in schemas:
             taskprogress.add(
                 {
                     "message": f"Reading sources for schema {schema} from warehouse",
                     "status": TaskProgressStatus.RUNNING,
                 }
             )
-            logger.info(f"reading sources for schema {schema} for warehouse")
-            for table in wclient.get_tables(schema):
+
+            logger.info("Warehouse query [2] start: fetch tables via SQL schema=%s", schema)
+            tables = list_table_names(wclient, org_warehouse.wtype, schema)
+            logger.info(
+                "Warehouse query [2] end: table fetch schema=%s total=%s",
+                schema,
+                len(tables),
+            )
+
+            for table in tables:
+                table_output_cols = None
+                try:
+                    logger.info(
+                        "Warehouse query [3] start: get_table_columns schema=%s table=%s",
+                        schema,
+                        table,
+                    )
+                    table_output_cols = [
+                        col["name"] for col in wclient.get_table_columns(schema, table)
+                    ]
+                    logger.info(
+                        "Warehouse query [3] end: get_table_columns schema=%s table=%s cols=%s",
+                        schema,
+                        table,
+                        len(table_output_cols),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Error fetching output cols for table %s in schema %s: %s",
+                        table,
+                        schema,
+                        e,
+                    )
+
                 dbtmodel = OrgDbtModel.objects.filter(
                     orgdbt=org_dbt, schema=schema, name=table
                 ).first()
@@ -717,18 +767,9 @@ def sync_sources_for_warehouse_v2(
                     logger.info(
                         f"table {table} in schema {schema} not present as model; will create source"
                     )
-                    create_source_model_for_tables.append((schema, table))
-                else:
-                    # update the cols though
-                    try:
-                        dbtmodel.output_cols = [
-                            col["name"] for col in wclient.get_table_columns(schema, table)
-                        ]
-                        dbtmodel.save()
-                    except Exception as e:
-                        logger.error(
-                            f"Error updating output cols for existing model {dbtmodel.name} in schema {schema}: {e}"
-                        )
+                    create_source_model_for_tables.append((schema, table, table_output_cols))
+                elif table_output_cols is not None:
+                    existing_model_updates.append((dbtmodel, table_output_cols))
 
             taskprogress.add(
                 {
@@ -747,7 +788,7 @@ def sync_sources_for_warehouse_v2(
         )
         raise Exception(f"Error syncing sources: {e}")
 
-    logger.info("synced sources in dbt, creating now")
+    logger.info("synced sources in dbt, persisting now")
     taskprogress.add(
         {
             "message": "Creating sources",
@@ -755,33 +796,46 @@ def sync_sources_for_warehouse_v2(
         }
     )
 
-    for source_schema, source_table in create_source_model_for_tables:
-        orgdbt_source = OrgDbtModel(
-            uuid=uuid.uuid4(),
-            orgdbt=org_dbt,
-            source_name=source_schema,
-            name=source_table,
-            display_name=source_table,
-            schema=source_schema,
-            type=OrgDbtModelType.SOURCE,
-        )
-        try:
-            orgdbt_source.output_cols = [
-                col["name"] for col in wclient.get_table_columns(source_schema, source_table)
-            ]
-        except Exception as e:
-            logger.error(
-                f"Error fetching output cols for source {source_table} in schema {source_schema}: {e}"
-            )
+    try:
+        logger.info("Write transaction start: sync_sources_for_warehouse_v2")
+        with transaction.atomic():
+            for dbtmodel, output_cols in existing_model_updates:
+                dbtmodel.output_cols = output_cols
+                dbtmodel.save()
 
-        orgdbt_source.save()
+            for source_schema, source_table, output_cols in create_source_model_for_tables:
+                orgdbt_source = OrgDbtModel(
+                    uuid=uuid.uuid4(),
+                    orgdbt=org_dbt,
+                    source_name=source_schema,
+                    name=source_table,
+                    display_name=source_table,
+                    schema=source_schema,
+                    type=OrgDbtModelType.SOURCE,
+                )
 
+                if output_cols is not None:
+                    orgdbt_source.output_cols = output_cols
+
+                orgdbt_source.save()
+
+                taskprogress.add(
+                    {
+                        "message": "Added " + source_schema + "." + source_table,
+                        "status": TaskProgressStatus.RUNNING,
+                    }
+                )
+
+        logger.info("Write transaction end: sync_sources_for_warehouse_v2")
+    except Exception as e:
+        logger.error("Write transaction failed in sync_sources_for_warehouse_v2: %s", e)
         taskprogress.add(
             {
-                "message": "Added " + source_schema + "." + source_table,
-                "status": TaskProgressStatus.RUNNING,
+                "message": f"Error syncing sources: {e}",
+                "status": TaskProgressStatus.FAILED,
             }
         )
+        raise Exception(f"Error syncing sources: {e}")
 
     taskprogress.add(
         {
@@ -796,14 +850,31 @@ def sync_sources_for_warehouse_v2(
 
 def warehouse_datatypes(org_warehouse: OrgWarehouse):
     """Get the datatypes of a table in a warehouse"""
-    wclient = _get_wclient(org_warehouse)
-    return wclient.get_column_data_types()
+    logger.info("Warehouse type registry lookup start wtype=%s", org_warehouse.wtype)
+    data_types = WAREHOUSE_SUPPORTED_TYPES.get(org_warehouse.wtype)
+    if data_types is None:
+        raise ValueError(f"Unsupported warehouse type: {org_warehouse.wtype}")
+    return data_types
 
 
 def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
     """Get json keys of a table in warehouse"""
     wclient = _get_wclient(warehouse)
-    return wclient.get_json_columnspec(source_schema, input_name, json_column)
+    logger.info(
+        "Warehouse query start: infer_json_keys schema=%s table=%s column=%s",
+        source_schema,
+        input_name,
+        json_column,
+    )
+    json_keys = infer_json_keys(
+        wclient,
+        warehouse.wtype,
+        source_schema,
+        input_name,
+        json_column,
+    )
+    logger.info("Warehouse query end: infer_json_keys count=%s", len(json_keys))
+    return json_keys
 
 
 def ensure_source_yml_definition_in_project(

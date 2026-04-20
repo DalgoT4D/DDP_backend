@@ -2,6 +2,7 @@
 
 import os
 import argparse
+import json
 from logging import basicConfig, getLogger, INFO
 from pathlib import Path
 
@@ -10,8 +11,9 @@ from dotenv import load_dotenv
 load_dotenv("dbconnection.env")
 
 # pylint:disable=wrong-import-position
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
-from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
+from ddpui.utils.warehouse.client.table_queries import list_table_names
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbtautomation_service import upsert_multiple_sources_to_a_yaml
 
@@ -27,7 +29,11 @@ def sync_sources(config, warehouse: WarehouseInterface, dbtproject: dbtProject):
     input_schema = config["source_schema"]
     source_name = config["source_name"]
 
-    tablenames = warehouse.get_tables(input_schema)
+    warehouse_type = getattr(warehouse, "name", None)
+    if not warehouse_type:
+        raise ValueError("Warehouse client type is unavailable")
+
+    tablenames = list_table_names(warehouse, warehouse_type, input_schema)
 
     # Convert to the new format expected by upsert function
     sources_groups = {source_name: {input_schema: tablenames}}
@@ -45,6 +51,7 @@ if __name__ == "__main__":
     projectdir = os.getenv("DBT_PROJECT_DIR")
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--warehouse", required=True, choices=["postgres", "bigquery"])
     parser.add_argument("--project-dir", required=True)
     parser.add_argument("--source-name", required=True)
     parser.add_argument("--source-schema", required=True)
@@ -55,7 +62,19 @@ if __name__ == "__main__":
 
     config = {"source_schema": args.source_schema, "source_name": args.source_name}
 
-    warehouse = get_client()
+    if args.warehouse == "postgres":
+        conn_info = {
+            "host": os.getenv("DBHOST"),
+            "port": os.getenv("DBPORT"),
+            "username": os.getenv("DBUSER"),
+            "password": os.getenv("DBPASSWORD"),
+            "database": os.getenv("DBNAME"),
+        }
+        warehouse = WarehouseFactory.connect(conn_info, args.warehouse)
+    else:
+        conn_info = json.loads(os.getenv("TEST_BG_SERVICEJSON", "{}"))
+        bq_location = os.getenv("TEST_BG_LOCATION")
+        warehouse = WarehouseFactory.connect(conn_info, args.warehouse, bq_location)
 
     sync_sources(
         config,

@@ -7,6 +7,9 @@ from ddpui.core.charts.charts_service import execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import convert_to_standard_types
+from ddpui.utils.warehouse.client.schema_queries import get_schema_query
+from ddpui.utils.warehouse.client.table_queries import list_table_names
+from ddpui.utils.warehouse.client.table_data_queries import fetch_table_data
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilterType
 from ddpui.models.dbt_workflow import OrgDbtModelType
@@ -29,13 +32,17 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         data = []
         client = dbtautomation_service._get_wclient(org_warehouse)
         if data_type == "tables":
-            data = client.get_tables(kwargs["schema_name"])
+            data = list_table_names(client, org_warehouse.wtype, kwargs["schema_name"])
         elif data_type == "schemas":
-            data = client.get_schemas()
+            schema_query = get_schema_query(org_warehouse.wtype)
+            schema_rows = client.execute(schema_query)
+            data = [row["schema_name"] for row in schema_rows if row.get("schema_name")]
         elif data_type == "table_columns":
             data = client.get_table_columns(kwargs["schema_name"], kwargs["table_name"])
         elif data_type == "table_data":
-            data = client.get_table_data(
+            data = fetch_table_data(
+                client=client,
+                wtype=org_warehouse.wtype,
                 schema=kwargs["schema_name"],
                 table=kwargs["table_name"],
                 limit=kwargs["limit"],

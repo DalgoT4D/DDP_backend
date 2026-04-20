@@ -2,8 +2,6 @@ from ninja.errors import HttpError
 from sqlalchemy.sql.expression import column
 
 from ddpui.models.org import OrgWarehouse
-from ddpui.utils import secretsmanager
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
@@ -25,9 +23,8 @@ def generate_chart_data(
     This can be used by both direct chart generation and saved chart APIs.
     """
     try:
-        credentials = secretsmanager.retrieve_warehouse_credentials(org_warehouse)
-        logger.info(credentials)
-        wclient = WarehouseFactory.connect(credentials, wtype=org_warehouse.wtype)
+        wclient = WarehouseFactory.get_warehouse_client(org_warehouse)
+        logger.info("Using unified warehouse client: %s", type(wclient).__name__)
 
         # Use AggQueryBuilder to build the query
         builder = AggQueryBuilder()
@@ -42,6 +39,7 @@ def generate_chart_data(
         sql = str(stmt)
 
         logger.info(f"Generated SQL query: {sql}")
+        logger.info("Executing chart query via unified warehouse client")
 
         rows = wclient.execute(sql)
 

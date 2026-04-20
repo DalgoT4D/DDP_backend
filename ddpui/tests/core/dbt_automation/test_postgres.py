@@ -2,6 +2,8 @@ import os
 import tempfile
 from unittest.mock import patch, ANY, Mock, MagicMock
 import pytest
+from ddpui.core.dbt_automation.warehouse_types import WAREHOUSE_SUPPORTED_TYPES
+from ddpui.core.dbt_automation.json_sql import json_extract_expression
 from ddpui.utils.warehouse.old_client.postgres import PostgresClient
 
 
@@ -204,14 +206,10 @@ def test_insert_row():
         )
 
 
-def test_json_extract_op():
-    """tests PostgresClient.json_extract_op"""
-    with patch("ddpui.utils.warehouse.old_client.postgres.psycopg2.connect"):
-        client = PostgresClient(
-            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
-        )
-        result = client.json_extract_op("json_column", "json_field", "sql_column")
-        assert result == """"json_column"::json->>'json_field' as \"sql_column\""""
+def test_postgres_json_extract_expression():
+    """tests postgres json extraction expression builder"""
+    result = json_extract_expression("postgres", '"json_column"', "json_field")
+    assert result == "(\"json_column\"::json ->> 'json_field')"
 
 
 def test_close():
@@ -288,28 +286,23 @@ def test_get_total_rows():
         assert result == 10
 
 
-def test_get_column_data_types():
-    """tests PostgresClient.get_column_data_types"""
-    with patch("ddpui.utils.warehouse.old_client.postgres.psycopg2.connect"):
-        client = PostgresClient(
-            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
-        )
-        result = client.get_column_data_types()
-        expected = [
-            "boolean",
-            "char",
-            "character varying",
-            "date",
-            "double precision",
-            "float",
-            "integer",
-            "jsonb",
-            "numeric",
-            "text",
-            "time",
-            "timestamp",
-            "timestamp with time zone",
-            "uuid",
-            "varchar",
-        ]
-        assert result == expected
+def test_postgres_supported_type_registry():
+    """tests postgres supported type registry values"""
+    expected = [
+        "boolean",
+        "char",
+        "character varying",
+        "date",
+        "double precision",
+        "float",
+        "integer",
+        "jsonb",
+        "numeric",
+        "text",
+        "time",
+        "timestamp",
+        "timestamp with time zone",
+        "uuid",
+        "varchar",
+    ]
+    assert WAREHOUSE_SUPPORTED_TYPES["postgres"] == expected

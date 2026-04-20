@@ -170,10 +170,14 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
         TaskProgress, "add", return_value=Mock()
     ) as add_progress_mock, patch(
         "ddpui.core.dbtautomation_service._get_wclient",
-    ) as get_wclient_mock:
+    ) as get_wclient_mock, patch(
+        "ddpui.core.dbtautomation_service.list_table_names",
+        side_effect=lambda _client, _wtype, schema: SCHEMAS_TABLES[schema],
+    ):
         mock_instance = Mock()
-        mock_instance.get_schemas.return_value = SCHEMAS_TABLES.keys()
-        mock_instance.get_tables.side_effect = lambda schema: SCHEMAS_TABLES[schema]
+        mock_instance.execute.return_value = [
+            {"schema_name": schema_name} for schema_name in SCHEMAS_TABLES.keys()
+        ]
 
         # Make _get_wclient return the mock instance
         get_wclient_mock.return_value = mock_instance
