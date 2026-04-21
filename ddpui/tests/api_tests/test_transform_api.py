@@ -113,6 +113,7 @@ def create_canvas_graph(orgdbt):
 
 
 def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
+    """Set up a temporary dbt workspace with mocked dbt init and credential retrieval."""
     project_name = "dbtrepo"
     default_schema = "default"
 
@@ -163,6 +164,7 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
 
 
 def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
+    """Mock warehouse introspection and run source-sync task for test setup."""
     # warehouse schemas and tables
     SCHEMAS_TABLES = WAREHOUSE_DATA
 
@@ -176,7 +178,7 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
     ):
         mock_instance = Mock()
         mock_instance.execute.return_value = [
-            {"schema_name": schema_name} for schema_name in SCHEMAS_TABLES.keys()
+            {"schema_name": schema_name} for schema_name in SCHEMAS_TABLES
         ]
 
         # Make _get_wclient return the mock instance

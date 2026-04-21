@@ -39,10 +39,7 @@ def flattenjson_dbt_sql(
         )
 
     source_columns = [col for col in source_columns if col != json_column]
-
-    dbt_code = (
-        f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
-    )
+    select_expressions = [quote_columnname(col, warehouse.name) for col in source_columns]
 
     sql_columns = make_cleaned_column_names(json_columns_to_copy)
 
@@ -54,7 +51,14 @@ def flattenjson_dbt_sql(
     for json_field, sql_column in zip(json_columns_to_copy, sql_columns):
         json_column_ref = quote_columnname(json_column, warehouse.name)
         extracted_expr = json_extract_expression(warehouse.name, json_column_ref, json_field)
-        dbt_code += f",{extracted_expr} as {quote_columnname(sql_column, warehouse.name)}\n"
+        select_expressions.append(
+            f"{extracted_expr} as {quote_columnname(sql_column, warehouse.name)}"
+        )
+
+    if not select_expressions:
+        raise ValueError("No columns selected for flattenjson output")
+
+    dbt_code = "SELECT\n" + ",\n".join(select_expressions) + "\n"
 
     select_from = source_or_ref(**config["input"])
     if config["input"]["input_type"] == "cte":

@@ -34,7 +34,7 @@ def get_warehouse_data(request, data_type: str, **kwargs):
         if data_type == "tables":
             data = list_table_names(client, org_warehouse.wtype, kwargs["schema_name"])
         elif data_type == "schemas":
-            schema_query = get_schema_query(org_warehouse.wtype)
+            schema_query = get_schema_query(org_warehouse.wtype, org_warehouse.bq_location)
             schema_rows = client.execute(schema_query)
             data = [row["schema_name"] for row in schema_rows if row.get("schema_name")]
         elif data_type == "table_columns":

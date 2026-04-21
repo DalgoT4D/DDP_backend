@@ -1,3 +1,5 @@
+import re
+
 import sqlalchemy.types as types
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
@@ -12,6 +14,28 @@ from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 
 ### CAUTION: workaround for missing datatypes; complex queries on such types using sqlalchemy expression might fail
 _type_map["JSON"] = types.JSON
+
+_BQ_DATASET_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_BQ_PROJECT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
+
+
+def _validate_bq_dataset(dataset: str) -> str:
+    if not _BQ_DATASET_RE.fullmatch(dataset):
+        raise ValueError(f"Invalid bigquery dataset name: {dataset}")
+    return dataset
+
+
+def _validate_bq_project(project: str) -> str:
+    if not _BQ_PROJECT_RE.fullmatch(project):
+        raise ValueError(f"Invalid bigquery project name: {project}")
+    return project
+
+
+def _split_bq_schema(schema: str) -> tuple[str | None, str]:
+    if "." in schema:
+        project, dataset = schema.split(".", 1)
+        return _validate_bq_project(project), _validate_bq_dataset(dataset)
+    return None, _validate_bq_dataset(schema)
 
 
 class BigqueryClient(Warehouse):
@@ -114,11 +138,14 @@ class BigqueryClient(Warehouse):
     ) -> list[dict]:
         """Return paginated rows from a dataset.table for tests and debugging."""
         offset = max((page - 1) * limit, 0)
-        table_ref = f"`{schema}.{table}`"
+        schema_project, dataset = _split_bq_schema(schema)
+        project_name = self.engine.url.database or ""
+        project = schema_project or _validate_bq_project(project_name)
+        table_ref = f"`{project}.{dataset}.{_validate_bq_dataset(table)}`"
         query = f"SELECT * FROM {table_ref}"
 
         if order_by:
-            order_by_quoted = order_by.replace("`", "")
+            order_by_quoted = _validate_bq_dataset(order_by)
             sort_order = "ASC" if order == 1 else "DESC"
             query += f" ORDER BY `{order_by_quoted}` {sort_order}"
 

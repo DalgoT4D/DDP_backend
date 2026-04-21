@@ -6,7 +6,6 @@ This operation will only work in the chain of mergeoperations if its at the firs
 from logging import basicConfig, getLogger, INFO
 
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.core.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 from ddpui.core.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
 from ddpui.core.dbt_automation.utils.tableutils import source_or_ref

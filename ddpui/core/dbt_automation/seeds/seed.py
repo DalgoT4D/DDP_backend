@@ -154,22 +154,27 @@ for json_file, tablename in zip(
         wc_client.execute(truncate_table_query)
         logger.info("Finished query: truncate existing rows")
 
-        # seed data
-        insert_query = f"""
-        INSERT INTO `{conn_info['project_id']}.{dataset.dataset_id}.{tablename}` (_airbyte_ab_id, _airbyte_data, _airbyte_emitted_at)
-        VALUES 
-        """
-        insert_query_values = ",".join(
-            [
-                f"""('{row["_airbyte_ab_id"]}', '{row["_airbyte_data"]}', '{row["_airbyte_emitted_at"]}')"""
-                for row in data
-            ]
-        )
-        insert_query += insert_query_values
+        # seed data using BigQuery row API to avoid SQL string interpolation
+        rows_to_insert = []
+        for row in data:
+            raw_airbyte_data = row["_airbyte_data"]
+            rows_to_insert.append(
+                {
+                    "_airbyte_ab_id": row["_airbyte_ab_id"],
+                    "_airbyte_data": (
+                        raw_airbyte_data
+                        if isinstance(raw_airbyte_data, str)
+                        else json.dumps(raw_airbyte_data)
+                    ),
+                    "_airbyte_emitted_at": row["_airbyte_emitted_at"],
+                }
+            )
 
-        logger.info("Executing query: bulk insert rows")
-        wc_client.execute(insert_query)
-        logger.info("Finished query: bulk insert rows")
+        logger.info("Executing API call: insert_rows_json")
+        insert_errors = bqclient.insert_rows_json(table, rows_to_insert)
+        if insert_errors:
+            raise RuntimeError(f"BigQuery insert_rows_json errors: {insert_errors}")
+        logger.info("Finished API call: insert_rows_json rows=%s", len(rows_to_insert))
 
 
 wc_client.close()

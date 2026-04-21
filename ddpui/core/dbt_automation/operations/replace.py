@@ -42,8 +42,8 @@ def replace_dbt_sql(config: dict, warehouse: WarehouseInterface):
             f"{replace_sql_str} AS {quote_columnname(output_col_name, warehouse.name)}"
         )
 
-        if output_col_name == col_name and col_name in source_columns:
-            source_col_idx = source_columns.index(col_name)
+        if output_col_name in source_columns:
+            source_col_idx = source_columns.index(output_col_name)
             select_expressions[source_col_idx] = replace_sql_str
         else:
             select_expressions.append(replace_sql_str)
@@ -69,7 +69,7 @@ def replace(config: dict, warehouse: WarehouseInterface, project_dir: str):
         dbt_sql = "{{ config(materialized='table', schema='" + config["dest_schema"] + "') }}"
 
     select_statement, output_cols = replace_dbt_sql(config, warehouse)
-    dbt_sql += dbt_sql + "\n" + select_statement
+    dbt_sql += "\n" + select_statement
 
     dbtproject = dbtProject(project_dir)
     dbtproject.ensure_models_dir(config["dest_schema"])

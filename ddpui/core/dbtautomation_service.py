@@ -44,7 +44,10 @@ from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.schema_queries import get_schema_query
 from ddpui.utils.warehouse.client.table_queries import list_table_names
 from ddpui.core.dbt_automation.warehouse_types import WAREHOUSE_SUPPORTED_TYPES
-from ddpui.core.dbt_automation.json_keys_sql import infer_json_keys
+from ddpui.core.dbt_automation.json_keys_sql import (
+    infer_json_keys,
+    validate_json_key_source_identifiers,
+)
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbt_automation.utils.dbtsources import read_sources, read_sources_from_yaml
 from ddpui.core.dbt_automation.operations.replace import replace, replace_dbt_sql
@@ -358,6 +361,10 @@ class SourceYmlDefinition(Schema):
     source_schema: str
     table: str
     sql_path: str
+
+
+class DbtSyncError(Exception):
+    """Raised when warehouse source syncing fails."""
 
 
 logger = CustomLogger("ddpui")
@@ -711,7 +718,7 @@ def sync_sources_for_warehouse_v2(
         wclient = _get_wclient(org_warehouse)
 
         logger.info("Warehouse query [1] start: fetch schemas via SQL")
-        schema_query = get_schema_query(org_warehouse.wtype)
+        schema_query = get_schema_query(org_warehouse.wtype, org_warehouse.bq_location)
         schema_rows = wclient.execute(schema_query)
         schemas = [row["schema_name"] for row in schema_rows if row.get("schema_name")]
         logger.info("Warehouse query [1] end: schema fetch, total=%s", len(schemas))
@@ -759,6 +766,12 @@ def sync_sources_for_warehouse_v2(
                         schema,
                         e,
                     )
+                    taskprogress.add(
+                        {
+                            "message": f"Warning: unable to read columns for {schema}.{table}: {e}",
+                            "status": TaskProgressStatus.RUNNING,
+                        }
+                    )
 
                 dbtmodel = OrgDbtModel.objects.filter(
                     orgdbt=org_dbt, schema=schema, name=table
@@ -786,7 +799,7 @@ def sync_sources_for_warehouse_v2(
                 "status": TaskProgressStatus.FAILED,
             }
         )
-        raise Exception(f"Error syncing sources: {e}")
+        raise DbtSyncError(f"Error syncing sources: {e}") from e
 
     logger.info("synced sources in dbt, persisting now")
     taskprogress.add(
@@ -835,7 +848,7 @@ def sync_sources_for_warehouse_v2(
                 "status": TaskProgressStatus.FAILED,
             }
         )
-        raise Exception(f"Error syncing sources: {e}")
+        raise DbtSyncError(f"Error syncing sources: {e}") from e
 
     taskprogress.add(
         {
@@ -859,6 +872,13 @@ def warehouse_datatypes(org_warehouse: OrgWarehouse):
 
 def json_columnspec(warehouse: OrgWarehouse, source_schema, input_name, json_column):
     """Get json keys of a table in warehouse"""
+    validate_json_key_source_identifiers(
+        warehouse.wtype,
+        source_schema,
+        input_name,
+        json_column,
+    )
+
     wclient = _get_wclient(warehouse)
     logger.info(
         "Warehouse query start: infer_json_keys schema=%s table=%s column=%s",

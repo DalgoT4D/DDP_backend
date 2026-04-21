@@ -8,30 +8,30 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv("dbconnection.env")
-
-# pylint:disable=wrong-import-position
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 from ddpui.utils.warehouse.client.table_queries import list_table_names
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbtautomation_service import upsert_multiple_sources_to_a_yaml
 
+load_dotenv("dbconnection.env")
+
 basicConfig(level=INFO)
 logger = getLogger()
 
 
-def sync_sources(config, warehouse: WarehouseInterface, dbtproject: dbtProject):
+def sync_sources(
+    config,
+    warehouse: WarehouseInterface,
+    dbtproject: dbtProject,
+    warehouse_type: str,
+):
     """
     reads tables from the input_schema to create a dbt sources.yml
     uses the metadata from the existing source definitions, if any
     """
     input_schema = config["source_schema"]
     source_name = config["source_name"]
-
-    warehouse_type = getattr(warehouse, "name", None)
-    if not warehouse_type:
-        raise ValueError("Warehouse client type is unavailable")
 
     tablenames = list_table_names(warehouse, warehouse_type, input_schema)
 
@@ -80,4 +80,5 @@ if __name__ == "__main__":
         config,
         warehouse,
         dbtproject,
+        args.warehouse,
     )

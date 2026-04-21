@@ -203,6 +203,7 @@ class TestBigqueryOperations:
             config,
             TestBigqueryOperations.wc_client,
             dbtProject(TestBigqueryOperations.test_project_dir),
+            TestBigqueryOperations.warehouse,
         )
         sources_yml = (
             Path(TestBigqueryOperations.test_project_dir)

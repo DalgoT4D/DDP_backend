@@ -193,6 +193,7 @@ class TestPostgresOperations:
             config,
             TestPostgresOperations.wc_client,
             dbtProject(TestPostgresOperations.test_project_dir),
+            TestPostgresOperations.warehouse,
         )
         sources_yml = (
             Path(TestPostgresOperations.test_project_dir)

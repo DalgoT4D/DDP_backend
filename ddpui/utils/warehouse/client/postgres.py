@@ -129,11 +129,12 @@ class PostgresClient(Warehouse):
     def get_columnspec(self, schema: str, table_id: str) -> list[str]:
         """Gets the column schema for this table."""
         resultset = self.execute(
-            f"""SELECT column_name
+            """SELECT column_name
                 FROM information_schema.columns
-                WHERE table_schema = '{schema}'
-                AND table_name = '{table_id}'
-            """
+                WHERE table_schema = :schema
+                AND table_name = :table_id
+            """,
+            {"schema": schema, "table_id": table_id},
         )
         return [row["column_name"] for row in resultset]
 
