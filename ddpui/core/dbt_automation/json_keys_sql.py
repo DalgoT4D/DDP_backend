@@ -118,7 +118,7 @@ def json_keys_query(
             SELECT DISTINCT key
             FROM sample
             CROSS JOIN UNNEST(
-                IFNULL(JSON_KEYS(SAFE.PARSE_JSON(CAST(sample.payload AS STRING))), [])
+                IFNULL(JSON_KEYS(SAFE.PARSE_JSON(CAST(sample.payload AS STRING)), 1), [])
             ) AS key
         """
 

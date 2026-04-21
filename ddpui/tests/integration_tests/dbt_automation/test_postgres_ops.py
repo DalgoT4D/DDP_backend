@@ -116,7 +116,11 @@ def scaffold(config, warehouse, tmpdir):
         insert_rows = [
             {
                 "airbyte_ab_id": row["_airbyte_ab_id"],
-                "airbyte_data": row["_airbyte_data"],
+                "airbyte_data": (
+                    row["_airbyte_data"]
+                    if isinstance(row["_airbyte_data"], str)
+                    else json.dumps(row["_airbyte_data"])
+                ),
                 "airbyte_emitted_at": row["_airbyte_emitted_at"],
             }
             for row in rows

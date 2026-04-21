@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Optional
 import math
 import json
 import subprocess
@@ -88,6 +89,14 @@ def _load_bigquery_credentials() -> dict:
 
 
 TEST_BG_CREDS = _load_bigquery_credentials()
+TEST_BG_DATASET = os.getenv("TEST_BG_DATASET_SRC")
+if not isinstance(TEST_BG_DATASET, str) or not TEST_BG_DATASET.strip():
+    pytest.skip(
+        "Skipping BigQuery tests: TEST_BG_DATASET_SRC not provided",
+        allow_module_level=True,
+    )
+TEST_BG_DATASET = TEST_BG_DATASET.strip()
+TEST_BG_LOCATION = (os.getenv("TEST_BG_LOCATION") or "us").strip()
 
 
 def scaffold(config, _warehouse, tmpdir):
@@ -99,7 +108,7 @@ def scaffold(config, _warehouse, tmpdir):
     if not dbt_bin:
         raise RuntimeError("dbt binary is not available on PATH")
 
-    subprocess.check_call(
+    subprocess.check_call(  # noqa: S603 - dbt binary resolved from PATH, fixed args in test
         [dbt_bin, "init", project_name, "--skip-profile-setup"],
         cwd=project_root,
     )
@@ -129,7 +138,7 @@ def scaffold(config, _warehouse, tmpdir):
                     "dataset": default_schema,
                     "threads": 4,
                     "timeout_seconds": 300,
-                    "location": os.environ.get("TEST_BG_LOCATION", "us-central1"),
+                    "location": TEST_BG_LOCATION,
                     "priority": "interactive",
                     "keyfile_json": service_json,
                 }
@@ -146,14 +155,16 @@ class TestBigqueryOperations:
     warehouse = "bigquery"
     test_project_dir = None
 
-    wc_client = WarehouseFactory.connect(
-        TEST_BG_CREDS, "bigquery", os.environ.get("TEST_BG_LOCATION")
-    )
-    schema = os.environ.get("TEST_BG_DATASET_SRC")  # source schema where the raw data lies
+    wc_client = WarehouseFactory.connect(TEST_BG_CREDS, "bigquery", TEST_BG_LOCATION)
+    schema = TEST_BG_DATASET  # source schema where the raw data lies
 
     @staticmethod
-    def execute_dbt(cmd: str, select_model: str = None):
+    def execute_dbt(cmd: str, select_model: Optional[str] = None):
         try:
+            allowed_commands = {"deps", "run", "init"}
+            if cmd not in allowed_commands:
+                raise ValueError(f"Unsupported dbt command for tests: {cmd}")
+
             dbt_bin = Path(TestBigqueryOperations.test_project_dir) / "venv" / "bin" / "dbt"
             if not dbt_bin.exists():
                 dbt_path = shutil.which("dbt")
@@ -162,7 +173,7 @@ class TestBigqueryOperations:
                 dbt_bin = Path(dbt_path)
 
             select_cli = ["--select", select_model] if select_model is not None else []
-            subprocess.check_call(
+            subprocess.check_call(  # noqa: S603 - dbt binary resolved from PATH, validated command in test
                 [
                     str(dbt_bin),
                     cmd,

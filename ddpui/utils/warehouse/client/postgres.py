@@ -71,7 +71,7 @@ class PostgresClient(Warehouse):
         Execute the sql query and return the results
         """
         statement = text(sql) if isinstance(sql, str) else sql
-        with self.engine.connect() as connection:
+        with self.engine.begin() as connection:
             result = (
                 connection.execute(statement)
                 if params is None

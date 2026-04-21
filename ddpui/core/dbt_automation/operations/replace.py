@@ -42,8 +42,8 @@ def replace_dbt_sql(config: dict, warehouse: WarehouseInterface):
             f"{replace_sql_str} AS {quote_columnname(output_col_name, warehouse.name)}"
         )
 
-        if output_col_name in source_columns:
-            source_col_idx = source_columns.index(output_col_name)
+        if output_col_name in output_columns:
+            source_col_idx = output_columns.index(output_col_name)
             select_expressions[source_col_idx] = replace_sql_str
         else:
             select_expressions.append(replace_sql_str)

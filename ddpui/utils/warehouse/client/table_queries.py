@@ -23,18 +23,21 @@ _BQ_PROJECT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
 
 
 def _validate_bq_dataset(dataset: str) -> str:
+    """Validate and return a BigQuery dataset identifier."""
     if not _BQ_DATASET_RE.fullmatch(dataset):
         raise ValueError(f"Invalid bigquery dataset name: {dataset}")
     return dataset
 
 
 def _validate_bq_project(project: str) -> str:
+    """Validate and return a BigQuery project identifier."""
     if not _BQ_PROJECT_RE.fullmatch(project):
         raise ValueError(f"Invalid bigquery project name: {project}")
     return project
 
 
 def _split_bq_schema(schema: str) -> tuple[str | None, str]:
+    """Split schema into optional project and dataset parts for BigQuery."""
     if "." in schema:
         project, dataset = schema.split(".", 1)
         return _validate_bq_project(project), _validate_bq_dataset(dataset)
@@ -42,6 +45,7 @@ def _split_bq_schema(schema: str) -> tuple[str | None, str]:
 
 
 def _get_bigquery_project(client) -> str:
+    """Resolve and validate the default BigQuery project from the warehouse client."""
     project = getattr(getattr(getattr(client, "engine", None), "url", None), "database", None)
     if not project:
         raise ValueError("Unable to determine BigQuery project from warehouse client")
@@ -49,6 +53,7 @@ def _get_bigquery_project(client) -> str:
 
 
 def get_table_query(wtype: str) -> str:
+    """Return the table-discovery SQL template for a warehouse type."""
     query = TABLE_QUERIES.get(wtype)
     if query is None:
         raise ValueError(f"Unsupported warehouse type: {wtype}")
@@ -56,6 +61,7 @@ def get_table_query(wtype: str) -> str:
 
 
 def _run_table_query(client, wtype: str, schema: str):
+    """Execute the warehouse-specific table-listing query for a schema."""
     query = get_table_query(wtype)
     if wtype == WarehouseType.POSTGRES.value:
         return client.execute(query, {"schema": schema})
@@ -68,6 +74,7 @@ def _run_table_query(client, wtype: str, schema: str):
 
 
 def _extract_table_name(row: Any) -> str | None:
+    """Extract a table_name value from supported row shapes."""
     if isinstance(row, dict):
         return row.get("table_name")
 
@@ -82,5 +89,6 @@ def _extract_table_name(row: Any) -> str | None:
 
 
 def list_table_names(client, wtype: str, schema: str) -> list[str]:
+    """List table names from a schema using the unified warehouse client."""
     rows = _run_table_query(client, wtype, schema)
     return [table_name for table_name in (_extract_table_name(row) for row in rows) if table_name]
