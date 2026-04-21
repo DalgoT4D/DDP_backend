@@ -324,3 +324,23 @@ def create_or_update_annotation(request, metric_id: int, payload: AnnotationCrea
         created_at=annotation.created_at,
         updated_at=annotation.updated_at,
     )
+
+
+@metrics_router.delete("/{metric_id}/annotations/{annotation_id}/")
+@has_permission(["can_edit_charts"])
+def delete_annotation(request, metric_id: int, annotation_id: int):
+    """Delete an annotation for a metric."""
+    org = request.orguser.org
+
+    try:
+        metric = MetricDefinition.objects.get(id=metric_id, org=org)
+    except MetricDefinition.DoesNotExist:
+        raise HttpError(404, "Metric not found")
+
+    try:
+        annotation = MetricAnnotation.objects.get(id=annotation_id, metric=metric)
+    except MetricAnnotation.DoesNotExist:
+        raise HttpError(404, "Annotation not found")
+
+    annotation.delete()
+    return {"success": True}
