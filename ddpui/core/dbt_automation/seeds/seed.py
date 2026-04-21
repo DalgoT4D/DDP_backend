@@ -121,9 +121,12 @@ for json_file, tablename in zip(
         location = os.getenv("TEST_BG_LOCATION")
         test_dataset = os.getenv("TEST_BG_DATASET_SRC")
 
-        wc_client = WarehouseFactory.connect(conn_info, WarehouseType.BIGQUERY, location)
-        bqclient = bigquery.Client.from_service_account_info(conn_info)
+        wc_client = None
+        bqclient = None
         try:
+            bqclient = bigquery.Client.from_service_account_info(conn_info)
+            wc_client = WarehouseFactory.connect(conn_info, WarehouseType.BIGQUERY, location)
+
             # create the dataset if it does not exist
             dataset = bigquery.Dataset(f"{conn_info['project_id']}.{test_dataset}")
             dataset.location = location
@@ -178,7 +181,10 @@ for json_file, tablename in zip(
                 raise RuntimeError(f"BigQuery insert_rows_json errors: {insert_errors}")
             logger.info("Finished API call: insert_rows_json rows=%s", len(rows_to_insert))
         finally:
-            wc_client.close()
+            if wc_client is not None:
+                wc_client.close()
+            if bqclient is not None:
+                bqclient.close()
 
 
 logger.info("seeding finished")

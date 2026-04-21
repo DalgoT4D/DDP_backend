@@ -53,6 +53,9 @@ def validate_json_key_source_identifiers(
             raise ValueError(f"Invalid bigquery table name: {table}")
         if not _BQ_DATASET_RE.fullmatch(column):
             raise ValueError(f"Invalid bigquery column name: {column}")
+        return
+
+    raise ValueError(f"Unsupported warehouse type: {wtype}")
 
 
 def format_bq_table(schema: str, table: str) -> str:

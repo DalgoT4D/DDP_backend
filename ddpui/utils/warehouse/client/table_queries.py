@@ -19,7 +19,7 @@ TABLE_QUERIES: dict[str, str] = {
 }
 
 _BQ_DATASET_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_BQ_PROJECT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
+_BQ_PROJECT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9\-.:]*$")
 
 
 def _validate_bq_dataset(dataset: str) -> str:
@@ -38,10 +38,26 @@ def _validate_bq_project(project: str) -> str:
 
 def _split_bq_schema(schema: str) -> tuple[str | None, str]:
     """Split schema into optional project and dataset parts for BigQuery."""
-    if "." in schema:
-        project, dataset = schema.split(".", 1)
-        return _validate_bq_project(project), _validate_bq_dataset(dataset)
-    return None, _validate_bq_dataset(schema)
+    cleaned_schema = schema.replace("`", "").strip()
+
+    if ":" in cleaned_schema and cleaned_schema.count(":") >= 2:
+        project_part, dataset_with_optional_table = cleaned_schema.rsplit(":", 1)
+        dataset_part = dataset_with_optional_table.split(".", 1)[0]
+        if _BQ_PROJECT_RE.fullmatch(project_part) and _BQ_DATASET_RE.fullmatch(dataset_part):
+            return _validate_bq_project(project_part), _validate_bq_dataset(dataset_part)
+
+    if "." in cleaned_schema:
+        project_part, dataset_part = cleaned_schema.rsplit(".", 1)
+
+        # Handle values that may include a trailing table segment.
+        if ":" in project_part and "." in project_part:
+            maybe_project, maybe_dataset = project_part.rsplit(".", 1)
+            if _BQ_PROJECT_RE.fullmatch(maybe_project) and _BQ_DATASET_RE.fullmatch(maybe_dataset):
+                return _validate_bq_project(maybe_project), _validate_bq_dataset(maybe_dataset)
+
+        return _validate_bq_project(project_part), _validate_bq_dataset(dataset_part)
+
+    return None, _validate_bq_dataset(cleaned_schema)
 
 
 def _get_bigquery_project(client) -> str:

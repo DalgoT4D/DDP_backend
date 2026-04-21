@@ -92,7 +92,10 @@ class PostgresClient(Warehouse):
         statement = text(sql) if isinstance(sql, str) else sql
         with self.engine.begin() as connection:
             result = connection.execute(statement, params_list)
-            return int(result.rowcount or 0)
+            rowcount = result.rowcount
+            if rowcount is None or rowcount < 0:
+                return len(params_list)
+            return int(rowcount)
 
     def execute_transaction(
         self,

@@ -7,6 +7,7 @@ import json
 import subprocess
 import shutil
 import yaml
+import pytest
 from logging import basicConfig, getLogger, INFO
 from ddpui.core.dbt_automation import assets, seeds
 from ddpui.core.dbt_automation.operations.flattenjson import flattenjson
@@ -36,6 +37,40 @@ basicConfig(level=INFO)
 logger = getLogger()
 
 
+def _load_postgres_test_credentials() -> dict[str, str]:
+    """Load and validate Postgres credentials for integration tests."""
+    creds = {
+        "host": os.environ.get("TEST_PG_DBHOST"),
+        "port": os.environ.get("TEST_PG_DBPORT", "5432"),
+        "username": os.environ.get("TEST_PG_DBUSER"),
+        "database": os.environ.get("TEST_PG_DBNAME"),
+        "password": os.environ.get("TEST_PG_DBPASSWORD"),
+    }
+
+    required_keys = ("host", "username", "database", "password")
+    missing_keys = [
+        key
+        for key in required_keys
+        if not isinstance(creds.get(key), str) or not str(creds.get(key)).strip()
+    ]
+    if missing_keys:
+        pytest.skip(
+            "Skipping Postgres tests: Postgres credentials not configured",
+            allow_module_level=True,
+        )
+
+    creds["host"] = creds["host"].strip()
+    creds["port"] = (creds["port"] or "5432").strip()
+    creds["username"] = creds["username"].strip()
+    creds["database"] = creds["database"].strip()
+    creds["password"] = creds["password"].strip()
+    return creds
+
+
+TEST_PG_CREDS = _load_postgres_test_credentials()
+TEST_PG_SCHEMA = (os.environ.get("TEST_PG_DBSCHEMA_SRC") or "public").strip()
+
+
 def scaffold(config, warehouse, tmpdir):
     """Create a dbt project for integration tests and write a postgres profile."""
     project_name = config["project_name"]
@@ -46,6 +81,7 @@ def scaffold(config, warehouse, tmpdir):
         raise RuntimeError("dbt binary is not available on PATH")
 
     subprocess.check_call(
+        # noqa: S603 - dbt binary resolved from PATH, fixed args in test
         [dbt_bin, "init", project_name, "--skip-profile-setup"],
         cwd=project_root,
     )
@@ -69,11 +105,11 @@ def scaffold(config, warehouse, tmpdir):
             "outputs": {
                 "dev": {
                     "type": "postgres",
-                    "host": os.environ.get("TEST_PG_DBHOST"),
-                    "port": int(os.environ.get("TEST_PG_DBPORT", "5432")),
-                    "user": os.environ.get("TEST_PG_DBUSER"),
-                    "password": os.environ.get("TEST_PG_DBPASSWORD"),
-                    "dbname": os.environ.get("TEST_PG_DBNAME"),
+                    "host": TEST_PG_CREDS["host"],
+                    "port": int(TEST_PG_CREDS["port"]),
+                    "user": TEST_PG_CREDS["username"],
+                    "password": TEST_PG_CREDS["password"],
+                    "dbname": TEST_PG_CREDS["database"],
                     "schema": default_schema,
                     "threads": 4,
                 }
@@ -83,7 +119,7 @@ def scaffold(config, warehouse, tmpdir):
     with open(project_dir / "profiles.yml", "w", encoding="utf-8") as profile_file:
         yaml.safe_dump(profile, profile_file, sort_keys=False)
 
-    schema = os.environ.get("TEST_PG_DBSCHEMA_SRC", default_schema)
+    schema = TEST_PG_SCHEMA or default_schema
     seed_files = [
         ("_airbyte_raw_Sheet1", "sample_sheet1.json"),
         ("_airbyte_raw_Sheet2", "sample_sheet2.json"),
@@ -133,21 +169,16 @@ class TestPostgresOperations:
 
     warehouse = "postgres"
     test_project_dir = None
-    wc_client = WarehouseFactory.connect(
-        {
-            "host": os.environ.get("TEST_PG_DBHOST"),
-            "port": os.environ.get("TEST_PG_DBPORT"),
-            "username": os.environ.get("TEST_PG_DBUSER"),
-            "database": os.environ.get("TEST_PG_DBNAME"),
-            "password": os.environ.get("TEST_PG_DBPASSWORD"),
-        },
-        "postgres",
-    )
-    schema = os.environ.get("TEST_PG_DBSCHEMA_SRC")  # source schema where the raw data lies
+    wc_client = WarehouseFactory.connect(TEST_PG_CREDS, "postgres")
+    schema = TEST_PG_SCHEMA  # source schema where the raw data lies
 
     @staticmethod
-    def execute_dbt(cmd: str, select_model: str = None):
+    def execute_dbt(cmd: str, select_model: str | None = None):
         try:
+            allowed_commands = {"deps", "run", "init"}
+            if cmd not in allowed_commands:
+                raise ValueError(f"Unsupported dbt command for tests: {cmd}")
+
             dbt_bin = Path(TestPostgresOperations.test_project_dir) / "venv" / "bin" / "dbt"
             if not dbt_bin.exists():
                 dbt_path = shutil.which("dbt")
@@ -157,6 +188,7 @@ class TestPostgresOperations:
 
             select_cli = ["--select", select_model] if select_model is not None else []
             subprocess.check_call(
+                # noqa: S603 - dbt binary resolved from PATH, validated command in test
                 [
                     str(dbt_bin),
                     cmd,
