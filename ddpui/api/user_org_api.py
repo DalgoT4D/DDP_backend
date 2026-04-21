@@ -149,15 +149,16 @@ def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=
 @user_org_router.post("/login/", auth=None)
 def post_login(request, payload: LoginPayload):
     """Uses the username and password in the request to return a JWT auth token"""
+    username = payload.username.strip()
     serializer = CustomTokenObtainSerializer(
         data={
-            "username": payload.username,
+            "username": username,
             "password": payload.password,
         }
     )
     serializer.is_valid(raise_exception=True)
     token_data = serializer.validated_data
-    retval = orguserfunctions.lookup_user(payload.username)
+    retval = orguserfunctions.lookup_user(username)
     retval["token"] = token_data["access"]
     retval["refresh_token"] = token_data["refresh"]
     return retval
@@ -633,9 +634,10 @@ def get_organization_wren(request):
 @user_org_router.post("/v2/login/", auth=None)
 def post_login_v2(request, payload: LoginPayload):
     """Login endpoint that sets httpOnly cookies instead of returning tokens in response"""
+    username = payload.username.strip()
     serializer = CustomTokenObtainSerializer(
         data={
-            "username": payload.username,
+            "username": username,
             "password": payload.password,
         }
     )
@@ -643,7 +645,7 @@ def post_login_v2(request, payload: LoginPayload):
     token_data = serializer.validated_data
 
     # Get user data (same as v1)
-    retval = orguserfunctions.lookup_user(payload.username)
+    retval = orguserfunctions.lookup_user(username)
 
     # Create JsonResponse and set cookies
     response = JsonResponse(retval)
