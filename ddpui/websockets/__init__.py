@@ -1,10 +1,11 @@
 import json
+from http.cookies import SimpleCookie
 from channels.generic.websocket import WebsocketConsumer
 from rest_framework_simplejwt.tokens import AccessToken
 from urllib.parse import parse_qs
 from django.contrib.auth.models import User
 
-from ddpui.websockets.schemas import WebsocketResponse
+from ddpui.websockets.schemas import WebsocketResponse, WebsocketCloseCodes
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -56,14 +57,34 @@ class BaseConsumer(WebsocketConsumer):
     def respond(self, message: WebsocketResponse):
         self.send(text_data=json.dumps(message.model_dump()))
 
+    def _get_cookie(self, name: str) -> str | None:
+        """Extract a cookie value from the WebSocket scope headers."""
+        for header_name, header_value in self.scope.get("headers", []):
+            if header_name == b"cookie":
+                cookie = SimpleCookie(header_value.decode())
+                if name in cookie:
+                    return cookie[name].value
+        return None
+
     def connect(self):
         query_string = parse_qs(self.scope["query_string"].decode())
-        token = query_string.get("token", [None])[0]
         orgslug = query_string.get("orgslug", [None])[0]
 
-        if self.authenticate_user(token, orgslug):
-            logger.info("User authenticated, establishing connection")
+        # Read JWT from the access_token httpOnly cookie (webapp_v2)
+        token = self._get_cookie("access_token")
+
+        # TODO: remove this fallback once webapp_v1 is fully deprecated
+        if not token:
+            token = query_string.get("token", [None])[0]
+
+        if not token:
+            logger.info("No access_token cookie found, closing connection")
             self.accept()
+            self.close(code=WebsocketCloseCodes.NO_TOKEN)
+        elif not self.authenticate_user(token, orgslug):
+            logger.info("Authentication failed (invalid/expired token), closing connection")
+            self.accept()
+            self.close(code=WebsocketCloseCodes.INVALID_TOKEN)
         else:
-            logger.info("Authentication failed, closing connection")
-            self.close()
+            logger.info("User authenticated via cookie, establishing connection")
+            self.accept()
