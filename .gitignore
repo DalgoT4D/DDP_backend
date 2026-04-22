@@ -158,3 +158,5 @@ Docker/.env*
 platform-notifications/
 
 .vscode/
+ddpui/tests/core/test_bootstrap_local_chart_sample.py
+ddpui/management/commands/bootstrap_local_chart_sample.py

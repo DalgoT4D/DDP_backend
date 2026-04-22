@@ -15,6 +15,7 @@ from ninja.errors import HttpError
 
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.models.dashboard import Dashboard, DashboardFilter
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.report import ReportSnapshot
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -45,6 +46,10 @@ class PublicDashboardResponse(DashboardResponse):
 
     org_name: str
     is_valid: bool = True
+    dashboard_logo_url: Optional[str] = None
+    dashboard_logo_width: int = 80
+    chart_palette_name: Optional[str] = None
+    chart_palette_colors: Optional[list[str]] = None
 
     # Remove fields not needed in public view
     last_modified_by: Optional[str] = None
@@ -102,12 +107,21 @@ def get_public_dashboard(request, token: str):
 
         # Reuse the authenticated dashboard response generation logic
         dashboard_data = DashboardService.get_dashboard_response(dashboard)
+        org_preferences = OrgPreferences.objects.filter(org=dashboard.org).first()
 
         # Enhance with public-specific fields and remove sensitive information
         public_response_data = {
             **dashboard_data,
             "org_name": dashboard.org.name,
             "is_valid": True,
+            "dashboard_logo_url": (org_preferences.dashboard_logo_url if org_preferences else None),
+            "dashboard_logo_width": (
+                org_preferences.dashboard_logo_width if org_preferences else 80
+            ),
+            "chart_palette_name": (org_preferences.chart_palette_name if org_preferences else None),
+            "chart_palette_colors": (
+                org_preferences.chart_palette_colors if org_preferences else None
+            ),
             # Remove sensitive fields for public access
             "last_modified_by": None,
             "is_locked": False,

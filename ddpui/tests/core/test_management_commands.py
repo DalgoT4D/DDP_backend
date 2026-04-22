@@ -1,12 +1,9 @@
 import os
-from io import StringIO
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
-from django.db import transaction
 
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, UserAttributes
