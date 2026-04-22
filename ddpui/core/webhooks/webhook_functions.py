@@ -1,6 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from ninja.errors import HttpError
 from django.db.models import F
 from django.utils.dateparse import parse_datetime
@@ -359,16 +360,30 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
                     odf = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
                     notify_users_about_failed_run(org, odf, flow_run, state)
                 elif state == FLOW_RUN_COMPLETED_STATE_NAME:
+                    # Pull the flow run's end timestamp so alerts can show
+                    # "data is N minutes old" (Goalkeep's last-pipeline-update
+                    # provenance ask). Prefect payloads vary; best-effort parse.
+                    completed_at = None
+                    ts = flow_run.get("end_time") or flow_run.get("updated")
+                    if ts:
+                        try:
+                            completed_at = datetime.fromisoformat(
+                                str(ts).replace("Z", "+00:00")
+                            )
+                        except (TypeError, ValueError):
+                            completed_at = None
                     alert_summary = AlertService.evaluate_alerts_for_completed_flow(
                         org=org,
                         deployment_id=deployment_id,
                         trigger_flow_run_id=flow_run_id,
+                        completed_at=completed_at,
                     )
                     logger.info(
-                        "Completed flow run %s evaluated %s alerts and fired %s",
+                        "Completed flow run %s evaluated %s alerts, fired %s, notified %s",
                         flow_run_id,
-                        alert_summary["evaluated"],
-                        alert_summary["fired"],
+                        alert_summary.get("evaluated", 0),
+                        alert_summary.get("fired", 0),
+                        alert_summary.get("notified", 0),
                     )
 
     except Exception as err:

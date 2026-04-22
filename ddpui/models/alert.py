@@ -1,7 +1,7 @@
 """Alert models for Dalgo platform"""
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Literal, Optional
 
 from django.db import models
 from django.utils import timezone
@@ -9,6 +9,42 @@ from django.utils import timezone
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metrics import KPI, Metric
+
+
+AlertType = Literal["threshold", "rag", "standalone"]
+RecipientKind = Literal["email", "user"]
+
+
+ALERT_TYPE_CHOICES = [
+    ("threshold", "Metric Threshold"),
+    ("rag", "KPI RAG"),
+    ("standalone", "Standalone SQL"),
+]
+
+
+@dataclass
+class AlertRecipient:
+    """Typed recipient — stored inside Alert.recipients.
+
+    `type="email"` → ref is a free-form email string (external stakeholders).
+    `type="user"`  → ref is an OrgUser ID, resolved to that user's email at
+    send time so we pick up address changes.
+    """
+
+    type: RecipientKind
+    ref: str
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "ref": self.ref}
+
+    @classmethod
+    def from_any(cls, raw) -> "AlertRecipient":
+        """Accepts either the typed dict or a legacy plain email string."""
+        if isinstance(raw, str):
+            return cls(type="email", ref=raw)
+        if isinstance(raw, dict) and "type" in raw and "ref" in raw:
+            return cls(type=raw["type"], ref=str(raw["ref"]))
+        raise ValueError(f"Invalid recipient payload: {raw!r}")
 
 
 @dataclass
@@ -71,8 +107,14 @@ class Alert(models.Model):
         db_column="created_by",
         related_name="alerts_created",
     )
-    # KPI-backed RAG alerts populate `kpi` + `metric_rag_level`.
-    # Metric-threshold alerts (Batch 3) populate `metric` instead.
+    # Which of the three variants this alert is. Set at create time.
+    alert_type = models.CharField(
+        max_length=20, choices=ALERT_TYPE_CHOICES, default="standalone"
+    )
+
+    # KPI RAG alerts populate `kpi` + `metric_rag_level`.
+    # Metric-threshold alerts populate `metric` + query_config.condition_*.
+    # Standalone alerts populate neither — query_config drives the SQL directly.
     kpi = models.ForeignKey(
         KPI,
         on_delete=models.CASCADE,
@@ -91,6 +133,17 @@ class Alert(models.Model):
 
     # Typed via AlertQueryConfig dataclass — see get/set methods below
     query_config = models.JSONField()
+
+    # Which pipelines trigger evaluation. Empty list = infer from the Metric's
+    # source tables (for threshold/rag) or "all transform pipelines" fallback
+    # (for standalone). Non-empty = explicit deployment_id list.
+    pipeline_triggers = models.JSONField(default=list)
+
+    # Notification cooldown in days. None = "notify only on state change"
+    # (default). N = "re-notify every N days while still firing." Evaluations
+    # still happen on every pipeline run; cooldown only gates the outgoing
+    # notification.
+    notification_cooldown_days = models.IntegerField(null=True, blank=True)
 
     # Delivery
     recipients = models.JSONField(default=list)
@@ -119,6 +172,10 @@ class Alert(models.Model):
         """Serialize typed dataclass into query_config JSON"""
         self.query_config = config.to_dict()
 
+    def get_recipients(self) -> list[AlertRecipient]:
+        """Deserialize recipients into typed list, tolerating legacy strings."""
+        return [AlertRecipient.from_any(r) for r in (self.recipients or [])]
+
 
 class AlertEvaluation(models.Model):
     """Log of each alert evaluation — fully self-contained with config + query snapshots"""
@@ -138,6 +195,12 @@ class AlertEvaluation(models.Model):
     result_preview = models.JSONField(default=list)
     rendered_message = models.TextField(default="")
     trigger_flow_run_id = models.TextField(null=True, blank=True)
+    # True iff the evaluation's notification actually went out. False when
+    # the alert fired but the cooldown suppressed the send.
+    notification_sent = models.BooleanField(default=False)
+    # When was the underlying pipeline last updated? Surfaces as "data freshness"
+    # in the fired-alert detail view (Goalkeep ask).
+    last_pipeline_update = models.DateTimeField(null=True, blank=True)
 
     # Error tracking
     error_message = models.TextField(null=True, blank=True)
