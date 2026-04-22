@@ -1,144 +1,137 @@
-"""Pydantic schemas for the My Metrics API"""
+"""Pydantic schemas for the Metric primitive API (Batch 1)."""
 
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Any
 
-from ninja import Schema
+from ninja import Schema, Field
 
 
-# ── Request schemas ──────────────────────────────────────────────────────────
+# ── Nested building blocks ───────────────────────────────────────────────────
+
+
+class MetricTermSchema(Schema):
+    """Simple-mode term — one (agg, column) pair, referenced by ``id`` in the formula."""
+
+    id: str = Field(..., pattern=r"^t\d+$")
+    agg: Literal["sum", "avg", "count", "min", "max", "count_distinct"]
+    column: str
+
+
+class MetricFilterSchema(Schema):
+    """Baked-in filter — always applied when the metric is evaluated."""
+
+    column: str
+    operator: str  # =, !=, >, <, >=, <=, contains, not contains
+    value: str
+
+
+# ── Requests ─────────────────────────────────────────────────────────────────
 
 
 class MetricCreate(Schema):
-    name: str
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    tags: List[str] = []
+
     schema_name: str
     table_name: str
-    column: str
-    aggregation: str  # sum, avg, count, min, max, count_distinct
-
-    # Time (optional)
     time_column: Optional[str] = None
-    time_grain: str = "month"  # month, quarter, year
+    default_time_grain: Literal["month", "quarter", "year"] = "month"
 
-    # Target & RAG
-    direction: Literal["increase", "decrease"] = "increase"
-    target_value: Optional[float] = None
-    amber_threshold_pct: float = 80
-    green_threshold_pct: float = 100
-
-    # Tags
-    program_tag: str = ""
-    metric_type_tag: str = ""
-
-    # Trend
-    trend_periods: int = 12
-    display_order: int = 0
+    creation_mode: Literal["simple", "sql"] = "simple"
+    simple_terms: List[MetricTermSchema] = []
+    simple_formula: str = ""
+    sql_expression: str = ""
+    filters: List[MetricFilterSchema] = []
 
 
 class MetricUpdate(Schema):
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+
     schema_name: Optional[str] = None
     table_name: Optional[str] = None
-    column: Optional[str] = None
-    aggregation: Optional[str] = None
-
     time_column: Optional[str] = None
-    time_grain: Optional[str] = None
+    default_time_grain: Optional[Literal["month", "quarter", "year"]] = None
 
-    direction: Optional[Literal["increase", "decrease"]] = None
-    target_value: Optional[float] = None
-    amber_threshold_pct: Optional[float] = None
-    green_threshold_pct: Optional[float] = None
-
-    program_tag: Optional[str] = None
-    metric_type_tag: Optional[str] = None
-
-    trend_periods: Optional[int] = None
-    display_order: Optional[int] = None
-
-
-class AnnotationCreate(Schema):
-    period_key: str  # "2025-03", "2025-Q1", "2025"
-    rationale: str = ""
-    quote_text: str = ""
-    quote_attribution: str = ""
+    creation_mode: Optional[Literal["simple", "sql"]] = None
+    simple_terms: Optional[List[MetricTermSchema]] = None
+    simple_formula: Optional[str] = None
+    sql_expression: Optional[str] = None
+    filters: Optional[List[MetricFilterSchema]] = None
 
 
 class MetricDataRequest(Schema):
-    """Request body for bulk metric data fetch"""
-
     metric_ids: List[int]
+    # Whether to include a trend alongside the current value (library preview).
+    include_trend: bool = False
 
 
-class LatestAnnotationsRequest(Schema):
-    """Request body for bulk latest-annotation fetch"""
+class ValidateSqlRequest(Schema):
+    schema_name: str
+    table_name: str
+    sql_expression: str
+    filters: List[MetricFilterSchema] = []
 
-    metric_ids: List[int]
 
-
-# ── Response schemas ─────────────────────────────────────────────────────────
+# ── Responses ────────────────────────────────────────────────────────────────
 
 
 class MetricResponse(Schema):
     id: int
     name: str
+    description: str
+    tags: List[str]
+
     schema_name: str
     table_name: str
-    column: str
-    aggregation: str
-
     time_column: Optional[str]
-    time_grain: str
+    default_time_grain: Literal["month", "quarter", "year"]
 
-    direction: Literal["increase", "decrease"]
-    target_value: Optional[float]
-    amber_threshold_pct: float
-    green_threshold_pct: float
-
-    program_tag: str
-    metric_type_tag: str
-
-    trend_periods: int
-    display_order: int
+    creation_mode: Literal["simple", "sql"]
+    simple_terms: List[MetricTermSchema]
+    simple_formula: str
+    sql_expression: str
+    filters: List[MetricFilterSchema]
 
     created_at: datetime
     updated_at: datetime
 
 
+class MetricReferencesResponse(Schema):
+    """Blast-radius summary — what breaks if this Metric changes?"""
+
+    metric_id: int
+    kpi_count: int
+    alert_count: int
+    # chart_count: reserved for the chart-builder rewire in Batch 6
+    chart_count: int = 0
+    kpi_ids: List[int] = []
+    alert_ids: List[int] = []
+
+
+class MetricDetailResponse(Schema):
+    """Single-metric detail with references attached."""
+
+    metric: MetricResponse
+    references: MetricReferencesResponse
+
+
 class TrendPoint(Schema):
-    period: str  # "2024-04", "2024-Q2", "2024"
+    period: str
     value: Optional[float]
 
 
 class MetricDataPoint(Schema):
-    """Live data for a single metric: current value + trend + RAG"""
-
     metric_id: int
     current_value: Optional[float]
-    rag_status: str  # "green", "amber", "red", "grey"
-    achievement_pct: Optional[float]
-    trend: List[TrendPoint]
-    error: Optional[str] = None  # non-null when warehouse query failed
+    trend: List[TrendPoint] = []
+    error: Optional[str] = None
 
 
-class AnnotationResponse(Schema):
-    id: int
-    period_key: str
-    rationale: str
-    quote_text: str
-    quote_attribution: str
-    created_at: datetime
-    updated_at: datetime
-
-
-class LatestAnnotationEntry(Schema):
-    """Latest annotation for a single metric (used in bulk response)"""
-
-    metric_id: int
-    id: int
-    period_key: str
-    rationale: str
-    quote_text: str
-    quote_attribution: str
-    created_at: datetime
-    updated_at: datetime
+class ValidateSqlResponse(Schema):
+    ok: bool
+    value: Optional[float] = None
+    error: Optional[str] = None
+    query_executed: Optional[str] = None

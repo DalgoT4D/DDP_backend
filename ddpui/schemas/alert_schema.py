@@ -37,10 +37,15 @@ MetricRagLevel = Literal["red", "amber", "green"]
 
 
 class AlertCreate(Schema):
-    """Schema for creating an alert"""
+    """Schema for creating an alert.
+
+    `kpi_id` (replaces old `metric_id`) wires a KPI-backed RAG alert.
+    `metric_id` is reserved for Batch 3's metric-threshold alert path.
+    """
 
     name: str = Field(..., min_length=1, max_length=255)
-    metric_id: Optional[int] = None
+    kpi_id: Optional[int] = None
+    metric_id: Optional[int] = None  # reserved — Batch 3 wires threshold alerts
     metric_rag_level: Optional[MetricRagLevel] = None
     query_config: AlertQueryConfigSchema
     recipients: List[str] = Field(..., min_length=1)  # at least one email required
@@ -52,6 +57,7 @@ class AlertUpdate(Schema):
     """Schema for updating an alert (all fields optional)"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    kpi_id: Optional[int] = None
     metric_id: Optional[int] = None
     metric_rag_level: Optional[MetricRagLevel] = None
     query_config: Optional[AlertQueryConfigSchema] = None
@@ -64,6 +70,7 @@ class AlertUpdate(Schema):
 class AlertTestRequest(Schema):
     """For the Test Alert button — query config only with pagination"""
 
+    kpi_id: Optional[int] = None
     metric_id: Optional[int] = None
     metric_rag_level: Optional[MetricRagLevel] = None
     query_config: AlertQueryConfigSchema
@@ -81,6 +88,8 @@ class AlertResponse(Schema):
 
     id: int
     name: str
+    kpi_id: Optional[int] = None
+    kpi_name: Optional[str] = None
     metric_id: Optional[int] = None
     metric_name: Optional[str] = None
     metric_rag_level: Optional[MetricRagLevel] = None
@@ -106,6 +115,8 @@ class AlertResponse(Schema):
         return cls(
             id=alert.id,
             name=alert.name,
+            kpi_id=alert.kpi_id,
+            kpi_name=alert.kpi.name if alert.kpi_id else None,
             metric_id=alert.metric_id,
             metric_name=alert.metric.name if alert.metric_id else None,
             metric_rag_level=alert.metric_rag_level,
@@ -176,6 +187,8 @@ class TriggeredAlertEventResponse(Schema):
     id: int
     alert_id: int
     alert_name: str
+    kpi_id: Optional[int] = None
+    kpi_name: Optional[str] = None
     metric_id: Optional[int] = None
     metric_name: Optional[str] = None
     metric_rag_level: Optional[MetricRagLevel] = None
@@ -193,6 +206,8 @@ class TriggeredAlertEventResponse(Schema):
             id=evaluation.id,
             alert_id=alert.id,
             alert_name=alert.name,
+            kpi_id=alert.kpi_id,
+            kpi_name=alert.kpi.name if alert.kpi_id else None,
             metric_id=alert.metric_id,
             metric_name=alert.metric.name if alert.metric_id else None,
             metric_rag_level=alert.metric_rag_level,

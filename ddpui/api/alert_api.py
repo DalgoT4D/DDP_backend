@@ -31,7 +31,13 @@ alert_router = Router()
 
 @alert_router.get("/")
 @has_permission(["can_view_alerts"])
-def list_alerts(request, page: int = 1, page_size: int = 10, metric_id: int | None = None):
+def list_alerts(
+    request,
+    page: int = 1,
+    page_size: int = 10,
+    kpi_id: int | None = None,
+    metric_id: int | None = None,
+):
     """List alerts for the org with pagination"""
     orguser: OrgUser = request.orguser
 
@@ -39,6 +45,7 @@ def list_alerts(request, page: int = 1, page_size: int = 10, metric_id: int | No
         org=orguser.org,
         page=page,
         page_size=page_size,
+        kpi_id=kpi_id,
         metric_id=metric_id,
     )
 
@@ -63,7 +70,13 @@ def list_alerts(request, page: int = 1, page_size: int = 10, metric_id: int | No
 
 @alert_router.get("/fired/")
 @has_permission(["can_view_alerts"])
-def list_fired_alerts(request, page: int = 1, page_size: int = 20, metric_id: int | None = None):
+def list_fired_alerts(
+    request,
+    page: int = 1,
+    page_size: int = 20,
+    kpi_id: int | None = None,
+    metric_id: int | None = None,
+):
     """List recent fired alert evaluations for the org."""
     orguser: OrgUser = request.orguser
 
@@ -71,6 +84,7 @@ def list_fired_alerts(request, page: int = 1, page_size: int = 20, metric_id: in
         org=orguser.org,
         page=page,
         page_size=page_size,
+        kpi_id=kpi_id,
         metric_id=metric_id,
     )
 

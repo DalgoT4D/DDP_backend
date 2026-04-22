@@ -1,4 +1,11 @@
-"""API endpoints for the My Metrics feature"""
+"""API endpoints for the Metric primitive library (Batch 1).
+
+Responsibilities:
+  - CRUD on Metric (the reusable aggregation primitive)
+  - Reference tracking (which KPIs / alerts / charts consume a Metric)
+  - Bulk data fetch for library preview
+  - Dry-run validation of Calculated-SQL expressions before save
+"""
 
 from typing import List
 
@@ -7,19 +14,24 @@ from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.models.org import OrgWarehouse
-from ddpui.models.metrics import MetricDefinition, MetricAnnotation
-from ddpui.core.alerts.alert_service import AlertService
-from ddpui.core.metrics_service import fetch_metrics_data
+from ddpui.models.metrics import Metric, KPI
+from ddpui.models.alert import Alert
+from ddpui.core.metrics_service import (
+    MetricCompileError,
+    compile_metric_value_expression,
+    fetch_metrics_data,
+    validate_sql_against_warehouse,
+)
 from ddpui.schemas.metric_schema import (
     MetricCreate,
     MetricUpdate,
     MetricResponse,
+    MetricDetailResponse,
+    MetricReferencesResponse,
     MetricDataRequest,
     MetricDataPoint,
-    AnnotationCreate,
-    AnnotationResponse,
-    LatestAnnotationsRequest,
-    LatestAnnotationEntry,
+    ValidateSqlRequest,
+    ValidateSqlResponse,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -28,299 +40,219 @@ logger = CustomLogger("ddpui")
 metrics_router = Router()
 
 
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _serialize(metric: Metric) -> MetricResponse:
+    return MetricResponse(
+        id=metric.id,
+        name=metric.name,
+        description=metric.description,
+        tags=metric.tags or [],
+        schema_name=metric.schema_name,
+        table_name=metric.table_name,
+        time_column=metric.time_column,
+        default_time_grain=metric.default_time_grain,
+        creation_mode=metric.creation_mode,
+        simple_terms=metric.simple_terms or [],
+        simple_formula=metric.simple_formula,
+        sql_expression=metric.sql_expression,
+        filters=metric.filters or [],
+        created_at=metric.created_at,
+        updated_at=metric.updated_at,
+    )
+
+
+def _references_for(metric: Metric) -> MetricReferencesResponse:
+    kpi_ids = list(KPI.objects.filter(metric=metric).values_list("id", flat=True))
+    alert_ids = list(Alert.objects.filter(metric=metric).values_list("id", flat=True))
+    return MetricReferencesResponse(
+        metric_id=metric.id,
+        kpi_count=len(kpi_ids),
+        alert_count=len(alert_ids),
+        chart_count=0,  # Charts land in Batch 6
+        kpi_ids=kpi_ids,
+        alert_ids=alert_ids,
+    )
+
+
+def _validate_payload(payload) -> None:
+    """Pre-flight: reject Metric create/update payloads that won't compile."""
+    stub = Metric(
+        name=getattr(payload, "name", "") or "",
+        schema_name=payload.schema_name or "",
+        table_name=payload.table_name or "",
+        creation_mode=payload.creation_mode or "simple",
+        simple_terms=[t.dict() for t in (payload.simple_terms or [])],
+        simple_formula=payload.simple_formula or "",
+        sql_expression=payload.sql_expression or "",
+    )
+    try:
+        compile_metric_value_expression(stub)
+    except MetricCompileError as e:
+        raise HttpError(400, f"Invalid metric definition: {e}")
+
+
 # ── Metric CRUD ──────────────────────────────────────────────────────────────
 
 
 @metrics_router.get("/", response=List[MetricResponse])
 @has_permission(["can_view_charts"])
 def list_metrics(request):
-    """List all metric definitions for the org"""
+    """List every Metric in the org, ordered by name."""
     org = request.orguser.org
-    metrics = MetricDefinition.objects.filter(org=org).order_by("display_order", "name")
-    return [
-        MetricResponse(
-            id=m.id,
-            name=m.name,
-            schema_name=m.schema_name,
-            table_name=m.table_name,
-            column=m.column,
-            aggregation=m.aggregation,
-            time_column=m.time_column,
-            time_grain=m.time_grain,
-            direction=m.direction,
-            target_value=m.target_value,
-            amber_threshold_pct=m.amber_threshold_pct,
-            green_threshold_pct=m.green_threshold_pct,
-            program_tag=m.program_tag,
-            metric_type_tag=m.metric_type_tag,
-            trend_periods=m.trend_periods,
-            display_order=m.display_order,
-            created_at=m.created_at,
-            updated_at=m.updated_at,
-        )
-        for m in metrics
-    ]
+    return [_serialize(m) for m in Metric.objects.filter(org=org).order_by("name")]
 
 
-# ── Metric Data (live warehouse queries) ─────────────────────────────────────
-# NOTE: This must be defined BEFORE /{metric_id}/ routes.
-# Django Ninja 0.21 generates <metric_id> without int: converter, so the string
-# "data" would match <metric_id> before reaching this literal path if ordered after.
+# NOTE: /data/ and /validate-sql/ must come BEFORE /{metric_id}/ routes
+# (Ninja path matching is first-match).
 
 
 @metrics_router.post("/data/", response=List[MetricDataPoint])
 @has_permission(["can_view_charts"])
 def fetch_metric_data(request, payload: MetricDataRequest):
-    """
-    Fetch current values + trend data for a list of metrics.
-    Runs warehouse queries in parallel.
-    """
+    """Bulk-fetch current value (and optional trend) for a list of Metrics."""
     org = request.orguser.org
-
     org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-
-    metrics = MetricDefinition.objects.filter(id__in=payload.metric_ids, org=org)
-
-    if not metrics.exists():
+    metrics = list(Metric.objects.filter(id__in=payload.metric_ids, org=org))
+    if not metrics:
         return []
-
     if not org_warehouse:
-        # Return a graceful per-metric error rather than a 400 so the frontend
-        # can display "Data unavailable" on each card instead of leaving them
-        # stuck on "Awaiting data" (which happens when the whole request fails).
         return [
             {
                 "metric_id": m.id,
                 "current_value": None,
-                "rag_status": "grey",
-                "achievement_pct": None,
                 "trend": [],
                 "error": "No warehouse configured for this organization",
             }
             for m in metrics
         ]
+    return fetch_metrics_data(org_warehouse, metrics, include_trend=payload.include_trend)
 
-    results = fetch_metrics_data(org_warehouse, list(metrics))
-    return results
+
+@metrics_router.post("/validate-sql/", response=ValidateSqlResponse)
+@has_permission(["can_create_charts"])
+def validate_sql(request, payload: ValidateSqlRequest):
+    """Dry-run a Calculated-SQL expression: compile-safe + runs + returns a scalar?"""
+    org = request.orguser.org
+    org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not org_warehouse:
+        return ValidateSqlResponse(ok=False, error="No warehouse configured for this organization")
+    result = validate_sql_against_warehouse(
+        org_warehouse=org_warehouse,
+        schema_name=payload.schema_name,
+        table_name=payload.table_name,
+        sql_expression=payload.sql_expression,
+        filters=[f.dict() for f in payload.filters],
+    )
+    return ValidateSqlResponse(**result)
 
 
 @metrics_router.post("/", response=MetricResponse)
 @has_permission(["can_create_charts"])
 def create_metric(request, payload: MetricCreate):
-    """Create a new metric definition"""
+    """Create a new Metric primitive."""
     orguser = request.orguser
     org = orguser.org
+    _validate_payload(payload)
 
-    metric = MetricDefinition.objects.create(
+    metric = Metric.objects.create(
         org=org,
         name=payload.name,
+        description=payload.description,
+        tags=payload.tags,
         schema_name=payload.schema_name,
         table_name=payload.table_name,
-        column=payload.column,
-        aggregation=payload.aggregation,
         time_column=payload.time_column,
-        time_grain=payload.time_grain,
-        direction=payload.direction,
-        target_value=payload.target_value,
-        amber_threshold_pct=payload.amber_threshold_pct,
-        green_threshold_pct=payload.green_threshold_pct,
-        program_tag=payload.program_tag,
-        metric_type_tag=payload.metric_type_tag,
-        trend_periods=payload.trend_periods,
-        display_order=payload.display_order,
+        default_time_grain=payload.default_time_grain,
+        creation_mode=payload.creation_mode,
+        simple_terms=[t.dict() for t in payload.simple_terms],
+        simple_formula=payload.simple_formula,
+        sql_expression=payload.sql_expression,
+        filters=[f.dict() for f in payload.filters],
         created_by=orguser,
     )
+    return _serialize(metric)
 
-    return MetricResponse(
-        id=metric.id,
-        name=metric.name,
-        schema_name=metric.schema_name,
-        table_name=metric.table_name,
-        column=metric.column,
-        aggregation=metric.aggregation,
-        time_column=metric.time_column,
-        time_grain=metric.time_grain,
-        direction=metric.direction,
-        target_value=metric.target_value,
-        amber_threshold_pct=metric.amber_threshold_pct,
-        green_threshold_pct=metric.green_threshold_pct,
-        program_tag=metric.program_tag,
-        metric_type_tag=metric.metric_type_tag,
-        trend_periods=metric.trend_periods,
-        display_order=metric.display_order,
-        created_at=metric.created_at,
-        updated_at=metric.updated_at,
-    )
+
+@metrics_router.get("/{metric_id}/", response=MetricDetailResponse)
+@has_permission(["can_view_charts"])
+def get_metric(request, metric_id: int):
+    """Return a single Metric along with its references (kpi/alert/chart counts)."""
+    org = request.orguser.org
+    try:
+        metric = Metric.objects.get(id=metric_id, org=org)
+    except Metric.DoesNotExist:
+        raise HttpError(404, "Metric not found")
+    return MetricDetailResponse(metric=_serialize(metric), references=_references_for(metric))
 
 
 @metrics_router.put("/{metric_id}/", response=MetricResponse)
 @has_permission(["can_edit_charts"])
 def update_metric(request, metric_id: int, payload: MetricUpdate):
-    """Update an existing metric definition"""
+    """Partial-update a Metric. Rejects if the new shape fails to compile."""
     org = request.orguser.org
-
     try:
-        metric = MetricDefinition.objects.get(id=metric_id, org=org)
-    except MetricDefinition.DoesNotExist:
+        metric = Metric.objects.get(id=metric_id, org=org)
+    except Metric.DoesNotExist:
         raise HttpError(404, "Metric not found")
 
-    # Update only fields that were explicitly included in the request body.
-    # Do NOT skip None values — a client sending null for an optional field
-    # (e.g. time_column) is intentionally clearing it.
     update_fields = payload.dict(exclude_unset=True)
-    if update_fields.get(
-        "aggregation"
-    ) == "count_distinct" and AlertService.metric_has_linked_alerts(metric):
-        raise HttpError(400, "Linked alerts do not support COUNT DISTINCT metrics")
+
+    # Normalize nested schemas to plain dicts for JSONField storage.
+    if "simple_terms" in update_fields:
+        update_fields["simple_terms"] = [
+            t if isinstance(t, dict) else t.dict()
+            for t in (update_fields["simple_terms"] or [])
+        ]
+    if "filters" in update_fields:
+        update_fields["filters"] = [
+            f if isinstance(f, dict) else f.dict()
+            for f in (update_fields["filters"] or [])
+        ]
 
     for field, value in update_fields.items():
         setattr(metric, field, value)
 
-    metric.save()
-    AlertService.sync_alerts_for_metric(metric)
+    # Compile-check before persisting.
+    try:
+        compile_metric_value_expression(metric)
+    except MetricCompileError as e:
+        raise HttpError(400, f"Invalid metric definition: {e}")
 
-    return MetricResponse(
-        id=metric.id,
-        name=metric.name,
-        schema_name=metric.schema_name,
-        table_name=metric.table_name,
-        column=metric.column,
-        aggregation=metric.aggregation,
-        time_column=metric.time_column,
-        time_grain=metric.time_grain,
-        direction=metric.direction,
-        target_value=metric.target_value,
-        amber_threshold_pct=metric.amber_threshold_pct,
-        green_threshold_pct=metric.green_threshold_pct,
-        program_tag=metric.program_tag,
-        metric_type_tag=metric.metric_type_tag,
-        trend_periods=metric.trend_periods,
-        display_order=metric.display_order,
-        created_at=metric.created_at,
-        updated_at=metric.updated_at,
-    )
+    metric.save()
+    return _serialize(metric)
 
 
 @metrics_router.delete("/{metric_id}/")
 @has_permission(["can_edit_charts"])
 def delete_metric(request, metric_id: int):
-    """Delete a metric definition"""
+    """Delete a Metric. Blocked while any KPI or alert references it."""
     org = request.orguser.org
-
     try:
-        metric = MetricDefinition.objects.get(id=metric_id, org=org)
-    except MetricDefinition.DoesNotExist:
+        metric = Metric.objects.get(id=metric_id, org=org)
+    except Metric.DoesNotExist:
         raise HttpError(404, "Metric not found")
 
-    if AlertService.metric_has_linked_alerts(metric):
+    refs = _references_for(metric)
+    if refs.kpi_count or refs.alert_count or refs.chart_count:
         raise HttpError(
             400,
-            "This metric is linked to one or more alerts. Remove or relink those alerts first.",
+            f"Metric is used by {refs.kpi_count} KPI(s), "
+            f"{refs.alert_count} alert(s), and {refs.chart_count} chart(s). "
+            "Remove those references first.",
         )
-
     metric.delete()
     return {"success": True}
 
 
-# ── Annotations ──────────────────────────────────────────────────────────────
-
-
-@metrics_router.post("/latest-annotations/", response=List[LatestAnnotationEntry])
+@metrics_router.get("/{metric_id}/references/", response=MetricReferencesResponse)
 @has_permission(["can_view_charts"])
-def fetch_latest_annotations(request, payload: LatestAnnotationsRequest):
-    """
-    Return the most-recent annotation for each requested metric.
-    Metrics with no annotation are omitted from the response.
-    """
+def get_references(request, metric_id: int):
+    """Blast-radius summary used by the 'you're about to edit this' confirm dialog."""
     org = request.orguser.org
-
-    metrics = MetricDefinition.objects.filter(id__in=payload.metric_ids, org=org)
-
-    # Fetch all annotations for the requested metrics in one query,
-    # ordered newest-first so we can pick the first per metric.
-    annotations = (
-        MetricAnnotation.objects.filter(metric__in=metrics)
-        .order_by("metric_id", "-period_key")
-        .select_related("metric")
-    )
-
-    # Keep only the latest annotation per metric
-    seen = set()
-    results = []
-    for a in annotations:
-        if a.metric_id not in seen:
-            seen.add(a.metric_id)
-            results.append(
-                LatestAnnotationEntry(
-                    metric_id=a.metric_id,
-                    id=a.id,
-                    period_key=a.period_key,
-                    rationale=a.rationale,
-                    quote_text=a.quote_text,
-                    quote_attribution=a.quote_attribution,
-                    created_at=a.created_at,
-                    updated_at=a.updated_at,
-                )
-            )
-
-    return results
-
-
-@metrics_router.get("/{metric_id}/annotations/", response=List[AnnotationResponse])
-@has_permission(["can_view_charts"])
-def list_annotations(request, metric_id: int):
-    """Get all annotations for a metric"""
-    org = request.orguser.org
-
     try:
-        metric = MetricDefinition.objects.get(id=metric_id, org=org)
-    except MetricDefinition.DoesNotExist:
+        metric = Metric.objects.get(id=metric_id, org=org)
+    except Metric.DoesNotExist:
         raise HttpError(404, "Metric not found")
-
-    annotations = MetricAnnotation.objects.filter(metric=metric).order_by("-period_key")
-    return [
-        AnnotationResponse(
-            id=a.id,
-            period_key=a.period_key,
-            rationale=a.rationale,
-            quote_text=a.quote_text,
-            quote_attribution=a.quote_attribution,
-            created_at=a.created_at,
-            updated_at=a.updated_at,
-        )
-        for a in annotations
-    ]
-
-
-@metrics_router.post("/{metric_id}/annotations/", response=AnnotationResponse)
-@has_permission(["can_edit_charts"])
-def create_or_update_annotation(request, metric_id: int, payload: AnnotationCreate):
-    """Create or update an annotation for a metric + period"""
-    orguser = request.orguser
-    org = orguser.org
-
-    try:
-        metric = MetricDefinition.objects.get(id=metric_id, org=org)
-    except MetricDefinition.DoesNotExist:
-        raise HttpError(404, "Metric not found")
-
-    annotation, created = MetricAnnotation.objects.update_or_create(
-        metric=metric,
-        period_key=payload.period_key,
-        defaults={
-            "rationale": payload.rationale,
-            "quote_text": payload.quote_text,
-            "quote_attribution": payload.quote_attribution,
-            "created_by": orguser,
-        },
-    )
-
-    return AnnotationResponse(
-        id=annotation.id,
-        period_key=annotation.period_key,
-        rationale=annotation.rationale,
-        quote_text=annotation.quote_text,
-        quote_attribution=annotation.quote_attribution,
-        created_at=annotation.created_at,
-        updated_at=annotation.updated_at,
-    )
+    return _references_for(metric)

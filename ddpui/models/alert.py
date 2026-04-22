@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.metrics import MetricDefinition
+from ddpui.models.metrics import KPI, Metric
 
 
 @dataclass
@@ -71,8 +71,17 @@ class Alert(models.Model):
         db_column="created_by",
         related_name="alerts_created",
     )
+    # KPI-backed RAG alerts populate `kpi` + `metric_rag_level`.
+    # Metric-threshold alerts (Batch 3) populate `metric` instead.
+    kpi = models.ForeignKey(
+        KPI,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alerts",
+    )
     metric = models.ForeignKey(
-        MetricDefinition,
+        Metric,
         on_delete=models.CASCADE,
         null=True,
         blank=True,

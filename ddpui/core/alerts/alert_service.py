@@ -1,6 +1,16 @@
-"""Alert business logic and CRUD operations"""
+"""Alert business logic — Batch 1 patch.
 
-from dataclasses import replace
+RAG-backed alerts now reference a **KPI** (the tracked layer), not a raw
+MetricDefinition. Source fields (schema / table / aggregation) come from the
+KPI's linked Metric; target / direction / thresholds come from the KPI.
+
+The `count_distinct` constraint is lifted per product call — alerts can now
+be built on any Metric regardless of aggregation.
+
+Batch 3 will split this into three explicit alert types (threshold / rag /
+standalone) with per-alert cooldown and structured recipients.
+"""
+
 from typing import Literal
 
 from ddpui.core.alerts.alert_query_builder import (
@@ -26,7 +36,7 @@ from ddpui.models.alert import (
 )
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.metrics import MetricDefinition
+from ddpui.models.metrics import KPI, Metric
 from ddpui.models.tasks import DataflowOrgTask, TaskType
 from ddpui.core.metrics_service import compute_rag_status, fetch_current_value
 from ddpui.schemas.alert_schema import AlertCreate, AlertUpdate, AlertTestRequest
@@ -41,15 +51,25 @@ MetricRagLevel = Literal["red", "amber", "green"]
 class AlertService:
     """Service class for alert operations"""
 
+    # ── Listing / single-read ────────────────────────────────────────────────
+
     @staticmethod
-    def list_alerts(org: Org, page: int = 1, page_size: int = 10, metric_id: int | None = None):
-        """List alerts for org, sorted by last fired (most recent first)"""
+    def list_alerts(
+        org: Org,
+        page: int = 1,
+        page_size: int = 10,
+        kpi_id: int | None = None,
+        metric_id: int | None = None,
+    ):
+        """List alerts for org, sorted by last fired (most recent first)."""
         queryset = Alert.objects.filter(org=org)
+        if kpi_id is not None:
+            queryset = queryset.filter(kpi_id=kpi_id)
         if metric_id is not None:
             queryset = queryset.filter(metric_id=metric_id)
 
         queryset = (
-            queryset.select_related("metric")
+            queryset.select_related("kpi", "kpi__metric", "metric")
             .annotate(
                 _last_evaluated_at=Max("evaluations__created_at"),
                 _last_fired_at=Max(
@@ -83,30 +103,32 @@ class AlertService:
 
     @staticmethod
     def get_alert(alert_id: int, org: Org) -> Alert:
-        """Get single alert, ensure org match"""
         try:
-            return Alert.objects.select_related("metric").get(id=alert_id, org=org)
+            return Alert.objects.select_related("kpi", "kpi__metric", "metric").get(
+                id=alert_id, org=org
+            )
         except Alert.DoesNotExist:
             raise AlertNotFoundError(alert_id)
 
+    # ── Create / update / delete ─────────────────────────────────────────────
+
     @staticmethod
     def create_alert(data: AlertCreate, orguser: OrgUser) -> Alert:
-        """Create alert from validated schema"""
         config = AlertQueryConfig.from_dict(data.query_config.dict())
-        metric = AlertService._resolve_metric(orguser.org, data.metric_id)
+        kpi = AlertService._resolve_kpi(orguser.org, data.kpi_id)
         metric_rag_level = data.metric_rag_level
-        AlertService._validate_metric_rag_configuration(metric, metric_rag_level, creating=True)
+        AlertService._validate_rag_configuration(kpi, metric_rag_level, creating=True)
         config = (
-            AlertService._build_metric_backed_query_config(metric)
-            if metric and metric_rag_level
-            else AlertService._apply_metric_to_query_config(config, metric)
+            AlertService._build_kpi_backed_query_config(kpi)
+            if kpi and metric_rag_level
+            else config
         )
 
         alert = Alert.objects.create(
             name=data.name,
             org=orguser.org,
             created_by=orguser,
-            metric=metric,
+            kpi=kpi,
             metric_rag_level=metric_rag_level,
             query_config=config.to_dict(),
             recipients=data.recipients,
@@ -117,7 +139,6 @@ class AlertService:
 
     @staticmethod
     def update_alert(alert_id: int, org: Org, orguser: OrgUser, data: AlertUpdate) -> Alert:
-        """Update alert — partial update of provided fields"""
         alert = AlertService.get_alert(alert_id, org)
         config = alert.get_query_config()
         payload = data.dict(exclude_unset=True)
@@ -126,23 +147,26 @@ class AlertService:
             alert.name = data.name
         if data.query_config is not None:
             config = AlertQueryConfig.from_dict(data.query_config.dict())
-        metric = alert.metric
+
+        kpi = alert.kpi
         metric_rag_level = alert.metric_rag_level
-        if "metric_id" in payload:
-            metric = AlertService._resolve_metric(org, data.metric_id)
-            alert.metric = metric
-            if metric is None:
+        if "kpi_id" in payload:
+            kpi = AlertService._resolve_kpi(org, data.kpi_id)
+            alert.kpi = kpi
+            if kpi is None:
                 metric_rag_level = None
         if "metric_rag_level" in payload:
             metric_rag_level = data.metric_rag_level
-        AlertService._validate_metric_rag_configuration(metric, metric_rag_level, creating=False)
+
+        AlertService._validate_rag_configuration(kpi, metric_rag_level, creating=False)
         config = (
-            AlertService._build_metric_backed_query_config(metric)
-            if metric and metric_rag_level
-            else AlertService._apply_metric_to_query_config(config, metric)
+            AlertService._build_kpi_backed_query_config(kpi)
+            if kpi and metric_rag_level
+            else config
         )
         alert.metric_rag_level = metric_rag_level
         alert.set_query_config(config)
+
         if data.recipients is not None:
             alert.recipients = data.recipients
         if data.message is not None:
@@ -157,13 +181,13 @@ class AlertService:
 
     @staticmethod
     def delete_alert(alert_id: int, org: Org):
-        """Delete alert and all its evaluations (CASCADE)"""
         alert = AlertService.get_alert(alert_id, org)
         alert.delete()
 
+    # ── Warehouse + test + evaluation ────────────────────────────────────────
+
     @staticmethod
     def _get_warehouse_client(org: Org):
-        """Get warehouse client for an org"""
         org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise AlertWarehouseError("No warehouse configured for this organization")
@@ -171,18 +195,14 @@ class AlertService:
 
     @staticmethod
     def test_alert(data: AlertTestRequest, org: Org) -> dict:
-        """
-        Build SQL from config, execute against warehouse, return paginated results.
-        Used by the "Test Alert" button in the UI.
-        """
         wclient = AlertService._get_warehouse_client(org)
         config = AlertQueryConfig.from_dict(data.query_config.dict())
-        metric = AlertService._resolve_metric(org, data.metric_id)
+        kpi = AlertService._resolve_kpi(org, data.kpi_id)
         metric_rag_level = data.metric_rag_level
-        AlertService._validate_metric_rag_configuration(metric, metric_rag_level, creating=False)
-        if metric and metric_rag_level:
-            return AlertService._test_metric_rag_alert(
-                metric=metric,
+        AlertService._validate_rag_configuration(kpi, metric_rag_level, creating=False)
+        if kpi and metric_rag_level:
+            return AlertService._test_kpi_rag_alert(
+                kpi=kpi,
                 metric_rag_level=metric_rag_level,
                 org=org,
                 message=data.message,
@@ -190,24 +210,20 @@ class AlertService:
                 page=data.page,
                 page_size=data.page_size,
             )
-        config = AlertService._apply_metric_to_query_config(config, metric)
 
-        # Build base query builder
+        # Standalone path — query_config drives the SQL directly.
         base_qb = build_alert_query_builder(config)
         base_sql = compile_query(base_qb, wclient)
 
-        # Count total matching rows
         count_qb = build_count_query_builder(base_qb)
         count_sql = compile_query(count_qb, wclient)
 
-        # Paginated results
         paginated_qb = build_paginated_query_builder(base_qb, data.page, data.page_size)
         paginated_sql = compile_query(paginated_qb, wclient)
 
         try:
             count_result = wclient.execute(count_sql)
             total_rows = count_result[0]["cnt"] if count_result else 0
-
             results = wclient.execute(paginated_sql) if total_rows > 0 else []
         except Exception as e:
             raise AlertWarehouseError(f"Query execution failed: {str(e)}")
@@ -219,7 +235,7 @@ class AlertService:
             group_message=data.group_message,
             rows=normalized_results,
             table_name=config.table_name,
-            metric_name=metric.name if metric else "",
+            metric_name="",
             group_by_column=config.group_by_column,
         )
 
@@ -237,10 +253,7 @@ class AlertService:
     def evaluate_alert(
         alert: Alert, trigger_flow_run_id: str | None = None
     ) -> tuple[bool, int, str]:
-        """
-        Evaluate a single alert: build SQL, execute, log result.
-        Returns (fired: bool, rows_count: int, rendered_message: str)
-        """
+        # Idempotent per trigger_flow_run_id.
         if (
             trigger_flow_run_id
             and AlertEvaluation.objects.filter(
@@ -248,7 +261,9 @@ class AlertService:
             ).exists()
         ):
             latest = (
-                AlertEvaluation.objects.filter(alert=alert, trigger_flow_run_id=trigger_flow_run_id)
+                AlertEvaluation.objects.filter(
+                    alert=alert, trigger_flow_run_id=trigger_flow_run_id
+                )
                 .order_by("-created_at")
                 .first()
             )
@@ -258,10 +273,9 @@ class AlertService:
                 latest.rendered_message if latest else "",
             )
 
-        if alert.metric_id and alert.metric_rag_level:
-            return AlertService._evaluate_metric_rag_alert(
-                alert,
-                trigger_flow_run_id=trigger_flow_run_id,
+        if alert.kpi_id and alert.metric_rag_level:
+            return AlertService._evaluate_kpi_rag_alert(
+                alert, trigger_flow_run_id=trigger_flow_run_id
             )
 
         wclient = AlertService._get_warehouse_client(alert.org)
@@ -281,7 +295,7 @@ class AlertService:
                 group_message=alert.group_message,
                 rows=normalized_results,
                 table_name=config.table_name,
-                metric_name=alert.metric.name if alert.metric_id else "",
+                metric_name="",
                 group_by_column=config.group_by_column,
             )
 
@@ -317,7 +331,6 @@ class AlertService:
 
     @staticmethod
     def get_evaluations(alert_id: int, org: Org, page: int = 1, page_size: int = 20):
-        """Get paginated evaluation history for an alert"""
         alert = AlertService.get_alert(alert_id, org)
         queryset = AlertEvaluation.objects.filter(alert=alert).order_by("-created_at")
         total = queryset.count()
@@ -327,12 +340,17 @@ class AlertService:
 
     @staticmethod
     def list_fired_evaluations(
-        org: Org, page: int = 1, page_size: int = 20, metric_id: int | None = None
+        org: Org,
+        page: int = 1,
+        page_size: int = 20,
+        kpi_id: int | None = None,
+        metric_id: int | None = None,
     ):
-        """List recent fired alert evaluations across the org."""
         queryset = AlertEvaluation.objects.filter(alert__org=org, fired=True).select_related(
-            "alert", "alert__metric"
+            "alert", "alert__kpi", "alert__kpi__metric", "alert__metric"
         )
+        if kpi_id is not None:
+            queryset = queryset.filter(alert__kpi_id=kpi_id)
         if metric_id is not None:
             queryset = queryset.filter(alert__metric_id=metric_id)
 
@@ -348,27 +366,26 @@ class AlertService:
         deployment_id: str | None,
         trigger_flow_run_id: str,
     ) -> dict[str, int]:
-        """Evaluate active alerts after a successful DBT/DBT Cloud flow run."""
         if not deployment_id:
             return {"evaluated": 0, "fired": 0}
         if not AlertService._deployment_has_transform_tasks(deployment_id):
             return {"evaluated": 0, "fired": 0}
 
-        active_alerts = Alert.objects.filter(org=org, is_active=True).select_related("metric")
+        active_alerts = Alert.objects.filter(org=org, is_active=True).select_related(
+            "kpi", "kpi__metric", "metric"
+        )
         evaluated_count = 0
         fired_count = 0
 
         for alert in active_alerts:
             try:
                 if AlertEvaluation.objects.filter(
-                    alert=alert,
-                    trigger_flow_run_id=trigger_flow_run_id,
+                    alert=alert, trigger_flow_run_id=trigger_flow_run_id
                 ).exists():
                     continue
 
                 fired, _, rendered_message = AlertService.evaluate_alert(
-                    alert,
-                    trigger_flow_run_id=trigger_flow_run_id,
+                    alert, trigger_flow_run_id=trigger_flow_run_id
                 )
                 evaluated_count += 1
                 if fired:
@@ -384,36 +401,37 @@ class AlertService:
 
         return {"evaluated": evaluated_count, "fired": fired_count}
 
+    # ── KPI / Metric reference helpers ───────────────────────────────────────
+
     @staticmethod
-    def sync_alerts_for_metric(metric: MetricDefinition):
-        """Rewrite metric-owned query fields for all alerts linked to a metric."""
-        alerts = Alert.objects.filter(metric=metric)
-        for alert in alerts:
+    def sync_alerts_for_kpi(kpi: KPI):
+        """Rewrite KPI-owned query fields for all alerts linked to this KPI."""
+        for alert in Alert.objects.filter(kpi=kpi):
             config = AlertService.get_effective_query_config(alert)
             alert.set_query_config(config)
             alert.save(update_fields=["query_config", "updated_at"])
 
     @staticmethod
-    def metric_has_linked_alerts(metric: MetricDefinition) -> bool:
-        """Check whether any alerts are linked to this metric."""
+    def kpi_has_linked_alerts(kpi: KPI) -> bool:
+        return Alert.objects.filter(kpi=kpi).exists()
+
+    @staticmethod
+    def metric_has_linked_alerts(metric: Metric) -> bool:
         return Alert.objects.filter(metric=metric).exists()
 
     @staticmethod
     def get_effective_query_config(alert: Alert) -> AlertQueryConfig:
-        """Read an alert query config with current metric-owned fields applied."""
-        if alert.metric and alert.metric_rag_level:
-            return AlertService._build_metric_backed_query_config(alert.metric)
-        return AlertService._apply_metric_to_query_config(alert.get_query_config(), alert.metric)
+        if alert.kpi and alert.metric_rag_level:
+            return AlertService._build_kpi_backed_query_config(alert.kpi)
+        return alert.get_query_config()
 
     @staticmethod
     def compute_fire_streak(alert: Alert) -> int:
-        """Count consecutive fired=True evaluations from most recent"""
         evaluations = (
             AlertEvaluation.objects.filter(alert=alert)
             .order_by("-created_at")
             .values_list("fired", flat=True)
         )
-
         streak = 0
         for fired in evaluations:
             if fired:
@@ -422,44 +440,50 @@ class AlertService:
                 break
         return streak
 
+    # ── Internal helpers ────────────────────────────────────────────────────
+
     @staticmethod
-    def _resolve_metric(org: Org, metric_id: int | None) -> MetricDefinition | None:
-        """Resolve a metric for the alert if one was selected."""
-        if metric_id is None:
+    def _resolve_kpi(org: Org, kpi_id: int | None) -> KPI | None:
+        """Resolve the KPI for a RAG alert, if one was selected.
+
+        Note: count_distinct constraint has been LIFTED — any Metric aggregation
+        (including count_distinct) is allowed to back an alert.
+        """
+        if kpi_id is None:
             return None
         try:
-            metric = MetricDefinition.objects.get(id=metric_id, org=org)
-        except MetricDefinition.DoesNotExist as err:
-            raise AlertValidationError("Selected metric does not exist") from err
-
-        if metric.aggregation == "count_distinct":
-            raise AlertValidationError("COUNT DISTINCT metrics are not supported for alerts yet")
-
-        return metric
+            return KPI.objects.select_related("metric").get(id=kpi_id, org=org)
+        except KPI.DoesNotExist as err:
+            raise AlertValidationError("Selected KPI does not exist") from err
 
     @staticmethod
-    def _validate_metric_rag_configuration(
-        metric: MetricDefinition | None,
+    def _validate_rag_configuration(
+        kpi: KPI | None,
         metric_rag_level: MetricRagLevel | None,
         *,
         creating: bool,
     ):
-        """Validate metric-backed RAG alert constraints."""
-        if metric_rag_level and not metric:
-            raise AlertValidationError("Metric RAG alerts require a selected metric")
-        if metric and creating and not metric_rag_level:
-            raise AlertValidationError("Choose Red, Amber, or Green for metric-backed alerts")
-        if metric and metric_rag_level and metric.target_value in (None, 0):
-            raise AlertValidationError("Metric-backed alerts require the metric to have a target")
+        if metric_rag_level and not kpi:
+            raise AlertValidationError("RAG alerts require a selected KPI")
+        if kpi and creating and not metric_rag_level:
+            raise AlertValidationError("Choose Red, Amber, or Green for KPI-backed alerts")
+        if kpi and metric_rag_level and kpi.target_value in (None, 0):
+            raise AlertValidationError("KPI-backed alerts require the KPI to have a target")
 
     @staticmethod
-    def _build_metric_backed_query_config(metric: MetricDefinition) -> AlertQueryConfig:
-        """Store the metric-owned source config for metric-backed alerts."""
+    def _build_kpi_backed_query_config(kpi: KPI) -> AlertQueryConfig:
+        """Store a readable source snapshot for KPI-backed alerts.
+
+        The actual RAG evaluation path does not go through this SQL — it uses
+        `fetch_current_value` against the KPI's underlying Metric. This config
+        is kept for the UI's "here's what data this alert reads" affordance.
+        """
+        m = kpi.metric
         return AlertQueryConfig(
-            schema_name=metric.schema_name,
-            table_name=metric.table_name,
-            aggregation=metric.aggregation.upper(),
-            measure_column=metric.column,
+            schema_name=m.schema_name,
+            table_name=m.table_name,
+            aggregation="FORMULA",  # compound Metric expressions can't reduce to one
+            measure_column=m.name,
             group_by_column=None,
             filters=[],
             filter_connector="AND",
@@ -468,66 +492,48 @@ class AlertService:
         )
 
     @staticmethod
-    def _apply_metric_to_query_config(
-        config: AlertQueryConfig, metric: MetricDefinition | None
-    ) -> AlertQueryConfig:
-        """Metric-backed alerts inherit the metric-owned query fields."""
-        if not metric:
-            return config
-
-        return replace(
-            config,
-            schema_name=metric.schema_name,
-            table_name=metric.table_name,
-            aggregation=metric.aggregation.upper(),
-            measure_column=metric.column,
-        )
-
-    @staticmethod
     def _deployment_has_transform_tasks(deployment_id: str) -> bool:
-        """Alerts only evaluate after successful transform runs."""
         return DataflowOrgTask.objects.filter(
             dataflow__deployment_id=deployment_id,
             orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD],
         ).exists()
 
     @staticmethod
-    def _get_metric_rag_state(metric: MetricDefinition, org: Org) -> dict:
-        """Fetch the current metric value and compute its live RAG status."""
+    def _get_kpi_rag_state(kpi: KPI, org: Org) -> dict:
         wclient = AlertService._get_warehouse_client(org)
-        current_value, error = fetch_current_value(wclient, metric)
+        current_value, error = fetch_current_value(wclient, kpi.metric)
         if error:
-            raise AlertWarehouseError(f"Metric evaluation failed: {error}")
+            raise AlertWarehouseError(f"KPI evaluation failed: {error}")
 
         rag_status, achievement_pct = compute_rag_status(
             current_value,
-            metric.target_value,
-            metric.amber_threshold_pct,
-            metric.green_threshold_pct,
-            metric.direction,
+            kpi.target_value,
+            kpi.amber_threshold_pct,
+            kpi.green_threshold_pct,
+            kpi.direction,
         )
 
         return {
             "alert_value": current_value,
             "rag_status": rag_status,
             "achievement_pct": achievement_pct,
-            "target_value": metric.target_value,
+            "target_value": kpi.target_value,
             "selected_rag_level": None,
         }
 
     @staticmethod
-    def _build_metric_rag_query_summary(metric: MetricDefinition, metric_rag_level: MetricRagLevel) -> str:
-        """Readable evaluation summary for metric-backed alerts."""
+    def _build_kpi_rag_query_summary(kpi: KPI, metric_rag_level: MetricRagLevel) -> str:
+        m = kpi.metric
         return (
-            f"Metric RAG evaluation for {metric.name} "
-            f"({metric.schema_name}.{metric.table_name}) "
+            f"KPI RAG evaluation for {m.name} "
+            f"({m.schema_name}.{m.table_name}) "
             f"targeting {metric_rag_level}"
         )
 
     @staticmethod
-    def _test_metric_rag_alert(
+    def _test_kpi_rag_alert(
         *,
-        metric: MetricDefinition,
+        kpi: KPI,
         metric_rag_level: MetricRagLevel,
         org: Org,
         message: str,
@@ -535,8 +541,7 @@ class AlertService:
         page: int,
         page_size: int,
     ) -> dict:
-        """Preview a metric-backed alert using the metric's current RAG state."""
-        state = AlertService._get_metric_rag_state(metric, org)
+        state = AlertService._get_kpi_rag_state(kpi, org)
         state["selected_rag_level"] = metric_rag_level
         would_fire = state["rag_status"] == metric_rag_level
         rows = [state]
@@ -545,8 +550,8 @@ class AlertService:
             message=message,
             group_message=group_message,
             rows=rows,
-            table_name=metric.table_name,
-            metric_name=metric.name,
+            table_name=kpi.metric.table_name,
+            metric_name=kpi.metric.name,
             group_by_column=None,
         )
 
@@ -556,33 +561,32 @@ class AlertService:
             "results": rows,
             "page": page,
             "page_size": page_size,
-            "query_executed": AlertService._build_metric_rag_query_summary(metric, metric_rag_level),
+            "query_executed": AlertService._build_kpi_rag_query_summary(kpi, metric_rag_level),
             "rendered_message": rendered_message,
         }
 
     @staticmethod
-    def _evaluate_metric_rag_alert(
+    def _evaluate_kpi_rag_alert(
         alert: Alert,
         *,
         trigger_flow_run_id: str | None = None,
     ) -> tuple[bool, int, str]:
-        """Evaluate a metric-backed alert against the metric's current RAG state."""
-        metric = alert.metric
-        if not metric or not alert.metric_rag_level:
-            raise AlertValidationError("Metric-backed alert is missing its metric or RAG level")
+        kpi = alert.kpi
+        if not kpi or not alert.metric_rag_level:
+            raise AlertValidationError("KPI-backed alert is missing its KPI or RAG level")
 
-        state = AlertService._get_metric_rag_state(metric, alert.org)
+        state = AlertService._get_kpi_rag_state(kpi, alert.org)
         state["selected_rag_level"] = alert.metric_rag_level
         fired = state["rag_status"] == alert.metric_rag_level
         rows = [state] if fired else []
-        sql = AlertService._build_metric_rag_query_summary(metric, alert.metric_rag_level)
+        sql = AlertService._build_kpi_rag_query_summary(kpi, alert.metric_rag_level)
         rendered_message = render_alert_message(
             alert_name=alert.name,
             message=alert.message,
             group_message=alert.group_message,
             rows=[state],
-            table_name=metric.table_name,
-            metric_name=metric.name,
+            table_name=kpi.metric.table_name,
+            metric_name=kpi.metric.name,
             group_by_column=None,
         )
 
