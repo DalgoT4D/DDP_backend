@@ -25,6 +25,7 @@ class DashboardComponentType(str, Enum):
     CHART = "chart"
     TEXT = "text"
     HEADING = "heading"
+    KPI = "kpi"
 
     @classmethod
     def choices(cls):

@@ -170,6 +170,11 @@ class KPIService:
 
         update_data = payload.dict(exclude_unset=True)
 
+        # Handle metric change
+        if "metric_id" in update_data:
+            new_metric = MetricService.get_metric(update_data.pop("metric_id"), org)
+            kpi.metric = new_metric
+
         # Validate changed fields
         direction = update_data.get("direction", kpi.direction)
         time_grain = update_data.get("time_grain", kpi.time_grain)
@@ -330,16 +335,66 @@ class KPIService:
         }
 
         # Generate echarts config
-        kpi_meta = {
-            "name": kpi.name,
-            "target_value": kpi.target_value,
-            "direction": kpi.direction,
-            "rag_status": rag_status,
-            "current_value": current_value,
-        }
-        echarts_config = EChartsConfigGenerator.generate_kpi_trend_config(
-            periods, kpi_meta, compact=False
-        )
+        if periods:
+            # Has trend data — render as line chart
+            kpi_meta = {
+                "name": kpi.name,
+                "target_value": kpi.target_value,
+                "direction": kpi.direction,
+                "rag_status": rag_status,
+                "current_value": current_value,
+            }
+            echarts_config = EChartsConfigGenerator.generate_kpi_trend_config(
+                periods, kpi_meta, compact=False
+            )
+        else:
+            # No time dimension — render as number chart showing value / target
+            def _fmt(v):
+                if v is None:
+                    return "—"
+                if abs(v) >= 1_000_000:
+                    return f"{v / 1_000_000:,.1f}M"
+                if abs(v) >= 1_000:
+                    return f"{v / 1_000:,.1f}K"
+                return f"{v:,.0f}"
+
+            display = _fmt(current_value)
+            if kpi.target_value is not None:
+                display += f"  {{fontSize|/ {_fmt(kpi.target_value)}}}"
+
+            echarts_config = {
+                "series": [
+                    {
+                        "type": "gauge",
+                        "center": ["50%", "50%"],
+                        "radius": "0%",
+                        "startAngle": 0,
+                        "endAngle": 0,
+                        "axisLine": {"show": False},
+                        "splitLine": {"show": False},
+                        "axisTick": {"show": False},
+                        "axisLabel": {"show": False},
+                        "pointer": {"show": False},
+                        "detail": {
+                            "show": True,
+                            "offsetCenter": [0, 0],
+                            "formatter": display,
+                            "rich": {
+                                "fontSize": {
+                                    "fontSize": 20,
+                                    "color": "#9ca3af",
+                                    "fontWeight": "normal",
+                                }
+                            },
+                            "fontSize": 36,
+                            "fontWeight": "bold",
+                            "color": "#111827",
+                        },
+                        "title": {"show": False},
+                        "data": [{"value": current_value or 0}],
+                    }
+                ],
+            }
 
         return {"data": data, "echarts_config": echarts_config}
 

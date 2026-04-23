@@ -25,6 +25,7 @@ class KPICreate(Schema):
 
 
 class KPIUpdate(Schema):
+    metric_id: Optional[int] = None
     name: Optional[str] = None
     target_value: Optional[float] = None
     direction: Optional[str] = None
