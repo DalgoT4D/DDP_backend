@@ -850,7 +850,10 @@ def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
         if dataflow is None:
             raise HttpError(403, "You don't have access to this flow run")
 
-        # Identify associated Airbyte connections and cancel running jobs
+        cancellation_params = {"state": payload.state.model_dump(), "force": str(payload.force)}
+        res = prefect_service.cancel_queued_manual_job(flow_run_id, cancellation_params)
+
+        # Best-effort cleanup of associated Airbyte jobs
         try:
             task_locks = TaskLock.objects.filter(flow_run_id=flow_run_id).select_related("orgtask")
             connection_ids = {lock.orgtask.connection_id for lock in task_locks if lock.orgtask.connection_id}
@@ -860,20 +863,20 @@ def cancel_queued_manual_job(request, flow_run_id, payload: TaskStateSchema):
                 for conn_id in connection_ids:
                     try:
                         # Fetch and cancel running jobs for this connection
-                        job_types = ["sync", "reset_connection", "clear", "discover_schema", "refresh"]
+                        job_types = ["sync", "reset_connection", "clear", "refresh"]
                         jobs_res = airbyte_service.get_jobs_for_connection(conn_id, job_types=job_types, limit=10)
-                        for job_entry in jobs_res.get("jobs", []):
-                            if job_entry["job"]["status"] == "running":
-                                job_id = job_entry["job"]["id"]
-                                airbyte_service.cancel_job(job_id)
-                                logger.info(f"Cancelled Airbyte job {job_id} for connection {conn_id}")
+                        if jobs_res and "jobs" in jobs_res:
+                            for job_entry in jobs_res.get("jobs", []):
+                                job = job_entry.get("job", {})
+                                if job.get("status") == "running":
+                                    job_id = job.get("id")
+                                    if job_id:
+                                        airbyte_service.cancel_job(job_id)
+                                        logger.info(f"Cancelled Airbyte job {job_id} for connection {conn_id}")
                     except Exception as ab_error:
                         logger.error(f"Failed to cancel Airbyte jobs for connection {conn_id}: {str(ab_error)}")
         except Exception as lock_error:
             logger.error(f"Error while identifying Airbyte connections for cancellation: {str(lock_error)}")
-
-        cancellation_params = {"state": payload.state.model_dump(), "force": str(payload.force)}
-        res = prefect_service.cancel_queued_manual_job(flow_run_id, cancellation_params)
     except HttpError as http_error:
         # We handle HttpError separately to ensure the correct message is raised
         logger.exception(http_error)
