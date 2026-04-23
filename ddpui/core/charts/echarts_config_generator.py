@@ -776,7 +776,7 @@ class EChartsConfigGenerator:
             }
 
         return {
-            "grid": {"left": 50, "right": 20, "top": 10, "bottom": 40, "containLabel": False},
+            "grid": {"left": 10, "right": 10, "top": 10, "bottom": 10, "containLabel": True},
             "xAxis": {
                 "type": "category",
                 "data": periods,
@@ -786,6 +786,7 @@ class EChartsConfigGenerator:
             "yAxis": {
                 "type": "value",
                 "axisLabel": {"fontSize": 11},
+                "splitLine": {"show": False},
             },
             "tooltip": {
                 "trigger": "axis",
