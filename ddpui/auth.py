@@ -51,6 +51,29 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
+def is_system_admin(api_endpoint):
+    """
+    Decorator to check if the authenticated user is a platform-level administrator.
+    Must be used with an authentication middleware that sets request.user.
+    """
+    from ddpui.models.admin_user import AdminUser
+
+    @wraps(api_endpoint)
+    def wrapper(*args, **kwargs):
+        request = args[0]
+        if not request.user or not request.user.is_authenticated:
+            raise HttpError(401, "unauthenticated")
+
+        is_admin = AdminUser.objects.filter(user=request.user).exists()
+        if not is_admin:
+            raise HttpError(403, "insufficient permissions - admin only")
+
+        return api_endpoint(*args, **kwargs)
+
+    return wrapper
+
+
+
 class CustomAuthMiddleware(HttpBearer):
     """new middleware that works based on permissions from db"""
 
@@ -136,12 +159,21 @@ class CustomJwtAuthMiddleware(HttpBearer):
 
         if token_payload and user_id:
             request.user = User.objects.filter(id=user_id).first()
+            if not request.user:
+                raise HttpError(401, "User not found")
+
+            # Check for platform admin status
+            from ddpui.models.admin_user import AdminUser
+            is_system_admin_user = AdminUser.objects.filter(user=request.user).exists()
+
             q_orguser = OrgUser.objects.filter(user=request.user)
             if request.headers.get("x-dalgo-org"):
                 orgslug = request.headers["x-dalgo-org"]
                 q_orguser = q_orguser.filter(org__slug=orgslug)
             orguser = q_orguser.select_related("org").first()
+            
             if orguser is not None:
+
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
@@ -190,6 +222,12 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 orguser_role_id = orguser_role_map_json.get(str(orguser.id))
                 request.permissions = permissions_json.get(str(orguser_role_id), [])
                 request.orguser = orguser
+                request.token = token
+                return request
+
+            if is_system_admin_user:
+                request.permissions = ["is_system_admin"]
+                request.orguser = None
                 request.token = token
                 return request
 
