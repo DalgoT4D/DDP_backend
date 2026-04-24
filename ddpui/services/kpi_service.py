@@ -285,14 +285,30 @@ class KPIService:
         return results
 
     @staticmethod
-    def get_kpi_data(kpi_id: int, org: Org) -> dict:
-        """Get KPI chart data + echarts config.
+    def compute_kpi_data(kpi_payload: dict, org: Org, date_filter: Optional[dict] = None) -> dict:
+        """Compute KPI data + echarts config from a payload.
 
-        Same pattern as chart data endpoint: returns {data, echarts_config}.
+        Args:
+            kpi_payload: KPI definition (metric, target, direction, time config)
+            org: Organization for warehouse access
+            date_filter: Optional {column_name, start, end} to filter warehouse queries
+
+        Common function used by both:
+          - Live KPI API (payload built from KPI model)
+          - Report service (payload built from frozen config)
+
+        kpi_payload shape:
+            name: str
+            metric: {schema_name, table_name, column, aggregation, column_expression}
+            target_value: float | None
+            direction: "increase" | "decrease"
+            green_threshold_pct: float
+            amber_threshold_pct: float
+            time_grain: str | None
+            time_dimension_column: str | None
+            trend_periods: int
         """
         from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-
-        kpi = KPIService.get_kpi(kpi_id, org)
 
         empty_result = {"data": {}, "echarts_config": {}}
 
@@ -300,47 +316,135 @@ class KPIService:
         if not org_warehouse:
             return empty_result
 
+        metric_def = kpi_payload.get("metric", {})
+        schema_name = metric_def.get("schema_name")
+        table_name = metric_def.get("table_name")
+        if not schema_name or not table_name:
+            return empty_result
+
         # Compute current value
         current_value = None
         try:
-            current_value = MetricService.compute_metric_value(kpi.metric, org_warehouse)
+            warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
+            qb = AggQueryBuilder()
+            qb.fetch_from(table_name, schema_name)
+            if metric_def.get("column_expression"):
+                qb.add_column(literal_column(metric_def["column_expression"]).label("metric_value"))
+            else:
+                qb.add_aggregate_column(
+                    metric_def.get("column"), metric_def.get("aggregation"), alias="metric_value"
+                )
+            # Apply date filter (used by reports with frozen period)
+            if date_filter:
+                from sqlalchemy import and_
+
+                date_col = column(date_filter["column_name"])
+                qb.where_clause(
+                    and_(
+                        date_col >= date_filter["start"],
+                        date_col <= date_filter["end"],
+                    )
+                )
+            sql_stmt = qb.build()
+            compiled = sql_stmt.compile(
+                bind=warehouse.engine, compile_kwargs={"literal_binds": True}
+            )
+            results = warehouse.execute(compiled)
+            if results and len(results) > 0:
+                row = results[0]
+                val = row.get("metric_value") if isinstance(row, dict) else row[0]
+                current_value = float(val) if val is not None else None
         except Exception as e:
-            logger.error(f"Error computing value for KPI {kpi.id}: {e}")
+            logger.error(f"Error computing KPI value: {e}")
 
         # Compute RAG
+        target_value = kpi_payload.get("target_value")
+        direction = kpi_payload.get("direction", "increase")
         rag_status = compute_rag_status(
             current_value,
-            kpi.target_value,
-            kpi.direction,
-            kpi.green_threshold_pct,
-            kpi.amber_threshold_pct,
+            target_value,
+            direction,
+            kpi_payload.get("green_threshold_pct", 100.0),
+            kpi_payload.get("amber_threshold_pct", 80.0),
         )
 
-        # Compute trend periods
+        # Compute trend
         periods = []
-        if kpi.time_dimension_column:
+        time_dimension_column = kpi_payload.get("time_dimension_column")
+        time_grain = kpi_payload.get("time_grain")
+        if time_dimension_column and time_grain:
             try:
-                periods = KPIService._compute_trend(kpi, org_warehouse)
-            except Exception as e:
-                logger.error(f"Error computing trend for KPI {kpi.id}: {e}")
+                warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
+                warehouse_type = org_warehouse.wtype.lower() if org_warehouse.wtype else "postgres"
+                sql_grain = TIME_GRAIN_TO_SQL.get(time_grain, "month")
 
-        # Build data payload
+                qb = AggQueryBuilder()
+                qb.fetch_from(table_name, schema_name)
+
+                time_col = column(time_dimension_column)
+                time_expr = apply_time_grain(time_col, sql_grain, warehouse_type)
+                time_col_labeled = time_expr.label("period")
+                qb.add_column(time_col_labeled)
+                qb.group_cols_by(time_col_labeled)
+
+                if metric_def.get("column_expression"):
+                    qb.add_column(literal_column(metric_def["column_expression"]).label("value"))
+                else:
+                    qb.add_aggregate_column(
+                        metric_def.get("column"), metric_def.get("aggregation"), alias="value"
+                    )
+
+                # Apply date filter for trend too
+                if date_filter:
+                    from sqlalchemy import and_
+
+                    date_col_expr = column(date_filter["column_name"])
+                    qb.where_clause(
+                        and_(
+                            date_col_expr >= date_filter["start"],
+                            date_col_expr <= date_filter["end"],
+                        )
+                    )
+
+                qb.order_cols_by([("period", "asc")])
+                qb.limit_rows(kpi_payload.get("trend_periods", 12))
+
+                sql_stmt = qb.build()
+                compiled = sql_stmt.compile(
+                    bind=warehouse.engine, compile_kwargs={"literal_binds": True}
+                )
+                results = warehouse.execute(compiled)
+
+                for row in results:
+                    period_val = row.get("period") if isinstance(row, dict) else row[0]
+                    value_val = row.get("value") if isinstance(row, dict) else row[1]
+                    period_label = format_time_grain_label(period_val, sql_grain)
+                    periods.append(
+                        {
+                            "period": period_label,
+                            "value": float(value_val) if value_val is not None else None,
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Error computing KPI trend: {e}")
+
+        # Build data
         data = {
             "current_value": current_value,
-            "target_value": kpi.target_value,
-            "direction": kpi.direction,
+            "target_value": target_value,
+            "direction": direction,
             "rag_status": rag_status,
-            "time_grain": kpi.time_grain,
+            "time_grain": time_grain,
             "periods": periods,
         }
 
         # Generate echarts config
+        name = kpi_payload.get("name", "")
         if periods:
-            # Has trend data — render as line chart
             kpi_meta = {
-                "name": kpi.name,
-                "target_value": kpi.target_value,
-                "direction": kpi.direction,
+                "name": name,
+                "target_value": target_value,
+                "direction": direction,
                 "rag_status": rag_status,
                 "current_value": current_value,
             }
@@ -348,7 +452,7 @@ class KPIService:
                 periods, kpi_meta, compact=False
             )
         else:
-            # No time dimension — render as number chart showing value / target
+
             def _fmt(v):
                 if v is None:
                     return "—"
@@ -359,8 +463,8 @@ class KPIService:
                 return f"{v:,.0f}"
 
             display = _fmt(current_value)
-            if kpi.target_value is not None:
-                display += f"  {{fontSize|/ {_fmt(kpi.target_value)}}}"
+            if target_value is not None:
+                display += f"  {{fontSize|/ {_fmt(target_value)}}}"
 
             echarts_config = {
                 "series": [
@@ -399,49 +503,32 @@ class KPIService:
         return {"data": data, "echarts_config": echarts_config}
 
     @staticmethod
-    def _compute_trend(
-        kpi: KPI, org_warehouse: OrgWarehouse, limit: Optional[int] = None
-    ) -> List[dict]:
-        """Build and execute a time-series query for the KPI's metric."""
+    def get_kpi_data(kpi_id: int, org: Org) -> dict:
+        """Get KPI chart data + echarts config (live from DB).
+
+        Builds the payload from the KPI model and delegates to compute_kpi_data.
+        """
+        kpi = KPIService.get_kpi(kpi_id, org)
         metric = kpi.metric
-        warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
-        warehouse_type = org_warehouse.wtype.lower() if org_warehouse.wtype else "postgres"
-        sql_grain = TIME_GRAIN_TO_SQL.get(kpi.time_grain, "month")
 
-        qb = AggQueryBuilder()
-        qb.fetch_from(metric.table_name, metric.schema_name)
+        payload = {
+            "name": kpi.name,
+            "metric": {
+                "schema_name": metric.schema_name,
+                "table_name": metric.table_name,
+                "column": metric.column,
+                "aggregation": metric.aggregation,
+                "column_expression": metric.column_expression,
+            },
+            "target_value": kpi.target_value,
+            "direction": kpi.direction,
+            "green_threshold_pct": kpi.green_threshold_pct,
+            "amber_threshold_pct": kpi.amber_threshold_pct,
+            "time_grain": kpi.time_grain,
+            "time_dimension_column": kpi.time_dimension_column,
+            "trend_periods": kpi.trend_periods,
+        }
 
-        # Time dimension with grain
-        time_col = column(kpi.time_dimension_column)
-        time_expr = apply_time_grain(time_col, sql_grain, warehouse_type)
-        time_col_labeled = time_expr.label("period")
-        qb.add_column(time_col_labeled)
-        qb.group_cols_by(time_col_labeled)
-
-        # Metric aggregation
-        if metric.column_expression:
-            qb.add_column(literal_column(metric.column_expression).label("value"))
-        else:
-            qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
-
-        # Order by period ascending, limit to trend_periods
-        qb.order_cols_by([("period", "asc")])
-        qb.limit_rows(limit or kpi.trend_periods)
-
-        sql_stmt = qb.build()
-        compiled = sql_stmt.compile(bind=warehouse.engine, compile_kwargs={"literal_binds": True})
-        results = warehouse.execute(compiled)
-
-        periods = []
-        for row in results:
-            period_val = row.get("period") if isinstance(row, dict) else row[0]
-            value_val = row.get("value") if isinstance(row, dict) else row[1]
-            period_label = format_time_grain_label(period_val, sql_grain)
-            periods.append(
-                {
-                    "period": period_label,
-                    "value": float(value_val) if value_val is not None else None,
-                }
-            )
+        return KPIService.compute_kpi_data(payload, org)
 
         return periods

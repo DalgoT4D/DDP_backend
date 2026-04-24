@@ -310,9 +310,12 @@ class TestKPIData:
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi_data(99999, org)
 
-    @patch("ddpui.services.metric_service.MetricService.compute_metric_value")
-    def test_data_with_value(self, mock_compute, orguser, org, sample_kpi, seed_db):
-        mock_compute.return_value = 800.0
+    @patch("ddpui.services.kpi_service.WarehouseFactory.get_warehouse_client")
+    def test_data_with_value(self, mock_wh, orguser, org, sample_kpi, seed_db):
+        mock_client = MagicMock()
+        mock_client.execute.return_value = [{"metric_value": 800.0}]
+        mock_client.engine = MagicMock()
+        mock_wh.return_value = mock_client
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
 
         result = KPIService.get_kpi_data(sample_kpi.id, org)
