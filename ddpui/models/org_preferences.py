@@ -17,6 +17,15 @@ class OrgPreferences(models.Model):
     enable_llm_requested_by = models.ForeignKey(
         OrgUser, on_delete=models.CASCADE, related_name="llm_request", null=True, blank=True
     )
+    ai_data_sharing_enabled = models.BooleanField(default=False)
+    ai_data_sharing_consented_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        related_name="ai_data_sharing_consents",
+        null=True,
+        blank=True,
+    )
+    ai_data_sharing_consented_at = models.DateTimeField(null=True, blank=True)
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)

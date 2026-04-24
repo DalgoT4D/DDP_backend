@@ -26,23 +26,31 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
+from ddpui.models.dashboard_chat import (
+    DashboardChatMessage,
+    DashboardChatMessageFeedback,
+    DashboardChatSession,
+)
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
     get_dashboard,
+    export_dashboard,
     create_dashboard,
     update_dashboard,
     delete_dashboard,
     create_filter,
     update_filter,
     delete_filter,
+    set_dashboard_chat_message_feedback,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     FilterCreate,
     FilterUpdate,
+    DashboardChatMessageFeedbackRequest,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -128,6 +136,38 @@ def sample_filter(sample_dashboard):
         filter_obj.delete()
     except DashboardFilter.DoesNotExist:
         pass
+
+
+@pytest.fixture
+def sample_charts(orguser, org):
+    """Charts that can be referenced from dashboard components."""
+    charts = [
+        Chart.objects.create(
+            title="Funding by Quarter",
+            description="Quarterly funding totals",
+            chart_type="bar",
+            schema_name="public",
+            table_name="funding",
+            extra_config={"metrics": ["sum_amount"]},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        ),
+        Chart.objects.create(
+            title="Donor Count",
+            description="Unique donors over time",
+            chart_type="line",
+            schema_name="public",
+            table_name="donors",
+            extra_config={"metrics": ["count_distinct_donor_id"]},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        ),
+    ]
+    yield charts
+    for chart in charts:
+        chart.delete()
 
 
 # ================================================================================
@@ -267,6 +307,79 @@ class TestGetDashboard:
         other_orguser.delete()
         other_user.delete()
         other_org.delete()
+
+
+class TestExportDashboard:
+    """Tests for export_dashboard endpoint."""
+
+    def test_export_dashboard_success(self, orguser, sample_dashboard, sample_charts, seed_db):
+        """Test exporting dashboard data and referenced chart configs."""
+        request = mock_request(orguser)
+        sample_dashboard.components = {
+            "chart-1": {"type": "chart", "config": {"chartId": sample_charts[0].id}},
+            "text-1": {"type": "text", "config": {"content": "Notes"}},
+            "chart-2": {"type": "chart", "config": {"chartId": sample_charts[1].id}},
+        }
+        sample_dashboard.save(update_fields=["components"])
+
+        response = export_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response["dashboard"]["id"] == sample_dashboard.id
+        assert [chart["id"] for chart in response["charts"]] == [
+            sample_charts[0].id,
+            sample_charts[1].id,
+        ]
+        assert response["charts"][0]["extra_config"] == {"metrics": ["sum_amount"]}
+
+    def test_export_dashboard_not_found(self, orguser, seed_db):
+        """Test exporting a non-existent dashboard returns 404."""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            export_dashboard(request, dashboard_id=99999)
+
+        assert excinfo.value.status_code == 404
+
+    def test_export_dashboard_wrong_org(self, orguser, seed_db):
+        """Test exporting a dashboard from another org returns 404."""
+        other_org = Org.objects.create(name="Other Export Org", slug="other-export-org")
+        other_user = User.objects.create(username="otherexport", email="otherexport@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=other_org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        other_dashboard = Dashboard.objects.create(
+            title="Other Export Dashboard",
+            dashboard_type="native",
+            created_by=other_orguser,
+            org=other_org,
+        )
+
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            export_dashboard(request, dashboard_id=other_dashboard.id)
+
+        assert excinfo.value.status_code == 404
+
+        other_dashboard.delete()
+        other_orguser.delete()
+        other_user.delete()
+        other_org.delete()
+
+    def test_export_dashboard_skips_missing_chart(self, orguser, sample_dashboard, seed_db):
+        """Test exporting ignores chart references that no longer exist."""
+        request = mock_request(orguser)
+        sample_dashboard.components = {
+            "chart-1": {"type": "chart", "config": {"chartId": 999999}},
+        }
+        sample_dashboard.save(update_fields=["components"])
+
+        response = export_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response["dashboard"]["id"] == sample_dashboard.id
+        assert response["charts"] == []
 
 
 # ================================================================================
@@ -601,3 +714,74 @@ class TestDeleteFilter:
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
     assert Role.objects.count() == 5
+
+
+class TestDashboardChatMessageFeedback:
+    """Tests for locking thumbs feedback onto assistant answers."""
+
+    @patch("ddpui.api.dashboard_native_api.get_all_feature_flags_for_org")
+    def test_set_dashboard_chat_message_feedback_success(
+        self,
+        mock_feature_flags,
+        orguser,
+        sample_dashboard,
+        seed_db,
+    ):
+        mock_feature_flags.return_value = {"AI_DASHBOARD_CHAT": True}
+        request = mock_request(orguser)
+        session = DashboardChatSession.objects.create(
+            org=orguser.org,
+            orguser=orguser,
+            dashboard=sample_dashboard,
+        )
+        message = DashboardChatMessage.objects.create(
+            session=session,
+            sequence_number=1,
+            role="assistant",
+            content="Top facilitators are listed below.",
+        )
+
+        response = set_dashboard_chat_message_feedback(
+            request,
+            dashboard_id=sample_dashboard.id,
+            message_id=message.id,
+            payload=DashboardChatMessageFeedbackRequest(feedback="thumbs_up"),
+        )
+
+        message.refresh_from_db()
+        assert response.message_id == message.id
+        assert response.feedback == "thumbs_up"
+        assert message.feedback == DashboardChatMessageFeedback.THUMBS_UP
+
+    @patch("ddpui.api.dashboard_native_api.get_all_feature_flags_for_org")
+    def test_set_dashboard_chat_message_feedback_is_locked_after_first_selection(
+        self,
+        mock_feature_flags,
+        orguser,
+        sample_dashboard,
+        seed_db,
+    ):
+        mock_feature_flags.return_value = {"AI_DASHBOARD_CHAT": True}
+        request = mock_request(orguser)
+        session = DashboardChatSession.objects.create(
+            org=orguser.org,
+            orguser=orguser,
+            dashboard=sample_dashboard,
+        )
+        message = DashboardChatMessage.objects.create(
+            session=session,
+            sequence_number=1,
+            role="assistant",
+            content="Top facilitators are listed below.",
+            feedback=DashboardChatMessageFeedback.THUMBS_UP,
+        )
+
+        with pytest.raises(HttpError) as excinfo:
+            set_dashboard_chat_message_feedback(
+                request,
+                dashboard_id=sample_dashboard.id,
+                message_id=message.id,
+                payload=DashboardChatMessageFeedbackRequest(feedback="thumbs_down"),
+            )
+
+        assert excinfo.value.status_code == 409
