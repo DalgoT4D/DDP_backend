@@ -73,8 +73,8 @@ class PostgresClient(WarehouseInterface):
             connect_params["sslrootcert"] = conn_info["sslrootcert"]
 
         # Set connection timeout to avoid hanging connections when warehouse is down
-        # Default: 10 seconds. Can be overridden via conn_info["connect_timeout"]
-        connect_params["connect_timeout"] = conn_info.get("connect_timeout", 5)
+        # Default: 15 seconds. Can be overridden via conn_info["connect_timeout"]
+        connect_params["connect_timeout"] = conn_info.get("connect_timeout", 15)
 
         connection = psycopg2.connect(**connect_params)
         return connection
