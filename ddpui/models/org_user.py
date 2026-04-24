@@ -11,8 +11,10 @@ from django.contrib.auth.models import User
 from ninja import Schema
 from pydantic import SecretStr, BaseModel
 
-from ddpui.models.org import Org, OrgSchema
+from ddpui.models.org import Org
 from ddpui.models.role_based_access import Role
+
+from ddpui.schemas.org_schema import OrgSchema
 
 
 class UserAttributes(models.Model):
@@ -94,25 +96,25 @@ class OrgUserCreate(Schema):
     email: str
     password: str
     signupcode: str
-    role: str = None
+    role: Optional[str] = None
 
 
 class OrgUserUpdate(Schema):
     """payload to update an existing OrgUser"""
 
     toupdate_email: str
-    email: str = None
-    active: bool = None
-    role: str = None
+    email: Optional[str] = None
+    active: Optional[bool] = None
+    role: Optional[str] = None
 
 
 class OrgUserUpdatev1(Schema):
     """payload to update an existing OrgUser"""
 
     toupdate_email: str
-    role_uuid: uuid.UUID = None
-    email: str = None
-    active: bool = None
+    role_uuid: Optional[uuid.UUID] = None
+    email: Optional[str] = None
+    active: Optional[bool] = None
 
 
 class OrgUserUpdateNewRole(Schema):
@@ -126,13 +128,13 @@ class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
     email: str
-    org: OrgSchema = None
+    org: Optional[OrgSchema] = None
     active: bool
     wtype: str | None
     is_demo: bool = False
     new_role_slug: str | None
     permissions: list[dict]
-    is_llm_active: bool = None
+    is_llm_active: Optional[bool] = None
     landing_dashboard_id: int | None = None
     org_default_dashboard_id: int | None = None
 
@@ -160,9 +162,9 @@ class InvitationSchema(Schema):
     """Docstring"""
 
     invited_email: str
-    invited_by: OrgUserResponse = None
-    invited_on: datetime = None
-    invite_code: str = None
+    invited_by: Optional[OrgUserResponse] = None
+    invited_on: Optional[datetime] = None
+    invite_code: Optional[str] = None
     invited_new_role_slug: str | None
 
 
@@ -170,7 +172,9 @@ class AcceptInvitationSchema(Schema):
     """Docstring"""
 
     invite_code: str
-    password: str = None  # the password is required only when the user has no platform account
+    password: Optional[
+        str
+    ] = None  # the password is required only when the user has no platform account
     work_domain: Optional[str] = None
 
 

@@ -8,15 +8,18 @@ from sqlalchemy import column, func, and_, or_, text
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
-from ddpui.datainsights.query_builder import AggQueryBuilder
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.warehouse.warehouse_interface import Warehouse
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.schemas.chart_schema import (
+    ChartConfig,
     ChartDataPayload,
     ExecuteChartQuery,
     TransformDataForChart,
 )
+
+logger = CustomLogger("ddpui.charts")
 
 
 def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):
@@ -58,11 +61,64 @@ def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgr
     return column_expr
 
 
+def format_time_grain_label(value: Any, time_grain: str) -> str:
+    """
+    Format time-truncated values into human-readable labels for chart axes.
+
+    Args:
+        value: The time value (datetime, date, or string)
+        time_grain: The time grain used ('year', 'month', 'day', 'hour', 'minute', 'second')
+
+    Returns:
+        Formatted string for display on chart axis
+    """
+    if value is None:
+        return "Unknown"
+
+    # Convert to datetime if it's a string
+    if isinstance(value, str):
+        try:
+            # Try to parse common datetime formats
+            if "T" in value or " " in value:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            else:
+                dt = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return str(value)  # Return as-is if parsing fails
+    elif isinstance(value, date) and not isinstance(value, datetime):
+        dt = datetime.combine(value, datetime.min.time())
+    elif isinstance(value, datetime):
+        dt = value
+    else:
+        return str(value)  # Return as-is for other types
+
+    # Format based on time grain
+    if time_grain == "year":
+        return dt.strftime("%Y")
+    elif time_grain == "month":
+        return dt.strftime("%b %Y")  # "Jan 2024"
+    elif time_grain == "day":
+        return dt.strftime("%b %d, %Y")  # "Jan 15, 2024"
+    elif time_grain == "hour":
+        return dt.strftime("%b %d,%Y %H:00")  # "Jan 15, 2024 14:00"
+    elif time_grain == "minute":
+        return dt.strftime("%b %d,%Y %H:%M")  # "Jan 15, 2024 14:30"
+    elif time_grain == "second":
+        return dt.strftime("%b %d,%Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
+    else:
+        return str(value)  # Default fallback
+
+
 def get_pagination_params(payload: ChartDataPayload):
     """
     Extract pagination parameters from payload.
     Returns (limit, offset) tuple with proper defaults.
     """
+    # Table charts use a custom preview pagination path; avoid inner LIMIT/OFFSET
+    # so that table-specific query logic is applied consistently.
+    if payload.chart_type == "table":
+        return None, None
+
     # Check if pagination is enabled in extra_config
     if (
         payload.extra_config
@@ -76,7 +132,78 @@ def get_pagination_params(payload: ChartDataPayload):
     return None, None
 
 
-logger = CustomLogger("ddpui.charts")
+def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
+    """
+    Normalize dimensions from payload, handling backward compatibility.
+    For table charts: prefer dimensions list, fallback to dimension_col + extra_dimension
+    For other charts: use dimension_col if present
+
+    Returns list of dimension column names.
+    Note: SQL injection protection is handled by SQLAlchemy's column() quoting.
+    """
+    final_dims = []
+    if payload.chart_type == "table":
+        # For table charts, use dimensions list if available
+        if payload.dimensions:
+            # Filter out empty strings
+            filtered_dims = [d for d in payload.dimensions if d and d.strip()]
+            final_dims = filtered_dims if filtered_dims else []
+
+    else:
+        # For other charts, include both dimension_col and extra_dimension if present
+        if payload.dimension_col:
+            final_dims.append(payload.dimension_col)
+        if payload.extra_dimension:
+            final_dims.append(payload.extra_dimension)
+
+    if not final_dims:
+        logger.warning(f"No valid dimensions found {payload.dimensions}")
+
+    return final_dims
+
+
+def build_chart_data_payload(
+    chart_config: ChartConfig,
+    resolved_dashboard_filters: Optional[List[Dict[str, Any]]] = None,
+) -> ChartDataPayload:
+    """Build a ChartDataPayload from a ChartConfig.
+
+    Common function used by dashboards and reports to build the payload
+    for generating chart data from a chart's stored configuration.
+
+    Args:
+        chart_config: Chart configuration (from Chart model or frozen report config).
+        resolved_dashboard_filters: Optional list of resolved dashboard filter dicts.
+    """
+    ec = chart_config.extra_config or {}
+    customizations = ec.get("customizations", {})
+    if chart_config.title:
+        customizations["title"] = chart_config.title
+
+    payload = ChartDataPayload(
+        chart_type=chart_config.chart_type,
+        schema_name=chart_config.schema_name,
+        table_name=chart_config.table_name,
+        x_axis=ec.get("x_axis_column"),
+        y_axis=ec.get("y_axis_column"),
+        dimension_col=ec.get("dimension_column"),
+        extra_dimension=ec.get("extra_dimension_column"),
+        dimensions=ec.get("dimension_columns"),
+        metrics=ec.get("metrics"),
+        geographic_column=ec.get("geographic_column"),
+        value_column=ec.get("value_column"),
+        selected_geojson_id=ec.get("selected_geojson_id"),
+        customizations=customizations,
+        offset=0,
+        limit=100,
+        extra_config=ec,
+        dashboard_filters=resolved_dashboard_filters,
+    )
+
+    payload.dimensions = normalize_dimensions(payload)
+
+    return payload
+
 
 # Global configuration for null value handling
 NULL_VALUE_LABEL = "Unknown"
@@ -144,65 +271,73 @@ def build_multi_metric_query(
     org_warehouse: OrgWarehouse = None,
 ) -> AggQueryBuilder:
     """Build query for multiple metrics on bar/line/pie/table/map charts"""
-    if not payload.dimension_col:
-        raise ValueError("dimension_col is required for multiple metrics charts")
+    dimensions = normalize_dimensions(payload)
 
-    if not payload.metrics or len(payload.metrics) == 0:
-        raise ValueError("At least one metric is required for multiple metrics charts")
+    # For non-table charts, require at least one dimension and one metric
+    if payload.chart_type != "table":
+        if not dimensions:
+            raise ValueError("At least one dimension is required for multiple metrics charts")
+        if not payload.metrics or len(payload.metrics) == 0:
+            raise ValueError("At least one metric is required for multiple metrics charts")
 
-    # Add dimension column with time grain if specified
-    dimension_column = column(payload.dimension_col)
-
-    # Apply time grain if specified and warehouse type is available
+    # Add all dimension columns with time grain if specified
     time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
-    if time_grain and org_warehouse:
-        warehouse_type = org_warehouse.wtype.lower()
-        dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
-        # Add label to preserve original column name for data access
-        dimension_column = dimension_column.label(payload.dimension_col)
 
-    query_builder.add_column(dimension_column)
+    warehouse_type = org_warehouse.wtype.lower() if org_warehouse else None
 
-    # Add all metrics as aggregate columns
-    for metric in payload.metrics:
-        if not metric.aggregation:
-            raise ValueError(f"Aggregation function is required for metric")
+    for dim_col_str in dimensions:
+        if not dim_col_str or not dim_col_str.strip():
+            logger.warning(f"Skipping empty dimension column: {dim_col_str}")
+            continue
 
-        # Handle count with None column case
-        if metric.aggregation.lower() == "count" and metric.column is None:
-            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+        dimension_col_clause = column(dim_col_str)
+        is_primary_dimension = dim_col_str == payload.dimension_col
+        is_time_grain_applicable = time_grain and warehouse_type and is_primary_dimension
+
+        # select & groupby dimension (apply time grain logic only to primary dimension)
+        if is_time_grain_applicable:
+            time_grain_dim_col_expression = apply_time_grain(
+                dimension_col_clause, time_grain, warehouse_type
+            )
+            # add label to preserve original column name for data access and grouping
+            time_grain_dim_col_clause = time_grain_dim_col_expression.label(dim_col_str)
+            query_builder.add_column(time_grain_dim_col_clause)
+            query_builder.group_cols_by(time_grain_dim_col_clause)
         else:
-            if not metric.column:
-                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+            # Even without time grain, ensure we have a label for consistent key access
+            dimension_col_clause_labeled = dimension_col_clause.label(dim_col_str)
+            query_builder.add_column(dimension_col_clause_labeled)
+            query_builder.group_cols_by(dim_col_str)
 
-        query_builder.add_aggregate_column(
-            metric.column,
-            metric.aggregation,
-            alias,
-        )
+    # Add all metrics as aggregate columns (if present)
+    if payload.metrics:
+        for metric in payload.metrics:
+            if not metric.aggregation:
+                raise ValueError(f"Aggregation function is required for metric")
 
-    # Group by dimension column (use the same time grain logic)
-    if time_grain and org_warehouse:
-        # When time grain is applied, group by the time grain expression (without label)
-        warehouse_type = org_warehouse.wtype.lower()
-        time_grain_expr = apply_time_grain(
-            column(payload.dimension_col), time_grain, warehouse_type
-        )
-        query_builder.group_cols_by(time_grain_expr)
-    else:
-        # Normal grouping by column name
-        query_builder.group_cols_by(payload.dimension_col)
+            # Handle count with None column case
+            if metric.aggregation.lower() == "count" and metric.column is None:
+                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+            else:
+                if not metric.column:
+                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
 
-    # Add extra dimension if specified
-    if payload.extra_dimension:
-        query_builder.add_column(column(payload.extra_dimension))
-        query_builder.group_cols_by(payload.extra_dimension)
+                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+            # Note: We don't validate aliases because they can be human-readable display names
+            # with spaces and special characters (e.g., "Total Count", "Average Price")
+            # The aliases are only used as dictionary keys in the result set, not in SQL
+
+            query_builder.add_aggregate_column(
+                metric.column,
+                metric.aggregation,
+                alias,
+            )
 
     # Add default ordering by time grain column when time grain is applied
-    if time_grain and org_warehouse:
-        # Order by the dimension column (which will have time grain applied) in ascending order (chronological)
-        query_builder.order_cols_by([(payload.dimension_col, "asc")])
+    if time_grain and dimensions:
+        # Order by the first dimension column (which will have time grain applied) in ascending order (chronological)
+        query_builder.order_cols_by([(dimensions[0], "asc")])
 
     return query_builder
 
@@ -240,10 +375,42 @@ def build_chart_query(
         query_builder.fetch_from(payload.table_name, payload.schema_name)
 
         # Now build the rest of the query logic on top of the (possibly paginated) data source
-        # All charts use aggregated (metrics-based) behavior
-        # All aggregated charts must use metrics
-        if not payload.metrics or len(payload.metrics) == 0:
-            raise ValueError("At least one metric is required for aggregated charts")
+        # Table charts can work with just dimensions (no metrics) - non-aggregated query
+        # Other charts require metrics for aggregation
+        if payload.chart_type != "table":
+            if not payload.metrics or len(payload.metrics) == 0:
+                raise ValueError("At least one metric is required for aggregated charts")
+        elif payload.chart_type == "table":
+            # Table charts: if no metrics, just select dimensions (non-aggregated)
+            dimensions = normalize_dimensions(payload)
+            if not dimensions:
+                raise ValueError("At least one dimension is required for table charts")
+
+            if not payload.metrics or len(payload.metrics) == 0:
+                # Non-aggregated query: just select dimension columns
+                for dim_col in dimensions:
+                    if not dim_col or not dim_col.strip():
+                        continue
+                    dim_expr = column(dim_col)
+                    # Always label to ensure consistent key access
+                    dim_expr = dim_expr.label(dim_col)
+                    query_builder.add_column(dim_expr)
+                # No GROUP BY needed for non-aggregated queries
+            else:
+                # Aggregated query: use multi-metric query builder
+                query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
+
+            # Apply filters and sorting before returning
+            if payload.dashboard_filters:
+                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+            if payload.extra_config and payload.extra_config.get("filters"):
+                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+            if payload.extra_config and payload.extra_config.get("sort"):
+                query_builder = apply_chart_sorting(
+                    query_builder, payload.extra_config["sort"], payload
+                )
+
+            return query_builder
 
         # For number charts, we don't need dimension columns
         if payload.chart_type == "number":
@@ -611,14 +778,41 @@ def execute_query(
         bind=warehouse_client.engine, compile_kwargs={"literal_binds": True}
     )
 
-    logger.info(f"Generated SQL: {compiled_stmt}")
+    logger.debug(f"Executing SQL: {compiled_stmt}")
 
     # Execute query
     results: list[dict] = warehouse_client.execute(compiled_stmt)
 
-    logger.info(f"Query executed successfully, fetched {len(results)} rows")
+    if results and len(results) > 0:
+        first_row_keys = list(results[0].keys())
+
+        # Log column mapping if provided for debugging
+        # Note: column_mapping uses SQL aliases which should match query results
+        # Warnings here are informational - transformation handles key mapping
+        if column_mapping:
+            expected_keys = [col_name for col_name, _ in column_mapping]
+            missing_keys = [key for key in expected_keys if key not in first_row_keys]
+            if missing_keys:
+                # Try case-insensitive matching first
+                case_insensitive_matches = {}
+                for missing_key in missing_keys:
+                    for actual_key in first_row_keys:
+                        if actual_key.lower() == missing_key.lower():
+                            case_insensitive_matches[missing_key] = actual_key
+                            break
+
+                # Only warn about keys that truly don't exist
+                truly_missing = [k for k in missing_keys if k not in case_insensitive_matches]
+                if truly_missing:
+                    logger.warning(
+                        f"Some expected column keys not found in results: {truly_missing}. "
+                        f"Available keys: {first_row_keys}, Expected: {expected_keys}"
+                    )
 
     # Return raw results if no mapping provided
+    # Note: column_mapping is currently not used for transformation, as warehouse.execute()
+    # should return dictionaries with keys matching the SQL column labels
+    # However, if keys don't match, we rely on case-insensitive matching in transform functions
     return list(results)
 
 
@@ -630,12 +824,20 @@ def execute_chart_query(
     column_mapping = []
     col_index = 0
 
-    # Only add dimension_col for non-number charts
-    if payload.chart_type != "number" and payload.dimension_col:
-        column_mapping.append((payload.dimension_col, col_index))
-        col_index += 1
+    # For table charts with multiple dimensions, handle dimensions array
+    if payload.chart_type == "table" and payload.dimensions:
+        # Add all dimensions from the array
+        for dim_col in payload.dimensions:
+            if dim_col and dim_col.strip():
+                column_mapping.append((dim_col, col_index))
+                col_index += 1
+    else:
+        # For other charts or backward compatibility, use dimension_col
+        if payload.chart_type != "number" and payload.dimension_col:
+            column_mapping.append((payload.dimension_col, col_index))
+            col_index += 1
 
-    # Handle metrics - metrics are required for all charts
+    # Handle metrics - metrics are required for all charts (except table charts without metrics)
     if payload.metrics:
         for metric in payload.metrics:
             if metric.aggregation.lower() == "count" and metric.column is None:
@@ -645,7 +847,8 @@ def execute_chart_query(
             column_mapping.append((alias, col_index))
             col_index += 1
 
-    if payload.extra_dimension:
+    # Handle extra_dimension for backward compatibility (only if not using dimensions array)
+    if payload.extra_dimension and not (payload.chart_type == "table" and payload.dimensions):
         column_mapping.append((payload.extra_dimension, col_index))
 
     return execute_query(warehouse_client, query_builder, column_mapping)
@@ -700,6 +903,14 @@ def transform_data_for_chart(
 
             x_axis_data = sorted(list(x_values))
 
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
+
             series_data = []
             legend_data = []
 
@@ -729,8 +940,8 @@ def transform_data_for_chart(
                     legend_data.append(dimension)
 
             return {
-                "xAxisData": x_axis_data,  # For vertical bars
-                "yAxisData": x_axis_data,  # For horizontal bars
+                "xAxisData": formatted_x_axis,  # For vertical bars
+                "yAxisData": formatted_x_axis,  # For horizontal bars
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -742,6 +953,14 @@ def transform_data_for_chart(
                 )
                 for row in results
             ]
+
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
 
             # Create series for each dimension-metric combination
             series_data = []
@@ -766,8 +985,8 @@ def transform_data_for_chart(
                 legend_data.append(display_name)
 
             return {
-                "xAxisData": x_axis_data,  # For vertical bars
-                "yAxisData": x_axis_data,  # For horizontal bars
+                "xAxisData": formatted_x_axis,  # For vertical bars
+                "yAxisData": formatted_x_axis,  # For horizontal bars
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -882,6 +1101,14 @@ def transform_data_for_chart(
 
             x_axis_data = sorted(list(x_values))
 
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
+
             series_data = []
             legend_data = []
 
@@ -911,7 +1138,7 @@ def transform_data_for_chart(
                     legend_data.append(dimension)
 
             return {
-                "xAxisData": x_axis_data,
+                "xAxisData": formatted_x_axis,  # Use formatted labels for display
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -923,6 +1150,14 @@ def transform_data_for_chart(
                 )
                 for row in results
             ]
+
+            # Format x-axis labels if time_grain is applied
+            if payload.time_grain:
+                formatted_x_axis = [
+                    format_time_grain_label(x, payload.time_grain) for x in x_axis_data
+                ]
+            else:
+                formatted_x_axis = x_axis_data
 
             series_data = []
             legend_data = []
@@ -944,7 +1179,7 @@ def transform_data_for_chart(
                 legend_data.append(display_name)
 
             return {
-                "xAxisData": x_axis_data,
+                "xAxisData": formatted_x_axis,  # Use formatted labels for display
                 "series": series_data,
                 "legend": legend_data,
             }
@@ -952,25 +1187,70 @@ def transform_data_for_chart(
     elif payload.chart_type == "table":
         # Table charts return raw data for frontend table display
         # The frontend handles the table rendering, we just need to return the data
+        # Get dimensions from payload.dimensions if available, otherwise normalize from dimension_col/extra_dimension
+        if payload.dimensions and len(payload.dimensions) > 0:
+            dimensions = [d for d in payload.dimensions if d and d.strip()]
+        else:
+            # Fallback to normalize_dimensions logic for backward compatibility
+            dims = []
+            if payload.dimension_col:
+                dims.append(payload.dimension_col)
+            if payload.extra_dimension:
+                dims.append(payload.extra_dimension)
+            dimensions = dims
 
-        if payload.metrics:
-            # Multiple metrics - return structured data with all columns
-            table_data = []
-            for row in results:
-                row_data = {}
+        if results:
+            first_row_keys = list(results[0].keys())
 
-                # Add dimension column
-                row_data[payload.dimension_col] = handle_null_value(
-                    safe_get_value(row, payload.dimension_col, null_label), null_label
+            # Check if all dimensions are present in the row keys
+            missing_dimensions = [dim for dim in dimensions if dim not in first_row_keys]
+            if missing_dimensions:
+                logger.error(
+                    f"Missing: {missing_dimensions}, Available keys: {first_row_keys}, Expected dimensions: {dimensions}"
+                )
+                # Try case-insensitive match
+                for dim in missing_dimensions:
+                    for key in first_row_keys:
+                        if key.lower() == dim.lower():
+                            break
+
+        table_data = []
+        for row in results:
+            row_data = {}
+
+            # Add all dimension columns
+            for dim_col in dimensions:
+                # Try to get the value - check both the column name and if it exists in row
+                value = row.get(dim_col)
+                if value is None:
+                    # Try with different key variations (in case of time grain or aliases)
+                    # The row keys should match dim_col due to .label() in query builder
+                    # For multiple dimensions, check if the key exists with different casing or format
+                    available_keys = list(row.keys())
+                    matching_key = None
+
+                    # Try case-insensitive match
+                    for key in available_keys:
+                        if key.lower() == dim_col.lower():
+                            matching_key = key
+                            break
+
+                    if matching_key:
+                        value = row.get(matching_key)
+                    else:
+                        logger.warning(
+                            f"Dimension column '{dim_col}' not found in row. Available keys: {available_keys}, dimensions: {dimensions}"
+                        )
+                        # Still set the value to null_label to ensure column appears in output
+                        value = None
+
+                row_data[dim_col] = handle_null_value(
+                    value if value is not None else safe_get_value(row, dim_col, null_label),
+                    null_label,
                 )
 
-                # Add extra dimension if present
-                if payload.extra_dimension:
-                    row_data[payload.extra_dimension] = handle_null_value(
-                        safe_get_value(row, payload.extra_dimension, null_label), null_label
-                    )
-
-                # Add all metric columns
+            # Add all metric columns if present
+            if payload.metrics:
                 for metric in payload.metrics:
                     if metric.aggregation.lower() == "count" and metric.column is None:
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
@@ -981,12 +1261,29 @@ def transform_data_for_chart(
 
                     row_data[display_name] = row.get(alias, 0)
 
-                table_data.append(row_data)
+            table_data.append(row_data)
 
-            return {
-                "tableData": table_data,
-                "columns": list(table_data[0].keys()) if table_data else [],
-            }
+        # Build columns list from dimensions + metrics (not from data keys)
+        # This ensures all configured columns are included even if data is empty
+        columns_list = []
+        # Add all dimension columns
+        for dim_col in dimensions:
+            columns_list.append(dim_col)
+        # Add all metric columns
+        if payload.metrics:
+            for metric in payload.metrics:
+                if metric.aggregation.lower() == "count" and metric.column is None:
+                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                    display_name = metric.alias or "Total Count"
+                else:
+                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+                columns_list.append(display_name)
+
+        return {
+            "tableData": table_data,
+            "columns": columns_list,  # Use explicit columns list, not data keys
+        }
 
     elif payload.chart_type == "number":
         # Number charts return a single aggregated value
@@ -1041,30 +1338,45 @@ def get_chart_data_table_preview(
     # Use the same query builder as chart data
     query_builder = build_chart_query(payload, org_warehouse)
 
-    # Build column mapping - all charts use aggregated (metrics-based) approach
+    # Build column mapping - use normalized dimensions
     column_mapping = []
     columns = []
     col_index = 0
 
-    if payload.dimension_col:
-        column_mapping.append((payload.dimension_col, col_index))
-        columns.append(payload.dimension_col)
+    dimensions = normalize_dimensions(payload)
+
+    # Add all dimension columns
+    if not dimensions or len(dimensions) == 0:
+        error_msg = (
+            f"Table preview - ERROR: No dimensions found after normalization! "
+            f"Payload had: dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, "
+            f"extra_dimension={payload.extra_dimension}"
+        )
+        logger.error(error_msg)
+        raise ValueError("At least one dimension is required for table charts")
+
+    for dim_col in dimensions:
+        if not dim_col or not dim_col.strip():
+            continue
+        column_mapping.append((dim_col, col_index))
+        columns.append(dim_col)
         col_index += 1
 
-    # Handle multiple metrics
+    # Handle multiple metrics (if present)
     if payload.metrics:
         for metric in payload.metrics:
+            # Handle COUNT(*) case - SQL alias includes count_all_ prefix
             if metric.aggregation.lower() == "count" and metric.column is None:
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                display_name = metric.alias or "Total Count"
             else:
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            # Use SQL alias for column_mapping to match query results
+            # Use display_name for columns array to match transform_data_for_chart
             column_mapping.append((alias, col_index))
-            columns.append(alias)
+            columns.append(display_name)  # Use display_name to match transform_data_for_chart
             col_index += 1
-
-    if payload.extra_dimension:
-        column_mapping.append((payload.extra_dimension, col_index))
-        columns.append(payload.extra_dimension)
 
     # apply the pagination limits on the query
     offset = page * limit
@@ -1074,15 +1386,74 @@ def get_chart_data_table_preview(
     # Execute query with column mapping
     data_dicts = execute_query(warehouse, query_builder, column_mapping)
 
+    # Transform data to use display_names instead of aliases for metrics
+    # This ensures consistency with transform_data_for_chart
+    transformed_data = []
+    for row in data_dicts:
+        transformed_row = {}
+
+        # Copy dimension columns as-is (they use column names directly)
+        for dim_col in dimensions:
+            value = row.get(dim_col)
+            # If not found, try case-insensitive match (some databases return lowercase keys)
+            if value is None:
+                available_keys = list(row.keys())
+                for key in available_keys:
+                    if key.lower() == dim_col.lower():
+                        value = row.get(key)
+                        break
+            transformed_row[dim_col] = value
+
+        # Transform metric columns from alias to display_name
+        if payload.metrics:
+            for metric in payload.metrics:
+                if metric.aggregation.lower() == "count" and metric.column is None:
+                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                    display_name = metric.alias or "Total Count"
+                else:
+                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+
+                # Map from alias (query result key) to display_name (column name)
+                transformed_row[display_name] = row.get(alias, 0)
+
+        transformed_data.append(transformed_row)
+
+    if transformed_data and len(transformed_data) > 0:
+        # Verify all dimensions are in the transformed data
+        missing_dims = [dim for dim in dimensions if dim not in transformed_data[0]]
+        if missing_dims:
+            logger.error(
+                f"CRITICAL: Dimensions missing in transformed data! Missing: {missing_dims}, "
+                f"Available keys: {list(transformed_data[0].keys())}, Expected dimensions: {dimensions}"
+            )
+
+        # Verify all expected columns (dimensions + metrics) are present
+        expected_columns = dimensions.copy()
+        if payload.metrics:
+            for metric in payload.metrics:
+                if metric.aggregation.lower() == "count" and metric.column is None:
+                    display_name = metric.alias or "Total Count"
+                else:
+                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+                expected_columns.append(display_name)
+
+        missing_cols = [col for col in expected_columns if col not in transformed_data[0]]
+        if missing_cols:
+            logger.warning(
+                f"Some expected columns not found in transformed data: {missing_cols}. "
+                f"Available keys: {list(transformed_data[0].keys())}, Expected: {expected_columns}"
+            )
+
     # For chart preview, we don't need column types for specific columns
     column_types = {col: "unknown" for col in columns}
 
     return {
-        "columns": columns,
+        "columns": columns,  # Now uses display_names for metrics
         "column_types": column_types,
-        "data": data_dicts,
+        "data": transformed_data,  # Data rows now use display_names as keys
         "page": page,
-        "limit": limit,
+        "limit": limit,  # Include limit in response
     }
 
 

@@ -1,11 +1,10 @@
-""" create the dataflow for edr send report """
+"""create the dataflow for edr send report"""
 
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org import Org, OrgDataFlowv1
 from ddpui.models.tasks import DataflowOrgTask
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
-from ddpui.ddpdbt.elementary_service import create_edr_sendreport_dataflow
 
 
 class Command(BaseCommand):
@@ -23,6 +22,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        from ddpui.ddpdbt.elementary_service import create_edr_sendreport_dataflow
+
         if options["fix_links"]:
             for org in Org.objects.exclude(dbt__isnull=True):
                 org_task = get_edr_send_report_task(org)

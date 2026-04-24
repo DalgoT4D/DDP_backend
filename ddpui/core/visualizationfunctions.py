@@ -3,9 +3,9 @@ from sqlalchemy.sql.expression import column
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.utils import secretsmanager
-from ddpui.dbt_automation.utils.warehouseclient import get_client
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
-from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")

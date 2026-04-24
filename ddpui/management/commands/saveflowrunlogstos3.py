@@ -42,7 +42,6 @@ class Command(BaseCommand):
         fetches logs grouped by pipeline task for all deployments of an org and saves them to s3 bucket
         push only dbt related task's logs
         """
-        # dbt_tasks = Task.objects.filter(type="dbt").all()
         dbt_slugs = ["dbt-test", "dbt-run"]
         summ = {
             "dbt-test": {self.SUCCESS_LOGS: 0, self.FAILURE_LOGS: 0},

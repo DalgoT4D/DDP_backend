@@ -7,8 +7,8 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui import settings
 from ddpui.models.org import (
     Org,
-    CreateOrgSchema,
 )
+from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace

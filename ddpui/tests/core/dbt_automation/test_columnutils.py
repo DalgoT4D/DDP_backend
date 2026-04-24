@@ -1,5 +1,5 @@
 import pytest
-from ddpui.dbt_automation.utils.columnutils import (
+from ddpui.core.dbt_automation.utils.columnutils import (
     cleaned_column_name,
     make_cleaned_column_names,
     dedup_list,

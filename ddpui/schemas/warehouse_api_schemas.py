@@ -1,3 +1,4 @@
+from typing import Optional
 from ninja import Field, Schema
 
 
@@ -9,7 +10,7 @@ class RequestorColumnSchema(Schema):
     db_schema: str
     db_table: str
     column_name: str
-    filter: dict = None
+    filter: Optional[dict] = None
     refresh: bool = False
 
 
@@ -29,7 +30,7 @@ class SaveLlmSessionRequest(Schema):
 
     session_name: str
     overwrite: bool = False
-    old_session_id: str = None  # if overwrite is True, then this is required
+    old_session_id: Optional[str] = None  # if overwrite is True, then this is required
 
 
 class LlmSessionFeedbackRequest(Schema):

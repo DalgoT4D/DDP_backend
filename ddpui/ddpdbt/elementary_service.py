@@ -12,6 +12,7 @@ from ninja.errors import HttpError
 from django.utils import timezone as djantotimezone
 
 from ddpui import settings
+from ddpui.utils.aws_client import AWSClient
 from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgDataFlowv1
@@ -21,7 +22,6 @@ from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.celeryworkers.tasks import run_dbt_commands
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -30,7 +30,7 @@ from ddpui.utils.helpers import generate_hash_id, compare_semver
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
+from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -161,6 +161,9 @@ def check_dbt_files(org: Org):
 
 def create_elementary_tracking_tables(org: Org):
     """creates elementary tracking tables"""
+
+    from ddpui.celeryworkers.tasks import run_dbt_commands
+
     if org.dbt is None:
         return {"error": "dbt is not configured for this client"}
 
@@ -174,6 +177,7 @@ def create_elementary_tracking_tables(org: Org):
     # executes clean, deps, run
     run_dbt_commands.delay(
         org.id,
+        org.dbt.id,
         task_id,
         {
             # run parameters
@@ -219,9 +223,7 @@ def create_elementary_profile(org: Org):
     if not os.path.exists(dbt_profile_file):
         # fetch from the cli profile block in prefect
         logger.info("fetching dbt profile from prefect block")
-        dbt_cli_profile = OrgPrefectBlockv1.objects.filter(
-            org=org, block_type=DBTCLIPROFILE
-        ).first()
+        dbt_cli_profile: OrgPrefectBlockv1 = org.dbt.cli_profile_block if org.dbt else None
         if dbt_cli_profile is None:
             raise HttpError(400, f"{dbt_profile_file} is missing")
 
@@ -308,12 +310,7 @@ def fetch_elementary_report(org: Org):
     if not os.path.exists(project_dir / "elementary_profiles"):
         return "set up elementary profile first", None
 
-    s3 = boto3.client(
-        "s3",
-        "ap-south-1",
-        aws_access_key_id=os.getenv("ELEMENTARY_AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("ELEMENTARY_AWS_SECRET_ACCESS_KEY"),
-    )
+    s3 = AWSClient.get_instance("s3")
     bucket_file_path = make_edr_report_s3_path(org)
     try:
         s3response = s3.get_object(
@@ -462,7 +459,7 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
             },
             cron=cron,
         ),
-        MANUL_DBT_WORK_QUEUE,
+        org.get_queue_config().edr_queue,
     )
 
     logger.info(

@@ -23,14 +23,14 @@ from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgSchemaChange,
-    OrgWarehouseSchema,
     ConnectionMeta,
 )
 from ddpui.models.airbyte import AirbyteJob
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils import timezone
+from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
+from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
+
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
@@ -38,18 +38,21 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
 )
-from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.models.org import OrgDataFlowv1, OrgWarehouse
-from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskLockStatus
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
+from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
+from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
+
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils import timezone
+
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_AIRBYTECLEAR,
     AIRBYTE_CONNECTION_DEPRECATED,
 )
-from ddpui.celeryworkers.airbytehelpertasks import delete_airbyte_connections
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
@@ -58,7 +61,6 @@ from ddpui.utils.helpers import (
     get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
-from ddpui.assets.whitelist import DEMO_WHITELIST_SOURCES
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
@@ -205,7 +207,8 @@ def create_airbyte_deployment(org: Org, org_task: OrgTask, server_block: OrgPref
                     "tasks": [setup_airbyte_sync_task_config(org_task, server_block).to_json()],
                 }
             },
-        )
+        ),
+        org.get_queue_config().connection_sync_queue,  # manual airbyte syncs use this queue
     )
 
     existing_dataflow = OrgDataFlowv1.objects.filter(
@@ -760,6 +763,10 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         dbt_credentials["dataset_location"] = payload.config["dataset_location"]
         dbt_credentials["transformation_priority"] = payload.config["transformation_priority"]
 
+        if warehouse.bq_location != payload.config["dataset_location"]:
+            warehouse.bq_location = payload.config["dataset_location"]
+            warehouse.save()
+
     elif warehouse.wtype == "snowflake":
         dbt_credentials = update_dict_but_not_stars(payload.config)
 
@@ -775,37 +782,39 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
 
     secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
 
-    (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
-        org, warehouse, dbt_credentials
-    )
-    if error:
-        return None, error
-
-    # if elementary is set up for this client, we need to update the elemntary_profiles/profiles.yml
-    if elementary_setup_status(org) == "set-up":
-        # get prefect-dbt to create a new profiles.yml by running "dbt debug"
-        now = timezone.as_ist(datetime.now())
-        dbtdebugtask = schema.PrefectDbtTaskSetup(
-            seq=1,
-            slug="dbt-debug",
-            commands=[f"{dbt_project_params.dbt_binary} debug"],
-            type=DBTCORE,
-            env={},
-            working_dir=dbt_project_params.project_dir,
-            profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
-            project_dir=dbt_project_params.project_dir,
-            cli_profile_block=cli_profile_block.block_name,
-            cli_args=[],
-            orgtask_uuid=str(uuid4()),
-            flow_name=f"{org.slug}-dbt-debug",
-            flow_run_name=f"{now.isoformat()}",
+    # if the dbt workspace is setup, update the cli profile block & elementary profile
+    if org.dbt:
+        (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
+            org, warehouse, dbt_credentials
         )
+        if error:
+            return None, error
 
-        logger.info("running dbt debug to generate new profiles/profiles.yml")
-        prefect_service.run_dbt_task_sync(dbtdebugtask)
+        # if elementary is set up for this client, we need to update the elemntary_profiles/profiles.yml
+        if elementary_setup_status(org) == "set-up":
+            # get prefect-dbt to create a new profiles.yml by running "dbt debug"
+            now = timezone.as_ist(datetime.now())
+            dbtdebugtask = schema.PrefectDbtTaskSetup(
+                seq=1,
+                slug="dbt-debug",
+                commands=[f"{dbt_project_params.dbt_binary} debug"],
+                type=DBTCORE,
+                env={},
+                working_dir=dbt_project_params.project_dir,
+                profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
+                project_dir=dbt_project_params.project_dir,
+                cli_profile_block=cli_profile_block.block_name,
+                cli_args=[],
+                orgtask_uuid=str(uuid4()),
+                flow_name=f"{org.slug}-dbt-debug",
+                flow_run_name=f"{now.isoformat()}",
+            )
 
-        logger.info("recreating elementary_profiles/profiles.yml")
-        create_elementary_profile(org)
+            logger.info("running dbt debug to generate new profiles/profiles.yml")
+            prefect_service.run_dbt_task_sync(dbtdebugtask)
+
+            logger.info("recreating elementary_profiles/profiles.yml")
+            create_elementary_profile(org)
 
     return destination, None
 
@@ -894,20 +903,6 @@ def get_warehouses(org: Org):
         for warehouse in OrgWarehouse.objects.filter(org=org)
     ]
     return warehouses, None
-
-
-def get_demo_whitelisted_source_config(type_: str):
-    """Returns the config of whitelisted source based on type"""
-    ret_src = None
-    for src in DEMO_WHITELIST_SOURCES:
-        if src["type"] == type_:
-            ret_src = src
-            break
-
-    if not ret_src:
-        return ret_src, "source not found"
-
-    return ret_src["config"], None
 
 
 def delete_source(org: Org, source_id: str):

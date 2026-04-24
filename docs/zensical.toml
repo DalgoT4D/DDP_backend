@@ -1,0 +1,18 @@
+[project]
+site_name = "Dalgo Tech Docs"
+site_url = "https://ddp-backend-docs.dalgo.org"
+site_description = "Dalgo architecture and system docs_dirocumentation"
+site_author = "Dalgo Team"
+copyright = "2025 Dalgo. All rights reserved."
+
+docs_dir = "docs"
+site_dir = "site"
+dev_addr = "0.0.0.0:10001"
+
+[project.theme]
+variant = "modern"
+
+[project.extra]
+version = "1.0.0"
+repo_url = "https://github.com/DalgoT4D/DDP_backend"
+edit_uri = "edit/main/docs/"

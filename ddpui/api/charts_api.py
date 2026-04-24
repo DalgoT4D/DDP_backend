@@ -27,7 +27,9 @@ from ddpui.services.chart_service import (
     ChartValidationError,
     ChartPermissionError,
 )
+from ddpui.services.dashboard_service import DashboardService
 from ddpui.schemas.chart_schema import (
+    ChartConfig,
     ChartCreate,
     ChartMetric,
     ChartUpdate,
@@ -41,7 +43,7 @@ from ddpui.schemas.chart_schema import (
     GeoJSONListResponse,
     GeoJSONUpload,
 )
-from ddpui.datainsights.warehouse.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui")
 
@@ -118,23 +120,15 @@ def generate_chart_render_config(chart: Chart, org_warehouse: OrgWarehouse) -> d
     logger.info(f"Generating render config for chart {chart.id}: {chart.title}")
 
     try:
-        extra_config = chart.extra_config
-        logger.debug(f"Chart {chart.id} extra_config: {extra_config}")
+        logger.debug(f"Chart {chart.id} extra_config: {chart.extra_config}")
 
-        payload = ChartDataPayload(
+        config = ChartConfig(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
-            x_axis=extra_config.get("x_axis_column"),
-            y_axis=extra_config.get("y_axis_column"),
-            dimension_col=extra_config.get("dimension_column"),
-            extra_dimension=extra_config.get("extra_dimension_column"),
-            # Map-specific fields
-            geographic_column=extra_config.get("geographic_column"),
-            value_column=extra_config.get("value_column"),
-            selected_geojson_id=extra_config.get("selected_geojson_id"),
-            customizations=extra_config.get("customizations", {}),
+            extra_config=chart.extra_config,
         )
+        payload = charts_service.build_chart_data_payload(config)
 
         # Use the common function to generate config and data
         result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
@@ -168,6 +162,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
     )
 
@@ -177,18 +172,26 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     logger.debug(f"Query results for {chart_id_str}: {len(dict_results)} rows")
 
     # Transform data for chart
+    time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
     transform_payload = TransformDataForChart(
         chart_type=payload.chart_type,
         x_axis=payload.x_axis,
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Pass dimensions for table charts
         customizations=payload.customizations,
         metrics=payload.metrics,
+        time_grain=time_grain,  # Pass time_grain for formatting labels
     )
     chart_data = charts_service.transform_data_for_chart(dict_results, transform_payload)
 
-    # Generate ECharts config
+    # Table charts don't need ECharts config - they just return the data
+    if payload.chart_type == "table":
+        logger.info(f"Successfully generated table data for {chart_id_str}")
+        return {"data": chart_data, "echarts_config": {}}
+
+    # Generate ECharts config for other chart types
     config_generators = {
         "bar": EChartsConfigGenerator.generate_bar_config,
         "pie": EChartsConfigGenerator.generate_pie_config,
@@ -416,39 +419,14 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         # Resolve dashboard filters if provided (same logic as regular charts)
         resolved_dashboard_filters = None
         if dashboard_filters:
-            try:
-                # Import dashboard filter model
-                from ddpui.models.dashboard import DashboardFilter
-
-                resolved_filters = []
-
-                for filter_id, filter_value in dashboard_filters.items():
-                    if filter_id and filter_value is not None:
-                        try:
-                            # Get the filter configuration from the database
-                            dashboard_filter = DashboardFilter.objects.get(id=filter_id)
-
-                            # Only apply this filter if it applies to the same table as the chart
-                            if warehouse_client.column_exists(
-                                schema_name, table_name, dashboard_filter.column_name
-                            ):
-                                resolved_filters.append(
-                                    {
-                                        "filter_id": filter_id,
-                                        "column": dashboard_filter.column_name,
-                                        "type": dashboard_filter.filter_type,
-                                        "value": filter_value,
-                                        "settings": dashboard_filter.settings,
-                                    }
-                                )
-                        except DashboardFilter.DoesNotExist:
-                            logger.warning(f"Dashboard filter {filter_id} not found")
-
-                resolved_dashboard_filters = resolved_filters
-
-            except Exception as e:
-                logger.error(f"Error resolving dashboard filters: {str(e)}")
-                resolved_dashboard_filters = None
+            filter_defs = DashboardFilter.objects.filter(id__in=dashboard_filters.keys())
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                dashboard_filters,
+                [f.to_json() for f in filter_defs],
+                schema_name,
+                table_name,
+                warehouse_client,
+            )
 
         chart_payload = ChartDataPayload(
             chart_type="bar",  # We use bar chart query logic for aggregated data
@@ -533,15 +511,26 @@ def get_chart_data(request, payload: ChartDataPayload):
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
+    # Log payload details for debugging
+    logger.info(
+        f"Chart data endpoint - payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
+    )
+    logger.info(f"Chart data endpoint - payload metrics: {payload.metrics}")
+    logger.info(f"Chart data endpoint - payload extra_config: {payload.extra_config}")
+
     # Use the common function to generate data and config
     try:
         result = generate_chart_data_and_config(payload, org_warehouse)
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except ValueError as e:
+        logger.error(f"ValueError generating chart data: {str(e)}")
         raise HttpError(400, str(e))
     except Exception as e:
         logger.error(f"Error generating chart data: {str(e)}")
-        raise HttpError(500, "Error generating chart data")
+        logger.error(
+            f"Error details - payload: {payload.model_dump() if hasattr(payload, 'model_dump') else payload}"
+        )
+        raise HttpError(500, f"Error generating chart data: {str(e)}")
 
 
 @charts_router.post("/chart-data-preview/", response=DataPreviewResponse)
@@ -571,43 +560,28 @@ def get_chart_data_preview(
     if dashboard_filters:
         try:
             filter_values = json.loads(dashboard_filters)
-            logger.info(f"Applying dashboard filters to chart data preview: {filter_values}")
-
-            # Resolve filter configurations to get column information
-
-            # Get warehouse client to check column existence
-            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            resolved_filters = []
-
-            for filter_id, filter_value in filter_values.items():
-                if filter_value is not None:
-                    try:
-                        # Get the filter configuration from the database
-                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
-
-                        # Only apply this filter if it applies to the same table as the chart
-                        if warehouse_client.column_exists(
-                            payload.schema_name, payload.table_name, dashboard_filter.column_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,
-                                    "type": dashboard_filter.filter_type,
-                                    "value": filter_value,
-                                    "settings": dashboard_filter.settings,
-                                }
-                            )
-                    except DashboardFilter.DoesNotExist:
-                        logger.warning(f"Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
-
         except json.JSONDecodeError:
             logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
-            resolved_dashboard_filters = None
+            filter_values = None
+
+        if filter_values:
+            logger.info(f"Applying dashboard filters to chart data preview: {filter_values}")
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                payload.schema_name,
+                payload.table_name,
+                warehouse_client,
+            )
 
     # Create a modified payload with dashboard filters
+    # Log the incoming payload to debug dimension issues
+    logger.info(
+        f"Chart data preview - received payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
+    )
+
     modified_payload = ChartDataPayload(
         chart_type=payload.chart_type,
         schema_name=payload.schema_name,
@@ -616,6 +590,7 @@ def get_chart_data_preview(
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
         geographic_column=payload.geographic_column,
         value_column=payload.value_column,
@@ -627,19 +602,42 @@ def get_chart_data_preview(
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
     )
 
-    # Get table preview using the same query builder as chart data
-    # This ensures preview shows exactly what will be used for the chart
-    preview_data = charts_service.get_chart_data_table_preview(
-        org_warehouse, modified_payload, page, limit
-    )
+    logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
-    return DataPreviewResponse(
-        columns=preview_data["columns"],
-        column_types=preview_data["column_types"],
-        data=preview_data["data"],
-        page=preview_data["page"],
-        limit=preview_data["limit"],
-    )
+    try:
+        # Get table preview using the same query builder as chart data
+        # This ensures preview shows exactly what will be used for the chart
+        preview_data = charts_service.get_chart_data_table_preview(
+            org_warehouse, modified_payload, page, limit
+        )
+
+        logger.info(f"Preview data keys: {list(preview_data.keys())}")
+        logger.info(
+            f"Preview data sample: columns={len(preview_data.get('columns', []))}, data_rows={len(preview_data.get('data', []))}"
+        )
+
+        # Ensure all required fields are present with proper defaults
+        response_data = {
+            "columns": preview_data.get("columns", []),
+            "column_types": preview_data.get("column_types", {}),
+            "data": preview_data.get("data", []),
+            "page": preview_data.get("page", page),
+            "page_size": preview_data.get("limit", limit),
+            # Total rows are fetched via /chart-data-preview/total-rows/
+            "total_rows": preview_data.get("total_rows", 0),
+        }
+
+        logger.info(
+            f"Response data keys: {list(response_data.keys())}, page_size={response_data['page_size']}"
+        )
+
+        return DataPreviewResponse(**response_data)
+    except Exception as e:
+        logger.error(f"Error in chart data preview: {str(e)}")
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HttpError(500, f"Error generating chart data preview: {str(e)}")
 
 
 @charts_router.post("/chart-data-preview/total-rows/", response=int)
@@ -665,44 +663,23 @@ def get_chart_data_preview_total_rows(
     if dashboard_filters:
         try:
             filter_values = json.loads(dashboard_filters)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            filter_values = None
+
+        if filter_values:
             logger.info(
                 f"Applying dashboard filters to chart data preview total rows: {filter_values}"
             )
-
-            # Resolve filter configurations to get column information
-            from ddpui.models.dashboard import DashboardFilter
-
-            # Get warehouse client to check column existence
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            resolved_filters = []
-
-            for filter_id, filter_value in filter_values.items():
-                if filter_value is not None:
-                    try:
-                        # Get the filter configuration from the database
-                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
-
-                        # Only apply this filter if it applies to the same table as the chart
-                        if warehouse_client.column_exists(
-                            payload.schema_name, payload.table_name, dashboard_filter.column_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,
-                                    "type": dashboard_filter.filter_type,
-                                    "value": filter_value,
-                                    "settings": dashboard_filter.settings,
-                                }
-                            )
-                    except DashboardFilter.DoesNotExist:
-                        logger.warning(f"Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
-
-        except json.JSONDecodeError:
-            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
-            resolved_dashboard_filters = None
+            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                payload.schema_name,
+                payload.table_name,
+                warehouse_client,
+            )
 
     # Create a modified payload with dashboard filters
     modified_payload = ChartDataPayload(
@@ -713,6 +690,7 @@ def get_chart_data_preview_total_rows(
         y_axis=payload.y_axis,
         dimension_col=payload.dimension_col,
         extra_dimension=payload.extra_dimension,
+        dimensions=payload.dimensions,  # Support multiple dimensions for table charts
         metrics=payload.metrics,
         geographic_column=payload.geographic_column,
         value_column=payload.value_column,
@@ -1052,65 +1030,29 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     if dashboard_filters:
         try:
             filter_values = json.loads(dashboard_filters)
-            logger.info(f"Applying dashboard filters to chart {chart_id}: {filter_values}")
-
-            # Resolve filter configurations to get column information
-            from ddpui.models.dashboard import DashboardFilter
-
-            resolved_filters = []
-
-            for filter_id, filter_value in filter_values.items():
-                if filter_value is not None:
-                    try:
-                        # Get the filter configuration from the database
-                        dashboard_filter = DashboardFilter.objects.get(id=filter_id)
-
-                        # Only apply this filter if it applies to the same table as the chart
-                        if warehouse_client.column_exists(
-                            chart.schema_name, chart.table_name, dashboard_filter.column_name
-                        ):
-                            resolved_filters.append(
-                                {
-                                    "filter_id": filter_id,
-                                    "column": dashboard_filter.column_name,
-                                    "type": dashboard_filter.filter_type,
-                                    "value": filter_value,
-                                    "settings": dashboard_filter.settings,
-                                }
-                            )
-                    except DashboardFilter.DoesNotExist:
-                        logger.warning(f"Dashboard filter {filter_id} not found")
-
-            resolved_dashboard_filters = resolved_filters
-
         except json.JSONDecodeError:
             logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
-            resolved_dashboard_filters = None
+            filter_values = None
 
-    # Get existing customizations and add chart title
-    customizations = extra_config.get("customizations", {})
-    customizations["title"] = chart.title  # Add chart title to customizations
+        if filter_values:
+            logger.info(f"Applying dashboard filters to chart {chart_id}: {filter_values}")
+            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                chart.schema_name,
+                chart.table_name,
+                warehouse_client,
+            )
 
-    payload = ChartDataPayload(
+    config = ChartConfig(
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
-        x_axis=extra_config.get("x_axis_column"),
-        y_axis=extra_config.get("y_axis_column"),
-        dimension_col=extra_config.get("dimension_column"),
-        extra_dimension=extra_config.get("extra_dimension_column"),
-        # Multiple metrics support - CRITICAL FIX for dashboard charts
-        metrics=extra_config.get("metrics"),
-        # Map-specific fields
-        geographic_column=extra_config.get("geographic_column"),
-        value_column=extra_config.get("value_column"),
-        selected_geojson_id=extra_config.get("selected_geojson_id"),
-        customizations=extra_config.get("customizations", {}),
-        offset=0,
-        limit=100,
+        title=chart.title,
         extra_config=extra_config,
-        dashboard_filters=resolved_dashboard_filters,  # Pass resolved dashboard filters
     )
+    payload = charts_service.build_chart_data_payload(config, resolved_dashboard_filters)
 
     # Use the common function to generate data and config
     try:
@@ -1129,6 +1071,17 @@ def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
 
+    # Log the incoming payload for debugging
+    if payload.chart_type == "table":
+        dimensions = payload.extra_config.get("dimensions", [])
+        if dimensions:
+            drill_down_count = sum(
+                1 for d in dimensions if isinstance(d, dict) and d.get("enable_drill_down") is True
+            )
+            logger.info(
+                f"Table chart created with {len(dimensions)} dimensions, {drill_down_count} with drill-down enabled"
+            )
+
     try:
         chart_data = ChartData(
             title=payload.title,
@@ -1139,8 +1092,15 @@ def create_chart(request, payload: ChartCreate):
             extra_config=payload.extra_config,
         )
         chart = ChartService.create_chart(chart_data, orguser)
+
+        logger.info(f"Chart {chart.id} saved successfully (type={chart.chart_type})")
+
     except ChartValidationError as e:
+        logger.error(f"Chart validation error: {e.message}")
         raise HttpError(400, e.message) from None
+    except Exception as e:
+        logger.error(f"Error creating chart: {str(e)}")
+        raise HttpError(500, f"Error creating chart: {str(e)}") from None
 
     return ChartResponse(
         id=chart.id,

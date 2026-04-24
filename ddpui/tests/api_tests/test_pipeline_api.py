@@ -35,6 +35,8 @@ from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
     DBTCORE,
     SHELLOPERATION,
+    DDP_WORK_QUEUE,
+    MANUL_DBT_WORK_QUEUE,
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema4,
@@ -46,7 +48,7 @@ from ddpui.ddpprefect.schema import (
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role, RolePermission, Permission
-from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock
+from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock, TaskType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.constants import TASK_DBTRUN
@@ -71,10 +73,17 @@ def org_without_dbt_workspace():
     """org without dbt workspace"""
     org_slug = "test-org-slug"
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     org = Org.objects.create(
         airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
         slug=org_slug,
         name=org_slug,
+        queue_config=queue_config,
     )
     yield org
     org.delete()
@@ -110,6 +119,12 @@ def org_with_dbt_workspace(tmpdir_factory):
     with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     dbt = OrgDbt.objects.create(
         gitrepo_url="dummy-git-url.github.com",
         project_dir="tmp/",
@@ -122,7 +137,20 @@ def org_with_dbt_workspace(tmpdir_factory):
         slug=org_slug,
         dbt=dbt,
         name=org_slug,
+        queue_config=queue_config,
     )
+
+    # Create cli profile block for the org
+    cli_block = OrgPrefectBlockv1.objects.create(
+        org=org,
+        block_type=DBTCLIPROFILE,
+        block_id="test-cli-profile-block-id",
+        block_name="test-cli-profile-block",
+    )
+    # Set the relationship on dbt
+    dbt.cli_profile_block = cli_block
+    dbt.save()
+
     yield org
     print("deleting org_with_dbt_workspace")
     org.delete()
@@ -157,6 +185,12 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     dbt = OrgDbt.objects.create(
         gitrepo_url="dummy-git-url.github.com",
         project_dir="tmp/",
@@ -169,6 +203,7 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
         slug=org_slug,
         dbt=dbt,
         name=org_slug,
+        queue_config=queue_config,
     )
 
     # server block
@@ -188,15 +223,18 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     )
 
     # create cli block
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org,
         block_type=DBTCLIPROFILE,
         block_id="cliprofile-blk-id",
         block_name="cliprofile-blk-name",
     )
+    # Set the relationship on dbt
+    dbt.cli_profile_block = cli_block
+    dbt.save()
 
-    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
-        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
+    for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT]).all():
+        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
 
         if task.slug == "dbt-run":
             new_dataflow = OrgDataFlowv1.objects.create(
@@ -303,7 +341,7 @@ def test_post_prefect_dataflow_v1_success(orguser_transform_tasks):
     for conn in connections:
         OrgTask.objects.create(
             org=request.orguser.org,
-            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
             connection_id=conn.id,
         )
     payload = PrefectDataFlowCreateSchema4(
@@ -345,14 +383,14 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
         OrgTask.objects.create(
             uuid=uuid.uuid4(),
             org=request.orguser.org,
-            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
             connection_id=conn.id,
         )
 
     transform_tasks = OrgTask.objects.filter(
         org=request.orguser.org,
         generated_by="system",
-        task__type__in=["dbt", "git"],
+        task__type__in=[TaskType.DBT, TaskType.GIT],
     ).all()
 
     payload = PrefectDataFlowCreateSchema4(
@@ -600,14 +638,14 @@ def test_get_prefect_dataflow_v1_success(orguser_transform_tasks):
         OrgTask.objects.create(
             uuid=uuid.uuid4(),
             org=request.orguser.org,
-            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
             connection_id=conn.id,
         )
 
     transform_tasks = OrgTask.objects.filter(
         org=request.orguser.org,
         generated_by="system",
-        task__type__in=["dbt", "git"],
+        task__type__in=[TaskType.DBT, TaskType.GIT],
     ).all()
 
     payload = PrefectDataFlowCreateSchema4(
@@ -741,7 +779,7 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
         org_task = OrgTask.objects.create(
             uuid=uuid.uuid4(),
             org=request.orguser.org,
-            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
             connection_id=conn.id,
         )
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=org_task, seq=i)
@@ -751,7 +789,7 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
     transform_tasks = OrgTask.objects.filter(
         org=request.orguser.org,
         generated_by="system",
-        task__type__in=["dbt", "git"],
+        task__type__in=[TaskType.DBT, TaskType.GIT],
     ).all()
     for i, transform_task in enumerate(transform_tasks):
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=transform_task, seq=seq + i)
@@ -769,11 +807,19 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
     put_prefect_dataflow_v1(request, "test-dep-id-1", payload)
 
     assert (
-        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type="airbyte").count()
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type=TaskType.AIRBYTE
+        ).count()
         == 0
     )
-    assert DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type="git").count() == 1
-    assert DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type="dbt").count() >= 1
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.DBT).count()
+        >= 1
+    )
 
 
 @patch.multiple(
@@ -803,14 +849,14 @@ def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
         OrgTask.objects.create(
             uuid=uuid.uuid4(),
             org=request.orguser.org,
-            task=Task.objects.filter(type__in=["airbyte"]).first(),
+            task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
             connection_id=conn.id,
         )
 
     transform_tasks = OrgTask.objects.filter(
         org=request.orguser.org,
         generated_by="system",
-        task__type__in=["dbt", "git"],
+        task__type__in=[TaskType.DBT, TaskType.GIT],
     ).all()
     for i, transform_task in enumerate(transform_tasks):
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=transform_task, seq=i)
@@ -830,12 +876,20 @@ def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
     put_prefect_dataflow_v1(request, "test-dep-id-1", payload)
 
     assert (
-        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type="airbyte").count()
+        DataflowOrgTask.objects.filter(
+            dataflow=dataflow, orgtask__task__type=TaskType.AIRBYTE
+        ).count()
         == 2
     )
 
-    assert DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type="git").count() == 1
-    assert DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type="dbt").count() >= 1
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.DBT).count()
+        >= 1
+    )
 
 
 def test_post_deployment_set_schedule_failure(orguser):

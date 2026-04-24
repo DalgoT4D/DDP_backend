@@ -1,5 +1,5 @@
 import pytest
-from ddpui.dbt_automation.utils.tableutils import source_or_ref
+from ddpui.core.dbt_automation.utils.tableutils import source_or_ref
 
 
 @pytest.fixture

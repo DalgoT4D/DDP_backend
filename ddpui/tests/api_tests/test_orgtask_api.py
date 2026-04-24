@@ -19,12 +19,12 @@ from ddpui.api.orgtask_api import (
     post_system_transformation_tasks,
     post_run_prefect_org_task,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
 from ddpui.ddpprefect.schema import PrefectShellTaskSetup
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
+from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskType
 from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL, TASK_GENERATE_EDR
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -47,10 +47,17 @@ def org_without_dbt_workspace():
     """org without dbt workspace"""
     org_slug = "test-org-slug"
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     org = Org.objects.create(
         airbyte_workspace_id="FAKE-WORKSPACE-ID-1",
         slug=org_slug,
         name=org_slug,
+        queue_config=queue_config,
     )
     yield org
     org.delete()
@@ -86,6 +93,12 @@ def org_with_dbt_workspace(tmpdir_factory):
     with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     dbt = OrgDbt.objects.create(
         gitrepo_url="dummy-git-url.github.com",
         project_dir="tmp/",
@@ -98,6 +111,7 @@ def org_with_dbt_workspace(tmpdir_factory):
         slug=org_slug,
         dbt=dbt,
         name=org_slug,
+        queue_config=queue_config,
     )
     yield org
     print("deleting org_with_dbt_workspace")
@@ -133,6 +147,12 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     with open(str(org_dir / "dbtrepo" / "dbt_project.yml"), "w", encoding="utf-8") as output:
         yaml.safe_dump(yml_obj, output)
 
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+
     dbt = OrgDbt.objects.create(
         gitrepo_url="dummy-git-url.github.com",
         project_dir="tmp/",
@@ -145,6 +165,7 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
         slug=org_slug,
         dbt=dbt,
         name=org_slug,
+        queue_config=queue_config,
     )
 
     # create secret block
@@ -156,15 +177,18 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     )
 
     # create cli block
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org,
         block_type=DBTCLIPROFILE,
         block_id="cliprofile-blk-id",
         block_name="cliprofile-blk-name",
     )
+    # Set the relationship on dbt
+    dbt.cli_profile_block = cli_block
+    dbt.save()
 
-    for task in Task.objects.filter(type__in=["dbt", "git"]).all():
-        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
+    for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT]).all():
+        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
 
         if task.slug == "dbt-run":
             new_dataflow = OrgDataFlowv1.objects.create(

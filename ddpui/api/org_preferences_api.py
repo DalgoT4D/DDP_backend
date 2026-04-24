@@ -13,7 +13,7 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
 )
-from ddpui.core.notifications_service import create_notification
+from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
@@ -38,7 +38,7 @@ def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
     if OrgPreferences.objects.filter(org=org).exists():
         raise HttpError(400, "Organization preferences already exist")
 
-    payload_data = payload.dict(exclude={"org"})
+    payload_data = payload.model_dump(exclude={"org"})
 
     org_preferences = OrgPreferences.objects.create(
         org=org, **payload_data  # Use the rest of the payload

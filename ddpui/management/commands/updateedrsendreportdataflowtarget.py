@@ -1,4 +1,4 @@
-""" create the dataflow for edr send report """
+"""create the dataflow for edr send report"""
 
 from pathlib import Path
 from django.core.management.base import BaseCommand
@@ -7,7 +7,6 @@ from ddpui.models.org import Org, OrgDbt
 from ddpui.models.tasks import OrgTask
 from ddpui.models.tasks import DataflowOrgTask
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
-from ddpui.core.orgtaskfunctions import fetch_elementary_profile_target
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.schema import DbtProjectParams

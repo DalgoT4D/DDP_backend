@@ -72,14 +72,13 @@ def abreq(endpoint, req=None, **kwargs):
     try:
         res.raise_for_status()
     except Exception as error:
-        logger.info("here2222")
         logger.exception(error.args)
         raise HttpError(res.status_code, res.text) from error
 
     if "application/json" in res.headers.get("Content-Type", ""):
         return res.json()
 
-    logger.error(
+    logger.warning(
         "abreq result has content-type %s while hitting %s",
         res.headers.get("Content-Type", ""),
         endpoint,
@@ -516,6 +515,7 @@ def get_destination_definition_specification(workspace_id: str, destinationdef_i
     if "connectionSpecification" not in res:
         logger.error("Specification not found for destination definition: %s", destinationdef_id)
         raise HttpError(404, "Failed to get destination definition specification")
+
     if res["connectionSpecification"]["title"] == "Postgres Destination Spec":
         res["connectionSpecification"]["properties"]["ssl_mode"][
             "title"
@@ -523,6 +523,22 @@ def get_destination_definition_specification(workspace_id: str, destinationdef_i
         res["connectionSpecification"]["properties"]["tunnel_method"][
             "title"
         ] = "SSH Tunnel Method* (select 'No Tunnel' if you don't know)"
+
+    return res
+
+
+def get_destination_definition_specification_for_destination(destination_id: str) -> dict:
+    """Fetch destination definition specification for a specific destination instance"""
+    if not isinstance(destination_id, str):
+        raise HttpError(400, "destination_id must be a string")
+
+    res = abreq(
+        "destination_definition_specifications/get_for_destination",
+        {"destinationId": destination_id},
+    )
+    if "connectionSpecification" not in res:
+        logger.error("Specification not found for destination: %s", destination_id)
+        raise HttpError(404, "Failed to get destination specification")
     return res
 
 

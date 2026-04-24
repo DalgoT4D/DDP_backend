@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import patch
 
 
-from ddpui.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from sqlalchemy.sql.expression import (
     table,
     TableClause,

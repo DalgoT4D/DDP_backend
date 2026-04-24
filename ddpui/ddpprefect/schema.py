@@ -11,8 +11,8 @@ class PrefectAirbyteSync(Schema):
     """
 
     blockName: str
-    flowName: str = None
-    flowRunName: str = None
+    flowName: Optional[str] = None
+    flowRunName: Optional[str] = None
 
     def to_json(self):
         """JSON serialization"""
@@ -30,8 +30,8 @@ class PrefectDbtCore(Schema):
     """
 
     blockName: str
-    flowName: str = None
-    flowRunName: str = None
+    flowName: Optional[str] = None
+    flowRunName: Optional[str] = None
 
     def to_json(self):
         """JSON serialization"""
@@ -71,8 +71,8 @@ class PrefectAirbyteRefreshSchemaTaskSetup(Schema):
     timeout: int
     type: str
     orgtask_uuid: str
-    flow_name: str = None
-    flow_run_name: str = None
+    flow_name: Optional[str] = None
+    flow_run_name: Optional[str] = None
     seq: int = 0
     catalog_diff: dict
 
@@ -101,8 +101,8 @@ class PrefectAirbyteSyncTaskSetup(Schema):
     timeout: int
     type: str
     orgtask_uuid: str
-    flow_name: str = None
-    flow_run_name: str = None
+    flow_name: Optional[str] = None
+    flow_run_name: Optional[str] = None
     seq: int = 0
 
     def to_json(self):
@@ -131,8 +131,8 @@ class PrefectAirbyteClearStreamsTaskSetup(Schema):
     timeout: int
     type: str
     orgtask_uuid: str
-    flow_name: str = None
-    flow_run_name: str = None
+    flow_name: Optional[str] = None
+    flow_run_name: Optional[str] = None
     seq: int = 0
     streams: list[dict]
 
@@ -167,8 +167,8 @@ class PrefectDbtTaskSetup(Schema):
     commands: list
     cli_profile_block: str
     cli_args: list = []
-    flow_name: str = None
-    flow_run_name: str = None
+    flow_name: Optional[str] = None
+    flow_run_name: Optional[str] = None
     seq: int = 0
 
     def to_json(self):
@@ -238,8 +238,8 @@ class PrefectShellTaskSetup(Schema):
     working_dir: str
     env: dict
     orgtask_uuid: str
-    flow_name: str = None
-    flow_run_name: str = None
+    flow_name: Optional[str] = None
+    flow_run_name: Optional[str] = None
     seq: int = 0
 
     def to_json(self):
@@ -271,19 +271,17 @@ class PrefectSecretBlockEdit(Schema):
     block_name: str
 
 
-class OrgDbtSchema(Schema):
-    """Docstring"""
-
-    profile: DbtProfile
-    gitrepoUrl: str
-    gitrepoAccessToken: Optional[str]
-
-
-class OrgDbtGitHub(Schema):
-    """Docstring"""
+class OrgDbtConnectGitRemote(Schema):
+    """Schema for connecting an existing local git repo to a remote GitHub URL"""
 
     gitrepoUrl: str
-    gitrepoAccessToken: Optional[str]
+    gitrepoAccessToken: str  # Required - PAT is mandatory for this endpoint
+
+
+class OrgDbtChangesPublish(Schema):
+    """Schema for publishing local changes to remote git repo"""
+
+    commit_message: str
 
 
 class OrgDbtTarget(Schema):
@@ -314,10 +312,10 @@ class PrefectAirbyteConnectionBlockSchema(Schema):
     catalogId: str
     syncCatalog: dict
     status: str
-    deploymentId: str = None
-    lastRun: Optional[dict | None]
+    deploymentId: Optional[str] = None
+    lastRun: Optional[dict] = None
     destinationSchema: str = ""
-    lock: Optional[dict | None]
+    lock: Optional[dict] = None
 
 
 class PrefectFlowAirbyteConnection(Schema):
@@ -341,7 +339,7 @@ class PrefectDataFlowCreateSchema3(Schema):
     flow_name: str
     orgslug: str
     deployment_params: dict
-    cron: str = None
+    cron: Optional[str] = None
 
 
 class PrefectDataFlowOrgTasks(Schema):
@@ -363,11 +361,11 @@ class PrefectDataFlowCreateSchema4(Schema):
 class PrefectDataFlowUpdateSchema3(Schema):
     """Edit the data flow"""
 
-    name: str = None
-    connections: list[PrefectFlowAirbyteConnection2] = None
-    cron: str = None
-    transformTasks: list[PrefectDataFlowOrgTasks] = None
-    deployment_params: dict = None
+    name: Optional[str] = None
+    connections: Optional[list[PrefectFlowAirbyteConnection2]] = None
+    cron: Optional[str] = None
+    transformTasks: Optional[list[PrefectDataFlowOrgTasks]] = None
+    deployment_params: Optional[dict] = None
 
 
 class PrefectFlowRunSchema(Schema):
@@ -407,12 +405,12 @@ class DeploymentRunTimes(Schema):
 class FilterLateFlowRunsRequest(Schema):
     """search flow runs"""
 
-    deployment_id: str = None
-    work_pool_name: str = None
-    work_queue_name: str = None
+    deployment_id: Optional[str] = None
+    work_pool_name: Optional[str] = None
+    work_queue_name: Optional[str] = None
     limit: int = 1
-    before_start_time: str = None
-    after_start_time: str = None
+    before_start_time: Optional[str] = None
+    after_start_time: Optional[str] = None
     exclude_flow_run_ids: list[str] = []
 
 
@@ -431,7 +429,7 @@ class PrefectGetDataflowsResponse(Schema):
     status: bool
     deploymentName: str
     deploymentId: str
-    cron: Optional[str]
+    cron: Optional[str] = None
     lastRun: Optional[dict] = None
     lock: Optional[dict] = None
-    queuedFlowRunWaitTime: DeploymentCurrentQueueTime = None
+    queuedFlowRunWaitTime: Optional[DeploymentCurrentQueueTime] = None

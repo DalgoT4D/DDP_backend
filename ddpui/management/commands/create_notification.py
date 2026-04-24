@@ -1,7 +1,7 @@
 import sys
 from django.core.management.base import BaseCommand
 from django.utils.dateparse import parse_datetime
-from ddpui.core import notifications_service
+from ddpui.core.notifications import notifications_functions
 from ddpui.schemas.notifications_api_schemas import (
     SentToEnum,
     NotificationDataSchema,
@@ -40,6 +40,11 @@ class Command(BaseCommand):
             "--manager_or_above",
             action="store_true",
             help="Only applicable if audience = all_org_users; flag to include managers or above",
+        )
+        parser.add_argument(
+            "--superset_clients",
+            action="store_true",
+            help="Filter recipients to only users in orgs that have a superset viz_url configured",
         )
         parser.add_argument(
             "--urgent",
@@ -89,11 +94,12 @@ class Command(BaseCommand):
             sys.exit(1)
 
         # Get recipients based on audience field
-        error, recipients = notifications_service.get_recipients(
+        error, recipients = notifications_functions.get_recipients(
             SentToEnum(options["audience"]),
             options.get("org"),
             options.get("email"),
             options.get("manager_or_above", False),
+            options.get("superset_clients", False),
         )
 
         if error:
@@ -114,7 +120,7 @@ class Command(BaseCommand):
             print(notification_data)
         else:
             # Call the create notification service
-            error, result = notifications_service.create_notification(notification_data)
+            error, result = notifications_functions.create_notification(notification_data)
 
             if error:
                 print(f"Error in creating notification: {error}")

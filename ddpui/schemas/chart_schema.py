@@ -41,7 +41,7 @@ class ChartResponse(Schema):
 
     id: int
     title: str
-    description: Optional[str]
+    description: Optional[str] = None
     chart_type: str
     schema_name: str
     table_name: str
@@ -49,6 +49,19 @@ class ChartResponse(Schema):
     # Note: render_config removed - charts fetch fresh config via /data endpoint
     created_at: datetime
     updated_at: datetime
+
+
+class ChartConfig(Schema):
+    """Chart configuration used to build a ChartDataPayload.
+
+    Works for both Chart model instances and frozen report configs.
+    """
+
+    chart_type: str
+    schema_name: str
+    table_name: str
+    title: Optional[str] = None
+    extra_config: Optional[dict] = None
 
 
 class ChartDataPayload(Schema):
@@ -63,10 +76,13 @@ class ChartDataPayload(Schema):
     y_axis: Optional[str] = None
 
     # For aggregated data
-    dimension_col: Optional[str] = None
+    dimension_col: Optional[
+        str
+    ] = None  # later we need to still merge dimension and extra dimension into dimensions list
     extra_dimension: Optional[str] = None
+    dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
-    # Multiple metrics for bar/line charts
+    # Multiple metrics for bar/line charts (optional for table charts)
     metrics: Optional[List[ChartMetric]] = None
 
     # Map-specific fields
@@ -101,6 +117,9 @@ class DataPreviewResponse(Schema):
     columns: List
     column_types: dict
     data: List[dict]
+    page: Optional[int] = 0
+    page_size: Optional[int] = 100
+    total_rows: Optional[int] = 0
 
 
 class ExecuteChartQuery(Schema):
@@ -109,6 +128,7 @@ class ExecuteChartQuery(Schema):
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
     extra_dimension: Optional[str] = None
+    dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
     # Metrics for aggregated charts
     metrics: Optional[List[ChartMetric]] = None
@@ -122,6 +142,7 @@ class TransformDataForChart(Schema):
     y_axis: Optional[str] = None
     dimension_col: Optional[str] = None
     extra_dimension: Optional[str] = None
+    dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 
     # Metrics for aggregated charts
     metrics: Optional[List[ChartMetric]] = None
@@ -132,6 +153,9 @@ class TransformDataForChart(Schema):
     selected_geojson_id: Optional[int] = None
 
     customizations: Optional[dict] = None
+
+    # Time grain for formatting axis labels
+    time_grain: Optional[str] = None
 
 
 class GeoJSONListResponse(Schema):

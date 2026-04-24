@@ -4,7 +4,7 @@ import django
 from datetime import datetime
 from django.core.management import call_command
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 import pytest
 from ninja.errors import HttpError
 
@@ -31,8 +31,9 @@ from ddpui.api.user_org_api import (
     delete_invitation,
     post_organization_accept_tnc,
     get_organization_wren,
+    delete_organization_warehouses_v1,
 )
-from ddpui.models.org import Org, OrgWarehouseSchema, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import (
     OrgUser,
@@ -49,6 +50,7 @@ from ddpui.models.org_user import (
     VerifyEmailSchema,
     DeleteOrgUserPayload,
 )
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
     PIPELINE_MANAGER_ROLE,
@@ -241,7 +243,7 @@ def test_post_organization_user_userexists_username(orguser):
         email="tempusername",
         password="userpassword",
         signupcode="right-signupcode",
-        role=2,
+        role="2",
     )
     os.environ["SIGNUPCODE"] = "right-signupcode"
     with pytest.raises(HttpError) as excinfo:
@@ -256,7 +258,7 @@ def test_post_organization_user_invalid_email(orguser):
         email="invalid_email",
         password="userpassword",
         signupcode="right-signupcode",
-        role=2,
+        role="2",
     )
     os.environ["SIGNUPCODE"] = "right-signupcode"
     with pytest.raises(HttpError) as excinfo:
@@ -1114,3 +1116,24 @@ def test_get_organization_wren_success(orguser):
     with patch("ddpui.models.OrgWren.objects.filter", return_value=mock_queryset):
         response = get_organization_wren(request)
         assert response == {"wren_url": "http://example.com/wren"}
+
+
+# ================================================================================
+def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
+    request = mock_request(orguser)
+
+    # Patch OrgCleanupService methods
+    with patch("ddpui.api.user_org_api.OrgCleanupService") as MockCleanupService:
+        instance = MockCleanupService.return_value
+        instance.delete_orchestrate_pipelines = MagicMock()
+        instance.delete_warehouse = MagicMock()
+        instance.delete_transformation_layer = MagicMock()
+
+        # Call the API
+        response = delete_organization_warehouses_v1(request)
+
+        # Assert all three methods were called
+        instance.delete_orchestrate_pipelines.assert_called_once()
+        instance.delete_warehouse.assert_called_once()
+        instance.delete_transformation_layer.assert_called_once()
+        assert response == {"success": 1}

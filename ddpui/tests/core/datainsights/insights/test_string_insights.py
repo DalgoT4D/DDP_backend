@@ -11,15 +11,15 @@ django.setup()
 
 import pytest
 
-from ddpui.datainsights.insights.string_type.queries import (
+from ddpui.core.datainsights.insights.string_type.queries import (
     DistributionChart,
     StringLengthStats,
 )
-from ddpui.datainsights.insights.insight_interface import (
+from ddpui.core.datainsights.insights.insight_interface import (
     MAP_TRANSLATE_TYPES,
     TranslateColDataType,
 )
-from ddpui.datainsights.insights.string_type.string_insights import StringColInsights
+from ddpui.core.datainsights.insights.string_type.string_insights import StringColInsights
 
 
 @pytest.fixture

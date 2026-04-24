@@ -21,8 +21,8 @@ from datetime import timedelta
 
 from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
-from ddpui.utils.ddp_logger import setup_logger as setup_ddp_logger
-from ddpui.utils.ab_logger import setup_logger as setup_ab_logger
+
+# Legacy loggers removed - now using unified logging
 
 load_dotenv()
 
@@ -65,28 +65,20 @@ DEBUG = os.getenv("DEBUG", "") == "True"
 
 # CORS
 ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "staging-api.dalgo.org",
-    "api.dalgo.org",
-    "staging.dalgo.org",
-    "dashboard.dalgo.org",
-    "staging-app.dalgo.org",
-    "insights.dalgo.org",
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if host.strip()
 ]
 # For cookie-based authentication, we need specific origins instead of wildcard
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://host.docker.internal:3000",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-    "https://staging.dalgo.org",
-    "https://staging-app.dalgo.org",
-    "https://dashboard.dalgo.org",
-    "https://insights.dalgo.org",
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:3001",
+    ).split(",")
+    if origin.strip()
 ]
 CORS_ALLOW_METHODS = [
     "GET",
@@ -265,9 +257,56 @@ AIRBYTE_CUSTOM_SOURCES = {
 
 AIRBYTE_SOURCE_BLACKLIST = os.getenv("AIRBYTE_SOURCE_BLACKLIST", "").split(",")
 
-# finally set up the loggers
-setup_ddp_logger()
-setup_ab_logger()
+# Unified logging configuration
+# Console out level follows DEBUG env: DEBUG -> DEBUG, otherwise INFO
+CONSOLE_OUT_LEVEL = "DEBUG" if DEBUG else "INFO"
+LOGGER_EMIT_LEVEL = "DEBUG" if DEBUG else "INFO"
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "structured": {
+            "()": "ddpui.utils.unified_logger.StructuredFormatter",
+        },
+    },
+    "filters": {
+        "max_warning": {
+            "()": "ddpui.utils.unified_logger.MaxLevelFilter",
+            "max_level": "WARNING",
+        },
+    },
+    "handlers": {
+        "console_out": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "structured",
+            "level": CONSOLE_OUT_LEVEL,
+            "filters": ["max_warning"],
+        },
+        "console_err": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "formatter": "structured",
+            "level": "ERROR",
+        },
+    },
+    "root": {
+        "handlers": ["console_out", "console_err"],
+        "level": LOGGER_EMIT_LEVEL,
+    },
+    "loggers": {
+        "uvicorn.access": {
+            "handlers": ["console_out"],
+            "level": LOGGER_EMIT_LEVEL,
+            "propagate": False,
+        },
+        "uvicorn.error": {
+            "handlers": ["console_err"],
+            "level": LOGGER_EMIT_LEVEL,
+            "propagate": False,
+        },
+    },
+}
 
 # Fixtures to seed data
 # python3 manage.py loaddata seed/tasks.json
@@ -289,6 +328,9 @@ SIMPLE_JWT = {
 # Frontend URLs for public sharing and email links
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
+
+# Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
+RENDER_SECRET = os.getenv("RENDER_SECRET")
 
 
 # Cookie settings

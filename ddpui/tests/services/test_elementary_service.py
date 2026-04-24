@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from ddpui import settings
 from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix, TaskType
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
@@ -23,7 +23,7 @@ from ddpui.ddpdbt.elementary_service import (
     create_elementary_profile,
 )
 from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DBTCLIPROFILE
+from ddpui.ddpprefect import MANUL_DBT_WORK_QUEUE, DDP_WORK_QUEUE, EDR_WORK_QUEUE, DBTCLIPROFILE
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
@@ -44,7 +44,12 @@ def org_dbt():
 @pytest.fixture
 def org(org_dbt):
     """org with dbt"""
-    return Org.objects.create(slug="test-org", dbt=org_dbt)
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+    return Org.objects.create(slug="test-org", dbt=org_dbt, queue_config=queue_config)
 
 
 @pytest.fixture
@@ -62,7 +67,7 @@ def orguser(org, authuser):
 @pytest.fixture
 def task():
     """task of type generate-edr"""
-    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    edrtask = Task.objects.create(type=TaskType.EDR, slug=TASK_GENERATE_EDR, label="EDR generate")
     yield edrtask
     edrtask.delete()
 
@@ -78,13 +83,18 @@ def orgtask(org, task):
 @pytest.fixture
 def edr_deployment_org():
     """org task of type generate-edr"""
-    edrtask = Task.objects.create(type="edr", slug=TASK_GENERATE_EDR, label="EDR generate")
+    edrtask = Task.objects.create(type=TaskType.EDR, slug=TASK_GENERATE_EDR, label="EDR generate")
     dbt = OrgDbt.objects.create(
         project_dir="test-project-dir",
         target_type="tgt_type",
         default_schema="test-default_schema",
     )
-    org = Org.objects.create(slug="test-org", dbt=dbt)
+    queue_config = {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
+    }
+    org = Org.objects.create(slug="test-org", dbt=dbt, queue_config=queue_config)
     dataflow = OrgDataFlowv1.objects.create(
         org=org,
         name="dataflow-name",
@@ -373,6 +383,9 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
         "version": "0.19.1",
     }
 
+    # Set environment variable to control the expected upgrade version
+    os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"] = "0.20.0"
+
     response = check_dbt_files(org)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
@@ -384,6 +397,7 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
                 "elementary_package": {
                     "package": "elementary-data/elementary",
                     "version": "0.19.1",
+                    "needs_upgrade": "0.20.0",
                 },
             },
             "missing": {
@@ -391,6 +405,9 @@ def test_check_dbt_files_have_elementary_package_missing_target_schema(
             },
         },
     )
+
+    # Clean up environment variable
+    del os.environ["LATEST_ELEMENTARY_PACKAGE_VERSION"]
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -500,7 +517,7 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
 
 @patch("ddpui.ddpdbt.elementary_service.TaskProgress")
 @patch("ddpui.ddpdbt.elementary_service.uuid4")
-@patch("ddpui.ddpdbt.elementary_service.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
 def test_create_elementary_tracking_tables(
     mock_run_dbt_commands, mock_uuid4, mock_task_progress, org
 ):
@@ -518,6 +535,7 @@ def test_create_elementary_tracking_tables(
     mock_task_progress.assert_called_once_with("test-uuid", "run-dbt-commands-" + org.slug)
     mock_run_dbt_commands.delay.assert_called_once_with(
         org.id,
+        org.dbt.id,
         "test-uuid",
         {
             # run parameters
@@ -681,6 +699,7 @@ def test_create_edr_sendreport_dataflow(
     orgtask,
 ):
     """tests create_edr_sendreport_dataflow"""
+    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
     cron = "0 0 * * *"
 
     mock_gather_dbt_project_params.return_value = Mock(
@@ -708,21 +727,27 @@ def test_create_edr_sendreport_dataflow(
     )
     mock_generate_hash_id.assert_called_once_with(8)
 
-    mock_create_dataflow_v1.assert_called_once_with(
-        PrefectDataFlowCreateSchema3(
-            deployment_name=deployment_name,
-            flow_name=deployment_name,
-            orgslug=org.slug,
-            deployment_params={
-                "config": {
-                    "tasks": [{"task": "config"}],
-                    "org_slug": orgtask.org.slug,
-                }
-            },
-            cron=cron,
-        ),
-        MANUL_DBT_WORK_QUEUE,
-    )
+    # The create_dataflow_v1 should be called with the org's edr_queue config
+    expected_call_args = mock_create_dataflow_v1.call_args
+
+    # Check the first argument (PrefectDataFlowCreateSchema3)
+    assert expected_call_args[0][0].deployment_name == deployment_name
+    assert expected_call_args[0][0].flow_name == deployment_name
+    assert expected_call_args[0][0].orgslug == org.slug
+    assert expected_call_args[0][0].deployment_params == {
+        "config": {
+            "tasks": [{"task": "config"}],
+            "org_slug": orgtask.org.slug,
+        }
+    }
+    assert expected_call_args[0][0].cron == cron
+
+    # Check the second argument (QueueDetailsSchema)
+    queue_details = expected_call_args[0][1]
+    assert hasattr(queue_details, "name")
+    assert hasattr(queue_details, "workpool")
+    assert queue_details.name == EDR_WORK_QUEUE
+    assert queue_details.workpool == "test_workpool"
 
 
 def test_create_elementary_profile_no_dbt(org):
@@ -790,9 +815,12 @@ def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
 ):
     """tests create_elementary_profile when profiles.yml doesn't exist, fetches from Prefect blocks"""
     # Create Prefect block
-    OrgPrefectBlockv1.objects.create(
+    cli_block = OrgPrefectBlockv1.objects.create(
         org=org, block_type=DBTCLIPROFILE, block_name="test-cli-profile"
     )
+    # Link it to the org's dbt
+    org.dbt.cli_profile_block = cli_block
+    org.dbt.save()
 
     # Create temporary project directory (no profiles.yml)
     project_dir = tmp_path / "project"

@@ -11,7 +11,7 @@ import json
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand
 from ddpui.ddpairbyte.schema import AirbyteConnectionCreate, AirbyteSourceCreate
-from ddpui.models.org import Org, OrgWarehouseSchema
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.utils.custom_logger import CustomLogger
 from testclient.testclient import TestClient
@@ -80,7 +80,7 @@ class Command(BaseCommand):
             name=name,
             destinationDefId=warehousedef_id,
             airbyteConfig=airbyte_config,
-        ).dict()
+        ).model_dump()
 
         response = ngoClient.clientpost("organizations/warehouse/", json=payload)
 
@@ -113,7 +113,7 @@ class Command(BaseCommand):
             name=name,
             sourceDefId=sourceDefId,
             config=config["connectionConfiguration"],
-        ).dict()
+        ).model_dump()
 
         response = ngoClient.clientpost("airbyte/sources/", json=payload)
 
@@ -138,7 +138,7 @@ class Command(BaseCommand):
             sourceId=source_id,
             destinationSchema=config["destinationSchema"],
             streams=streams,
-        ).dict()
+        ).model_dump()
 
         response = ngoClient.clientpost("airbyte/v1/connections/", json=payload, timeout=60)
 

@@ -23,3 +23,14 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
+
+# Task routing configuration
+app.conf.task_routes = {
+    "ddpui.celeryworkers.tasks.run_dbt_commands": {"queue": "canvas_dbt"},
+}
+
+# Default queue
+app.conf.task_default_queue = "default"
+
+# Worker configuration for better task distribution
+app.conf.worker_prefetch_multiplier = 1  # Fair task distribution

@@ -1,0 +1,11 @@
+[project]
+name = "dalgo-backend-docs"
+version = "0.1.0"
+description = "Documentation for DDP Backend"
+requires-python = ">=3.10"
+dependencies = [
+    "zensical",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = []

@@ -1,0 +1,23 @@
+# Zensical build output directory
+# The default output directory is not specified in the initial documentation,
+# but can be configured with the 'site_dir' option in the config file.
+# You will need to add the specific directory name configured in your project.
+# Common names might be 'site/', 'build/', or 'public/'.
+# Example:
+site/
+# or
+build/
+
+# Python dependencies (Zensical is a Python package)
+# It is recommended to use a Python virtual environment
+.venv/
+env/
+venv/
+__pycache__/
+*.pyc
+
+# Operating System and Editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

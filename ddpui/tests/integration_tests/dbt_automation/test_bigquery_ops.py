@@ -6,28 +6,27 @@ import math
 import json
 import subprocess
 from logging import basicConfig, getLogger, INFO
-from ddpui.dbt_automation.operations.droprenamecolumns import rename_columns, drop_columns
-from ddpui.dbt_automation.operations.flattenjson import flattenjson
-from ddpui.dbt_automation.operations.generic import generic_function
-from ddpui.dbt_automation.operations.mergeoperations import (
+from ddpui.core.dbt_automation.operations.droprenamecolumns import rename_columns, drop_columns
+from ddpui.core.dbt_automation.operations.flattenjson import flattenjson
+from ddpui.core.dbt_automation.operations.generic import generic_function
+from ddpui.core.dbt_automation.operations.mergeoperations import (
     merge_operations,
 )
-from ddpui.dbt_automation.operations.rawsql import generic_sql_function
-from ddpui.dbt_automation.utils.warehouseclient import get_client
-from ddpui.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.dbt_automation.operations.scaffold import scaffold
-from ddpui.dbt_automation.operations.syncsources import sync_sources
-from ddpui.dbt_automation.operations.flattenairbyte import flatten_operation
-from ddpui.dbt_automation.operations.coalescecolumns import coalesce_columns
-from ddpui.dbt_automation.operations.concatcolumns import concat_columns
-from ddpui.dbt_automation.operations.arithmetic import arithmetic
-from ddpui.dbt_automation.operations.castdatatypes import cast_datatypes
-from ddpui.dbt_automation.operations.regexextraction import regex_extraction
-from ddpui.dbt_automation.operations.mergetables import union_tables
-from ddpui.dbt_automation.operations.aggregate import aggregate
-from ddpui.dbt_automation.operations.casewhen import casewhen
-from ddpui.dbt_automation.operations.pivot import pivot
-from ddpui.dbt_automation.operations.unpivot import unpivot
+from ddpui.core.dbt_automation.operations.rawsql import generic_sql_function
+from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
+from ddpui.core.dbt_automation.operations.syncsources import sync_sources
+from ddpui.core.dbt_automation.operations.flattenairbyte import flatten_operation
+from ddpui.core.dbt_automation.operations.coalescecolumns import coalesce_columns
+from ddpui.core.dbt_automation.operations.concatcolumns import concat_columns
+from ddpui.core.dbt_automation.operations.arithmetic import arithmetic
+from ddpui.core.dbt_automation.operations.castdatatypes import cast_datatypes
+from ddpui.core.dbt_automation.operations.regexextraction import regex_extraction
+from ddpui.core.dbt_automation.operations.mergetables import union_tables
+from ddpui.core.dbt_automation.operations.aggregate import aggregate
+from ddpui.core.dbt_automation.operations.casewhen import casewhen
+from ddpui.core.dbt_automation.operations.pivot import pivot
+from ddpui.core.dbt_automation.operations.unpivot import unpivot
 
 
 basicConfig(level=INFO)
@@ -76,6 +75,7 @@ class TestBigqueryOperations:
             "project_name": project_name,
             "default_schema": TestBigqueryOperations.schema,
         }
+        # TODO: need to change this
         scaffold(config, TestBigqueryOperations.wc_client, tmpdir)
         TestBigqueryOperations.test_project_dir = Path(tmpdir) / project_name
         TestBigqueryOperations.execute_dbt("deps")

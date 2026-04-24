@@ -1,4 +1,6 @@
 from unittest.mock import patch
+from datetime import datetime
+import pytz
 from ddpui.utils.helpers import (
     remove_nested_attribute,
     isvalid_email,
@@ -10,6 +12,7 @@ from ddpui.utils.helpers import (
     find_key_in_dictionary,
     get_integer_env_var,
     compare_semver,
+    from_timestamp,
 )
 
 
@@ -253,3 +256,104 @@ def test_compare_semver_3():
 def test_compare_semver_4():
     """tests compare_semver"""
     assert compare_semver("2.0.0", "1.9.9") == 1
+
+
+def test_from_timestamp_valid_timestamp():
+    """tests from_timestamp with a valid Unix timestamp"""
+    timestamp = 1640995200  # 2022-01-01 00:00:00 UTC
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    assert result == expected
+    assert result.year == 2022
+    assert result.month == 1
+    assert result.day == 1
+
+
+def test_from_timestamp_string_timestamp():
+    """tests from_timestamp with a string representation of timestamp"""
+    timestamp = "1640995200"  # 2022-01-01 00:00:00 UTC
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(1640995200, tz=pytz.UTC)
+    assert result == expected
+
+
+def test_from_timestamp_float_timestamp():
+    """tests from_timestamp with a float timestamp"""
+    timestamp = 1640995200.5
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(1640995200, tz=pytz.UTC)  # int() truncates the decimal
+    assert result == expected
+
+
+def test_from_timestamp_zero():
+    """tests from_timestamp with zero timestamp"""
+    result = from_timestamp(0)
+    assert result is None
+
+
+def test_from_timestamp_negative():
+    """tests from_timestamp with negative timestamp"""
+    result = from_timestamp(-100)
+    assert result is None
+
+
+def test_from_timestamp_none():
+    """tests from_timestamp with None input"""
+    result = from_timestamp(None)
+    assert result is None
+
+
+def test_from_timestamp_invalid_string():
+    """tests from_timestamp with invalid string input"""
+    result = from_timestamp("not_a_number")
+    assert result is None
+
+
+def test_from_timestamp_empty_string():
+    """tests from_timestamp with empty string input"""
+    result = from_timestamp("")
+    assert result is None
+
+
+def test_from_timestamp_boolean():
+    """tests from_timestamp with boolean input"""
+    # True converts to int(1) which is a valid timestamp (1 second after Unix epoch)
+    result = from_timestamp(True)
+    expected = datetime.fromtimestamp(1, tz=pytz.UTC)
+    assert result == expected
+
+    # False converts to int(0) which is invalid (returns None for 0)
+    result = from_timestamp(False)
+    assert result is None
+
+
+def test_from_timestamp_list():
+    """tests from_timestamp with list input"""
+    result = from_timestamp([1640995200])
+    assert result is None
+
+
+def test_from_timestamp_large_valid():
+    """tests from_timestamp with a large valid timestamp"""
+    timestamp = 2147483647  # 2038-01-19 03:14:07 UTC (max 32-bit signed int)
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    assert result == expected
+    assert result.year == 2038
+
+
+def test_from_timestamp_recent_timestamp():
+    """tests from_timestamp with a recent timestamp"""
+    timestamp = 1700000000  # 2023-11-14 22:13:20 UTC
+    result = from_timestamp(timestamp)
+    expected = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+    assert result == expected
+    assert result.tzinfo == pytz.UTC
+
+
+def test_from_timestamp_string_float():
+    """tests from_timestamp with string representation of float"""
+    timestamp = "1640995200.123"
+    result = from_timestamp(timestamp)
+    # int("1640995200.123") will raise ValueError, so should return None
+    assert result is None

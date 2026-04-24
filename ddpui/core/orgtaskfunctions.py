@@ -7,7 +7,7 @@ import uuid
 from typing import Union
 from pathlib import Path
 import yaml
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskLock, TaskLockStatus, TaskType
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
@@ -20,7 +20,6 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
 from ddpui.ddpprefect import (
-    MANUL_DBT_WORK_QUEUE,
     FLOW_RUN_PENDING_STATE_TYPE,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_SCHEDULED_STATE_TYPE,
@@ -47,9 +46,13 @@ def create_default_transform_tasks(
         raise ValueError("dbt is not configured for this org")
 
     # if transform_type is "ui" then we don't set up git-pull
-    task_types = ["dbt", "git"] if org.dbt.transform_type == TransformType.GIT else ["dbt"]
+    task_types = (
+        [TaskType.DBT, TaskType.GIT]
+        if org.dbt.transform_type == TransformType.GIT
+        else [TaskType.DBT]
+    )
     for task in Task.objects.filter(type__in=task_types, is_system=True).all():
-        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4())
+        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
 
         if task.slug == TASK_DBTRUN:
             # create deployment
@@ -113,6 +116,7 @@ def get_edr_send_report_task(org: Org, **kwargs) -> OrgTask | None:
             task=task,
             uuid=uuid.uuid4(),
             parameters={"options": options},
+            dbt=org.dbt,
         )
     return org_task
 
@@ -132,13 +136,13 @@ def create_prefect_deployment_for_dbtcore_task(
     deployment_name = f"manual-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
 
     tasks = []
-    if org_task.task.type == "dbt":
+    if org_task.task.type == TaskType.DBT:
         tasks = [
             setup_dbt_core_task_config(
                 org_task, credentials_profile_block, dbt_project_params
             ).to_json()
         ]
-    elif org_task.task.type == "dbtcloud":
+    elif org_task.task.type == TaskType.DBTCLOUD:
         tasks = [
             setup_dbt_cloud_task_config(
                 org_task, credentials_profile_block, dbt_project_params
@@ -157,7 +161,7 @@ def create_prefect_deployment_for_dbtcore_task(
                 }
             },
         ),
-        MANUL_DBT_WORK_QUEUE,
+        org_task.org.get_queue_config().transform_task_queue,  # manual dbt tasks queue
     )
 
     # store deployment record in django db

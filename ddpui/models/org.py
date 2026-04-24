@@ -1,9 +1,15 @@
-from typing import Optional
-from pydantic import HttpUrl
+import os
+
 from enum import Enum
 from django.db import models
 from django.utils import timezone
-from ninja import Schema
+
+from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
+from ddpui.schemas.org_queue_schema import (
+    QueueConfigSchema,
+    QueueDetailsSchema,
+    QueueConfigUpdateSchema,
+)
 
 
 class OrgType(str, Enum):
@@ -38,6 +44,17 @@ class TransformType(str, Enum):
     GIT = "github"
 
 
+def get_default_queue_config():
+    """Returns the new nested structure as default"""
+    default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME") or "default"
+    return {
+        "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
+        "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": default_workpool},
+        "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": default_workpool},
+        "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": default_workpool},
+    }
+
+
 class OrgDbt(models.Model):
     """Docstring"""
 
@@ -52,6 +69,26 @@ class OrgDbt(models.Model):
     target_type = models.CharField(max_length=10)
     default_schema = models.CharField(max_length=50)
     transform_type = models.CharField(max_length=10, null=True)
+    branch_name = models.CharField(max_length=256, null=True)
+    is_default_branch = models.BooleanField(null=True)
+    cli_profile_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+    dbtcloud_creds_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="dbtcloud_creds_block",
+    )
+
+    # Managed Git Repository fields
+    is_repo_managed_by_system = models.BooleanField(
+        default=False,
+        help_text="True if this repository is created and managed by the system, False if it's a user-owned repository",
+    )
+
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -72,57 +109,81 @@ class Org(models.Model):
     )
     viz_url = models.CharField(max_length=100, null=True)
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
-    ses_whitelisted_email = models.TextField(max_length=100, null=True)
     dalgouser_superset_creds_key = models.TextField(null=True)
     website = models.CharField(max_length=1000, null=True)
+    queue_config = models.JSONField(
+        default=get_default_queue_config,
+        help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue, edr_queue)",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"Org[{self.slug}|{self.name}|{self.airbyte_workspace_id}]"
 
+    def get_queue_config(self) -> QueueConfigSchema:
+        """Returns validated queue config with automatic defaults - supports both formats"""
+        stored = self.queue_config or {}
+
+        # Get defaults from the function that uses environment variables
+        default_config = get_default_queue_config()
+
+        def get_queue_details(key: str) -> QueueDetailsSchema:
+            if key not in stored:
+                # Use default from function
+                default_data = default_config[key]
+                return QueueDetailsSchema(
+                    name=default_data["name"], workpool=default_data["workpool"]
+                )
+
+            queue_data = stored[key]
+
+            # Handle new nested format
+            if isinstance(queue_data, dict) and "name" in queue_data:
+                workpool = queue_data.get("workpool")
+                if workpool is None:
+                    # Use the default workpool from the default config
+                    default_data = default_config[key]
+                    workpool = default_data["workpool"]
+                return QueueDetailsSchema(name=queue_data.get("name"), workpool=workpool)
+            # Handle legacy flat format (for backward compatibility during migration)
+            elif isinstance(queue_data, str):
+                # Use the default workpool from the default config
+                default_data = default_config[key]
+                workpool = default_data["workpool"]
+                return QueueDetailsSchema(name=queue_data, workpool=workpool)
+
+            # Fallback to defaults
+            default_data = default_config[key]
+            return QueueDetailsSchema(name=default_data["name"], workpool=default_data["workpool"])
+
+        return QueueConfigSchema(
+            scheduled_pipeline_queue=get_queue_details("scheduled_pipeline_queue"),
+            connection_sync_queue=get_queue_details("connection_sync_queue"),
+            transform_task_queue=get_queue_details("transform_task_queue"),
+            edr_queue=get_queue_details("edr_queue"),
+        )
+
+    def update_queue_config(self, update_data: QueueConfigUpdateSchema):
+        """Update queue config with nested data"""
+        current = self.get_queue_config()
+
+        if update_data.scheduled_pipeline_queue is not None:
+            current.scheduled_pipeline_queue = update_data.scheduled_pipeline_queue
+        if update_data.connection_sync_queue is not None:
+            current.connection_sync_queue = update_data.connection_sync_queue
+        if update_data.transform_task_queue is not None:
+            current.transform_task_queue = update_data.transform_task_queue
+        if update_data.edr_queue is not None:
+            current.edr_queue = update_data.edr_queue
+
+        # Store as nested structure
+        self.queue_config = current.model_dump()
+        self.save()
+
     def base_plan(self):
         """returns the base plan of the organization"""
         return self.org_plans.base_plan if hasattr(self, "org_plans") else None
-
-
-class OrgSchema(Schema):
-    """Docstring"""
-
-    name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
-    is_demo: bool = False
-
-
-class CreateOrgSchema(Schema):
-    """payload for org creation"""
-
-    name: str
-    slug: str = None
-    airbyte_workspace_id: str = None
-    viz_url: HttpUrl = None
-    viz_login_type: str = None
-    tnc_accepted: bool = None
-    is_demo: bool = False
-    base_plan: str
-    can_upgrade_plan: bool
-    subscription_duration: str
-    superset_included: bool
-    start_date: Optional[str]
-    end_date: Optional[str]
-    website: Optional[HttpUrl] = None
-
-
-class CreateFreeTrialOrgSchema(CreateOrgSchema):
-    """payload for org creation specifically for free trial account"""
-
-    email: str
-    superset_ec2_machine_id: str
-    superset_port: int
 
 
 class OrgWarehouse(models.Model):
@@ -147,15 +208,6 @@ class OrgWarehouse(models.Model):
 
     def __str__(self) -> str:
         return f"OrgWarehouse[{self.org.slug}|{self.wtype}|{self.airbyte_destination_id}]"
-
-
-class OrgWarehouseSchema(Schema):
-    """payload to register an organization's data warehouse"""
-
-    wtype: str
-    name: str
-    destinationDefId: str
-    airbyteConfig: dict
 
 
 # ============================================================================================
