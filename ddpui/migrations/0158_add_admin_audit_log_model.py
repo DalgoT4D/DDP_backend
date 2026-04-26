@@ -7,6 +7,7 @@ import uuid
 
 
 class Migration(migrations.Migration):
+    """Migration to add the Admin Audit Log model."""
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
@@ -24,7 +25,13 @@ class Migration(migrations.Migration):
                 ('payload', models.JSONField(default=dict, help_text='The data payload or diff (MUST be scrubbed of passwords)')),
                 ('ip_address', models.GenericIPAddressField(blank=True, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('actor', models.ForeignKey(help_text='The admin user who performed the action', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='audit_logs', to=settings.AUTH_USER_MODEL)),
+                ('actor', models.ForeignKey(
+                    help_text='The admin user who performed the action',
+                    null=True,
+                    on_delete=django.db.models.deletion.SET_NULL,
+                    related_name='audit_logs',
+                    to=settings.AUTH_USER_MODEL
+                )),
             ],
             options={
                 'db_table': 'admin_audit_log',

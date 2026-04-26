@@ -4,8 +4,13 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+
 class AuditLog(models.Model):
+    """Database model to track administrative actions."""
+
     class ActionChoices(models.TextChoices):
+        """Choices for the types of admin actions."""
+
         CREATE = 'CREATE', 'Create'
         UPDATE = 'UPDATE', 'Update'
         DELETE = 'DELETE', 'Delete'
@@ -13,9 +18,9 @@ class AuditLog(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     actor = models.ForeignKey(
-        User, 
-        on_delete=models.SET_NULL, 
-        null=True, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='audit_logs',
         help_text="The admin user who performed the action"
     )
@@ -27,7 +32,7 @@ class AuditLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'admin_audit_log' 
+        db_table = 'admin_audit_log'
         ordering = ['-created_at']
 
     def __str__(self):
