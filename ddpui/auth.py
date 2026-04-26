@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import inspect
 from functools import wraps
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
@@ -27,26 +28,40 @@ ANALYST_ROLE = "analyst"
 GUEST_ROLE = "guest"
 
 
+def _check_permissions(request, permission_slugs: list):
+    """Check if request has the required permissions."""
+    try:
+        if not request.permissions or len(request.permissions) == 0:
+            raise HttpError(403, "not allowed")
+
+        if not set(request.permissions).issuperset(set(permission_slugs)):
+            raise HttpError(403, "not allowed")
+    except HttpError:
+        raise
+    except Exception:
+        raise HttpError(404, UNAUTHORIZED)
+
+
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
-        @wraps(api_endpoint)
-        def wrapper(*args, **kwargs):
-            # request will have set of permissions that are allowed
-            # check if permission_slug lies in this set
-            # throw error if nots
-            request = args[0]
-            try:
-                if not request.permissions or len(request.permissions) == 0:
-                    raise HttpError(403, "not allowed")
+        if inspect.iscoroutinefunction(api_endpoint):
 
-                if not set(request.permissions).issuperset(set(permission_slugs)):
-                    raise HttpError(403, "not allowed")
-            except:
-                raise HttpError(404, UNAUTHORIZED)
+            @wraps(api_endpoint)
+            async def async_wrapper(*args, **kwargs):
+                request = args[0]
+                _check_permissions(request, permission_slugs)
+                return await api_endpoint(*args, **kwargs)
 
-            return api_endpoint(*args, **kwargs)
+            return async_wrapper
+        else:
 
-        return wrapper
+            @wraps(api_endpoint)
+            def wrapper(*args, **kwargs):
+                request = args[0]
+                _check_permissions(request, permission_slugs)
+                return api_endpoint(*args, **kwargs)
+
+            return wrapper
 
     return decorator
 
