@@ -12,7 +12,7 @@ from ddpui.core.dbt_automation.operations.generic import generic_function_dbt_sq
 from ddpui.core.dbt_automation.operations.mergetables import union_tables_sql
 from ddpui.core.dbt_automation.operations.regexextraction import regex_extraction_sql
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 from ddpui.core.dbt_automation.operations.castdatatypes import cast_datatypes_sql
 from ddpui.core.dbt_automation.operations.replace import replace_dbt_sql
 from ddpui.core.dbt_automation.operations.joins import joins_sql

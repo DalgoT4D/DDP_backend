@@ -3,16 +3,22 @@
 import os
 from pathlib import Path
 import math
+import json
 import subprocess
+import shutil
+import yaml
+import pytest
 from logging import basicConfig, getLogger, INFO
+from ddpui.core.dbt_automation import assets, seeds
 from ddpui.core.dbt_automation.operations.flattenjson import flattenjson
 from ddpui.core.dbt_automation.operations.droprenamecolumns import rename_columns, drop_columns
 from ddpui.core.dbt_automation.operations.generic import generic_function
 from ddpui.core.dbt_automation.operations.mergeoperations import merge_operations
 from ddpui.core.dbt_automation.operations.rawsql import generic_sql_function
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.dbtautomation_service import upsert_multiple_sources_to_a_yaml
 from ddpui.core.dbt_automation.operations.flattenairbyte import flatten_operation
+from ddpui.core.dbt_automation.operations.syncsources import sync_sources
 from ddpui.core.dbt_automation.operations.coalescecolumns import coalesce_columns
 from ddpui.core.dbt_automation.operations.concatcolumns import concat_columns
 from ddpui.core.dbt_automation.operations.arithmetic import arithmetic
@@ -24,10 +30,138 @@ from ddpui.core.dbt_automation.operations.aggregate import aggregate
 from ddpui.core.dbt_automation.operations.casewhen import casewhen
 from ddpui.core.dbt_automation.operations.pivot import pivot
 from ddpui.core.dbt_automation.operations.unpivot import unpivot
+from ddpui.utils.warehouse.client.table_queries import list_table_names
 
 
 basicConfig(level=INFO)
 logger = getLogger()
+
+
+def _load_postgres_test_credentials() -> dict[str, str]:
+    """Load and validate Postgres credentials for integration tests."""
+    creds = {
+        "host": os.environ.get("TEST_PG_DBHOST"),
+        "port": os.environ.get("TEST_PG_DBPORT", "5432"),
+        "username": os.environ.get("TEST_PG_DBUSER"),
+        "database": os.environ.get("TEST_PG_DBNAME"),
+        "password": os.environ.get("TEST_PG_DBPASSWORD"),
+    }
+
+    required_keys = ("host", "username", "database", "password")
+    missing_keys = [
+        key
+        for key in required_keys
+        if not isinstance(creds.get(key), str) or not str(creds.get(key)).strip()
+    ]
+    if missing_keys:
+        pytest.skip(
+            "Skipping Postgres tests: Postgres credentials not configured",
+            allow_module_level=True,
+        )
+
+    creds["host"] = creds["host"].strip()
+    creds["port"] = (creds["port"] or "5432").strip()
+    creds["username"] = creds["username"].strip()
+    creds["database"] = creds["database"].strip()
+    creds["password"] = creds["password"].strip()
+    return creds
+
+
+TEST_PG_CREDS = _load_postgres_test_credentials()
+TEST_PG_SCHEMA = (os.environ.get("TEST_PG_DBSCHEMA_SRC") or "public").strip()
+
+
+def scaffold(config, warehouse, tmpdir):
+    """Create a dbt project for integration tests and write a postgres profile."""
+    project_name = config["project_name"]
+    default_schema = config["default_schema"]
+    project_root = Path(tmpdir)
+    dbt_bin = shutil.which("dbt")
+    if not dbt_bin:
+        raise RuntimeError("dbt binary is not available on PATH")
+
+    subprocess.check_call(
+        # noqa: S603 - dbt binary resolved from PATH, fixed args in test
+        [dbt_bin, "init", project_name, "--skip-profile-setup"],
+        cwd=project_root,
+    )
+
+    project_dir = project_root / project_name
+
+    example_models_dir = project_dir / "models" / "example"
+    if example_models_dir.exists():
+        shutil.rmtree(example_models_dir)
+
+    assets_module_path = Path(assets.__file__).parent
+    shutil.copy(assets_module_path / "packages.yml", project_dir / "packages.yml")
+    macros_dir = project_dir / "macros"
+    macros_dir.mkdir(exist_ok=True)
+    for sql_file in assets_module_path.glob("*.sql"):
+        shutil.copy(sql_file, macros_dir / sql_file.name)
+
+    profile = {
+        project_name: {
+            "target": "dev",
+            "outputs": {
+                "dev": {
+                    "type": "postgres",
+                    "host": TEST_PG_CREDS["host"],
+                    "port": int(TEST_PG_CREDS["port"]),
+                    "user": TEST_PG_CREDS["username"],
+                    "password": TEST_PG_CREDS["password"],
+                    "dbname": TEST_PG_CREDS["database"],
+                    "schema": default_schema,
+                    "threads": 4,
+                }
+            },
+        }
+    }
+    with open(project_dir / "profiles.yml", "w", encoding="utf-8") as profile_file:
+        yaml.safe_dump(profile, profile_file, sort_keys=False)
+
+    schema = TEST_PG_SCHEMA or default_schema
+    seed_files = [
+        ("_airbyte_raw_Sheet1", "sample_sheet1.json"),
+        ("_airbyte_raw_Sheet2", "sample_sheet2.json"),
+    ]
+
+    for table_name, seed_filename in seed_files:
+        seed_path = Path(seeds.__file__).parent / seed_filename
+        with open(seed_path, "r", encoding="utf-8") as seed_file:
+            rows = json.load(seed_file)
+
+        warehouse.execute_transaction(
+            [
+                (f"CREATE SCHEMA IF NOT EXISTS {schema};", None),
+                (
+                    f"""CREATE TABLE IF NOT EXISTS {schema}."{table_name}" (
+                        _airbyte_ab_id character varying,
+                        _airbyte_data jsonb,
+                        _airbyte_emitted_at timestamp with time zone
+                    );""",
+                    None,
+                ),
+                (f"""TRUNCATE TABLE {schema}."{table_name}";""", None),
+            ]
+        )
+
+        insert_query = f"""
+            INSERT INTO {schema}."{table_name}" (_airbyte_ab_id, _airbyte_data, _airbyte_emitted_at)
+            VALUES (:airbyte_ab_id, CAST(:airbyte_data AS jsonb), :airbyte_emitted_at)
+        """
+        insert_rows = [
+            {
+                "airbyte_ab_id": row["_airbyte_ab_id"],
+                "airbyte_data": (
+                    row["_airbyte_data"]
+                    if isinstance(row["_airbyte_data"], str)
+                    else json.dumps(row["_airbyte_data"])
+                ),
+                "airbyte_emitted_at": row["_airbyte_emitted_at"],
+            }
+            for row in rows
+        ]
+        warehouse.execute_many(insert_query, insert_rows)
 
 
 class TestPostgresOperations:
@@ -35,25 +169,28 @@ class TestPostgresOperations:
 
     warehouse = "postgres"
     test_project_dir = None
-    wc_client = get_client(
-        "postgres",
-        {
-            "host": os.environ.get("TEST_PG_DBHOST"),
-            "port": os.environ.get("TEST_PG_DBPORT"),
-            "user": os.environ.get("TEST_PG_DBUSER"),
-            "database": os.environ.get("TEST_PG_DBNAME"),
-            "password": os.environ.get("TEST_PG_DBPASSWORD"),
-        },
-    )
-    schema = os.environ.get("TEST_PG_DBSCHEMA_SRC")  # source schema where the raw data lies
+    wc_client = WarehouseFactory.connect(TEST_PG_CREDS, "postgres")
+    schema = TEST_PG_SCHEMA  # source schema where the raw data lies
 
     @staticmethod
-    def execute_dbt(cmd: str, select_model: str = None):
+    def execute_dbt(cmd: str, select_model: str | None = None):
         try:
+            allowed_commands = {"deps", "run", "init"}
+            if cmd not in allowed_commands:
+                raise ValueError(f"Unsupported dbt command for tests: {cmd}")
+
+            dbt_bin = Path(TestPostgresOperations.test_project_dir) / "venv" / "bin" / "dbt"
+            if not dbt_bin.exists():
+                dbt_path = shutil.which("dbt")
+                if not dbt_path:
+                    raise RuntimeError("dbt binary is not available on PATH")
+                dbt_bin = Path(dbt_path)
+
             select_cli = ["--select", select_model] if select_model is not None else []
             subprocess.check_call(
+                # noqa: S603 - dbt binary resolved from PATH, validated command in test
                 [
-                    Path(TestPostgresOperations.test_project_dir) / "venv" / "bin" / "dbt",
+                    str(dbt_bin),
                     cmd,
                 ]
                 + select_cli
@@ -76,7 +213,6 @@ class TestPostgresOperations:
             "project_name": project_name,
             "default_schema": TestPostgresOperations.schema,
         }
-        # TODO: need to change this
         scaffold(config, TestPostgresOperations.wc_client, tmpdir)
         TestPostgresOperations.test_project_dir = Path(tmpdir) / project_name
         TestPostgresOperations.execute_dbt("deps")
@@ -93,6 +229,7 @@ class TestPostgresOperations:
             config,
             TestPostgresOperations.wc_client,
             dbtProject(TestPostgresOperations.test_project_dir),
+            TestPostgresOperations.warehouse,
         )
         sources_yml = (
             Path(TestPostgresOperations.test_project_dir)
@@ -119,12 +256,13 @@ class TestPostgresOperations:
         TestPostgresOperations.execute_dbt("run", "_airbyte_raw_Sheet2")
         logger.info("inside test flatten")
         logger.info(f"inside project directory : {TestPostgresOperations.test_project_dir}")
-        assert "_airbyte_raw_Sheet1" in TestPostgresOperations.wc_client.get_tables(
-            "pytest_intermediate"
+        tables = list_table_names(
+            TestPostgresOperations.wc_client,
+            TestPostgresOperations.warehouse,
+            "pytest_intermediate",
         )
-        assert "_airbyte_raw_Sheet2" in TestPostgresOperations.wc_client.get_tables(
-            "pytest_intermediate"
-        )
+        assert "_airbyte_raw_Sheet1" in tables
+        assert "_airbyte_raw_Sheet2" in tables
 
     def test_rename_columns(self):
         """test rename_columns for sample seed data"""

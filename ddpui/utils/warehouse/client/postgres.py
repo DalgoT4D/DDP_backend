@@ -1,9 +1,10 @@
 import tempfile
 from urllib.parse import quote
+from typing import Any
 
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.types import NullType
 from sqlalchemy.exc import NoSuchTableError
 
@@ -18,6 +19,8 @@ class PostgresClient(Warehouse):
         Establish connection to the postgres database using sqlalchemy engine
         Creds come from the secrets manager
         """
+        self.name = "postgres"
+
         creds["encoded_username"] = quote(creds["username"].strip())
         creds["encoded_password"] = quote(creds["password"].strip())
 
@@ -63,14 +66,80 @@ class PostgresClient(Warehouse):
             self.engine
         )  # this will be used to fetch metadata of the database
 
-    def execute(self, sql) -> list[dict]:
+    def execute(self, sql, params: dict[str, Any] | None = None) -> list[dict]:
         """
         Execute the sql query and return the results
         """
-        with self.engine.connect() as connection:
-            result = connection.execute(sql)
+        statement = text(sql) if isinstance(sql, str) else sql
+        with self.engine.begin() as connection:
+            result = (
+                connection.execute(statement)
+                if params is None
+                else connection.execute(statement, params)
+            )
+            if not result.returns_rows:
+                return []
             rows = result.fetchall()
-            return [dict(row) for row in rows]
+            return [dict(row._mapping) for row in rows]
+
+    def execute_many(self, sql: str, params_list: list[dict[str, Any]]) -> int:
+        """
+        Execute a parameterized SQL statement against multiple rows atomically.
+        """
+        if not params_list:
+            return 0
+
+        statement = text(sql) if isinstance(sql, str) else sql
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params_list)
+            rowcount = result.rowcount
+            if rowcount is None or rowcount < 0:
+                return len(params_list)
+            return int(rowcount)
+
+    def execute_transaction(
+        self,
+        statements: list[tuple[str, dict[str, Any] | None]],
+    ) -> list[list[dict]]:
+        """
+        Execute a list of SQL statements in a single transaction.
+        Returns result rows for statements that produce rows.
+        """
+        results: list[list[dict]] = []
+
+        with self.engine.begin() as connection:
+            for sql, params in statements:
+                statement = text(sql) if isinstance(sql, str) else sql
+                result = (
+                    connection.execute(statement)
+                    if params is None
+                    else connection.execute(statement, params)
+                )
+
+                if result.returns_rows:
+                    rows = result.fetchall()
+                    results.append([dict(row._mapping) for row in rows])
+                else:
+                    results.append([])
+
+        return results
+
+    def close(self) -> bool:
+        """Dispose SQLAlchemy connections held by the engine pool."""
+        self.engine.dispose()
+        return True
+
+    def get_columnspec(self, schema: str, table_id: str) -> list[str]:
+        """Gets the column schema for this table."""
+        resultset = self.execute(
+            """SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = :schema
+                AND table_name = :table_id
+            """,
+            {"schema": schema, "table_id": table_id},
+        )
+        return [row["column_name"] for row in resultset]
 
     def get_table_columns(self, db_schema: str, db_table: str) -> dict:
         """Fetch columns of a table; also send the translated col data type"""
@@ -89,6 +158,29 @@ class PostgresClient(Warehouse):
                 }
             )
         return res
+
+    def get_table_data(
+        self,
+        schema: str,
+        table: str,
+        limit: int,
+        page: int = 1,
+        order_by: str | None = None,
+        order: int = 1,
+    ) -> list[dict]:
+        """Return paginated rows from a schema.table for tests and debugging."""
+        offset = max((page - 1) * limit, 0)
+        schema_quoted = schema.replace('"', '""')
+        table_quoted = table.replace('"', '""')
+
+        query = f'SELECT * FROM "{schema_quoted}"."{table_quoted}"'
+        if order_by:
+            order_by_quoted = order_by.replace('"', '""')
+            sort_order = "ASC" if order == 1 else "DESC"
+            query += f' ORDER BY "{order_by_quoted}" {sort_order}'
+
+        query += " OFFSET :offset LIMIT :limit"
+        return self.execute(query, {"offset": offset, "limit": int(limit)})
 
     def get_col_python_type(self, db_schema: str, db_table: str, column_name: str):
         """Fetch python type of a column"""

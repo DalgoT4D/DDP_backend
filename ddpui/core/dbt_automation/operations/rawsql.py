@@ -1,5 +1,5 @@
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
-from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 from ddpui.core.dbt_automation.utils.tableutils import source_or_ref
 import sqlparse
 import re
