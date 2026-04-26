@@ -136,6 +136,7 @@ def signup_orguser(payload: OrgUserCreate):
     orguserid_bytes = str(orguser.id).encode("utf8")
 
     redis.set(redis_key, orguserid_bytes)
+    redis.expire(redis_key, 3600 * 24)  # 24 hours
 
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
@@ -450,6 +451,7 @@ def resend_verification_email(orguser: OrgUser, email: str):
     orguserid_bytes = str(orguser.id).encode("utf8")
 
     redis.set(redis_key, orguserid_bytes)
+    redis.expire(redis_key, 3600 * 24)  # 24 hours
 
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
