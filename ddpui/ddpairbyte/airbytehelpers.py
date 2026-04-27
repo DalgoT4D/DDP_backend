@@ -500,11 +500,7 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
                 "resetConnDeploymentId": None,
                 "clearConnDeploymentId": clear_dataflow.deployment_id if clear_dataflow else None,
                 # "look_up_last_run_deployment_ids": look_up_last_run_deployment_ids,
-                "queuedFlowRunWaitTime": (
-                    prefect_service.estimate_time_for_next_queued_run_of_dataflow(sync_dataflow)
-                    if lock and lock["status"] == TaskLockStatus.QUEUED
-                    else None
-                ),
+                "queuedFlowRunWaitTime": None,
             }
         )
 
