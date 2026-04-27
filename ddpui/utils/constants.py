@@ -6,6 +6,7 @@ TASK_DBTTEST = "dbt-test"
 TASK_DBTCLEAN = "dbt-clean"
 TASK_DBTDEPS = "dbt-deps"
 TASK_GITPULL = "git-pull"
+TASK_GITCLONE = "git-clone"
 TASK_DBTCLOUD_JOB = "dbt-cloud-job"  # this is task slug so it should match the seed data.
 TASK_DOCSGENERATE = "dbt-docs-generate"
 TASK_AIRBYTESYNC = "airbyte-sync"
@@ -23,13 +24,10 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTSEED: 4,
     TASK_DBTRUN: 5,
     TASK_DBTTEST: 6,
-    TASK_DOCSGENERATE: 7,
-    TASK_GENERATE_EDR: 8,
     TASK_DBTCLOUD_JOB: 20,
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
-    TASK_GITPULL,
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
     TASK_DBTRUN,

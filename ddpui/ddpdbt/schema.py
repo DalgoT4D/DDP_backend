@@ -9,6 +9,10 @@ class DbtProjectParams(Schema):
     """
 
     dbt_env_dir: Union[str, Path]
+    clients_base_dir: Union[str, Path]  # Base clients directory for git clone
+    project_dir_relative: Union[
+        str, Path
+    ]  # Relative path from clients_base_dir (orgdbt.project_dir)
     project_dir: Union[str, Path]
     org_project_dir: Union[str, Path]
     target: str
