@@ -37,6 +37,7 @@ def test_get_connection_1():
             port=1234,
             user="USER",
             password="PASSWORD",
+            connect_timeout=15,
         )
 
 
@@ -59,6 +60,7 @@ def test_get_connection_2():
             user="USER",
             password="PASSWORD",
             database="DATABASE",
+            connect_timeout=15,
         )
 
 
@@ -75,6 +77,7 @@ def test_get_connection_3():
         mock_connect.assert_called_with(
             sslmode="verify-ca",
             sslrootcert="/path/to/cert",
+            connect_timeout=15,
         )
 
 
@@ -91,6 +94,7 @@ def test_get_connection_4():
         mock_connect.assert_called_with(
             sslmode="require",
             sslrootcert="/path/to/cert",
+            connect_timeout=15,
         )
 
 
@@ -107,6 +111,7 @@ def test_get_connection_5():
         mock_connect.assert_called_with(
             sslmode="disable",
             sslrootcert="/path/to/cert",
+            connect_timeout=15,
         )
 
 
@@ -123,6 +128,7 @@ def test_get_connection_6():
         mock_connect.assert_called_once()
         mock_connect.assert_called_with(
             sslmode="disable",
+            connect_timeout=15,
         )
 
 
@@ -133,7 +139,7 @@ def test_get_connection_7():
             {"sslmode": {"mode": "disable", "ca_certificate": "LONG-CERTIFICATE"}}
         )
         mock_connect.assert_called_once()
-        mock_connect.assert_called_with(sslmode="disable", sslrootcert=ANY)
+        mock_connect.assert_called_with(sslmode="disable", sslrootcert=ANY, connect_timeout=15)
 
 
 def test_init_with_ssh_pkey_writes_tempfile_and_starts_tunnel(mock_tunnel, mock_connection):

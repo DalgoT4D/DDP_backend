@@ -226,14 +226,18 @@ def get_elemetary_task_lock(request):
 
 @orgtask_router.get("transform/")
 @has_permission(["can_view_orgtasks"])
-def get_prefect_transformation_tasks(request):
+def get_prefect_transformation_tasks(request, exclude_git: bool = False):
     """Fetch all dbt tasks for an org; client or system"""
     orguser: OrgUser = request.orguser
+
+    task_types = [TaskType.DBT, TaskType.DBTCLOUD]
+    if not exclude_git:
+        task_types.append(TaskType.GIT)
 
     org_tasks = (
         OrgTask.objects.filter(
             org=orguser.org,
-            task__type__in=[TaskType.GIT, TaskType.DBT, TaskType.DBTCLOUD],
+            task__type__in=task_types,
         )
         .order_by("-generated_by")
         .select_related("task")

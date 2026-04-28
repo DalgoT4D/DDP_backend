@@ -1,0 +1,10 @@
+[project]
+name = "dalgo-prefect-deps"
+version = "0.1.0"
+description = "Prefect dependencies for Dalgo platform"
+requires-python = ">=3.10"
+dependencies = [
+    "prefect==3.1.15",
+    "prefect-airbyte @ git+https://github.com/Ishankoradia/prefect-airbyte.git@v0.90",
+    "prefect-dbt==0.6.6",
+]
