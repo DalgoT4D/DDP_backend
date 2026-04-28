@@ -128,6 +128,8 @@ class GitManager:
             raise ValueError(f"Unsupported HTTP method: {method}")
 
         response.raise_for_status()
+        if response.status_code == 204:
+            return {}
         return response.json()
 
     @staticmethod

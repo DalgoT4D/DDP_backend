@@ -60,7 +60,7 @@ def test_sync_sources_failed_to_connect_to_warehouse(orguser: OrgUser, tmp_path)
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -107,7 +107,7 @@ def test_sync_sources_failed_to_fetch_schemas(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -170,7 +170,7 @@ def test_sync_sources_success_with_no_schemas(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -278,7 +278,7 @@ def test_sync_sources_v2_with_existing_models_update_columns(orguser: OrgUser, t
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -357,7 +357,7 @@ def test_sync_sources_v2_column_fetch_error_handling(orguser: OrgUser, tmp_path)
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -404,7 +404,7 @@ def test_sync_sources_v2_empty_warehouse(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -459,7 +459,7 @@ def test_sync_sources_v2_invalid_warehouse_id(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
