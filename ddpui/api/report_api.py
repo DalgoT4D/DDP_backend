@@ -78,7 +78,7 @@ def create_snapshot(request, payload: SnapshotCreate):
             title=payload.title,
             dashboard_id=payload.dashboard_id,
             orguser=orguser,
-            date_column=payload.date_column.model_dump() if payload.date_column else None,
+            date_column=payload.date_column.model_dump() if payload.date_column else {},
             period_end=payload.period_end,
             period_start=payload.period_start,
         )
