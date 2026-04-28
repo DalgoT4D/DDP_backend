@@ -77,9 +77,9 @@ def create_snapshot(request, payload: SnapshotCreate):
         s = ReportService.create_snapshot(
             title=payload.title,
             dashboard_id=payload.dashboard_id,
-            date_column=payload.date_column.model_dump(),
-            period_end=payload.period_end,
             orguser=orguser,
+            date_column=payload.date_column.model_dump() if payload.date_column else None,
+            period_end=payload.period_end,
             period_start=payload.period_start,
         )
         return api_response(
