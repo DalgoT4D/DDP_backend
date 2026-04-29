@@ -379,11 +379,11 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
 def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     """registers a data warehouse for the org"""
     orguser: OrgUser = request.orguser
-    _, error = airbytehelpers.create_warehouse(orguser.org, payload)
+    result, error = airbytehelpers.create_warehouse(orguser.org, payload)
     if error:
         raise HttpError(400, error)
 
-    return {"success": 1}
+    return result
 
 
 @user_org_router.get("/organizations/warehouses")
