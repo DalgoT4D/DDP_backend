@@ -21,6 +21,8 @@ from ddpui.schemas.chart_schema import ChartConfig
 from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     FrozenChartConfig,
+    FrozenKpiConfig,
+    FrozenKpiMetric,
     FrozenDashboardConfig,
     SnapshotUpdate,
 )
@@ -64,22 +66,32 @@ class ReportService:
     @staticmethod
     def _freeze_chart_configs(dashboard: Dashboard) -> Dict[str, Any]:
         """
-        Layer 3: Freeze ALL chart configs referenced in dashboard components.
+        Layer 3: Freeze ALL chart and KPI configs referenced in dashboard components.
 
-        Walks through components, extracts chartId from each chart component,
-        batch-fetches the Chart records, and stores full configs.
+        Walks through components, extracts chartId/kpiId from each component,
+        batch-fetches the records, and stores full configs.
         """
+        from ddpui.models.metric import KPI
+
         components = dashboard.components or {}
         chart_ids = []
+        kpi_ids = []
 
         for comp_id, component in components.items():
-            if component.get("type") == "chart":
+            comp_type = component.get("type")
+            if comp_type == "chart":
                 chart_id = component.get("config", {}).get("chartId")
                 if chart_id:
                     chart_ids.append(chart_id)
+            elif comp_type == "kpi":
+                kpi_id = component.get("config", {}).get("kpiId")
+                if kpi_id:
+                    kpi_ids.append(kpi_id)
 
-        charts = Chart.objects.filter(id__in=chart_ids, org=dashboard.org)
         frozen = {}
+
+        # Freeze charts
+        charts = Chart.objects.filter(id__in=chart_ids, org=dashboard.org)
         for chart in charts:
             frozen[str(chart.id)] = {
                 "id": chart.id,
@@ -90,6 +102,68 @@ class ReportService:
                 "table_name": chart.table_name,
                 "extra_config": chart.extra_config,
             }
+
+        # Freeze KPIs — capture all data needed to render without the live KPI/metric
+        if kpi_ids:
+            from ddpui.services.kpi_service import KPIService, compute_rag_status
+            from ddpui.services.metric_service import MetricService
+
+            org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
+            kpis = KPI.objects.filter(id__in=kpi_ids, org=dashboard.org).select_related("metric")
+
+            for kpi in kpis:
+                current_value = None
+                periods = []
+
+                if org_warehouse:
+                    try:
+                        current_value = MetricService.compute_metric_value(
+                            kpi.metric, org_warehouse
+                        )
+                    except Exception as e:
+                        logger.error(f"Error computing value for KPI {kpi.id}: {e}")
+
+                    if kpi.time_dimension_column:
+                        try:
+                            periods = KPIService._compute_trend(kpi, org_warehouse)
+                        except Exception as e:
+                            logger.error(f"Error computing trend for KPI {kpi.id}: {e}")
+
+                rag_status = compute_rag_status(
+                    current_value,
+                    kpi.target_value,
+                    kpi.direction,
+                    kpi.green_threshold_pct,
+                    kpi.amber_threshold_pct,
+                )
+
+                metric = kpi.metric
+                frozen_kpi = FrozenKpiConfig(
+                    id=kpi.id,
+                    title=kpi.name,
+                    metric=FrozenKpiMetric(
+                        id=metric.id,
+                        name=metric.name,
+                        schema_name=metric.schema_name,
+                        table_name=metric.table_name,
+                        column=metric.column,
+                        aggregation=metric.aggregation,
+                        column_expression=metric.column_expression,
+                    ),
+                    target_value=kpi.target_value,
+                    direction=kpi.direction,
+                    rag_status=rag_status,
+                    time_grain=kpi.time_grain,
+                    time_dimension_column=kpi.time_dimension_column,
+                    trend_periods=kpi.trend_periods,
+                    green_threshold_pct=kpi.green_threshold_pct,
+                    amber_threshold_pct=kpi.amber_threshold_pct,
+                    metric_type_tag=kpi.metric_type_tag,
+                    program_tags=kpi.program_tags,
+                    periods=periods,
+                )
+                frozen[str(kpi.id)] = frozen_kpi.model_dump()
+
         return frozen
 
     # =========================================================================
@@ -291,6 +365,63 @@ class ReportService:
         # Generate chart data using same function as dashboards
         return generate_chart_data_and_config(payload, org_warehouse, chart_id=chart_id)
 
+    @staticmethod
+    def get_report_kpi_data(
+        snapshot_id: int,
+        kpi_id: int,
+        org: Org,
+    ) -> Dict[str, Any]:
+        """Get KPI data from a frozen snapshot config.
+
+        Builds a payload from the frozen KPI config and delegates
+        to KPIService.compute_kpi_data — same warehouse query path
+        as the live KPI endpoint. Works even if the KPI is deleted.
+        """
+        from ddpui.services.kpi_service import KPIService
+
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        frozen_charts = snapshot.frozen_chart_configs or {}
+        kpi_config = frozen_charts.get(str(kpi_id))
+        if not kpi_config:
+            raise SnapshotValidationError(f"KPI {kpi_id} not found in snapshot {snapshot_id}")
+
+        if kpi_config.get("component_type") != "kpi":
+            raise SnapshotValidationError(f"Entry {kpi_id} is not a KPI")
+
+        metric_info = kpi_config.get("metric", {})
+
+        # Build the same payload shape that compute_kpi_data expects
+        payload = {
+            "name": kpi_config.get("title", ""),
+            "metric": metric_info,
+            "target_value": kpi_config.get("target_value"),
+            "direction": kpi_config.get("direction", "increase"),
+            "green_threshold_pct": kpi_config.get("green_threshold_pct", 100.0),
+            "amber_threshold_pct": kpi_config.get("amber_threshold_pct", 80.0),
+            "time_grain": kpi_config.get("time_grain"),
+            "time_dimension_column": kpi_config.get("time_dimension_column"),
+            "trend_periods": kpi_config.get("trend_periods", 12),
+        }
+
+        # Build date filter from snapshot period if applicable
+        date_filter = None
+        date_col = snapshot.date_column
+        if (
+            date_col
+            and snapshot.period_start
+            and snapshot.period_end
+            and date_col.get("schema_name") == metric_info.get("schema_name")
+            and date_col.get("table_name") == metric_info.get("table_name")
+        ):
+            date_filter = {
+                "column_name": date_col["column_name"],
+                "start": snapshot.period_start.isoformat(),
+                "end": snapshot.period_end.isoformat(),
+            }
+
+        return KPIService.compute_kpi_data(payload, org, date_filter=date_filter)
+
     # =========================================================================
     # Snapshot CRUD
     # =========================================================================
@@ -382,10 +513,13 @@ class ReportService:
         frozen_dashboard = FrozenDashboardConfig(
             **ReportService._freeze_dashboard(dashboard)
         ).model_dump()
-        frozen_chart_configs = {
-            k: FrozenChartConfig(**v).model_dump()
-            for k, v in ReportService._freeze_chart_configs(dashboard).items()
-        }
+        raw_configs = ReportService._freeze_chart_configs(dashboard)
+        frozen_chart_configs = {}
+        for k, v in raw_configs.items():
+            if v.get("component_type") == "kpi":
+                frozen_chart_configs[k] = v  # Already validated via FrozenKpiConfig
+            else:
+                frozen_chart_configs[k] = FrozenChartConfig(**v).model_dump()
 
         snapshot = ReportSnapshot.objects.create(
             title=title,

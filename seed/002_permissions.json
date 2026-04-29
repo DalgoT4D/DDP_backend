@@ -582,5 +582,69 @@
             "name": "Can Manage Organization Default Dashboard",
             "slug": "can_manage_org_default_dashboard"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 74,
+        "fields": {
+            "name": "Can View Metrics",
+            "slug": "can_view_metrics"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 75,
+        "fields": {
+            "name": "Can Create Metrics",
+            "slug": "can_create_metrics"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 76,
+        "fields": {
+            "name": "Can Edit Metrics",
+            "slug": "can_edit_metrics"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 77,
+        "fields": {
+            "name": "Can Delete Metrics",
+            "slug": "can_delete_metrics"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 78,
+        "fields": {
+            "name": "Can View KPIs",
+            "slug": "can_view_kpis"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 79,
+        "fields": {
+            "name": "Can Create KPIs",
+            "slug": "can_create_kpis"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 80,
+        "fields": {
+            "name": "Can Edit KPIs",
+            "slug": "can_edit_kpis"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 81,
+        "fields": {
+            "name": "Can Delete KPIs",
+            "slug": "can_delete_kpis"
+        }
     }
 ]

@@ -697,3 +697,101 @@ class EChartsConfigGenerator:
                 default_grid["right"] = f"{legend_width}px"
 
         return default_grid
+
+    @staticmethod
+    def generate_kpi_trend_config(
+        trend_data: List[Dict[str, Any]],
+        kpi_meta: Dict[str, Any],
+        compact: bool = False,
+    ) -> Dict:
+        """Generate ECharts config for a KPI trendline.
+
+        Args:
+            trend_data: List of {period, value} dicts
+            kpi_meta: {name, target_value, direction, rag_status, current_value}
+            compact: If True, generate a minimal sparkline (for KPI cards)
+        """
+        periods = [p["period"] for p in trend_data]
+        values = [p["value"] for p in trend_data]
+        target = kpi_meta.get("target_value")
+        rag_status = kpi_meta.get("rag_status")
+
+        rag_color_map = {
+            "green": "#16a34a",
+            "amber": "#f59e0b",
+            "red": "#dc2626",
+        }
+        line_color = rag_color_map.get(rag_status, "#6366f1")
+
+        series: List[Dict] = [
+            {
+                "type": "line",
+                "data": values,
+                "smooth": True,
+                "symbol": "none" if compact else "circle",
+                "symbolSize": 0 if compact else 6,
+                "lineStyle": {"width": 2, "color": line_color},
+                "areaStyle": {
+                    "color": {
+                        "type": "linear",
+                        "x": 0,
+                        "y": 0,
+                        "x2": 0,
+                        "y2": 1,
+                        "colorStops": [
+                            {"offset": 0, "color": line_color + "30"},
+                            {"offset": 1, "color": line_color + "05"},
+                        ],
+                    }
+                },
+                "itemStyle": {"color": line_color},
+            }
+        ]
+
+        # Target line
+        if target is not None:
+            series.append(
+                {
+                    "type": "line",
+                    "data": [target] * len(periods),
+                    "smooth": False,
+                    "symbol": "none",
+                    "lineStyle": {
+                        "width": 1,
+                        "type": "dashed",
+                        "color": "#94a3b8",
+                    },
+                    "itemStyle": {"color": "#94a3b8"},
+                    "tooltip": {"show": False},
+                }
+            )
+
+        if compact:
+            return {
+                "grid": {"left": 0, "right": 0, "top": 2, "bottom": 0, "containLabel": False},
+                "xAxis": {"type": "category", "data": periods, "show": False},
+                "yAxis": {"type": "value", "show": False},
+                "series": series,
+                "tooltip": {"show": False},
+            }
+
+        return {
+            "grid": {"left": 10, "right": 10, "top": 10, "bottom": 10, "containLabel": True},
+            "xAxis": {
+                "type": "category",
+                "data": periods,
+                "axisLabel": {"rotate": 0, "hideOverlap": True, "fontSize": 11},
+                "boundaryGap": False,
+            },
+            "yAxis": {
+                "type": "value",
+                "axisLabel": {"fontSize": 11},
+                "splitLine": {"show": False},
+            },
+            "tooltip": {
+                "trigger": "axis",
+                "axisPointer": {"type": "cross"},
+            },
+            "legend": {"show": False},
+            "series": series,
+        }

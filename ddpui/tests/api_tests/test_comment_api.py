@@ -270,11 +270,11 @@ class TestMarkAsRead:
 
     def test_mark_chart(self, orguser, snapshot):
         request = mock_request(orguser)
-        payload = MarkReadRequest(target_type="chart", chart_id=10)
+        payload = MarkReadRequest(target_type="chart", target_id=10)
         response = mark_as_read(request, snapshot.id, payload)
         assert response["success"] is True
         assert CommentReadStatus.objects.filter(
-            user=orguser, snapshot=snapshot, target_type="chart", chart_id=10
+            user=orguser, snapshot=snapshot, target_type="chart", target_id=10
         ).exists()
 
     def test_updates_existing(self, orguser, snapshot):
@@ -326,16 +326,16 @@ class TestListComments:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart note",
             author=orguser,
             org=org,
         )
         request = mock_request(orguser)
-        response = list_comments(request, snapshot.id, target_type="chart", chart_id=10)
+        response = list_comments(request, snapshot.id, target_type="chart", target_id=10)
         assert response["success"] is True
         assert len(response["data"]) == 1
-        assert response["data"][0].chart_id == 10
+        assert response["data"][0].target_id == 10
 
     def test_empty_list(self, orguser, snapshot):
         request = mock_request(orguser)
@@ -384,10 +384,10 @@ class TestCreateComment:
     @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
     def test_create_chart(self, mock_mentions, orguser, snapshot):
         request = mock_request(orguser)
-        payload = CommentCreate(target_type="chart", chart_id=10, content="Chart comment")
+        payload = CommentCreate(target_type="chart", target_id=10, content="Chart comment")
         response = create_comment(request, snapshot.id, payload)
         assert response["success"] is True
-        assert response["data"]["chart_id"] == 10
+        assert response["data"]["target_id"] == 10
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
     @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
@@ -409,7 +409,7 @@ class TestCreateComment:
     @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
     def test_chart_not_in_snapshot(self, mock_mentions, orguser, snapshot):
         request = mock_request(orguser)
-        payload = CommentCreate(target_type="chart", chart_id=999, content="Ghost chart")
+        payload = CommentCreate(target_type="chart", target_id=999, content="Ghost chart")
         with pytest.raises(HttpError) as exc:
             create_comment(request, snapshot.id, payload)
         assert exc.value.status_code == 400
