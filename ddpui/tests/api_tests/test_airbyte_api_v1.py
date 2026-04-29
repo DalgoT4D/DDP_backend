@@ -311,6 +311,108 @@ def test_get_airbyte_connections_success(orguser_workspace):
     assert result[0]["lock"] is None
 
 
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_webbackend_connections=Mock(
+        return_value=[
+            {
+                "name": "older-conn",
+                "sourceId": "older-source-id",
+                "connectionId": "older-connection-id",
+                "destinationId": "older-destination-id",
+                "status": "conn-status",
+                "source": {"id": "older-source-id", "name": "older-source-name"},
+                "destination": {
+                    "id": "older-destination-id",
+                    "name": "older-destination-name",
+                },
+            },
+            {
+                "name": "newer-conn",
+                "sourceId": "newer-source-id",
+                "connectionId": "newer-connection-id",
+                "destinationId": "newer-destination-id",
+                "status": "conn-status",
+                "source": {"id": "newer-source-id", "name": "newer-source-name"},
+                "destination": {
+                    "id": "newer-destination-id",
+                    "name": "newer-destination-name",
+                },
+            },
+        ]
+    ),
+)
+def test_get_airbyte_connections_orders_newest_connection_first(seed_db, orguser_workspace):
+    """tests GET /v1/connections returns newest connection first"""
+    request = mock_request(orguser_workspace)
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+
+    older_org_task = OrgTask.objects.create(
+        task=task, org=request.orguser.org, connection_id="older-connection-id"
+    )
+    newer_org_task = OrgTask.objects.create(
+        task=task, org=request.orguser.org, connection_id="newer-connection-id"
+    )
+
+    older_reset_dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="older-reset-deployment",
+        deployment_id="older-reset-deployment-id",
+        deployment_name="older-reset-deployment",
+        cron=None,
+        dataflow_type="manual",
+        created_at=datetime(2025, 1, 1, 0, 0, 0, tzinfo=pytz.UTC),
+    )
+    older_dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="older-deployment",
+        deployment_id="older-deployment-id",
+        deployment_name="older-deployment",
+        cron=None,
+        dataflow_type="manual",
+        reset_conn_dataflow=older_reset_dataflow,
+        created_at=datetime(2025, 1, 1, 1, 0, 0, tzinfo=pytz.UTC),
+    )
+
+    newer_reset_dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="newer-reset-deployment",
+        deployment_id="newer-reset-deployment-id",
+        deployment_name="newer-reset-deployment",
+        cron=None,
+        dataflow_type="manual",
+        created_at=datetime(2025, 1, 2, 0, 0, 0, tzinfo=pytz.UTC),
+    )
+    newer_dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="newer-deployment",
+        deployment_id="newer-deployment-id",
+        deployment_name="newer-deployment",
+        cron=None,
+        dataflow_type="manual",
+        reset_conn_dataflow=newer_reset_dataflow,
+        created_at=datetime(2025, 1, 2, 1, 0, 0, tzinfo=pytz.UTC),
+    )
+
+    DataflowOrgTask.objects.create(dataflow=older_dataflow, orgtask=older_org_task)
+    DataflowOrgTask.objects.create(dataflow=newer_dataflow, orgtask=newer_org_task)
+    OrgWarehouse.objects.create(org=request.orguser.org, name="fake-warehouse-name")
+
+    result = get_airbyte_connections_v1(request)
+
+    assert [connection["connectionId"] for connection in result] == [
+        "newer-connection-id",
+        "older-connection-id",
+    ]
+
+
 # ================================================================================
 def test_post_airbyte_connection_v1_without_workspace(orguser):
     """tests POST /v1/connections/ failure with no workspace"""
