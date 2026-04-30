@@ -1,3 +1,5 @@
+import os
+
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 
@@ -63,7 +65,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
 
 
 def test_map_airbyte_destination_spec_to_dbtcli_profile_success_ssl_params(tmpdir):
-    """Tests all the success cases"""
+    """Tests ssl params are stored in conn_info for runtime cert writing"""
     dbt_project_params = DbtProjectParams(
         org_project_dir=str(tmpdir),
         dbt_env_dir="/path/to/dbt_venv",
@@ -78,7 +80,51 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_ssl_params(tmpdi
 
     conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}
     res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
-    assert res["sslmode"] == conn_info["ssl_mode"]["mode"]
+    assert res["sslmode"] == "verify-ca"
     assert res["sslrootcert"] == f"{tmpdir}/sslrootcert.pem"
-    with open(f"{tmpdir}/sslrootcert.pem") as file:
-        assert file.read() == conn_info["ssl_mode"]["ca_certificate"]
+    assert res["sslrootcert_content"] == "ca_certificate"
+    # cert should NOT be written to disk at setup time
+    assert not os.path.exists(f"{tmpdir}/sslrootcert.pem")
+
+
+def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_mode_only(tmpdir):
+    """Tests ssl_mode with mode but no ca_certificate"""
+    dbt_project_params = DbtProjectParams(
+        org_project_dir=str(tmpdir),
+        dbt_env_dir="/path/to/dbt_venv",
+        dbt_repo_dir="/path/to/dbt_repo",
+        project_dir="/path/to/project_dir",
+        target="target",
+        dbt_binary="dbt_binary",
+        venv_binary="path/to/venv/bin",
+        clients_base_dir="/path/to/clients_base",
+        project_dir_relative="org/dbtrepo",
+    )
+
+    conn_info = {"ssl_mode": {"mode": "require"}}
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    assert res["sslmode"] == "require"
+    assert "sslrootcert" not in res
+    assert "sslrootcert_content" not in res
+
+
+def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_no_org_project_dir():
+    """Tests ssl with ca_certificate but no org_project_dir raises"""
+    dbt_project_params = DbtProjectParams(
+        org_project_dir=None,
+        dbt_env_dir="/path/to/dbt_venv",
+        dbt_repo_dir="/path/to/dbt_repo",
+        project_dir="/path/to/project_dir",
+        target="target",
+        dbt_binary="dbt_binary",
+        venv_binary="path/to/venv/bin",
+        clients_base_dir="/path/to/clients_base",
+        project_dir_relative="org/dbtrepo",
+    )
+
+    conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}
+    try:
+        map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+        assert False, "should have raised"
+    except Exception as e:
+        assert "org_project_dir is required" in str(e)
