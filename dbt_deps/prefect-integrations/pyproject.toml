@@ -6,6 +6,6 @@ requires-python = ">=3.10"
 dependencies = [
     "prefect==3.1.15",
     "prefect-airbyte @ git+https://github.com/Ishankoradia/prefect-airbyte.git@v0.90",
-    "prefect-dbt==0.6.6",
+    "prefect-dbt[bigquery,postgres]==0.6.6",
     "prefect-shell==0.3.1",
 ]
