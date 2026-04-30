@@ -513,14 +513,14 @@ class TestUpdateSnapshot:
     def test_update_summary(self, sample_snapshot, org, orguser):
         """Updating 'summary' succeeds"""
         data = SnapshotUpdate(summary="New summary")
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data, orguser)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
         assert updated.summary == "New summary"
 
     def test_update_not_found_raises(self, org, orguser):
         """Updating nonexistent snapshot raises SnapshotNotFoundError"""
         data = SnapshotUpdate(summary="test")
         with pytest.raises(SnapshotNotFoundError):
-            ReportService.update_snapshot(99999, org, data, orguser)
+            ReportService.update_snapshot(99999, data, orguser)
 
     def test_update_with_none_value_skips(self, sample_snapshot, org, orguser):
         """Updating with None value does not change the field"""
@@ -528,7 +528,7 @@ class TestUpdateSnapshot:
         sample_snapshot.save(update_fields=["summary"])
 
         data = SnapshotUpdate(summary=None)
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data, orguser)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
         assert updated.summary == "Original"
 
     def test_update_sets_last_modified_by(self, sample_snapshot, org, orguser):
@@ -536,7 +536,7 @@ class TestUpdateSnapshot:
         assert sample_snapshot.last_modified_by is None
 
         data = SnapshotUpdate(summary="Edited summary")
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data, orguser)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
 
         assert updated.last_modified_by == orguser
         assert updated.last_modified_by.user.email == orguser.user.email
@@ -544,7 +544,7 @@ class TestUpdateSnapshot:
     def test_update_tracks_different_modifier(self, sample_snapshot, org, other_orguser):
         """last_modified_by reflects the user who made the latest edit"""
         data = SnapshotUpdate(summary="Edited by other user")
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data, other_orguser)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, other_orguser)
 
         assert updated.last_modified_by == other_orguser
         assert updated.last_modified_by.user.email == other_orguser.user.email
@@ -554,7 +554,7 @@ class TestUpdateSnapshot:
         assert sample_snapshot.last_modified_by is None
 
         data = SnapshotUpdate(summary=None)
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data, orguser)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
 
         assert updated.last_modified_by is None
 
@@ -700,7 +700,7 @@ class TestGetSnapshotViewData:
         mock_factory.get_warehouse_client.return_value = MagicMock()
 
         data = SnapshotUpdate(summary="Updated summary")
-        ReportService.update_snapshot(sample_snapshot.id, org, data, orguser)
+        ReportService.update_snapshot(sample_snapshot.id, data, orguser)
 
         view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
         rm = view_data["report_metadata"]
