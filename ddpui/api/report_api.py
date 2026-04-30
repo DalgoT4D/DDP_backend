@@ -155,7 +155,7 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
     try:
-        snapshot = ReportService.update_snapshot(snapshot_id, orguser.org, payload, orguser)
+        snapshot = ReportService.update_snapshot(snapshot_id, payload, orguser)
         return api_response(
             success=True,
             data=SnapshotUpdateResponse.from_model(snapshot),

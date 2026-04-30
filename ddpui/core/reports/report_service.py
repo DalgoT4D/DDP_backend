@@ -429,7 +429,7 @@ class ReportService:
             query &= Q(created_by__user__email__icontains=created_by_email)
         return list(
             ReportSnapshot.objects.filter(query)
-            .select_related("created_by__user", "last_modified_by__user")
+            .select_related("created_by__user")
             .order_by("-created_at")
         )
 
@@ -529,14 +529,11 @@ class ReportService:
         }
 
     @staticmethod
-    def update_snapshot(
-        snapshot_id: int, org: Org, data: SnapshotUpdate, orguser: OrgUser
-    ) -> ReportSnapshot:
+    def update_snapshot(snapshot_id: int, data: SnapshotUpdate, orguser: OrgUser) -> ReportSnapshot:
         """Update mutable fields on a snapshot.
 
         Args:
             snapshot_id: The snapshot ID to update
-            org: The organization to filter by
             data: Validated update payload
             orguser: The user making the update
 
@@ -546,7 +543,7 @@ class ReportService:
         Raises:
             SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
         """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
         if data.summary is not None:
             snapshot.summary = data.summary
             snapshot.last_modified_by = orguser
