@@ -29,7 +29,11 @@ class ReportSnapshot(models.Model):
         blank=True,
         help_text="Start of reporting period (inclusive). NULL = no lower bound.",
     )
-    period_end = models.DateField(help_text="End of reporting period (inclusive)")
+    period_end = models.DateField(
+        null=True,
+        blank=True,
+        help_text="End of reporting period (inclusive). NULL for snapshots without date filtering.",
+    )
 
     # --- FROZEN DATA (2 layers) ---
 
