@@ -24,6 +24,8 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
     TASK_DBTRUN,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
     TASK_GITPULL,
     TASK_AIRBYTECLEAR,
     TASK_GITCLONE,
@@ -101,6 +103,10 @@ class PipelineService:
         dbt_orgtasks = []
         git_orgtasks = []
         dbt_cloud_orgtasks = []
+        auto_managed_dbt_orgtasks = []
+
+        # Task slugs that are auto-managed and should not come from frontend
+        auto_managed_task_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
 
         transform_tasks_payload.sort(key=lambda task: task.seq)
 
@@ -111,21 +117,27 @@ class PipelineService:
                     f"transform task with uuid {transform_task.uuid} not found"
                 )
 
-            if org_task.task.type == TaskType.DBT:
-                dbt_orgtasks.append(org_task)
-            elif org_task.task.type == TaskType.GIT:
+            if org_task.task.type == TaskType.GIT:
                 # Skip git tasks - they should not come from frontend anymore
                 logger.warning(
                     f"Ignoring git task {org_task.task.slug} from frontend - git tasks are auto-managed"
                 )
                 continue
+            elif (
+                org_task.task.type == TaskType.DBT and org_task.task.slug in auto_managed_task_slugs
+            ):
+                # Skip dbt-clean and dbt-deps - they are auto-managed
+                logger.warning(f"Ignoring {org_task.task.slug} from frontend - auto-managed")
+                continue
+            elif org_task.task.type == TaskType.DBT:
+                dbt_orgtasks.append(org_task)
             elif org_task.task.type == TaskType.DBTCLOUD:
                 dbt_cloud_orgtasks.append(org_task)
 
         logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
         logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
 
-        # Add git step automatically based on workpool type
+        # Auto-add git and dbt-clean/dbt-deps steps when there are DBT tasks
         if len(dbt_orgtasks) > 0:
             if PipelineService._is_workpool_eks(org):
                 logger.info("EKS workpool detected, adding git clone step before DBT tasks")
@@ -135,6 +147,12 @@ class PipelineService:
                 logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
                 git_pull_orgtask = PipelineService._get_or_create_git_pull_orgtask(org)
                 git_orgtasks.insert(0, git_pull_orgtask)
+
+            # Auto-add dbt clean and dbt deps before other DBT tasks
+            logger.info("Adding dbt clean and dbt deps steps before DBT tasks")
+            dbt_clean_orgtask = PipelineService._get_or_create_dbt_clean_orgtask(org)
+            dbt_deps_orgtask = PipelineService._get_or_create_dbt_deps_orgtask(org)
+            auto_managed_dbt_orgtasks = [dbt_clean_orgtask, dbt_deps_orgtask]
 
         # dbt cli profile block - only needed if we have DBT tasks
         cli_block = None
@@ -151,9 +169,10 @@ class PipelineService:
                 raise PipelineConfigurationError("dbt cloud creds block not found")
 
         # get the deployment task configs
+        all_orgtasks = git_orgtasks + auto_managed_dbt_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks
         task_configs, error = pipeline_with_orgtasks(
             org,
-            git_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks,
+            all_orgtasks,
             cli_block=cli_block,
             dbt_project_params=dbt_project_params,
             start_seq=len(existing_task_configs),
@@ -163,7 +182,7 @@ class PipelineService:
         if error:
             raise PipelineConfigurationError(error)
 
-        map_org_tasks = git_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks
+        map_org_tasks = all_orgtasks
         return task_configs, map_org_tasks
 
     @staticmethod
@@ -734,3 +753,43 @@ class PipelineService:
             logger.info(f"Created git pull OrgTask for org {org.slug}")
 
         return git_pull_orgtask
+
+    @staticmethod
+    def _get_or_create_dbt_clean_orgtask(org: Org) -> OrgTask:
+        """Get or create dbt clean OrgTask for the organization"""
+        dbt_clean_task = Task.objects.filter(slug=TASK_DBTCLEAN).first()
+        if not dbt_clean_task:
+            raise PipelineConfigurationError("dbt-clean task not found in database")
+
+        orgdbt = org.dbt
+        if not orgdbt:
+            raise PipelineConfigurationError("dbt configuration not found for organization")
+
+        dbt_clean_orgtask, created = OrgTask.objects.get_or_create(
+            org=org, task=dbt_clean_task, dbt=orgdbt, defaults={"parameters": {}}
+        )
+
+        if created:
+            logger.info(f"Created dbt clean OrgTask for org {org.slug}")
+
+        return dbt_clean_orgtask
+
+    @staticmethod
+    def _get_or_create_dbt_deps_orgtask(org: Org) -> OrgTask:
+        """Get or create dbt deps OrgTask for the organization"""
+        dbt_deps_task = Task.objects.filter(slug=TASK_DBTDEPS).first()
+        if not dbt_deps_task:
+            raise PipelineConfigurationError("dbt-deps task not found in database")
+
+        orgdbt = org.dbt
+        if not orgdbt:
+            raise PipelineConfigurationError("dbt configuration not found for organization")
+
+        dbt_deps_orgtask, created = OrgTask.objects.get_or_create(
+            org=org, task=dbt_deps_task, dbt=orgdbt, defaults={"parameters": {}}
+        )
+
+        if created:
+            logger.info(f"Created dbt deps OrgTask for org {org.slug}")
+
+        return dbt_deps_orgtask
