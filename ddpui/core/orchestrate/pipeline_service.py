@@ -158,6 +158,7 @@ class PipelineService:
             dbt_project_params=dbt_project_params,
             start_seq=len(existing_task_configs),
             dbt_cloud_creds_block=dbt_cloud_creds_block,
+            gitrepo_url=orgdbt.gitrepo_url if orgdbt else None,
         )
         if error:
             raise PipelineConfigurationError(error)
