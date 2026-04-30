@@ -4,7 +4,7 @@ This module contains all Pydantic schemas for dashboard-related API endpoints.
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from ninja import Schema
 
@@ -187,3 +187,52 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str] = None
     dashboard_type: Optional[str] = None
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Dashboard Export Schemas
+# =============================================================================
+
+
+class DashboardExportResponse(Schema):
+    """Response schema for exporting dashboard context and referenced charts"""
+
+    dashboard: DashboardResponse
+    charts: List[dict]
+
+
+class DashboardAIContextResponse(Schema):
+    """Response schema for dashboard-level AI context settings."""
+
+    dashboard_id: int
+    dashboard_title: str
+    dashboard_context_markdown: str
+    dashboard_context_updated_by: Optional[str]
+    dashboard_context_updated_at: Optional[datetime]
+    ai_context_refreshed_at: Optional[datetime]
+
+
+class UpdateDashboardAIContextSchema(Schema):
+    """Request schema for dashboard-level AI context updates."""
+
+    dashboard_context_markdown: str
+
+
+class DashboardChatBootstrapResponse(Schema):
+    """Response schema for chat bootstrap UI state."""
+
+    dashboard_id: int
+    suggested_prompts: List[str]
+
+
+class DashboardChatMessageFeedbackRequest(Schema):
+    """Request schema for locked feedback on one assistant answer."""
+
+    feedback: Literal["thumbs_up", "thumbs_down"]
+
+
+class DashboardChatMessageFeedbackResponse(Schema):
+    """Response schema for stored feedback on one assistant answer."""
+
+    message_id: int
+    feedback: Literal["thumbs_up", "thumbs_down"]

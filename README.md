@@ -139,7 +139,25 @@ PREFECT_PROXY_API_URL=
 ### Step 6: Create secrets directory
 -   Set `DEV_SECRETS_DIR` in `.env` unless you want to use Amazon's Secrets Manager
 
-### Step 7: Install DBT
+### Step 7: Install Chroma for dashboard chat
+
+Dashboard chat retrieval uses a local Chroma server in development. One simple way to run it is:
+
+```bash
+docker run --rm \
+  -p 8003:8000 \
+  -v "$PWD/.local/chroma-data:/data" \
+  chromadb/chroma:0.5.23
+```
+
+Then point the backend env to it:
+
+```bash
+AI_DASHBOARD_CHAT_CHROMA_HOST=localhost
+AI_DASHBOARD_CHAT_CHROMA_PORT=8003
+```
+
+### Step 8: Install DBT
 
 The platform now supports multiple DBT versions using `uv` and `pyproject.toml` for better dependency management.
 
@@ -178,11 +196,11 @@ $DBT_VENV/
 
 Organizations use either `venv` or `venv-1.9.8` in their `dbt_venv` database field.
 
-### Step 8: Add SIGNUPCODE and FRONTEND_URL
+### Step 9: Add SIGNUPCODE and FRONTEND_URL
 
 -   The `SIGNUPCODE` in `.env` is for signing up using the frontend. If you are running the frontend, set its URL in `FRONTEND_URL`
 
-### Step 9: Start Backend
+### Step 10: Start Backend
 
 ```
 DJANGOSECRET=
@@ -199,11 +217,11 @@ DJANGOSECRET=
 
 -   Start the server `uvicorn ddpui.asgi:application --port <PORT_TO_LISTEN_ON>`
 
-### Step 10: Create first org and user
+### Step 11: Create first org and user
 -   Run `python manage.py createorganduser <Org Name> <Email address> --role super-admin`
 -   The above command creates a user with super admin role. If we don't provide any role, the default role is of account manager.
 
-### Step11: Running celery
+### Step 12: Running celery
 
 We use two separate Celery workers for better task isolation:
 
