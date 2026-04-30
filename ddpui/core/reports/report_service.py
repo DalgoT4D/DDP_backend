@@ -299,9 +299,9 @@ class ReportService:
     def create_snapshot(
         title: str,
         dashboard_id: int,
-        date_column: Dict[str, str],
-        period_end: date,
         orguser: OrgUser,
+        date_column: Optional[Dict[str, str]] = None,
+        period_end: Optional[date] = None,
         period_start: Optional[date] = None,
     ) -> ReportSnapshot:
         """Create a snapshot from a dashboard.
@@ -314,10 +314,11 @@ class ReportService:
         Args:
             title: User-provided title for the snapshot
             dashboard_id: ID of the dashboard to snapshot
-            date_column: Dictionary with {schema_name, table_name, column_name}
-                        identifying the datetime column for period filtering
-            period_end: End of reporting period (inclusive)
             orguser: The user creating the snapshot
+            date_column: Dictionary with {schema_name, table_name, column_name}
+                        identifying the datetime column for period filtering.
+                        None for dashboards without datetime columns.
+            period_end: End of reporting period (inclusive). None when no date filtering.
             period_start: Start of reporting period (inclusive). None means no lower bound.
 
         Returns:
@@ -328,7 +329,7 @@ class ReportService:
                                     dashboard doesn't exist, or date_column is
                                     not a valid datetime column in the warehouse
         """
-        if period_start is not None and period_start > period_end:
+        if period_start is not None and period_end is not None and period_start > period_end:
             raise SnapshotValidationError("period_start must be before period_end")
 
         # Fetch dashboard with filters prefetched (used only for freezing)
@@ -339,45 +340,45 @@ class ReportService:
         except Dashboard.DoesNotExist:
             raise SnapshotValidationError(f"Dashboard {dashboard_id} not found")
 
-        # Validate date_column: first check dashboard filters, then fall back
-        # to verifying the column exists in the warehouse as a datetime type
-        datetime_filters = dashboard.filters.filter(filter_type="datetime")
-        match_on_filter = datetime_filters.filter(
-            schema_name=date_column["schema_name"],
-            table_name=date_column["table_name"],
-            column_name=date_column["column_name"],
-        ).exists()
+        # Validate date_column if provided
+        if date_column:
+            datetime_filters = dashboard.filters.filter(filter_type="datetime")
+            match_on_filter = datetime_filters.filter(
+                schema_name=date_column["schema_name"],
+                table_name=date_column["table_name"],
+                column_name=date_column["column_name"],
+            ).exists()
 
-        if not match_on_filter:
-            # Fallback: verify the column exists in the warehouse as datetime
-            org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-            if not org_warehouse:
-                raise SnapshotValidationError("Warehouse not configured")
+            if not match_on_filter:
+                # Fallback: verify the column exists in the warehouse as datetime
+                org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+                if not org_warehouse:
+                    raise SnapshotValidationError("Warehouse not configured")
 
-            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            all_columns = warehouse_client.get_table_columns(
-                date_column["schema_name"],
-                date_column["table_name"],
-            )
-
-            # Find the specific column
-            target_col = None
-            for col in all_columns:
-                if col["name"] == date_column["column_name"]:
-                    target_col = col
-                    break
-
-            if not target_col:
-                raise SnapshotValidationError(
-                    f"Column '{date_column['column_name']}' not found in "
-                    f"{date_column['schema_name']}.{date_column['table_name']}"
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                all_columns = warehouse_client.get_table_columns(
+                    date_column["schema_name"],
+                    date_column["table_name"],
                 )
 
-            if target_col.get("translated_type") != TranslateColDataType.DATETIME:
-                raise SnapshotValidationError(
-                    f"Column '{date_column['column_name']}' is not a datetime column "
-                    f"(type: {target_col['data_type']})"
-                )
+                # Find the specific column
+                target_col = None
+                for col in all_columns:
+                    if col["name"] == date_column["column_name"]:
+                        target_col = col
+                        break
+
+                if not target_col:
+                    raise SnapshotValidationError(
+                        f"Column '{date_column['column_name']}' not found in "
+                        f"{date_column['schema_name']}.{date_column['table_name']}"
+                    )
+
+                if target_col.get("translated_type") != TranslateColDataType.DATETIME:
+                    raise SnapshotValidationError(
+                        f"Column '{date_column['column_name']}' is not a datetime column "
+                        f"(type: {target_col['data_type']})"
+                    )
 
         frozen_dashboard = FrozenDashboardConfig(
             **ReportService._freeze_dashboard(dashboard)
