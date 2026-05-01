@@ -510,26 +510,53 @@ class TestFreezeChartConfigs:
 class TestUpdateSnapshot:
     """Tests for ReportService.update_snapshot"""
 
-    def test_update_summary(self, sample_snapshot, org):
+    def test_update_summary(self, sample_snapshot, org, orguser):
         """Updating 'summary' succeeds"""
         data = SnapshotUpdate(summary="New summary")
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
         assert updated.summary == "New summary"
 
-    def test_update_not_found_raises(self, org):
+    def test_update_not_found_raises(self, org, orguser):
         """Updating nonexistent snapshot raises SnapshotNotFoundError"""
         data = SnapshotUpdate(summary="test")
         with pytest.raises(SnapshotNotFoundError):
-            ReportService.update_snapshot(99999, org, data)
+            ReportService.update_snapshot(99999, data, orguser)
 
-    def test_update_with_none_value_skips(self, sample_snapshot, org):
+    def test_update_with_none_value_skips(self, sample_snapshot, org, orguser):
         """Updating with None value does not change the field"""
         sample_snapshot.summary = "Original"
         sample_snapshot.save(update_fields=["summary"])
 
         data = SnapshotUpdate(summary=None)
-        updated = ReportService.update_snapshot(sample_snapshot.id, org, data)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
         assert updated.summary == "Original"
+
+    def test_update_sets_last_modified_by(self, sample_snapshot, org, orguser):
+        """Updating summary sets last_modified_by to the editing user"""
+        assert sample_snapshot.last_modified_by is None
+
+        data = SnapshotUpdate(summary="Edited summary")
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
+
+        assert updated.last_modified_by == orguser
+        assert updated.last_modified_by.user.email == orguser.user.email
+
+    def test_update_tracks_different_modifier(self, sample_snapshot, org, other_orguser):
+        """last_modified_by reflects the user who made the latest edit"""
+        data = SnapshotUpdate(summary="Edited by other user")
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, other_orguser)
+
+        assert updated.last_modified_by == other_orguser
+        assert updated.last_modified_by.user.email == other_orguser.user.email
+
+    def test_update_none_summary_does_not_set_last_modified_by(self, sample_snapshot, org, orguser):
+        """When summary is None (no change), last_modified_by is not updated"""
+        assert sample_snapshot.last_modified_by is None
+
+        data = SnapshotUpdate(summary=None)
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
+
+        assert updated.last_modified_by is None
 
 
 # ================================================================================
@@ -652,6 +679,32 @@ class TestGetSnapshotViewData:
         assert len(filters) == 2  # start and end date filters
         col_names = [f["column"] for f in filters]
         assert "updated_at" in col_names
+
+    def test_view_data_includes_last_modified_by_null(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org
+    ):
+        """report_metadata includes last_modified_by as None for unedited snapshots"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
+        rm = view_data["report_metadata"]
+        assert "last_modified_by" in rm
+        assert rm["last_modified_by"] is None
+
+    def test_view_data_includes_last_modified_by_email(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot, org, orguser
+    ):
+        """report_metadata includes last_modified_by email after an update"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_factory.get_warehouse_client.return_value = MagicMock()
+
+        data = SnapshotUpdate(summary="Updated summary")
+        ReportService.update_snapshot(sample_snapshot.id, data, orguser)
+
+        view_data = ReportService.get_snapshot_view_data(sample_snapshot.id, org)
+        rm = view_data["report_metadata"]
+        assert rm["last_modified_by"] == orguser.user.email
 
     def test_not_found(self, mock_org_warehouse_model, mock_factory, org):
         """Viewing nonexistent snapshot raises SnapshotNotFoundError"""

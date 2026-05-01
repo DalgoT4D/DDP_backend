@@ -77,6 +77,14 @@ class ReportSnapshot(models.Model):
         null=True,
         help_text="User who created this snapshot",
     )
+    last_modified_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modified_snapshots",
+        help_text="User who last modified the summary",
+    )
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
