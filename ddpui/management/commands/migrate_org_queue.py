@@ -268,12 +268,13 @@ class Command(BaseCommand):
 
         for dataflow in dataflows:
             try:
+                # Update queue/workpool for all dataflows first
+                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
+
                 # For scheduled pipelines, update pipeline which will handle git steps automatically
+                # This runs after queue update so the schedule toggle picks up the new queue
                 if queue_type == "scheduled_pipeline_queue":
                     self.update_scheduled_pipeline(dataflow)
-
-                # Update queue/workpool for all dataflows
-                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
                 self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
                 updated_count += 1
             except Exception as e:
@@ -362,6 +363,17 @@ class Command(BaseCommand):
 
             # Update pipeline using PipelineService (handles git steps based on workpool)
             PipelineService.update_pipeline(dataflow.org, dataflow.deployment_id, update_payload)
+
+            # Toggle schedule inactive → active to clear pre-scheduled runs.
+            # Prefect schedules runs 1-2 days in advance; those won't pick up
+            # the updated deployment params unless the schedule is reset.
+            if dataflow.cron and pipeline_details.get("isScheduleActive", False):
+                PipelineService.set_pipeline_schedule(
+                    dataflow.org, dataflow.deployment_id, "inactive"
+                )
+                PipelineService.set_pipeline_schedule(
+                    dataflow.org, dataflow.deployment_id, "active"
+                )
 
             logger.info(f"Updated scheduled pipeline {dataflow.deployment_name}")
 
