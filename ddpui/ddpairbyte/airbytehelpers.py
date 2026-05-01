@@ -367,6 +367,7 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
         )
         .filter(Q(reset_conn_dataflow_id__isnull=False) | Q(clear_conn_dataflow_id__isnull=False))
         .select_related("clear_conn_dataflow")
+        .order_by("-created_at", "-id")
     )
 
     dataflow_ids = sync_dataflows.values_list("id", flat=True)
