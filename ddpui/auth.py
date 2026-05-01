@@ -31,18 +31,15 @@ def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
         @wraps(api_endpoint)
         def wrapper(*args, **kwargs):
-            # request will have set of permissions that are allowed
-            # check if permission_slug lies in this set
-            # throw error if nots
             request = args[0]
-            try:
-                if not request.permissions or len(request.permissions) == 0:
-                    raise HttpError(403, "not allowed")
 
-                if not set(request.permissions).issuperset(set(permission_slugs)):
-                    raise HttpError(403, "not allowed")
-            except:
-                raise HttpError(404, UNAUTHORIZED)
+            permissions = getattr(request, "permissions", None)
+
+            if permissions is None or len(permissions) == 0:
+                raise HttpError(403, "not allowed")
+
+            if not set(permissions).issuperset(set(permission_slugs)):
+                raise HttpError(403, "not allowed")
 
             return api_endpoint(*args, **kwargs)
 
