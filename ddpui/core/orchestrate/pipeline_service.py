@@ -446,12 +446,16 @@ class PipelineService:
             .order_by("seq")
         ]
 
+        # Exclude auto-managed tasks (dbt-clean, dbt-deps) from the response
+        # since they are automatically added during pipeline creation/updation
+        auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
         transform_tasks = [
             {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
             for dataflow_orgtask in DataflowOrgTask.objects.filter(
                 dataflow=org_data_flow,
                 orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD],
             )
+            .exclude(orgtask__task__slug__in=auto_managed_slugs)
             .all()
             .order_by("seq")
         ]
