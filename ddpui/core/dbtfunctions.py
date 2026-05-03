@@ -41,10 +41,15 @@ def map_airbyte_destination_spec_to_dbtcli_profile(
         if mode:
             conn_info["sslmode"] = mode
 
-        if ca_certificate and dbt_project_params.org_project_dir:
-            file_path = os.path.join(dbt_project_params.org_project_dir, "sslrootcert.pem")
-            with open(file_path, "w", encoding="utf-8") as file:
-                file.write(ca_certificate)
-            conn_info["sslrootcert"] = file_path
+        if ca_certificate:
+            if not dbt_project_params.org_project_dir:
+                raise Exception(
+                    "org_project_dir is required to save the ca_certificate for dbt ssl connections"
+                )
+
+            conn_info["sslrootcert_content"] = ca_certificate
+            conn_info["sslrootcert"] = os.path.join(
+                dbt_project_params.org_project_dir, "sslrootcert.pem"
+            )
 
     return conn_info
