@@ -8,19 +8,33 @@ from ninja import Router
 from ddpui import settings
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
+    AirbyteCheckConnectionResponse,
+    AirbyteCancelJobResponse,
     AirbyteConnectionCreate,
     AirbyteConnectionCreateResponse,
-    AirbyteGetConnectionsResponse,
     AirbyteConnectionSchemaUpdateSchedule,
+    AirbyteConnectionUpdate,
     AirbyteDestinationCreate,
+    AirbyteDestinationDefinition,
+    AirbyteDestinationIdResponse,
+    AirbyteDestinationRead,
     AirbyteDestinationUpdate,
+    AirbyteDestinationUpdateCheckConnection,
+    AirbyteGetConnectionsResponse,
+    AirbyteJobStatusResponse,
+    AirbyteJobStatusWithoutLogsResponse,
+    AirbyteSchemaChangeResponse,
     AirbyteSourceCreate,
+    AirbyteSourceDefinition,
+    AirbyteSourceIdResponse,
+    AirbyteSourceRead,
     AirbyteSourceUpdate,
+    AirbyteSourceUpdateCheckConnection,
+    AirbyteSyncHistoryResponse,
+    AirbyteSuccessResponse,
+    AirbyteTaskResponse,
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
-    AirbyteSourceUpdateCheckConnection,
-    AirbyteDestinationUpdateCheckConnection,
-    AirbyteConnectionUpdate,
 )
 from ddpui.auth import has_permission
 
@@ -44,7 +58,7 @@ airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
 
-@airbyte_router.get("/source_definitions")
+@airbyte_router.get("/source_definitions", response=List[AirbyteSourceDefinition])
 @has_permission(["can_view_sources"])
 def get_airbyte_source_definitions(request):
     """Fetch airbyte source definitions in the user organization workspace"""
@@ -66,7 +80,7 @@ def get_airbyte_source_definitions(request):
     return res["sourceDefinitions"]
 
 
-@airbyte_router.get("/source_definitions/{sourcedef_id}/specifications")
+@airbyte_router.get("/source_definitions/{sourcedef_id}/specifications", response=dict)
 @has_permission(["can_view_sources"])
 def get_airbyte_source_definition_specifications(request, sourcedef_id):
     """
@@ -84,7 +98,7 @@ def get_airbyte_source_definition_specifications(request, sourcedef_id):
     return res["connectionSpecification"]
 
 
-@airbyte_router.post("/sources/")
+@airbyte_router.post("/sources/", response=AirbyteSourceIdResponse)
 @has_permission(["can_create_source"])
 def post_airbyte_source(request, payload: AirbyteSourceCreate):
     """Create airbyte source in the user organization workspace"""
@@ -117,7 +131,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyte_router.put("/sources/{source_id}")
+@airbyte_router.put("/sources/{source_id}", response=AirbyteSourceIdResponse)
 @has_permission(["can_edit_source"])
 def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     """Update airbyte source in the user organization workspace"""
@@ -148,7 +162,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     return {"sourceId": source["sourceId"]}
 
 
-@airbyte_router.post("/sources/check_connection/")
+@airbyte_router.post("/sources/check_connection/", response=AirbyteCheckConnectionResponse)
 @has_permission(["can_create_source"])
 def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     """Test the source connection in the user organization workspace"""
@@ -178,7 +192,9 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
     }
 
 
-@airbyte_router.post("/sources/{source_id}/check_connection_for_update/")
+@airbyte_router.post(
+    "/sources/{source_id}/check_connection_for_update/", response=AirbyteCheckConnectionResponse
+)
 @has_permission(["can_edit_source"])
 def post_airbyte_check_source_for_update(
     request, source_id: str, payload: AirbyteSourceUpdateCheckConnection
@@ -209,7 +225,7 @@ def post_airbyte_check_source_for_update(
     }
 
 
-@airbyte_router.get("/sources")
+@airbyte_router.get("/sources", response=List[AirbyteSourceRead])
 @has_permission(["can_view_sources"])
 def get_airbyte_sources(request):
     """Fetch all airbyte sources in the user organization workspace"""
@@ -222,7 +238,7 @@ def get_airbyte_sources(request):
     return res
 
 
-@airbyte_router.get("/sources/{source_id}")
+@airbyte_router.get("/sources/{source_id}", response=AirbyteSourceRead)
 @has_permission(["can_view_source"])
 def get_airbyte_source(request, source_id):
     """Fetch a single airbyte source in the user organization workspace"""
@@ -235,7 +251,7 @@ def get_airbyte_source(request, source_id):
     return res
 
 
-@airbyte_router.get("/sources/{source_id}/schema_catalog")
+@airbyte_router.get("/sources/{source_id}/schema_catalog", response=dict)
 @has_permission(["can_view_source"])
 def get_airbyte_source_schema_catalog(request, source_id):
     """Fetch schema catalog for a source in the user organization workspace"""
@@ -248,7 +264,7 @@ def get_airbyte_source_schema_catalog(request, source_id):
     return res
 
 
-@airbyte_router.get("/destination_definitions")
+@airbyte_router.get("/destination_definitions", response=List[AirbyteDestinationDefinition])
 @has_permission(["can_view_warehouses"])
 def get_airbyte_destination_definitions(request):
     """Fetch destination definitions in the user organization workspace"""
@@ -266,7 +282,7 @@ def get_airbyte_destination_definitions(request):
     return res
 
 
-@airbyte_router.get("/destination_definitions/{destinationdef_id}/specifications")
+@airbyte_router.get("/destination_definitions/{destinationdef_id}/specifications", response=dict)
 @has_permission(["can_view_warehouse"])
 def get_airbyte_destination_definition_specifications(request, destinationdef_id):
     """
@@ -284,7 +300,7 @@ def get_airbyte_destination_definition_specifications(request, destinationdef_id
     return res
 
 
-@airbyte_router.post("/destinations/")
+@airbyte_router.post("/destinations/", response=AirbyteDestinationIdResponse)
 @has_permission(["can_create_warehouse"])
 def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     """Create an airbyte destination in the user organization workspace"""
@@ -302,7 +318,7 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyte_router.post("/destinations/check_connection/")
+@airbyte_router.post("/destinations/check_connection/", response=AirbyteCheckConnectionResponse)
 @has_permission(["can_create_warehouse"])
 def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     """Test connection to destination in the user organization workspace"""
@@ -319,7 +335,10 @@ def post_airbyte_check_destination(request, payload: AirbyteDestinationCreate):
     }
 
 
-@airbyte_router.post("/destinations/{destination_id}/check_connection_for_update/")
+@airbyte_router.post(
+    "/destinations/{destination_id}/check_connection_for_update/",
+    response=AirbyteCheckConnectionResponse,
+)
 @has_permission(["can_edit_warehouse"])
 def post_airbyte_check_destination_for_update(
     request, destination_id: str, payload: AirbyteDestinationUpdateCheckConnection
@@ -336,7 +355,7 @@ def post_airbyte_check_destination_for_update(
     }
 
 
-@airbyte_router.get("/destinations")
+@airbyte_router.get("/destinations", response=List[AirbyteDestinationRead])
 @has_permission(["can_view_warehouses"])
 def get_airbyte_destinations(request):
     """Fetch all airbyte destinations in the user organization workspace"""
@@ -349,7 +368,7 @@ def get_airbyte_destinations(request):
     return res
 
 
-@airbyte_router.get("/destinations/{destination_id}")
+@airbyte_router.get("/destinations/{destination_id}", response=AirbyteDestinationRead)
 @has_permission(["can_view_warehouse"])
 def get_airbyte_destination(request, destination_id):
     """Fetch an airbyte destination in the user organization workspace"""
@@ -362,7 +381,7 @@ def get_airbyte_destination(request, destination_id):
     return res
 
 
-@airbyte_router.get("/destinations/{destination_id}/specifications")
+@airbyte_router.get("/destinations/{destination_id}/specifications", response=dict)
 @has_permission(["can_view_warehouse"])
 def get_airbyte_destination_specifications_for_destination(request, destination_id):
     """
@@ -377,7 +396,7 @@ def get_airbyte_destination_specifications_for_destination(request, destination_
     return res
 
 
-@airbyte_router.get("/jobs/{job_id}")
+@airbyte_router.get("/jobs/{job_id}", response=AirbyteJobStatusResponse)
 @has_permission(["can_view_connection"])
 def get_job_status(request, job_id):
     """get the job info from airbyte"""
@@ -389,7 +408,7 @@ def get_job_status(request, job_id):
     }
 
 
-@airbyte_router.get("/jobs/{job_id}/status")
+@airbyte_router.get("/jobs/{job_id}/status", response=AirbyteJobStatusWithoutLogsResponse)
 @has_permission(["can_view_connection"])
 def get_job_status_without_logs(request, job_id):
     """get the job info from airbyte"""
@@ -481,7 +500,7 @@ def get_airbyte_connection_v1(request, connection_id):
     return res
 
 
-@airbyte_router.put("/v1/connections/{connection_id}/update")
+@airbyte_router.put("/v1/connections/{connection_id}/update", response=dict)
 @has_permission(["can_edit_connection"])
 def put_airbyte_connection_v1(
     request, connection_id, payload: AirbyteConnectionUpdate
@@ -499,7 +518,7 @@ def put_airbyte_connection_v1(
     return res
 
 
-@airbyte_router.delete("/v1/connections/{connection_id}")
+@airbyte_router.delete("/v1/connections/{connection_id}", response=AirbyteSuccessResponse)
 @has_permission(["can_delete_connection"])
 def delete_airbyte_connection_v1(request, connection_id):
     """Update an airbyte connection in the user organization workspace"""
@@ -517,7 +536,7 @@ def delete_airbyte_connection_v1(request, connection_id):
     return {"success": 1}
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/jobs")
+@airbyte_router.get("/v1/connections/{connection_id}/jobs", response=dict)
 @has_permission(["can_view_connection"])
 def get_latest_job_for_connection(request, connection_id):
     """get the job info from airbyte for a connection"""
@@ -532,7 +551,9 @@ def get_latest_job_for_connection(request, connection_id):
     return job_info
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/sync/history")
+@airbyte_router.get(
+    "/v1/connections/{connection_id}/sync/history", response=AirbyteSyncHistoryResponse
+)
 @has_permission(["can_view_connection"])
 def get_sync_history_for_connection(request, connection_id, limit: int = 10, offset: int = 0):
     """get the job info from airbyte for a connection"""
@@ -549,7 +570,7 @@ def get_sync_history_for_connection(request, connection_id, limit: int = 10, off
     return job_info
 
 
-@airbyte_router.put("/v1/destinations/{destination_id}/")
+@airbyte_router.put("/v1/destinations/{destination_id}/", response=AirbyteDestinationIdResponse)
 @has_permission(["can_edit_warehouse"])
 def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDestinationUpdate):
     """Update an airbyte destination in the user organization workspace"""
@@ -566,7 +587,7 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
     return {"destinationId": destination["destinationId"]}
 
 
-@airbyte_router.delete("/sources/{source_id}")
+@airbyte_router.delete("/sources/{source_id}", response=AirbyteSuccessResponse)
 @has_permission(["can_delete_source"])
 def delete_airbyte_source_v1(request, source_id):
     """Delete a single airbyte source in the user organization workspace"""
@@ -583,7 +604,7 @@ def delete_airbyte_source_v1(request, source_id):
     return {"success": 1}
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/catalog")
+@airbyte_router.get("/v1/connections/{connection_id}/catalog", response=AirbyteTaskResponse)
 @has_permission(["can_view_connection"])
 def get_connection_catalog_v1(request, connection_id):
     """Fetch a connection in the user organization workspace"""
@@ -609,7 +630,9 @@ def get_connection_catalog_v1(request, connection_id):
     return {"task_id": task_key}
 
 
-@airbyte_router.post("/v1/connections/{connection_id}/schema_update/schedule")
+@airbyte_router.post(
+    "/v1/connections/{connection_id}/schema_update/schedule", response=AirbyteSuccessResponse
+)
 @has_permission(["can_edit_connection"])
 def schedule_update_connection_schema(
     request, connection_id, payload: AirbyteConnectionSchemaUpdateSchedule
@@ -630,7 +653,7 @@ def schedule_update_connection_schema(
     return {"success": 1}
 
 
-@airbyte_router.get("/v1/connection/schema_change")
+@airbyte_router.get("/v1/connection/schema_change", response=List[AirbyteSchemaChangeResponse])
 @has_permission(["can_view_connection"])
 def get_schema_changes_for_connection(request):
     """Get schema changes for an org"""
@@ -645,7 +668,7 @@ def get_schema_changes_for_connection(request):
     return res
 
 
-@airbyte_router.get("/v1/connections/{connection_id}/logsummary")
+@airbyte_router.get("/v1/connections/{connection_id}/logsummary", response=AirbyteTaskResponse)
 @has_permission(["can_view_pipeline"])
 def get_flow_runs_logsummary_v1(
     request, connection_id: str, job_id: int, attempt_number: int, regenerate: int = 0
@@ -680,7 +703,7 @@ def get_flow_runs_logsummary_v1(
         raise HttpError(400, "failed to retrieve logs") from error
 
 
-@airbyte_router.get("/v1/logs")
+@airbyte_router.get("/v1/logs", response=List[str])
 @has_permission(["can_view_connection"])
 def get_job_logs(
     request,
@@ -697,7 +720,9 @@ def get_job_logs(
     return log_lines
 
 
-@airbyte_router.post("/v1/connections/{connection_id}/cancel/{job_type}/")
+@airbyte_router.post(
+    "/v1/connections/{connection_id}/cancel/{job_type}/", response=AirbyteCancelJobResponse
+)
 @has_permission(["can_edit_connection"])
 def post_cancel_connection_job(
     request,
