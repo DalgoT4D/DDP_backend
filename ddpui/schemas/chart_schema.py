@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from ninja import Schema
 
@@ -89,6 +89,16 @@ class ChartDataPayload(Schema):
     geographic_column: Optional[str] = None
     value_column: Optional[str] = None
     selected_geojson_id: Optional[int] = None
+
+    # Pivot table fields
+    row_dimensions: Optional[List[str]] = None
+    column_dimensions: Optional[List[str]] = None  # multiple column dimensions (pivot axes)
+    column_time_grains: Optional[
+        Dict[str, str]
+    ] = None  # {column_name: grain} e.g. {"enrollment_date": "month"}
+    show_row_subtotals: bool = False
+    show_column_subtotals: bool = False
+    show_grand_total: bool = True
 
     # Customizations
     customizations: Optional[dict] = None

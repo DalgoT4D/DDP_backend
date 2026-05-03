@@ -202,6 +202,15 @@ def build_chart_data_payload(
 
     payload.dimensions = normalize_dimensions(payload)
 
+    # Pivot table fields live in extra_config when saved, but need to be top-level on the payload
+    if chart_config.chart_type == "pivot_table":
+        payload.row_dimensions = ec.get("row_dimensions", [])
+        payload.column_dimensions = ec.get("column_dimensions", [])
+        payload.column_time_grains = ec.get("column_time_grains", {})
+        payload.show_row_subtotals = ec.get("show_row_subtotals", True)
+        payload.show_column_subtotals = ec.get("show_column_subtotals", False)
+        payload.show_grand_total = ec.get("show_grand_total", True)
+
     return payload
 
 
@@ -342,6 +351,100 @@ def build_multi_metric_query(
     return query_builder
 
 
+def build_pivot_table_query(
+    payload: ChartDataPayload,
+    query_builder: AggQueryBuilder,
+    org_warehouse=None,
+) -> AggQueryBuilder:
+    """Build ROLLUP query for pivot table with GROUPING() markers.
+
+    Supports multiple column dimensions. Each column dimension becomes
+    pivot_col_0, pivot_col_1, ... in the SELECT with corresponding
+    GROUPING markers _grp_pivot_col_0, _grp_pivot_col_1, ...
+
+    ROLLUP(pivot_col_0, pivot_col_1) produces:
+    - (val0, val1) — leaf cells
+    - (val0, NULL/_grp=1) — column subtotals for val0
+    - (NULL/_grp=1, NULL/_grp=1) — overall column total
+    """
+    if not payload.row_dimensions:
+        raise ValueError("At least one row dimension is required for pivot tables")
+    if not payload.metrics or len(payload.metrics) == 0:
+        raise ValueError("At least one metric is required for pivot tables")
+
+    warehouse_type = org_warehouse.wtype.lower() if org_warehouse else None
+    needs_row_rollup = payload.show_row_subtotals or payload.show_grand_total
+    col_dims = payload.column_dimensions or []
+    time_grains = payload.column_time_grains or {}
+
+    # Add row dimension columns to SELECT
+    for dim_col in payload.row_dimensions:
+        dim_expr = column(dim_col).label(dim_col)
+        query_builder.add_column(dim_expr)
+
+    # Add column dimension columns to SELECT (with time grain if applicable)
+    col_select_exprs = []
+    for idx, col_dim in enumerate(col_dims):
+        col_label = f"pivot_col_{idx}"
+        col_raw = column(col_dim)
+        grain = time_grains.get(col_dim)
+        if grain and warehouse_type:
+            col_expr = apply_time_grain(col_raw, grain, warehouse_type).label(col_label)
+        else:
+            col_expr = col_raw.label(col_label)
+        query_builder.add_column(col_expr)
+        col_select_exprs.append(col_expr)
+
+    # Add metric aggregations to SELECT
+    for metric in payload.metrics:
+        if metric.aggregation.lower() == "count" and metric.column is None:
+            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+        else:
+            if not metric.column:
+                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+        query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
+
+    # Add GROUPING() markers for each row dimension
+    for dim_col in payload.row_dimensions:
+        query_builder.add_grouping_column(dim_col, f"_grp_{dim_col}")
+
+    # Add GROUPING() markers for each column dimension
+    for idx, col_dim in enumerate(col_dims):
+        grain = time_grains.get(col_dim)
+        if grain and warehouse_type:
+            grp_expr = apply_time_grain(column(col_dim), grain, warehouse_type)
+        else:
+            grp_expr = column(col_dim)
+        query_builder.add_grouping_column(grp_expr, f"_grp_pivot_col_{idx}")
+
+    # GROUP BY row dimensions — use ROLLUP when subtotals/grand total are requested
+    if needs_row_rollup:
+        query_builder.group_cols_by_rollup(*payload.row_dimensions)
+    else:
+        query_builder.group_cols_by(*payload.row_dimensions)
+
+    # GROUP BY column dimensions — ROLLUP so column totals are identifiable
+    if col_dims:
+        col_group_exprs = []
+        for idx, col_dim in enumerate(col_dims):
+            grain = time_grains.get(col_dim)
+            if grain and warehouse_type:
+                col_group_exprs.append(apply_time_grain(column(col_dim), grain, warehouse_type))
+            else:
+                col_group_exprs.append(col_dim)
+        query_builder.group_cols_by_rollup(*col_group_exprs)
+
+    # ORDER BY row dimensions then column dimensions for consistent output
+    order_cols = [(dim, "asc") for dim in payload.row_dimensions]
+    for idx in range(len(col_dims)):
+        order_cols.append((f"pivot_col_{idx}", "asc"))
+    query_builder.order_cols_by(order_cols)
+
+    return query_builder
+
+
 def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
@@ -373,6 +476,18 @@ def build_chart_query(
         # No pagination, use original table directly
         query_builder = AggQueryBuilder()
         query_builder.fetch_from(payload.table_name, payload.schema_name)
+
+        # Pivot table charts have their own query builder with ROLLUP support
+        if payload.chart_type == "pivot_table":
+            query_builder = build_pivot_table_query(payload, query_builder, org_warehouse)
+
+            # Apply filters
+            if payload.dashboard_filters:
+                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+            if payload.extra_config and payload.extra_config.get("filters"):
+                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+
+            return query_builder
 
         # Now build the rest of the query logic on top of the (possibly paginated) data source
         # Table charts can work with just dimensions (no metrics) - non-aggregated query
