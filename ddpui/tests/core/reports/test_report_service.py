@@ -558,6 +558,23 @@ class TestUpdateSnapshot:
 
         assert updated.last_modified_by is None
 
+    def test_creator_writes_then_other_user_edits(
+        self, sample_snapshot, org, orguser, other_orguser
+    ):
+        """Creator writes the initial summary, then another user edits it"""
+        # Creator writes the first summary
+        data = SnapshotUpdate(summary="Initial summary by creator")
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, orguser)
+        assert updated.summary == "Initial summary by creator"
+        assert updated.last_modified_by == orguser
+
+        # A different user edits the summary
+        data = SnapshotUpdate(summary="Revised by another user")
+        updated = ReportService.update_snapshot(sample_snapshot.id, data, other_orguser)
+        assert updated.summary == "Revised by another user"
+        assert updated.last_modified_by == other_orguser
+        assert updated.created_by == orguser  # creator unchanged
+
 
 # ================================================================================
 # Test delete_snapshot
