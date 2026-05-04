@@ -109,22 +109,10 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_mode_only(tmpdir):
 
 
 def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_no_org_project_dir():
-    """Tests ssl with ca_certificate but no org_project_dir raises"""
-    dbt_project_params = DbtProjectParams(
-        org_project_dir=None,
-        dbt_env_dir="/path/to/dbt_venv",
-        dbt_repo_dir="/path/to/dbt_repo",
-        project_dir="/path/to/project_dir",
-        target="target",
-        dbt_binary="dbt_binary",
-        venv_binary="path/to/venv/bin",
-        clients_base_dir="/path/to/clients_base",
-        project_dir_relative="org/dbtrepo",
-    )
-
+    """Tests ssl with ca_certificate but no dbt_project_params raises"""
     conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}
     try:
-        map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+        map_airbyte_destination_spec_to_dbtcli_profile(conn_info, None)
         assert False, "should have raised"
     except Exception as e:
         assert "org_project_dir is required" in str(e)

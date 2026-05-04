@@ -42,7 +42,7 @@ def map_airbyte_destination_spec_to_dbtcli_profile(
             conn_info["sslmode"] = mode
 
         if ca_certificate:
-            if not dbt_project_params.org_project_dir:
+            if not dbt_project_params or not dbt_project_params.org_project_dir:
                 raise Exception(
                     "org_project_dir is required to save the ca_certificate for dbt ssl connections"
                 )
