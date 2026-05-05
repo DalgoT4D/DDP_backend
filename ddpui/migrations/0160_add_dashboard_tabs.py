@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0152_reportsnapshot"),
+        ("ddpui", "0156_add_comment_snapshot_index"),
     ]
 
     operations = [
