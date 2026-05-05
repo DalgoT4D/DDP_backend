@@ -25,10 +25,11 @@ class Migration(migrations.Migration):
                 ("connection_id", models.CharField(max_length=36)),
                 ("attempt", models.IntegerField(default=0)),
                 ("status", models.TextField()),
-                (
+               (
                     "sync_type",
                     models.CharField(
-                        choices=[("manual", "manual"), ("orchestrate", "orchestrate")]
+                        max_length=20,
+                        choices=[("manual", "manual"), ("orchestrate", "orchestrate")],
                     ),
                 ),
                 ("sync_time", models.DateTimeField()),

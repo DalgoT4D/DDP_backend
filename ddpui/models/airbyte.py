@@ -8,11 +8,17 @@ class SyncStats(models.Model):
     """single table to track connection sync stats"""
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    connection_id = models.CharField(max_length=36)
+    connection_id = models.CharField(max_length=50)
     job_id = models.IntegerField(null=True)
     attempt = models.IntegerField(default=0)
     status = models.TextField()
-    sync_type = models.CharField(choices=[("manual", "manual"), ("orchestrate", "orchestrate")])
+
+    # ✅ FIXED LINE (added max_length)
+    sync_type = models.CharField(
+        max_length=20,
+        choices=[("manual", "manual"), ("orchestrate", "orchestrate")]
+    )
+
     sync_time = models.DateTimeField()
     sync_duration_s = models.BigIntegerField(default=0)
     sync_records = models.BigIntegerField(default=0)
@@ -66,7 +72,7 @@ class AirbyteJob(models.Model):
     started_at = models.DateTimeField(null=True)  # because the api spec says this will be optional
     ended_at = models.DateTimeField(
         null=True
-    )  # when the job ended; can be null if we pull or sync an ongonig job
+    )  # when the job ended; can be null if we pull or sync an ongoing job
     created_at = models.DateTimeField()  # when the job was created in airbyte
     updated_at = models.DateTimeField(auto_now=True)  # when the django record was last updated
 
