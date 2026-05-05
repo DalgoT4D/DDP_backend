@@ -24,13 +24,12 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write("\n=== DRY RUN MODE: No changes will be made ===\n")
 
-        # Get all dashboards
-        all_dashboards = Dashboard.objects.all()
-
         migrated_count = 0
         skipped_count = 0
 
-        for dashboard in all_dashboards:
+        for dashboard in Dashboard.objects.only(
+            "id", "title", "tabs", "layout_config", "components", "org"
+        ).iterator(chunk_size=1000):
             # Skip if already has tabs
             if dashboard.tabs and len(dashboard.tabs) > 0:
                 skipped_count += 1
@@ -69,7 +68,7 @@ class Command(BaseCommand):
                 dashboard.tabs = [default_tab]
                 dashboard.layout_config = []
                 dashboard.components = {}
-                dashboard.save()
+                dashboard.save(update_fields=["tabs", "layout_config", "components"])
 
                 self.stdout.write(
                     f"Migrated - "
