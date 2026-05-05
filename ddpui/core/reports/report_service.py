@@ -806,7 +806,7 @@ class ReportService:
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
         if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("Only report creators can view sharing settings")
+            raise SnapshotPermissionError("Only Report creators can share with others")
 
         response_data = {
             "is_public": snapshot.is_public,
