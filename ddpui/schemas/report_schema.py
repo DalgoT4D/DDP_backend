@@ -29,6 +29,7 @@ class FrozenDashboardConfig(Schema):
     target_screen_size: Optional[str] = None
     layout_config: Optional[Any] = None
     components: Optional[Dict[str, Any]] = None
+    tabs: Optional[List[Dict[str, Any]]] = None
     filter_layout: Optional[str] = None
     filters: List[Dict[str, Any]] = []
 
