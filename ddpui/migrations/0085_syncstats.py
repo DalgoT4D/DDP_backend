@@ -25,11 +25,14 @@ class Migration(migrations.Migration):
                 ("connection_id", models.CharField(max_length=36)),
                 ("attempt", models.IntegerField(default=0)),
                 ("status", models.TextField()),
-               (
+                (
                     "sync_type",
                     models.CharField(
                         max_length=20,
-                        choices=[("manual", "manual"), ("orchestrate", "orchestrate")],
+                        choices=[
+                            ("manual", "manual"),
+                            ("orchestrate", "orchestrate"),
+                        ],
                     ),
                 ),
                 ("sync_time", models.DateTimeField()),
@@ -38,8 +41,12 @@ class Migration(migrations.Migration):
                 ("sync_data_volume_b", models.IntegerField(default=0)),
                 (
                     "org",
-                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="ddpui.org",
+                    ),
                 ),
             ],
         ),
     ]
+    
