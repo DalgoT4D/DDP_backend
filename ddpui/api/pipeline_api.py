@@ -233,6 +233,12 @@ def get_flow_runs_logs(
 ):  # pylint: disable=unused-argument
     """return the logs from a flow-run"""
     try:
+        if limit == 0:
+            all_logs = prefect_service.recurse_flow_run_logs(
+                flow_run_id, task_run_id or None, offset=offset
+            )
+            return {"logs": {"offset": offset, "logs": all_logs}}
+
         result = prefect_service.get_flow_run_logs(flow_run_id, task_run_id, limit, offset)
     except Exception as error:
         logger.exception(error)
