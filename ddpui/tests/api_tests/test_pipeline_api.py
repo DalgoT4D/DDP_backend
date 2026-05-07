@@ -51,7 +51,7 @@ from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock, TaskType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.utils.constants import TASK_DBTRUN, TASK_DBTCLEAN, TASK_DBTDEPS
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -387,11 +387,17 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
             connection_id=conn.id,
         )
 
-    transform_tasks = OrgTask.objects.filter(
-        org=request.orguser.org,
-        generated_by="system",
-        task__type__in=[TaskType.DBT],  # Only DBT tasks - git tasks are now auto-managed
-    ).all()
+    # Only include non-auto-managed DBT tasks in payload (dbt-clean and dbt-deps are auto-managed)
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_tasks = (
+        OrgTask.objects.filter(
+            org=request.orguser.org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .all()
+    )
 
     payload = PrefectDataFlowCreateSchema4(
         name="test-dataflow",
@@ -424,11 +430,26 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
         assert dataflow_task is not None
         assert dataflow_task.seq == i
 
-    seq = len(connections) + 1  # +1 for automatically added git task
+    # +3 for automatically added git task, dbt-clean, and dbt-deps
+    seq = len(connections) + 3
     for i, org_task in enumerate(transform_tasks):
         dataflow_task = DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask=org_task).first()
         assert dataflow_task is not None
         assert dataflow_task.seq == seq + i
+
+    # verify auto-managed tasks (git, dbt-clean, dbt-deps) were added
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTCLEAN).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTDEPS).count()
+        == 1
+    )
 
     # cleanup
     OrgTask.objects.filter(
@@ -786,11 +807,17 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
 
     seq = len(connections)
 
-    transform_tasks = OrgTask.objects.filter(
-        org=request.orguser.org,
-        generated_by="system",
-        task__type__in=[TaskType.DBT, TaskType.GIT],
-    ).all()
+    # Only include non-auto-managed tasks in payload
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_tasks = (
+        OrgTask.objects.filter(
+            org=request.orguser.org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .all()
+    )
     for i, transform_task in enumerate(transform_tasks):
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=transform_task, seq=seq + i)
 
@@ -814,6 +841,15 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
     )
     assert (
         DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    # verify dbt-clean and dbt-deps are auto-added
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTCLEAN).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTDEPS).count()
         == 1
     )
     assert (
@@ -853,11 +889,17 @@ def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
             connection_id=conn.id,
         )
 
-    transform_tasks = OrgTask.objects.filter(
-        org=request.orguser.org,
-        generated_by="system",
-        task__type__in=[TaskType.DBT, TaskType.GIT],
-    ).all()
+    # Only include non-auto-managed tasks in payload
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_tasks = (
+        OrgTask.objects.filter(
+            org=request.orguser.org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .all()
+    )
     for i, transform_task in enumerate(transform_tasks):
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=transform_task, seq=i)
 
@@ -884,6 +926,15 @@ def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
 
     assert (
         DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    # verify dbt-clean and dbt-deps are auto-added
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTCLEAN).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTDEPS).count()
         == 1
     )
     assert (

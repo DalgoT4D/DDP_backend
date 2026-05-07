@@ -29,7 +29,11 @@ class ReportSnapshot(models.Model):
         blank=True,
         help_text="Start of reporting period (inclusive). NULL = no lower bound.",
     )
-    period_end = models.DateField(help_text="End of reporting period (inclusive)")
+    period_end = models.DateField(
+        null=True,
+        blank=True,
+        help_text="End of reporting period (inclusive). NULL for snapshots without date filtering.",
+    )
 
     # --- FROZEN DATA (2 layers) ---
 
@@ -72,6 +76,14 @@ class ReportSnapshot(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         help_text="User who created this snapshot",
+    )
+    last_modified_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modified_snapshots",
+        help_text="User who last modified the summary",
     )
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
