@@ -125,4 +125,3 @@ class AirbyteJob(models.Model):
                 return max(failed_attempts, key=lambda x: x["id"])["id"]
 
         return None
-    
