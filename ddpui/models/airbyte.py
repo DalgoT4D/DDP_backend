@@ -8,12 +8,11 @@ class SyncStats(models.Model):
     """single table to track connection sync stats"""
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    connection_id = models.CharField(max_length=50)
+    connection_id = models.CharField(max_length=36)
     job_id = models.IntegerField(null=True)
     attempt = models.IntegerField(default=0)
     status = models.TextField()
 
-    # ✅ FIXED LINE (added max_length)
     sync_type = models.CharField(
         max_length=20,
         choices=[("manual", "manual"), ("orchestrate", "orchestrate")]
@@ -38,8 +37,6 @@ class SyncStats(models.Model):
             "sync_records": self.sync_records,
             "sync_data_volume_b": self.sync_data_volume_b,
         }
-
-
 class AirbyteJob(models.Model):
     """model to track airbyte jobs"""
 
