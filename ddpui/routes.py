@@ -4,34 +4,34 @@ from ninja.responses import Response
 from pydantic import ValidationError as PydanticValidationError
 
 from ddpui import auth
+from ddpui.api.admin_portal.organizations_api import admin_org_router
 from ddpui.api.airbyte_api import airbyte_router
+from ddpui.api.charts_api import charts_router
 from ddpui.api.dashboard_api import dashboard_router
+from ddpui.api.dashboard_native_api import dashboard_native_router
 from ddpui.api.data_api import data_router
 from ddpui.api.dbt_api import dbt_router
+from ddpui.api.filter_api import filter_router
 from ddpui.api.notifications_api import notification_router
+from ddpui.api.org_preferences_api import orgpreference_router
 from ddpui.api.orgtask_api import orgtask_router
 from ddpui.api.pipeline_api import pipeline_router
+from ddpui.api.public_api import public_router
+from ddpui.api.report_api import report_router
 from ddpui.api.superset_api import superset_router
 from ddpui.api.task_api import task_router
 from ddpui.api.transform_api import transform_router
 from ddpui.api.user_org_api import user_org_router
 from ddpui.api.user_preferences_api import userpreference_router
-from ddpui.api.org_preferences_api import orgpreference_router
 from ddpui.api.warehouse_api import warehouse_router
 from ddpui.api.webhook_api import webhook_router
-from ddpui.api.charts_api import charts_router
-from ddpui.api.dashboard_native_api import dashboard_native_router
-from ddpui.api.filter_api import filter_router
-from ddpui.api.public_api import public_router
-from ddpui.api.report_api import report_router
-from ddpui.api.admin_portal.organizations_api import admin_org_router
 
 src_api = NinjaAPI(
     urls_namespace="api",
     title="Dalgo backend apis",
     description="Open source ELT orchestrator",
     docs_url="/api/docs",
-    auth=auth.CustomJwtAuthMiddleware()   
+    auth=auth.CustomJwtAuthMiddleware(),
 )
 
 
@@ -108,6 +108,7 @@ src_api.add_router("/api/dashboards/", dashboard_native_router)
 src_api.add_router("/api/filters/", filter_router)
 src_api.add_router("/api/reports/", report_router)
 src_api.add_router("/api/admin/", admin_org_router)
+
 # Public API without authentication
 public_api = NinjaAPI(
     urls_namespace="public-api",
@@ -115,4 +116,5 @@ public_api = NinjaAPI(
     description="Public endpoints for shared dashboards - no authentication required",
     docs_url="/api/v1/public/docs",
 )
+
 public_api.add_router("/api/v1/public/", public_router)
