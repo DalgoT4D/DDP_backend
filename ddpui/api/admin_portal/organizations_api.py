@@ -44,4 +44,3 @@ def get_single_org(request, org_id: int):
         "success": True,
         "data": org,
     }
-    
