@@ -3,16 +3,20 @@ Management command to migrate a specific organization to a new queue.
 Updates relevant dataflows for that org based on queue type and then updates the org's queue config.
 """
 
-import os
 from typing import List, Set
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
-from ddpui.models.org import Org, QueueConfigUpdateSchema, QueueDetailsSchema
-from ddpui.models.org import OrgDataFlowv1
-from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType
+from ddpui.models.org import (
+    Org,
+    OrgDataFlowv1,
+    QueueConfigUpdateSchema,
+    QueueDetailsSchema,
+)
+from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, Task
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
-from ddpui.utils.constants import TASK_GENERATE_EDR
+from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
+from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITPULL, TASK_GITCLONE
 from ddpui.utils.unified_logger import get_logger
+from ddpui.core.orchestrate.pipeline_service import PipelineService
 
 logger = get_logger()
 
@@ -58,6 +62,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Show what would be changed without making actual changes",
         )
+        parser.add_argument(
+            "--is-workpool-eks",
+            action="store_true",
+            help="Mark the workpool as EKS workpool (default: False)",
+        )
 
     def handle(self, *args, **options):
         org_slug: str = options["org_slug"]
@@ -65,6 +74,7 @@ class Command(BaseCommand):
         new_queue: str = options["new_queue"]
         new_workpool: str = options.get("new_workpool")
         dry_run: bool = options["dry_run"]
+        is_workpool_eks: bool = options["is_workpool_eks"]
 
         # Get the organization
         try:
@@ -84,7 +94,14 @@ class Command(BaseCommand):
 
         # Show what will be done
         self.show_migration_plan(
-            org, queue_type, new_queue, final_workpool, dataflows, dry_run, new_workpool is not None
+            org,
+            queue_type,
+            new_queue,
+            final_workpool,
+            dataflows,
+            dry_run,
+            new_workpool is not None,
+            is_workpool_eks,
         )
 
         if dry_run:
@@ -105,7 +122,9 @@ class Command(BaseCommand):
             return
 
         # Perform the migration
-        self.perform_migration(org, queue_type, new_queue, final_workpool, dataflows)
+        self.perform_migration(
+            org, queue_type, new_queue, final_workpool, dataflows, is_workpool_eks
+        )
 
     def get_dataflows_for_queue_type(self, org: Org, queue_type: str) -> List[OrgDataFlowv1]:
         """Get relevant dataflows based on queue type"""
@@ -166,6 +185,7 @@ class Command(BaseCommand):
         dataflows: List[OrgDataFlowv1],
         dry_run: bool,
         workpool_changing: bool,
+        is_workpool_eks: bool,
     ):
         """Show what the migration will do"""
         action = "Would update" if dry_run else "Will update"
@@ -179,6 +199,8 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"Workpool: {final_workpool} (unchanged)")
 
+        self.stdout.write(f"Is EKS workpool: {is_workpool_eks}")
+
         self.stdout.write(f"Relevant dataflows to update: {len(dataflows)}")
 
         # Show current vs new configuration
@@ -186,10 +208,13 @@ class Command(BaseCommand):
         current_details = getattr(current_config, queue_type)
 
         self.stdout.write("\nConfiguration change:")
+        current_eks_status = getattr(current_details, "is_workpool_eks", False)
         self.stdout.write(
-            f"  Current: queue='{current_details.name}', workpool='{current_details.workpool}'"
+            f"  Current: queue='{current_details.name}', workpool='{current_details.workpool}', is_eks={current_eks_status}"
         )
-        self.stdout.write(f"  New:     queue='{new_queue}', workpool='{final_workpool}'\n")
+        self.stdout.write(
+            f"  New:     queue='{new_queue}', workpool='{final_workpool}', is_eks={is_workpool_eks}\n"
+        )
 
         if dataflows:
             for dataflow in dataflows:
@@ -208,44 +233,19 @@ class Command(BaseCommand):
         new_queue: str,
         final_workpool: str,
         dataflows: List[OrgDataFlowv1],
+        is_workpool_eks: bool,
     ):
         """Perform the actual migration with nested queue config"""
         self.stdout.write(
             f"\nMigrating {org.slug} {queue_type} to queue '{new_queue}' and workpool '{final_workpool}'..."
         )
 
-        # Update dataflows in Prefect
-        dataflow_errors = []
-        updated_count = 0
-
-        for dataflow in dataflows:
-            try:
-                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
-                self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
-                updated_count += 1
-            except Exception as e:
-                error_msg = f"Failed to update dataflow {dataflow.deployment_name}: {str(e)}"
-                dataflow_errors.append(error_msg)
-                self.stdout.write(self.style.ERROR(f"  ✗ {error_msg}"))
-                logger.error(error_msg)
-
-        # Only update database configuration if ALL dataflows updated successfully
-        if dataflow_errors:
-            self.stdout.write(f"\nMigration failed:")
-            self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
-            self.stdout.write(
-                self.style.ERROR(f"✗ {len(dataflow_errors)} dataflow update(s) failed")
-            )
-            self.stdout.write(
-                self.style.ERROR("✗ Database config NOT updated due to dataflow failures")
-            )
-            self.stdout.write("Check logs for details.")
-            raise CommandError("Migration failed due to dataflow update errors")
-
-        # All dataflows updated successfully, now update database config
+        # First update database config so PipelineService can detect EKS properly
         try:
             # Create new queue details object
-            new_queue_details = QueueDetailsSchema(name=new_queue, workpool=final_workpool)
+            new_queue_details = QueueDetailsSchema(
+                name=new_queue, workpool=final_workpool, is_workpool_eks=is_workpool_eks
+            )
 
             # Create update schema with the new nested structure
             update_data = QueueConfigUpdateSchema()
@@ -262,10 +262,42 @@ class Command(BaseCommand):
             logger.error(error_msg)
             raise CommandError(error_msg)
 
+        # Now update dataflows in Prefect (PipelineService can now detect EKS properly)
+        dataflow_errors = []
+        updated_count = 0
+
+        for dataflow in dataflows:
+            try:
+                # Update queue/workpool for all dataflows first
+                self.update_dataflow_queue(dataflow, new_queue, final_workpool)
+
+                # For scheduled pipelines, update pipeline which will handle git steps automatically
+                # This runs after queue update so the schedule toggle picks up the new queue
+                if queue_type == "scheduled_pipeline_queue":
+                    self.update_scheduled_pipeline(dataflow)
+                self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
+                updated_count += 1
+            except Exception as e:
+                error_msg = f"Failed to update dataflow {dataflow.deployment_name}: {str(e)}"
+                dataflow_errors.append(error_msg)
+                self.stdout.write(self.style.ERROR(f"  ✗ {error_msg}"))
+                logger.error(error_msg)
+
+        # Check if there were any dataflow update errors
+        if dataflow_errors:
+            self.stdout.write(f"\nMigration partially failed:")
+            self.stdout.write(f"✓ Database config updated")
+            self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
+            self.stdout.write(
+                self.style.ERROR(f"✗ {len(dataflow_errors)} dataflow update(s) failed")
+            )
+            self.stdout.write("Check logs for details.")
+            raise CommandError("Migration failed due to dataflow update errors")
+
         # Summary - all successful
         self.stdout.write(f"\nMigration completed successfully:")
-        self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
         self.stdout.write(f"✓ Database config updated")
+        self.stdout.write(f"✓ Dataflows updated: {updated_count}/{len(dataflows)}")
 
     def update_dataflow_queue(self, dataflow: OrgDataFlowv1, new_queue: str, work_pool_name: str):
         """Update a Prefect dataflow to use a new queue"""
@@ -299,3 +331,51 @@ class Command(BaseCommand):
 
         except Exception as e:
             raise Exception(f"Prefect API error: {str(e)}")
+
+    def update_scheduled_pipeline(self, dataflow: OrgDataFlowv1):
+        """Update scheduled pipeline - PipelineService will handle git steps automatically"""
+
+        try:
+            # Get current pipeline details
+            pipeline_details = PipelineService.get_pipeline_details(
+                dataflow.org, dataflow.deployment_id
+            )
+
+            transform_tasks = pipeline_details.get("transformTasks", [])
+
+            if not transform_tasks:
+                # No transform tasks, nothing to update
+                self.stdout.write(f"  → No transform tasks found")
+                return
+
+            # Convert UUIDs to strings for Pydantic validation
+            transform_tasks_str = [
+                {"uuid": str(task["uuid"]), "seq": task["seq"]} for task in transform_tasks
+            ]
+
+            # Create update payload - PipelineService will handle git step logic automatically
+            update_payload = PrefectDataFlowUpdateSchema3(
+                name=pipeline_details["name"],
+                cron=pipeline_details["cron"],
+                connections=pipeline_details["connections"],
+                transformTasks=transform_tasks_str,
+            )
+
+            # Update pipeline using PipelineService (handles git steps based on workpool)
+            PipelineService.update_pipeline(dataflow.org, dataflow.deployment_id, update_payload)
+
+            # Toggle schedule inactive → active to clear pre-scheduled runs.
+            # Prefect schedules runs 1-2 days in advance; those won't pick up
+            # the updated deployment params unless the schedule is reset.
+            if dataflow.cron and pipeline_details.get("isScheduleActive", False):
+                PipelineService.set_pipeline_schedule(
+                    dataflow.org, dataflow.deployment_id, "inactive"
+                )
+                PipelineService.set_pipeline_schedule(
+                    dataflow.org, dataflow.deployment_id, "active"
+                )
+
+            logger.info(f"Updated scheduled pipeline {dataflow.deployment_name}")
+
+        except Exception as e:
+            raise Exception(f"Pipeline update error: {str(e)}")

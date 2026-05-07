@@ -12,7 +12,6 @@ from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgDataFlowv1,
-    TransformType,
     OrgDbt,
 )
 from ddpui.utils.custom_logger import CustomLogger
@@ -45,13 +44,7 @@ def create_default_transform_tasks(
     if org.dbt is None:
         raise ValueError("dbt is not configured for this org")
 
-    # if transform_type is "ui" then we don't set up git-pull
-    task_types = (
-        [TaskType.DBT, TaskType.GIT]
-        if org.dbt.transform_type == TransformType.GIT
-        else [TaskType.DBT]
-    )
-    for task in Task.objects.filter(type__in=task_types, is_system=True).all():
+    for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT], is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
 
         if task.slug == TASK_DBTRUN:

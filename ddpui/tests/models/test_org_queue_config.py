@@ -227,10 +227,26 @@ class TestGetDefaultQueueConfig:
         config = get_default_queue_config()
 
         expected = {
-            "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
-            "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "test_workpool"},
-            "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "test_workpool"},
-            "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "test_workpool"},
+            "scheduled_pipeline_queue": {
+                "name": DDP_WORK_QUEUE,
+                "workpool": "test_workpool",
+                "is_workpool_eks": False,
+            },
+            "connection_sync_queue": {
+                "name": DDP_WORK_QUEUE,
+                "workpool": "test_workpool",
+                "is_workpool_eks": False,
+            },
+            "transform_task_queue": {
+                "name": MANUL_DBT_WORK_QUEUE,
+                "workpool": "test_workpool",
+                "is_workpool_eks": False,
+            },
+            "edr_queue": {
+                "name": EDR_WORK_QUEUE,
+                "workpool": "test_workpool",
+                "is_workpool_eks": False,
+            },
         }
 
         assert config == expected
@@ -241,10 +257,26 @@ class TestGetDefaultQueueConfig:
             config = get_default_queue_config()
 
             expected = {
-                "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
-                "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
-                "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "default"},
-                "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "default"},
+                "scheduled_pipeline_queue": {
+                    "name": DDP_WORK_QUEUE,
+                    "workpool": "default",
+                    "is_workpool_eks": False,
+                },
+                "connection_sync_queue": {
+                    "name": DDP_WORK_QUEUE,
+                    "workpool": "default",
+                    "is_workpool_eks": False,
+                },
+                "transform_task_queue": {
+                    "name": MANUL_DBT_WORK_QUEUE,
+                    "workpool": "default",
+                    "is_workpool_eks": False,
+                },
+                "edr_queue": {
+                    "name": EDR_WORK_QUEUE,
+                    "workpool": "default",
+                    "is_workpool_eks": False,
+                },
             }
 
             assert config == expected
@@ -255,10 +287,22 @@ class TestGetDefaultQueueConfig:
         config = get_default_queue_config()
 
         expected = {
-            "scheduled_pipeline_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
-            "connection_sync_queue": {"name": DDP_WORK_QUEUE, "workpool": "default"},
-            "transform_task_queue": {"name": MANUL_DBT_WORK_QUEUE, "workpool": "default"},
-            "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "default"},
+            "scheduled_pipeline_queue": {
+                "name": DDP_WORK_QUEUE,
+                "workpool": "default",
+                "is_workpool_eks": False,
+            },
+            "connection_sync_queue": {
+                "name": DDP_WORK_QUEUE,
+                "workpool": "default",
+                "is_workpool_eks": False,
+            },
+            "transform_task_queue": {
+                "name": MANUL_DBT_WORK_QUEUE,
+                "workpool": "default",
+                "is_workpool_eks": False,
+            },
+            "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "default", "is_workpool_eks": False},
         }
 
         assert config == expected

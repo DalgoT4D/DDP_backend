@@ -210,7 +210,7 @@ def test_lock_canvas_acquire(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -231,7 +231,7 @@ def test_lock_canvas_locked_by_another(seed_db, orguser, nonadminorguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -259,7 +259,7 @@ def test_lock_canvas_locked_by_self(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -287,7 +287,7 @@ def test_unlock_canvas_unlocked(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -307,7 +307,7 @@ def test_unlock_canvas_locked_by_different_user(seed_db, orguser, nonadminorguse
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -335,7 +335,7 @@ def test_unlock_canvas_success(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -481,7 +481,7 @@ def test_delete_dbt_project_blocked_by_canvas_nodes(seed_db, orguser: OrgUser, t
         dbt_venv="some/venv/bin/dbt",
         target_type="postgres",
         default_schema="default",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = dbt
     orguser.org.save()
@@ -538,7 +538,7 @@ def test_delete_dbt_project_force_delete_bypasses_canvas_check(seed_db, orguser:
         dbt_venv="some/venv/bin/dbt",
         target_type="postgres",
         default_schema="default",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = dbt
     orguser.org.save()
@@ -582,7 +582,7 @@ def test_delete_dbt_project_allowed_when_no_canvas_nodes(seed_db, orguser: OrgUs
         dbt_venv="some/venv/bin/dbt",
         target_type="postgres",
         default_schema="default",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = dbt
     orguser.org.save()
@@ -664,7 +664,7 @@ def test_sync_sources_success(orguser: OrgUser, tmp_path):
         dbt_venv=tmp_path,
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -730,7 +730,7 @@ def test_get_input_sources_and_models_v2_empty_response(seed_db, orguser: OrgUse
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -757,7 +757,7 @@ def test_get_input_sources_and_models_v2_with_models_and_sources(seed_db, orguse
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -847,7 +847,7 @@ def test_get_input_sources_and_models_v2_with_schema_filter(seed_db, orguser: Or
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -945,7 +945,7 @@ def test_delete_orgdbtmodel_canvas_lock_validation_fails(seed_db, orguser: OrgUs
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -978,7 +978,7 @@ def test_delete_orgdbtmodel_model_not_found(seed_db, orguser: OrgUser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1011,7 +1011,7 @@ def test_delete_orgdbtmodel_source_success(seed_db, orguser: OrgUser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1067,7 +1067,7 @@ def test_delete_orgdbtmodel_with_canvas_dependencies(seed_db, orguser: OrgUser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1128,7 +1128,7 @@ def test_delete_orgdbtmodel_success(seed_db, orguser: OrgUser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1208,7 +1208,7 @@ def test_get_dbt_project_DAG_v2_empty_canvas(seed_db, orguser: OrgUser, tmp_path
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1239,7 +1239,7 @@ def test_get_dbt_project_DAG_v2_with_canvas_graph(seed_db, orguser: OrgUser, tmp
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1317,7 +1317,7 @@ def test_get_dbt_project_DAG_v2_project_directory_not_exist(seed_db, orguser: Or
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1385,7 +1385,7 @@ def test_post_create_src_model_node_model_not_found(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1417,7 +1417,7 @@ def test_post_create_src_model_node_source_type_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1493,7 +1493,7 @@ def test_post_create_src_model_node_model_type_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1555,7 +1555,7 @@ def test_post_create_src_model_node_existing_node_returns_existing(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1612,7 +1612,7 @@ def test_post_create_src_model_node_source_definition_error(mock_ensure_source, 
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1660,7 +1660,7 @@ def test_post_create_src_model_node_update_cols_error(mock_update_cols, seed_db,
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1712,7 +1712,7 @@ def test_post_create_src_model_node_source_no_existing_node_calls_all_functions(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1770,7 +1770,7 @@ def test_post_create_src_model_node_model_no_existing_node_calls_required_functi
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1859,7 +1859,7 @@ def test_post_add_operation_node_input_node_not_found(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1898,7 +1898,7 @@ def test_post_add_operation_node_single_input_operation_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -1988,7 +1988,7 @@ def test_post_add_operation_node_multi_input_operation_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2099,7 +2099,7 @@ def test_post_add_operation_node_invalid_operation_config(mock_validate_config, 
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2155,7 +2155,7 @@ def test_post_add_operation_node_get_output_cols_error(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2212,7 +2212,7 @@ def test_post_add_operation_node_validate_inputs_error(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2271,7 +2271,7 @@ def test_post_add_operation_node_verify_function_calls(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2379,7 +2379,7 @@ def test_put_operation_node_operation_node_not_found(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2408,7 +2408,7 @@ def test_put_operation_node_non_operation_node(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2450,7 +2450,7 @@ def test_put_operation_node_single_input_operation_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2528,7 +2528,7 @@ def test_put_operation_node_multi_input_operation_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2662,7 +2662,7 @@ def test_put_operation_node_invalid_operation_config(mock_validate_config, seed_
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2717,7 +2717,7 @@ def test_put_operation_node_get_output_cols_error(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2775,7 +2775,7 @@ def test_put_operation_node_validate_inputs_error(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2835,7 +2835,7 @@ def test_put_operation_node_verify_function_calls(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -2913,7 +2913,7 @@ def test_put_operation_node_edge_cleanup_for_multi_input_operation(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3061,7 +3061,7 @@ def test_post_terminate_operation_node_operation_node_not_found(seed_db, orguser
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3093,7 +3093,7 @@ def test_post_terminate_operation_node_non_operation_node(seed_db, orguser):
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3142,7 +3142,7 @@ def test_post_terminate_operation_node_create_new_model_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3221,7 +3221,7 @@ def test_post_terminate_operation_node_update_existing_model_success(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3312,7 +3312,7 @@ def test_post_terminate_operation_node_create_dbt_model_error(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3370,7 +3370,7 @@ def test_post_terminate_operation_node_with_rel_dir_to_models(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3438,7 +3438,7 @@ def test_post_terminate_operation_node_with_root_directory_edge_case(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3506,7 +3506,7 @@ def test_post_terminate_operation_node_traverse_graph_error(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()
@@ -3562,7 +3562,7 @@ def test_post_terminate_operation_node_verify_transaction_atomicity(
         dbt_venv="test_venv",
         target_type="postgres",
         default_schema="default_schema",
-        transform_type=TransformType.UI,
+        transform_type=TransformType.GIT,
     )
     orguser.org.dbt = orgdbt
     orguser.org.save()

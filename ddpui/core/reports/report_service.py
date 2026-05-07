@@ -299,9 +299,9 @@ class ReportService:
     def create_snapshot(
         title: str,
         dashboard_id: int,
-        date_column: Dict[str, str],
-        period_end: date,
         orguser: OrgUser,
+        date_column: Optional[Dict[str, str]] = None,
+        period_end: Optional[date] = None,
         period_start: Optional[date] = None,
     ) -> ReportSnapshot:
         """Create a snapshot from a dashboard.
@@ -314,10 +314,11 @@ class ReportService:
         Args:
             title: User-provided title for the snapshot
             dashboard_id: ID of the dashboard to snapshot
-            date_column: Dictionary with {schema_name, table_name, column_name}
-                        identifying the datetime column for period filtering
-            period_end: End of reporting period (inclusive)
             orguser: The user creating the snapshot
+            date_column: Dictionary with {schema_name, table_name, column_name}
+                        identifying the datetime column for period filtering.
+                        None for dashboards without datetime columns.
+            period_end: End of reporting period (inclusive). None when no date filtering.
             period_start: Start of reporting period (inclusive). None means no lower bound.
 
         Returns:
@@ -328,7 +329,7 @@ class ReportService:
                                     dashboard doesn't exist, or date_column is
                                     not a valid datetime column in the warehouse
         """
-        if period_start is not None and period_start > period_end:
+        if period_start is not None and period_end is not None and period_start > period_end:
             raise SnapshotValidationError("period_start must be before period_end")
 
         # Fetch dashboard with filters prefetched (used only for freezing)
@@ -339,45 +340,45 @@ class ReportService:
         except Dashboard.DoesNotExist:
             raise SnapshotValidationError(f"Dashboard {dashboard_id} not found")
 
-        # Validate date_column: first check dashboard filters, then fall back
-        # to verifying the column exists in the warehouse as a datetime type
-        datetime_filters = dashboard.filters.filter(filter_type="datetime")
-        match_on_filter = datetime_filters.filter(
-            schema_name=date_column["schema_name"],
-            table_name=date_column["table_name"],
-            column_name=date_column["column_name"],
-        ).exists()
+        # Validate date_column if provided
+        if date_column:
+            datetime_filters = dashboard.filters.filter(filter_type="datetime")
+            match_on_filter = datetime_filters.filter(
+                schema_name=date_column["schema_name"],
+                table_name=date_column["table_name"],
+                column_name=date_column["column_name"],
+            ).exists()
 
-        if not match_on_filter:
-            # Fallback: verify the column exists in the warehouse as datetime
-            org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
-            if not org_warehouse:
-                raise SnapshotValidationError("Warehouse not configured")
+            if not match_on_filter:
+                # Fallback: verify the column exists in the warehouse as datetime
+                org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+                if not org_warehouse:
+                    raise SnapshotValidationError("Warehouse not configured")
 
-            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            all_columns = warehouse_client.get_table_columns(
-                date_column["schema_name"],
-                date_column["table_name"],
-            )
-
-            # Find the specific column
-            target_col = None
-            for col in all_columns:
-                if col["name"] == date_column["column_name"]:
-                    target_col = col
-                    break
-
-            if not target_col:
-                raise SnapshotValidationError(
-                    f"Column '{date_column['column_name']}' not found in "
-                    f"{date_column['schema_name']}.{date_column['table_name']}"
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                all_columns = warehouse_client.get_table_columns(
+                    date_column["schema_name"],
+                    date_column["table_name"],
                 )
 
-            if target_col.get("translated_type") != TranslateColDataType.DATETIME:
-                raise SnapshotValidationError(
-                    f"Column '{date_column['column_name']}' is not a datetime column "
-                    f"(type: {target_col['data_type']})"
-                )
+                # Find the specific column
+                target_col = None
+                for col in all_columns:
+                    if col["name"] == date_column["column_name"]:
+                        target_col = col
+                        break
+
+                if not target_col:
+                    raise SnapshotValidationError(
+                        f"Column '{date_column['column_name']}' not found in "
+                        f"{date_column['schema_name']}.{date_column['table_name']}"
+                    )
+
+                if target_col.get("translated_type") != TranslateColDataType.DATETIME:
+                    raise SnapshotValidationError(
+                        f"Column '{date_column['column_name']}' is not a datetime column "
+                        f"(type: {target_col['data_type']})"
+                    )
 
         frozen_dashboard = FrozenDashboardConfig(
             **ReportService._freeze_dashboard(dashboard)
@@ -447,9 +448,9 @@ class ReportService:
             SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
         """
         try:
-            return ReportSnapshot.objects.select_related("created_by__user").get(
-                id=snapshot_id, org=org
-            )
+            return ReportSnapshot.objects.select_related(
+                "created_by__user", "last_modified_by__user"
+            ).get(id=snapshot_id, org=org)
         except ReportSnapshot.DoesNotExist:
             raise SnapshotNotFoundError(snapshot_id)
 
@@ -514,6 +515,9 @@ class ReportService:
             "created_at": snapshot.created_at,
             "updated_at": snapshot.updated_at,
             "created_by": snapshot.created_by.user.email if snapshot.created_by else None,
+            "last_modified_by": (
+                snapshot.last_modified_by.user.email if snapshot.last_modified_by else None
+            ),
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
             "dashboard_id": snapshot.frozen_dashboard.get("dashboard_id"),
         }
@@ -525,13 +529,13 @@ class ReportService:
         }
 
     @staticmethod
-    def update_snapshot(snapshot_id: int, org: Org, data: SnapshotUpdate) -> ReportSnapshot:
+    def update_snapshot(snapshot_id: int, data: SnapshotUpdate, orguser: OrgUser) -> ReportSnapshot:
         """Update mutable fields on a snapshot.
 
         Args:
             snapshot_id: The snapshot ID to update
-            org: The organization to filter by
             data: Validated update payload
+            orguser: The user making the update
 
         Returns:
             ReportSnapshot: The updated snapshot instance
@@ -539,10 +543,11 @@ class ReportService:
         Raises:
             SnapshotNotFoundError: If snapshot doesn't exist or doesn't belong to org
         """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
         if data.summary is not None:
             snapshot.summary = data.summary
-            snapshot.save(update_fields=["summary"])
+            snapshot.last_modified_by = orguser
+            snapshot.save(update_fields=["summary", "last_modified_by", "updated_at"])
         return snapshot
 
     @staticmethod
@@ -801,7 +806,7 @@ class ReportService:
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
         if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("Only report creators can view sharing settings")
+            raise SnapshotPermissionError("Only Report creators can share with others")
 
         response_data = {
             "is_public": snapshot.is_public,

@@ -77,9 +77,9 @@ def create_snapshot(request, payload: SnapshotCreate):
         s = ReportService.create_snapshot(
             title=payload.title,
             dashboard_id=payload.dashboard_id,
-            date_column=payload.date_column.model_dump(),
-            period_end=payload.period_end,
             orguser=orguser,
+            date_column=payload.date_column.model_dump() if payload.date_column else {},
+            period_end=payload.period_end,
             period_start=payload.period_start,
         )
         return api_response(
@@ -155,7 +155,7 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
     try:
-        snapshot = ReportService.update_snapshot(snapshot_id, orguser.org, payload)
+        snapshot = ReportService.update_snapshot(snapshot_id, payload, orguser)
         return api_response(
             success=True,
             data=SnapshotUpdateResponse.from_model(snapshot),

@@ -37,6 +37,7 @@ from ddpui.ddpprefect import (
 from ddpui.utils.constants import (
     PREFECT_AIRBYTE_TASKS_TIMEOUT,
     TASK_GITPULL,
+    TASK_GITCLONE,
     TASK_AIRBYTESYNC,
     TASK_GENERATE_EDR,
     TASK_AIRBYTERESET,
@@ -166,6 +167,42 @@ def setup_git_pull_shell_task_config(
     )
 
 
+def setup_git_clone_shell_task_config(
+    org_task: OrgTask,
+    working_dir: str,
+    project_dir: str,
+    gitpull_secret_block: OrgPrefectBlockv1,
+    seq: int = 1,
+    gitrepo_url: str = "",
+):
+    """
+    constructs the prefect payload for a git clone
+    project_dir is the relative path to clone the repo in
+    working_dir is the absolute path
+
+    eg. working_dir = /mnt/appdata/clientdbts/org1
+        project_dir = dbtrepo
+    """
+    shell_env = {
+        "secret-git-pull-url-block": "",
+        "project_dir": project_dir,
+        "gitrepo_url": gitrepo_url,
+    }
+
+    if gitpull_secret_block is not None:
+        shell_env["secret-git-pull-url-block"] = gitpull_secret_block.block_name
+
+    return PrefectShellTaskSetup(
+        commands=[f"git {org_task.get_task_parameters()}"],
+        working_dir=working_dir,
+        env=shell_env,
+        slug=org_task.task.slug,
+        type=SHELLOPERATION,
+        seq=seq,
+        orgtask_uuid=str(org_task.uuid),
+    )
+
+
 def setup_edr_send_report_task_config(
     org_task: OrgTask, project_dir: str, venv_binary: str, seq: int = 1
 ):
@@ -193,6 +230,7 @@ def pipeline_with_orgtasks(
     dbt_project_params: DbtProjectParams = None,
     start_seq: int = 0,
     dbt_cloud_creds_block: OrgPrefectBlockv1 = None,
+    gitrepo_url: str = None,
 ):
     """
     Returns a list of task configs for a pipeline;
@@ -217,6 +255,22 @@ def pipeline_with_orgtasks(
                 )
             task_config = setup_git_pull_shell_task_config(
                 org_task, dbt_project_params.project_dir, gitpull_secret_block
+            ).to_json()
+        elif org_task.task.slug == TASK_GITCLONE:
+            gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=SECRET, block_name__contains="git-pull"
+            ).first()
+
+            if not gitpull_secret_block:
+                logger.info(
+                    f"secret block for {org_task.task.slug} not found in org prefect blocks;"
+                )
+            task_config = setup_git_clone_shell_task_config(
+                org_task,
+                dbt_project_params.clients_base_dir,
+                dbt_project_params.project_dir_relative,
+                gitpull_secret_block,
+                gitrepo_url=gitrepo_url or "",
             ).to_json()
         elif org_task.task.slug == TASK_GENERATE_EDR:
             task_config = setup_edr_send_report_task_config(
