@@ -33,16 +33,13 @@ def has_permission(permission_slugs: list):
         def wrapper(*args, **kwargs):
             # request will have set of permissions that are allowed
             # check if permission_slug lies in this set
-            # throw error if nots
+            # throw 403 if not — bare except previously masked this as 404 (issue #1325)
             request = args[0]
-            try:
-                if not request.permissions or len(request.permissions) == 0:
-                    raise HttpError(403, "not allowed")
+            if not request.permissions or len(request.permissions) == 0:
+                raise HttpError(403, "not allowed")
 
-                if not set(request.permissions).issuperset(set(permission_slugs)):
-                    raise HttpError(403, "not allowed")
-            except:
-                raise HttpError(404, UNAUTHORIZED)
+            if not set(request.permissions).issuperset(set(permission_slugs)):
+                raise HttpError(403, "not allowed")
 
             return api_endpoint(*args, **kwargs)
 
