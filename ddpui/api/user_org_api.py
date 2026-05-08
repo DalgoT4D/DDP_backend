@@ -509,7 +509,7 @@ def post_resend_invitation(request, invitation_id):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    _, error = orguserfunctions.resend_invitation(invitation_id)
+    _, error = orguserfunctions.resend_invitation(invitation_id, orguser.org)
     if error:
         raise HttpError(400, error)
 
@@ -524,7 +524,10 @@ def delete_invitation(request, invitation_id):
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
-    invitation = Invitation.objects.filter(id=invitation_id).first()
+    # scope by org so a user cannot delete invitations belonging to another org
+    invitation = Invitation.objects.filter(
+        id=invitation_id, invited_by__org=orguser.org
+    ).first()
 
     if invitation:
         invitation.delete()
