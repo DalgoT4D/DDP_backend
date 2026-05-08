@@ -142,6 +142,20 @@ def get_report_chart_data(
         raise HttpError(404, str(err)) from err
     except SnapshotValidationError as err:
         raise HttpError(400, str(err)) from err
+
+
+@report_router.get("/{snapshot_id}/kpis/{kpi_id}/data/", response=ChartDataResponse)
+@has_permission(["can_view_dashboards"])
+def get_report_kpi_data(request, snapshot_id: int, kpi_id: int):
+    """Get KPI data for a specific KPI in a report snapshot."""
+    orguser: OrgUser = request.orguser
+    try:
+        result = ReportService.get_report_kpi_data(snapshot_id, kpi_id, orguser.org)
+        return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
     except SnapshotExternalServiceError as err:
         raise HttpError(502, str(err)) from err
     except Exception as e:
@@ -337,7 +351,7 @@ def mark_as_read(request, snapshot_id: int, payload: MarkReadRequest):
             snapshot_id=snapshot_id,
             orguser=orguser,
             target_type=payload.target_type,
-            chart_id=payload.chart_id,
+            target_id=payload.target_id,
         )
         return api_response(success=True, message="Marked as read")
     except CommentValidationError as err:
@@ -350,7 +364,7 @@ def list_comments(
     request,
     snapshot_id: int,
     target_type: str,
-    chart_id: int = None,
+    target_id: int = None,
 ):
     """List comments for a report target"""
     orguser: OrgUser = request.orguser
@@ -360,7 +374,7 @@ def list_comments(
             snapshot_id=snapshot_id,
             org=orguser.org,
             target_type=target_type,
-            chart_id=chart_id,
+            target_id=target_id,
             orguser=orguser,
         )
         return api_response(
@@ -384,7 +398,7 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
             orguser=orguser,
             target_type=payload.target_type,
             content=payload.content,
-            chart_id=payload.chart_id,
+            target_id=payload.target_id,
             mentioned_emails=payload.mentioned_emails,
         )
         return api_response(

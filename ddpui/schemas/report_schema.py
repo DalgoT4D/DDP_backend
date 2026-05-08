@@ -45,6 +45,42 @@ class FrozenChartConfig(Schema):
     extra_config: Optional[Dict[str, Any]] = None
 
 
+class FrozenKpiMetric(Schema):
+    """Frozen metric info within a KPI snapshot"""
+
+    id: int
+    name: str
+    schema_name: str
+    table_name: str
+    column: Optional[str] = None
+    aggregation: Optional[str] = None
+    column_expression: Optional[str] = None
+
+
+class FrozenKpiConfig(Schema):
+    """Frozen KPI stored in snapshots.
+
+    Captures all data needed to regenerate the KPI echarts config
+    at render time — survives KPI/metric deletion.
+    """
+
+    id: int
+    title: str
+    component_type: str = "kpi"
+    metric: FrozenKpiMetric
+    target_value: Optional[float] = None
+    direction: str = "increase"
+    rag_status: Optional[str] = None
+    time_grain: Optional[str] = None
+    time_dimension_column: Optional[str] = None
+    trend_periods: int = 12
+    green_threshold_pct: float = 100.0
+    amber_threshold_pct: float = 80.0
+    metric_type_tag: Optional[str] = None
+    program_tags: List[str] = []
+    periods: List[Dict[str, Any]] = []
+
+
 # Request schemas
 
 
@@ -148,8 +184,10 @@ class SnapshotDeleteResponse(Schema):
 class CommentCreate(Schema):
     """Schema for creating a comment on a report snapshot"""
 
-    target_type: str = Field(..., description="'summary' or 'chart'")
-    chart_id: Optional[int] = Field(None, description="Required when target_type='chart'")
+    target_type: str = Field(..., description="'summary', 'chart', or 'kpi'")
+    target_id: Optional[int] = Field(
+        None, description="Required when target_type is 'chart' or 'kpi'"
+    )
     content: str = Field(..., min_length=1, max_length=5000)
     mentioned_emails: List[str] = []
 
@@ -164,8 +202,8 @@ class CommentUpdate(Schema):
 class MarkReadRequest(Schema):
     """Schema for marking comments as read"""
 
-    target_type: str = Field(..., description="'summary' or 'chart'")
-    chart_id: Optional[int] = None
+    target_type: str = Field(..., description="'summary', 'chart', or 'kpi'")
+    target_id: Optional[int] = None
 
 
 class CommentResponse(Schema):
@@ -174,7 +212,7 @@ class CommentResponse(Schema):
     id: int
     target_type: str
     snapshot_id: int
-    chart_id: Optional[int] = None
+    target_id: Optional[int] = None
     content: str
     author_email: str
     is_new: bool = False
@@ -190,7 +228,7 @@ class CommentResponse(Schema):
             id=comment.id,
             target_type=comment.target_type,
             snapshot_id=comment.snapshot_id,
-            chart_id=comment.snapshot_chart_id,
+            target_id=comment.target_id,
             content=comment.content,
             author_email=comment.author.user.email,
             is_new=getattr(comment, "is_new", False),
@@ -204,8 +242,8 @@ class CommentResponse(Schema):
 class CommentStateEntry(Schema):
     """Icon state for a single target"""
 
-    target_type: str  # "summary" | "chart"
-    chart_id: Optional[int] = None  # set when target_type="chart"
+    target_type: str  # "summary" | "chart" | "kpi"
+    target_id: Optional[int] = None  # set when target_type is "chart" or "kpi"
     state: str  # "none" | "unread" | "read" | "mentioned"
 
 

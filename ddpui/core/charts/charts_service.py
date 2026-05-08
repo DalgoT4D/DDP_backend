@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date
 from decimal import Decimal
 
-from sqlalchemy import column, func, and_, or_, text
+from sqlalchemy import column, func, and_, or_, text, literal_column
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
@@ -162,6 +162,52 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     return final_dims
 
 
+def _resolve_saved_metrics(metrics_list: Optional[list]) -> Optional[list]:
+    """Resolve saved_metric_id references in a metrics list to inline ChartMetric dicts.
+
+    Entries with saved_metric_id are looked up from the Metric model and converted
+    to {column, aggregation, alias} dicts (simple path) or
+    {column_expression, alias} dicts (expression path).
+    Regular ad-hoc metric dicts are passed through unchanged.
+    """
+    if not metrics_list:
+        return metrics_list
+
+    resolved = []
+    for m in metrics_list:
+        if not isinstance(m, dict):
+            resolved.append(m)
+            continue
+
+        saved_id = m.get("saved_metric_id")
+        if saved_id is None:
+            resolved.append(m)
+            continue
+
+        from ddpui.models.metric import Metric
+
+        try:
+            metric = Metric.objects.get(id=saved_id)
+        except Metric.DoesNotExist:
+            logger.warning(f"Saved metric {saved_id} not found, skipping")
+            continue
+
+        alias = m.get("alias") or metric.name
+
+        if metric.column_expression:
+            resolved.append({"column_expression": metric.column_expression, "alias": alias})
+        else:
+            resolved.append(
+                {
+                    "column": metric.column,
+                    "aggregation": metric.aggregation,
+                    "alias": alias,
+                }
+            )
+
+    return resolved if resolved else None
+
+
 def build_chart_data_payload(
     chart_config: ChartConfig,
     resolved_dashboard_filters: Optional[List[Dict[str, Any]]] = None,
@@ -180,6 +226,10 @@ def build_chart_data_payload(
     if chart_config.title:
         customizations["title"] = chart_config.title
 
+    # Resolve any saved_metric_id references to inline metric definitions
+    raw_metrics = ec.get("metrics")
+    resolved_metrics = _resolve_saved_metrics(raw_metrics)
+
     payload = ChartDataPayload(
         chart_type=chart_config.chart_type,
         schema_name=chart_config.schema_name,
@@ -189,7 +239,7 @@ def build_chart_data_payload(
         dimension_col=ec.get("dimension_column"),
         extra_dimension=ec.get("extra_dimension_column"),
         dimensions=ec.get("dimension_columns"),
-        metrics=ec.get("metrics"),
+        metrics=resolved_metrics,
         geographic_column=ec.get("geographic_column"),
         value_column=ec.get("value_column"),
         selected_geojson_id=ec.get("selected_geojson_id"),
@@ -312,6 +362,13 @@ def build_multi_metric_query(
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
         for metric in payload.metrics:
+            # Expression path: inline raw SQL expression
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                continue
+
+            # Simple path: column + aggregation
             if not metric.aggregation:
                 raise ValueError(f"Aggregation function is required for metric")
 

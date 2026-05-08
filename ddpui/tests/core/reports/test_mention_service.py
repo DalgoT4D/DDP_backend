@@ -298,7 +298,7 @@ class TestBuildReportUrl:
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="test",
             author=author_orguser,
             org=org,
@@ -321,7 +321,7 @@ class TestResolveChartName:
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="test",
             author=author_orguser,
             org=org,
