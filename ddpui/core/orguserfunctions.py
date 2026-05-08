@@ -360,9 +360,12 @@ def get_invitations_from_orguser_v1(orguser: OrgUser):
     return res, None
 
 
-def resend_invitation(invitation_id: str):
-    """resend email invitation to user"""
-    invitation = Invitation.objects.filter(id=invitation_id).first()
+def resend_invitation(invitation_id: str, org):
+    """resend email invitation to user — scoped to the requestor's org"""
+    # scope by org so a user cannot resend invitations belonging to another org
+    invitation = Invitation.objects.filter(
+        id=invitation_id, invited_by__org=org
+    ).first()
 
     if invitation:
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
