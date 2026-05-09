@@ -1,6 +1,6 @@
 from ninja import Field, Schema
 from typing import Union, Any, Literal, Optional
-from pydantic import ConfigDict
+from pydantic import ConfigDict, validator
 
 from ddpui.models.dbt_workflow import OrgDbtModel
 from ddpui.models.canvas_models import CanvasNode
@@ -215,6 +215,12 @@ class JoinOperationConfig(Schema):
 
     join_type: Literal["inner", "left", "full outer"]
     join_on: Union[JoinOnConditionConfig, list[JoinOnConditionConfig]]
+
+    @validator("join_on")
+    def validate_join_on(cls, v):
+        if isinstance(v, list) and len(v) == 0:
+            raise ValueError("join_on list cannot be empty")
+        return v
 
 
 class UnionTablesOperationConfig(Schema):
