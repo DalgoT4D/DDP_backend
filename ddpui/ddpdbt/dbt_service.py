@@ -368,9 +368,10 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             orgdbt.is_repo_managed_by_system = True
             orgdbt.save()
 
-        # 6. Check if project already exists
+        # 6. Check if project already exists - if it does, wipe it for recreation (Issue #529)
         if dbtrepo_dir.exists():
-            raise Exception(f"Project {project_name} already exists")
+            logger.warning(f"Project {project_name} already exists at {dbtrepo_dir}. Cleaning up for recreation.")
+            shutil.rmtree(dbtrepo_dir)
 
         if not project_dir.exists():
             project_dir.mkdir(parents=True, exist_ok=True)
