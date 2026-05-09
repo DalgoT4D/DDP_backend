@@ -209,6 +209,7 @@ class JoinOnConditionConfig(Schema):
 
     @validator("compare_with")
     def validate_compare_with(cls, v):
+        """Validate that the comparison operator is in the allowed whitelist"""
         allowed_operators = ["=", "!=", "<>", ">", "<", ">=", "<=", "LIKE", "ILIKE"]
         if v.upper() not in allowed_operators:
             raise ValueError(f"Operator {v} not allowed. Must be one of {allowed_operators}")
@@ -225,6 +226,7 @@ class JoinOperationConfig(Schema):
 
     @validator("join_on")
     def validate_join_on(cls, v):
+        """Validate that the join_on list is not empty if provided as a list"""
         if isinstance(v, list) and len(v) == 0:
             raise ValueError("join_on list cannot be empty")
         return v
