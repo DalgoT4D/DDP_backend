@@ -207,6 +207,13 @@ class JoinOnConditionConfig(Schema):
     key2: str
     compare_with: str
 
+    @validator("compare_with")
+    def validate_compare_with(cls, v):
+        allowed_operators = ["=", "!=", "<>", ">", "<", ">=", "<=", "LIKE", "ILIKE"]
+        if v.upper() not in allowed_operators:
+            raise ValueError(f"Operator {v} not allowed. Must be one of {allowed_operators}")
+        return v.upper()
+
 
 class JoinOperationConfig(Schema):
     """Config for join operations"""
