@@ -308,6 +308,19 @@ op_config_mapping = {
 }
 
 
+def get_operation_schemas() -> dict:
+    """Return JSON schemas for all operations"""
+    schemas = {}
+    for op_type, schema_class in op_config_mapping.items():
+        try:
+            # For Ninja/Pydantic V2
+            schemas[op_type] = schema_class.model_json_schema()
+        except AttributeError:
+            # Fallback for Pydantic V1 if needed
+            schemas[op_type] = schema_class.schema()
+    return schemas
+
+
 def validate_operation_config_v2(op_type: str, config: dict) -> None:
     """Validate config based on operation type"""
 
