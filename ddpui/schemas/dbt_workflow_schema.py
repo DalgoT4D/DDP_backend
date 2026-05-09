@@ -201,6 +201,8 @@ class GroupByOperationConfig(Schema):
 class JoinOnConditionConfig(Schema):
     """Schema for individual join on condition"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     key1: str
     key2: str
     compare_with: str
@@ -209,8 +211,10 @@ class JoinOnConditionConfig(Schema):
 class JoinOperationConfig(Schema):
     """Config for join operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     join_type: Literal["inner", "left", "full outer"]
-    join_on: JoinOnConditionConfig
+    join_on: Union[JoinOnConditionConfig, list[JoinOnConditionConfig]]
 
 
 class UnionTablesOperationConfig(Schema):

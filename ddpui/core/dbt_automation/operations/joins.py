@@ -104,8 +104,14 @@ def joins_sql(
             f" {join_type.upper()} JOIN " + "{{" + join_with + "}}" + " " + aliases[1] + "\n"
         )
 
-    dbt_code += f" ON {quote_columnname(aliases[0], warehouse.name)}.{quote_columnname(join_on['key1'], warehouse.name)}"
-    dbt_code += f" {join_on['compare_with']} {quote_columnname(aliases[1], warehouse.name)}.{quote_columnname(join_on['key2'], warehouse.name)}\n"
+    join_conditions = join_on if isinstance(join_on, list) else [join_on]
+    on_clause = []
+    for condition in join_conditions:
+        left = f"{quote_columnname(aliases[0], warehouse.name)}.{quote_columnname(condition['key1'], warehouse.name)}"
+        right = f"{quote_columnname(aliases[1], warehouse.name)}.{quote_columnname(condition['key2'], warehouse.name)}"
+        on_clause.append(f"{left} {condition['compare_with']} {right}")
+
+    dbt_code += " ON " + " AND ".join(on_clause) + "\n"
 
     return dbt_code, list(output_set)
 
