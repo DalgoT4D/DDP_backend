@@ -352,6 +352,39 @@ class TestEdgeCases:
         assert response.settings["range"]["min"] == 0
         assert response.settings["display"]["prefix"] == "$"
 
+    def test_filter_response_from_model(self):
+        """from_model() builds a response with the same fields as the source model instance."""
+        from types import SimpleNamespace
+
+        now = datetime.now()
+        filter_obj = SimpleNamespace(
+            id=42,
+            dashboard_id=7,
+            name="Region",
+            filter_type="value",
+            schema_name="public",
+            table_name="orders",
+            column_name="region",
+            settings={"options": ["NA", "EU"]},
+            order=2,
+            created_at=now,
+            updated_at=now,
+        )
+
+        response = DashboardFilterResponse.from_model(filter_obj)
+
+        assert response.id == 42
+        assert response.dashboard_id == 7
+        assert response.name == "Region"
+        assert response.filter_type == "value"
+        assert response.schema_name == "public"
+        assert response.table_name == "orders"
+        assert response.column_name == "region"
+        assert response.settings == {"options": ["NA", "EU"]}
+        assert response.order == 2
+        assert response.created_at == now
+        assert response.updated_at == now
+
     def test_dashboard_response_with_filters(self):
         """Test dashboard response with embedded filters"""
         now = datetime.now()

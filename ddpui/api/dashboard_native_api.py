@@ -340,7 +340,7 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     except FilterValidationError as err:
         raise HttpError(400, err.message) from err
 
-    return DashboardFilterResponse(**filter_obj.to_json())
+    return DashboardFilterResponse.from_model(filter_obj)
 
 
 @dashboard_native_router.get(
@@ -358,7 +358,7 @@ def get_filter(request, dashboard_id: int, filter_id: int):
     except FilterNotFoundError as err:
         raise HttpError(404, "Filter not found") from err
 
-    return DashboardFilterResponse(**filter_obj.to_json())
+    return DashboardFilterResponse.from_model(filter_obj)
 
 
 @dashboard_native_router.put(
@@ -383,7 +383,7 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
     except FilterValidationError as err:
         raise HttpError(400, err.message) from err
 
-    return DashboardFilterResponse(**filter_obj.to_json())
+    return DashboardFilterResponse.from_model(filter_obj)
 
 
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
