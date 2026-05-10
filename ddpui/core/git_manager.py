@@ -368,14 +368,14 @@ class GitManager:
                     pat=org_admin_pat,
                     method="GET",
                 )
-            elif status_code == 401:
+            if status_code == 401:
                 raise GitManagerError("Authentication failed - check PAT permissions") from e
-            elif status_code == 403:
+            if status_code == 403:
                 raise GitManagerError(
                     "Insufficient permissions to create repository in organization"
                 ) from e
-            else:
-                raise GitManagerError(f"GitHub API error: HTTP {status_code}: {str(e)}") from e
+            
+            raise GitManagerError(f"GitHub API error: HTTP {status_code}: {str(e)}") from e
         except requests.RequestException as e:
             raise GitManagerError(
                 f"Network error: Failed to connect to GitHub API: {str(e)}"
