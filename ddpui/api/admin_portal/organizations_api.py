@@ -3,6 +3,7 @@ from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.models.org import Org
+from ddpui.models.admin_audit_log import AdminAuditLog
 from ddpui.schemas.admin_org_schema import UpdateOrganizationSchema
 
 admin_org_router = Router()
@@ -70,9 +71,26 @@ def update_organization(
     if existing_slug:
         raise HttpError(400, "Slug already exists")
 
+    old_data = {
+        "name": org.name,
+        "slug": org.slug,
+    }
+
     org.name = payload.name
     org.slug = payload.slug
     org.save()
+
+    new_data = {
+        "name": org.name,
+        "slug": org.slug,
+    }
+
+    AdminAuditLog.objects.create(
+        org=org,
+        action="organization_updated",
+        old_data=old_data,
+        new_data=new_data,
+    )
 
     return {
         "success": True,
