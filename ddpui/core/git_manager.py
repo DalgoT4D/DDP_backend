@@ -361,17 +361,21 @@ class GitManager:
         except requests.HTTPError as e:
             status_code = e.response.status_code
             if status_code == 422:
-                raise GitManagerError(
-                    f"Repository {repo_name} already exists or name is invalid"
-                ) from e
-            elif status_code == 401:
+                # If repository already exists, fetch and return its data
+                logger.info(f"Repository {repo_name} already exists, fetching existing repo data")
+                return GitManager._github_api_request(
+                    url=f"https://api.github.com/repos/{dalgo_github_org}/{repo_name}",
+                    pat=org_admin_pat,
+                    method="GET",
+                )
+            if status_code == 401:
                 raise GitManagerError("Authentication failed - check PAT permissions") from e
-            elif status_code == 403:
+            if status_code == 403:
                 raise GitManagerError(
                     "Insufficient permissions to create repository in organization"
                 ) from e
-            else:
-                raise GitManagerError(f"GitHub API error: HTTP {status_code}: {str(e)}") from e
+            
+            raise GitManagerError(f"GitHub API error: HTTP {status_code}: {str(e)}") from e
         except requests.RequestException as e:
             raise GitManagerError(
                 f"Network error: Failed to connect to GitHub API: {str(e)}"
