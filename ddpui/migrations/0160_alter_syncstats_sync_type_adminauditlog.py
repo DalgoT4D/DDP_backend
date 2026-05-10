@@ -6,6 +6,7 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
     """Add AdminAuditLog model and update SyncStats sync_type field."""
+
     dependencies = [
         ("ddpui", "0159_merge_20260504_0910"),
     ]
