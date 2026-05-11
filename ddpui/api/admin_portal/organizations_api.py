@@ -108,7 +108,6 @@ def update_organization(
 @has_permission(["can_manage_organization"])
 def get_audit_logs(request):
     """List all admin audit logs."""
-
     logs = list(
         AdminAuditLog.objects.select_related("org")
         .values(
@@ -135,7 +134,6 @@ def get_audit_logs(request):
 @has_permission(["can_manage_organization"])
 def get_single_audit_log(request, log_id: int):
     """Get single audit log by ID."""
-
     log = (
         AdminAuditLog.objects.select_related("org")
         .filter(id=log_id)
