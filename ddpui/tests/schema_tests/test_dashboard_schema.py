@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
+    DashboardTabSchema,
     DashboardResponse,
     DashboardFilterResponse,
     FilterCreate,
@@ -29,6 +30,36 @@ from ddpui.schemas.dashboard_schema import (
     LandingPageResponse,
     LandingPageResolveResponse,
 )
+
+
+# ================================================================================
+# Test DashboardTabSchema Validation
+# ================================================================================
+
+
+class TestDashboardTabSchema:
+    """Tests for DashboardTabSchema field constraints"""
+
+    def test_valid_tab(self):
+        """Test that a valid tab is accepted"""
+        tab = DashboardTabSchema(id="tab-1710901234567", title="Sales Overview")
+        assert tab.id == "tab-1710901234567"
+        assert tab.title == "Sales Overview"
+
+    def test_empty_id_is_rejected(self):
+        """id must not be an empty string"""
+        with pytest.raises(ValidationError):
+            DashboardTabSchema(id="", title="Valid Title")
+
+    def test_title_over_50_chars_is_rejected(self):
+        """title must not exceed 50 characters"""
+        with pytest.raises(ValidationError):
+            DashboardTabSchema(id="tab-1", title="A" * 51)
+
+    def test_title_exactly_50_chars_is_accepted(self):
+        """title at exactly 50 characters is valid"""
+        tab = DashboardTabSchema(id="tab-1", title="A" * 50)
+        assert len(tab.title) == 50
 
 
 # ================================================================================

@@ -6,7 +6,7 @@ This module contains all Pydantic schemas for dashboard-related API endpoints.
 from datetime import datetime
 from typing import Optional, List
 
-from ninja import Schema
+from ninja import Schema, Field
 
 
 # =============================================================================
@@ -29,8 +29,8 @@ class DashboardTabSchema(Schema):
     to organize charts into separate views within a single dashboard.
     """
 
-    id: str  # e.g., "tab-1710901234567"
-    title: str  # e.g., "Untitled Tab 1" (max 50 chars)
+    id: str = Field(..., min_length=1)  # e.g., "tab-1710901234567"
+    title: str = Field(..., max_length=50)  # e.g., "Untitled Tab 1"
     layout_config: List[dict] = []  # Grid positions for this tab
     components: dict = {}  # Component configs for this tab
 
