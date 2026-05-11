@@ -11,3 +11,4 @@ from ddpui.models.georegion import GeoRegion
 from ddpui.models.geojson import GeoJSON
 from ddpui.models.canvas_models import CanvasNode, CanvasEdge
 from ddpui.models.comment import Comment, CommentReadStatus
+from ddpui.models.admin_audit_log import AdminAuditLog
