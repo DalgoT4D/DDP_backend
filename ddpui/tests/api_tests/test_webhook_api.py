@@ -453,11 +453,11 @@ def test_post_notification_v1_webhook_scheduled_pipeline(seed_master_tasks):
 def test_notify_platform_admins():
     """tests notify_platform_admins"""
     with patch(
-        "ddpui.core.notifications.delivery.send_discord_notification"
-    ) as mock_send_discord_notification, patch(
+        "ddpui.core.notifications.delivery.send_discord_embed"
+    ) as mock_send_discord_embed, patch(
         "ddpui.core.notifications.delivery.send_text_message"
     ) as mock_send_text_message:
-        org = Mock(slug="orgslug", airbyte_workspace_id="airbyte_workspace_id")
+        org = Mock(slug="orgslug", name="Org Name", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
         os.environ["ADMIN_DISCORD_WEBHOOK"] = "https://discord.com/api/webhooks/test"
@@ -465,20 +465,14 @@ def test_notify_platform_admins():
         os.environ["AIRBYTE_URL_FOR_NOTIFICATIONS"] = "airbyte-url-for-notifications"
         os.environ["SES_SENDER_EMAIL"] = "sender@example.com"
 
-        message = """Pipeline Failure Alert
-
-Organization: orgslug
-Failed step: Test Step
-State: FAILED
-Base plan: baseplan
-
-Prefect flow run: prefect-url-for-notifications/flow-runs/flow-run/flow-run-id
-Airbyte workspace URL: airbyte-url-for-notifications/workspaces/airbyte_workspace_id"""
-
         notify_platform_admins(org, "flow-run-id", "FAILED", "Test Step")
-        mock_send_discord_notification.assert_called_once_with(
-            "https://discord.com/api/webhooks/test", message
-        )
+
+        mock_send_discord_embed.assert_called_once()
+        call_kwargs = mock_send_discord_embed.call_args.kwargs
+        assert call_kwargs["webhook_url"] == "https://discord.com/api/webhooks/test"
+        assert call_kwargs["title"] == "Pipeline Failure Alert"
+        assert "orgslug" in call_kwargs["description"] or "Org Name" in call_kwargs["description"]
+
         mock_send_text_message.assert_called_once()
 
 

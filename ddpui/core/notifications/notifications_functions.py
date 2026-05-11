@@ -1,3 +1,4 @@
+import os
 from typing import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 from celery.result import AsyncResult
@@ -14,7 +15,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.auth import PIPELINE_MANAGER_ROLE
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.discord import send_discord_notification
+from ddpui.utils.discord import send_discord_embed, send_discord_notification
 from ddpui.utils.awsses import send_text_message
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.moretasks import schedule_notification_task
@@ -144,13 +145,29 @@ def create_notification(
             if error:
                 errors.append(error)
 
+    environment = os.getenv("ENVIRONMENT", "staging")
+
     for org_id in org_ids:
         org = Org.objects.get(id=org_id)
         if hasattr(org, "preferences"):
             orgpreferences: OrgPreferences = org.preferences
             if orgpreferences.enable_discord_notifications and orgpreferences.discord_webhook:
                 try:
-                    send_discord_notification(orgpreferences.discord_webhook, notification.message)
+                    send_discord_embed(
+                        webhook_url=orgpreferences.discord_webhook,
+                        title=notification.email_subject or "Dalgo Notification",
+                        description=notification.message,
+                        color=0xE53935 if notification.urgent else 0x1565C0,
+                        fields=[
+                            {"name": "Environment", "value": environment, "inline": True},
+                            {
+                                "name": "Urgent",
+                                "value": "Yes" if notification.urgent else "No",
+                                "inline": True,
+                            },
+                        ],
+                        footer=f"Dalgo · {environment}",
+                    )
                 except Exception as e:
                     errors.append(f"Error sending discord message: {e}")
 
