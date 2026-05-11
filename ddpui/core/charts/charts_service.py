@@ -156,7 +156,9 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
         if payload.extra_dimension:
             final_dims.append(payload.extra_dimension)
 
-    if not final_dims:
+    # number charts aggregate to a single value and don't use dimensions
+    DIMENSIONLESS_CHART_TYPES = {"number"}
+    if not final_dims and payload.chart_type not in DIMENSIONLESS_CHART_TYPES:
         logger.warning(f"No valid dimensions found {payload.dimensions}")
 
     return final_dims
