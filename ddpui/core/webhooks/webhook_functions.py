@@ -22,6 +22,7 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_NAME,
     FLOW_RUN_RUNNING_STATE_NAME,
     FLOW_RUN_PENDING_STATE_NAME,
+    FLOW_RUN_CANCELLED_STATE_TYPE,
     FLOW_RUN_CRASHED_STATE_TYPE,
     FLOW_RUN_FAILED_STATE_TYPE,
 )
@@ -300,26 +301,45 @@ Please visit {os.getenv('FRONTEND_URL')} for more details."""
 
 
 def _detect_failed_step(flow_run_id: str) -> str:
-    """Detect which step failed in the flow run"""
+    """Detect which step failed in the flow run.
+
+    Returns a descriptive string. If no clearly failed task is found,
+    falls back to a compact summary of all task states so the caller
+    still gets actionable context instead of "Unknown Step".
+    """
     try:
         task_runs = prefect_service.get_flow_run_graphs(flow_run_id)
 
         if not task_runs:
             logger.debug(f"No task runs found for flow run {flow_run_id}")
-            return "Unknown Step"
+            return "Unknown Step (no task graph returned)"
 
-        # Find the failed step
-        failed_step = "Unknown Step"
+        terminal_failure_types = {FLOW_RUN_FAILED_STATE_TYPE, FLOW_RUN_CRASHED_STATE_TYPE}
+        cancelled_type = FLOW_RUN_CANCELLED_STATE_TYPE
+
+        # First pass: find a clearly failed or crashed task
         for task in task_runs:
-            if task.get("state_type") in [FLOW_RUN_FAILED_STATE_TYPE, FLOW_RUN_CRASHED_STATE_TYPE]:
-                failed_step = task.get("label", "label?")
-                break
+            state_type = task.get("state_type", "")
+            if state_type in terminal_failure_types:
+                return task.get("label") or task.get("name") or state_type
 
-        return failed_step
+        # Second pass: find a cancelled task (may indicate the trigger step)
+        for task in task_runs:
+            if task.get("state_type") == cancelled_type:
+                label = task.get("label") or task.get("name") or "unknown"
+                return f"{label} (cancelled)"
+
+        # Fallback: compact state summary so we know what actually ran
+        summary = ", ".join(
+            f"{t.get('label') or t.get('name') or '?'}[{t.get('state_type', '?')}]"
+            for t in task_runs
+        )
+        logger.debug(f"No failed task found for {flow_run_id}, task states: {summary}")
+        return f"Unknown Step — tasks: {summary}"
 
     except Exception as e:
         logger.error(f"Error detecting failed step for {flow_run_id}: {e}")
-        return "Unknown Step"
+        return f"Unknown Step (detection error: {e})"
 
 
 def do_handle_prefect_webhook(flow_run_id: str, state: str):

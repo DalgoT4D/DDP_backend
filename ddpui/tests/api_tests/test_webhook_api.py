@@ -456,7 +456,11 @@ def test_notify_platform_admins():
         "ddpui.core.notifications.delivery.send_discord_embed"
     ) as mock_send_discord_embed, patch(
         "ddpui.core.notifications.delivery.send_text_message"
-    ) as mock_send_text_message:
+    ) as mock_send_text_message, patch(
+        "ddpui.core.notifications.delivery.OrgDataFlowv1"
+    ) as mock_org_dataflow:
+        mock_org_dataflow.objects.filter.return_value.count.return_value = 3
+
         org = Mock(slug="orgslug", name="Org Name", airbyte_workspace_id="airbyte_workspace_id")
         org.base_plan = Mock(return_value="baseplan")
         os.environ["ADMIN_EMAIL"] = "adminemail"
@@ -471,7 +475,10 @@ def test_notify_platform_admins():
         call_kwargs = mock_send_discord_embed.call_args.kwargs
         assert call_kwargs["webhook_url"] == "https://discord.com/api/webhooks/test"
         assert call_kwargs["title"] == "Pipeline Failure Alert"
-        assert "orgslug" in call_kwargs["description"] or "Org Name" in call_kwargs["description"]
+        assert "Org Name" in call_kwargs["description"]
+        field_names = [f["name"] for f in call_kwargs["fields"]]
+        assert "Pipelines" in field_names
+        assert "Failed Step" in field_names
 
         mock_send_text_message.assert_called_once()
 

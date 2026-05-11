@@ -1,5 +1,7 @@
 import os
-from ddpui.models.org import Org
+from urllib.parse import quote
+
+from ddpui.models.org import Org, OrgDataFlowv1
 from ddpui.utils.awsses import send_text_message
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.auth import SUPER_ADMIN_ROLE
@@ -44,8 +46,11 @@ def notify_platform_admins(
     """send a notification to platform admins discord webhook"""
     prefect_url = os.getenv("PREFECT_URL_FOR_NOTIFICATIONS")
     airbyte_url = os.getenv("AIRBYTE_URL_FOR_NOTIFICATIONS")
+    sentry_org_url = os.getenv("SENTRY_ORG_URL", "").rstrip("/")
     environment = os.getenv("ENVIRONMENT", "staging")
-    base_plan = org.base_plan() or "Unknown"
+    base_plan = org.base_plan() or "Not configured"
+
+    pipeline_count = OrgDataFlowv1.objects.filter(org=org).count()
 
     prefect_run_url = f"{prefect_url}/flow-runs/flow-run/{flow_run_id}"
     airbyte_workspace_url = f"{airbyte_url}/workspaces/{org.airbyte_workspace_id}"
@@ -55,6 +60,7 @@ Organization: {org.slug}
 Failed step: {failed_step}
 State: {state}
 Base plan: {base_plan}
+Pipelines: {pipeline_count}
 Environment: {environment}
 Prefect flow run: {prefect_run_url}
 Airbyte workspace URL: {airbyte_workspace_url}"""
@@ -71,9 +77,16 @@ Airbyte workspace URL: {airbyte_workspace_url}"""
             {"name": "Base Plan", "value": base_plan, "inline": True},
             {"name": "State", "value": state, "inline": True},
             {"name": "Failed Step", "value": failed_step, "inline": True},
+            {"name": "Pipelines", "value": str(pipeline_count), "inline": True},
             {"name": "Prefect Run", "value": prefect_run_url, "inline": False},
             {"name": "Airbyte Workspace", "value": airbyte_workspace_url, "inline": False},
         ]
+
+        if sentry_org_url:
+            sentry_query = quote(f"is:unresolved org_slug:{org.slug}")
+            sentry_url = f"{sentry_org_url}/issues/?query={sentry_query}"
+            fields.append({"name": "Sentry Issues", "value": sentry_url, "inline": False})
+
         send_discord_embed(
             webhook_url=os.getenv("ADMIN_DISCORD_WEBHOOK"),
             title="Pipeline Failure Alert",
