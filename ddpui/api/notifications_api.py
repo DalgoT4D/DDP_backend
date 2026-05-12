@@ -46,7 +46,7 @@ def get_notification_history(request, page: int = 1, limit: int = 10, read_statu
     Returns all the notifications including the
     past and the future scheduled notifications
     """
-    error, result = notifications_functions.get_notification_history(page, limit, read_status=None)
+    error, result = notifications_functions.get_notification_history(page, limit, read_status = read_status)
     if error is not None:
         raise HttpError(400, error)
 
