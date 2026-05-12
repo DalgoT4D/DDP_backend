@@ -356,6 +356,7 @@ class PrefectDataFlowCreateSchema4(Schema):
     connections: list[PrefectFlowAirbyteConnection2]
     cron: str
     transformTasks: list[PrefectDataFlowOrgTasks]
+    continueOnSyncFailure: bool = False
 
 
 class PrefectDataFlowUpdateSchema3(Schema):
@@ -366,6 +367,7 @@ class PrefectDataFlowUpdateSchema3(Schema):
     cron: Optional[str] = None
     transformTasks: Optional[list[PrefectDataFlowOrgTasks]] = None
     deployment_params: Optional[dict] = None
+    continueOnSyncFailure: bool = False
 
 
 class PrefectFlowRunSchema(Schema):

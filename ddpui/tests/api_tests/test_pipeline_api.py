@@ -1187,3 +1187,199 @@ def test_cancel_queued_manual_job_access_denied(
 
     assert exc.value.status_code == 403
     assert "You don't have access to this flow run" in str(exc.value)
+
+
+# ================================================================================
+# Tests for continueOnSyncFailure flag
+# ================================================================================
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_continue_on_sync_failure(orguser_transform_tasks):
+    """tests that continueOnSyncFailure flag is passed through to deployment params"""
+    request = mock_request(orguser_transform_tasks)
+
+    connections = [
+        PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
+    ]
+    OrgTask.objects.create(
+        org=request.orguser.org,
+        task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
+        connection_id="test-conn-id-1",
+    )
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow-flag",
+        connections=connections,
+        cron="test-cron",
+        transformTasks=[],
+        continueOnSyncFailure=True,
+    )
+
+    from ddpui.ddpprefect import prefect_service
+
+    deployment = post_prefect_dataflow_v1(request, payload)
+    assert deployment["deploymentId"] == "test-deploy-id"
+
+    # verify the flag was passed in deployment_params
+    call_args = prefect_service.create_dataflow_v1.call_args
+    deployment_params = call_args[0][0].deployment_params
+    assert deployment_params["config"]["continue_on_sync_failure"] is True
+
+    # cleanup
+    OrgTask.objects.filter(org=request.orguser.org, connection_id="test-conn-id-1").delete()
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-deploy-id").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_continue_on_sync_failure_defaults_false(
+    orguser_transform_tasks,
+):
+    """tests that continueOnSyncFailure defaults to False when not provided"""
+    request = mock_request(orguser_transform_tasks)
+
+    connections = [
+        PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
+    ]
+    OrgTask.objects.create(
+        org=request.orguser.org,
+        task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
+        connection_id="test-conn-id-1",
+    )
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow-default",
+        connections=connections,
+        cron="test-cron",
+        transformTasks=[],
+    )
+
+    from ddpui.ddpprefect import prefect_service
+
+    post_prefect_dataflow_v1(request, payload)
+
+    call_args = prefect_service.create_dataflow_v1.call_args
+    deployment_params = call_args[0][0].deployment_params
+    assert deployment_params["config"]["continue_on_sync_failure"] is False
+
+    # cleanup
+    OrgTask.objects.filter(org=request.orguser.org, connection_id="test-conn-id-1").delete()
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-deploy-id").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_deployment=Mock(
+        return_value={
+            "name": "test-deploy",
+            "cron": "test-cron",
+            "isScheduleActive": True,
+            "parameters": {
+                "config": {
+                    "tasks": [],
+                    "continue_on_sync_failure": True,
+                }
+            },
+        }
+    ),
+)
+def test_get_prefect_dataflow_v1_returns_continue_on_sync_failure(orguser_transform_tasks):
+    """tests that continueOnSyncFailure is returned from deployment parameters"""
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="flow-flag",
+        deployment_name="prefect-flow-flag",
+        deployment_id="test-dep-flag",
+        dataflow_type="orchestrate",
+    )
+
+    dataflow = get_prefect_dataflow_v1(request, "test-dep-flag")
+    assert dataflow["continueOnSyncFailure"] is True
+
+    # cleanup
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-dep-flag").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_deployment=Mock(
+        return_value={
+            "name": "test-deploy",
+            "cron": "test-cron",
+            "isScheduleActive": True,
+            "parameters": {
+                "config": {
+                    "tasks": [],
+                }
+            },
+        }
+    ),
+)
+def test_get_prefect_dataflow_v1_defaults_continue_on_sync_failure_false(
+    orguser_transform_tasks,
+):
+    """tests that continueOnSyncFailure defaults to False for existing pipelines without the flag"""
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="flow-no-flag",
+        deployment_name="prefect-flow-no-flag",
+        deployment_id="test-dep-no-flag",
+        dataflow_type="orchestrate",
+    )
+
+    dataflow = get_prefect_dataflow_v1(request, "test-dep-no-flag")
+    assert dataflow["continueOnSyncFailure"] is False
+
+    # cleanup
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-dep-no-flag").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    update_dataflow_v1=Mock(return_value=[]),
+)
+def test_put_prefect_dataflow_v1_passes_continue_on_sync_failure(orguser_transform_tasks):
+    """tests that continueOnSyncFailure flag is passed through on update"""
+    request = mock_request(orguser_transform_tasks)
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="flow-update-flag",
+        deployment_name="prefect-flow-update",
+        deployment_id="test-dep-update-flag",
+        dataflow_type="orchestrate",
+    )
+
+    payload = PrefectDataFlowUpdateSchema3(
+        name="updated-flow",
+        connections=[],
+        transformTasks=[],
+        cron="",
+        continueOnSyncFailure=True,
+    )
+
+    from ddpui.ddpprefect import prefect_service
+
+    put_prefect_dataflow_v1(request, "test-dep-update-flag", payload)
+
+    call_args = prefect_service.update_dataflow_v1.call_args
+    updated_payload = call_args[0][1]
+    assert updated_payload.deployment_params["config"]["continue_on_sync_failure"] is True
+
+    # cleanup
+    DataflowOrgTask.objects.filter(dataflow=dataflow).delete()
+    dataflow.delete()
