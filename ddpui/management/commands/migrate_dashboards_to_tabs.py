@@ -64,11 +64,11 @@ class Command(BaseCommand):
                     "components": dashboard.components or {},
                 }
 
-                # Update dashboard structure
+                # Update dashboard structure — only set tabs, leave layout_config
+                # and components intact for rollback safety. They will be removed
+                # from the DB in a follow-up cleanup PR after the release is stable.
                 dashboard.tabs = [default_tab]
-                dashboard.layout_config = []
-                dashboard.components = {}
-                dashboard.save(update_fields=["tabs", "layout_config", "components"])
+                dashboard.save(update_fields=["tabs"])
 
                 self.stdout.write(
                     f"Migrated - "

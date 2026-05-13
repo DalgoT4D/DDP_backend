@@ -42,9 +42,7 @@ class DashboardUpdate(Schema):
     description: Optional[str] = None
     grid_columns: Optional[int] = None
     target_screen_size: Optional[str] = None
-    layout_config: Optional[list[dict]] = None
-    components: Optional[dict] = None
-    tabs: Optional[List[DashboardTabSchema]] = None  # Array of tabs
+    tabs: Optional[List[DashboardTabSchema]] = None
     filter_layout: Optional[str] = None
     is_published: Optional[bool] = None
 

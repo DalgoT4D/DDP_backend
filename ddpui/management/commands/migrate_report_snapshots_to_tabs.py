@@ -74,9 +74,10 @@ class Command(BaseCommand):
                     "components": components,
                 }
 
+                # Only add tabs — leave root-level layout_config and components intact
+                # for rollback safety. They will be removed in a follow-up cleanup PR
+                # after the release is confirmed stable.
                 frozen["tabs"] = [default_tab]
-                frozen["layout_config"] = []
-                frozen["components"] = {}
 
                 snapshot.frozen_dashboard = frozen
                 snapshot.save(update_fields=["frozen_dashboard"])

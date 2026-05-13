@@ -334,8 +334,8 @@ class TestEdgeCases:
 
         assert dashboard.title == "日本語ダッシュボード 📊"
 
-    def test_dashboard_update_with_complex_components(self):
-        """Test dashboard update with complex nested components"""
+    def test_dashboard_update_with_complex_tab_components(self):
+        """Test dashboard update with complex nested components inside a tab"""
         components = {
             "chart-1": {
                 "type": "chart",
@@ -353,10 +353,13 @@ class TestEdgeCases:
             },
         }
 
-        update = DashboardUpdate(components=components)
+        update = DashboardUpdate(
+            tabs=[DashboardTabSchema(id="tab-1", title="Tab 1", components=components)]
+        )
 
-        assert update.components["chart-1"]["config"]["settings"]["showLegend"] is True
-        assert update.components["text-1"]["config"]["fontSize"] == 16
+        tab_components = update.tabs[0].components
+        assert tab_components["chart-1"]["config"]["settings"]["showLegend"] is True
+        assert tab_components["text-1"]["config"]["fontSize"] == 16
 
     def test_filter_response_with_nested_settings(self):
         """Test filter response with deeply nested settings"""

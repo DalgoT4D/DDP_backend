@@ -34,6 +34,7 @@ from ddpui.core.charts.charts_service import (
     execute_chart_query,
     transform_data_for_chart,
 )
+from ddpui.schemas.dashboard_schema import DashboardTabSchema
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -362,12 +363,12 @@ class DashboardService:
             Created Dashboard instance
         """
         # Generate default tab for new dashboard
-        default_tab = {
-            "id": f"tab-{int(time.time() * 1000)}",
-            "title": "Untitled Tab 1",
-            "layout_config": [],
-            "components": {},
-        }
+        default_tab = DashboardTabSchema(
+            id=f"tab-{int(time.time() * 1000)}",
+            title="Untitled Tab 1",
+            layout_config=[],
+            components={},
+        ).model_dump()
 
         dashboard = Dashboard.objects.create(
             title=data.title,
@@ -420,13 +421,9 @@ class DashboardService:
             dashboard.grid_columns = data.grid_columns
         if data.target_screen_size is not None:
             dashboard.target_screen_size = data.target_screen_size
-        if data.layout_config is not None:
-            dashboard.layout_config = data.layout_config
-        if data.components is not None:
-            dashboard.components = data.components
         if data.tabs is not None:
             # Convert Pydantic models to dicts for JSON storage
-            dashboard.tabs = [tab.dict() for tab in data.tabs]
+            dashboard.tabs = [tab.model_dump() for tab in data.tabs]
         if data.filter_layout is not None:
             dashboard.filter_layout = data.filter_layout
         if data.is_published is not None:
