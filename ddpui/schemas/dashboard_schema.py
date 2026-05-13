@@ -62,6 +62,23 @@ class DashboardFilterResponse(Schema):
     created_at: datetime
     updated_at: datetime
 
+    @classmethod
+    def from_model(cls, filter_obj) -> "DashboardFilterResponse":
+        """Build response from a DashboardFilter model instance."""
+        return cls(
+            id=filter_obj.id,
+            dashboard_id=filter_obj.dashboard_id,
+            name=filter_obj.name,
+            filter_type=filter_obj.filter_type,
+            schema_name=filter_obj.schema_name,
+            table_name=filter_obj.table_name,
+            column_name=filter_obj.column_name,
+            settings=filter_obj.settings,
+            order=filter_obj.order,
+            created_at=filter_obj.created_at,
+            updated_at=filter_obj.updated_at,
+        )
+
 
 class DashboardResponse(Schema):
     """Response schema for dashboard"""
