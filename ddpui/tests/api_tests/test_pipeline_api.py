@@ -9,7 +9,7 @@ from pathlib import Path
 from django.apps import apps
 from django.core.management import call_command
 from ninja.errors import HttpError
-
+from ddpui.ddpprefect import prefect_service
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -1221,8 +1221,6 @@ def test_post_prefect_dataflow_v1_continue_on_sync_failure(orguser_transform_tas
         continueOnSyncFailure=True,
     )
 
-    from ddpui.ddpprefect import prefect_service
-
     deployment = post_prefect_dataflow_v1(request, payload)
     assert deployment["deploymentId"] == "test-deploy-id"
 
@@ -1263,8 +1261,6 @@ def test_post_prefect_dataflow_v1_continue_on_sync_failure_defaults_false(
         cron="test-cron",
         transformTasks=[],
     )
-
-    from ddpui.ddpprefect import prefect_service
 
     post_prefect_dataflow_v1(request, payload)
 
@@ -1371,8 +1367,6 @@ def test_put_prefect_dataflow_v1_passes_continue_on_sync_failure(orguser_transfo
         cron="",
         continueOnSyncFailure=True,
     )
-
-    from ddpui.ddpprefect import prefect_service
 
     put_prefect_dataflow_v1(request, "test-dep-update-flag", payload)
 
