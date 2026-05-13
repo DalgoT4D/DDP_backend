@@ -1,3 +1,4 @@
+from django.db.models import Q
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -106,11 +107,53 @@ def update_organization(
 @admin_org_router.get("/v1/audit-logs")
 @admin_org_router.get("/v1/audit-logs/")
 @has_permission(["can_manage_organization"])
-def get_audit_logs(request):
-    """List all admin audit logs."""
+def get_audit_logs(
+    request,
+    limit: int = 20,
+    offset: int = 0,
+    action: str | None = None,
+    org_id: int | None = None,
+    search: str | None = None,
+    order_by: str = "-created_at",
+):
+    """List admin audit logs with pagination, filtering and ordering."""
+
+    if limit < 1 or limit > 100:
+        raise HttpError(400, "limit must be between 1 and 100")
+
+    if offset < 0:
+        raise HttpError(400, "offset must be non-negative")
+
+    allowed_order_fields = [
+        "created_at",
+        "-created_at",
+        "action",
+        "-action",
+    ]
+
+    if order_by not in allowed_order_fields:
+        raise HttpError(400, "Invalid order_by field")
+
+    queryset = AdminAuditLog.objects.select_related("org")
+
+    if action:
+        queryset = queryset.filter(action=action)
+
+    if org_id:
+        queryset = queryset.filter(org_id=org_id)
+
+    if search:
+        queryset = queryset.filter(
+            Q(org__name__icontains=search)
+            | Q(action__icontains=search)
+        )
+
+    queryset = queryset.order_by(order_by)
+
+    total_count = queryset.count()
+
     logs = list(
-        AdminAuditLog.objects.select_related("org")
-        .values(
+        queryset[offset : offset + limit].values(
             "id",
             "action",
             "created_at",
@@ -119,12 +162,13 @@ def get_audit_logs(request):
             "old_data",
             "new_data",
         )
-        .order_by("-created_at")
     )
 
     return {
         "success": True,
-        "count": len(logs),
+        "count": total_count,
+        "limit": limit,
+        "offset": offset,
         "data": logs,
     }
 
