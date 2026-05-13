@@ -9,7 +9,7 @@ from pathlib import Path
 from django.apps import apps
 from django.core.management import call_command
 from ninja.errors import HttpError
-
+from ddpui.ddpprefect import prefect_service
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -51,7 +51,7 @@ from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock, TaskType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.constants import TASK_DBTRUN
+from ddpui.utils.constants import TASK_DBTRUN, TASK_DBTCLEAN, TASK_DBTDEPS
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -387,11 +387,17 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
             connection_id=conn.id,
         )
 
-    transform_tasks = OrgTask.objects.filter(
-        org=request.orguser.org,
-        generated_by="system",
-        task__type__in=[TaskType.DBT],  # Only DBT tasks - git tasks are now auto-managed
-    ).all()
+    # Only include non-auto-managed DBT tasks in payload (dbt-clean and dbt-deps are auto-managed)
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_tasks = (
+        OrgTask.objects.filter(
+            org=request.orguser.org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .all()
+    )
 
     payload = PrefectDataFlowCreateSchema4(
         name="test-dataflow",
@@ -424,11 +430,26 @@ def test_post_prefect_dataflow_v1_success2(orguser_transform_tasks):
         assert dataflow_task is not None
         assert dataflow_task.seq == i
 
-    seq = len(connections) + 1  # +1 for automatically added git task
+    # +3 for automatically added git task, dbt-clean, and dbt-deps
+    seq = len(connections) + 3
     for i, org_task in enumerate(transform_tasks):
         dataflow_task = DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask=org_task).first()
         assert dataflow_task is not None
         assert dataflow_task.seq == seq + i
+
+    # verify auto-managed tasks (git, dbt-clean, dbt-deps) were added
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTCLEAN).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTDEPS).count()
+        == 1
+    )
 
     # cleanup
     OrgTask.objects.filter(
@@ -786,11 +807,17 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
 
     seq = len(connections)
 
-    transform_tasks = OrgTask.objects.filter(
-        org=request.orguser.org,
-        generated_by="system",
-        task__type__in=[TaskType.DBT, TaskType.GIT],
-    ).all()
+    # Only include non-auto-managed tasks in payload
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_tasks = (
+        OrgTask.objects.filter(
+            org=request.orguser.org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .all()
+    )
     for i, transform_task in enumerate(transform_tasks):
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=transform_task, seq=seq + i)
 
@@ -814,6 +841,15 @@ def test_put_prefect_dataflow_v1_success(orguser_transform_tasks):
     )
     assert (
         DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    # verify dbt-clean and dbt-deps are auto-added
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTCLEAN).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTDEPS).count()
         == 1
     )
     assert (
@@ -853,11 +889,17 @@ def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
             connection_id=conn.id,
         )
 
-    transform_tasks = OrgTask.objects.filter(
-        org=request.orguser.org,
-        generated_by="system",
-        task__type__in=[TaskType.DBT, TaskType.GIT],
-    ).all()
+    # Only include non-auto-managed tasks in payload
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_tasks = (
+        OrgTask.objects.filter(
+            org=request.orguser.org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .all()
+    )
     for i, transform_task in enumerate(transform_tasks):
         DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=transform_task, seq=i)
 
@@ -884,6 +926,15 @@ def test_put_prefect_dataflow_v1_success2(orguser_transform_tasks):
 
     assert (
         DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__type=TaskType.GIT).count()
+        == 1
+    )
+    # verify dbt-clean and dbt-deps are auto-added
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTCLEAN).count()
+        == 1
+    )
+    assert (
+        DataflowOrgTask.objects.filter(dataflow=dataflow, orgtask__task__slug=TASK_DBTDEPS).count()
         == 1
     )
     assert (
@@ -1136,3 +1187,193 @@ def test_cancel_queued_manual_job_access_denied(
 
     assert exc.value.status_code == 403
     assert "You don't have access to this flow run" in str(exc.value)
+
+
+# ================================================================================
+# Tests for continueOnSyncFailure flag
+# ================================================================================
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_continue_on_sync_failure(orguser_transform_tasks):
+    """tests that continueOnSyncFailure flag is passed through to deployment params"""
+    request = mock_request(orguser_transform_tasks)
+
+    connections = [
+        PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
+    ]
+    OrgTask.objects.create(
+        org=request.orguser.org,
+        task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
+        connection_id="test-conn-id-1",
+    )
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow-flag",
+        connections=connections,
+        cron="test-cron",
+        transformTasks=[],
+        continueOnSyncFailure=True,
+    )
+
+    deployment = post_prefect_dataflow_v1(request, payload)
+    assert deployment["deploymentId"] == "test-deploy-id"
+
+    # verify the flag was passed in deployment_params
+    call_args = prefect_service.create_dataflow_v1.call_args
+    deployment_params = call_args[0][0].deployment_params
+    assert deployment_params["config"]["continue_on_sync_failure"] is True
+
+    # cleanup
+    OrgTask.objects.filter(org=request.orguser.org, connection_id="test-conn-id-1").delete()
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-deploy-id").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_continue_on_sync_failure_defaults_false(
+    orguser_transform_tasks,
+):
+    """tests that continueOnSyncFailure defaults to False when not provided"""
+    request = mock_request(orguser_transform_tasks)
+
+    connections = [
+        PrefectFlowAirbyteConnection2(id="test-conn-id-1", seq=1),
+    ]
+    OrgTask.objects.create(
+        org=request.orguser.org,
+        task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
+        connection_id="test-conn-id-1",
+    )
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="test-dataflow-default",
+        connections=connections,
+        cron="test-cron",
+        transformTasks=[],
+    )
+
+    post_prefect_dataflow_v1(request, payload)
+
+    call_args = prefect_service.create_dataflow_v1.call_args
+    deployment_params = call_args[0][0].deployment_params
+    assert deployment_params["config"]["continue_on_sync_failure"] is False
+
+    # cleanup
+    OrgTask.objects.filter(org=request.orguser.org, connection_id="test-conn-id-1").delete()
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-deploy-id").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_deployment=Mock(
+        return_value={
+            "name": "test-deploy",
+            "cron": "test-cron",
+            "isScheduleActive": True,
+            "parameters": {
+                "config": {
+                    "tasks": [],
+                    "continue_on_sync_failure": True,
+                }
+            },
+        }
+    ),
+)
+def test_get_prefect_dataflow_v1_returns_continue_on_sync_failure(orguser_transform_tasks):
+    """tests that continueOnSyncFailure is returned from deployment parameters"""
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="flow-flag",
+        deployment_name="prefect-flow-flag",
+        deployment_id="test-dep-flag",
+        dataflow_type="orchestrate",
+    )
+
+    dataflow = get_prefect_dataflow_v1(request, "test-dep-flag")
+    assert dataflow["continueOnSyncFailure"] is True
+
+    # cleanup
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-dep-flag").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    get_deployment=Mock(
+        return_value={
+            "name": "test-deploy",
+            "cron": "test-cron",
+            "isScheduleActive": True,
+            "parameters": {
+                "config": {
+                    "tasks": [],
+                }
+            },
+        }
+    ),
+)
+def test_get_prefect_dataflow_v1_defaults_continue_on_sync_failure_false(
+    orguser_transform_tasks,
+):
+    """tests that continueOnSyncFailure defaults to False for existing pipelines without the flag"""
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="flow-no-flag",
+        deployment_name="prefect-flow-no-flag",
+        deployment_id="test-dep-no-flag",
+        dataflow_type="orchestrate",
+    )
+
+    dataflow = get_prefect_dataflow_v1(request, "test-dep-no-flag")
+    assert dataflow["continueOnSyncFailure"] is False
+
+    # cleanup
+    OrgDataFlowv1.objects.filter(org=request.orguser.org, deployment_id="test-dep-no-flag").delete()
+
+
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    update_dataflow_v1=Mock(return_value=[]),
+)
+def test_put_prefect_dataflow_v1_passes_continue_on_sync_failure(orguser_transform_tasks):
+    """tests that continueOnSyncFailure flag is passed through on update"""
+    request = mock_request(orguser_transform_tasks)
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="flow-update-flag",
+        deployment_name="prefect-flow-update",
+        deployment_id="test-dep-update-flag",
+        dataflow_type="orchestrate",
+    )
+
+    payload = PrefectDataFlowUpdateSchema3(
+        name="updated-flow",
+        connections=[],
+        transformTasks=[],
+        cron="",
+        continueOnSyncFailure=True,
+    )
+
+    put_prefect_dataflow_v1(request, "test-dep-update-flag", payload)
+
+    call_args = prefect_service.update_dataflow_v1.call_args
+    updated_payload = call_args[0][1]
+    assert updated_payload.deployment_params["config"]["continue_on_sync_failure"] is True
+
+    # cleanup
+    DataflowOrgTask.objects.filter(dataflow=dataflow).delete()
+    dataflow.delete()

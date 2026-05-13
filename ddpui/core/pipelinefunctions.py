@@ -173,6 +173,7 @@ def setup_git_clone_shell_task_config(
     project_dir: str,
     gitpull_secret_block: OrgPrefectBlockv1,
     seq: int = 1,
+    gitrepo_url: str = "",
 ):
     """
     constructs the prefect payload for a git clone
@@ -182,7 +183,11 @@ def setup_git_clone_shell_task_config(
     eg. working_dir = /mnt/appdata/clientdbts/org1
         project_dir = dbtrepo
     """
-    shell_env = {"secret-git-pull-url-block": "", "project_dir": project_dir}
+    shell_env = {
+        "secret-git-pull-url-block": "",
+        "project_dir": project_dir,
+        "gitrepo_url": gitrepo_url,
+    }
 
     if gitpull_secret_block is not None:
         shell_env["secret-git-pull-url-block"] = gitpull_secret_block.block_name
@@ -225,6 +230,7 @@ def pipeline_with_orgtasks(
     dbt_project_params: DbtProjectParams = None,
     start_seq: int = 0,
     dbt_cloud_creds_block: OrgPrefectBlockv1 = None,
+    gitrepo_url: str = None,
 ):
     """
     Returns a list of task configs for a pipeline;
@@ -264,6 +270,7 @@ def pipeline_with_orgtasks(
                 dbt_project_params.clients_base_dir,
                 dbt_project_params.project_dir_relative,
                 gitpull_secret_block,
+                gitrepo_url=gitrepo_url or "",
             ).to_json()
         elif org_task.task.slug == TASK_GENERATE_EDR:
             task_config = setup_edr_send_report_task_config(

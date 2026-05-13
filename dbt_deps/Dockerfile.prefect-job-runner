@@ -52,6 +52,9 @@ RUN python3 -m venv /home/ddp/dbt/venv-1.10.19 && \
     /home/ddp/dbt/venv-1.10.19/bin/pip install --no-cache-dir . && \
     rm -rf /tmp/dbt-1.10.19
 
+# Create default dbt profiles directory
+RUN mkdir -p /root/.dbt
+
 # Final cleanup - remove build tools and any remaining artifacts
 RUN apt-get purge -y build-essential python3-dev curl && \
     apt-get autoremove -y && \
