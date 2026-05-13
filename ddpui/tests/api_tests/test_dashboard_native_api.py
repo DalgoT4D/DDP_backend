@@ -671,9 +671,7 @@ class TestDuplicateDashboardTabs:
         new_filter_id = int(new_filter_key.replace("filter-", ""))
 
         # Old filter ID must NOT appear in the new tab
-        assert f"filter-{original_filter.id}" not in [
-            item["i"] for item in new_tab.layout_config
-        ]
+        assert f"filter-{original_filter.id}" not in [item["i"] for item in new_tab.layout_config]
         # New filter ID must appear in layout_config
         assert f"filter-{new_filter_id}" in [item["i"] for item in new_tab.layout_config]
         # New filter ID must appear in components config

@@ -67,7 +67,7 @@ class ReportService:
         """Extract chart IDs from tabs (new structure) and root components (backward compat)."""
         chart_ids = []
 
-        for tab in (dashboard.tabs or []):
+        for tab in dashboard.tabs or []:
             for component in (tab.get("components") or {}).values():
                 if component.get("type") == "chart":
                     chart_id = component.get("config", {}).get("chartId")

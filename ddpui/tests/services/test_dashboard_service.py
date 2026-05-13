@@ -683,14 +683,18 @@ class TestUpdateDashboardTabs:
         assert len(updated.tabs) == 1
         assert updated.tabs[0]["id"] == "tab-111"
         assert updated.tabs[0]["title"] == "My Tab"
-        assert updated.tabs[0]["layout_config"] == [{"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 3}]
+        assert updated.tabs[0]["layout_config"] == [
+            {"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 3}
+        ]
         assert updated.tabs[0]["components"] == {"chart-1": {"type": "chart"}}
 
     def test_update_dashboard_without_tabs_preserves_existing(
         self, orguser, sample_dashboard, seed_db
     ):
         """Test that omitting tabs in update does not overwrite existing tabs"""
-        sample_dashboard.tabs = [{"id": "tab-existing", "title": "Existing Tab", "layout_config": [], "components": {}}]
+        sample_dashboard.tabs = [
+            {"id": "tab-existing", "title": "Existing Tab", "layout_config": [], "components": {}}
+        ]
         sample_dashboard.save()
 
         updated = DashboardService.update_dashboard(
