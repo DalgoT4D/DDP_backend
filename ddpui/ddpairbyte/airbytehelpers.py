@@ -535,6 +535,8 @@ def get_connections(org: Org) -> Tuple[List[AirbyteGetConnectionsResponse], None
             f"delete-connections-{org.slug}", org.id, connections_to_clean_up
         )
 
+    res.sort(key=lambda x: x["name"].lower())
+
     return res, None
 
 
