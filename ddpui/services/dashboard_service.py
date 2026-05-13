@@ -1026,6 +1026,56 @@ class DashboardService:
         ]
 
     @staticmethod
+    @staticmethod
+    def copy_tabs_with_filter_remapping(tabs: list, filter_id_mapping: Dict[str, str]) -> list:
+        """Copy tabs and remap filter IDs to match newly created filter copies.
+
+        When duplicating a dashboard, filters get new IDs. This method updates
+        any filter references inside tab layout_config and components to point
+        to the new filter IDs.
+
+        Args:
+            tabs: List of tab dicts from the original dashboard
+            filter_id_mapping: Mapping of old filter ID (str) -> new filter ID (str)
+
+        Returns:
+            New list of tab dicts with updated filter references
+        """
+        import copy as _copy
+
+        new_tabs = []
+        for tab in _copy.deepcopy(tabs):
+            for layout_item in tab.get("layout_config", []):
+                item_id = layout_item.get("i", "")
+                if item_id.startswith("filter-"):
+                    old_filter_id = item_id.replace("filter-", "")
+                    if old_filter_id in filter_id_mapping:
+                        layout_item["i"] = f"filter-{filter_id_mapping[old_filter_id]}"
+
+            updated_tab_components = {}
+            for component_id, component_data in tab.get("components", {}).items():
+                new_component_id = component_id
+                new_component_data = _copy.deepcopy(component_data)
+
+                if component_id.startswith("filter-"):
+                    old_filter_id = component_id.replace("filter-", "")
+                    if old_filter_id in filter_id_mapping:
+                        new_filter_id = filter_id_mapping[old_filter_id]
+                        new_component_id = f"filter-{new_filter_id}"
+                        if (
+                            "config" in new_component_data
+                            and "filterId" in new_component_data["config"]
+                        ):
+                            new_component_data["config"]["filterId"] = int(new_filter_id)
+
+                updated_tab_components[new_component_id] = new_component_data
+
+            tab["components"] = updated_tab_components
+            new_tabs.append(tab)
+
+        return new_tabs
+
+    @staticmethod
     def validate_dashboard_config(dashboard: Dashboard) -> Dict[str, Any]:
         """Validate dashboard configuration
 
