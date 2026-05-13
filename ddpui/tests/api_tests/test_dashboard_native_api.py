@@ -361,7 +361,9 @@ class TestUpdateDashboard:
         assert excinfo.value.status_code == 404
 
     def test_update_dashboard_layout_and_components(self, orguser, sample_dashboard, seed_db):
-        """Test updating layout and components"""
+        """Test updating layout and components via tabs"""
+        from ddpui.schemas.dashboard_schema import DashboardTabSchema
+
         request = mock_request(orguser)
 
         new_layout = [
@@ -374,14 +376,21 @@ class TestUpdateDashboard:
         }
 
         payload = DashboardUpdate(
-            layout_config=new_layout,
-            components=new_components,
+            tabs=[
+                DashboardTabSchema(
+                    id="tab-1",
+                    title="Tab 1",
+                    layout_config=new_layout,
+                    components=new_components,
+                )
+            ]
         )
 
         response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
-        assert len(response.layout_config) == 2
-        assert len(response.components) == 2
+        assert len(response.tabs) == 1
+        assert len(response.tabs[0].layout_config) == 2
+        assert len(response.tabs[0].components) == 2
 
     def test_update_dashboard_publish(self, orguser, sample_dashboard, seed_db):
         """Test publishing a dashboard"""
