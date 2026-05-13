@@ -117,7 +117,6 @@ def get_audit_logs(
     order_by: str = "-created_at",
 ):
     """List admin audit logs with pagination, filtering and ordering."""
-
     if limit < 1 or limit > 100:
         raise HttpError(400, "limit must be between 1 and 100")
 
