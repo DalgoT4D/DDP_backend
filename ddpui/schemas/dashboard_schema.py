@@ -6,7 +6,7 @@ This module contains all Pydantic schemas for dashboard-related API endpoints.
 from datetime import datetime
 from typing import Optional, List
 
-from ninja import Schema
+from ninja import Schema, Field
 
 
 # =============================================================================
@@ -22,6 +22,19 @@ class DashboardCreate(Schema):
     grid_columns: int = 12
 
 
+class DashboardTabSchema(Schema):
+    """Schema for a dashboard tab
+
+    Each tab contains its own layout and components, allowing users
+    to organize charts into separate views within a single dashboard.
+    """
+
+    id: str = Field(..., min_length=1)  # e.g., "tab-1710901234567"
+    title: str = Field(..., max_length=50)  # e.g., "Untitled Tab 1"
+    layout_config: List[dict] = []  # Grid positions for this tab
+    components: dict = {}  # Component configs for this tab
+
+
 class DashboardUpdate(Schema):
     """Schema for updating a dashboard"""
 
@@ -29,8 +42,7 @@ class DashboardUpdate(Schema):
     description: Optional[str] = None
     grid_columns: Optional[int] = None
     target_screen_size: Optional[str] = None
-    layout_config: Optional[list[dict]] = None
-    components: Optional[dict] = None
+    tabs: Optional[List[DashboardTabSchema]] = None
     filter_layout: Optional[str] = None
     is_published: Optional[bool] = None
 
@@ -63,6 +75,7 @@ class DashboardResponse(Schema):
     filter_layout: str
     layout_config: list[dict]
     components: dict
+    tabs: List[DashboardTabSchema] = []  # Array of tabs
     is_published: bool
     published_at: Optional[datetime] = None
     is_locked: bool = False

@@ -1040,3 +1040,160 @@ class TestCrossTableFilterInjection:
         filters = chart.get("extra_config", {}).get("filters", [])
         assert len(filters) == 2  # start + end date filters
         assert filters[0]["column"] == "created_at"
+
+
+# ================================================================================
+# Tab-based dashboard fixtures
+# ================================================================================
+
+
+@pytest.fixture
+def tab_chart(orguser, org):
+    chart = Chart.objects.create(
+        title="Tab Line Chart",
+        description="A chart inside a tab",
+        chart_type="line",
+        schema_name="public",
+        table_name="sales",
+        extra_config={},
+        created_by=orguser,
+        org=org,
+    )
+    yield chart
+    try:
+        chart.refresh_from_db()
+        chart.delete()
+    except Chart.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def tab_dashboard(orguser, org, tab_chart):
+    dashboard = Dashboard.objects.create(
+        title="Tab Dashboard",
+        dashboard_type="native",
+        grid_columns=12,
+        layout_config=[],
+        components={},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Overview",
+                "layout_config": [{"i": "chart-2", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {
+                    "chart-2": {
+                        "id": "chart-2",
+                        "type": "chart",
+                        "config": {"chartId": tab_chart.id, "chartType": "line"},
+                    },
+                    "text-1": {
+                        "id": "text-1",
+                        "type": "text",
+                        "config": {"content": "Tab text"},
+                    },
+                },
+            }
+        ],
+        created_by=orguser,
+        org=org,
+    )
+    yield dashboard
+    try:
+        dashboard.refresh_from_db()
+        dashboard.delete()
+    except Dashboard.DoesNotExist:
+        pass
+
+
+# ================================================================================
+# Test _extract_chart_ids
+# ================================================================================
+
+
+class TestExtractChartIds:
+    """Tests for ReportService._extract_chart_ids"""
+
+    def test_extracts_ids_from_tabs(self, tab_dashboard, tab_chart):
+        """Charts inside tabs are discovered"""
+        chart_ids = ReportService._extract_chart_ids(tab_dashboard)
+        assert tab_chart.id in chart_ids
+
+    def test_extracts_ids_from_root_components(self, sample_dashboard, sample_chart):
+        """Charts in root components are discovered (backward compat)"""
+        chart_ids = ReportService._extract_chart_ids(sample_dashboard)
+        assert sample_chart.id in chart_ids
+
+    def test_deduplicates_when_chart_in_both(self, orguser, org):
+        """Same chartId in tabs and root components appears only once"""
+        dashboard = Dashboard.objects.create(
+            title="Overlap",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={
+                "chart-1": {"type": "chart", "config": {"chartId": 99}},
+            },
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "chart-1": {"type": "chart", "config": {"chartId": 99}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        chart_ids = ReportService._extract_chart_ids(dashboard)
+        assert chart_ids.count(99) == 1
+        dashboard.delete()
+
+
+# ================================================================================
+# Test _freeze_dashboard with tabs
+# ================================================================================
+
+
+class TestFreezeDashboardTabs:
+    """Tests for ReportService._freeze_dashboard on tab-based dashboards"""
+
+    def test_tabs_captured_in_frozen_output(self, tab_dashboard):
+        """tabs field is included and contains all tab data"""
+        frozen = ReportService._freeze_dashboard(tab_dashboard)
+
+        assert "tabs" in frozen
+        assert len(frozen["tabs"]) == 1
+        assert frozen["tabs"][0]["id"] == "tab-1"
+        assert frozen["tabs"][0]["title"] == "Overview"
+
+    def test_root_fields_empty_for_tab_dashboard(self, tab_dashboard):
+        """Root layout_config and components are empty for tab-based dashboards"""
+        frozen = ReportService._freeze_dashboard(tab_dashboard)
+
+        assert frozen["layout_config"] == []
+        assert frozen["components"] == {}
+
+
+# ================================================================================
+# Test _freeze_chart_configs with tabs
+# ================================================================================
+
+
+class TestFreezeChartConfigsTabs:
+    """Tests for ReportService._freeze_chart_configs on tab-based dashboards"""
+
+    def test_freezes_chart_from_tab(self, tab_dashboard, tab_chart):
+        """Charts referenced inside tabs are frozen"""
+        frozen = ReportService._freeze_chart_configs(tab_dashboard)
+
+        assert str(tab_chart.id) in frozen
+        chart_data = frozen[str(tab_chart.id)]
+        assert chart_data["title"] == "Tab Line Chart"
+        assert chart_data["chart_type"] == "line"
+        assert chart_data["table_name"] == "sales"
+
+    def test_non_chart_components_in_tabs_are_skipped(self, tab_dashboard, tab_chart):
+        """Text components inside tabs are not included in frozen configs"""
+        frozen = ReportService._freeze_chart_configs(tab_dashboard)
+        assert len(frozen) == 1

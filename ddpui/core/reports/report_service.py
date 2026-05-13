@@ -57,26 +57,40 @@ class ReportService:
             "target_screen_size": dashboard.target_screen_size,
             "layout_config": dashboard.layout_config,
             "components": dashboard.components,
+            "tabs": dashboard.tabs,
             "filter_layout": dashboard.filter_layout,
             "filters": [f.to_json() for f in filters],
         }
+
+    @staticmethod
+    def _extract_chart_ids(dashboard: Dashboard) -> List[int]:
+        """Extract chart IDs from tabs (new structure) and root components (backward compat)."""
+        chart_ids = []
+
+        for tab in dashboard.tabs or []:
+            for component in (tab.get("components") or {}).values():
+                if component.get("type") == "chart":
+                    chart_id = component.get("config", {}).get("chartId")
+                    if chart_id:
+                        chart_ids.append(chart_id)
+
+        for component in (dashboard.components or {}).values():
+            if component.get("type") == "chart":
+                chart_id = component.get("config", {}).get("chartId")
+                if chart_id:
+                    chart_ids.append(chart_id)
+
+        return list(set(chart_ids))
 
     @staticmethod
     def _freeze_chart_configs(dashboard: Dashboard) -> Dict[str, Any]:
         """
         Layer 3: Freeze ALL chart configs referenced in dashboard components.
 
-        Walks through components, extracts chartId from each chart component,
-        batch-fetches the Chart records, and stores full configs.
+        Walks through components and tabs, extracts chartId from each chart
+        component, batch-fetches the Chart records, and stores full configs.
         """
-        components = dashboard.components or {}
-        chart_ids = []
-
-        for comp_id, component in components.items():
-            if component.get("type") == "chart":
-                chart_id = component.get("config", {}).get("chartId")
-                if chart_id:
-                    chart_ids.append(chart_id)
+        chart_ids = ReportService._extract_chart_ids(dashboard)
 
         charts = Chart.objects.filter(id__in=chart_ids, org=dashboard.org)
         frozen = {}
@@ -605,14 +619,8 @@ class ReportService:
         except Dashboard.DoesNotExist:
             raise SnapshotValidationError(f"Dashboard {dashboard_id} not found")
 
-        # Extract unique (schema_name, table_name) from chart components
-        components = dashboard.components or {}
-        chart_ids = []
-        for comp_id, component in components.items():
-            if component.get("type") == "chart":
-                chart_id = component.get("config", {}).get("chartId")
-                if chart_id:
-                    chart_ids.append(chart_id)
+        # Extract unique (schema_name, table_name) from chart components and tabs
+        chart_ids = ReportService._extract_chart_ids(dashboard)
 
         charts = Chart.objects.filter(id__in=chart_ids, org=org)
         table_refs = set()

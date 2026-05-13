@@ -242,9 +242,12 @@ def duplicate_dashboard(request, dashboard_id: int):
 
             updated_components[new_component_id] = new_component_data
 
-        # Update the dashboard with the corrected layout_config and components
+        # Update the dashboard with the corrected layout_config, components, and tabs
         new_dashboard.layout_config = new_layout_config
         new_dashboard.components = updated_components
+        new_dashboard.tabs = DashboardService.copy_tabs_with_filter_remapping(
+            original_dashboard.tabs or [], filter_id_mapping
+        )
         new_dashboard.save()
 
         logger.info(
