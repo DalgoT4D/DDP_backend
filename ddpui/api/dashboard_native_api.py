@@ -16,9 +16,16 @@ from ddpui.models.dashboard import (
     DashboardLock,
     DashboardFilterType,
 )
+from ddpui.models.dashboard_chat import (
+    DashboardAIContext,
+    DashboardChatMessage,
+    DashboardChatMessageRole,
+)
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 from ddpui.services.dashboard_service import (
     DashboardService,
     DashboardData,
@@ -35,6 +42,7 @@ from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     DashboardResponse,
+    DashboardExportResponse,
     DashboardFilterResponse,
     FilterCreate,
     FilterUpdate,
@@ -46,11 +54,58 @@ from ddpui.schemas.dashboard_schema import (
     DashboardShareStatus,
     LandingPageResponse,
     LandingPageResolveResponse,
+    DashboardAIContextResponse,
+    DashboardChatBootstrapResponse,
+    DashboardChatMessageFeedbackRequest,
+    DashboardChatMessageFeedbackResponse,
+    UpdateDashboardAIContextSchema,
 )
+from ddpui.core.dashboard_chat.suggested_prompts import build_dashboard_suggested_prompts
 
 logger = CustomLogger("ddpui")
 
 dashboard_native_router = Router()
+
+
+def _get_or_create_dashboard_ai_context(dashboard: Dashboard):
+    context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
+    return context
+
+
+def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAIContext):
+    org_dbt = dashboard.org.dbt
+    return DashboardAIContextResponse(
+        dashboard_id=dashboard.id,
+        dashboard_title=dashboard.title,
+        dashboard_context_markdown=context.markdown,
+        dashboard_context_updated_by=context.updated_by.user.email if context.updated_by else None,
+        dashboard_context_updated_at=context.updated_at,
+        ai_context_refreshed_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+    )
+
+
+def _serialize_dashboard_chat_bootstrap(dashboard: Dashboard) -> DashboardChatBootstrapResponse:
+    dashboard_export = DashboardService.export_dashboard_context_for_dashboard(dashboard, dashboard.org)
+
+    return DashboardChatBootstrapResponse(
+        dashboard_id=dashboard.id,
+        suggested_prompts=build_dashboard_suggested_prompts(
+            dashboard_export=dashboard_export,
+        ),
+    )
+
+
+def _ensure_dashboard_chat_feature_enabled(org) -> None:
+    """Hide dashboard chat settings endpoints unless the feature flag is enabled."""
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+
+
+def _ensure_dashboard_chat_consent_enabled(org) -> None:
+    """Require consent before writing dashboard-specific AI context."""
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None or not org_preferences.ai_data_sharing_enabled:
+        raise HttpError(409, "Enable AI data sharing before updating dashboard AI context")
 
 
 # Endpoints
@@ -87,6 +142,133 @@ def get_dashboard(request, dashboard_id: int):
         raise HttpError(404, "Dashboard not found") from err
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+
+
+@dashboard_native_router.get("/{dashboard_id}/export/", response=DashboardExportResponse)
+@has_permission(["can_view_dashboards"])
+def export_dashboard(request, dashboard_id: int):
+    """Export dashboard JSON along with the chart configs it references."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        return DashboardService.export_dashboard_context(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+
+@dashboard_native_router.get(
+    "/{dashboard_id}/ai-context/",
+    response=DashboardAIContextResponse,
+)
+@has_permission(["can_manage_org_settings"])
+def get_dashboard_ai_context(request, dashboard_id: int):
+    """Load dashboard-level AI context settings for settings management."""
+    orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    context = _get_or_create_dashboard_ai_context(dashboard)
+
+    return _serialize_dashboard_ai_context(dashboard, context)
+
+
+@dashboard_native_router.get(
+    "/{dashboard_id}/chat-bootstrap/",
+    response=DashboardChatBootstrapResponse,
+)
+@has_permission(["can_view_dashboards"])
+def get_dashboard_chat_bootstrap(request, dashboard_id: int):
+    """Return deterministic UI bootstrap data for dashboard chat."""
+    orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return _serialize_dashboard_chat_bootstrap(dashboard)
+
+
+@dashboard_native_router.post(
+    "/{dashboard_id}/chat/messages/{message_id}/feedback/",
+    response=DashboardChatMessageFeedbackResponse,
+)
+@has_permission(["can_view_dashboards"])
+@transaction.atomic
+def set_dashboard_chat_message_feedback(
+    request,
+    dashboard_id: int,
+    message_id: int,
+    payload: DashboardChatMessageFeedbackRequest,
+):
+    """Persist one locked thumbs-up/thumbs-down selection for an assistant answer."""
+    orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+
+    message = (
+        DashboardChatMessage.objects.select_related("session")
+        .filter(
+            id=message_id,
+            session__org=orguser.org,
+            session__orguser=orguser,
+            session__dashboard_id=dashboard_id,
+            role=DashboardChatMessageRole.ASSISTANT.value,
+        )
+        .first()
+    )
+    if message is None:
+        raise HttpError(404, "Assistant message not found")
+
+    if message.feedback is not None:
+        if message.feedback == payload.feedback:
+            return DashboardChatMessageFeedbackResponse(
+                message_id=message.id,
+                feedback=message.feedback,
+            )
+        raise HttpError(409, "Feedback has already been recorded for this message")
+
+    message.feedback = payload.feedback
+    message.save(update_fields=["feedback"])
+
+    return DashboardChatMessageFeedbackResponse(
+        message_id=message.id,
+        feedback=message.feedback,
+    )
+
+
+@dashboard_native_router.put(
+    "/{dashboard_id}/ai-context/",
+    response=DashboardAIContextResponse,
+)
+@has_permission(["can_manage_org_settings"])
+@transaction.atomic
+def update_dashboard_ai_context(
+    request,
+    dashboard_id: int,
+    payload: UpdateDashboardAIContextSchema,
+):
+    """Update dashboard-level AI context markdown for settings management."""
+    orguser: OrgUser = request.orguser
+    _ensure_dashboard_chat_feature_enabled(orguser.org)
+    _ensure_dashboard_chat_consent_enabled(orguser.org)
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    context = _get_or_create_dashboard_ai_context(dashboard)
+    context.markdown = payload.dashboard_context_markdown
+    context.updated_by = orguser
+    context.updated_at = timezone.now()
+    context.save()
+
+    return _serialize_dashboard_ai_context(dashboard, context)
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)

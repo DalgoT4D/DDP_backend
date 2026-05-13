@@ -105,6 +105,8 @@ class OrgDbt(models.Model):
         help_text="True if this repository is created and managed by the system, False if it's a user-owned repository",
     )
 
+    docs_generated_at = models.DateTimeField(null=True, blank=True)
+    vector_last_ingested_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
