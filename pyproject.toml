@@ -285,16 +285,22 @@ testpaths = [
   "ddpui/tests"
 ]
 
+[tool.pylint.master]
+ignore = ["migrations", "tests", "api_tests"]
+load-plugins = ["pylint_django"]
+fail-under = 8.5
+
 [tool.pylint.messages_control]
 max-line-length = 200
-fail-under = 6.5
 disable = [
   "missing-module-docstring",
   "broad-exception-raised",
   "broad-exception-caught",
   "too-few-public-methods",
   "logging-not-lazy",
-  "logging-fstring-interpolation"
+  "logging-fstring-interpolation",
+  "cyclic-import",
+  "duplicate-code"
 ]
 
 [tool.coverage.run]

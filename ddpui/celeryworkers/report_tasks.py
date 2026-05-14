@@ -18,7 +18,7 @@ logger = CustomLogger("ddpui.celeryworkers.report_tasks")
 
 @app.task(bind=True)
 def send_report_email_task(
-    self,
+    _,
     snapshot_id,
     orguser_id,
     recipient_emails,
@@ -39,12 +39,12 @@ def send_report_email_task(
     report_title = snapshot.title
 
     # Always include the private (authenticated) URL
-    private_url = ReportService._build_private_url(snapshot_id)
+    private_url = ReportService.build_private_url(snapshot_id)
 
     # Include the public URL only if the report is publicly shared
     public_url = None
     if snapshot.is_public and snapshot.public_share_token:
-        public_url = ReportService._build_public_url(snapshot.public_share_token)
+        public_url = ReportService.build_public_url(snapshot.public_share_token)
 
     # Start with all recipients as failed; remove as they succeed
     failed_recipients = list(recipient_emails)

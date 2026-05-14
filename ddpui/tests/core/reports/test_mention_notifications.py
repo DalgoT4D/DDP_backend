@@ -359,7 +359,6 @@ class TestRenderMentionEmail:
         """render_mention_email returns a (plain_text, html) tuple"""
         plain, html_body = render_mention_email(
             author_name="Noopur Raval",
-            author_email="noopur@test.com",
             comment_excerpt="This looks great",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/42",
@@ -374,7 +373,6 @@ class TestRenderMentionEmail:
         """Template includes author, title, excerpt, and URL"""
         plain, html_body = render_mention_email(
             author_name="Noopur Raval",
-            author_email="noopur@test.com",
             comment_excerpt="Check this number",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/42",
@@ -396,7 +394,6 @@ class TestRenderMentionEmail:
         """Template includes chart name when provided"""
         plain, html_body = render_mention_email(
             author_name="Noopur Raval",
-            author_email="noopur@test.com",
             comment_excerpt="Check the bar values",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/42",
@@ -415,7 +412,6 @@ class TestRenderMentionEmail:
         """Template omits chart name when None (summary-level comment)"""
         plain, html_body = render_mention_email(
             author_name="Noopur Raval",
-            author_email="noopur@test.com",
             comment_excerpt="Looks good",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/42",
@@ -430,7 +426,6 @@ class TestRenderMentionEmail:
         """@email mentions have the @ prefix stripped to prevent auto-linking"""
         plain, html_body = render_mention_email(
             author_name="Author",
-            author_email="author@test.com",
             comment_excerpt="Hey @mentioned@test.com check this",
             snapshot_title="Q1 Report",
             report_url="http://localhost:3001/reports/42",
@@ -446,7 +441,6 @@ class TestRenderMentionEmail:
         """User-generated content is HTML-escaped to prevent XSS"""
         plain, html_body = render_mention_email(
             author_name='<script>alert("xss")</script>',
-            author_email="attacker@test.com",
             comment_excerpt="<img src=x onerror=alert(1)>",
             snapshot_title="Report <b>bold</b>",
             report_url="http://localhost:3001/reports/42",

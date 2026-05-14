@@ -55,7 +55,6 @@ class MentionService:
 
         MentionService.notify_mentioned_users(
             comment=comment,
-            org=org,
             author=author,
             mentioned_users=mentioned_users,
         )
@@ -71,7 +70,6 @@ class MentionService:
     @staticmethod
     def notify_mentioned_users(
         comment: Comment,
-        org: Org,
         author: OrgUser,
         mentioned_users: list,
     ) -> None:
@@ -98,7 +96,6 @@ class MentionService:
 
             MentionService._send_email_notification(
                 comment=comment,
-                author=author,
                 mentioned_user=mentioned_user,
                 author_email=author_email,
                 email_subject=email_subject,
@@ -159,7 +156,6 @@ class MentionService:
     @staticmethod
     def _send_email_notification(
         comment: Comment,
-        author: OrgUser,
         mentioned_user: OrgUser,
         author_email: str,
         email_subject: str,
@@ -184,7 +180,6 @@ class MentionService:
 
             plain_text, html_body = render_mention_email(
                 author_name=author_email,
-                author_email=author_email,
                 comment_excerpt=excerpt,
                 snapshot_title=snapshot_title,
                 report_url=report_url,
