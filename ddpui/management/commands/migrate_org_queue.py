@@ -12,11 +12,18 @@ from ddpui.models.org import (
     QueueDetailsSchema,
 )
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, Task
+from ddpui.ddpprefect import SCHEDULED_PIPELINE_QUEUE, CONNECTION_SYNC_QUEUE
 from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITPULL, TASK_GITCLONE
 from ddpui.utils.unified_logger import get_logger
 from ddpui.core.orchestrate.pipeline_service import PipelineService
+
+# Mapping from queue type to the EKS queue name
+EKS_QUEUE_NAME_MAP = {
+    "scheduled_pipeline_queue": SCHEDULED_PIPELINE_QUEUE,
+    "connection_sync_queue": CONNECTION_SYNC_QUEUE,
+}
 
 logger = get_logger()
 
@@ -48,8 +55,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--new-queue",
             type=str,
-            required=True,
-            help="New queue name to migrate to",
+            required=False,
+            help="New queue name to migrate to (auto-resolved for EKS migrations of scheduled_pipeline_queue and connection_sync_queue)",
         )
         parser.add_argument(
             "--new-workpool",
@@ -71,10 +78,20 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         org_slug: str = options["org_slug"]
         queue_type: str = options["queue_type"]
-        new_queue: str = options["new_queue"]
+        new_queue: str = options.get("new_queue")
         new_workpool: str = options.get("new_workpool")
         dry_run: bool = options["dry_run"]
         is_workpool_eks: bool = options["is_workpool_eks"]
+
+        # Auto-resolve queue name for EKS migrations
+        if not new_queue:
+            if is_workpool_eks and queue_type in EKS_QUEUE_NAME_MAP:
+                new_queue = EKS_QUEUE_NAME_MAP[queue_type]
+            else:
+                raise CommandError(
+                    "--new-queue is required (it can only be auto-resolved when "
+                    "--is-workpool-eks is set for scheduled_pipeline_queue or connection_sync_queue)"
+                )
 
         # Get the organization
         try:

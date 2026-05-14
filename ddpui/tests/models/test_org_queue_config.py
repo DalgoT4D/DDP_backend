@@ -2,7 +2,13 @@ import os
 import pytest
 from unittest.mock import patch
 from ddpui.models.org import Org, get_default_queue_config
-from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
+from ddpui.ddpprefect import (
+    DDP_WORK_QUEUE,
+    MANUL_DBT_WORK_QUEUE,
+    EDR_WORK_QUEUE,
+    SCHEDULED_PIPELINE_QUEUE,
+    CONNECTION_SYNC_QUEUE,
+)
 
 
 @pytest.fixture
@@ -320,12 +326,12 @@ class TestGetDefaultQueueConfig:
 
         expected = {
             "scheduled_pipeline_queue": {
-                "name": DDP_WORK_QUEUE,
+                "name": SCHEDULED_PIPELINE_QUEUE,
                 "workpool": "eks-pool",
                 "is_workpool_eks": True,
             },
             "connection_sync_queue": {
-                "name": DDP_WORK_QUEUE,
+                "name": CONNECTION_SYNC_QUEUE,
                 "workpool": "eks-pool",
                 "is_workpool_eks": True,
             },
