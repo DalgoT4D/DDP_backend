@@ -47,16 +47,26 @@ class TransformType(str, Enum):
 def get_default_queue_config():
     """Returns the new nested structure as default"""
     default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME") or "default"
+    eks_workpool = os.getenv("PREFECT_EKS_WORKER_POOL_NAME")
+
+    # If an EKS pool is configured, scheduled_pipeline and connection_sync use it
+    if eks_workpool:
+        pipeline_workpool = eks_workpool
+        pipeline_is_eks = True
+    else:
+        pipeline_workpool = default_workpool
+        pipeline_is_eks = False
+
     return {
         "scheduled_pipeline_queue": {
             "name": DDP_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": pipeline_workpool,
+            "is_workpool_eks": pipeline_is_eks,
         },
         "connection_sync_queue": {
             "name": DDP_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": pipeline_workpool,
+            "is_workpool_eks": pipeline_is_eks,
         },
         "transform_task_queue": {
             "name": MANUL_DBT_WORK_QUEUE,

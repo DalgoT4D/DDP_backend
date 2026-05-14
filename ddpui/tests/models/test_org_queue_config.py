@@ -306,3 +306,39 @@ class TestGetDefaultQueueConfig:
         }
 
         assert config == expected
+
+    @patch.dict(
+        os.environ,
+        {
+            "PREFECT_WORKER_POOL_NAME": "ec2-pool",
+            "PREFECT_EKS_WORKER_POOL_NAME": "eks-pool",
+        },
+    )
+    def test_get_default_queue_config_with_eks_env_var(self):
+        """Test that scheduled_pipeline and connection_sync use EKS pool when configured."""
+        config = get_default_queue_config()
+
+        expected = {
+            "scheduled_pipeline_queue": {
+                "name": DDP_WORK_QUEUE,
+                "workpool": "eks-pool",
+                "is_workpool_eks": True,
+            },
+            "connection_sync_queue": {
+                "name": DDP_WORK_QUEUE,
+                "workpool": "eks-pool",
+                "is_workpool_eks": True,
+            },
+            "transform_task_queue": {
+                "name": MANUL_DBT_WORK_QUEUE,
+                "workpool": "ec2-pool",
+                "is_workpool_eks": False,
+            },
+            "edr_queue": {
+                "name": EDR_WORK_QUEUE,
+                "workpool": "ec2-pool",
+                "is_workpool_eks": False,
+            },
+        }
+
+        assert config == expected
