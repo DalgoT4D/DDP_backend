@@ -172,7 +172,7 @@ class TestSendReportEmailTask:
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
-    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.build_private_url")
     def test_sends_to_all_recipients_no_notification(
         self,
         mock_private_url,
@@ -210,7 +210,7 @@ class TestSendReportEmailTask:
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
-    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.build_private_url")
     def test_uses_custom_subject(
         self,
         mock_private_url,
@@ -241,7 +241,7 @@ class TestSendReportEmailTask:
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
-    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.build_private_url")
     def test_partial_failure_notifies_with_failed_recipients(
         self,
         mock_private_url,
@@ -280,7 +280,7 @@ class TestSendReportEmailTask:
     @patch("ddpui.celeryworkers.report_tasks.create_notification")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
-    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.build_private_url")
     def test_pdf_failure_notifies_with_all_recipients(
         self,
         mock_private_url,
@@ -314,8 +314,8 @@ class TestSendReportEmailTask:
     @patch("ddpui.celeryworkers.report_tasks.send_email_with_attachment")
     @patch("ddpui.celeryworkers.report_tasks.PdfExportService.generate_pdf")
     @patch("ddpui.celeryworkers.report_tasks.ReportService.ensure_share_token")
-    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_private_url")
-    @patch("ddpui.celeryworkers.report_tasks.ReportService._build_public_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.build_private_url")
+    @patch("ddpui.celeryworkers.report_tasks.ReportService.build_public_url")
     def test_includes_public_url_when_report_is_public(
         self,
         mock_public_url,

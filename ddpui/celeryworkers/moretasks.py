@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from ddpui.celery import app
 
@@ -16,7 +15,7 @@ logger = CustomLogger("ddpui")
 
 
 @app.task(bind=True)
-def schedule_notification_task(self, notification_id, recipient_id):  # skipcq: PYL-W0613
+def schedule_notification_task(_, notification_id, recipient_id):  # skipcq: PYL-W0613
     """send scheduled notifications"""
     notification = Notification.objects.get(id=notification_id)
     recipient = OrgUser.objects.get(id=recipient_id)

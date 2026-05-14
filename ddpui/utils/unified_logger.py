@@ -6,13 +6,12 @@ correlation tracking, and observability platform compatibility.
 import json
 import logging
 import traceback
-import uuid
 import inspect
 import threading
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Dict
 from django.conf import settings
 from logging.handlers import RotatingFileHandler
 

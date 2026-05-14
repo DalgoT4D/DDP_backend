@@ -53,7 +53,6 @@ def _render_thread_plain(thread: list) -> str:
 
 def render_mention_email(
     author_name: str,
-    author_email: str,
     comment_excerpt: str,
     snapshot_title: str,
     report_url: str,
@@ -64,7 +63,6 @@ def render_mention_email(
 
     Args:
         author_name: Display name of the commenter
-        author_email: Email of the commenter
         comment_excerpt: The comment text (truncated)
         snapshot_title: Title of the report snapshot
         report_url: URL to the report
@@ -226,13 +224,13 @@ def render_share_report_email(
     if public_url:
         plain_text += f"\nPublic link (no login required): {public_url}\n"
     plain_text += (
-        f"\n"
-        f"OR\n"
-        f"\n"
-        f"Download the attached PDF to peruse at your own pace.\n"
-        f"\n"
-        f"---\n"
-        f"You received this email because someone shared a Dalgo report with you.\n"
+        "\n"
+        "OR\n"
+        "\n"
+        "Download the attached PDF to peruse at your own pace.\n"
+        "\n"
+        "---\n"
+        "You received this email because someone shared a Dalgo report with you.\n"
     )
 
     # Public link HTML block (only if public)

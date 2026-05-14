@@ -1,18 +1,17 @@
 """these are tasks which we run through celery"""
 
 import os
-import shutil
-from pathlib import Path
-from datetime import datetime, timedelta
-from time import sleep
 import subprocess
-from django.utils.dateparse import parse_datetime
-import pytz
-from django.core.management import call_command
-from django.utils.text import slugify
+from datetime import datetime, timedelta
+from pathlib import Path
+from time import sleep
 
+import pytz
 import yaml
 from celery.schedules import crontab
+from django.core.management import call_command
+from django.utils.dateparse import parse_datetime
+
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
 from ddpui.settings import PRODUCTION
@@ -24,20 +23,15 @@ from ddpui.core.webhooks.webhook_functions import (
     get_org_from_flow_run,
 )
 from ddpui.core.notifications.delivery import notify_org_managers
-
-from ddpui.ddpdbt import elementary_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.models.org import (
     Org,
-    OrgDbt,
     OrgSchemaChange,
     OrgWarehouse,
     OrgPrefectBlockv1,
     OrgDataFlowv1,
-    TransformType,
 )
 from ddpui.models.airbyte import AirbyteJob
 
@@ -73,7 +67,6 @@ from ddpui.utils.constants import (
     SYSTEM_USER_EMAIL,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
-from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
@@ -86,7 +79,6 @@ from ddpui.ddpprefect.prefect_service import (
     get_flow_run_poll,
 )
 from ddpui.ddpprefect import (
-    DBTCLIPROFILE,
     TASK_RUN_KIND,
     FLOW_RUN_KIND,
     FLOW_RUN_CRASHED_STATE_NAME,

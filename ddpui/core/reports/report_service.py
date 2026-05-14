@@ -706,12 +706,12 @@ class ReportService:
         return frontend_url
 
     @staticmethod
-    def _build_public_url(token: str) -> str:
+    def build_public_url(token: str) -> str:
         """Build the public share URL for a report snapshot."""
         return f"{ReportService._get_frontend_url()}/share/report/{token}"
 
     @staticmethod
-    def _build_private_url(snapshot_id: int) -> str:
+    def build_private_url(snapshot_id: int) -> str:
         """Build the authenticated URL for a report snapshot."""
         return f"{ReportService._get_frontend_url()}/reports/{snapshot_id}"
 
@@ -788,7 +788,7 @@ class ReportService:
         }
 
         if snapshot.is_public and snapshot.public_share_token:
-            response_data["public_url"] = ReportService._build_public_url(
+            response_data["public_url"] = ReportService.build_public_url(
                 snapshot.public_share_token
             )
             response_data["public_share_token"] = snapshot.public_share_token
@@ -824,7 +824,7 @@ class ReportService:
         }
 
         if snapshot.is_public and snapshot.public_share_token:
-            response_data["public_url"] = ReportService._build_public_url(
+            response_data["public_url"] = ReportService.build_public_url(
                 snapshot.public_share_token
             )
 
