@@ -2,7 +2,13 @@ import os
 import pytest
 from unittest.mock import patch
 from ddpui.models.org import Org, get_default_queue_config
-from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
+from ddpui.ddpprefect import (
+    DDP_WORK_QUEUE,
+    MANUL_DBT_WORK_QUEUE,
+    EDR_WORK_QUEUE,
+    SCHEDULED_PIPELINE_QUEUE,
+    CONNECTION_SYNC_QUEUE,
+)
 
 
 @pytest.fixture
@@ -303,6 +309,42 @@ class TestGetDefaultQueueConfig:
                 "is_workpool_eks": False,
             },
             "edr_queue": {"name": EDR_WORK_QUEUE, "workpool": "default", "is_workpool_eks": False},
+        }
+
+        assert config == expected
+
+    @patch.dict(
+        os.environ,
+        {
+            "PREFECT_WORKER_POOL_NAME": "ec2-pool",
+            "PREFECT_EKS_WORKER_POOL_NAME": "eks-pool",
+        },
+    )
+    def test_get_default_queue_config_with_eks_env_var(self):
+        """Test that scheduled_pipeline and connection_sync use EKS pool when configured."""
+        config = get_default_queue_config()
+
+        expected = {
+            "scheduled_pipeline_queue": {
+                "name": SCHEDULED_PIPELINE_QUEUE,
+                "workpool": "eks-pool",
+                "is_workpool_eks": True,
+            },
+            "connection_sync_queue": {
+                "name": CONNECTION_SYNC_QUEUE,
+                "workpool": "eks-pool",
+                "is_workpool_eks": True,
+            },
+            "transform_task_queue": {
+                "name": MANUL_DBT_WORK_QUEUE,
+                "workpool": "ec2-pool",
+                "is_workpool_eks": False,
+            },
+            "edr_queue": {
+                "name": EDR_WORK_QUEUE,
+                "workpool": "ec2-pool",
+                "is_workpool_eks": False,
+            },
         }
 
         assert config == expected
