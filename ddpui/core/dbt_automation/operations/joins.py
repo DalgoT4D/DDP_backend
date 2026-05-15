@@ -104,8 +104,23 @@ def joins_sql(
             f" {join_type.upper()} JOIN " + "{{" + join_with + "}}" + " " + aliases[1] + "\n"
         )
 
-    dbt_code += f" ON {quote_columnname(aliases[0], warehouse.name)}.{quote_columnname(join_on['key1'], warehouse.name)}"
-    dbt_code += f" {join_on['compare_with']} {quote_columnname(aliases[1], warehouse.name)}.{quote_columnname(join_on['key2'], warehouse.name)}\n"
+    join_conditions = join_on if isinstance(join_on, list) else [join_on]
+    if not join_conditions:
+        raise ValueError("Join operation requires at least one join condition")
+
+    on_clause = []
+    allowed_operators = ["=", "!=", "<>", ">", "<", ">=", "<=", "LIKE", "ILIKE"]
+
+    for condition in join_conditions:
+        op = condition["compare_with"].upper()
+        if op not in allowed_operators:
+            raise ValueError(f"Operator {op} not allowed in join condition")
+
+        left = f"{quote_columnname(aliases[0], warehouse.name)}.{quote_columnname(condition['key1'], warehouse.name)}"
+        right = f"{quote_columnname(aliases[1], warehouse.name)}.{quote_columnname(condition['key2'], warehouse.name)}"
+        on_clause.append(f"{left} {op} {right}")
+
+    dbt_code += " ON " + " AND ".join(on_clause) + "\n"
 
     return dbt_code, list(output_set)
 
