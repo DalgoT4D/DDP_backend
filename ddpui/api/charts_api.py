@@ -605,27 +605,58 @@ def get_chart_data_preview(
     logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
     try:
-        # Get table preview using the same query builder as chart data
-        # This ensures preview shows exactly what will be used for the chart
-        preview_data = charts_service.get_chart_data_table_preview(
-            org_warehouse, modified_payload, page, limit
-        )
+        if modified_payload.chart_type == "table":
+            # Table charts require dimensions — use the dedicated table preview path
+            preview_data = charts_service.get_chart_data_table_preview(
+                org_warehouse, modified_payload, page, limit
+            )
 
-        logger.info(f"Preview data keys: {list(preview_data.keys())}")
-        logger.info(
-            f"Preview data sample: columns={len(preview_data.get('columns', []))}, data_rows={len(preview_data.get('data', []))}"
-        )
+            logger.info(f"Preview data keys: {list(preview_data.keys())}")
+            logger.info(
+                f"Preview data sample: columns={len(preview_data.get('columns', []))}, data_rows={len(preview_data.get('data', []))}"
+            )
 
-        # Ensure all required fields are present with proper defaults
-        response_data = {
-            "columns": preview_data.get("columns", []),
-            "column_types": preview_data.get("column_types", {}),
-            "data": preview_data.get("data", []),
-            "page": preview_data.get("page", page),
-            "page_size": preview_data.get("limit", limit),
-            # Total rows are fetched via /chart-data-preview/total-rows/
-            "total_rows": preview_data.get("total_rows", 0),
-        }
+            response_data = {
+                "columns": preview_data.get("columns", []),
+                "column_types": preview_data.get("column_types", {}),
+                "data": preview_data.get("data", []),
+                "page": preview_data.get("page", page),
+                "page_size": preview_data.get("limit", limit),
+                "total_rows": preview_data.get("total_rows", 0),
+            }
+        else:
+            # Non-table charts (number, bar, line, etc.) may have no dimensions.
+            # Run the chart query and return raw results as a simple data preview.
+            warehouse_client = charts_service.get_warehouse_client(org_warehouse)
+            query_builder = charts_service.build_chart_query(modified_payload, org_warehouse)
+            results = charts_service.execute_chart_query(
+                warehouse_client, query_builder, modified_payload
+            )
+
+            # Build column list from metrics (and dimension_col if present)
+            columns = []
+            if modified_payload.dimension_col:
+                columns.append(modified_payload.dimension_col)
+            if modified_payload.metrics:
+                for metric in modified_payload.metrics:
+                    if metric.aggregation.lower() == "count" and metric.column is None:
+                        columns.append(metric.alias or "Total Count")
+                    else:
+                        columns.append(metric.alias or f"{metric.aggregation}({metric.column})")
+
+            logger.info(
+                f"Non-table chart preview: chart_type={modified_payload.chart_type}, "
+                f"columns={columns}, rows={len(results)}"
+            )
+
+            response_data = {
+                "columns": columns,
+                "column_types": {},
+                "data": results,  # already a list of dicts from execute_chart_query
+                "page": page,
+                "page_size": limit,
+                "total_rows": len(results),
+            }
 
         logger.info(
             f"Response data keys: {list(response_data.keys())}, page_size={response_data['page_size']}"
