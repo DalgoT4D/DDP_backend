@@ -86,8 +86,21 @@ def update_organization(
         "slug": org.slug,
     }
 
+    performed_by = None
+
+    if hasattr(request, "orguser") and request.orguser:
+        performed_by = request.orguser.user
+
+    elif (
+        hasattr(request, "user")
+        and request.user
+        and request.user.is_authenticated
+    ):
+        performed_by = request.user
+
     AdminAuditLog.objects.create(
         org=org,
+        performed_by=performed_by,
         action="organization_updated",
         old_data=old_data,
         new_data=new_data,
@@ -117,6 +130,7 @@ def get_audit_logs(
     order_by: str = "-created_at",
 ):
     """List admin audit logs with pagination, filtering and ordering."""
+
     if limit < 1 or limit > 100:
         raise HttpError(400, "limit must be between 1 and 100")
 
@@ -133,7 +147,10 @@ def get_audit_logs(
     if order_by not in allowed_order_fields:
         raise HttpError(400, "Invalid order_by field")
 
-    queryset = AdminAuditLog.objects.select_related("org")
+    queryset = AdminAuditLog.objects.select_related(
+        "org",
+        "performed_by",
+    )
 
     if action:
         queryset = queryset.filter(action=action)
@@ -145,6 +162,7 @@ def get_audit_logs(
         queryset = queryset.filter(
             Q(org__name__icontains=search)
             | Q(action__icontains=search)
+            | Q(performed_by__username__icontains=search)
         )
 
     queryset = queryset.order_by(order_by)
@@ -158,6 +176,9 @@ def get_audit_logs(
             "created_at",
             "org__id",
             "org__name",
+            "performed_by__id",
+            "performed_by__username",
+            "performed_by__email",
             "old_data",
             "new_data",
         )
@@ -178,7 +199,10 @@ def get_audit_logs(
 def get_single_audit_log(request, log_id: int):
     """Get single audit log by ID."""
     log = (
-        AdminAuditLog.objects.select_related("org")
+        AdminAuditLog.objects.select_related(
+            "org",
+            "performed_by",
+        )
         .filter(id=log_id)
         .values(
             "id",
@@ -186,6 +210,9 @@ def get_single_audit_log(request, log_id: int):
             "created_at",
             "org__id",
             "org__name",
+            "performed_by__id",
+            "performed_by__username",
+            "performed_by__email",
             "old_data",
             "new_data",
         )

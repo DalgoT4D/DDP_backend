@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.auth.models import User
 
 from ddpui.models.org import Org
 
@@ -17,6 +18,13 @@ class AdminAuditLog(models.Model):
         on_delete=models.CASCADE,
     )
 
+    performed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
     action = models.CharField(
         max_length=100,
         choices=ACTION_CHOICES,
@@ -26,4 +34,14 @@ class AdminAuditLog(models.Model):
     new_data = models.JSONField()
 
     def __str__(self):
-        return f"{self.action} | Org: {self.org.name}"
+        performed_by = (
+            self.performed_by.username
+            if self.performed_by
+            else "unknown"
+        )
+
+        return (
+            f"{self.action} | "
+            f"Org: {self.org.name} | "
+            f"By: {performed_by}"
+        )
