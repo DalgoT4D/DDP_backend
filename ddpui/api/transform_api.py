@@ -27,6 +27,7 @@ from ddpui.schemas.dbt_workflow_schema import (
     ModelSrcInputsForMultiInputOp,
     validate_operation_config_v2,
     TerminateChainAndCreateModelPayload,
+    get_operation_schemas,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.taskprogress import TaskProgress
@@ -608,6 +609,16 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
         logger.error(f"Failed to create source/model node: {str(e)}")
         # Transaction will automatically rollback due to the exception
         raise HttpError(500, f"Failed to create node: {str(e)}")
+
+
+@transform_router.get("/v2/dbt_project/operations/schemas/")
+@has_permission(["can_view_dbt_workspace"])
+def get_operation_input_schemas(request):
+    """
+    Returns the JSON schemas for all available transformation operations.
+    This allows the frontend to dynamically generate UI forms for operations.
+    """
+    return get_operation_schemas()
 
 
 @transform_router.post("/v2/dbt_project/operations/nodes/")
