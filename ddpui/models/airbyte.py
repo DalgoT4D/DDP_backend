@@ -1,6 +1,7 @@
 """track sync times, number of records, volume of data by client and connection"""
 
 from django.db import models
+
 from ddpui.models.org import Org
 
 
@@ -12,7 +13,12 @@ class SyncStats(models.Model):
     job_id = models.IntegerField(null=True)
     attempt = models.IntegerField(default=0)
     status = models.TextField()
-    sync_type = models.CharField(choices=[("manual", "manual"), ("orchestrate", "orchestrate")])
+
+    sync_type = models.CharField(
+        max_length=20,
+        choices=[("manual", "manual"), ("orchestrate", "orchestrate")],
+    )
+
     sync_time = models.DateTimeField()
     sync_duration_s = models.BigIntegerField(default=0)
     sync_records = models.BigIntegerField(default=0)
@@ -41,7 +47,9 @@ class AirbyteJob(models.Model):
     job_type = models.CharField(
         max_length=20
     )  # check_connection_source┃check_connection_destination┃discover_schema┃get_spec┃sync┃reset_connection┃refresh┃clear
-    config_id = models.CharField(max_length=100)  # connection_id, source_id, destination_id
+    config_id = models.CharField(
+        max_length=100
+    )  # connection_id, source_id, destination_id
     status = models.CharField(
         max_length=20
     )  # pending┃running┃incomplete┃failed┃succeeded┃cancelled
@@ -63,15 +71,22 @@ class AirbyteJob(models.Model):
         null=True
     )  # contains information about the attempts made for this job. only populated if the job has attempts.
 
-    started_at = models.DateTimeField(null=True)  # because the api spec says this will be optional
+    started_at = models.DateTimeField(
+        null=True
+    )  # because the api spec says this will be optional
     ended_at = models.DateTimeField(
         null=True
-    )  # when the job ended; can be null if we pull or sync an ongonig job
+    )  # when the job ended; can be null if we pull or sync an ongoing job
     created_at = models.DateTimeField()  # when the job was created in airbyte
-    updated_at = models.DateTimeField(auto_now=True)  # when the django record was last updated
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )  # when the django record was last updated
 
     def __str__(self) -> str:
-        return f"AirbyteJob[Job ID: {self.job_id}|Job Type: {self.job_type}|Status: {self.status}]"
+        return (
+            f"AirbyteJob[Job ID: {self.job_id}|"
+            f"Job Type: {self.job_type}|Status: {self.status}]"
+        )
 
     @property
     def duration(self):

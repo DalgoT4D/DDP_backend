@@ -28,7 +28,11 @@ class Migration(migrations.Migration):
                 (
                     "sync_type",
                     models.CharField(
-                        choices=[("manual", "manual"), ("orchestrate", "orchestrate")]
+                        max_length=20,
+                        choices=[
+                            ("manual", "manual"),
+                            ("orchestrate", "orchestrate"),
+                        ],
                     ),
                 ),
                 ("sync_time", models.DateTimeField()),
@@ -37,7 +41,10 @@ class Migration(migrations.Migration):
                 ("sync_data_volume_b", models.IntegerField(default=0)),
                 (
                     "org",
-                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to="ddpui.org"),
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="ddpui.org",
+                    ),
                 ),
             ],
         ),
