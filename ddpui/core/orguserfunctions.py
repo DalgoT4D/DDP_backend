@@ -136,6 +136,7 @@ def signup_orguser(payload: OrgUserCreate):
     orguserid_bytes = str(orguser.id).encode("utf8")
 
     redis.set(redis_key, orguserid_bytes)
+    redis.expire(redis_key, 3600 * 24)  # 24 hours TTL
 
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
@@ -393,7 +394,7 @@ def request_reset_password(email: str, is_v2: bool = False):
     orguserid_bytes = str(orguser.id).encode("utf8")
 
     redis.set(redis_key, orguserid_bytes)
-    redis.expire(redis_key, 3600 * 24)  # 24 hours
+    redis.expire(redis_key, 3600 * 24)  # 24 hours TTL
 
     # To seperate the frontend urls for v1 and v2
     FRONTEND_URL = os.getenv("FRONTEND_URL_V2") if is_v2 else os.getenv("FRONTEND_URL")
@@ -450,6 +451,7 @@ def resend_verification_email(orguser: OrgUser, email: str):
     orguserid_bytes = str(orguser.id).encode("utf8")
 
     redis.set(redis_key, orguserid_bytes)
+    redis.expire(redis_key, 3600 * 24)  # 24 hours TTL
 
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
