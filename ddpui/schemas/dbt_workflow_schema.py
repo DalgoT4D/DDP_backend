@@ -82,6 +82,8 @@ class LockCanvasResponseSchema(Schema):
 class AggregateMetricConfig(Schema):
     """Schema for individual aggregation metric"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     column: str
     operation: str
     output_column_name: str
@@ -90,11 +92,15 @@ class AggregateMetricConfig(Schema):
 class AggregateOperationConfig(Schema):
     """Config for aggregate operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     aggregate_on: list[AggregateMetricConfig]
 
 
 class ArithmeticOperand(Schema):
     """Schema for individual arithmetic operand"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     is_col: bool
     value: Union[str, float, int]
@@ -102,6 +108,8 @@ class ArithmeticOperand(Schema):
 
 class ArithmeticOperationConfig(Schema):
     """Config for arithmetic operations"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     operator: Literal["add", "sub", "mul", "div"]
     operands: list[ArithmeticOperand]
@@ -120,6 +128,8 @@ class CaseWhenClause(Schema):
 class CaseWhenOperationConfig(Schema):
     """Config for case when operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     when_clauses: list[CaseWhenClause]
     output_column_name: str
     case_type: Literal["simple", "advance"]
@@ -129,6 +139,8 @@ class CaseWhenOperationConfig(Schema):
 
 class CastDatatypeColumnConfig(Schema):
     """Schema for individual column in cast datatypes operation"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     columnname: str
     columntype: str
@@ -143,6 +155,8 @@ class CastDatatypesOperationConfig(Schema):
 class CoalesceColumnsOperationConfig(Schema):
     """Config for coalesce columns operation"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     columns: list[str]
     output_column_name: str
     default_value: Any = Field(
@@ -154,6 +168,8 @@ class CoalesceColumnsOperationConfig(Schema):
 class ConcatColumnsOperationConfig(Schema):
     """Config for concat columns operation"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     columns: list[str]
     output_column_name: str
 
@@ -161,11 +177,15 @@ class ConcatColumnsOperationConfig(Schema):
 class DropColumnOperationConfig(Schema):
     """Config for drop column operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     columns: list[str]
 
 
 class RenameColumnOperationConfig(Schema):
     """Config for rename column operations"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     columns: dict[str, str]  # mapping of old column names to new column names
 
@@ -173,12 +193,16 @@ class RenameColumnOperationConfig(Schema):
 class FlattenJsonOperationConfig(Schema):
     """Config for flattening JSON columns"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     json_column: str
     json_columns_to_copy: list[str]
 
 
 class GenericColumnConfig(Schema):
     """Schema for individual generic column operation"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     function_name: str
     operands: list[ArithmeticOperand]
@@ -188,11 +212,15 @@ class GenericColumnConfig(Schema):
 class GenericColumnOperationConfig(Schema):
     """Config for generic column operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     computed_columns: list[GenericColumnConfig]
 
 
 class GroupByOperationConfig(Schema):
     """Config for group by operations"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     aggregate_on: list[AggregateMetricConfig]
     dimension_columns: list[str]
@@ -230,6 +258,8 @@ class PivotOperationConfig(Schema):
 class RawSqlOperationConfig(Schema):
     """Config for raw/generic SQL operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     sql_statement_1: str  # select part
     sql_statement_2: str = ""  # optional where/group by etc.
 
@@ -237,16 +267,22 @@ class RawSqlOperationConfig(Schema):
 class RegexExtractionOperationConfig(Schema):
     """Config for regex extraction operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     columns: dict[str, str]  # mapping of column names to regex patterns
 
 
 class ReplaceColOp(Schema):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     find: str
     replace: str
 
 
 class ReplaceColumnValueConfig(Schema):
     """Schema for individual replace column value operation"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     col_name: str
     output_column_name: str
@@ -256,11 +292,15 @@ class ReplaceColumnValueConfig(Schema):
 class ReplaceValueOperationConfig(Schema):
     """Config for replace value operations"""
 
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     columns: list[ReplaceColumnValueConfig]
 
 
 class UnpivotOperationConfig(Schema):
     """Config for unpivot operations"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     exclude_columns: list[str] = []  # exclude from unpivot but keep in the resulting table
     unpivot_columns: list[str]  # columns to unpivot
@@ -279,6 +319,8 @@ class FilterClauseConfig(Schema):
 
 class WhereFilterOperationConfig(Schema):
     """Config for where filter operations"""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     where_type: Literal["and", "or", "sql"] = "and"
     clauses: list[FilterClauseConfig]

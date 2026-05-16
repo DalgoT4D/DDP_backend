@@ -98,7 +98,7 @@ def merge_operations_sql(
         elif operation["type"] == "rawsql":
             op_select_statement, out_cols = raw_generic_dbt_sql(operation["config"], warehouse)
 
-        output_cols = out_cols
+        output_cols = [col.strip() if isinstance(col, str) else col for col in out_cols]
 
         cte_sql = f" , {operation['as_cte']} as (\n"
         if cte_counter == 0:
@@ -193,7 +193,7 @@ def merge_operations_sql_v2(operations: list[dict], warehouse: WarehouseInterfac
         elif operation["type"] == "rawsql":
             op_select_statement, out_cols = raw_generic_dbt_sql(operation["config"], warehouse)
 
-        output_cols = out_cols
+        output_cols = [col.strip() if isinstance(col, str) else col for col in out_cols]
 
         cte_sql = f" , {operation['as_cte']} as (\n"
         if cte_counter == 0:
