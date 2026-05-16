@@ -62,6 +62,11 @@ class DashboardFilterResponse(Schema):
     created_at: datetime
     updated_at: datetime
 
+    @classmethod
+    def from_model(cls, filter_obj):
+        """Create response schema from dashboard filter model."""
+        return cls(**filter_obj.to_json())
+
 
 class DashboardResponse(Schema):
     """Response schema for dashboard"""
