@@ -164,7 +164,9 @@ def update_orguser(orguser: OrgUser, payload: OrgUserUpdate):
 def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
     """updates attributes of an OrgUser"""
     if payload.email:
-        orguser.user.email = payload.email.lower().strip()
+        email = payload.email.lower().strip()
+        orguser.user.email = email
+        orguser.user.username = email
     if payload.active is not None:
         orguser.user.is_active = payload.active
     if payload.role_uuid:
