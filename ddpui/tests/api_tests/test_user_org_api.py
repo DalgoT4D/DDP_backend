@@ -419,9 +419,11 @@ def test_put_organization_user_self_v1(orguser):
     )
 
     response = put_organization_user_self_v1(request, payload)
+    orguser.user.refresh_from_db()
 
     assert response.email == "newemail"
     assert response.active is new_active_status
+    assert orguser.user.username == "newemail"
 
 
 # ================================================================================
@@ -451,7 +453,10 @@ def test_put_organization_user_v1(orguser, nonadminorguser):
     )
 
     response = put_organization_user_v1(request, payload)
+    nonadminorguser.user.refresh_from_db()
+
     assert response.email == payload.email
+    assert nonadminorguser.user.username == payload.email
 
 
 # ================================================================================
