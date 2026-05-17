@@ -4,7 +4,7 @@ Functions which communicate with Airbyte
 These functions do not access the Dalgo database
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 import os
 import json
 from datetime import datetime
@@ -86,7 +86,7 @@ def abreq(endpoint, req=None, **kwargs):
     return {}
 
 
-def get_workspaces():
+def get_workspaces() -> dict:
     """Fetch all workspaces in airbyte server"""
     logger.info("Fetching workspaces from Airbyte server")
 
@@ -139,7 +139,7 @@ def create_workspace(name: str) -> dict:
     return res
 
 
-def delete_workspace(workspace_id: str):
+def delete_workspace(workspace_id: str) -> dict:
     """Deletes an airbyte workspace"""
     res = abreq("workspaces/delete", {"workspaceId": workspace_id})
     return res
@@ -167,7 +167,7 @@ def get_source_definition(workspace_id: str, sourcedef_id: str) -> dict:
     return res
 
 
-def get_source_definitions(workspace_id: str) -> List[Dict]:
+def get_source_definitions(workspace_id: str) -> dict:
     """Fetch source definitions for an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -228,7 +228,7 @@ def create_custom_source_definition(
     docker_repository: str,
     docker_image_tag: str,
     documentation_url: str,
-):
+) -> dict:
     """Create a custom source definition in Airbyte."""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -261,7 +261,7 @@ def create_custom_source_definition(
     return res
 
 
-def get_sources(workspace_id: str) -> List[Dict]:
+def get_sources(workspace_id: str) -> dict:
     """Fetch all sources in an airbyte workspace"""
     if not isinstance(workspace_id, str):
         raise HttpError(400, "Invalid workspace ID")
@@ -404,7 +404,9 @@ def check_source_connection(workspace_id: str, data: AirbyteSourceCreate) -> dic
     return res
 
 
-def check_source_connection_for_update(source_id: str, data: AirbyteSourceUpdateCheckConnection):
+def check_source_connection_for_update(
+    source_id: str, data: AirbyteSourceUpdateCheckConnection
+) -> dict:
     """Test connection on a potential edit on source"""
     res = abreq(
         "sources/check_connection_for_update",
@@ -661,7 +663,7 @@ def check_destination_connection(workspace_id: str, data: AirbyteDestinationCrea
 
 def check_destination_connection_for_update(
     destination_id: str, data: AirbyteDestinationUpdateCheckConnection
-):
+) -> dict:
     """Test a potential destination's connection in an airbyte workspace"""
     if not isinstance(destination_id, str):
         raise HttpError(400, "destination_id must be a string")
@@ -1005,7 +1007,7 @@ def get_jobs_for_connection(
     job_types: list[str] | None = None,
     created_at_start: datetime = None,
     created_at_end: datetime = None,
-) -> int | None:
+) -> dict:
     """
     returns most recent job for a connection
     possible configTypes are
@@ -1117,7 +1119,7 @@ def get_connection_catalog(connection_id: str, **kwargs) -> dict:
     return res
 
 
-def get_current_airbyte_version():
+def get_current_airbyte_version() -> Optional[str]:
     """Fetch airbyte version"""
 
     res = abreq("instance_configuration", method="GET")
