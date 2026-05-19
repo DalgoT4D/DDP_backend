@@ -104,14 +104,20 @@ def sample_dashboard(orguser, org):
         description="Test",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
-        components={
-            "chart-1": {
-                "id": "chart-1",
-                "type": "chart",
-                "config": {"chartId": 1, "chartType": "bar", "title": "Bar"},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {
+                    "chart-1": {
+                        "id": "chart-1",
+                        "type": "chart",
+                        "config": {"chartId": 1, "chartType": "bar", "title": "Bar"},
+                    }
+                },
             }
-        },
+        ],
         created_by=orguser,
         org=org,
     )
@@ -476,14 +482,20 @@ def public_dashboard(orguser, org):
         description="Test",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
-        components={
-            "chart-1": {
-                "id": "chart-1",
-                "type": "chart",
-                "config": {"chartId": 1, "chartType": "bar", "title": "Bar"},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {
+                    "chart-1": {
+                        "id": "chart-1",
+                        "type": "chart",
+                        "config": {"chartId": 1, "chartType": "bar", "title": "Bar"},
+                    }
+                },
             }
-        },
+        ],
         created_by=orguser,
         org=org,
         is_public=True,

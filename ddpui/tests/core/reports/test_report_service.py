@@ -104,19 +104,21 @@ def sample_dashboard(orguser, org):
         dashboard_type="native",
         grid_columns=12,
         target_screen_size="desktop",
-        layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
-        components={
-            "chart-1": {
-                "id": "chart-1",
-                "type": "chart",
-                "config": {"chartId": 1, "chartType": "bar", "title": "Bar Chart"},
-            },
-            "text-1": {
-                "id": "text-1",
-                "type": "text",
-                "config": {"content": "Hello"},
-            },
-        },
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {
+                    "chart-1": {
+                        "id": "chart-1",
+                        "type": "chart",
+                        "config": {"chartId": 1, "chartType": "bar", "title": "Bar Chart"},
+                    },
+                    "text-1": {"id": "text-1", "type": "text", "config": {"content": "Hello"}},
+                },
+            }
+        ],
         created_by=orguser,
         org=org,
     )
@@ -411,8 +413,8 @@ class TestFreezeDashboard:
         assert frozen["description"] == "Test Description"
         assert frozen["grid_columns"] == 12
         assert frozen["target_screen_size"] == "desktop"
-        assert frozen["layout_config"] is not None
-        assert "chart-1" in frozen["components"]
+        assert len(frozen["tabs"]) == 1
+        assert "chart-1" in frozen["tabs"][0]["components"]
         assert len(frozen["filters"]) == 1
         assert frozen["filters"][0]["filter_type"] == "datetime"
 
@@ -428,8 +430,6 @@ class TestFreezeDashboard:
             title="Empty",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             created_by=orguser,
             org=org,
         )
@@ -471,8 +471,6 @@ class TestFreezeChartConfigs:
             title="Empty",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             created_by=orguser,
             org=org,
         )
@@ -486,14 +484,14 @@ class TestFreezeChartConfigs:
             title="Missing ID",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={
-                "chart-1": {
-                    "id": "chart-1",
-                    "type": "chart",
-                    "config": {},  # No chartId
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": [],
+                    "components": {"chart-1": {"id": "chart-1", "type": "chart", "config": {}}},
                 }
-            },
+            ],
             created_by=orguser,
             org=org,
         )
@@ -659,7 +657,7 @@ class TestGetSnapshotViewData:
         assert dd["title"] == "Test Dashboard"
         assert dd["dashboard_type"] == "native"
         assert dd["is_published"] is True
-        assert "components" in dd
+        assert "tabs" in dd
         assert "filters" in dd
 
         # report_metadata keys
@@ -922,7 +920,7 @@ class TestSnapshotIsolation:
         dd = view_data["dashboard_data"]
         assert dd["title"] == original_title
         assert dd["dashboard_type"] == "native"
-        assert "components" in dd
+        assert "tabs" in dd
         assert "filters" in dd
 
         rm = view_data["report_metadata"]
@@ -1073,8 +1071,6 @@ def tab_dashboard(orguser, org, tab_chart):
         title="Tab Dashboard",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[],
-        components={},
         tabs=[
             {
                 "id": "tab-1",
@@ -1123,24 +1119,25 @@ class TestExtractChartIds:
         chart_ids = ReportService._extract_chart_ids(sample_dashboard)
         assert sample_chart.id in chart_ids
 
-    def test_deduplicates_when_chart_in_both(self, orguser, org):
-        """Same chartId in tabs and root components appears only once"""
+    def test_deduplicates_when_chart_in_multiple_tabs(self, orguser, org):
+        """Same chartId in multiple tabs appears only once"""
         dashboard = Dashboard.objects.create(
             title="Overlap",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={
-                "chart-1": {"type": "chart", "config": {"chartId": 99}},
-            },
             tabs=[
                 {
                     "id": "tab-1",
-                    "title": "T",
-                    "components": {
-                        "chart-1": {"type": "chart", "config": {"chartId": 99}},
-                    },
-                }
+                    "title": "T1",
+                    "layout_config": [],
+                    "components": {"chart-1": {"type": "chart", "config": {"chartId": 99}}},
+                },
+                {
+                    "id": "tab-2",
+                    "title": "T2",
+                    "layout_config": [],
+                    "components": {"chart-1": {"type": "chart", "config": {"chartId": 99}}},
+                },
             ],
             created_by=orguser,
             org=org,
@@ -1166,13 +1163,6 @@ class TestFreezeDashboardTabs:
         assert len(frozen["tabs"]) == 1
         assert frozen["tabs"][0]["id"] == "tab-1"
         assert frozen["tabs"][0]["title"] == "Overview"
-
-    def test_root_fields_empty_for_tab_dashboard(self, tab_dashboard):
-        """Root layout_config and components are empty for tab-based dashboards"""
-        frozen = ReportService._freeze_dashboard(tab_dashboard)
-
-        assert frozen["layout_config"] == []
-        assert frozen["components"] == {}
 
 
 # ================================================================================

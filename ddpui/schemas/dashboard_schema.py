@@ -73,8 +73,6 @@ class DashboardResponse(Schema):
     grid_columns: int
     target_screen_size: str
     filter_layout: str
-    layout_config: list[dict]
-    components: dict
     tabs: List[DashboardTabSchema] = []  # Array of tabs
     is_published: bool
     published_at: Optional[datetime] = None

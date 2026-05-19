@@ -64,12 +64,6 @@ class Dashboard(models.Model):
         help_text="Target screen size for dashboard design",
     )
 
-    # Layout configuration stored as JSON
-    layout_config = models.JSONField(default=list, help_text="Grid layout positions and sizes")
-
-    # Components configuration
-    components = models.JSONField(default=dict, help_text="Dashboard components configuration")
-
     # Tabs configuration - each tab contains its own layout_config and components
     tabs = models.JSONField(
         default=list, help_text="Array of tab objects: [{id, title, layout_config, components}]"
@@ -137,8 +131,6 @@ class Dashboard(models.Model):
             "dashboard_type": self.dashboard_type,
             "grid_columns": self.grid_columns,
             "target_screen_size": self.target_screen_size,
-            "layout_config": self.layout_config,
-            "components": self.components,
             "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
             "is_published": self.is_published,
