@@ -1,4 +1,5 @@
 import json
+import time
 from typing import List
 from datetime import timedelta
 
@@ -12,7 +13,7 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from django.http import JsonResponse
 from django.conf import settings
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
@@ -51,6 +52,7 @@ from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
+from ddpui.utils.redis_client import RedisClient
 
 from django.db import transaction
 
@@ -191,10 +193,23 @@ def post_logout(request):
     Blacklists the refresh token on logout and clears httpOnly cookies.
     Gets refresh token from cookies for cookie-based authentication.
     """
-    # Get refresh token from cookies
-    refresh_token = request.COOKIES.get("refresh_token")
+    # Blacklist the access token JTI in Redis so it cannot be reused after logout
+    access_token_str = request.COOKIES.get("access_token")
+    if access_token_str:
+        try:
+            access_token = AccessToken(access_token_str)
+            jti = access_token.payload.get("jti")
+            exp = access_token.payload.get("exp")
+            if jti and exp:
+                ttl = int(exp - time.time())
+                if ttl > 0:
+                    redis_client = RedisClient.get_instance()
+                    redis_client.set(f"blacklisted_jti:{jti}", "1", ex=ttl)
+        except (TokenError, Exception):
+            pass
 
-    # Try to blacklist the refresh token if we have one
+    # Blacklist the refresh token
+    refresh_token = request.COOKIES.get("refresh_token")
     if refresh_token:
         try:
             token = RefreshToken(refresh_token)
@@ -202,14 +217,9 @@ def post_logout(request):
             if request.user and request.user.id == token_user_id:
                 token.blacklist()
         except (TokenError, Exception):
-            # Token is already invalid/expired or other error, continue with logout
             pass
 
-    # Create response
     response = JsonResponse({"success": True})
-
-    # Always try to clear cookies (harmless if they don't exist)
-    # delete_cookie only accepts: key, path, domain, samesite
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
 

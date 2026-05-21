@@ -127,6 +127,13 @@ class CustomJwtAuthMiddleware(HttpBearer):
             logger.exception("Invalid or expired token: %s", err)
             raise HttpError(401, "Invalid or expired token") from err
 
+        # Check if this token's JTI has been blacklisted (e.g. user logged out)
+        jti = token_payload.get("jti")
+        if jti:
+            redis_client = RedisClient.get_instance()
+            if redis_client.get(f"blacklisted_jti:{jti}"):
+                raise HttpError(401, "Token has been invalidated")
+
         role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
 
         user_id = token_payload.get("user_id")

@@ -1,5 +1,6 @@
 import uuid
 import os
+import time
 import django
 from datetime import datetime
 from django.core.management import call_command
@@ -14,6 +15,7 @@ django.setup()
 
 from ddpui.api.user_org_api import (
     get_current_user_v2,
+    post_logout,
     post_organization_user,
     get_organization_users,
     delete_organization_users_v1,
@@ -1137,3 +1139,57 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
         instance.delete_warehouse.assert_called_once()
         instance.delete_transformation_layer.assert_called_once()
         assert response == {"success": 1}
+
+
+# ================================================================================
+# Logout tests
+# ================================================================================
+@patch("ddpui.api.user_org_api.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+@patch("ddpui.api.user_org_api.RefreshToken")
+def test_post_logout_blacklists_access_token_jti(mock_refresh_token, mock_access_token, mock_redis):
+    """Test that logout stores the access token JTI in Redis with correct TTL."""
+    jti = "test-jti-abc123"
+    exp = int(time.time()) + 3600  # expires in 1 hour
+    mock_access_token.return_value.payload = {"jti": jti, "exp": exp}
+    mock_refresh_token.return_value.payload = {"user_id": 1}
+
+    request = Mock()
+    request.COOKIES = {"access_token": "fake-access-token", "refresh_token": "fake-refresh-token"}
+    request.user = Mock(id=1)
+
+    post_logout(request)
+
+    call_args = mock_redis.return_value.set.call_args
+    assert call_args[0][0] == f"blacklisted_jti:{jti}"
+    assert call_args[0][1] == "1"
+    assert abs(call_args[1]["ex"] - 3600) < 5  # TTL should be ~3600 seconds
+
+
+@patch("ddpui.api.user_org_api.AccessToken")
+def test_post_logout_no_access_token_cookie(mock_access_token):
+    """Test that logout succeeds gracefully when no access token cookie exists."""
+    request = Mock()
+    request.COOKIES = {}
+    request.user = None
+
+    response = post_logout(request)
+
+    mock_access_token.assert_not_called()
+    assert response.status_code == 200
+
+
+@patch("ddpui.api.user_org_api.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+def test_post_logout_invalid_access_token_still_succeeds(mock_access_token, mock_redis):
+    """Test that logout succeeds even when the access token is already invalid/expired."""
+    mock_access_token.side_effect = Exception("Token is invalid")
+
+    request = Mock()
+    request.COOKIES = {"access_token": "invalid-token"}
+    request.user = None
+
+    response = post_logout(request)
+
+    mock_redis.return_value.set.assert_not_called()
+    assert response.status_code == 200
