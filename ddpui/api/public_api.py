@@ -1292,8 +1292,15 @@ def get_public_report_map_data(request, token: str):
 
         payload = json.loads(request.body) if request.body else {}
 
+        # Validate that at least one of value_column or metrics is provided
+        if not payload.get("value_column") and "metrics" not in payload:
+            return 404, PublicErrorResponse(
+                error="Either value_column or metrics is required for map data",
+                is_valid=False,
+            )
+
         # Add metrics from payload if not provided (same logic as dashboard map endpoint)
-        if "metrics" not in payload and payload.get("value_column"):
+        if "metrics" not in payload and payload.get("value_column") is not None:
             payload["metrics"] = [
                 {
                     "column": payload.get("value_column"),

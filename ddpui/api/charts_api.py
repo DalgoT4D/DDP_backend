@@ -361,7 +361,7 @@ class MapDataOverlayPayload(Schema):
     schema_name: str
     table_name: str
     geographic_column: str
-    value_column: str
+    value_column: Optional[str] = None
     metrics: List[ChartMetric]
     filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
     dashboard_filters: Optional[dict[str, Any]] = Field(
