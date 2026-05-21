@@ -56,6 +56,8 @@ class DbtProjectManager:
             dbt_env_dir=str(dbt_env_dir),
             venv_binary=venv_binary,
             target=target,
+            clients_base_dir=str(DbtProjectManager.clients_base_dir()),
+            project_dir_relative=orgdbt.project_dir,
             project_dir=project_dir,
             org_project_dir=org_dir,
         )

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
+    DashboardTabSchema,
     DashboardResponse,
     DashboardFilterResponse,
     FilterCreate,
@@ -29,6 +30,36 @@ from ddpui.schemas.dashboard_schema import (
     LandingPageResponse,
     LandingPageResolveResponse,
 )
+
+
+# ================================================================================
+# Test DashboardTabSchema Validation
+# ================================================================================
+
+
+class TestDashboardTabSchema:
+    """Tests for DashboardTabSchema field constraints"""
+
+    def test_valid_tab(self):
+        """Test that a valid tab is accepted"""
+        tab = DashboardTabSchema(id="tab-1710901234567", title="Sales Overview")
+        assert tab.id == "tab-1710901234567"
+        assert tab.title == "Sales Overview"
+
+    def test_empty_id_is_rejected(self):
+        """id must not be an empty string"""
+        with pytest.raises(ValidationError):
+            DashboardTabSchema(id="", title="Valid Title")
+
+    def test_title_over_50_chars_is_rejected(self):
+        """title must not exceed 50 characters"""
+        with pytest.raises(ValidationError):
+            DashboardTabSchema(id="tab-1", title="A" * 51)
+
+    def test_title_exactly_50_chars_is_accepted(self):
+        """title at exactly 50 characters is valid"""
+        tab = DashboardTabSchema(id="tab-1", title="A" * 50)
+        assert len(tab.title) == 50
 
 
 # ================================================================================
@@ -303,8 +334,8 @@ class TestEdgeCases:
 
         assert dashboard.title == "日本語ダッシュボード 📊"
 
-    def test_dashboard_update_with_complex_components(self):
-        """Test dashboard update with complex nested components"""
+    def test_dashboard_update_with_complex_tab_components(self):
+        """Test dashboard update with complex nested components inside a tab"""
         components = {
             "chart-1": {
                 "type": "chart",
@@ -322,10 +353,13 @@ class TestEdgeCases:
             },
         }
 
-        update = DashboardUpdate(components=components)
+        update = DashboardUpdate(
+            tabs=[DashboardTabSchema(id="tab-1", title="Tab 1", components=components)]
+        )
 
-        assert update.components["chart-1"]["config"]["settings"]["showLegend"] is True
-        assert update.components["text-1"]["config"]["fontSize"] == 16
+        tab_components = update.tabs[0].components
+        assert tab_components["chart-1"]["config"]["settings"]["showLegend"] is True
+        assert tab_components["text-1"]["config"]["fontSize"] == 16
 
     def test_filter_response_with_nested_settings(self):
         """Test filter response with deeply nested settings"""

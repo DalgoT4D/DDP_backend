@@ -41,6 +41,8 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.constants import (
     TASK_GITPULL,
+    TASK_DBTCLEAN,
+    TASK_DBTDEPS,
     TRANSFORM_TASKS_SEQ,
     TASK_GENERATE_EDR,
     LONG_RUNNING_TASKS,
@@ -226,14 +228,21 @@ def get_elemetary_task_lock(request):
 
 @orgtask_router.get("transform/")
 @has_permission(["can_view_orgtasks"])
-def get_prefect_transformation_tasks(request):
-    """Fetch all dbt tasks for an org; client or system"""
+def get_prefect_transformation_tasks(request, exclude_git: bool = False):
+    """Fetch all dbt tasks for an org; client or system.
+    When exclude_git=True (used by pipeline page), auto-managed tasks
+    (git, dbt-clean, dbt-deps) are excluded since they are automatically
+    added during pipeline creation/updation."""
     orguser: OrgUser = request.orguser
+
+    task_types = [TaskType.DBT, TaskType.DBTCLOUD]
+    if not exclude_git:
+        task_types.append(TaskType.GIT)
 
     org_tasks = (
         OrgTask.objects.filter(
             org=orguser.org,
-            task__type__in=[TaskType.GIT, TaskType.DBT, TaskType.DBTCLOUD],
+            task__type__in=task_types,
         )
         .order_by("-generated_by")
         .select_related("task")
@@ -248,8 +257,13 @@ def get_prefect_transformation_tasks(request):
 
     res = []
 
+    auto_managed_task_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+
     for org_task in org_tasks:
         if org_task.task.slug not in TRANSFORM_TASKS_SEQ:
+            continue
+
+        if exclude_git and org_task.task.slug in auto_managed_task_slugs:
             continue
 
         # git pull               : "git" + " " + "pull"

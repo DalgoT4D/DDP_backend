@@ -29,6 +29,7 @@ class FrozenDashboardConfig(Schema):
     target_screen_size: Optional[str] = None
     layout_config: Optional[Any] = None
     components: Optional[Dict[str, Any]] = None
+    tabs: Optional[List[Dict[str, Any]]] = None
     filter_layout: Optional[str] = None
     filters: List[Dict[str, Any]] = []
 
@@ -89,9 +90,9 @@ class SnapshotCreate(Schema):
 
     title: str = Field(..., min_length=1, max_length=255)
     dashboard_id: int
-    date_column: DateColumnSchema
+    date_column: Optional[DateColumnSchema] = None
     period_start: Optional[date] = None  # None = no lower bound
-    period_end: date
+    period_end: Optional[date] = None
 
 
 class SnapshotUpdate(Schema):
@@ -111,7 +112,7 @@ class SnapshotResponse(Schema):
     dashboard_title: Optional[str] = None  # From frozen_dashboard, not a live FK
     date_column: Optional[Dict[str, str]] = None
     period_start: Optional[date] = None
-    period_end: date
+    period_end: Optional[date] = None
     summary: Optional[str] = None
     created_by: Optional[str] = None
     created_at: datetime
