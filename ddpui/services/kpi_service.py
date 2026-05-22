@@ -449,7 +449,33 @@ class KPIService:
         return {"data": data, "echarts_config": echarts_config}
 
     @staticmethod
-    def get_kpi_data(kpi_id: int, org: Org) -> dict:
-        """Get KPI chart data + echarts config (live from DB)."""
+    def get_kpi_data(
+        kpi_id: int,
+        org: Org,
+        time_grain_override: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> dict:
+        """Get KPI chart data + echarts config (live from DB).
+
+        Optional overrides:
+          - time_grain_override: use this time grain instead of the KPI's default
+          - date_from/date_to: filter trend data to this date range
+        """
         kpi = KPIService.get_kpi(kpi_id, org)
-        return KPIService.compute_kpi_data(KPIService.kpi_to_response(kpi), org)
+        kpi_response = KPIService.kpi_to_response(kpi)
+
+        # Override time grain if provided
+        if time_grain_override and time_grain_override in VALID_TIME_GRAINS:
+            kpi_response.time_grain = time_grain_override
+
+        # Build date filter from query params
+        date_filter = None
+        if date_from and date_to and kpi.time_dimension_column:
+            date_filter = {
+                "column_name": kpi.time_dimension_column,
+                "start": date_from,
+                "end": date_to,
+            }
+
+        return KPIService.compute_kpi_data(kpi_response, org, date_filter=date_filter)

@@ -133,12 +133,30 @@ def delete_kpi(request, kpi_id: int):
 
 @kpi_router.get("/{kpi_id}/data/", response=ChartDataResponse)
 @has_permission(["can_view_kpis"])
-def get_kpi_data(request, kpi_id: int):
-    """Get KPI chart data + echarts config (same pattern as chart data endpoint)"""
+def get_kpi_data(
+    request,
+    kpi_id: int,
+    time_grain: str = None,
+    date_from: str = None,
+    date_to: str = None,
+):
+    """Get KPI chart data + echarts config.
+
+    Optional query params:
+      - time_grain: override the KPI's default time grain (daily/weekly/monthly/quarterly/yearly)
+      - date_from: filter trend data from this date (ISO format, e.g. 2025-01-01)
+      - date_to: filter trend data up to this date (ISO format, e.g. 2026-01-01)
+    """
     orguser: OrgUser = request.orguser
 
     try:
-        result = KPIService.get_kpi_data(kpi_id, orguser.org)
+        result = KPIService.get_kpi_data(
+            kpi_id,
+            orguser.org,
+            time_grain_override=time_grain,
+            date_from=date_from,
+            date_to=date_to,
+        )
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 
