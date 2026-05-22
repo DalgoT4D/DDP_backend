@@ -901,7 +901,7 @@ def transform_data_for_chart(
 
                     grouped_data[dimension][metric_key][x_value] = row.get(alias, 0)
 
-            x_axis_data = sorted(list(x_values))
+            x_axis_data = sorted(list(x_values), key=str)
 
             # Format x-axis labels if time_grain is applied
             if payload.time_grain:
@@ -1099,7 +1099,7 @@ def transform_data_for_chart(
 
                     grouped_data[dimension][metric_key][x_value] = row.get(alias, 0)
 
-            x_axis_data = sorted(list(x_values))
+            x_axis_data = sorted(list(x_values), key=str)
 
             # Format x-axis labels if time_grain is applied
             if payload.time_grain:
