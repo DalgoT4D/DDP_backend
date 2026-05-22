@@ -104,19 +104,27 @@ def sample_dashboard(orguser, org):
         dashboard_type="native",
         grid_columns=12,
         target_screen_size="desktop",
-        layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
-        components={
-            "chart-1": {
-                "id": "chart-1",
-                "type": "chart",
-                "config": {"chartId": 1, "chartType": "bar", "title": "Bar Chart"},
-            },
-            "text-1": {
-                "id": "text-1",
-                "type": "text",
-                "config": {"content": "Hello"},
-            },
-        },
+        layout_config=[],
+        components={},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Overview",
+                "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {
+                    "chart-1": {
+                        "id": "chart-1",
+                        "type": "chart",
+                        "config": {"chartId": 1, "chartType": "bar", "title": "Bar Chart"},
+                    },
+                    "text-1": {
+                        "id": "text-1",
+                        "type": "text",
+                        "config": {"content": "Hello"},
+                    },
+                },
+            }
+        ],
         created_by=orguser,
         org=org,
     )
@@ -412,7 +420,8 @@ class TestFreezeDashboard:
         assert frozen["grid_columns"] == 12
         assert frozen["target_screen_size"] == "desktop"
         assert frozen["layout_config"] is not None
-        assert "chart-1" in frozen["components"]
+        assert len(frozen["tabs"]) == 1
+        assert "chart-1" in frozen["tabs"][0]["components"]
         assert len(frozen["filters"]) == 1
         assert frozen["filters"][0]["filter_type"] == "datetime"
 
@@ -1118,8 +1127,8 @@ class TestExtractChartIds:
         chart_ids = ReportService._extract_chart_ids(tab_dashboard)
         assert tab_chart.id in chart_ids
 
-    def test_extracts_ids_from_root_components(self, sample_dashboard, sample_chart):
-        """Charts in root components are discovered (backward compat)"""
+    def test_extracts_ids_from_tabs_sample(self, sample_dashboard, sample_chart):
+        """Charts inside tabs are discovered (sample_dashboard fixture)"""
         chart_ids = ReportService._extract_chart_ids(sample_dashboard)
         assert sample_chart.id in chart_ids
 
@@ -1197,3 +1206,477 @@ class TestFreezeChartConfigsTabs:
         """Text components inside tabs are not included in frozen configs"""
         frozen = ReportService._freeze_chart_configs(tab_dashboard)
         assert len(frozen) == 1
+
+
+# ================================================================================
+# KPI Freezing Fixtures
+# ================================================================================
+
+
+@pytest.fixture
+def sample_metric(orguser, org):
+    from ddpui.models.metric import Metric
+
+    metric = Metric.objects.create(
+        name="Total Revenue",
+        schema_name="public",
+        table_name="orders",
+        column="amount",
+        aggregation="sum",
+        org=org,
+        created_by=orguser,
+    )
+    yield metric
+    try:
+        metric.refresh_from_db()
+        metric.delete()
+    except Metric.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def sample_kpi(orguser, org, sample_metric):
+    from ddpui.models.metric import KPI
+
+    kpi = KPI.objects.create(
+        metric=sample_metric,
+        name="Revenue KPI",
+        target_value=10000.0,
+        direction="increase",
+        green_threshold_pct=100.0,
+        amber_threshold_pct=80.0,
+        time_grain="monthly",
+        time_dimension_column="created_at",
+        metric_type_tag="outcome",
+        program_tags=["education", "health"],
+        org=org,
+        created_by=orguser,
+    )
+    yield kpi
+    try:
+        kpi.refresh_from_db()
+        kpi.delete()
+    except KPI.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def kpi_dashboard(orguser, org, sample_chart, sample_kpi):
+    """Dashboard with both a chart and a KPI in tabs"""
+    dashboard = Dashboard.objects.create(
+        title="KPI Dashboard",
+        dashboard_type="native",
+        grid_columns=12,
+        layout_config=[],
+        components={},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Overview",
+                "layout_config": [
+                    {"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4},
+                    {"i": "kpi-1", "x": 6, "y": 0, "w": 6, "h": 4},
+                ],
+                "components": {
+                    "chart-1": {
+                        "id": "chart-1",
+                        "type": "chart",
+                        "config": {"chartId": sample_chart.id},
+                    },
+                    "kpi-1": {
+                        "id": "kpi-1",
+                        "type": "kpi",
+                        "config": {"kpiId": sample_kpi.id},
+                    },
+                },
+            }
+        ],
+        created_by=orguser,
+        org=org,
+    )
+    yield dashboard
+    try:
+        dashboard.refresh_from_db()
+        dashboard.delete()
+    except Dashboard.DoesNotExist:
+        pass
+
+
+# ================================================================================
+# Test _freeze_chart_configs with KPI components
+# ================================================================================
+
+
+@patch("ddpui.core.reports.report_service.OrgWarehouse")
+@patch("ddpui.core.reports.report_service.KPIService")
+class TestFreezeKpiConfigs:
+    """Tests for KPI freezing in ReportService._freeze_chart_configs"""
+
+    def test_freezes_kpi_from_tab(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi, sample_chart
+    ):
+        """KPI components inside tabs are frozen with all fields"""
+        mock_org_wh.objects.filter.return_value.first.return_value = MagicMock()
+        mock_kpi_service.kpi_to_response.return_value = MagicMock()
+        mock_kpi_service._compute_trend.return_value = [
+            {"label": "Jan 2025", "value": 8000},
+            {"label": "Feb 2025", "value": 9500},
+        ]
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+
+        # Both chart and KPI should be frozen
+        assert str(sample_chart.id) in frozen
+        assert str(sample_kpi.id) in frozen
+
+        kpi_data = frozen[str(sample_kpi.id)]
+        assert kpi_data["component_type"] == "kpi"
+        assert kpi_data["title"] == "Revenue KPI"
+        assert kpi_data["target_value"] == 10000.0
+        assert kpi_data["direction"] == "increase"
+        assert kpi_data["time_grain"] == "monthly"
+        assert kpi_data["metric"]["name"] == "Total Revenue"
+        assert kpi_data["metric"]["schema_name"] == "public"
+        assert kpi_data["metric"]["table_name"] == "orders"
+        assert kpi_data["metric"]["column"] == "amount"
+        assert kpi_data["metric"]["aggregation"] == "sum"
+
+    def test_kpi_frozen_with_trend_data(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """Frozen KPI captures computed trend periods and current value"""
+        mock_org_wh.objects.filter.return_value.first.return_value = MagicMock()
+        mock_kpi_service.kpi_to_response.return_value = MagicMock()
+        mock_kpi_service._compute_trend.return_value = [
+            {"label": "Jan 2025", "value": 8000},
+            {"label": "Feb 2025", "value": 9500},
+        ]
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert len(kpi_data["periods"]) == 2
+        assert kpi_data["periods"][-1]["value"] == 9500
+
+    def test_kpi_frozen_with_rag_status(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """Frozen KPI includes computed RAG status"""
+        mock_org_wh.objects.filter.return_value.first.return_value = MagicMock()
+        mock_kpi_service.kpi_to_response.return_value = MagicMock()
+        mock_kpi_service._compute_trend.return_value = [
+            {"label": "Feb 2025", "value": 10000},
+        ]
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        # target=10000, current=10000, direction=increase, green_pct=100 → green
+        assert kpi_data["rag_status"] == "green"
+
+    def test_kpi_frozen_amber_status(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """KPI at 85% of target with green=100%, amber=80% should be amber"""
+        mock_org_wh.objects.filter.return_value.first.return_value = MagicMock()
+        mock_kpi_service.kpi_to_response.return_value = MagicMock()
+        mock_kpi_service._compute_trend.return_value = [
+            {"label": "Feb 2025", "value": 8500},
+        ]
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert kpi_data["rag_status"] == "amber"
+
+    def test_kpi_frozen_red_status(self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi):
+        """KPI at 70% of target with amber=80% should be red"""
+        mock_org_wh.objects.filter.return_value.first.return_value = MagicMock()
+        mock_kpi_service.kpi_to_response.return_value = MagicMock()
+        mock_kpi_service._compute_trend.return_value = [
+            {"label": "Feb 2025", "value": 7000},
+        ]
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert kpi_data["rag_status"] == "red"
+
+    def test_kpi_frozen_no_warehouse(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """When no warehouse is available, KPI is frozen with empty periods"""
+        mock_org_wh.objects.filter.return_value.first.return_value = None
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert kpi_data["periods"] == []
+        assert kpi_data["rag_status"] is None
+
+    def test_kpi_frozen_trend_error_graceful(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """If trend computation fails, KPI is frozen with empty periods"""
+        mock_org_wh.objects.filter.return_value.first.return_value = MagicMock()
+        mock_kpi_service.kpi_to_response.return_value = MagicMock()
+        mock_kpi_service._compute_trend.side_effect = Exception("Warehouse error")
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert kpi_data["periods"] == []
+
+    def test_kpi_only_dashboard(self, mock_kpi_service, mock_org_wh, orguser, org, sample_kpi):
+        """Dashboard with only KPI components (no charts)"""
+        mock_org_wh.objects.filter.return_value.first.return_value = None
+        dashboard = Dashboard.objects.create(
+            title="KPI Only",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={},
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "KPIs",
+                    "components": {
+                        "kpi-1": {
+                            "type": "kpi",
+                            "config": {"kpiId": sample_kpi.id},
+                        },
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        frozen = ReportService._freeze_chart_configs(dashboard)
+
+        assert str(sample_kpi.id) in frozen
+        assert frozen[str(sample_kpi.id)]["component_type"] == "kpi"
+        dashboard.delete()
+
+    def test_kpi_component_without_kpi_id(self, mock_kpi_service, mock_org_wh, orguser, org):
+        """KPI component without kpiId in config is skipped"""
+        dashboard = Dashboard.objects.create(
+            title="Missing KPI ID",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={},
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "kpi-1": {
+                            "type": "kpi",
+                            "config": {},  # No kpiId
+                        },
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        frozen = ReportService._freeze_chart_configs(dashboard)
+        assert frozen == {}
+        dashboard.delete()
+
+    def test_kpi_expression_metric_frozen(self, mock_kpi_service, mock_org_wh, orguser, org):
+        """KPI with an expression metric is frozen with column_expression"""
+        mock_org_wh.objects.filter.return_value.first.return_value = None
+        from ddpui.models.metric import Metric, KPI as KPIModel
+
+        metric = Metric.objects.create(
+            name="Profit Ratio",
+            schema_name="public",
+            table_name="financials",
+            column_expression="SUM(revenue - cost) / COUNT(DISTINCT id)",
+            org=org,
+            created_by=orguser,
+        )
+        kpi = KPIModel.objects.create(
+            metric=metric,
+            name="Profit KPI",
+            direction="increase",
+            time_grain="monthly",
+            org=org,
+            created_by=orguser,
+        )
+        dashboard = Dashboard.objects.create(
+            title="Expr Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={},
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "kpi-1": {"type": "kpi", "config": {"kpiId": kpi.id}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+
+        frozen = ReportService._freeze_chart_configs(dashboard)
+        kpi_data = frozen[str(kpi.id)]
+
+        assert kpi_data["metric"]["column_expression"] == "SUM(revenue - cost) / COUNT(DISTINCT id)"
+        assert kpi_data["metric"]["column"] is None
+        assert kpi_data["metric"]["aggregation"] is None
+
+        dashboard.delete()
+        kpi.delete()
+        metric.delete()
+
+
+# ================================================================================
+# Test get_report_kpi_data
+# ================================================================================
+
+
+class TestGetReportKpiData:
+    """Tests for ReportService.get_report_kpi_data"""
+
+    @patch("ddpui.core.reports.report_service.KPIService")
+    def test_kpi_not_found_in_snapshot(self, mock_kpi_service, sample_snapshot, org):
+        """Requesting a KPI ID not in the snapshot raises SnapshotValidationError"""
+        with pytest.raises(SnapshotValidationError, match="not found"):
+            ReportService.get_report_kpi_data(sample_snapshot.id, 99999, org)
+
+    @patch("ddpui.core.reports.report_service.KPIService")
+    def test_non_kpi_entry_raises(self, mock_kpi_service, sample_snapshot, org, sample_chart):
+        """Requesting a chart ID via get_report_kpi_data raises SnapshotValidationError"""
+        # sample_snapshot has chart with id=sample_chart.id frozen in it
+        with pytest.raises(SnapshotValidationError, match="not a KPI"):
+            ReportService.get_report_kpi_data(sample_snapshot.id, sample_chart.id, org)
+
+    @patch("ddpui.services.kpi_service.KPIService.compute_kpi_data")
+    def test_returns_kpi_data_from_frozen_config(
+        self, mock_compute, orguser, org, sample_chart, sample_kpi
+    ):
+        """get_report_kpi_data builds KPIResponse from frozen config and delegates to compute"""
+        # Create a dashboard with a KPI and freeze it
+        dashboard = Dashboard.objects.create(
+            title="Report Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={},
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "kpi-1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        f = DashboardFilter.objects.create(
+            dashboard=dashboard,
+            name="Date",
+            filter_type="datetime",
+            schema_name="public",
+            table_name="orders",
+            column_name="created_at",
+            settings={},
+            order=0,
+        )
+        snapshot = ReportService.create_snapshot(
+            title="KPI Report",
+            dashboard_id=dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+            orguser=orguser,
+        )
+
+        # Verify KPI was frozen
+        assert str(sample_kpi.id) in snapshot.frozen_chart_configs
+        frozen_kpi = snapshot.frozen_chart_configs[str(sample_kpi.id)]
+        assert frozen_kpi["component_type"] == "kpi"
+
+        # Mock the compute call
+        mock_compute.return_value = {"data": {"current_value": 9500}, "echarts_config": {}}
+
+        result = ReportService.get_report_kpi_data(snapshot.id, sample_kpi.id, org)
+
+        assert result == {"data": {"current_value": 9500}, "echarts_config": {}}
+        mock_compute.assert_called_once()
+
+        # Verify the KPIResponse was constructed correctly
+        call_args = mock_compute.call_args
+        kpi_response = call_args[0][0]
+        assert kpi_response.name == "Revenue KPI"
+        assert kpi_response.metric.name == "Total Revenue"
+        assert kpi_response.target_value == 10000.0
+
+        # Verify date filter was passed (same schema/table as metric)
+        date_filter = (
+            call_args[1].get("date_filter") or call_args[0][2]
+            if len(call_args[0]) > 2
+            else call_args[1].get("date_filter")
+        )
+        assert date_filter is not None
+        assert date_filter["start"] == "2025-01-01"
+        assert date_filter["end"] == "2025-03-31"
+
+        snapshot.delete()
+        f.delete()
+        dashboard.delete()
+
+    @patch("ddpui.services.kpi_service.KPIService.compute_kpi_data")
+    def test_kpi_survives_deletion(self, mock_compute, orguser, org, sample_chart, sample_kpi):
+        """Frozen KPI data is available even after the original KPI is deleted"""
+        dashboard = Dashboard.objects.create(
+            title="Deletion Test",
+            dashboard_type="native",
+            grid_columns=12,
+            layout_config=[],
+            components={},
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "kpi-1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        snapshot = ReportService.create_snapshot(
+            title="Deletion Report",
+            dashboard_id=dashboard.id,
+            date_column={},
+            period_end=date(2025, 3, 31),
+            orguser=orguser,
+        )
+
+        kpi_id = sample_kpi.id
+        assert str(kpi_id) in snapshot.frozen_chart_configs
+
+        # Delete the original KPI and metric
+        sample_kpi.delete()
+
+        # get_report_kpi_data should still work from frozen config
+        mock_compute.return_value = {"data": {}, "echarts_config": {}}
+        result = ReportService.get_report_kpi_data(snapshot.id, kpi_id, org)
+        assert result is not None
+
+        snapshot.delete()
+        dashboard.delete()

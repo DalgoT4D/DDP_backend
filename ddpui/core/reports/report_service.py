@@ -98,20 +98,20 @@ class ReportService:
         batch-fetches the records, and stores full configs.
         """
 
-        components = dashboard.components or {}
         chart_ids = []
         kpi_ids = []
 
-        for comp_id, component in components.items():
-            comp_type = component.get("type")
-            if comp_type == "chart":
-                chart_id = component.get("config", {}).get("chartId")
-                if chart_id:
-                    chart_ids.append(chart_id)
-            elif comp_type == "kpi":
-                kpi_id = component.get("config", {}).get("kpiId")
-                if kpi_id:
-                    kpi_ids.append(kpi_id)
+        for tab in dashboard.tabs or []:
+            for comp_id, component in (tab.get("components") or {}).items():
+                comp_type = component.get("type")
+                if comp_type == "chart":
+                    chart_id = component.get("config", {}).get("chartId")
+                    if chart_id:
+                        chart_ids.append(chart_id)
+                elif comp_type == "kpi":
+                    kpi_id = component.get("config", {}).get("kpiId")
+                    if kpi_id:
+                        kpi_ids.append(kpi_id)
 
         frozen = {}
 
