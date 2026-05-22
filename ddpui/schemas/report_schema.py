@@ -74,7 +74,6 @@ class FrozenKpiConfig(Schema):
     rag_status: Optional[str] = None
     time_grain: Optional[str] = None
     time_dimension_column: Optional[str] = None
-    trend_periods: int = 12
     green_threshold_pct: float = 100.0
     amber_threshold_pct: float = 80.0
     metric_type_tag: Optional[str] = None

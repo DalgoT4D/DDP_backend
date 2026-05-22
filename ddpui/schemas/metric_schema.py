@@ -9,8 +9,8 @@ from ninja import Schema
 # ── Metric Schemas ──────────────────────────────────────────────────────────
 
 
-class MetricCreate(Schema):
-    """Schema for creating a metric"""
+class MetricPayload(Schema):
+    """Schema for creating or updating a metric"""
 
     name: str
     description: Optional[str] = None
@@ -20,18 +20,6 @@ class MetricCreate(Schema):
     column: Optional[str] = None
     aggregation: Optional[str] = None  # sum/avg/count/min/max/count_distinct
     # Expression path (mutually exclusive with column + aggregation)
-    column_expression: Optional[str] = None
-
-
-class MetricUpdate(Schema):
-    """Schema for updating a metric"""
-
-    name: Optional[str] = None
-    description: Optional[str] = None
-    schema_name: Optional[str] = None
-    table_name: Optional[str] = None
-    column: Optional[str] = None
-    aggregation: Optional[str] = None
     column_expression: Optional[str] = None
 
 
@@ -72,3 +60,10 @@ class MetricConsumersResponse(Schema):
 
     charts: List[dict]  # [{id, title, chart_type}]
     kpis: List[dict]  # [{id, name}]
+
+
+class MetricValidateResponse(Schema):
+    """Response for metric definition validation"""
+
+    valid: bool
+    error: Optional[str] = None

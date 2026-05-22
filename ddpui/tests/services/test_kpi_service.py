@@ -91,7 +91,6 @@ def sample_kpi(orguser, org, sample_metric):
         green_threshold_pct=100.0,
         amber_threshold_pct=80.0,
         time_grain="monthly",
-        trend_periods=12,
         org=org,
         created_by=orguser,
     )
@@ -223,12 +222,33 @@ class TestKPICRUD:
         assert total >= 1
         assert any(k.id == sample_kpi.id for k in kpis)
 
-    def test_list_kpis_search(self, org, sample_kpi, seed_db):
+    def test_list_kpis_search_by_name(self, org, sample_kpi, seed_db):
         kpis, total = KPIService.list_kpis(org, search="Test")
         assert total >= 1
 
         kpis, total = KPIService.list_kpis(org, search="nonexistent_xyz")
         assert total == 0
+
+    def test_list_kpis_search_by_program_tag(self, orguser, org, sample_metric, seed_db):
+        """Search should match program_tags as well as name."""
+        kpi = KPI.objects.create(
+            name="Enrollment KPI",
+            metric=sample_metric,
+            direction="increase",
+            time_grain="monthly",
+            program_tags=["Health Program", "Education"],
+            org=org,
+            created_by=orguser,
+        )
+        kpis, total = KPIService.list_kpis(org, search="Health")
+        assert total >= 1
+        assert any(k.id == kpi.id for k in kpis)
+
+        # Search by name still works
+        kpis, total = KPIService.list_kpis(org, search="Enrollment")
+        assert total >= 1
+
+        kpi.delete()
 
     def test_update_kpi(self, orguser, org, sample_kpi, seed_db):
         payload = KPIUpdate(name="Updated KPI", target_value=2000.0)
@@ -283,16 +303,21 @@ class TestKPISummary:
         assert item["rag_status"] is None
         assert item["name"] == "Test KPI"
 
-    @patch("ddpui.services.metric_service.MetricService.compute_metric_value")
-    def test_summary_with_value(self, mock_compute, orguser, org, sample_kpi, seed_db):
-        mock_compute.return_value = 900.0
+    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    def test_summary_with_trend(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """Current value comes from last trend period."""
+        mock_trend.return_value = [
+            {"period": "Jan 2026", "value": 800.0},
+            {"period": "Feb 2026", "value": 900.0},
+        ]
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
 
         results = KPIService.get_kpi_summary(org)
         item = next(r for r in results if r["id"] == sample_kpi.id)
         assert item["current_value"] == 900.0
-        assert item["rag_status"] == "amber"  # 900/1000 = 90%, below 100% green, above 80% amber
+        assert item["rag_status"] == "amber"  # 900/1000 = 90%
         assert item["achievement_pct"] == 90.0
+        assert item["period_over_period_change"] == 12.5  # (900-800)/800 * 100
 
         OrgWarehouse.objects.filter(org=org).delete()
 
@@ -310,18 +335,59 @@ class TestKPIData:
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi_data(99999, org)
 
-    @patch("ddpui.services.kpi_service.WarehouseFactory.get_warehouse_client")
-    def test_data_with_value(self, mock_wh, orguser, org, sample_kpi, seed_db):
-        mock_client = MagicMock()
-        mock_client.execute.return_value = [{"metric_value": 800.0}]
-        mock_client.engine = MagicMock()
-        mock_wh.return_value = mock_client
+    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    def test_data_current_value_from_trend(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """Current value is the last trend period's value."""
+        mock_trend.return_value = [
+            {"period": "Jan 2026", "value": 700.0},
+            {"period": "Feb 2026", "value": 800.0},
+        ]
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
 
         result = KPIService.get_kpi_data(sample_kpi.id, org)
         assert result["data"]["current_value"] == 800.0
         assert result["data"]["rag_status"] == "amber"
         assert result["data"]["target_value"] == 1000.0
+        assert result["data"]["data_last_date"] == "Feb 2026"
+        assert len(result["data"]["periods"]) == 2
         assert isinstance(result["echarts_config"], dict)
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    def test_data_no_trend_no_value(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """No trend → current_value is None, data_last_date is None, empty echarts."""
+        mock_trend.return_value = []
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+
+        result = KPIService.get_kpi_data(sample_kpi.id, org)
+        assert result["data"]["current_value"] is None
+        assert result["data"]["data_last_date"] is None
+        assert result["data"]["periods"] == []
+        assert result["echarts_config"] == {}
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    def test_data_rag_green(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """Value >= target → green."""
+        mock_trend.return_value = [{"period": "Mar 2026", "value": 1200.0}]
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+
+        result = KPIService.get_kpi_data(sample_kpi.id, org)
+        assert result["data"]["current_value"] == 1200.0
+        assert result["data"]["rag_status"] == "green"
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    def test_data_rag_red(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """Value far below target → red."""
+        mock_trend.return_value = [{"period": "Mar 2026", "value": 500.0}]
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+
+        result = KPIService.get_kpi_data(sample_kpi.id, org)
+        assert result["data"]["current_value"] == 500.0
+        assert result["data"]["rag_status"] == "red"
 
         OrgWarehouse.objects.filter(org=org).delete()

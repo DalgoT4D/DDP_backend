@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.metric import KPI
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.visualization import Chart
@@ -18,6 +19,8 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
 from ddpui.schemas.chart_schema import ChartConfig
+from ddpui.schemas.kpi_schema import KPIResponse
+from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
     FrozenChartConfig,
@@ -28,6 +31,8 @@ from ddpui.schemas.report_schema import (
 )
 from ddpui.core.charts.charts_service import build_chart_data_payload
 from ddpui.services.dashboard_service import DashboardService
+from ddpui.services.kpi_service import KPIService, compute_rag_status
+from ddpui.services.metric_service import MetricService
 from ddpui.api.charts_api import generate_chart_data_and_config
 
 from .exceptions import (
@@ -65,6 +70,26 @@ class ReportService:
         }
 
     @staticmethod
+    def _extract_chart_ids(dashboard: Dashboard) -> List[int]:
+        """Extract chart IDs from tabs (new structure) and root components (backward compat)."""
+        chart_ids = []
+
+        for tab in dashboard.tabs or []:
+            for component in (tab.get("components") or {}).values():
+                if component.get("type") == "chart":
+                    chart_id = component.get("config", {}).get("chartId")
+                    if chart_id:
+                        chart_ids.append(chart_id)
+
+        for component in (dashboard.components or {}).values():
+            if component.get("type") == "chart":
+                chart_id = component.get("config", {}).get("chartId")
+                if chart_id:
+                    chart_ids.append(chart_id)
+
+        return list(set(chart_ids))
+
+    @staticmethod
     def _freeze_chart_configs(dashboard: Dashboard) -> Dict[str, Any]:
         """
         Layer 3: Freeze ALL chart and KPI configs referenced in dashboard components.
@@ -72,7 +97,6 @@ class ReportService:
         Walks through components, extracts chartId/kpiId from each component,
         batch-fetches the records, and stores full configs.
         """
-        from ddpui.models.metric import KPI
 
         components = dashboard.components or {}
         chart_ids = []
@@ -106,9 +130,6 @@ class ReportService:
 
         # Freeze KPIs — capture all data needed to render without the live KPI/metric
         if kpi_ids:
-            from ddpui.services.kpi_service import KPIService, compute_rag_status
-            from ddpui.services.metric_service import MetricService
-
             org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
             kpis = KPI.objects.filter(id__in=kpi_ids, org=dashboard.org).select_related("metric")
 
@@ -117,18 +138,13 @@ class ReportService:
                 periods = []
 
                 if org_warehouse:
+                    kpi_resp = KPIService.kpi_to_response(kpi)
                     try:
-                        current_value = MetricService.compute_metric_value(
-                            kpi.metric, org_warehouse
-                        )
+                        periods = KPIService._compute_trend(kpi_resp, org_warehouse)
+                        if periods:
+                            current_value = periods[-1]["value"]
                     except Exception as e:
-                        logger.error(f"Error computing value for KPI {kpi.id}: {e}")
-
-                    if kpi.time_dimension_column:
-                        try:
-                            periods = KPIService._compute_trend(kpi, org_warehouse)
-                        except Exception as e:
-                            logger.error(f"Error computing trend for KPI {kpi.id}: {e}")
+                        logger.error(f"Error computing trend for KPI {kpi.id}: {e}")
 
                 rag_status = compute_rag_status(
                     current_value,
@@ -156,7 +172,6 @@ class ReportService:
                     rag_status=rag_status,
                     time_grain=kpi.time_grain,
                     time_dimension_column=kpi.time_dimension_column,
-                    trend_periods=kpi.trend_periods,
                     green_threshold_pct=kpi.green_threshold_pct,
                     amber_threshold_pct=kpi.amber_threshold_pct,
                     metric_type_tag=kpi.metric_type_tag,
@@ -392,18 +407,37 @@ class ReportService:
 
         metric_info = kpi_config.get("metric", {})
 
-        # Build the same payload shape that compute_kpi_data expects
-        payload = {
-            "name": kpi_config.get("title", ""),
-            "metric": metric_info,
-            "target_value": kpi_config.get("target_value"),
-            "direction": kpi_config.get("direction", "increase"),
-            "green_threshold_pct": kpi_config.get("green_threshold_pct", 100.0),
-            "amber_threshold_pct": kpi_config.get("amber_threshold_pct", 80.0),
-            "time_grain": kpi_config.get("time_grain"),
-            "time_dimension_column": kpi_config.get("time_dimension_column"),
-            "trend_periods": kpi_config.get("trend_periods", 12),
-        }
+        # Build KPIResponse from frozen config
+        from datetime import datetime
+
+        now = datetime.now()
+        kpi_response = KPIResponse(
+            id=kpi_id,
+            name=kpi_config.get("title", ""),
+            metric=MetricResponse(
+                id=0,
+                name=metric_info.get("name", ""),
+                description=None,
+                schema_name=metric_info.get("schema_name", ""),
+                table_name=metric_info.get("table_name", ""),
+                column=metric_info.get("column"),
+                aggregation=metric_info.get("aggregation"),
+                column_expression=metric_info.get("column_expression"),
+                created_at=now,
+                updated_at=now,
+            ),
+            target_value=kpi_config.get("target_value"),
+            direction=kpi_config.get("direction", "increase"),
+            green_threshold_pct=kpi_config.get("green_threshold_pct", 100.0),
+            amber_threshold_pct=kpi_config.get("amber_threshold_pct", 80.0),
+            time_grain=kpi_config.get("time_grain", "monthly"),
+            time_dimension_column=kpi_config.get("time_dimension_column"),
+            metric_type_tag=kpi_config.get("metric_type_tag"),
+            program_tags=kpi_config.get("program_tags", []),
+            display_order=0,
+            created_at=now,
+            updated_at=now,
+        )
 
         # Build date filter from snapshot period if applicable
         date_filter = None
@@ -421,7 +455,7 @@ class ReportService:
                 "end": snapshot.period_end.isoformat(),
             }
 
-        return KPIService.compute_kpi_data(payload, org, date_filter=date_filter)
+        return KPIService.compute_kpi_data(kpi_response, org, date_filter=date_filter)
 
     # =========================================================================
     # Snapshot CRUD

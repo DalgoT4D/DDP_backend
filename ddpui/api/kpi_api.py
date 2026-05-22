@@ -12,7 +12,6 @@ from ddpui.schemas.kpi_schema import (
     KPIListResponse,
 )
 from ddpui.schemas.chart_schema import ChartDataResponse
-from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.services.kpi_service import (
     KPIService,
     KPINotFoundError,
@@ -24,39 +23,6 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 kpi_router = Router()
-
-
-def _kpi_to_response(kpi) -> KPIResponse:
-    """Convert a KPI model instance to KPIResponse."""
-    m = kpi.metric
-    return KPIResponse(
-        id=kpi.id,
-        name=kpi.name,
-        metric=MetricResponse(
-            id=m.id,
-            name=m.name,
-            description=m.description,
-            schema_name=m.schema_name,
-            table_name=m.table_name,
-            column=m.column,
-            aggregation=m.aggregation,
-            column_expression=m.column_expression,
-            created_at=m.created_at,
-            updated_at=m.updated_at,
-        ),
-        target_value=kpi.target_value,
-        direction=kpi.direction,
-        green_threshold_pct=kpi.green_threshold_pct,
-        amber_threshold_pct=kpi.amber_threshold_pct,
-        time_grain=kpi.time_grain,
-        time_dimension_column=kpi.time_dimension_column,
-        trend_periods=kpi.trend_periods,
-        metric_type_tag=kpi.metric_type_tag,
-        program_tags=kpi.program_tags,
-        display_order=kpi.display_order,
-        created_at=kpi.created_at,
-        updated_at=kpi.updated_at,
-    )
 
 
 @kpi_router.get("/", response=KPIListResponse)
@@ -89,12 +55,20 @@ def list_kpis(
     total_pages = (total + page_size - 1) // page_size
 
     return KPIListResponse(
-        data=[_kpi_to_response(kpi) for kpi in kpis],
+        data=[KPIService.kpi_to_response(kpi) for kpi in kpis],
         total=total,
         page=page,
         page_size=page_size,
         total_pages=total_pages,
     )
+
+
+@kpi_router.get("/summary/", response=list)
+@has_permission(["can_view_kpis"])
+def get_kpi_summary(request):
+    """Batch compute all KPIs with current values + RAG for the KPI page."""
+    orguser: OrgUser = request.orguser
+    return KPIService.get_kpi_summary(orguser.org)
 
 
 @kpi_router.post("/", response=KPIResponse)
@@ -110,7 +84,7 @@ def create_kpi(request, payload: KPICreate):
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
 
-    return _kpi_to_response(kpi)
+    return KPIService.kpi_to_response(kpi)
 
 
 @kpi_router.get("/{kpi_id}/", response=KPIResponse)
@@ -124,7 +98,7 @@ def get_kpi(request, kpi_id: int):
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 
-    return _kpi_to_response(kpi)
+    return KPIService.kpi_to_response(kpi)
 
 
 @kpi_router.put("/{kpi_id}/", response=KPIResponse)
@@ -140,7 +114,7 @@ def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
 
-    return _kpi_to_response(kpi)
+    return KPIService.kpi_to_response(kpi)
 
 
 @kpi_router.delete("/{kpi_id}/")

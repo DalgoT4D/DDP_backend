@@ -16,6 +16,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.schemas.metric_schema import MetricPayload
 from ddpui.services.metric_service import (
     MetricService,
     MetricNotFoundError,
@@ -116,45 +117,159 @@ def expression_metric(orguser, org):
 
 class TestMetricValidation:
     def test_validate_simple_valid(self):
-        MetricService.validate_metric_definition("amount", "sum", None)
+        MetricService.validate_metric_payload(
+            MetricPayload(
+                name="test", schema_name="s", table_name="t", column="amount", aggregation="sum"
+            )
+        )
 
     def test_validate_count_star(self):
         """COUNT(*) — column is None, aggregation is count"""
-        MetricService.validate_metric_definition(None, "count", None)
+        MetricService.validate_metric_payload(
+            MetricPayload(name="test", schema_name="s", table_name="t", aggregation="count")
+        )
 
     def test_validate_expression_valid(self):
-        MetricService.validate_metric_definition(None, None, "SUM(col_a) / COUNT(DISTINCT id)")
+        MetricService.validate_metric_payload(
+            MetricPayload(
+                name="test",
+                schema_name="s",
+                table_name="t",
+                column_expression="SUM(col_a) / COUNT(DISTINCT id)",
+            )
+        )
 
     def test_validate_both_paths_rejected(self):
         with pytest.raises(MetricValidationError, match="not both"):
-            MetricService.validate_metric_definition("amount", "sum", "SUM(amount)")
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column="amount",
+                    aggregation="sum",
+                    column_expression="SUM(amount)",
+                )
+            )
 
     def test_validate_neither_path_rejected(self):
         with pytest.raises(MetricValidationError, match="Provide either"):
-            MetricService.validate_metric_definition(None, None, None)
+            MetricService.validate_metric_payload(
+                MetricPayload(name="test", schema_name="s", table_name="t")
+            )
 
     def test_validate_empty_expression_rejected(self):
         with pytest.raises(MetricValidationError, match="Provide either"):
-            MetricService.validate_metric_definition(None, None, "   ")
+            MetricService.validate_metric_payload(
+                MetricPayload(name="test", schema_name="s", table_name="t", column_expression="   ")
+            )
 
     def test_validate_invalid_aggregation(self):
         with pytest.raises(MetricValidationError, match="Invalid aggregation"):
-            MetricService.validate_metric_definition("amount", "median", None)
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column="amount",
+                    aggregation="median",
+                )
+            )
 
     def test_validate_missing_aggregation(self):
         with pytest.raises(MetricValidationError, match="aggregation is required"):
-            MetricService.validate_metric_definition("amount", None, None)
+            MetricService.validate_metric_payload(
+                MetricPayload(name="test", schema_name="s", table_name="t", column="amount")
+            )
 
     def test_validate_missing_column_for_non_count(self):
         with pytest.raises(MetricValidationError, match="column is required"):
-            MetricService.validate_metric_definition(None, "sum", None)
+            MetricService.validate_metric_payload(
+                MetricPayload(name="test", schema_name="s", table_name="t", aggregation="sum")
+            )
+
+    def test_validate_expression_rejects_select_statement(self):
+        with pytest.raises(MetricValidationError, match="SQL statements"):
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column_expression="SELECT COUNT(*) FROM users",
+                )
+            )
+
+    def test_validate_expression_rejects_drop_statement(self):
+        with pytest.raises(MetricValidationError, match="SQL statements"):
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column_expression="DROP TABLE users",
+                )
+            )
+
+    def test_validate_expression_rejects_insert_statement(self):
+        with pytest.raises(MetricValidationError, match="SQL statements"):
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column_expression="INSERT INTO users VALUES (1)",
+                )
+            )
+
+    def test_validate_expression_rejects_delete_statement(self):
+        with pytest.raises(MetricValidationError, match="SQL statements"):
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column_expression="DELETE FROM users",
+                )
+            )
+
+    def test_validate_expression_rejects_multiple_statements(self):
+        with pytest.raises(MetricValidationError, match="single SQL expression"):
+            MetricService.validate_metric_payload(
+                MetricPayload(
+                    name="test",
+                    schema_name="s",
+                    table_name="t",
+                    column_expression="SUM(amount); DROP TABLE users",
+                )
+            )
+
+    def test_validate_expression_allows_aggregation_functions(self):
+        """Pure expressions like SUM(), COUNT(), CASE WHEN should pass."""
+        MetricService.validate_metric_payload(
+            MetricPayload(
+                name="test",
+                schema_name="s",
+                table_name="t",
+                column_expression="SUM(col_a - col_b) / COUNT(DISTINCT id)",
+            )
+        )
+
+    def test_validate_expression_allows_case_when(self):
+        MetricService.validate_metric_payload(
+            MetricPayload(
+                name="test",
+                schema_name="s",
+                table_name="t",
+                column_expression="SUM(CASE WHEN status='active' THEN 1 ELSE 0 END)",
+            )
+        )
 
 
 # ── CRUD Tests ──────────────────────────────────────────────────────────────
 
 
 class TestMetricCRUD:
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_against_warehouse")
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
     def test_create_simple_metric(self, mock_validate, orguser, seed_db):
         metric = MetricService.create_metric(
             name="New Metric",
@@ -173,7 +288,7 @@ class TestMetricCRUD:
         assert metric.column_expression is None
         metric.delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_against_warehouse")
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
     def test_create_expression_metric(self, mock_validate, orguser, seed_db):
         metric = MetricService.create_metric(
             name="Expr Metric",
@@ -191,7 +306,7 @@ class TestMetricCRUD:
         assert metric.aggregation is None
         metric.delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_against_warehouse")
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
     def test_create_duplicate_name_rejected(self, mock_validate, orguser, sample_metric, seed_db):
         with pytest.raises(MetricValidationError, match="already exists"):
             MetricService.create_metric(
@@ -238,22 +353,104 @@ class TestMetricCRUD:
         metrics, total = MetricService.list_metrics(org, schema_name="other_schema")
         assert total == 0
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_against_warehouse")
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
     def test_update_metric_name(self, mock_validate, orguser, org, sample_metric, seed_db):
-        updated = MetricService.update_metric(sample_metric.id, org, orguser, name="Renamed Metric")
+        updated = MetricService.update_metric(
+            sample_metric.id,
+            org,
+            orguser,
+            MetricPayload(
+                name="Renamed Metric",
+                schema_name="public",
+                table_name="beneficiaries",
+                column="amount",
+                aggregation="sum",
+            ),
+        )
         assert updated.name == "Renamed Metric"
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_against_warehouse")
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
     def test_update_metric_definition(self, mock_validate, orguser, org, sample_metric, seed_db):
-        # Need an OrgWarehouse so the validation path is triggered
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
         updated = MetricService.update_metric(
-            sample_metric.id, org, orguser, column="other_col", aggregation="avg"
+            sample_metric.id,
+            org,
+            orguser,
+            MetricPayload(
+                name="Test Metric",
+                schema_name="public",
+                table_name="beneficiaries",
+                column="other_col",
+                aggregation="avg",
+            ),
         )
         assert updated.column == "other_col"
         assert updated.aggregation == "avg"
         mock_validate.assert_called_once()
         OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    def test_update_switch_simple_to_expression(
+        self, mock_validate, orguser, org, sample_metric, seed_db
+    ):
+        """Switching from simple (column+aggregation) to expression should clear simple fields."""
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+        updated = MetricService.update_metric(
+            sample_metric.id,
+            org,
+            orguser,
+            MetricPayload(
+                name="Test Metric",
+                schema_name="public",
+                table_name="beneficiaries",
+                column_expression="COUNT(*)",
+            ),
+        )
+        assert updated.column_expression == "COUNT(*)"
+        assert updated.column is None
+        assert updated.aggregation is None
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    def test_update_switch_expression_to_simple(
+        self, mock_validate, orguser, org, expression_metric, seed_db
+    ):
+        """Switching from expression to simple should clear column_expression."""
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+        updated = MetricService.update_metric(
+            expression_metric.id,
+            org,
+            orguser,
+            MetricPayload(
+                name="Expression Metric",
+                schema_name="public",
+                table_name="beneficiaries",
+                column="amount",
+                aggregation="sum",
+            ),
+        )
+        assert updated.column == "amount"
+        assert updated.aggregation == "sum"
+        assert updated.column_expression is None
+        OrgWarehouse.objects.filter(org=org).delete()
+
+    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    def test_update_duplicate_name_rejected(
+        self, mock_validate, orguser, org, sample_metric, expression_metric, seed_db
+    ):
+        """Cannot rename a metric to a name that already exists."""
+        with pytest.raises(MetricValidationError, match="already exists"):
+            MetricService.update_metric(
+                expression_metric.id,
+                org,
+                orguser,
+                MetricPayload(
+                    name="Test Metric",
+                    schema_name="public",
+                    table_name="beneficiaries",
+                    column_expression="SUM(x)",
+                ),
+            )
 
     def test_delete_metric(self, orguser, org, sample_metric, seed_db):
         metric_id = sample_metric.id

@@ -98,8 +98,6 @@ class KPI(models.Model):
     # Time configuration
     time_grain = models.CharField(max_length=20, choices=TIME_GRAIN_CHOICES)
     time_dimension_column = models.CharField(max_length=255, null=True, blank=True)
-    trend_periods = models.IntegerField(default=12)
-
     # Tags
     metric_type_tag = models.CharField(
         max_length=20, choices=METRIC_TYPE_TAG_CHOICES, null=True, blank=True

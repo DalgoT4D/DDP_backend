@@ -714,41 +714,21 @@ class EChartsConfigGenerator:
         periods = [p["period"] for p in trend_data]
         values = [p["value"] for p in trend_data]
         target = kpi_meta.get("target_value")
-        rag_status = kpi_meta.get("rag_status")
 
-        rag_color_map = {
-            "green": "#16a34a",
-            "amber": "#f59e0b",
-            "red": "#dc2626",
-        }
-        line_color = rag_color_map.get(rag_status, "#6366f1")
+        line_color = "#2563eb"  # Blue
 
         series: List[Dict] = [
             {
                 "type": "line",
                 "data": values,
-                "smooth": True,
-                "symbol": "none" if compact else "circle",
-                "symbolSize": 0 if compact else 6,
+                "smooth": False,
+                "symbol": "none",
                 "lineStyle": {"width": 2, "color": line_color},
-                "areaStyle": {
-                    "color": {
-                        "type": "linear",
-                        "x": 0,
-                        "y": 0,
-                        "x2": 0,
-                        "y2": 1,
-                        "colorStops": [
-                            {"offset": 0, "color": line_color + "30"},
-                            {"offset": 1, "color": line_color + "05"},
-                        ],
-                    }
-                },
                 "itemStyle": {"color": line_color},
             }
         ]
 
-        # Target line
+        # Target as a flat dashed line across all periods
         if target is not None:
             series.append(
                 {
@@ -757,7 +737,7 @@ class EChartsConfigGenerator:
                     "smooth": False,
                     "symbol": "none",
                     "lineStyle": {
-                        "width": 1,
+                        "width": 1.5,
                         "type": "dashed",
                         "color": "#94a3b8",
                     },
@@ -776,22 +756,27 @@ class EChartsConfigGenerator:
             }
 
         return {
-            "grid": {"left": 10, "right": 10, "top": 10, "bottom": 10, "containLabel": True},
+            "grid": {"left": 0, "right": 0, "top": 0, "bottom": 0, "containLabel": True},
             "xAxis": {
                 "type": "category",
                 "data": periods,
-                "axisLabel": {"rotate": 0, "hideOverlap": True, "fontSize": 11},
-                "boundaryGap": False,
+                "axisLine": {"show": False},
+                "axisTick": {"show": False},
+                "axisLabel": {
+                    "fontSize": 11,
+                    "color": "#6b7280",
+                    "hideOverlap": True,
+                },
+                "boundaryGap": True,
             },
             "yAxis": {
                 "type": "value",
-                "axisLabel": {"fontSize": 11},
+                "axisLine": {"show": False},
+                "axisTick": {"show": False},
+                "axisLabel": {"show": False},
                 "splitLine": {"show": False},
             },
-            "tooltip": {
-                "trigger": "axis",
-                "axisPointer": {"type": "cross"},
-            },
+            "tooltip": {"trigger": "axis"},
             "legend": {"show": False},
             "series": series,
         }

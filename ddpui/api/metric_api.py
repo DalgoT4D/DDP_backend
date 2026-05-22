@@ -8,13 +8,14 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.metric_schema import (
-    MetricCreate,
-    MetricUpdate,
+    MetricPayload,
     MetricResponse,
     MetricListResponse,
     MetricPreviewResponse,
     MetricConsumersResponse,
+    MetricValidateResponse,
 )
+from ddpui.models.org import OrgWarehouse
 from ddpui.services.metric_service import (
     MetricService,
     MetricNotFoundError,
@@ -84,7 +85,7 @@ def list_metrics(
 
 @metric_router.post("/", response=MetricResponse)
 @has_permission(["can_create_metrics"])
-def create_metric(request, payload: MetricCreate):
+def create_metric(request, payload: MetricPayload):
     """Create a new metric"""
     orguser: OrgUser = request.orguser
 
@@ -116,6 +117,28 @@ def create_metric(request, payload: MetricCreate):
     )
 
 
+@metric_router.post("/validate/", response=MetricValidateResponse)
+@has_permission(["can_create_metrics"])
+def validate_metric(request, payload: MetricPayload):
+    """Validate a metric definition against the warehouse without saving."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        MetricService.validate_metric_payload(payload)
+    except MetricValidationError as e:
+        return MetricValidateResponse(valid=False, error=str(e))
+
+    org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    if not org_warehouse:
+        return MetricValidateResponse(valid=False, error="Warehouse not configured")
+
+    try:
+        MetricService.validate_metric_query(payload, org_warehouse)
+        return MetricValidateResponse(valid=True)
+    except MetricValidationError as e:
+        return MetricValidateResponse(valid=False, error=str(e))
+
+
 @metric_router.get("/{metric_id}/", response=MetricResponse)
 @has_permission(["can_view_metrics"])
 def get_metric(request, metric_id: int):
@@ -143,7 +166,7 @@ def get_metric(request, metric_id: int):
 
 @metric_router.put("/{metric_id}/", response=MetricResponse)
 @has_permission(["can_edit_metrics"])
-def update_metric(request, metric_id: int, payload: MetricUpdate):
+def update_metric(request, metric_id: int, payload: MetricPayload):
     """Update a metric"""
     orguser: OrgUser = request.orguser
 
@@ -152,13 +175,7 @@ def update_metric(request, metric_id: int, payload: MetricUpdate):
             metric_id=metric_id,
             org=orguser.org,
             orguser=orguser,
-            name=payload.name,
-            description=payload.description,
-            schema_name=payload.schema_name,
-            table_name=payload.table_name,
-            column=payload.column,
-            aggregation=payload.aggregation,
-            column_expression=payload.column_expression,
+            payload=payload,
         )
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None

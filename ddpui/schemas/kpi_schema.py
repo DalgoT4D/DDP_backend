@@ -19,7 +19,6 @@ class KPICreate(Schema):
     amber_threshold_pct: float = 80.0
     time_grain: str  # daily/weekly/monthly/quarterly/yearly
     time_dimension_column: Optional[str] = None
-    trend_periods: int = 12
     metric_type_tag: Optional[str] = None
     program_tags: List[str] = []
 
@@ -33,7 +32,6 @@ class KPIUpdate(Schema):
     amber_threshold_pct: Optional[float] = None
     time_grain: Optional[str] = None
     time_dimension_column: Optional[str] = None
-    trend_periods: Optional[int] = None
     metric_type_tag: Optional[str] = None
     program_tags: Optional[List[str]] = None
     display_order: Optional[int] = None
@@ -49,7 +47,6 @@ class KPIResponse(Schema):
     amber_threshold_pct: float
     time_grain: str
     time_dimension_column: Optional[str]
-    trend_periods: int
     metric_type_tag: Optional[str]
     program_tags: List[str]
     display_order: int

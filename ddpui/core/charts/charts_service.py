@@ -94,17 +94,21 @@ def format_time_grain_label(value: Any, time_grain: str) -> str:
 
     # Format based on time grain
     if time_grain == "year":
-        return dt.strftime("%Y")
+        return dt.strftime("%Y")  # "2025"
+    elif time_grain == "quarter":
+        return dt.strftime("%b %d, %Y")  # "Jan 01, 2025" (start of quarter)
     elif time_grain == "month":
-        return dt.strftime("%b %Y")  # "Jan 2024"
+        return dt.strftime("%b %d, %Y")  # "May 01, 2026"
+    elif time_grain == "week":
+        return dt.strftime("%b %d, %Y")  # "Aug 03, 2026" (start of week)
     elif time_grain == "day":
-        return dt.strftime("%b %d, %Y")  # "Jan 15, 2024"
+        return dt.strftime("%b %d, %Y")  # "Aug 03, 2026"
     elif time_grain == "hour":
-        return dt.strftime("%b %d,%Y %H:00")  # "Jan 15, 2024 14:00"
+        return dt.strftime("%b %d, %Y %H:00")  # "Jan 15, 2024 14:00"
     elif time_grain == "minute":
-        return dt.strftime("%b %d,%Y %H:%M")  # "Jan 15, 2024 14:30"
+        return dt.strftime("%b %d, %Y %H:%M")  # "Jan 15, 2024 14:30"
     elif time_grain == "second":
-        return dt.strftime("%b %d,%Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
+        return dt.strftime("%b %d, %Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
     else:
         return str(value)  # Default fallback
 
