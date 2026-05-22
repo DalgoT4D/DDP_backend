@@ -149,6 +149,13 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             final_dims = filtered_dims if filtered_dims else []
 
+        # Fallback to legacy fields for backward compatibility
+        if not final_dims:
+            if payload.dimension_col:
+                final_dims.append(payload.dimension_col)
+            if payload.extra_dimension:
+                final_dims.append(payload.extra_dimension)
+
     else:
         # For other charts, include both dimension_col and extra_dimension if present
         if payload.dimension_col:
