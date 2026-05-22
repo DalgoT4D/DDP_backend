@@ -8,6 +8,9 @@ from ddpui.models.org_user import OrgUser
 from ddpui.schemas.kpi_schema import (
     KPICreate,
     KPIUpdate,
+    AnnotationEntryCreate,
+    AnnotationEntryUpdate,
+    AnnotationEntryResponse,
     KPIResponse,
     KPIListResponse,
 )
@@ -164,3 +167,51 @@ def get_kpi_data(
         data=result["data"],
         echarts_config=result["echarts_config"],
     )
+
+
+# ── Annotation Endpoints ──────────────────────────────────────────────
+
+
+@kpi_router.get("/{kpi_id}/notes/", response=list[AnnotationEntryResponse])
+@has_permission(["can_view_kpis"])
+def list_annotations(request, kpi_id: int):
+    """List all annotation entries for a KPI."""
+    orguser: OrgUser = request.orguser
+    try:
+        return KPIService.list_annotations(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+
+
+@kpi_router.post("/{kpi_id}/notes/", response=AnnotationEntryResponse)
+@has_permission(["can_edit_kpis"])
+def create_annotation(request, kpi_id: int, payload: AnnotationEntryCreate):
+    """Create an annotation entry."""
+    orguser: OrgUser = request.orguser
+    try:
+        return KPIService.create_annotation(kpi_id, orguser.org, orguser, payload)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+
+
+@kpi_router.put("/{kpi_id}/notes/{entry_id}/", response=AnnotationEntryResponse)
+@has_permission(["can_edit_kpis"])
+def update_annotation(request, kpi_id: int, entry_id: int, payload: AnnotationEntryUpdate):
+    """Update an annotation entry."""
+    orguser: OrgUser = request.orguser
+    try:
+        return KPIService.update_annotation(kpi_id, entry_id, orguser.org, payload)
+    except KPINotFoundError:
+        raise HttpError(404, "Not found") from None
+
+
+@kpi_router.delete("/{kpi_id}/notes/{entry_id}/")
+@has_permission(["can_edit_kpis"])
+def delete_annotation(request, kpi_id: int, entry_id: int):
+    """Delete an annotation entry."""
+    orguser: OrgUser = request.orguser
+    try:
+        KPIService.delete_annotation(kpi_id, entry_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "Not found") from None
+    return {"success": True}

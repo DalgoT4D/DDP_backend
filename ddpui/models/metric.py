@@ -119,3 +119,35 @@ class KPI(models.Model):
 
     def __str__(self):
         return f"{self.name} (KPI)"
+
+
+NOTE_TYPE_CHOICES = [
+    ("beneficiary_quote", "Beneficiary Quote"),
+    ("note", "Note"),
+]
+
+
+class AnnotationEntry(models.Model):
+    """Timeline entry on a KPI — beneficiary quote or note with auto-captured snapshot."""
+
+    id = models.BigAutoField(primary_key=True)
+    kpi = models.ForeignKey(KPI, on_delete=models.CASCADE, related_name="annotation_entries")
+    note_type = models.CharField(max_length=20, choices=NOTE_TYPE_CHOICES)
+
+    period_key = models.CharField(max_length=100)
+    period_date = models.DateField(null=True, blank=True)
+
+    content = models.TextField()
+
+    snapshot_value = models.FloatField(null=True, blank=True)
+    snapshot_pop_change = models.FloatField(null=True, blank=True)
+
+    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-period_date", "-created_at"]
+
+    def __str__(self):
+        return f"{self.note_type}: {self.period_key} on {self.kpi.name}"

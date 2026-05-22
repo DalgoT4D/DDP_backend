@@ -60,3 +60,37 @@ class KPIListResponse(Schema):
     page: int
     page_size: int
     total_pages: int
+
+
+# ── Annotation Schemas ─────────────────────────────────────────────────
+
+
+class AnnotationEntryCreate(Schema):
+    note_type: str
+    period_key: str
+    period_date: Optional[str] = None
+    content: str
+    snapshot_value: Optional[float] = None
+    snapshot_pop_change: Optional[float] = None
+
+
+class AnnotationEntryUpdate(Schema):
+    note_type: Optional[str] = None
+    period_key: Optional[str] = None
+    period_date: Optional[str] = None
+    content: Optional[str] = None
+    snapshot_value: Optional[float] = None
+    snapshot_pop_change: Optional[float] = None
+
+
+class AnnotationEntryResponse(Schema):
+    id: int
+    note_type: str
+    period_key: str
+    period_date: Optional[str]
+    content: str
+    snapshot_value: Optional[float]
+    snapshot_pop_change: Optional[float]
+    created_by_email: str
+    created_at: datetime
+    updated_at: datetime

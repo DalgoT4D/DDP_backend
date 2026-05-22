@@ -377,7 +377,11 @@ def build_multi_metric_query(
                 raise ValueError(f"Aggregation function is required for metric")
 
             # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 if not metric.column:
@@ -479,7 +483,11 @@ def build_chart_query(
             metric = payload.metrics[0]
 
             # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 if not metric.column:
@@ -518,7 +526,11 @@ def build_chart_query(
             metric = payload.metrics[0]
 
             # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 if not metric.column:
@@ -796,7 +808,11 @@ def apply_chart_sorting(
 
         if matching_metric:
             # It's a metric - generate the actual SQL alias that matches SELECT clause
-            if matching_metric.aggregation.lower() == "count" and matching_metric.column is None:
+            if (
+                matching_metric.aggregation
+                and matching_metric.aggregation.lower() == "count"
+                and matching_metric.column is None
+            ):
                 sort_column = (
                     f"count_all_{matching_metric.alias}" if matching_metric.alias else "count_all"
                 )
@@ -901,7 +917,14 @@ def execute_chart_query(
     # Handle metrics - metrics are required for all charts (except table charts without metrics)
     if payload.metrics:
         for metric in payload.metrics:
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+            elif (
+                metric.aggregation
+                and metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -949,7 +972,11 @@ def transform_data_for_chart(
 
                 # Store each metric value for this dimension-x_value combination
                 for metric in payload.metrics:
-                    if metric.aggregation.lower() == "count" and metric.column is None:
+                    if (
+                        metric.aggregation
+                        and metric.aggregation.lower() == "count"
+                        and metric.column is None
+                    ):
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     else:
                         alias = metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -1028,7 +1055,11 @@ def transform_data_for_chart(
             legend_data = []
 
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1059,7 +1090,7 @@ def transform_data_for_chart(
 
         # Use first metric for pie charts
         metric = payload.metrics[0]
-        if metric.aggregation.lower() == "count" and metric.column is None:
+        if metric.aggregation and metric.aggregation.lower() == "count" and metric.column is None:
             alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             display_name = metric.alias or "Total Count"
         else:
@@ -1147,7 +1178,11 @@ def transform_data_for_chart(
 
                 # Store each metric value for this dimension-x_value combination
                 for metric in payload.metrics:
-                    if metric.aggregation.lower() == "count" and metric.column is None:
+                    if (
+                        metric.aggregation
+                        and metric.aggregation.lower() == "count"
+                        and metric.column is None
+                    ):
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     else:
                         alias = metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -1224,7 +1259,11 @@ def transform_data_for_chart(
             legend_data = []
 
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1313,7 +1352,11 @@ def transform_data_for_chart(
             # Add all metric columns if present
             if payload.metrics:
                 for metric in payload.metrics:
-                    if metric.aggregation.lower() == "count" and metric.column is None:
+                    if (
+                        metric.aggregation
+                        and metric.aggregation.lower() == "count"
+                        and metric.column is None
+                    ):
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                         display_name = metric.alias or "Total Count"
                     else:
@@ -1333,7 +1376,11 @@ def transform_data_for_chart(
         # Add all metric columns
         if payload.metrics:
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1356,7 +1403,11 @@ def transform_data_for_chart(
             metric = payload.metrics[0]
             row = results[0] if results else {}
 
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                 display_name = metric.alias or "Total Count"
             else:
@@ -1427,7 +1478,11 @@ def get_chart_data_table_preview(
     if payload.metrics:
         for metric in payload.metrics:
             # Handle COUNT(*) case - SQL alias includes count_all_ prefix
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                 display_name = metric.alias or "Total Count"
             else:
@@ -1468,7 +1523,11 @@ def get_chart_data_table_preview(
         # Transform metric columns from alias to display_name
         if payload.metrics:
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1493,7 +1552,11 @@ def get_chart_data_table_preview(
         expected_columns = dimensions.copy()
         if payload.metrics:
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     display_name = metric.alias or "Total Count"
                 else:
                     display_name = metric.alias or f"{metric.aggregation}({metric.column})"

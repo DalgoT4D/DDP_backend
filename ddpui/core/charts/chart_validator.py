@@ -117,6 +117,11 @@ class ChartValidator:
 
             metric_agg = metric.get("aggregation")
             metric_col = metric.get("column")
+            metric_expr = metric.get("column_expression")
+
+            # Expression metrics don't need aggregation or column
+            if metric_expr:
+                continue
 
             if not metric_agg:
                 raise ChartValidationError(f"Metric {i+1} requires aggregation function")

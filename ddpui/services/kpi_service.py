@@ -374,6 +374,7 @@ class KPIService:
             periods.append(
                 {
                     "period": period_label,
+                    "period_date": str(period_val) if period_val is not None else None,
                     "value": float(value_val) if value_val is not None else None,
                 }
             )
@@ -479,3 +480,110 @@ class KPIService:
             }
 
         return KPIService.compute_kpi_data(kpi_response, org, date_filter=date_filter)
+
+    # ── Annotation methods ──────────────────────────────────────────────
+
+    @staticmethod
+    def _entry_to_response(entry) -> "AnnotationEntryResponse":
+        """Convert an AnnotationEntry model to response schema."""
+        from ddpui.schemas.kpi_schema import AnnotationEntryResponse
+
+        return AnnotationEntryResponse(
+            id=entry.id,
+            note_type=entry.note_type,
+            period_key=entry.period_key,
+            period_date=entry.period_date.isoformat() if entry.period_date else None,
+            content=entry.content,
+            snapshot_value=entry.snapshot_value,
+            snapshot_pop_change=entry.snapshot_pop_change,
+            created_by_email=entry.created_by.user.email
+            if entry.created_by and entry.created_by.user
+            else "",
+            created_at=entry.created_at,
+            updated_at=entry.updated_at,
+        )
+
+    @staticmethod
+    def list_annotations(kpi_id: int, org: Org) -> list:
+        """List all annotation entries for a KPI."""
+        from ddpui.models.metric import AnnotationEntry
+
+        kpi = KPIService.get_kpi(kpi_id, org)
+        entries = AnnotationEntry.objects.filter(kpi=kpi).select_related("created_by__user")
+        return [KPIService._entry_to_response(e) for e in entries]
+
+    @staticmethod
+    def create_annotation(kpi_id: int, org: Org, orguser: OrgUser, payload):
+        """Create an annotation entry. Snapshot values come from the frontend."""
+        from ddpui.models.metric import AnnotationEntry
+        from datetime import date as date_type
+
+        kpi = KPIService.get_kpi(kpi_id, org)
+
+        period_date = None
+        if payload.period_date:
+            try:
+                period_date = date_type.fromisoformat(payload.period_date[:10])
+            except (ValueError, TypeError):
+                pass
+
+        entry = AnnotationEntry.objects.create(
+            kpi=kpi,
+            note_type=payload.note_type,
+            period_key=payload.period_key,
+            period_date=period_date,
+            content=payload.content,
+            snapshot_value=payload.snapshot_value,
+            snapshot_pop_change=payload.snapshot_pop_change,
+            created_by=orguser,
+        )
+        # Reload to get created_by relation
+        entry = AnnotationEntry.objects.select_related("created_by__user").get(id=entry.id)
+        return KPIService._entry_to_response(entry)
+
+    @staticmethod
+    def update_annotation(kpi_id: int, entry_id: int, org: Org, payload):
+        """Update an annotation entry."""
+        from ddpui.models.metric import AnnotationEntry
+        from datetime import date as date_type
+
+        KPIService.get_kpi(kpi_id, org)
+        try:
+            entry = AnnotationEntry.objects.select_related("created_by__user").get(
+                id=entry_id, kpi_id=kpi_id
+            )
+        except AnnotationEntry.DoesNotExist:
+            raise KPINotFoundError(entry_id)
+
+        if payload.content is not None:
+            entry.content = payload.content
+        if payload.note_type is not None:
+            entry.note_type = payload.note_type
+        if payload.period_key is not None:
+            entry.period_key = payload.period_key
+        if payload.period_date is not None:
+            try:
+                entry.period_date = date_type.fromisoformat(payload.period_date[:10])
+            except (ValueError, TypeError):
+                pass
+        if payload.snapshot_value is not None:
+            entry.snapshot_value = payload.snapshot_value
+        if payload.snapshot_pop_change is not None:
+            entry.snapshot_pop_change = payload.snapshot_pop_change
+
+        entry.save()
+        return KPIService._entry_to_response(entry)
+
+    @staticmethod
+    def delete_annotation(kpi_id: int, entry_id: int, org: Org) -> bool:
+        """Delete an annotation entry."""
+        from ddpui.models.metric import AnnotationEntry
+
+        KPIService.get_kpi(kpi_id, org)
+        try:
+            entry = AnnotationEntry.objects.get(id=entry_id, kpi_id=kpi_id)
+        except AnnotationEntry.DoesNotExist:
+            raise KPINotFoundError(entry_id)
+
+        entry.delete()
+        return True
