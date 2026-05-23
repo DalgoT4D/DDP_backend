@@ -23,6 +23,7 @@ from ddpui.services.metric_service import (
     MetricDeleteBlockedError,
 )
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.response_wrapper import api_response
 
 logger = CustomLogger("ddpui")
 
@@ -209,7 +210,7 @@ def delete_metric(request, metric_id: int):
     except MetricDeleteBlockedError as e:
         raise HttpError(409, e.message) from None
 
-    return {"success": True}
+    return api_response(success=True)
 
 
 @metric_router.post("/{metric_id}/preview/", response=MetricPreviewResponse)

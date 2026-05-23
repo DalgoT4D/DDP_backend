@@ -3,10 +3,12 @@
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date
 from decimal import Decimal
+from collections import defaultdict
 
 from sqlalchemy import column, func, and_, or_, text, literal_column
 
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.metric import Metric
 from ddpui.models.visualization import Chart
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
@@ -187,8 +189,6 @@ def _resolve_saved_metrics(metrics_list: Optional[list]) -> Optional[list]:
         if saved_id is None:
             resolved.append(m)
             continue
-
-        from ddpui.models.metric import Metric
 
         try:
             metric = Metric.objects.get(id=saved_id)
@@ -679,8 +679,6 @@ def apply_chart_filters(
     """
     if not filters:
         return query_builder
-
-    from collections import defaultdict
 
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)

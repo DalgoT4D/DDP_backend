@@ -22,6 +22,8 @@ from ddpui.services.kpi_service import (
 )
 from ddpui.services.metric_service import MetricNotFoundError
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.response_wrapper import api_response
+import json
 
 logger = CustomLogger("ddpui")
 
@@ -131,7 +133,7 @@ def delete_kpi(request, kpi_id: int):
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 
-    return {"success": True}
+    return api_response(success=True)
 
 
 @kpi_router.get("/{kpi_id}/data/", response=ChartDataResponse)
@@ -152,8 +154,6 @@ def get_kpi_data(
       - date_to: filter trend data up to this date (ISO format, e.g. 2026-01-01)
       - dashboard_filters: JSON-encoded {filter_id: value} dict from dashboard
     """
-    import json
-
     orguser: OrgUser = request.orguser
 
     # Parse dashboard filters JSON
@@ -227,4 +227,4 @@ def delete_annotation(request, kpi_id: int, entry_id: int):
         KPIService.delete_annotation(kpi_id, entry_id, orguser.org)
     except KPINotFoundError:
         raise HttpError(404, "Not found") from None
-    return {"success": True}
+    return api_response(success=True)

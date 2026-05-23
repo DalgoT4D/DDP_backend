@@ -1,18 +1,25 @@
 """KPI service for business logic"""
 
 from typing import Optional, List, Any
+from datetime import date as date_type
 
 from django.db.models import Q
 from sqlalchemy import column, literal_column, func, and_
 
-from ddpui.models.metric import Metric, KPI
+from ddpui.models.metric import Metric, KPI, AnnotationEntry
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.dashboard import Dashboard
+from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
-from ddpui.core.charts.charts_service import apply_time_grain, format_time_grain_label
+from ddpui.core.charts.charts_service import (
+    apply_time_grain,
+    format_time_grain_label,
+    apply_dashboard_filters,
+)
+from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.services.metric_service import MetricService
-from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIResponse
+from ddpui.services.dashboard_service import DashboardService
+from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIResponse, AnnotationEntryResponse
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
@@ -200,7 +207,7 @@ class KPIService:
     def update_kpi(kpi_id: int, org: Org, orguser: OrgUser, payload: KPIUpdate) -> KPI:
         kpi = KPIService.get_kpi(kpi_id, org)
 
-        update_data = payload.dict(exclude_unset=True)
+        update_data = payload.model_dump(exclude_unset=True)
 
         # Handle metric change
         if "metric_id" in update_data:
@@ -326,8 +333,6 @@ class KPIService:
 
         Returns list of {period: str, value: float|None} ordered ascending.
         """
-        from ddpui.core.charts.charts_service import apply_dashboard_filters
-
         metric = kpi_response.metric
         if not kpi_response.time_dimension_column or not kpi_response.time_grain:
             return []
@@ -397,8 +402,6 @@ class KPIService:
           - Live KPI API (via get_kpi_data)
           - Report service (builds KPIResponse from frozen config)
         """
-        from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-
         empty_result = {"data": {}, "echarts_config": {}}
 
         org_warehouse = OrgWarehouse.objects.filter(org=org).first()
@@ -474,9 +477,6 @@ class KPIService:
           - date_from/date_to: filter trend data to this date range
           - dashboard_filters: raw {filter_id: value} dict from dashboard
         """
-        from ddpui.models.dashboard import DashboardFilter
-        from ddpui.services.dashboard_service import DashboardService
-
         kpi = KPIService.get_kpi(kpi_id, org)
         kpi_response = KPIService.kpi_to_response(kpi)
 
@@ -519,8 +519,6 @@ class KPIService:
     @staticmethod
     def _entry_to_response(entry) -> "AnnotationEntryResponse":
         """Convert an AnnotationEntry model to response schema."""
-        from ddpui.schemas.kpi_schema import AnnotationEntryResponse
-
         return AnnotationEntryResponse(
             id=entry.id,
             note_type=entry.note_type,
@@ -539,8 +537,6 @@ class KPIService:
     @staticmethod
     def list_annotations(kpi_id: int, org: Org) -> list:
         """List all annotation entries for a KPI."""
-        from ddpui.models.metric import AnnotationEntry
-
         kpi = KPIService.get_kpi(kpi_id, org)
         entries = AnnotationEntry.objects.filter(kpi=kpi).select_related("created_by__user")
         return [KPIService._entry_to_response(e) for e in entries]
@@ -548,9 +544,6 @@ class KPIService:
     @staticmethod
     def create_annotation(kpi_id: int, org: Org, orguser: OrgUser, payload):
         """Create an annotation entry. Snapshot values come from the frontend."""
-        from ddpui.models.metric import AnnotationEntry
-        from datetime import date as date_type
-
         kpi = KPIService.get_kpi(kpi_id, org)
 
         period_date = None
@@ -577,9 +570,6 @@ class KPIService:
     @staticmethod
     def update_annotation(kpi_id: int, entry_id: int, org: Org, payload):
         """Update an annotation entry."""
-        from ddpui.models.metric import AnnotationEntry
-        from datetime import date as date_type
-
         KPIService.get_kpi(kpi_id, org)
         try:
             entry = AnnotationEntry.objects.select_related("created_by__user").get(
@@ -610,8 +600,6 @@ class KPIService:
     @staticmethod
     def delete_annotation(kpi_id: int, entry_id: int, org: Org) -> bool:
         """Delete an annotation entry."""
-        from ddpui.models.metric import AnnotationEntry
-
         KPIService.get_kpi(kpi_id, org)
         try:
             entry = AnnotationEntry.objects.get(id=entry_id, kpi_id=kpi_id)
