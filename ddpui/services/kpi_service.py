@@ -3,7 +3,7 @@
 from typing import Optional, List, Any
 
 from django.db.models import Q
-from sqlalchemy import column, literal_column, func
+from sqlalchemy import column, literal_column, func, and_
 
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.org import Org, OrgWarehouse
@@ -320,11 +320,14 @@ class KPIService:
         org_warehouse: OrgWarehouse,
         date_filter: Optional[dict] = None,
         limit: Optional[int] = None,
+        dashboard_filters: Optional[List[dict]] = None,
     ) -> List[dict]:
         """Compute trend periods for a KPI. Single source of truth for trend queries.
 
         Returns list of {period: str, value: float|None} ordered ascending.
         """
+        from ddpui.core.charts.charts_service import apply_dashboard_filters
+
         metric = kpi_response.metric
         if not kpi_response.time_dimension_column or not kpi_response.time_grain:
             return []
@@ -348,8 +351,6 @@ class KPIService:
             qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
 
         if date_filter:
-            from sqlalchemy import and_
-
             date_col_expr = column(date_filter["column_name"])
             qb.where_clause(
                 and_(
@@ -357,6 +358,9 @@ class KPIService:
                     date_col_expr <= date_filter["end"],
                 )
             )
+
+        if dashboard_filters:
+            qb = apply_dashboard_filters(qb, dashboard_filters)
 
         qb.order_cols_by([("period", "asc")])
         if limit:
@@ -382,7 +386,10 @@ class KPIService:
 
     @staticmethod
     def compute_kpi_data(
-        kpi_response: KPIResponse, org: Org, date_filter: Optional[dict] = None
+        kpi_response: KPIResponse,
+        org: Org,
+        date_filter: Optional[dict] = None,
+        dashboard_filters: Optional[List[dict]] = None,
     ) -> dict:
         """Compute KPI data + echarts config.
 
@@ -404,7 +411,9 @@ class KPIService:
         # Compute trend — current value is derived from the latest period
         periods = []
         try:
-            periods = KPIService._compute_trend(kpi_response, org_warehouse, date_filter)
+            periods = KPIService._compute_trend(
+                kpi_response, org_warehouse, date_filter, dashboard_filters=dashboard_filters
+            )
         except Exception as e:
             logger.error(f"Error computing KPI trend: {e}")
 
@@ -456,13 +465,18 @@ class KPIService:
         time_grain_override: Optional[str] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        dashboard_filters: Optional[dict] = None,
     ) -> dict:
         """Get KPI chart data + echarts config (live from DB).
 
         Optional overrides:
           - time_grain_override: use this time grain instead of the KPI's default
           - date_from/date_to: filter trend data to this date range
+          - dashboard_filters: raw {filter_id: value} dict from dashboard
         """
+        from ddpui.models.dashboard import DashboardFilter
+        from ddpui.services.dashboard_service import DashboardService
+
         kpi = KPIService.get_kpi(kpi_id, org)
         kpi_response = KPIService.kpi_to_response(kpi)
 
@@ -479,7 +493,26 @@ class KPIService:
                 "end": date_to,
             }
 
-        return KPIService.compute_kpi_data(kpi_response, org, date_filter=date_filter)
+        # Resolve dashboard filters (same as charts)
+        resolved_dashboard_filters = None
+        if dashboard_filters:
+            metric = kpi.metric
+            org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+            warehouse_client = (
+                WarehouseFactory.get_warehouse_client(org_warehouse) if org_warehouse else None
+            )
+            filter_defs = DashboardFilter.objects.filter(id__in=dashboard_filters.keys())
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                dashboard_filters,
+                [f.to_json() for f in filter_defs],
+                metric.schema_name,
+                metric.table_name,
+                warehouse_client,
+            )
+
+        return KPIService.compute_kpi_data(
+            kpi_response, org, date_filter=date_filter, dashboard_filters=resolved_dashboard_filters
+        )
 
     # ── Annotation methods ──────────────────────────────────────────────
 
@@ -496,9 +529,9 @@ class KPIService:
             content=entry.content,
             snapshot_value=entry.snapshot_value,
             snapshot_pop_change=entry.snapshot_pop_change,
-            created_by_email=entry.created_by.user.email
-            if entry.created_by and entry.created_by.user
-            else "",
+            created_by_email=(
+                entry.created_by.user.email if entry.created_by and entry.created_by.user else ""
+            ),
             created_at=entry.created_at,
             updated_at=entry.updated_at,
         )

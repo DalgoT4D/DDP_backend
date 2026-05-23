@@ -386,6 +386,7 @@ class ReportService:
         snapshot_id: int,
         kpi_id: int,
         org: Org,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Get KPI data from a frozen snapshot config.
 
@@ -455,7 +456,25 @@ class ReportService:
                 "end": snapshot.period_end.isoformat(),
             }
 
-        return KPIService.compute_kpi_data(kpi_response, org, date_filter=date_filter)
+        # Resolve dashboard filters from frozen config (same as charts)
+        resolved_dashboard_filters = None
+        if dashboard_filters:
+            org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+            warehouse_client = (
+                WarehouseFactory.get_warehouse_client(org_warehouse) if org_warehouse else None
+            )
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                dashboard_filters,
+                frozen_filters,
+                metric_info.get("schema_name", ""),
+                metric_info.get("table_name", ""),
+                warehouse_client,
+            )
+
+        return KPIService.compute_kpi_data(
+            kpi_response, org, date_filter=date_filter, dashboard_filters=resolved_dashboard_filters
+        )
 
     # =========================================================================
     # Snapshot CRUD

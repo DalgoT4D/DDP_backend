@@ -142,6 +142,7 @@ def get_kpi_data(
     time_grain: str = None,
     date_from: str = None,
     date_to: str = None,
+    dashboard_filters: str = None,
 ):
     """Get KPI chart data + echarts config.
 
@@ -149,8 +150,19 @@ def get_kpi_data(
       - time_grain: override the KPI's default time grain (daily/weekly/monthly/quarterly/yearly)
       - date_from: filter trend data from this date (ISO format, e.g. 2025-01-01)
       - date_to: filter trend data up to this date (ISO format, e.g. 2026-01-01)
+      - dashboard_filters: JSON-encoded {filter_id: value} dict from dashboard
     """
+    import json
+
     orguser: OrgUser = request.orguser
+
+    # Parse dashboard filters JSON
+    parsed_dashboard_filters = None
+    if dashboard_filters:
+        try:
+            parsed_dashboard_filters = json.loads(dashboard_filters)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
 
     try:
         result = KPIService.get_kpi_data(
@@ -159,6 +171,7 @@ def get_kpi_data(
             time_grain_override=time_grain,
             date_from=date_from,
             date_to=date_to,
+            dashboard_filters=parsed_dashboard_filters,
         )
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None

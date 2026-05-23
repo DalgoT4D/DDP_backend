@@ -146,11 +146,22 @@ def get_report_chart_data(
 
 @report_router.get("/{snapshot_id}/kpis/{kpi_id}/data/", response=ChartDataResponse)
 @has_permission(["can_view_dashboards"])
-def get_report_kpi_data(request, snapshot_id: int, kpi_id: int):
+def get_report_kpi_data(
+    request, snapshot_id: int, kpi_id: int, dashboard_filters: Optional[str] = None
+):
     """Get KPI data for a specific KPI in a report snapshot."""
     orguser: OrgUser = request.orguser
     try:
-        result = ReportService.get_report_kpi_data(snapshot_id, kpi_id, orguser.org)
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+
+        result = ReportService.get_report_kpi_data(
+            snapshot_id, kpi_id, orguser.org, dashboard_filters=parsed_filters
+        )
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
