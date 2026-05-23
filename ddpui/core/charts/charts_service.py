@@ -716,6 +716,23 @@ def apply_chart_sorting(
     if not sort_config:
         return query_builder
 
+    # Build the set of valid sortable columns from the payload
+    valid_columns = set()
+    if payload:
+        # Add dimension columns (these are in GROUP BY)
+        if hasattr(payload, "dimension_col") and payload.dimension_col:
+            valid_columns.add(payload.dimension_col)
+        if hasattr(payload, "dimensions") and payload.dimensions:
+            for dim in payload.dimensions:
+                valid_columns.add(dim)
+        # Add metric aliases and raw column names
+        if hasattr(payload, "metrics") and payload.metrics:
+            for metric in payload.metrics:
+                if metric.alias:
+                    valid_columns.add(metric.alias)
+                if metric.column:
+                    valid_columns.add(metric.column)
+
     # Prepare sort columns as list of tuples for order_cols_by method
     sort_cols = []
     for sort_item in sort_config:
@@ -725,11 +742,11 @@ def apply_chart_sorting(
         if not column_name:
             continue
 
-        # Try to match against metric aliases first
+        # Try to match against metric aliases and column names
         matching_metric = None
         if payload and payload.metrics:
             for metric in payload.metrics:
-                if metric.alias == column_name:
+                if metric.alias == column_name or metric.column == column_name:
                     matching_metric = metric
                     break
 
@@ -744,6 +761,13 @@ def apply_chart_sorting(
                     matching_metric.alias
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
+        elif payload and valid_columns and column_name not in valid_columns:
+            # Column is not a known dimension or metric - skip to avoid invalid SQL
+            logger.warning(
+                f"Sort column '{column_name}' is not in the query's selected or grouped columns. "
+                f"Skipping to avoid invalid SQL. Valid columns: {valid_columns}"
+            )
+            continue
         else:
             # It's a dimension column - use as-is
             sort_column = column_name
