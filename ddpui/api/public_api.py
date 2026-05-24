@@ -953,7 +953,7 @@ def download_public_chart_data_csv(request, token: str, chart_id: int, payload: 
 
 @public_router.post(
     "/dashboards/{token}/charts/{chart_id}/data-preview/total-rows/",
-    response={200: dict, 404: PublicErrorResponse},
+    response={200: dict, 400: PublicErrorResponse, 404: PublicErrorResponse},
 )
 def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int):
     """
@@ -1036,6 +1036,8 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
         return 404, PublicErrorResponse(
             error="Dashboard not found or no longer public", is_valid=False
         )
+    except ValueError as e:
+        return 400, PublicErrorResponse(error=str(e), is_valid=False)
     except Exception as e:
         logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
