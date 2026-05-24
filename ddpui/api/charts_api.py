@@ -632,6 +632,9 @@ def get_chart_data_preview(
         )
 
         return DataPreviewResponse(**response_data)
+    except ValueError as e:
+        logger.warning(f"Validation error in chart data preview: {str(e)}")
+        raise HttpError(400, str(e))
     except Exception as e:
         logger.error(f"Error in chart data preview: {str(e)}")
         import traceback
@@ -703,7 +706,11 @@ def get_chart_data_preview_total_rows(
     )
 
     # Get total rows using the same query builder as chart data
-    total_rows = charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
+    try:
+        total_rows = charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
+    except ValueError as e:
+        logger.warning(f"Validation error in chart data preview total rows: {str(e)}")
+        raise HttpError(400, str(e))
 
     return total_rows
 
