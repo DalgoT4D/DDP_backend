@@ -249,7 +249,10 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
             f"Resent invitation to {invited_email} to join {orguser.org.name} "
             f"with invite code {invitation.invite_code}",
         )
-        return from_invitation(invitation), None
+        return NewInvitationSchema(
+            invited_email=invitation.invited_email,
+            invited_role_uuid=invitation.invited_new_role.uuid,
+        ), None
 
     # payload.invited_by = from_orguser(orguser)
     # payload.invited_on = timezone.as_utc(datetime.utcnow())
