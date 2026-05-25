@@ -1,5 +1,7 @@
 """KPI API endpoints"""
 
+from typing import Optional
+
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -36,9 +38,9 @@ def list_kpis(
     request,
     page: int = 1,
     page_size: int = 10,
-    search: str = None,
-    program_tag: str = None,
-    metric_type: str = None,
+    search: Optional[str] = None,
+    program_tag: Optional[str] = None,
+    metric_type: Optional[str] = None,
 ):
     """List KPIs for the organization"""
     orguser: OrgUser = request.orguser
@@ -136,15 +138,26 @@ def delete_kpi(request, kpi_id: int):
     return api_response(success=True)
 
 
+@kpi_router.get("/{kpi_id}/dashboards/", response=list)
+@has_permission(["can_view_kpis"])
+def get_kpi_dashboards(request, kpi_id: int):
+    """Get list of dashboards that use this KPI."""
+    orguser: OrgUser = request.orguser
+    try:
+        return KPIService.get_kpi_dashboards(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+
+
 @kpi_router.get("/{kpi_id}/data/", response=ChartDataResponse)
 @has_permission(["can_view_kpis"])
 def get_kpi_data(
     request,
     kpi_id: int,
-    time_grain: str = None,
-    date_from: str = None,
-    date_to: str = None,
-    dashboard_filters: str = None,
+    time_grain: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    dashboard_filters: Optional[str] = None,
 ):
     """Get KPI chart data + echarts config.
 

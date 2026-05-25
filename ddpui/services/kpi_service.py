@@ -62,12 +62,12 @@ def compute_rag_status(
         if achievement >= amber_pct:
             return "amber"
         return "red"
-    else:  # decrease — lower is better
-        if achievement <= green_pct:
-            return "green"
-        if achievement <= amber_pct:
+    else:  # decrease — lower is better, check worst first
+        if achievement > amber_pct:
+            return "red"
+        if achievement > green_pct:
             return "amber"
-        return "red"
+        return "green"
 
 
 # ── Exceptions ──────────────────────────────────────────────────────────────
@@ -228,26 +228,30 @@ class KPIService:
         return kpi
 
     @staticmethod
+    def get_kpi_dashboards(kpi_id: int, org: Org) -> List[dict]:
+        """Get list of dashboards that use this KPI."""
+        KPIService.get_kpi(kpi_id, org)
+        dashboards_with_kpi = []
+        for dashboard in Dashboard.objects.filter(org=org):
+            for tab in dashboard.tabs or []:
+                for comp in (tab.get("components") or {}).values():
+                    if comp.get("type") == "kpi" and comp.get("config", {}).get("kpiId") == kpi_id:
+                        dashboards_with_kpi.append(
+                            {
+                                "id": dashboard.id,
+                                "title": dashboard.title,
+                                "dashboard_type": dashboard.dashboard_type,
+                            }
+                        )
+                        break
+                else:
+                    continue
+                break
+        return dashboards_with_kpi
+
+    @staticmethod
     def delete_kpi(kpi_id: int, org: Org, orguser: OrgUser) -> bool:
         kpi = KPIService.get_kpi(kpi_id, org)
-
-        # Remove from any dashboard components
-        for dashboard in Dashboard.objects.filter(org=org):
-            if not dashboard.components:
-                continue
-            keys_to_remove = [
-                comp_id
-                for comp_id, comp in dashboard.components.items()
-                if comp.get("type") == "kpi" and comp.get("config", {}).get("kpiId") == kpi_id
-            ]
-            if keys_to_remove:
-                for key in keys_to_remove:
-                    del dashboard.components[key]
-                    dashboard.layout_config = [
-                        item for item in (dashboard.layout_config or []) if item.get("i") != key
-                    ]
-                dashboard.save()
-
         kpi_name = kpi.name
         kpi.delete()
         logger.info(f"Deleted KPI '{kpi_name}' (id={kpi_id}) by {orguser.user.email}")

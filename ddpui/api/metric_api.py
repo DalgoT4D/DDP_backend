@@ -1,6 +1,6 @@
 """Metric API endpoints"""
 
-from typing import List
+from typing import List, Optional
 
 from ninja import Router
 from ninja.errors import HttpError
@@ -36,9 +36,9 @@ def list_metrics(
     request,
     page: int = 1,
     page_size: int = 10,
-    search: str = None,
-    schema_name: str = None,
-    table_name: str = None,
+    search: Optional[str] = None,
+    schema_name: Optional[str] = None,
+    table_name: Optional[str] = None,
 ):
     """List metrics for the organization with pagination and filtering"""
     orguser: OrgUser = request.orguser

@@ -223,10 +223,10 @@ class TestKPICRUD:
         assert any(k.id == sample_kpi.id for k in kpis)
 
     def test_list_kpis_search_by_name(self, org, sample_kpi, seed_db):
-        kpis, total = KPIService.list_kpis(org, search="Test")
+        _, total = KPIService.list_kpis(org, search="Test")
         assert total >= 1
 
-        kpis, total = KPIService.list_kpis(org, search="nonexistent_xyz")
+        _, total = KPIService.list_kpis(org, search="nonexistent_xyz")
         assert total == 0
 
     def test_list_kpis_search_by_program_tag(self, orguser, org, sample_metric, seed_db):
@@ -245,7 +245,7 @@ class TestKPICRUD:
         assert any(k.id == kpi.id for k in kpis)
 
         # Search by name still works
-        kpis, total = KPIService.list_kpis(org, search="Enrollment")
+        _, total = KPIService.list_kpis(org, search="Enrollment")
         assert total >= 1
 
         kpi.delete()
@@ -267,27 +267,28 @@ class TestKPICRUD:
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi(kpi_id, org)
 
-    def test_delete_kpi_cleans_dashboard(self, orguser, org, sample_kpi, seed_db):
+    def test_get_kpi_dashboards(self, orguser, org, sample_kpi, seed_db):
         dashboard = Dashboard.objects.create(
             title="Test Dashboard",
             org=org,
             created_by=orguser,
-            components={
-                "comp1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
-                "comp2": {"type": "chart", "config": {"chartId": 1}},
-            },
-            layout_config=[
-                {"i": "comp1", "x": 0, "y": 0, "w": 4, "h": 2},
-                {"i": "comp2", "x": 4, "y": 0, "w": 4, "h": 2},
+            components={},
+            layout_config=[],
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "comp1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
+                    },
+                }
             ],
         )
 
-        KPIService.delete_kpi(sample_kpi.id, org, orguser)
-
-        dashboard.refresh_from_db()
-        assert "comp1" not in dashboard.components
-        assert "comp2" in dashboard.components
-        assert len(dashboard.layout_config) == 1
+        result = KPIService.get_kpi_dashboards(sample_kpi.id, org)
+        assert len(result) == 1
+        assert result[0]["id"] == dashboard.id
+        assert result[0]["title"] == "Test Dashboard"
         dashboard.delete()
 
 
