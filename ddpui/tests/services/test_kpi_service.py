@@ -395,13 +395,19 @@ class TestKPIData:
 
 
 class TestAnnotations:
+    def _clear_annotations(self, sample_kpi):
+        sample_kpi.annotations = []
+        sample_kpi.save(update_fields=["annotations"])
+
     def test_list_empty(self, org, sample_kpi, seed_db):
+        self._clear_annotations(sample_kpi)
         results = KPIService.list_annotations(sample_kpi.id, org)
         assert results == []
 
     def test_create_annotation(self, orguser, org, sample_kpi, seed_db):
         from ddpui.schemas.kpi_schema import AnnotationEntryCreate
 
+        self._clear_annotations(sample_kpi)
         payload = AnnotationEntryCreate(
             note_type="beneficiary_quote",
             period_key="Jan 01, 2026",
@@ -419,14 +425,12 @@ class TestAnnotations:
         assert result.snapshot_pop_change == 8.3
         assert result.created_by_email == orguser.user.email
 
-        from ddpui.models.metric import AnnotationEntry
-
-        AnnotationEntry.objects.filter(id=result.id).delete()
+        self._clear_annotations(sample_kpi)
 
     def test_create_and_list(self, orguser, org, sample_kpi, seed_db):
         from ddpui.schemas.kpi_schema import AnnotationEntryCreate
-        from ddpui.models.metric import AnnotationEntry
 
+        self._clear_annotations(sample_kpi)
         payload = AnnotationEntryCreate(
             note_type="note",
             period_key="Feb 01, 2026",
@@ -437,12 +441,12 @@ class TestAnnotations:
         assert len(results) >= 1
         assert any(r.id == created.id for r in results)
 
-        AnnotationEntry.objects.filter(id=created.id).delete()
+        self._clear_annotations(sample_kpi)
 
     def test_update_annotation(self, orguser, org, sample_kpi, seed_db):
         from ddpui.schemas.kpi_schema import AnnotationEntryCreate, AnnotationEntryUpdate
-        from ddpui.models.metric import AnnotationEntry
 
+        self._clear_annotations(sample_kpi)
         create_payload = AnnotationEntryCreate(
             note_type="note",
             period_key="Mar 01, 2026",
@@ -458,22 +462,26 @@ class TestAnnotations:
         assert updated.content == "Updated note content."
         assert updated.note_type == "beneficiary_quote"
 
-        AnnotationEntry.objects.filter(id=created.id).delete()
+        self._clear_annotations(sample_kpi)
 
     def test_delete_annotation(self, orguser, org, sample_kpi, seed_db):
         from ddpui.schemas.kpi_schema import AnnotationEntryCreate
-        from ddpui.models.metric import AnnotationEntry
 
+        self._clear_annotations(sample_kpi)
         payload = AnnotationEntryCreate(
             note_type="note",
             period_key="Apr 01, 2026",
             content="To be deleted.",
         )
         created = KPIService.create_annotation(sample_kpi.id, org, orguser, payload)
-        assert AnnotationEntry.objects.filter(id=created.id).exists()
+
+        sample_kpi.refresh_from_db()
+        assert len(sample_kpi.annotations) == 1
 
         KPIService.delete_annotation(sample_kpi.id, created.id, org)
-        assert not AnnotationEntry.objects.filter(id=created.id).exists()
+
+        sample_kpi.refresh_from_db()
+        assert len(sample_kpi.annotations) == 0
 
     def test_delete_nonexistent(self, org, sample_kpi, seed_db):
         with pytest.raises(KPINotFoundError):
@@ -481,8 +489,8 @@ class TestAnnotations:
 
     def test_period_date_stored(self, orguser, org, sample_kpi, seed_db):
         from ddpui.schemas.kpi_schema import AnnotationEntryCreate
-        from ddpui.models.metric import AnnotationEntry
 
+        self._clear_annotations(sample_kpi)
         payload = AnnotationEntryCreate(
             note_type="note",
             period_key="May 01, 2026",
@@ -492,8 +500,10 @@ class TestAnnotations:
         created = KPIService.create_annotation(sample_kpi.id, org, orguser, payload)
         assert created.period_date == "2026-05-01"
 
-        entry = AnnotationEntry.objects.get(id=created.id)
-        assert str(entry.period_date) == "2026-05-01"
-        entry.delete()
+        sample_kpi.refresh_from_db()
+        entry = next(e for e in sample_kpi.annotations if e["id"] == created.id)
+        assert entry["period_date"] == "2026-05-01"
+
+        self._clear_annotations(sample_kpi)
 
         OrgWarehouse.objects.filter(org=org).delete()
