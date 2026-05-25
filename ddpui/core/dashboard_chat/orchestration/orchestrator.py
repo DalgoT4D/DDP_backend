@@ -7,12 +7,11 @@ from typing import Any, Union
 
 from langgraph.graph import END, START, StateGraph
 
-from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig, DashboardChatSourceConfig
+from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig
 from ddpui.core.dashboard_chat.agents.llm_client_interface import DashboardChatLlmClient
 from ddpui.core.dashboard_chat.agents.openai_llm_client import OpenAIDashboardChatLlmClient
 from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
 from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
-from ddpui.core.dashboard_chat.vector.org_vector_store import OrgVectorStore
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
 from ddpui.models.org import Org
 
@@ -128,10 +127,8 @@ def _timed_node(node_name: str, handler):
 
 def _build_graph(
     llm_client,
-    vector_store,
     warehouse_tools_factory,
     runtime_config,
-    source_config,
     tool_specifications,
     *,
     checkpointer=None,
@@ -145,22 +142,20 @@ def _build_graph(
         return route_intent_node(state, llm_client)
 
     def _handle_small_talk(state):
-        return handle_small_talk_node(state, llm_client, vector_store)
+        return handle_small_talk_node(state, llm_client)
 
     def _handle_irrelevant(state):
-        return handle_irrelevant_node(state, llm_client, vector_store)
+        return handle_irrelevant_node(state, llm_client)
 
     def _handle_needs_clarification(state):
-        return handle_needs_clarification_node(state, llm_client, vector_store)
+        return handle_needs_clarification_node(state, llm_client)
 
     def _handle_query_with_sql(state):
         return handle_query_with_sql_node(
             state,
             llm_client,
-            vector_store,
             warehouse_tools_factory,
             runtime_config,
-            source_config,
             tool_specifications,
         )
 
@@ -168,10 +163,8 @@ def _build_graph(
         return handle_query_without_sql_node(
             state,
             llm_client,
-            vector_store,
             warehouse_tools_factory,
             runtime_config,
-            source_config,
             tool_specifications,
         )
 
@@ -179,10 +172,8 @@ def _build_graph(
         return handle_follow_up_sql_node(
             state,
             llm_client,
-            vector_store,
             warehouse_tools_factory,
             runtime_config,
-            source_config,
             tool_specifications,
         )
 
@@ -190,10 +181,8 @@ def _build_graph(
         return handle_follow_up_context_node(
             state,
             llm_client,
-            vector_store,
             warehouse_tools_factory,
             runtime_config,
-            source_config,
             tool_specifications,
         )
 
@@ -201,7 +190,7 @@ def _build_graph(
         return finalize_node(state)
 
     def _compose_response(state):
-        return compose_response_node(state, llm_client, vector_store)
+        return compose_response_node(state, llm_client)
 
     graph = StateGraph(DashboardChatGraphState)
     graph.add_node("load_context", _timed_node("load_context", _load_context))
@@ -261,22 +250,21 @@ def _build_graph(
 
 
 class DashboardChatRuntime:
-    """Run dashboard chat turns with the prototype's explicit intent routing and tool loop."""
+    """Run dashboard chat turns with explicit intent routing and tool execution."""
 
     def __init__(
         self,
-        vector_store: Union[OrgVectorStore, None] = None,
         llm_client: Union[DashboardChatLlmClient, None] = None,
         warehouse_tools_factory: Union[Callable[[Org], DashboardChatWarehouseTools], None] = None,
         runtime_config: Union[DashboardChatRuntimeConfig, None] = None,
-        source_config: Union[DashboardChatSourceConfig, None] = None,
         checkpointer=None,
     ):
         self.runtime_config = runtime_config or DashboardChatRuntimeConfig.from_env()
-        self.source_config = source_config or DashboardChatSourceConfig.from_env()
-        self.vector_store = vector_store or OrgVectorStore()
         self.llm_client = llm_client or OpenAIDashboardChatLlmClient(
             model=self.runtime_config.llm_model,
+            intent_model=self.runtime_config.intent_llm_model,
+            final_answer_model=self.runtime_config.final_answer_llm_model,
+            reasoning_effort=self.runtime_config.llm_reasoning_effort,
             timeout_ms=self.runtime_config.llm_timeout_ms,
             max_attempts=self.runtime_config.llm_max_attempts,
         )
@@ -288,19 +276,15 @@ class DashboardChatRuntime:
         )
         self.graph = _build_graph(
             self.llm_client,
-            self.vector_store,
             self.warehouse_tools_factory,
             self.runtime_config,
-            self.source_config,
             DASHBOARD_CHAT_TOOL_SPECIFICATIONS,
         )
         self.persistent_graph = (
             _build_graph(
                 self.llm_client,
-                self.vector_store,
                 self.warehouse_tools_factory,
                 self.runtime_config,
-                self.source_config,
                 DASHBOARD_CHAT_TOOL_SPECIFICATIONS,
                 checkpointer=checkpointer,
             )
@@ -352,7 +336,6 @@ class DashboardChatRuntime:
         dashboard_id: int,
         user_query: str,
         session_id: str | None = None,
-        vector_collection_name: str | None = None,
         conversation_history: Sequence[dict[str, Any]] | None = None,
         interrupt_before: Sequence[str] | None = None,
         interrupt_after: Sequence[str] | None = None,
@@ -360,13 +343,10 @@ class DashboardChatRuntime:
         """Run one dashboard chat turn."""
         if hasattr(self.llm_client, "reset_usage"):
             self.llm_client.reset_usage()
-        if hasattr(self.vector_store, "reset_usage"):
-            self.vector_store.reset_usage()
         initial_state: DashboardChatGraphState = {
             "org_id": org.id,
             "dashboard_id": dashboard_id,
             "session_id": session_id,
-            "vector_collection_name": vector_collection_name,
             "user_query": user_query,
             "conversation_history": normalize_conversation_history(conversation_history),
             "small_talk_response": None,

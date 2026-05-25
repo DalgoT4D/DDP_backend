@@ -123,14 +123,49 @@ class DashboardChatSqlGuard:
         )
 
         tables: list[str] = []
-        for table_name in re.findall(
-            r"\b(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)",
-            sql_without_quotes,
-            flags=re.IGNORECASE,
-        ):
-            if table_name.upper() in FORBIDDEN_SQL_KEYWORDS or table_name.lower() in cte_names:
+        depth = 0
+        index = 0
+        sql_length = len(sql_without_quotes)
+        while index < sql_length:
+            character = sql_without_quotes[index]
+            if character == "(":
+                depth += 1
+                index += 1
                 continue
-            tables.append(table_name.lower())
+            if character == ")":
+                depth = max(depth - 1, 0)
+                index += 1
+                continue
+
+            keyword = None
+            if depth == 0:
+                if cls._matches_keyword(sql_without_quotes.upper(), index, "FROM"):
+                    keyword = "FROM"
+                elif cls._matches_keyword(sql_without_quotes.upper(), index, "JOIN"):
+                    keyword = "JOIN"
+
+            if keyword is None:
+                index += 1
+                continue
+
+            index += len(keyword)
+            while index < sql_length and sql_without_quotes[index].isspace():
+                index += 1
+
+            start = index
+            while index < sql_length and (
+                sql_without_quotes[index].isalnum()
+                or sql_without_quotes[index] in {"_", "."}
+            ):
+                index += 1
+
+            table_name = sql_without_quotes[start:index].lower()
+            if (
+                table_name
+                and table_name.upper() not in FORBIDDEN_SQL_KEYWORDS
+                and table_name not in cte_names
+            ):
+                tables.append(table_name)
 
         return list(dict.fromkeys(tables))
 

@@ -1,4 +1,4 @@
-"""Helpers for parsing dashboard-chat vector source identifiers."""
+"""Helpers for parsing stored dashboard-chat source identifiers."""
 
 
 def chart_id_from_source_identifier(source_identifier: str) -> int | None:
@@ -10,13 +10,3 @@ def chart_id_from_source_identifier(source_identifier: str) -> int | None:
         except ValueError:
             return None
     return None
-
-
-def unique_id_from_source_identifier(source_identifier: str) -> str | None:
-    """Extract dbt unique ids from manifest/catalog source identifiers."""
-    if ":" not in source_identifier:
-        return None
-    prefix, unique_id = source_identifier.split(":", 1)
-    if prefix not in {"manifest", "catalog"}:
-        return None
-    return unique_id

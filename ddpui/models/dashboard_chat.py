@@ -120,6 +120,79 @@ class DashboardAIContext(models.Model):
         db_table = "dashboard_ai_context"
 
 
+class DashboardChatMetadataArtifactStatus(models.TextChoices):
+    """Lifecycle states for one dashboard-scoped metadata artifact."""
+
+    READY = "ready", "Ready"
+    BUILDING = "building", "Building"
+    FAILED = "failed", "Failed"
+    STALE = "stale", "Stale"
+
+
+class DashboardChatMetadataArtifact(models.Model):
+    """Dashboard-scoped structured metadata artifact used by chat runtime."""
+
+    dashboard = models.OneToOneField(
+        Dashboard,
+        on_delete=models.CASCADE,
+        related_name="chat_metadata_artifact",
+    )
+    schema_version = models.PositiveIntegerField(default=2)
+    status = models.CharField(
+        max_length=16,
+        choices=DashboardChatMetadataArtifactStatus.choices,
+        default=DashboardChatMetadataArtifactStatus.STALE,
+    )
+    artifact_json = models.JSONField(default=dict, blank=True)
+    source_fingerprint = models.CharField(max_length=255, blank=True, default="")
+    builder_model = models.CharField(max_length=128, blank=True, default="")
+    built_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dashboard_chat_metadata_builds",
+    )
+    built_at = models.DateTimeField(null=True, blank=True)
+    error_payload = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dashboard_chat_metadata_artifact"
+        indexes = [
+            models.Index(fields=["status"], name="dchat_meta_artifact_status_idx"),
+            models.Index(fields=["built_at"], name="dchat_meta_artifact_built_idx"),
+        ]
+
+
+class DashboardChatMetadataBuildRun(models.Model):
+    """Operational log for one metadata build attempt."""
+
+    dashboard = models.ForeignKey(
+        Dashboard,
+        on_delete=models.CASCADE,
+        related_name="chat_metadata_build_runs",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=DashboardChatMetadataArtifactStatus.choices,
+        default=DashboardChatMetadataArtifactStatus.BUILDING,
+    )
+    builder_model = models.CharField(max_length=128, blank=True, default="")
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    log_payload = models.JSONField(null=True, blank=True)
+    error_payload = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        db_table = "dashboard_chat_metadata_build_run"
+        indexes = [
+            models.Index(fields=["dashboard", "started_at"], name="dchat_meta_run_dash_idx"),
+            models.Index(fields=["status"], name="dchat_meta_run_status_idx"),
+        ]
+
+
 class DashboardChatSession(models.Model):
     """Groups dashboard chat messages under one org/dashboard conversation."""
 
@@ -127,7 +200,6 @@ class DashboardChatSession(models.Model):
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     orguser = models.ForeignKey(OrgUser, null=True, on_delete=models.SET_NULL)
     dashboard = models.ForeignKey(Dashboard, on_delete=models.SET_NULL, null=True)
-    vector_collection_name = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

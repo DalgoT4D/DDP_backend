@@ -12,8 +12,6 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from ddpui.core.dashboard_chat.config import DashboardChatVectorStoreConfig
-from ddpui.core.dashboard_chat.vector.vector_documents import build_dashboard_chat_collection_name
 from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationMessage,
 )
@@ -66,19 +64,10 @@ def get_or_create_dashboard_chat_session(
             raise DashboardChatSessionError(
                 "Cannot create a chat session for a dashboard outside the current organization"
             )
-        collection_name = None
-        if orguser.org.dbt and orguser.org.dbt.vector_last_ingested_at is not None:
-            vector_store_config = DashboardChatVectorStoreConfig.from_env()
-            collection_name = build_dashboard_chat_collection_name(
-                orguser.org.id,
-                prefix=vector_store_config.collection_prefix,
-                version=orguser.org.dbt.vector_last_ingested_at,
-            )
         return DashboardChatSession.objects.create(
             org=orguser.org,
             orguser=orguser,
             dashboard=dashboard,
-            vector_collection_name=collection_name,
         )
 
     try:
@@ -505,7 +494,6 @@ def execute_dashboard_chat_turn(
             dashboard_id=session.dashboard.id,
             user_query=user_message.content,
             session_id=str(session.session_id),
-            vector_collection_name=session.vector_collection_name,
             conversation_history=list_dashboard_chat_history(
                 session,
                 exclude_message_id=user_message.id,

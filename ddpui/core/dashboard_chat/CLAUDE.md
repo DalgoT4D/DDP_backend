@@ -202,9 +202,9 @@ Flow:
 +----------------------------------------------+
 | handle_query_without_sql                     |
 | -> tool loop                                 |
-|    - usually retrieve_docs                   |
-|    - may use search_dbt_models               |
-|    - may use get_dbt_model_info              |
+|    - inspect chart metadata                  |
+|    - inspect enriched table metadata         |
+|    - inspect related tables / join paths     |
 | -> compose final answer                      |
 +----------------------------------------------+
             |
@@ -215,9 +215,9 @@ Flow:
 ```
 
 These questions are usually answered from:
-- vectorized dashboard/org/dbt docs
-- deterministic dbt index lookups
+- org/dashboard authored context
 - chart metadata in the dashboard export
+- dashboard-scoped enriched metadata artifacts
 
 ### 5. Data / SQL question
 Examples:
@@ -245,7 +245,8 @@ Flow:
 +----------------------------------------------+
 | handle_query_with_sql                        |
 | -> tool loop                                 |
-|    - retrieve_docs                           |
+|    - inspect chart metadata                  |
+|    - inspect enriched table metadata         |
 |    - get_schema_snippets                     |
 |    - get_distinct_values                     |
 |    - run_sql_query                           |
@@ -392,10 +393,6 @@ Warnings are persisted with the assistant response and can be shown or inspected
 ## Runtime Limits
 
 Current enforced limits:
-- retrieval from Chroma per query: `6` results by default from runtime config
-- `retrieve_docs` tool request limit: capped to `20`
-- `search_dbt_models` tool request limit: capped to `20`
-- `list_tables_by_keyword` tool request limit: capped to `50`
 - `get_distinct_values` tool request limit: capped to `200`
 - SQL result row limit: `200`
 - SQL/context tool-loop turns for new questions: `15`
@@ -423,12 +420,18 @@ Inside the SQL/context routes, the model runs an explicit tool loop with a bound
                   |
                   v
 +------------------------------------+
-| retrieve_docs                      |
+| get_chart_table_metadata           |
+| search_metadata                    |
+| get_table_metadata                 |
+| get_column_metadata                |
+| search_columns_by_name             |
+| get_join_paths                     |
+| get_related_tables                 |
+| get_table_statistics               |
+| resolve_time_scope                 |
+| read_full_metadata                 |
 | get_schema_snippets                |
-| search_dbt_models                  |
-| get_dbt_model_info                 |
 | get_distinct_values                |
-| list_tables_by_keyword             |
 | check_table_row_count              |
 | run_sql_query                      |
 +------------------------------------+
@@ -447,100 +450,16 @@ Inside the SQL/context routes, the model runs an explicit tool loop with a bound
 +------------------------------------+
 ```
 
-## Chroma Integration
+## Metadata Build
 
-There are two layers here on purpose:
+Dashboard chat metadata is not rebuilt on every user message. It is rebuilt manually from AI settings.
 
-### 1. Generic Chroma transport
-Location:
-- [`ddpui/utils/vector/chroma/client.py`](../../utils/vector/chroma/client.py)
-- [`ddpui/utils/vector/chroma/store.py`](../../utils/vector/chroma/store.py)
-- [`ddpui/utils/vector/chroma/types.py`](../../utils/vector/chroma/types.py)
-
-Responsibilities:
-- shared HTTP client creation
-- create/load/delete/list collections
-- get/query/upsert/delete documents
-- normalize Chroma result shapes
-
-This layer knows how to talk to Chroma, but does not know anything about dashboards, orgs, or dbt business logic.
-
-### 2. Dashboard-chat vector layer
-Location:
-- [`vector/org_vector_store.py`](./vector/org_vector_store.py)
-- [`vector/vector_documents.py`](./vector/vector_documents.py)
-- [`vector/builder.py`](./vector/builder.py)
-- [`vector/building.py`](./vector/building.py)
-- [`vector/embeddings.py`](./vector/embeddings.py)
-
-Responsibilities:
-- build dashboard-chat collection names
-- define dashboard-chat document/source types
-- build embeddings
-- filter retrieval by source type and dashboard id
-- build org-scoped collections and rebuild them from app/dbt context
-
-### What Gets Vectorized
-
-Current source types:
-- `org_context`
-- `dashboard_context`
-- `dashboard_export`
-- `dbt_manifest`
-- `dbt_catalog`
-
-At retrieval time, the runtime can search one or more of these source types depending on the question.
-
-## Background Vector Refresh
-
-Vector context is not rebuilt on every user message. It is refreshed in the background.
-
-Main Celery tasks:
-- `schedule_dashboard_chat_context_builds`
-- `build_dashboard_chat_context_for_org`
-
-Periodic schedule:
-- every 3 hours via Celery beat
-
-Flow:
-```
-+------------------------------+
-| Celery beat                  |
-+------------------------------+
-               |
-               v
-+------------------------------+
-| schedule_dashboard_chat_     |
-| context_builds               |
-+------------------------------+
-               |
-               v
-+------------------------------+
-| find eligible orgs           |
-+------------------------------+
-               |
-               v
-+------------------------------+
-| enqueue one build per org    |
-+------------------------------+
-               |
-               v
-+------------------------------+
-| build_dashboard_chat_        |
-| context_for_org              |
-+------------------------------+
-               |
-               v
-+------------------------------+
-| acquire Redis lock           |
-| generate dbt docs if needed  |
-| build vector documents       |
-| write versioned collection   |
-| update vector_last_ingested  |
-| GC inactive collections      |
-| release lock                 |
-+------------------------------+
-```
+Current flow:
+- org admin opens AI settings
+- trigger metadata build for one dashboard or all dashboards
+- backend builds the dashboard-scoped artifact
+- artifact is enriched and stored in Postgres JSONB
+- runtime loads the persisted artifact on each chat turn
 
 Eligibility is based on:
 - org has dbt configured
@@ -548,8 +467,7 @@ Eligibility is based on:
 - org has `AI_DASHBOARD_CHAT` feature flag enabled
 
 If dbt is not configured:
-- vector context is not built for that org
-- the background build task skips the org
+- metadata cannot be built for that org
 - live chat is rejected with "Chat with dashboards is not available because dbt is not configured"
 
 The feature flag and dbt requirement are separate:
@@ -564,16 +482,14 @@ The runtime combines several different kinds of context:
   - chart metadata, filters, datasets for the current dashboard
 - allowlist
   - dashboard tables plus upstream dbt lineage tables
-- compact dbt index
-  - deterministic model/column/lineage lookup for allowlisted dbt resources
-- vector retrieval
-  - semantic matching across org/dashboard/dbt docs
+- metadata artifact
+  - observed physical facts plus inferred semantic guidance for the current dashboard tables
 - warehouse tools
   - deterministic schema inspection, distinct validation, and SQL execution
 
 These sources are intentionally different:
-- vector retrieval is good for fuzzy semantic matching
-- the compact dbt index is good for deterministic dbt lookups (ex: upstream models)
+- dashboard export grounds the runtime in the visible charts
+- the metadata artifact drives table, join, and column discovery
 - warehouse tools are good for trustworthy data answers
 
 ## LangGraph Persistence
@@ -583,7 +499,8 @@ This feature now uses official LangGraph Postgres checkpoints for session contin
 What is persisted in checkpoints:
 - dashboard export payload
 - allowlist payload
-- compact dbt index
+- chart registry payload
+- metadata artifact payload + status
 - schema snippet payloads
 - validated distinct-value payloads
 - turn state needed for follow-ups and resume
@@ -594,7 +511,7 @@ What is not stored there:
 Chat history remains in `dashboard_chat_session` / `dashboard_chat_message`. LangGraph owns resumable workflow state; Django models still own the user-visible transcript.
 
 Why this exists:
-- a chat session should keep using stable dashboard/dbt context across follow-up turns
+- a chat session should keep using stable dashboard/metadata context across follow-up turns
 - schema lookups and distinct validations should carry across turns
 - interrupted runs should be resumable at graph-step boundaries
 - continuity should survive process restarts without relying on Django cache
@@ -602,11 +519,9 @@ Why this exists:
 ### Shared process-level clients
 Location:
 - `orchestration/orchestrator.py`
-- `ddpui/utils/vector/chroma/client.py`
 
 What is reused:
 - shared dashboard-chat runtime
-- shared Chroma HTTP client
 - shared OpenAI clients inside their wrappers
 
 Why this exists:
@@ -630,8 +545,8 @@ Primary tables:
 Persisted trace fields:
 
 - `dashboard_chat_session`
-  - fields: `org`, `orguser`, `dashboard`, `session_id`, `vector_collection_name`
-  - gives us: who the conversation belongs to, which dashboard it is scoped to, and which vector collection was pinned for that session
+  - fields: `org`, `orguser`, `dashboard`, `session_id`
+  - gives us: who the conversation belongs to and which dashboard it is scoped to
 - `dashboard_chat_message` (`user`)
   - fields: `content`, `client_message_id`, `created_at`
   - gives us: what the user asked and when
@@ -683,9 +598,7 @@ This is the quickest way to navigate the package.
 
 ### Root
 - [`config.py`](./config.py)
-  - environment-driven runtime, vector, and source configuration
-- [`events.py`](./events.py)
-  - websocket event helpers / channel group naming
+  - environment-driven runtime and model configuration
 
 ### `agents/`
 - [`llm_client_interface.py`](./agents/llm_client_interface.py)
@@ -699,9 +612,10 @@ This is the quickest way to navigate the package.
 
 ### `context/`
 - [`dashboard_table_allowlist.py`](./context/dashboard_table_allowlist.py)
-  - dashboard export -> allowlisted tables/dbt lineage -> compact dbt index
-- [`dbt_docs_artifacts.py`](./context/dbt_docs_artifacts.py)
-  - dbt docs generation/loading helpers for manifest/catalog artifacts
+  - dashboard export -> allowlisted tables/dbt lineage and manifest dependency handling
+
+### `metadata/`
+- build, enrich, store, and search dashboard-scoped metadata artifacts
 
 ### `contracts/`
 - [`conversation_contracts.py`](./contracts/conversation_contracts.py)
@@ -721,11 +635,11 @@ This is the quickest way to navigate the package.
 - [`checkpoints.py`](./orchestration/checkpoints.py)
   - official LangGraph Postgres checkpoint wiring
 - [`state/`](./orchestration/state)
-  - grouped graph-state definitions, payload codecs, and typed runtime accessors
+  - grouped graph-state definitions and typed runtime accessors
 - [`nodes/`](./orchestration/nodes)
   - graph node handlers, including explicit query/follow-up route files plus `compose_response` and `finalize`
 - [`retrieval_support.py`](./orchestration/retrieval_support.py)
-  - Chroma retrieval + citations
+  - citation and source-payload helpers
 - [`conversation_context.py`](./orchestration/conversation_context.py)
   - conversation-context extraction and follow-up helpers
 - [`response_composer.py`](./orchestration/response_composer.py)
@@ -733,7 +647,7 @@ This is the quickest way to navigate the package.
 - [`tool_loop_message_builder.py`](./orchestration/tool_loop_message_builder.py)
   - message-building helpers for the tool loop
 - [`source_identifier_parsing.py`](./orchestration/source_identifier_parsing.py)
-  - parsing helpers for chart/dbt source identifiers
+  - parsing helpers for stored source identifiers
 - [`intent_routing.py`](./orchestration/intent_routing.py)
   - graph route selection after intent classification
 - [`timing_breakdown.py`](./orchestration/timing_breakdown.py)
@@ -744,14 +658,6 @@ This is the quickest way to navigate the package.
 ### `sessions/`
 - [`session_service.py`](./sessions/session_service.py)
   - create/reuse sessions, persist messages, serialize message payloads
-
-### `vector/`
-- [`vector_documents.py`](./vector/vector_documents.py)
-  - vector document dataclasses, source types, collection naming helpers
-- [`org_vector_store.py`](./vector/org_vector_store.py)
-  - dashboard-chat adapter on top of the shared Chroma wrapper
-- [`org_vector_context_build_service.py`](./vector/org_vector_context_build_service.py)
-  - document chunking, vector document building, and org-level rebuild workflow
 
 ### `warehouse/`
 - [`warehouse_access_tools.py`](./warehouse/warehouse_access_tools.py)
@@ -782,6 +688,6 @@ If chat is failing, the fastest places to inspect are:
 - `orchestrator/orchestrator.py` for runtime construction
 - `orchestration/checkpoints.py` for LangGraph Postgres persistence setup
 - `orchestration/nodes/` for route choice and final response creation
-- `vector/building.py` if retrieval data is stale or missing
+- `metadata/build_service.py` or `metadata/builder.py` if metadata is stale or missing
 - `warehouse/sql_guard.py` if SQL is being rejected
 - LangGraph checkpoint tables plus `orchestration/state/` if follow-up state behaves inconsistently

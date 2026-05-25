@@ -13,7 +13,7 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 
 
 def handle_small_talk_node(
-    state: DashboardChatGraphState, llm_client, vector_store
+    state: DashboardChatGraphState, llm_client
 ) -> dict[str, Any]:
     """Handle simple social turns without any tool use."""
     return {
@@ -23,6 +23,6 @@ def handle_small_talk_node(
                 or compose_small_talk_response(llm_client, state["user_query"])
             ),
             intent=DashboardChatIntent.SMALL_TALK,
-            usage=build_usage_summary(llm_client, vector_store),
+            usage=build_usage_summary(llm_client),
         ).to_dict()
     }

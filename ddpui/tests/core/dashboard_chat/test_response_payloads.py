@@ -1,16 +1,17 @@
-from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntent
 from ddpui.core.dashboard_chat.contracts.response_contracts import (
     DashboardChatCitation,
     DashboardChatResponse,
 )
-from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.retrieval_contracts import (
+    DashboardChatRetrievedDocument,
+    DashboardChatSourceType,
+)
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import (
     build_citations,
     explore_table_url,
 )
 from ddpui.core.dashboard_chat.orchestration.nodes.finalize import finalize_node
-from ddpui.core.dashboard_chat.vector.vector_documents import DashboardChatSourceType
 
 
 def test_dashboard_chat_response_to_dict_includes_citation_urls():
@@ -39,10 +40,6 @@ def test_explore_table_url_requires_schema_qualified_table_name():
 
 
 def test_build_citations_adds_frontend_urls():
-    allowlist = DashboardChatAllowlist(
-        allowed_tables={"analytics.sessions"},
-        unique_id_to_table={"model.dalgo.sessions": "analytics.sessions"},
-    )
     retrieved_documents = [
         DashboardChatRetrievedDocument(
             document_id="doc-1",
@@ -53,13 +50,6 @@ def test_build_citations_adds_frontend_urls():
         ),
         DashboardChatRetrievedDocument(
             document_id="doc-2",
-            source_type=DashboardChatSourceType.DBT_MANIFEST.value,
-            source_identifier="manifest:model.dalgo.sessions",
-            content="Model content",
-            dashboard_id=6,
-        ),
-        DashboardChatRetrievedDocument(
-            document_id="doc-3",
             source_type=DashboardChatSourceType.DASHBOARD_EXPORT.value,
             source_identifier="dashboard:6",
             content="Dashboard export content",
@@ -74,44 +64,12 @@ def test_build_citations_adds_frontend_urls():
     citations = build_citations(
         retrieved_documents=retrieved_documents,
         dashboard_export=dashboard_export,
-        allowlist=allowlist,
     )
 
     assert citations[0].url == "/charts/7"
     assert citations[0].title == "Chart: Sessions by District"
     assert citations[0].snippet == 'Reviewed chart configuration and metadata for "Sessions by District".'
     assert len(citations) == 1
-
-
-def test_build_citations_ignores_dbt_docs_for_user_facing_sources():
-    allowlist = DashboardChatAllowlist(
-        allowed_tables={"analytics.sessions"},
-        unique_id_to_table={"model.dalgo.sessions": "analytics.sessions"},
-    )
-    retrieved_documents = [
-        DashboardChatRetrievedDocument(
-            document_id="doc-1",
-            source_type=DashboardChatSourceType.DBT_MANIFEST.value,
-            source_identifier="manifest:model.dalgo.sessions",
-            content="Manifest content",
-            dashboard_id=6,
-        ),
-        DashboardChatRetrievedDocument(
-            document_id="doc-2",
-            source_type=DashboardChatSourceType.DBT_CATALOG.value,
-            source_identifier="catalog:model.dalgo.sessions",
-            content="Catalog content",
-            dashboard_id=6,
-        ),
-    ]
-
-    citations = build_citations(
-        retrieved_documents=retrieved_documents,
-        dashboard_export={"dashboard": {"id": 6, "title": "Impact Overview"}, "charts": []},
-        allowlist=allowlist,
-    )
-
-    assert citations == []
 
 
 def test_build_citations_formats_context_file_cards_for_users():
@@ -133,7 +91,6 @@ def test_build_citations_formats_context_file_cards_for_users():
             ),
         ],
         dashboard_export={"dashboard": {"id": 6, "title": "Impact Overview"}, "charts": []},
-        allowlist=DashboardChatAllowlist(allowed_tables=set(), unique_id_to_table={}),
     )
 
     assert citations[0].title == "Organization context file"

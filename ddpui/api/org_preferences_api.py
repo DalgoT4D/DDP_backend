@@ -8,7 +8,13 @@ from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import OrgAIContext
+from ddpui.core.dashboard_chat.metadata.build_service import (
+    DashboardChatMetadataBuildService,
+    summarize_dashboard_metadata_status,
+)
+from ddpui.celeryworkers.tasks import build_dashboard_chat_metadata_artifacts
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
@@ -16,6 +22,8 @@ from ddpui.schemas.org_preferences_schema import (
     OrgAIDashboardChatSettingsResponse,
     UpdateOrgAIDashboardChatSchema,
     OrgAIDashboardChatStatusResponse,
+    OrgAIDashboardChatMetadataStatusResponse,
+    TriggerOrgAIDashboardChatMetadataBuildSchema,
 )
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -33,8 +41,11 @@ from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 orgpreference_router = Router()
 
+
 def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
     org_dbt = org.dbt
+    native_dashboards = list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+    metadata_summary = summarize_dashboard_metadata_status(native_dashboards)
     return OrgAIDashboardChatSettingsResponse(
         feature_flag_enabled=get_all_feature_flags_for_org(org).get(
             "AI_DASHBOARD_CHAT",
@@ -53,19 +64,23 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
         else None,
         org_context_updated_at=org_context.updated_at,
         dbt_configured=org_dbt is not None,
-        ai_context_refreshed_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+        metadata_last_built_at=metadata_summary["last_built_at"],
+        metadata_ready_dashboard_count=metadata_summary["ready_dashboard_count"],
+        metadata_total_dashboard_count=metadata_summary["total_dashboard_count"],
     )
 
 
 def _serialize_ai_dashboard_chat_status(org, org_preferences):
     org_dbt = org.dbt
+    native_dashboards = list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+    metadata_summary = summarize_dashboard_metadata_status(native_dashboards)
     feature_flag_enabled = get_all_feature_flags_for_org(org).get(
         "AI_DASHBOARD_CHAT",
         False,
     )
     ai_data_sharing_enabled = bool(org_preferences.ai_data_sharing_enabled)
     dbt_configured = org_dbt is not None
-    vector_last_ingested_at = org_dbt.vector_last_ingested_at if org_dbt else None
+    last_built_at = metadata_summary["last_built_at"]
 
     return OrgAIDashboardChatStatusResponse(
         feature_flag_enabled=feature_flag_enabled,
@@ -74,13 +89,13 @@ def _serialize_ai_dashboard_chat_status(org, org_preferences):
             feature_flag_enabled
             and ai_data_sharing_enabled
             and dbt_configured
-            and vector_last_ingested_at is not None
+            and metadata_summary["ready_dashboard_count"] > 0
         ),
         dbt_configured=dbt_configured,
-        ai_context_refreshed_at=vector_last_ingested_at,
+        metadata_last_built_at=last_built_at,
+        metadata_ready_dashboard_count=metadata_summary["ready_dashboard_count"],
+        metadata_total_dashboard_count=metadata_summary["total_dashboard_count"],
     )
-
-
 @orgpreference_router.post("/")
 def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
     """Creates preferences for an organization"""
@@ -266,6 +281,67 @@ def get_ai_dashboard_chat_status(request):
         "success": True,
         "res": _serialize_ai_dashboard_chat_status(org, org_preferences).dict(),
     }
+
+
+@orgpreference_router.get(
+    "/ai-dashboard-chat/metadata/status",
+    response=OrgAIDashboardChatMetadataStatusResponse,
+)
+@has_permission(["can_manage_org_settings"])
+def get_ai_dashboard_chat_metadata_status(request):
+    """Return per-dashboard metadata build status for the current org."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+    return OrgAIDashboardChatMetadataStatusResponse(
+        **summarize_dashboard_metadata_status(
+            list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+        )
+    )
+
+
+@orgpreference_router.post(
+    "/ai-dashboard-chat/metadata/build",
+    response=OrgAIDashboardChatMetadataStatusResponse,
+)
+@has_permission(["can_manage_org_settings"])
+def build_ai_dashboard_chat_metadata(
+    request,
+    payload: TriggerOrgAIDashboardChatMetadataBuildSchema,
+):
+    """Manually build dashboard metadata artifacts for the current org."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+    if org.dbt is None:
+        raise HttpError(409, "Configure dbt before building dashboard chat metadata")
+
+    dashboards = list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+    if payload.dashboard_id is not None:
+        dashboards = [dashboard for dashboard in dashboards if dashboard.id == payload.dashboard_id]
+        if not dashboards:
+            raise HttpError(404, "Dashboard not found")
+
+    builder_model = str(payload.builder_model or "o4-mini")
+    build_service = DashboardChatMetadataBuildService()
+    build_service.mark_dashboards_building(
+        dashboards=dashboards,
+        builder_model=builder_model,
+    )
+    build_dashboard_chat_metadata_artifacts.delay(
+        org.id,
+        [dashboard.id for dashboard in dashboards],
+        builder_model,
+        orguser.id,
+    )
+    return OrgAIDashboardChatMetadataStatusResponse(
+        **summarize_dashboard_metadata_status(
+            list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+        )
+    )
 
 
 @orgpreference_router.get("/toolinfo")

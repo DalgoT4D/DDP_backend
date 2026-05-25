@@ -14,6 +14,14 @@ from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 logger = CustomLogger("dashboard_chat")
 
 SAFE_WAREHOUSE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+POSTGRES_TABLE_REF_PATTERN = re.compile(
+    r"(?P<prefix>\b(?:FROM|JOIN)\b\s+)"
+    r"(?P<schema>(?:\"[^\"]+\"|`[^`]+`|[A-Za-z0-9_-]+))"
+    r"\."
+    r"(?P<table>(?:\"[^\"]+\"|`[^`]+`|[A-Za-z0-9_-]+))",
+    flags=re.IGNORECASE,
+)
+SINGLE_QUOTED_SQL_SEGMENT_PATTERN = re.compile(r"('(?:''|[^'])*')")
 
 
 class DashboardChatWarehouseToolsError(Exception):
@@ -69,8 +77,8 @@ class DashboardChatWarehouseTools:
                 continue
             if not columns:
                 continue
-            snippets[table_name.lower()] = DashboardChatSchemaSnippet(
-                table_name=table_name.lower(),
+            snippets[table_name] = DashboardChatSchemaSnippet(
+                table_name=table_name,
                 columns=list(columns),
             )
 
@@ -95,8 +103,46 @@ class DashboardChatWarehouseTools:
 
     def execute_sql(self, sql: str) -> list[dict[str, Any]]:
         """Execute a validated read-only SQL statement."""
-        rows = self.warehouse_client.execute(sql)
+        rows = self.warehouse_client.execute(self._prepare_sql_for_execution(sql))
         return list(rows[: self.max_rows])
+
+    def _prepare_sql_for_execution(self, sql: str) -> str:
+        """Normalize generated SQL for the target warehouse before execution."""
+        if getattr(self.org_warehouse, "wtype", None) != "postgres":
+            return sql
+        return self._prepare_postgres_sql(sql)
+
+    def _prepare_postgres_sql(self, sql: str) -> str:
+        """Quote physical Postgres identifiers that require case preservation."""
+        normalized_sql = sql
+        mixed_case_columns_by_table: dict[tuple[str, str], list[str]] = {}
+
+        def replace_table_ref(match: re.Match[str]) -> str:
+            schema_name = self._normalize_identifier_component(match.group("schema"), "schema name")
+            table_name = self._normalize_identifier_component(match.group("table"), "table name")
+            mixed_case_columns_by_table[(schema_name, table_name)] = (
+                self._get_postgres_mixed_case_columns(schema_name, table_name)
+            )
+            return (
+                f'{match.group("prefix")}'
+                f'{self._quote_postgres_identifier(schema_name)}.'
+                f'{self._quote_postgres_identifier(table_name)}'
+            )
+
+        normalized_sql = POSTGRES_TABLE_REF_PATTERN.sub(replace_table_ref, normalized_sql)
+
+        mixed_case_columns = sorted(
+            {
+                column_name
+                for column_names in mixed_case_columns_by_table.values()
+                for column_name in column_names
+            },
+            key=len,
+            reverse=True,
+        )
+        if not mixed_case_columns:
+            return normalized_sql
+        return self._quote_postgres_columns_outside_strings(normalized_sql, mixed_case_columns)
 
     def _quote_bigquery_table_ref(self, schema_name: str, table_name: str) -> str:
         """Return a quoted BigQuery table ref using the configured project id."""
@@ -107,6 +153,26 @@ class DashboardChatWarehouseTools:
         return (
             f"`{normalized_project_id}.{normalized_schema_name}.{normalized_table_name}`"
         )
+
+    def _get_postgres_mixed_case_columns(self, schema_name: str, table_name: str) -> list[str]:
+        """Return physical Postgres column names that require quoting."""
+        try:
+            columns = self.warehouse_client.get_table_columns(schema_name, table_name)
+        except Exception as error:
+            logger.warning(
+                "dashboard chat postgres column lookup failed for %s.%s: %s",
+                schema_name,
+                table_name,
+                error,
+            )
+            return []
+
+        return [
+            str(column.get("name"))
+            for column in columns
+            if column.get("name")
+            and str(column.get("name")) != str(column.get("name")).lower()
+        ]
 
     def _resolve_bigquery_project_id(self) -> str:
         """Resolve the BigQuery project id from stored warehouse credentials."""
@@ -157,3 +223,35 @@ class DashboardChatWarehouseTools:
                 f"Invalid {component_name} for dashboard chat warehouse access"
             )
         return normalized_component
+
+    @staticmethod
+    def _quote_postgres_identifier(identifier: str) -> str:
+        """Quote a Postgres identifier while preserving physical case."""
+        return '"' + identifier.replace('"', '""') + '"'
+
+    def _quote_postgres_columns_outside_strings(
+        self,
+        sql: str,
+        column_names: list[str],
+    ) -> str:
+        """Quote mixed-case Postgres column identifiers outside string literals."""
+        segments = SINGLE_QUOTED_SQL_SEGMENT_PATTERN.split(sql)
+        quoted_sql_segments: list[str] = []
+
+        for index, segment in enumerate(segments):
+            if index % 2 == 1:
+                quoted_sql_segments.append(segment)
+                continue
+
+            updated_segment = segment
+            for column_name in column_names:
+                pattern = re.compile(
+                    rf'(?<!["`])\b{re.escape(column_name)}\b(?!["`])'
+                )
+                updated_segment = pattern.sub(
+                    self._quote_postgres_identifier(column_name),
+                    updated_segment,
+                )
+            quoted_sql_segments.append(updated_segment)
+
+        return "".join(quoted_sql_segments)

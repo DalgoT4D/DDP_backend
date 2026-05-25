@@ -91,8 +91,8 @@ class RaisingClient:
         self.chat = type("Chat", (), {"completions": RaisingCompletions()})()
 
 
-def test_classify_intent_uses_prototype_router_message_shape():
-    """Intent classification should use the prototype router prompt contract."""
+def test_classify_intent_uses_router_message_shape():
+    """Intent classification should use the router prompt contract."""
     fake_client = FakeClient()
     fake_client.chat.completions.response_content = json.dumps(
         {
@@ -142,7 +142,7 @@ def test_classify_intent_uses_prototype_router_message_shape():
 
 
 def test_compose_small_talk_uses_capabilities_prompt():
-    """Small talk should use the DB-backed prototype capabilities prompt."""
+    """Small talk should use the DB-backed capabilities prompt."""
     fake_client = FakeClient()
     llm_client = OpenAIDashboardChatLlmClient(
         api_key="test-key",
@@ -302,3 +302,33 @@ def test_compose_final_answer_keeps_freeform_markdown_for_text_responses():
     payload = json.loads(messages[1]["content"])
     assert payload["response_format"] == "text"
     assert llm_client.usage_summary()["calls"][0]["operation"] == "final_answer_composition"
+
+
+def test_compose_final_answer_uses_faster_final_answer_model_without_reasoning():
+    """Final answer composition should be able to use a faster model than SQL planning."""
+    fake_client = FakeClient()
+    fake_client.chat.completions.response_content = "Short answer"
+    llm_client = OpenAIDashboardChatLlmClient(
+        api_key="test-key",
+        client=fake_client,
+        prompt_store=FakePromptStore(),
+        model="gpt-5.2",
+        intent_model="gpt-4.1",
+        final_answer_model="gpt-4.1",
+        reasoning_effort="high",
+    )
+
+    answer = llm_client.compose_final_answer(
+        user_query="Tell me about this dashboard",
+        intent=DashboardChatIntent.QUERY_WITHOUT_SQL,
+        response_format="text",
+        draft_answer="This dashboard tracks literacy outcomes.",
+        retrieved_documents=[],
+        sql=None,
+        sql_results=None,
+        warnings=[],
+    )
+
+    assert answer == "Short answer"
+    assert fake_client.chat.completions.calls[0]["model"] == "gpt-4.1"
+    assert "extra_body" not in fake_client.chat.completions.calls[0]
