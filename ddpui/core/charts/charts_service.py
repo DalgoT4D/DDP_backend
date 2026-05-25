@@ -583,6 +583,70 @@ def apply_dashboard_filters(
     return query_builder
 
 
+_NUMERIC_DATA_TYPES = frozenset([
+    "bigint", "integer", "int", "smallint", "int2", "int4", "int8",
+    "numeric", "decimal", "real", "float", "float4", "float8",
+    "double precision", "double", "number", "serial", "bigserial",
+    "int64", "float64",
+])
+
+
+def _is_numeric_data_type(data_type: Optional[str]) -> bool:
+    """Check if a data_type string indicates a numeric column."""
+    if not data_type:
+        return False
+    return data_type.strip().lower() in _NUMERIC_DATA_TYPES
+
+
+def _coerce_filter_value(value: Any, data_type: Optional[str]) -> Any:
+    """Coerce a filter value to match the column's data type.
+
+    For numeric columns:
+      - empty string -> None  (will be turned into IS NULL)
+      - non-empty string -> cast to int or float
+      - already a number -> pass through
+
+    For non-numeric / unknown columns the value is returned unchanged.
+
+    Raises ValueError if a non-empty value cannot be cast to a numeric type.
+    """
+    if not _is_numeric_data_type(data_type):
+        return value
+
+    # Handle empty / whitespace-only strings for numeric columns
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return None
+        # Try int first, then float
+        try:
+            return int(stripped)
+        except ValueError:
+            pass
+        try:
+            return float(stripped)
+        except ValueError:
+            raise ValueError(
+                f"Cannot convert filter value '{value}' to numeric type '{data_type}'"
+            )
+
+    return value
+
+
+def _build_eq_condition(col_name: str, value: Any):
+    """Build an equality condition, using IS NULL when value is None."""
+    if value is None:
+        return column(col_name).is_(None)
+    return column(col_name) == value
+
+
+def _build_neq_condition(col_name: str, value: Any):
+    """Build a not-equal condition, using IS NOT NULL when value is None."""
+    if value is None:
+        return column(col_name).isnot(None)
+    return column(col_name) != value
+
+
 def apply_chart_filters(
     query_builder: AggQueryBuilder, filters: List[Dict[str, Any]]
 ) -> AggQueryBuilder:
@@ -610,6 +674,7 @@ def apply_chart_filters(
     from collections import defaultdict
 
     # Group filters by column+operator combination
+    # Store tuples of (value, data_type) so coercion info is preserved
     grouped_filters = defaultdict(list)
     single_filters = []
 
@@ -617,8 +682,21 @@ def apply_chart_filters(
         column_name = filter_config["column"]
         operator = filter_config["operator"]
         value = filter_config["value"]
+        data_type = filter_config.get("data_type")
 
         if not column_name or operator is None:
+            continue
+
+        # Coerce the value based on data_type
+        try:
+            value = _coerce_filter_value(value, data_type)
+        except ValueError:
+            logger.warning(
+                "Skipping filter: invalid value '%s' for column '%s' (data_type=%s)",
+                filter_config["value"],
+                column_name,
+                data_type,
+            )
             continue
 
         # Operators that can be grouped (multiple values with OR)
@@ -626,7 +704,9 @@ def apply_chart_filters(
             grouped_filters[(column_name, operator)].append(value)
         else:
             # Other operators are applied individually
-            single_filters.append(filter_config)
+            single_filters.append(
+                {**filter_config, "value": value, "data_type": data_type}
+            )
 
     # Apply grouped filters (multiple values with OR logic)
     for (column_name, operator), values in grouped_filters.items():
@@ -634,18 +714,18 @@ def apply_chart_filters(
             # Single value, apply normally
             value = values[0]
             if operator == "equals":
-                query_builder.where_clause(column(column_name) == value)
+                query_builder.where_clause(_build_eq_condition(column_name, value))
             elif operator == "not_equals":
-                query_builder.where_clause(column(column_name) != value)
+                query_builder.where_clause(_build_neq_condition(column_name, value))
         else:
             # Multiple values, use OR logic
             if operator == "equals":
                 # state_name = 'A' OR state_name = 'B' OR state_name = 'C'
-                or_conditions = [column(column_name) == value for value in values]
+                or_conditions = [_build_eq_condition(column_name, v) for v in values]
                 query_builder.where_clause(or_(*or_conditions))
             elif operator == "not_equals":
                 # state_name != 'A' AND state_name != 'B' AND state_name != 'C'
-                and_conditions = [column(column_name) != value for value in values]
+                and_conditions = [_build_neq_condition(column_name, v) for v in values]
                 query_builder.where_clause(and_(*and_conditions))
 
     # Apply single filters (non-groupable operators)
