@@ -52,7 +52,9 @@ class OrgAIDashboardChatSettingsResponse(Schema):
     org_context_updated_by: Optional[str]
     org_context_updated_at: Optional[datetime]
     dbt_configured: bool
-    ai_context_refreshed_at: Optional[datetime]
+    metadata_last_built_at: Optional[datetime]
+    metadata_ready_dashboard_count: int = 0
+    metadata_total_dashboard_count: int = 0
 
 
 class UpdateOrgAIDashboardChatSchema(Schema):
@@ -69,7 +71,42 @@ class OrgAIDashboardChatStatusResponse(Schema):
     ai_data_sharing_enabled: bool
     chat_available: bool
     dbt_configured: bool
-    ai_context_refreshed_at: Optional[datetime]
+    metadata_last_built_at: Optional[datetime]
+    metadata_ready_dashboard_count: int = 0
+    metadata_total_dashboard_count: int = 0
+
+
+class DashboardChatMetadataArtifactStatusItem(Schema):
+    """One dashboard metadata artifact summary."""
+
+    dashboard_id: int
+    dashboard_title: str
+    status: str
+    table_count: int
+    chart_count: int
+    builder_model: str
+    source_fingerprint: str
+    built_at: Optional[datetime]
+    error_message: Optional[str] = None
+
+
+class OrgAIDashboardChatMetadataStatusResponse(Schema):
+    """Org-scoped dashboard metadata build/status summary."""
+
+    dashboards: list[DashboardChatMetadataArtifactStatusItem]
+    total_dashboard_count: int
+    ready_dashboard_count: int
+    failed_dashboard_count: int
+    stale_dashboard_count: int
+    missing_dashboard_count: int
+    last_built_at: Optional[datetime]
+
+
+class TriggerOrgAIDashboardChatMetadataBuildSchema(Schema):
+    """Request schema for manual metadata builds."""
+
+    dashboard_id: Optional[int] = None
+    builder_model: Optional[str] = "o4-mini"
 
 
 class CreateOrgSupersetDetailsSchema(Schema):

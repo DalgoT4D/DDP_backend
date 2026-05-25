@@ -38,13 +38,19 @@ class OpenAIDashboardChatLlmClient:
         self,
         api_key: str | None = None,
         model: str = "gpt-4o-mini",
-        timeout_ms: int = 12000,
+        intent_model: str | None = None,
+        final_answer_model: str | None = None,
+        reasoning_effort: str | None = None,
+        timeout_ms: int | None = None,
         max_attempts: int = 1,
         client: OpenAI | None = None,
         prompt_store: DashboardChatPromptStore | None = None,
     ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model = model
+        self.intent_model = intent_model
+        self.final_answer_model = final_answer_model or intent_model or model
+        self.reasoning_effort = reasoning_effort
         self.timeout_ms = timeout_ms
         self.max_attempts = max(1, max_attempts)
         self.prompt_store = prompt_store or DashboardChatPromptStore()
@@ -54,7 +60,7 @@ class OpenAIDashboardChatLlmClient:
                 raise ValueError("OPENAI_API_KEY must be set for dashboard chat runtime")
             client = get_shared_openai_client(
                 self.api_key,
-                timeout_seconds=timeout_ms / 1000,
+                timeout_seconds=None if timeout_ms is None else timeout_ms / 1000,
                 max_retries=0,
             )
         self.client = client
@@ -68,7 +74,7 @@ class OpenAIDashboardChatLlmClient:
         user_query: str,
         conversation_context: DashboardChatConversationContext,
     ) -> DashboardChatIntentDecision:
-        """Classify intent with prototype-style conversation awareness."""
+        """Classify intent with conversation-aware follow-up handling."""
         system_prompt = self.prompt_store.get(DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION)
         if (
             conversation_context.last_sql_query
@@ -94,6 +100,8 @@ class OpenAIDashboardChatLlmClient:
                 operation="intent_classification",
                 system_prompt=system_prompt,
                 user_prompt=f"Classify this query: {user_query}",
+                model_override=self.intent_model,
+                reasoning_effort=None,
             )
         except Exception:
             logger.exception("Dashboard chat intent classification failed")
@@ -135,7 +143,7 @@ class OpenAIDashboardChatLlmClient:
         )
 
     def compose_small_talk(self, user_query: str) -> str:
-        """Generate a brief friendly response using the prototype capabilities prompt."""
+        """Generate a brief friendly response using the capabilities prompt."""
         response = self._create_chat_completion(
             messages=[
                 {
@@ -185,10 +193,14 @@ class OpenAIDashboardChatLlmClient:
                     + TABLE_SUMMARY_JSON_INSTRUCTIONS
                 ),
                 user_prompt=json.dumps(context_payload, ensure_ascii=False),
+                model_override=self.final_answer_model,
+                reasoning_effort=None,
             )
             return format_table_summary_markdown(result)
 
         response = self._create_chat_completion(
+            model_override=self.final_answer_model,
+            reasoning_effort=None,
             messages=[
                 {
                     "role": "system",
@@ -219,7 +231,7 @@ class OpenAIDashboardChatLlmClient:
         tools: list[dict[str, Any]],
         tool_choice: str,
         operation: str,
-    ) -> dict[str, Any]:
+        ) -> dict[str, Any]:
         """Run one raw OpenAI tool-calling turn and normalize the response."""
         try:
             response = self._create_chat_completion(
@@ -229,7 +241,8 @@ class OpenAIDashboardChatLlmClient:
                 temperature=0,
             )
         except Exception:
-            return {"content": self.TECHNICAL_DIFFICULTIES_MESSAGE, "tool_calls": []}
+            logger.exception("Dashboard chat tool-loop turn failed")
+            return {"content": "", "tool_calls": [], "error": self.TECHNICAL_DIFFICULTIES_MESSAGE}
         self._record_usage(operation, response)
         message = response.choices[0].message
         tool_calls: list[dict[str, Any]] = []
@@ -245,10 +258,17 @@ class OpenAIDashboardChatLlmClient:
         return {"content": message.content or "", "tool_calls": tool_calls}
 
     def _complete_json(
-        self, operation: str, system_prompt: str, user_prompt: str
+        self,
+        operation: str,
+        system_prompt: str,
+        user_prompt: str,
+        model_override: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         """Run a JSON-mode chat completion and parse the result."""
         response = self._create_chat_completion(
+            model_override=model_override,
+            reasoning_effort=reasoning_effort,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -256,7 +276,7 @@ class OpenAIDashboardChatLlmClient:
             temperature=0,
             response_format={"type": "json_object"},
         )
-        self._record_usage(operation, response)
+        self._record_usage(operation, response, model_override=model_override)
         content = response.choices[0].message.content or "{}"
         return json.loads(content)
 
@@ -277,29 +297,56 @@ class OpenAIDashboardChatLlmClient:
             "totals": totals,
         }
 
-    def _record_usage(self, operation: str, response: Any) -> None:
+    def _record_usage(
+        self,
+        operation: str,
+        response: Any,
+        *,
+        model_override: str | None = None,
+    ) -> None:
         """Capture usage data from one OpenAI response when available."""
         usage = getattr(response, "usage", None)
         if usage is None:
             return
+        response_model = getattr(response, "model", None) or model_override or self.model
         self.usage_events.append(
             {
                 "operation": operation,
-                "model": self.model,
+                "model": response_model,
                 "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
                 "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
                 "total_tokens": getattr(usage, "total_tokens", 0) or 0,
             }
         )
 
-    def _create_chat_completion(self, **kwargs: Any) -> Any:
+    def _create_chat_completion(
+        self,
+        *,
+        model_override: str | None = None,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Run one OpenAI chat completion with a small interactive retry envelope."""
         last_error: Exception | None = None
+        model_name = model_override or self.model
+        effective_reasoning_effort = reasoning_effort
+        if effective_reasoning_effort is None and model_override != self.intent_model:
+            effective_reasoning_effort = self.reasoning_effort
+
+        request_kwargs = dict(kwargs)
+        if model_name.startswith("gpt-5") and "max_tokens" in request_kwargs:
+            request_kwargs["max_completion_tokens"] = request_kwargs.pop("max_tokens")
+        if effective_reasoning_effort:
+            request_kwargs.pop("temperature", None)
+            request_kwargs.pop("top_p", None)
+            extra_body = dict(request_kwargs.get("extra_body") or {})
+            extra_body["reasoning_effort"] = effective_reasoning_effort
+            request_kwargs["extra_body"] = extra_body
         for attempt in range(self.max_attempts):
             try:
                 return self.client.chat.completions.create(
-                    model=self.model,
-                    **kwargs,
+                    model=model_name,
+                    **request_kwargs,
                 )
             except Exception as error:
                 last_error = error

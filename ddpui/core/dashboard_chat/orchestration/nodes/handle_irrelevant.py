@@ -10,7 +10,7 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 
 
 def handle_irrelevant_node(
-    state: DashboardChatGraphState, llm_client, vector_store
+    state: DashboardChatGraphState, llm_client
 ) -> dict[str, Any]:
     """Handle questions outside dashboard chat scope."""
     return {
@@ -19,6 +19,6 @@ def handle_irrelevant_node(
                 "I can only answer questions about this dashboard, its charts, and the data behind them."
             ),
             intent=DashboardChatIntent.IRRELEVANT,
-            usage=build_usage_summary(llm_client, vector_store),
+            usage=build_usage_summary(llm_client),
         ).to_dict()
     }

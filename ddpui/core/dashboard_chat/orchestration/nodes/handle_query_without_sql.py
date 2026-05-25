@@ -5,7 +5,10 @@ from typing import Any
 from ddpui.core.dashboard_chat.orchestration.tool_loop_message_builder import (
     build_new_query_messages,
 )
-from ddpui.core.dashboard_chat.orchestration.retrieval_support import get_or_embed_query
+from ddpui.core.dashboard_chat.orchestration.nodes.metadata_gate import (
+    metadata_artifact_is_ready,
+    metadata_blocked_response,
+)
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.tool_loop import execute_tool_loop
 from ddpui.core.dashboard_chat.orchestration.timing_breakdown import merge_tool_loop_timing
@@ -14,27 +17,24 @@ from ddpui.core.dashboard_chat.orchestration.timing_breakdown import merge_tool_
 def handle_query_without_sql_node(
     state: DashboardChatGraphState,
     llm_client,
-    vector_store,
     warehouse_tools_factory,
     runtime_config,
-    source_config,
     tool_specifications,
 ) -> dict[str, Any]:
     """Handle new questions that continue with retrieved context but no SQL requirement."""
-    query_embedding = get_or_embed_query(vector_store, state["user_query"], query_embeddings={})
+    if not metadata_artifact_is_ready(state):
+        return metadata_blocked_response(state, llm_client)
+
     messages = build_new_query_messages(llm_client, state)
 
     execution_result = execute_tool_loop(
         llm_client,
         warehouse_tools_factory,
-        vector_store,
-        source_config,
         runtime_config,
         tool_specifications,
         state=state,
         messages=messages,
         max_turns=15,
-        initial_query_embeddings={state["user_query"]: query_embedding},
     )
 
     sql_validation = execution_result["sql_validation"]

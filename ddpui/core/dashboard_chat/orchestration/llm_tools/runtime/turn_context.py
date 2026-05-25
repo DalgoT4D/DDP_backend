@@ -16,8 +16,10 @@ from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlVa
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
 from ddpui.utils.custom_logger import CustomLogger
 
-from ddpui.core.dashboard_chat.orchestration.retrieval_support import get_or_embed_query
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
+    find_matching_dashboard_chat_table_name,
+)
 from ddpui.models.org import Org
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
@@ -35,7 +37,6 @@ class DashboardChatTurnContext:
     """Ephemeral per-turn execution context kept outside checkpointed graph state."""
 
     validated_distinct_values: set[tuple[str, str, str]]
-    query_embeddings: dict[str, list[float]]
     schema_snippets_by_table: dict[str, Any]
     retrieved_documents: list[DashboardChatRetrievedDocument] = field(default_factory=list)
     retrieved_document_ids: set[str] = field(default_factory=set)
@@ -51,13 +52,10 @@ class DashboardChatTurnContext:
     def from_state(
         cls,
         state: DashboardChatGraphState,
-        *,
-        initial_query_embeddings: dict[str, list[float]] | None = None,
     ) -> "DashboardChatTurnContext":
         """Build a fresh turn context from checkpointed state plus per-run inputs."""
         return cls(
             validated_distinct_values=hydrate_validated_distinct_values(state),
-            query_embeddings=dict(initial_query_embeddings or {}),
             schema_snippets_by_table=hydrate_schema_snippets_by_table(state),
             warnings=list(state.get("warnings", [])),
             timing_breakdown={
@@ -125,13 +123,18 @@ def get_or_load_schema_snippets(
 ) -> dict[str, Any]:
     """Load and keep schema snippets in the current turn state."""
     allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
-    requested_tables = [
-        table_name.lower()
-        for table_name in (tables if tables is not None else allowlist.prioritized_tables())
-        if allowlist.is_allowed(table_name)
-    ]
+    requested_tables: list[str] = []
+    for table_name in tables if tables is not None else allowlist.prioritized_tables():
+        resolved_table_name = allowlist.resolve_allowed_table_name(table_name)
+        if resolved_table_name is not None:
+            requested_tables.append(resolved_table_name)
+    requested_tables = list(dict.fromkeys(requested_tables))
     cache = turn_context.schema_snippets_by_table
-    missing_tables = [table_name for table_name in requested_tables if table_name not in cache]
+    missing_tables = [
+        table_name
+        for table_name in requested_tables
+        if find_matching_dashboard_chat_table_name(table_name, cache) is None
+    ]
     if missing_tables:
         snippets = get_turn_warehouse_tools(
             warehouse_tools_factory,
@@ -139,10 +142,16 @@ def get_or_load_schema_snippets(
             state,
         ).get_schema_snippets(missing_tables)
         for table_name, snippet in snippets.items():
-            cache[table_name.lower()] = snippet
+            cache[table_name] = snippet
     if tables is None:
         return cache
-    return {table_name: cache[table_name] for table_name in requested_tables if table_name in cache}
+    requested_cache: dict[str, Any] = {}
+    for table_name in requested_tables:
+        matched_table_name = find_matching_dashboard_chat_table_name(table_name, cache)
+        if matched_table_name is None:
+            continue
+        requested_cache[table_name] = cache[matched_table_name]
+    return requested_cache
 
 
 def normalize_distinct_value(value: Any) -> str:
@@ -255,9 +264,3 @@ def seed_validated_distinct_values_from_previous_sql(
         turn_context=turn_context,
         sql=previous_sql,
     )
-
-
-def dbt_resources_by_unique_id(state: DashboardChatGraphState) -> dict[str, dict[str, Any]]:
-    """Return the allowlisted dbt index built at session start."""
-    dbt_index = state.get("dbt_index") or {}
-    return dict(dbt_index.get("resources_by_unique_id") or {})

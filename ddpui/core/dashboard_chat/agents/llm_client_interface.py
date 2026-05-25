@@ -40,7 +40,7 @@ class DashboardChatLlmClient(Protocol):
         tool_choice: str,
         operation: str,
     ) -> dict[str, Any]:
-        """Run one prototype-style tool-loop completion."""
+        """Run one tool-loop completion."""
 
     def compose_final_answer(
         self,

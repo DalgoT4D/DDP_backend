@@ -47,25 +47,50 @@ def summarize_tool_call(
     entry: dict[str, Any] = {"name": tool_name, "args": args}
     if duration_ms is not None:
         entry["duration_ms"] = duration_ms
-    if tool_name == "retrieve_docs":
+    if tool_name == "get_chart_table_metadata":
         entry["count"] = result.get("count", 0)
-        entry["doc_ids"] = [doc.get("doc_id") for doc in result.get("docs", [])[:6]]
+        entry["charts"] = [chart.get("title") for chart in result.get("charts", [])[:6]]
+        entry["tables"] = [table.get("table_name") for table in result.get("tables", [])[:6]]
+    elif tool_name == "search_metadata":
+        entry["count"] = result.get("count", 0)
+        entry["tables"] = [table.get("table_name") for table in result.get("tables", [])[:8]]
+    elif tool_name == "get_table_metadata":
+        entry["count"] = result.get("count", 0)
+        entry["tables"] = [table.get("table_name") for table in result.get("tables", [])[:8]]
+    elif tool_name == "get_column_metadata":
+        entry["count"] = result.get("count", 0)
+        entry["columns"] = [
+            f"{item.get('table_name')}.{(item.get('column') or {}).get('name')}"
+            for item in result.get("columns", [])[:12]
+        ]
+    elif tool_name == "search_columns_by_name":
+        entry["count"] = result.get("count", 0)
+        entry["columns"] = [
+            f"{item.get('table_name')}.{item.get('column_name')}"
+            for item in result.get("columns", [])[:12]
+        ]
+    elif tool_name == "get_join_paths":
+        entry["count"] = result.get("count", 0)
+        entry["joins"] = [
+            f"{join.get('source_table')}->{join.get('target_table')}"
+            for join in result.get("joins", [])[:10]
+        ]
+    elif tool_name == "get_related_tables":
+        entry["count"] = result.get("count", 0)
+        entry["tables"] = [table.get("table_name") for table in result.get("tables", [])[:8]]
+    elif tool_name == "get_table_statistics":
+        entry["count"] = result.get("count", 0)
+        entry["tables"] = [table.get("table_name") for table in result.get("tables", [])[:8]]
+    elif tool_name == "resolve_time_scope":
+        entry["resolved_ranges"] = result.get("resolved_ranges", [])
+    elif tool_name == "read_full_metadata":
+        entry["table_count"] = len(result.get("tables") or [])
     elif tool_name == "get_schema_snippets":
         entry["tables"] = [table.get("table") for table in result.get("tables", [])]
-    elif tool_name == "search_dbt_models":
-        entry["count"] = result.get("count", 0)
-        entry["models"] = [
-            model.get("table") or model.get("name") for model in result.get("models", [])
-        ]
-    elif tool_name == "get_dbt_model_info":
-        entry["model"] = result.get("model")
-        entry["column_count"] = len(result.get("columns") or [])
     elif tool_name == "get_distinct_values":
         entry["error"] = result.get("error")
         entry["count"] = result.get("count", 0)
         entry["values_sample"] = (result.get("values") or [])[:10]
-    elif tool_name == "list_tables_by_keyword":
-        entry["tables"] = [table.get("table") for table in result.get("tables", [])]
     elif tool_name == "check_table_row_count":
         entry["row_count"] = result.get("row_count")
     elif tool_name == "run_sql_query":
@@ -172,17 +197,13 @@ def sql_result_columns(sql_results: list[dict[str, Any]] | None) -> list[str]:
     return list(first_row.keys())
 
 
-def build_usage_summary(llm_client, vector_store) -> dict[str, Any]:
-    """Collect per-turn usage from the llm client and embedding provider."""
+def build_usage_summary(llm_client) -> dict[str, Any]:
+    """Collect per-turn usage from the LLM client."""
     usage: dict[str, Any] = {}
     if hasattr(llm_client, "usage_summary"):
         llm_usage = llm_client.usage_summary()
         if llm_usage:
             usage["llm"] = llm_usage
-    if hasattr(vector_store, "usage_summary"):
-        embedding_usage = vector_store.usage_summary()
-        if embedding_usage:
-            usage["embeddings"] = embedding_usage
     return usage
 
 

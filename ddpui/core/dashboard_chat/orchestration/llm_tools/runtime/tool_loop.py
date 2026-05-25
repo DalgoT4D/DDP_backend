@@ -20,18 +20,22 @@ from ddpui.core.dashboard_chat.orchestration.response_composer import (
 from ddpui.core.dashboard_chat.contracts.event_contracts import DashboardChatProgressStage
 from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.dbt_tools import (
-    handle_get_dbt_model_info_tool,
-    handle_search_dbt_models_tool,
-)
-from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.vector_retrieval_tool import (
-    handle_retrieve_docs_tool,
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.metadata_tools import (
+    handle_get_chart_table_metadata_tool,
+    handle_get_column_metadata_tool,
+    handle_get_join_paths_tool,
+    handle_get_related_tables_tool,
+    handle_get_table_metadata_tool,
+    handle_get_table_statistics_tool,
+    handle_read_full_metadata_tool,
+    handle_resolve_time_scope_tool,
+    handle_search_columns_by_name_tool,
+    handle_search_metadata_tool,
 )
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.schema_tools import (
     handle_check_table_row_count_tool,
     handle_get_distinct_values_tool,
     handle_get_schema_snippets_tool,
-    handle_list_tables_by_keyword_tool,
 )
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_execution_tools import (
     handle_run_sql_query_tool,
@@ -50,9 +54,45 @@ from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
 logger = CustomLogger("dashboard_chat")
 
 TOOL_PROGRESS = {
-    "retrieve_docs": (
+    "get_chart_table_metadata": (
         DashboardChatProgressStage.SEARCHING_CONTEXT,
-        "Searching relevant sources",
+        "Inspecting chart tables",
+    ),
+    "search_metadata": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Inspecting metadata",
+    ),
+    "get_table_metadata": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Inspecting metadata",
+    ),
+    "get_column_metadata": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Inspecting columns",
+    ),
+    "search_columns_by_name": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Searching columns",
+    ),
+    "get_join_paths": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Inspecting join paths",
+    ),
+    "get_related_tables": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Inspecting related tables",
+    ),
+    "get_table_statistics": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Inspecting table statistics",
+    ),
+    "resolve_time_scope": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Resolving time scope",
+    ),
+    "read_full_metadata": (
+        DashboardChatProgressStage.SEARCHING_CONTEXT,
+        "Reading full metadata",
     ),
     "get_schema_snippets": (
         DashboardChatProgressStage.VALIDATING_QUERY,
@@ -61,10 +101,6 @@ TOOL_PROGRESS = {
     "get_distinct_values": (
         DashboardChatProgressStage.VALIDATING_QUERY,
         "Validating filters",
-    ),
-    "list_tables_by_keyword": (
-        DashboardChatProgressStage.VALIDATING_QUERY,
-        "Validating query",
     ),
     "check_table_row_count": (
         DashboardChatProgressStage.VALIDATING_QUERY,
@@ -80,21 +116,15 @@ TOOL_PROGRESS = {
 def execute_tool_loop(
     llm_client,
     warehouse_tools_factory,
-    vector_store,
-    source_config,
     runtime_config,
     tool_specifications,
     *,
     state: DashboardChatGraphState,
     messages: list[dict[str, Any]],
     max_turns: int,
-    initial_query_embeddings: dict[str, list[float]] | None = None,
 ) -> dict[str, Any]:
-    """Execute the prototype's iterative tool loop."""
-    turn_context = DashboardChatTurnContext.from_state(
-        state,
-        initial_query_embeddings=initial_query_embeddings,
-    )
+    """Execute the iterative dashboard-chat tool loop."""
+    turn_context = DashboardChatTurnContext.from_state(state)
     tool_loop_started_at = perf_counter()
     seed_validated_distinct_values_from_previous_sql(state, turn_context)
     intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
@@ -132,9 +162,14 @@ def execute_tool_loop(
         messages.append(assistant_record)
 
         if not tool_calls:
+            answer_text = (ai_message.get("content") or "").strip()
+            if ai_message.get("error") and (
+                turn_context.last_sql_results is not None or turn_context.retrieved_documents
+            ):
+                answer_text = ""
             return build_tool_loop_result(
                 answer_text=(
-                    (ai_message.get("content") or "").strip()
+                    answer_text
                     or fallback_answer_text(
                         turn_context.retrieved_documents,
                         turn_context.last_sql_results,
@@ -157,8 +192,6 @@ def execute_tool_loop(
             tool_started_at = perf_counter()
             result = execute_tool_call(
                 warehouse_tools_factory,
-                vector_store,
-                source_config,
                 runtime_config,
                 tool_name=str(tool_call.get("name") or ""),
                 args=args,
@@ -190,12 +223,7 @@ def execute_tool_loop(
             )
             raise_if_runtime_cancelled()
             if tool_name == "run_sql_query" and result.get("success"):
-                return build_tool_loop_result(
-                    answer_text="",
-                    turn_context=turn_context,
-                    max_turns_reached=False,
-                    tool_loop_started_at=tool_loop_started_at,
-                )
+                continue
 
     return build_tool_loop_result(
         answer_text=max_turns_message(
@@ -210,8 +238,6 @@ def execute_tool_loop(
 
 def execute_tool_call(
     warehouse_tools_factory,
-    vector_store,
-    source_config,
     runtime_config,
     *,
     tool_name: str,
@@ -219,23 +245,35 @@ def execute_tool_call(
     state: DashboardChatGraphState,
     turn_context: DashboardChatTurnContext,
 ) -> dict[str, Any]:
-    """Execute one prototype tool against the Dalgo runtime primitives."""
+    """Execute one dashboard-chat tool against the runtime primitives."""
     try:
         progress = TOOL_PROGRESS.get(tool_name)
         if progress is not None:
             publish_runtime_progress(progress[1], progress[0])
-        if tool_name == "retrieve_docs":
-            return handle_retrieve_docs_tool(
-                vector_store, source_config, runtime_config, args, state, turn_context
-            )
+        if tool_name == "get_chart_table_metadata":
+            return handle_get_chart_table_metadata_tool(args, state, turn_context)
+        if tool_name == "search_metadata":
+            return handle_search_metadata_tool(args, state, turn_context)
+        if tool_name == "get_table_metadata":
+            return handle_get_table_metadata_tool(args, state, turn_context)
+        if tool_name == "get_column_metadata":
+            return handle_get_column_metadata_tool(args, state, turn_context)
+        if tool_name == "search_columns_by_name":
+            return handle_search_columns_by_name_tool(args, state, turn_context)
+        if tool_name == "get_join_paths":
+            return handle_get_join_paths_tool(args, state, turn_context)
+        if tool_name == "get_table_statistics":
+            return handle_get_table_statistics_tool(args, state, turn_context)
+        if tool_name == "get_related_tables":
+            return handle_get_related_tables_tool(args, state, turn_context)
+        if tool_name == "resolve_time_scope":
+            return handle_resolve_time_scope_tool(args, state, turn_context)
+        if tool_name == "read_full_metadata":
+            return handle_read_full_metadata_tool(args, state, turn_context)
         if tool_name == "get_schema_snippets":
             return handle_get_schema_snippets_tool(
                 warehouse_tools_factory, args, state, turn_context
             )
-        if tool_name == "search_dbt_models":
-            return handle_search_dbt_models_tool(args, state, turn_context)
-        if tool_name == "get_dbt_model_info":
-            return handle_get_dbt_model_info_tool(args, state, turn_context)
         if tool_name == "get_distinct_values":
             return handle_get_distinct_values_tool(
                 warehouse_tools_factory, args, state, turn_context
@@ -243,10 +281,6 @@ def execute_tool_call(
         if tool_name == "run_sql_query":
             return handle_run_sql_query_tool(
                 warehouse_tools_factory, runtime_config, args, state, turn_context
-            )
-        if tool_name == "list_tables_by_keyword":
-            return handle_list_tables_by_keyword_tool(
-                warehouse_tools_factory, args, state, turn_context
             )
         if tool_name == "check_table_row_count":
             return handle_check_table_row_count_tool(

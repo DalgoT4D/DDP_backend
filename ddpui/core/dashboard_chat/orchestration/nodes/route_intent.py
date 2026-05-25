@@ -13,7 +13,7 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 
 
 def route_intent_node(state: DashboardChatGraphState, llm_client) -> dict[str, Any]:
-    """Use the prototype router prompt for all non-trivial routing."""
+    """Classify intent for all non-trivial routing decisions."""
     conversation_context = extract_conversation_context(state["conversation_history"])
     fast_path_intent = build_fast_path_intent(state["user_query"])
     if fast_path_intent is not None:

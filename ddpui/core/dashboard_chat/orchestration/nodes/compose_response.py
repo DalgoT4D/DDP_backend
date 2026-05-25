@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
 from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
@@ -20,7 +19,6 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 def compose_response_node(
     state: DashboardChatGraphState,
     llm_client,
-    vector_store,
 ) -> dict[str, Any]:
     """Compose the final dashboard-chat response from state accumulated by prior nodes."""
     if state.get("response") is not None:
@@ -39,7 +37,6 @@ def compose_response_node(
             ).to_dict()
         }
 
-    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     retrieved_documents = [
         DashboardChatRetrievedDocument.model_validate(p)
         for p in (state.get("retrieved_documents") or [])
@@ -47,7 +44,6 @@ def compose_response_node(
     citations = build_citations(
         retrieved_documents=retrieved_documents,
         dashboard_export=state.get("dashboard_export_payload") or {},
-        allowlist=allowlist,
     )
     response_format = determine_response_format(
         user_query=state["user_query"],
@@ -76,7 +72,7 @@ def compose_response_node(
             warnings=list(state.get("warnings") or []),
             sql=state.get("sql"),
             sql_results=state.get("sql_results"),
-            usage=build_usage_summary(llm_client, vector_store),
+            usage=build_usage_summary(llm_client),
             tool_calls=list(state.get("tool_calls") or []),
             metadata={
                 "response_format": response_format,

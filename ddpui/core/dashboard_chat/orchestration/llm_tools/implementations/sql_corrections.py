@@ -6,6 +6,7 @@ from typing import Any
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
     best_table_for_missing_columns,
+    cte_schema_snippets,
     find_tables_with_column,
     primary_table_name,
     referenced_sql_identifier_refs,
@@ -41,7 +42,12 @@ def missing_columns_in_primary_table(
         turn_context,
         tables=referenced_tables,
     )
-    all_schema_snippets_by_table = get_or_load_schema_snippets(warehouse_tools_factory, state, turn_context)
+    synthetic_cte_snippets = cte_schema_snippets(sql)
+    schema_snippets_by_table = {**synthetic_cte_snippets, **schema_snippets_by_table}
+    all_schema_snippets_by_table = {
+        **synthetic_cte_snippets,
+        **get_or_load_schema_snippets(warehouse_tools_factory, state, turn_context),
+    }
     missing_columns_by_table: dict[str, set[str]] = {}
     candidate_tables_by_column: dict[str, list[str]] = {}
     tables_in_query = list(dict.fromkeys(referenced_tables))

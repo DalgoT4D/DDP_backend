@@ -15,7 +15,7 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 
 
 def handle_needs_clarification_node(
-    state: DashboardChatGraphState, llm_client, vector_store
+    state: DashboardChatGraphState, llm_client
 ) -> dict[str, Any]:
     """Ask for clarification when the router says the query is underspecified."""
     intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
@@ -26,6 +26,6 @@ def handle_needs_clarification_node(
                 or clarification_fallback(intent_decision.missing_info)
             ),
             intent=DashboardChatIntent.NEEDS_CLARIFICATION,
-            usage=build_usage_summary(llm_client, vector_store),
+            usage=build_usage_summary(llm_client),
         ).to_dict()
     }

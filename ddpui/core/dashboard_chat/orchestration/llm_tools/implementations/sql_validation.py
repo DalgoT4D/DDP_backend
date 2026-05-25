@@ -51,7 +51,7 @@ def validate_sql_allowlist(
             "message": (
                 "SQL references tables not available in the current dashboard: "
                 + ", ".join(invalid_tables)
-                + ". Use list_tables_by_keyword to find allowed tables."
+                + ". Inspect metadata and schema tools to find the correct allowlisted tables."
             ),
         }
     return {"valid": True, "invalid_tables": [], "message": ""}

@@ -3,7 +3,6 @@
 from typing import Any
 
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
-from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
@@ -17,7 +16,82 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     record_validated_distinct_values,
 )
 
-logger = CustomLogger("dashboard_chat")
+def _build_table_profile(columns: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize whether a table is row-grain, aggregate-like, or score-bearing."""
+    column_names = [str(column.get("name") or "") for column in columns]
+    normalized_column_names = [column_name.lower() for column_name in column_names]
+
+    join_key_columns = [
+        column_name
+        for column_name in column_names
+        if column_name.lower() == "id" or column_name.lower().endswith("_id")
+    ]
+    entity_name_columns = [
+        column_name for column_name in column_names if "name" in column_name.lower()
+    ]
+    numeric_score_columns = [
+        column_name
+        for column_name in column_names
+        if any(
+            marker in column_name.lower()
+            for marker in ("_perc", "_mastery", "score", "percentage", "percent")
+        )
+    ]
+    performance_columns = [
+        column_name
+        for column_name in column_names
+        if any(
+            marker in column_name.lower()
+            for marker in (
+                "_status",
+                "_level",
+                "grade_level",
+                "_perc",
+                "_mastery",
+                "score",
+            )
+        )
+    ]
+    aggregate_count_columns = [
+        column_name for column_name in column_names if "count" in column_name.lower()
+    ]
+    is_aggregate_like = bool(aggregate_count_columns) and not join_key_columns
+
+    return {
+        "join_key_columns": join_key_columns[:10],
+        "entity_name_columns": entity_name_columns[:10],
+        "numeric_score_columns": numeric_score_columns[:10],
+        "performance_columns": performance_columns[:15],
+        "aggregate_count_columns": aggregate_count_columns[:10],
+        "is_aggregate_like": is_aggregate_like,
+        "has_join_key": bool(join_key_columns),
+        "has_entity_name_columns": bool(entity_name_columns),
+        "has_numeric_score_columns": bool(numeric_score_columns),
+        "has_performance_columns": bool(performance_columns),
+        "normalized_columns": normalized_column_names[:50],
+    }
+
+
+def _build_table_hint(table_name: str, profile: dict[str, Any]) -> str | None:
+    """Emit a short model-usage hint for the LLM when a schema is obviously aggregate-like."""
+    if profile["is_aggregate_like"]:
+        if not profile["has_entity_name_columns"]:
+            return (
+                f"{table_name} looks aggregate-like: it has summary count columns but no row-level id "
+                "or entity-name columns. Do not use it for named-entity rankings or lists if deeper "
+                "fact/dimension models are needed."
+            )
+        return (
+            f"{table_name} looks aggregate-like: it summarizes counts and does not expose row-level ids. "
+            "Use it for chart totals, but inspect deeper models before answering named-entity or "
+            "score-threshold questions."
+        )
+    if profile["has_numeric_score_columns"]:
+        return (
+            f"{table_name} includes direct numeric score/mastery fields. Prefer these columns for explicit "
+            "percentage thresholds, averages, and best-performing comparisons."
+        )
+    return None
 
 
 def handle_get_schema_snippets_tool(
@@ -28,22 +102,37 @@ def handle_get_schema_snippets_tool(
 ) -> dict[str, Any]:
     """Return schema snippets for allowlisted tables only."""
     allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
-    requested_tables = [str(table_name).lower() for table_name in args.get("tables") or []]
-    allowed_tables = [
-        table_name for table_name in requested_tables if allowlist.is_allowed(table_name)
-    ]
-    filtered_tables = sorted(set(requested_tables) - set(allowed_tables))
+    requested_tables = [str(table_name).strip() for table_name in args.get("tables") or []]
+    allowed_tables: list[str] = []
+    filtered_tables: list[str] = []
+    for table_name in requested_tables:
+        resolved_table_name = allowlist.resolve_allowed_table_name(table_name)
+        if resolved_table_name is None:
+            filtered_tables.append(table_name)
+            continue
+        allowed_tables.append(resolved_table_name)
+    allowed_tables = list(dict.fromkeys(allowed_tables))
+    filtered_tables = sorted(set(filtered_tables))
     schema_snippets_by_table = get_or_load_schema_snippets(
         warehouse_tools_factory,
         state,
         turn_context,
         tables=allowed_tables,
     )
-    tables_payload = [
-        {"table": table_name, "columns": snippet.columns}
-        for table_name, snippet in schema_snippets_by_table.items()
-        if table_name in allowed_tables
-    ]
+    tables_payload = []
+    for table_name, snippet in schema_snippets_by_table.items():
+        if table_name not in allowed_tables:
+            continue
+        profile = _build_table_profile(snippet.columns)
+        table_payload: dict[str, Any] = {
+            "table": table_name,
+            "columns": snippet.columns,
+            "profile": profile,
+        }
+        hint = _build_table_hint(table_name, profile)
+        if hint is not None:
+            table_payload["hint"] = hint
+        tables_payload.append(table_payload)
     response: dict[str, Any] = {"tables": tables_payload}
     if filtered_tables:
         response["filtered_tables"] = filtered_tables
@@ -61,14 +150,17 @@ def handle_get_distinct_values_tool(
 ) -> dict[str, Any]:
     """Return distinct values and persist validated filter values for the session."""
     allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
-    table_name = str(args.get("table") or "").lower()
+    requested_table_name = str(args.get("table") or "").strip()
+    table_name = allowlist.resolve_allowed_table_name(requested_table_name)
     column_name = str(args.get("column") or "")
     limit = max(1, min(int(args.get("limit", 50)), 200))
-    if not allowlist.is_allowed(table_name):
+    if table_name is None:
         return {
             "error": "table_not_allowed",
-            "table": table_name,
-            "message": (f"Table {table_name} is not accessible in the current dashboard context."),
+            "table": requested_table_name,
+            "message": (
+                f"Table {requested_table_name} is not accessible in the current dashboard context."
+            ),
         }
 
     schema_snippets_by_table = get_or_load_schema_snippets(
@@ -114,81 +206,6 @@ def handle_get_distinct_values_tool(
     }
 
 
-def handle_list_tables_by_keyword_tool(
-    warehouse_tools_factory,
-    args: dict[str, Any],
-    state: DashboardChatGraphState,
-    turn_context: DashboardChatTurnContext,
-) -> dict[str, Any]:
-    """Search allowlisted tables by table name or column name."""
-    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
-    keyword = str(args.get("keyword") or "").strip().lower()
-    limit = max(1, min(int(args.get("limit", 15)), 50))
-    if not keyword:
-        return {"tables": []}
-
-    allowlist_tables_source = allowlist.prioritized_tables() or sorted(allowlist.allowed_tables)
-    allowlisted_tables = list(
-        dict.fromkeys(table_name.lower() for table_name in allowlist_tables_source)
-    )
-    direct_match_tables = [
-        table_name
-        for table_name in allowlisted_tables
-        if keyword in table_name or keyword in table_name.rsplit(".", 1)[-1]
-    ]
-
-    schema_snippets_by_table: dict[str, Any] = {}
-    lookup_tables = direct_match_tables or allowlisted_tables
-    if lookup_tables:
-        try:
-            schema_snippets_by_table = get_or_load_schema_snippets(
-                warehouse_tools_factory,
-                state,
-                turn_context,
-                tables=lookup_tables,
-            )
-        except Exception as error:
-            logger.warning("Dashboard chat keyword table lookup fell back to names only: %s", error)
-            turn_context.warnings.append(str(error))
-
-    matches: list[dict[str, Any]] = []
-    seen_tables: set[str] = set()
-
-    for table_name in direct_match_tables:
-        column_names = [
-            str(column.get("name") or "")
-            for column in getattr(schema_snippets_by_table.get(table_name), "columns", [])
-        ]
-        matches.append({"table": table_name, "columns": column_names[:40]})
-        seen_tables.add(table_name)
-        if len(matches) >= limit:
-            break
-
-    for table_name, snippet in schema_snippets_by_table.items():
-        if table_name in seen_tables:
-            continue
-        column_names = [str(column.get("name") or "") for column in snippet.columns]
-        if not any(keyword in column_name.lower() for column_name in column_names):
-            continue
-        matches.append({"table": table_name, "columns": column_names[:40]})
-        if len(matches) >= limit:
-            break
-
-    if matches:
-        return {
-            "tables": matches,
-            "hint": (
-                f"Found {len(matches)} allowlisted tables. Check schema before assuming table structure."
-            ),
-        }
-    return {
-        "tables": [],
-        "hint": (
-            f"No allowlisted tables matched '{keyword}'. Try a broader keyword or retrieve chart docs first."
-        ),
-    }
-
-
 def handle_check_table_row_count_tool(
     warehouse_tools_factory,
     args: dict[str, Any],
@@ -197,12 +214,15 @@ def handle_check_table_row_count_tool(
 ) -> dict[str, Any]:
     """Count rows in one allowlisted table."""
     allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
-    table_name = str(args.get("table") or "").lower()
-    if not allowlist.is_allowed(table_name):
+    requested_table_name = str(args.get("table") or "").strip()
+    table_name = allowlist.resolve_allowed_table_name(requested_table_name)
+    if table_name is None:
         return {
             "error": "table_not_allowed",
-            "table": table_name,
-            "message": (f"Table {table_name} is not accessible in the current dashboard context."),
+            "table": requested_table_name,
+            "message": (
+                f"Table {requested_table_name} is not accessible in the current dashboard context."
+            ),
         }
 
     sql = f"SELECT COUNT(*) AS row_count FROM {table_name} LIMIT 1"

@@ -71,7 +71,11 @@ The current backend shape is:
 
 ### `context/`
 - `dashboard_table_allowlist.py` builds the dashboard-scoped table/dbt allowlist
-- `dbt_docs_artifacts.py` generates and loads manifest/catalog artifacts for chat context builds
+
+### `metadata/`
+- dashboard-scoped metadata artifact build, enrichment, storage, and search helpers
+- the metadata build path has an explicit dbt build-time dependency on `target/manifest.json`
+- runtime does not read raw dbt artifacts, but metadata builds still require the manifest for lineage and YAML-authored docs
 
 ### `contracts/`
 - `conversation_contracts.py`, `intent_contracts.py`, `response_contracts.py`, `retrieval_contracts.py`, `sql_contracts.py`
@@ -82,15 +86,13 @@ The current backend shape is:
 - `conversation_context.py`: extracts reusable follow-up context from prior messages
 - `tool_loop_message_builder.py`: builds tool-loop prompt stacks
 - `response_composer.py`: builds final answer text and response-format decisions
-- `retrieval_support.py`: retrieval normalization and citation helpers
-- `source_identifier_parsing.py`: parses chart/dbt identifiers from stored vector sources
+- `retrieval_support.py`: chart/citation helpers used by the runtime
+- `source_identifier_parsing.py`: parses chart identifiers from stored sources
 - `intent_routing.py`: maps classified intents to route node names
 - `timing_breakdown.py`: merges timing payloads across node/tool execution
 
 #### `orchestration/state/`
 - `graph_state.py`: JSON-safe LangGraph state contract
-- `payload_codec.py`: serialize/deserialize checkpoint payloads
-- `accessors.py`: reconstruct typed runtime views from persisted payloads
 
 #### `orchestration/nodes/`
 - graph nodes only
@@ -104,11 +106,6 @@ The current backend shape is:
 
 ### `sessions/`
 - `session_service.py`: session/message persistence and message serialization
-
-### `vector/`
-- `vector_documents.py`: vector document contracts and collection naming
-- `org_vector_store.py`: org-scoped Chroma adapter
-- `org_vector_context_build_service.py`: document building and org-level vector rebuilds
 
 ### `warehouse/`
 - `warehouse_access_tools.py`: schema lookups, distincts, row counts, SQL execution

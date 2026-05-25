@@ -1,6 +1,5 @@
 """Tests for dashboard chat session creation, reuse, and turn execution."""
 
-from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import pytest
@@ -22,10 +21,9 @@ from ddpui.core.dashboard_chat.sessions.session_service import (
     execute_dashboard_chat_turn,
     get_or_create_dashboard_chat_session,
 )
-from ddpui.core.dashboard_chat.vector.vector_documents import build_dashboard_chat_collection_name
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import DashboardChatMessage, DashboardChatSession
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.tests.api_tests.test_user_org_api import seed_db
@@ -148,9 +146,6 @@ def test_get_or_create_dashboard_chat_session_creates_new_session(session_owner,
     assert isinstance(session, DashboardChatSession)
     assert session.orguser == session_owner
     assert session.dashboard == dashboard
-    assert session.vector_collection_name is None
-
-
 def test_get_or_create_dashboard_chat_session_rejects_cross_org_dashboard_on_create(
     session_owner,
     other_org_dashboard,
@@ -165,38 +160,6 @@ def test_get_or_create_dashboard_chat_session_rejects_cross_org_dashboard_on_cre
             dashboard=other_org_dashboard,
             session_id=None,
         )
-
-
-def test_get_or_create_dashboard_chat_session_pins_active_vector_collection(
-    session_owner,
-    dashboard,
-):
-    """New chat sessions should pin the active org vector collection at creation time."""
-    org_dbt = OrgDbt.objects.create(
-        project_dir="client_dbt/dashchat",
-        target_type="postgres",
-        default_schema="analytics",
-        vector_last_ingested_at=datetime(2026, 3, 23, 12, 0, tzinfo=timezone.utc),
-    )
-    session_owner.org.dbt = org_dbt
-    session_owner.org.save(update_fields=["dbt"])
-
-    with patch.dict(
-        "os.environ",
-        {"AI_DASHBOARD_CHAT_CHROMA_COLLECTION_PREFIX": "tenant_"},
-        clear=False,
-    ):
-        session = get_or_create_dashboard_chat_session(
-            orguser=session_owner,
-            dashboard=dashboard,
-            session_id=None,
-        )
-
-    assert session.vector_collection_name == build_dashboard_chat_collection_name(
-        session_owner.org.id,
-        prefix="tenant_",
-        version=org_dbt.vector_last_ingested_at,
-    )
 
 
 def test_get_or_create_dashboard_chat_session_rejects_other_user_session(
