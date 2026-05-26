@@ -374,125 +374,125 @@ def build_chart_query(
         query_builder = AggQueryBuilder()
         query_builder.fetch_from(payload.table_name, payload.schema_name)
 
-        # Now build the rest of the query logic on top of the (possibly paginated) data source
-        # Table charts can work with just dimensions (no metrics) - non-aggregated query
-        # Other charts require metrics for aggregation
-        if payload.chart_type != "table":
-            if not payload.metrics or len(payload.metrics) == 0:
-                raise ValueError("At least one metric is required for aggregated charts")
-        elif payload.chart_type == "table":
-            # Table charts: if no metrics, just select dimensions (non-aggregated)
-            dimensions = normalize_dimensions(payload)
-            if not dimensions:
-                raise ValueError("At least one dimension is required for table charts")
+    # Now build the rest of the query logic on top of the (possibly paginated) data source
+    # Table charts can work with just dimensions (no metrics) - non-aggregated query
+    # Other charts require metrics for aggregation
+    if payload.chart_type != "table":
+        if not payload.metrics or len(payload.metrics) == 0:
+            raise ValueError("At least one metric is required for aggregated charts")
+    elif payload.chart_type == "table":
+        # Table charts: if no metrics, just select dimensions (non-aggregated)
+        dimensions = normalize_dimensions(payload)
+        if not dimensions:
+            raise ValueError("At least one dimension is required for table charts")
 
-            if not payload.metrics or len(payload.metrics) == 0:
-                # Non-aggregated query: just select dimension columns
-                for dim_col in dimensions:
-                    if not dim_col or not dim_col.strip():
-                        continue
-                    dim_expr = column(dim_col)
-                    # Always label to ensure consistent key access
-                    dim_expr = dim_expr.label(dim_col)
-                    query_builder.add_column(dim_expr)
-                # No GROUP BY needed for non-aggregated queries
-            else:
-                # Aggregated query: use multi-metric query builder
-                query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
-
-            # Apply filters and sorting before returning
-            if payload.dashboard_filters:
-                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
-            if payload.extra_config and payload.extra_config.get("filters"):
-                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
-            if payload.extra_config and payload.extra_config.get("sort"):
-                query_builder = apply_chart_sorting(
-                    query_builder, payload.extra_config["sort"], payload
-                )
-
-            return query_builder
-
-        # For number charts, we don't need dimension columns
-        if payload.chart_type == "number":
-            # Use first metric for number charts
-            metric = payload.metrics[0]
-
-            # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-            # Just add the aggregate column without any grouping
-            query_builder.add_aggregate_column(
-                metric.column,
-                metric.aggregation,
-                alias,
-            )
-        elif payload.chart_type == "pie":
-            # Pie charts need dimension and one metric
-            if not payload.dimension_col:
-                raise ValueError("dimension_col is required for pie charts")
-
-            # Add dimension column with time grain if specified
-            dimension_column = column(payload.dimension_col)
-
-            # Apply time grain if specified and warehouse type is available
-            time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
-            if time_grain and org_warehouse:
-                warehouse_type = org_warehouse.wtype.lower()
-                dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
-                # Add label to preserve original column name for data access
-                dimension_column = dimension_column.label(payload.dimension_col)
-
-            query_builder.add_column(dimension_column)
-
-            # Add extra dimension if specified (for combination slices)
-            if payload.extra_dimension:
-                query_builder.add_column(column(payload.extra_dimension))
-
-            # Use first metric for pie charts
-            metric = payload.metrics[0]
-
-            # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-            # Add aggregate column
-            query_builder.add_aggregate_column(
-                metric.column,
-                metric.aggregation,
-                alias,
-            )
-
-            # Group by dimension column and extra dimension if provided
-            if time_grain and org_warehouse:
-                # When time grain is applied, group by the time grain expression (without label)
-                warehouse_type = org_warehouse.wtype.lower()
-                time_grain_expr = apply_time_grain(
-                    column(payload.dimension_col), time_grain, warehouse_type
-                )
-                query_builder.group_cols_by(time_grain_expr)
-            else:
-                # Normal grouping by column name
-                query_builder.group_cols_by(payload.dimension_col)
-
-            if payload.extra_dimension:
-                query_builder.group_cols_by(payload.extra_dimension)
-
-            # Add default ordering by time grain column when time grain is applied
-            if time_grain and org_warehouse:
-                # Order by the dimension column (which will have time grain applied) in ascending order (chronological)
-                query_builder.order_cols_by([(payload.dimension_col, "asc")])
+        if not payload.metrics or len(payload.metrics) == 0:
+            # Non-aggregated query: just select dimension columns
+            for dim_col in dimensions:
+                if not dim_col or not dim_col.strip():
+                    continue
+                dim_expr = column(dim_col)
+                # Always label to ensure consistent key access
+                dim_expr = dim_expr.label(dim_col)
+                query_builder.add_column(dim_expr)
+            # No GROUP BY needed for non-aggregated queries
         else:
-            # Bar, line, and other charts - use multi-metric query
+            # Aggregated query: use multi-metric query builder
             query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
+
+        # Apply filters and sorting before returning
+        if payload.dashboard_filters:
+            query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+        if payload.extra_config and payload.extra_config.get("filters"):
+            query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+        if payload.extra_config and payload.extra_config.get("sort"):
+            query_builder = apply_chart_sorting(
+                query_builder, payload.extra_config["sort"], payload
+            )
+
+        return query_builder
+
+    # For number charts, we don't need dimension columns
+    if payload.chart_type == "number":
+        # Use first metric for number charts
+        metric = payload.metrics[0]
+
+        # Handle count with None column case
+        if metric.aggregation.lower() == "count" and metric.column is None:
+            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+        else:
+            if not metric.column:
+                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+        # Just add the aggregate column without any grouping
+        query_builder.add_aggregate_column(
+            metric.column,
+            metric.aggregation,
+            alias,
+        )
+    elif payload.chart_type == "pie":
+        # Pie charts need dimension and one metric
+        if not payload.dimension_col:
+            raise ValueError("dimension_col is required for pie charts")
+
+        # Add dimension column with time grain if specified
+        dimension_column = column(payload.dimension_col)
+
+        # Apply time grain if specified and warehouse type is available
+        time_grain = payload.extra_config.get("time_grain") if payload.extra_config else None
+        if time_grain and org_warehouse:
+            warehouse_type = org_warehouse.wtype.lower()
+            dimension_column = apply_time_grain(dimension_column, time_grain, warehouse_type)
+            # Add label to preserve original column name for data access
+            dimension_column = dimension_column.label(payload.dimension_col)
+
+        query_builder.add_column(dimension_column)
+
+        # Add extra dimension if specified (for combination slices)
+        if payload.extra_dimension:
+            query_builder.add_column(column(payload.extra_dimension))
+
+        # Use first metric for pie charts
+        metric = payload.metrics[0]
+
+        # Handle count with None column case
+        if metric.aggregation.lower() == "count" and metric.column is None:
+            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+        else:
+            if not metric.column:
+                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+        # Add aggregate column
+        query_builder.add_aggregate_column(
+            metric.column,
+            metric.aggregation,
+            alias,
+        )
+
+        # Group by dimension column and extra dimension if provided
+        if time_grain and org_warehouse:
+            # When time grain is applied, group by the time grain expression (without label)
+            warehouse_type = org_warehouse.wtype.lower()
+            time_grain_expr = apply_time_grain(
+                column(payload.dimension_col), time_grain, warehouse_type
+            )
+            query_builder.group_cols_by(time_grain_expr)
+        else:
+            # Normal grouping by column name
+            query_builder.group_cols_by(payload.dimension_col)
+
+        if payload.extra_dimension:
+            query_builder.group_cols_by(payload.extra_dimension)
+
+        # Add default ordering by time grain column when time grain is applied
+        if time_grain and org_warehouse:
+            # Order by the dimension column (which will have time grain applied) in ascending order (chronological)
+            query_builder.order_cols_by([(payload.dimension_col, "asc")])
+    else:
+        # Bar, line, and other charts - use multi-metric query
+        query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
 
     # Apply dashboard filters if provided
     if payload.dashboard_filters:
