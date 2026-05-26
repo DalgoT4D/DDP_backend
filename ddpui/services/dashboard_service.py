@@ -1052,21 +1052,21 @@ class DashboardService:
         # Validate component configurations across all tabs
         for tab in dashboard.tabs or []:
             components = tab.get("components") or {}
-        for component_id, component_config in components.items():
-            component_type = component_config.get("type")
+            for component_id, component_config in components.items():
+                component_type = component_config.get("type")
 
-            if not component_type:
-                errors.append(f"Component {component_id} has no type specified")
-                continue
+                if not component_type:
+                    errors.append(f"Component {component_id} has no type specified")
+                    continue
 
-            if component_type not in [ct.value for ct in DashboardComponentType]:
-                errors.append(f"Component {component_id} has invalid type: {component_type}")
+                if component_type not in [ct.value for ct in DashboardComponentType]:
+                    errors.append(f"Component {component_id} has invalid type: {component_type}")
 
-            # Validate chart components
-            if component_type == DashboardComponentType.CHART.value:
-                config = component_config.get("config", {})
-                if not config.get("chartId"):
-                    errors.append(f"Chart component {component_id} has no chartId")
+                # Validate chart components
+                if component_type == DashboardComponentType.CHART.value:
+                    config = component_config.get("config", {})
+                    if not config.get("chartId"):
+                        errors.append(f"Chart component {component_id} has no chartId")
 
         # Validate filters
         for filter in dashboard.filters.all():

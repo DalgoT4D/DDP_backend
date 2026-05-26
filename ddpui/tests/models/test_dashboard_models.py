@@ -142,7 +142,7 @@ def test_dashboard_create_success(orguser, org, seed_db):
                 "id": "tab-1",
                 "title": "Tab 1",
                 "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
-                "components": {"chart-1": {"type": "chart", "chart_id": 1}},
+                "components": {"chart-1": {"type": "chart", "config": {"chartId": 1}}},
             }
         ],
         created_by=orguser,
