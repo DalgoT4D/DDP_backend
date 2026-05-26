@@ -4,20 +4,34 @@ from django.db import migrations, models
 import django.db.models.deletion
 
 
+def copy_comment_target_ids(apps, schema_editor):
+    """Copy snapshot_chart_id → target_id on Comment before dropping the old column."""
+    Comment = apps.get_model("ddpui", "Comment")
+    for comment in Comment.objects.filter(snapshot_chart_id__isnull=False):
+        comment.target_id = comment.snapshot_chart_id
+        comment.save(update_fields=["target_id"])
+
+
+def copy_readstatus_target_ids(apps, schema_editor):
+    """Copy chart_id → target_id on CommentReadStatus before dropping the old column."""
+    CommentReadStatus = apps.get_model("ddpui", "CommentReadStatus")
+    for status in CommentReadStatus.objects.filter(chart_id__isnull=False):
+        status.target_id = status.chart_id
+        status.save(update_fields=["target_id"])
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("ddpui", "0160_add_dashboard_tabs"),
     ]
 
     operations = [
+        # --- Step 1: Drop old unique constraint on commentreadstatus ---
         migrations.AlterUniqueTogether(
             name="commentreadstatus",
             unique_together=set(),
         ),
-        migrations.RemoveField(
-            model_name="comment",
-            name="snapshot_chart_id",
-        ),
+        # --- Step 2: Add new target_id columns (nullable) ---
         migrations.AddField(
             model_name="comment",
             name="target_id",
@@ -34,10 +48,24 @@ class Migration(migrations.Migration):
                 null=True,
             ),
         ),
+        # --- Step 3: Copy data from old columns to new columns ---
+        migrations.RunPython(copy_comment_target_ids, migrations.RunPython.noop),
+        migrations.RunPython(copy_readstatus_target_ids, migrations.RunPython.noop),
+        # --- Step 4: Drop old columns ---
+        migrations.RemoveField(
+            model_name="comment",
+            name="snapshot_chart_id",
+        ),
+        migrations.RemoveField(
+            model_name="commentreadstatus",
+            name="chart_id",
+        ),
+        # --- Step 5: Add new unique constraint ---
         migrations.AlterUniqueTogether(
             name="commentreadstatus",
             unique_together={("user", "snapshot", "target_type", "target_id")},
         ),
+        # --- Step 6: Create Metric model ---
         migrations.CreateModel(
             name="Metric",
             fields=[
@@ -83,6 +111,7 @@ class Migration(migrations.Migration):
                 "ordering": ["-updated_at"],
             },
         ),
+        # --- Step 7: Create KPI model ---
         migrations.CreateModel(
             name="KPI",
             fields=[
@@ -155,10 +184,7 @@ class Migration(migrations.Migration):
                 "ordering": ["display_order", "-updated_at"],
             },
         ),
-        migrations.RemoveField(
-            model_name="commentreadstatus",
-            name="chart_id",
-        ),
+        # --- Step 8: Add unique constraint on Metric ---
         migrations.AddConstraint(
             model_name="metric",
             constraint=models.UniqueConstraint(
