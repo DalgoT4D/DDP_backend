@@ -149,6 +149,13 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             final_dims = filtered_dims if filtered_dims else []
 
+        # Fallback to dimension_col + extra_dimension for backward compatibility
+        if not final_dims:
+            if payload.dimension_col:
+                final_dims.append(payload.dimension_col)
+            if payload.extra_dimension:
+                final_dims.append(payload.extra_dimension)
+
     else:
         # For other charts, include both dimension_col and extra_dimension if present
         if payload.dimension_col:
@@ -157,7 +164,11 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             final_dims.append(payload.extra_dimension)
 
     if not final_dims:
-        logger.warning(f"No valid dimensions found {payload.dimensions}")
+        logger.error(
+            f"No valid dimensions found: chart_type={payload.chart_type}, "
+            f"dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, "
+            f"extra_dimension={payload.extra_dimension}"
+        )
 
     return final_dims
 
