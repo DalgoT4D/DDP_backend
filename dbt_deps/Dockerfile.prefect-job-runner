@@ -1,7 +1,14 @@
 # Define version as build arg with default
-ARG PREFECT_VERSION=3.1.15
+ARG PREFECT_VERSION=3.6.24
 
 FROM prefecthq/prefect:${PREFECT_VERSION}-python3.10-kubernetes
+
+# Prefect integration package versions. `prefect` itself comes from the base image
+# above — we only layer the integrations on top. Bump these alongside PREFECT_VERSION
+# to cut a new image (e.g. image tag 0.1 was prefect 3.1.15, tag 0.2 is prefect 3.6.24).
+ARG PREFECT_DBT_VERSION=0.7.24
+ARG PREFECT_SHELL_VERSION=0.3.5
+ARG PREFECT_AIRBYTE_REF=v0.90
 
 # Define common paths as build args and env vars after FROM
 ARG DBT_VENV="/home/ddp/dbt"
@@ -19,11 +26,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Prefect dependencies
-COPY prefect-integrations/ /tmp/prefect-integrations/
-RUN cd /tmp/prefect-integrations && \
-    pip install --no-cache-dir . && \
-    rm -rf /tmp/prefect-integrations
+# Install Prefect integration deps on top of the base image (which already ships prefect).
+RUN pip install --no-cache-dir \
+    "prefect-dbt[bigquery,postgres]==${PREFECT_DBT_VERSION}" \
+    "prefect-shell==${PREFECT_SHELL_VERSION}" \
+    "prefect-airbyte @ git+https://github.com/Ishankoradia/prefect-airbyte.git@${PREFECT_AIRBYTE_REF}"
 
 # Create the exact directory structure matching your current setup
 RUN mkdir -p ${DBT_VENV} \
