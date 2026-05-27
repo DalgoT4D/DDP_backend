@@ -252,6 +252,15 @@ class KPIService:
     @staticmethod
     def delete_kpi(kpi_id: int, org: Org, orguser: OrgUser) -> bool:
         kpi = KPIService.get_kpi(kpi_id, org)
+
+        dashboards = KPIService.get_kpi_dashboards(kpi_id, org)
+        if dashboards:
+            names = ", ".join(d["title"] for d in dashboards)
+            raise KPIValidationError(
+                f"Cannot delete KPI '{kpi.name}' — it is used in: {names}. "
+                "Remove it from these dashboards first."
+            )
+
         kpi_name = kpi.name
         kpi.delete()
         logger.info(f"Deleted KPI '{kpi_name}' (id={kpi_id}) by {orguser.user.email}")

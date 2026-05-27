@@ -134,6 +134,8 @@ def delete_kpi(request, kpi_id: int):
         KPIService.delete_kpi(kpi_id, orguser.org, orguser)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
+    except KPIValidationError as e:
+        raise HttpError(400, e.message) from None
 
     return api_response(success=True)
 
