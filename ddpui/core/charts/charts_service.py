@@ -1,10 +1,11 @@
 """Chart service module for handling chart business logic"""
 
+import re
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date
 from decimal import Decimal
 
-from sqlalchemy import column, func, and_, or_, text
+from sqlalchemy import column, func, asc, desc, and_, or_, text
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
@@ -744,11 +745,48 @@ def apply_chart_sorting(
                     matching_metric.alias
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
+            sort_cols.append((sort_column, direction))
         else:
-            # It's a dimension column - use as-is
-            sort_column = column_name
+            # Check if column_name is an aggregate expression like "SUM(col_name)"
+            agg_match = re.match(
+                r"^(SUM|COUNT|AVG|MIN|MAX)\((.+)\)$", column_name, re.IGNORECASE
+            )
+            if agg_match:
+                agg_name = agg_match.group(1).lower()
+                col_name = agg_match.group(2).strip()
 
-        sort_cols.append((sort_column, direction))
+                # Try to match against metrics by aggregation + column
+                agg_metric = None
+                if payload and payload.metrics:
+                    for metric in payload.metrics:
+                        if (
+                            metric.aggregation
+                            and metric.column
+                            and metric.aggregation.lower() == agg_name
+                            and metric.column.lower() == col_name.lower()
+                        ):
+                            agg_metric = metric
+                            break
+
+                if agg_metric:
+                    # Use the matched metric's alias
+                    sort_column = (
+                        agg_metric.alias
+                        or f"{agg_metric.aggregation}_{agg_metric.column}"
+                    )
+                    sort_cols.append((sort_column, direction))
+                else:
+                    # Build a proper SQLAlchemy func expression directly
+                    agg_func = getattr(func, agg_name)
+                    order_expr = agg_func(column(col_name))
+                    if direction.lower() == "desc":
+                        order_expr = desc(order_expr)
+                    else:
+                        order_expr = asc(order_expr)
+                    query_builder.order_by_clauses.append(order_expr)
+            else:
+                # It's a dimension column - use as-is
+                sort_cols.append((column_name, direction))
 
     if sort_cols:
         query_builder.order_cols_by(sort_cols)
