@@ -62,17 +62,30 @@ def map_airbyte_keys_to_postgres_keys(conn_info: dict):
     """called by `post_system_transformation_tasks` and `_get_wclient`"""
     if "tunnel_method" in conn_info:
         method = conn_info["tunnel_method"]
+        tunnel_type = method.get("tunnel_method")
 
-        if method["tunnel_method"] in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
+        if tunnel_type in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
+            missing = [
+                k for k in ["tunnel_host", "tunnel_port", "tunnel_user"]
+                if k not in method
+            ]
+            if missing:
+                raise ValueError(
+                    f"SSH tunnel config is missing required fields: {', '.join(missing)}"
+                )
             conn_info["ssh_host"] = method["tunnel_host"]
             conn_info["ssh_port"] = method["tunnel_port"]
             conn_info["ssh_username"] = method["tunnel_user"]
 
-        if method["tunnel_method"] == "SSH_KEY_AUTH":
+        if tunnel_type == "SSH_KEY_AUTH":
+            if "ssh_key" not in method:
+                raise ValueError(
+                    "SSH tunnel config is missing required field: ssh_key"
+                )
             conn_info["ssh_pkey"] = method["ssh_key"]
             conn_info["ssh_private_key_password"] = method.get("tunnel_private_key_password")
 
-        elif method["tunnel_method"] == "SSH_PASSWORD_AUTH":
+        elif tunnel_type == "SSH_PASSWORD_AUTH":
             conn_info["ssh_password"] = method.get("tunnel_user_password")
 
     conn_info["user"] = conn_info["username"]
