@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from ninja import Schema
+from pydantic import model_validator
 
 
 class ChartMetric(Schema):
@@ -10,6 +11,18 @@ class ChartMetric(Schema):
     column: Optional[str] = None  # Column name, null for COUNT(*) operations
     aggregation: str  # SUM, COUNT, AVG, MAX, MIN, etc.
     alias: Optional[str] = None  # Display name for the metric
+
+    @model_validator(mode="after")
+    def validate_column_for_aggregation(self):
+        # Normalize empty string to None
+        if self.column is not None and self.column.strip() == "":
+            self.column = None
+        # Non-count aggregations require a column
+        if self.aggregation and self.aggregation.lower() != "count" and self.column is None:
+            raise ValueError(
+                f"Column is required for {self.aggregation} aggregation"
+            )
+        return self
 
 
 class ChartCreate(Schema):

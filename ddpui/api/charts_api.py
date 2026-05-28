@@ -523,7 +523,7 @@ def get_chart_data(request, payload: ChartDataPayload):
         result = generate_chart_data_and_config(payload, org_warehouse)
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
     except ValueError as e:
-        logger.error(f"ValueError generating chart data: {str(e)}")
+        logger.warning(f"ValueError generating chart data: {str(e)}")
         raise HttpError(400, str(e))
     except Exception as e:
         logger.error(f"Error generating chart data: {str(e)}")
