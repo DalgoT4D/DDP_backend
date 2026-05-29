@@ -17,7 +17,7 @@ from ddpui.models.metric import Metric, KPI
 from ddpui.models.dashboard import Dashboard
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate
-from ddpui.services.kpi_service import (
+from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
     KPIValidationError,
@@ -198,7 +198,7 @@ class TestKPICRUD:
             KPIService.create_kpi(payload, orguser)
 
     def test_create_kpi_invalid_metric(self, orguser, seed_db):
-        from ddpui.services.metric_service import MetricNotFoundError
+        from ddpui.core.metric.metric_service import MetricNotFoundError
 
         payload = KPICreate(
             metric_id=99999,
@@ -304,7 +304,7 @@ class TestKPISummary:
         assert item["rag_status"] is None
         assert item["name"] == "Test KPI"
 
-    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
     def test_summary_with_trend(self, mock_trend, orguser, org, sample_kpi, seed_db):
         """Current value comes from last trend period."""
         mock_trend.return_value = [
@@ -336,7 +336,7 @@ class TestKPIData:
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi_data(99999, org)
 
-    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
     def test_data_current_value_from_trend(self, mock_trend, orguser, org, sample_kpi, seed_db):
         """Current value is the last trend period's value."""
         mock_trend.return_value = [
@@ -355,7 +355,7 @@ class TestKPIData:
 
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
     def test_data_no_trend_no_value(self, mock_trend, orguser, org, sample_kpi, seed_db):
         """No trend → current_value is None, data_last_date is None, empty echarts."""
         mock_trend.return_value = []
@@ -369,7 +369,7 @@ class TestKPIData:
 
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
     def test_data_rag_green(self, mock_trend, orguser, org, sample_kpi, seed_db):
         """Value >= target → green."""
         mock_trend.return_value = [{"period": "Mar 2026", "value": 1200.0}]
@@ -381,7 +381,7 @@ class TestKPIData:
 
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.kpi_service.KPIService._compute_trend")
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
     def test_data_rag_red(self, mock_trend, orguser, org, sample_kpi, seed_db):
         """Value far below target → red."""
         mock_trend.return_value = [{"period": "Mar 2026", "value": 500.0}]
@@ -459,7 +459,9 @@ class TestAnnotations:
             content="Updated note content.",
             note_type="beneficiary_quote",
         )
-        updated = KPIService.update_annotation(sample_kpi.id, created.id, org, update_payload)
+        updated = KPIService.update_annotation(
+            sample_kpi.id, created.id, org, orguser, update_payload
+        )
         assert updated.content == "Updated note content."
         assert updated.note_type == "beneficiary_quote"
 

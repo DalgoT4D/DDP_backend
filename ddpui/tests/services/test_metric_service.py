@@ -17,7 +17,7 @@ from ddpui.models.metric import Metric, KPI
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.schemas.metric_schema import MetricPayload
-from ddpui.services.metric_service import (
+from ddpui.core.metric.metric_service import (
     MetricService,
     MetricNotFoundError,
     MetricValidationError,
@@ -269,7 +269,7 @@ class TestMetricValidation:
 
 
 class TestMetricCRUD:
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_create_simple_metric(self, mock_validate, orguser, seed_db):
         metric = MetricService.create_metric(
             name="New Metric",
@@ -288,7 +288,7 @@ class TestMetricCRUD:
         assert metric.column_expression is None
         metric.delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_create_expression_metric(self, mock_validate, orguser, seed_db):
         metric = MetricService.create_metric(
             name="Expr Metric",
@@ -306,7 +306,7 @@ class TestMetricCRUD:
         assert metric.aggregation is None
         metric.delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_create_duplicate_name_rejected(self, mock_validate, orguser, sample_metric, seed_db):
         with pytest.raises(MetricValidationError, match="already exists"):
             MetricService.create_metric(
@@ -353,7 +353,7 @@ class TestMetricCRUD:
         metrics, total = MetricService.list_metrics(org, schema_name="other_schema")
         assert total == 0
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_update_metric_name(self, mock_validate, orguser, org, sample_metric, seed_db):
         updated = MetricService.update_metric(
             sample_metric.id,
@@ -369,7 +369,7 @@ class TestMetricCRUD:
         )
         assert updated.name == "Renamed Metric"
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_update_metric_definition(self, mock_validate, orguser, org, sample_metric, seed_db):
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
         updated = MetricService.update_metric(
@@ -389,7 +389,7 @@ class TestMetricCRUD:
         mock_validate.assert_called_once()
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_update_switch_simple_to_expression(
         self, mock_validate, orguser, org, sample_metric, seed_db
     ):
@@ -411,7 +411,7 @@ class TestMetricCRUD:
         assert updated.aggregation is None
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_update_switch_expression_to_simple(
         self, mock_validate, orguser, org, expression_metric, seed_db
     ):
@@ -434,7 +434,7 @@ class TestMetricCRUD:
         assert updated.column_expression is None
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_update_duplicate_name_rejected(
         self, mock_validate, orguser, org, sample_metric, expression_metric, seed_db
     ):
@@ -536,7 +536,7 @@ class TestMetricPreview:
         assert result["value"] is None
         assert result["error"] == "Warehouse not configured"
 
-    @patch("ddpui.services.metric_service.MetricService.compute_metric_value")
+    @patch("ddpui.core.metric.metric_service.MetricService.compute_metric_value")
     def test_preview_success(self, mock_compute, orguser, org, sample_metric, seed_db):
         mock_compute.return_value = 42.0
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
@@ -547,7 +547,7 @@ class TestMetricPreview:
 
         OrgWarehouse.objects.filter(org=org).delete()
 
-    @patch("ddpui.services.metric_service.MetricService.compute_metric_value")
+    @patch("ddpui.core.metric.metric_service.MetricService.compute_metric_value")
     def test_preview_error(self, mock_compute, orguser, org, sample_metric, seed_db):
         mock_compute.side_effect = Exception("query failed")
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})

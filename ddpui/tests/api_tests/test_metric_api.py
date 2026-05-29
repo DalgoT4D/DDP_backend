@@ -27,7 +27,7 @@ from ddpui.api.metric_api import (
     validate_metric,
 )
 from ddpui.schemas.metric_schema import MetricPayload
-from ddpui.services.metric_service import MetricValidationError
+from ddpui.core.metric.metric_service import MetricValidationError
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -118,7 +118,7 @@ class TestListMetrics:
 
 
 class TestCreateMetric:
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_create_simple_metric(self, mock_validate, orguser, seed_db):
         request = mock_request(orguser)
         payload = MetricPayload(
@@ -133,7 +133,7 @@ class TestCreateMetric:
         assert response.name == "New API Metric"
         Metric.objects.filter(id=response.id).delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_create_expression_metric(self, mock_validate, orguser, seed_db):
         request = mock_request(orguser)
         payload = MetricPayload(
@@ -312,7 +312,7 @@ class TestValidateMetric:
         assert response.valid is False
         assert "not both" in response.error
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_validate_success(self, mock_query, orguser, seed_db):
         OrgWarehouse.objects.create(org=orguser.org, wtype="postgres", credentials={})
         request = mock_request(orguser)
@@ -327,7 +327,7 @@ class TestValidateMetric:
         mock_query.assert_called_once()
         OrgWarehouse.objects.filter(org=orguser.org).delete()
 
-    @patch("ddpui.services.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_validate_warehouse_error(self, mock_query, orguser, seed_db):
         mock_query.side_effect = MetricValidationError("column xyz does not exist")
         OrgWarehouse.objects.create(org=orguser.org, wtype="postgres", credentials={})

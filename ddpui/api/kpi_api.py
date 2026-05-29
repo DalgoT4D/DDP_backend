@@ -17,12 +17,12 @@ from ddpui.schemas.kpi_schema import (
     KPIListResponse,
 )
 from ddpui.schemas.chart_schema import ChartDataResponse
-from ddpui.services.kpi_service import (
+from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
     KPIValidationError,
 )
-from ddpui.services.metric_service import MetricNotFoundError
+from ddpui.core.metric.metric_service import MetricNotFoundError
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 import json
@@ -228,7 +228,7 @@ def update_annotation(request, kpi_id: int, entry_id: int, payload: AnnotationEn
     """Update an annotation entry."""
     orguser: OrgUser = request.orguser
     try:
-        return KPIService.update_annotation(kpi_id, entry_id, orguser.org, payload)
+        return KPIService.update_annotation(kpi_id, entry_id, orguser.org, orguser, payload)
     except KPINotFoundError:
         raise HttpError(404, "Not found") from None
 

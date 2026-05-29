@@ -1,7 +1,7 @@
 """KPI service for business logic"""
 
 from typing import Optional, List, Any
-from datetime import date as date_type
+from datetime import date as date_type, datetime, timezone
 
 from django.db.models import Q
 from sqlalchemy import column, literal_column, func, and_
@@ -17,7 +17,7 @@ from ddpui.core.charts.charts_service import (
     apply_dashboard_filters,
 )
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-from ddpui.services.metric_service import MetricService
+from ddpui.core.metric.metric_service import MetricService
 from ddpui.services.dashboard_service import DashboardService
 from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIResponse, AnnotationEntryResponse
 from ddpui.schemas.metric_schema import MetricResponse
@@ -73,22 +73,11 @@ def compute_rag_status(
 # ── Exceptions ──────────────────────────────────────────────────────────────
 
 
-class KPIServiceError(Exception):
-    def __init__(self, message: str, error_code: str = "KPI_ERROR"):
-        self.message = message
-        self.error_code = error_code
-        super().__init__(self.message)
-
-
-class KPINotFoundError(KPIServiceError):
-    def __init__(self, kpi_id: int):
-        super().__init__(f"KPI with id {kpi_id} not found", "KPI_NOT_FOUND")
-        self.kpi_id = kpi_id
-
-
-class KPIValidationError(KPIServiceError):
-    def __init__(self, message: str):
-        super().__init__(message, "VALIDATION_ERROR")
+from ddpui.core.kpi.exceptions import (
+    KPIServiceError,
+    KPINotFoundError,
+    KPIValidationError,
+)
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -198,6 +187,7 @@ class KPIService:
             program_tags=payload.program_tags,
             org=orguser.org,
             created_by=orguser,
+            last_modified_by=orguser,
         )
 
         logger.info(f"Created KPI {kpi.id} '{kpi.name}' for org {orguser.org.id}")
@@ -223,6 +213,7 @@ class KPIService:
         for field_name, value in update_data.items():
             setattr(kpi, field_name, value)
 
+        kpi.last_modified_by = orguser
         kpi.save()
         logger.info(f"Updated KPI {kpi.id}")
         return kpi
@@ -541,6 +532,9 @@ class KPIService:
             snapshot_value=entry.get("snapshot_value"),
             snapshot_pop_change=entry.get("snapshot_pop_change"),
             created_by_email=entry.get("created_by_email", ""),
+            last_modified_by_email=entry.get(
+                "last_modified_by_email", entry.get("created_by_email", "")
+            ),
             created_at=entry["created_at"],
             updated_at=entry["updated_at"],
         )
@@ -556,13 +550,12 @@ class KPIService:
     @staticmethod
     def create_annotation(kpi_id: int, org: Org, orguser: OrgUser, payload):
         """Create an annotation entry. Snapshot values come from the frontend."""
-        from datetime import datetime
 
         kpi = KPIService.get_kpi(kpi_id, org)
         annotations = list(kpi.annotations or [])
 
         max_id = max((e["id"] for e in annotations), default=0)
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         entry = {
             "id": max_id + 1,
@@ -573,6 +566,7 @@ class KPIService:
             "snapshot_value": payload.snapshot_value,
             "snapshot_pop_change": payload.snapshot_pop_change,
             "created_by_email": orguser.user.email,
+            "last_modified_by_email": orguser.user.email,
             "created_at": now,
             "updated_at": now,
         }
@@ -583,9 +577,8 @@ class KPIService:
         return KPIService._annotation_entry_to_response(entry)
 
     @staticmethod
-    def update_annotation(kpi_id: int, entry_id: int, org: Org, payload):
+    def update_annotation(kpi_id: int, entry_id: int, org: Org, orguser: OrgUser, payload):
         """Update an annotation entry."""
-        from datetime import datetime
 
         kpi = KPIService.get_kpi(kpi_id, org)
         annotations = list(kpi.annotations or [])
@@ -607,7 +600,8 @@ class KPIService:
         if payload.snapshot_pop_change is not None:
             entry["snapshot_pop_change"] = payload.snapshot_pop_change
 
-        entry["updated_at"] = datetime.now().isoformat()
+        entry["last_modified_by_email"] = orguser.user.email
+        entry["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         kpi.annotations = annotations
         kpi.save(update_fields=["annotations"])

@@ -13,7 +13,7 @@ from sqlparse.tokens import Keyword, DML, DDL
 from django.db.models import Q
 from sqlalchemy import literal_column
 
-from ddpui.models.metric import Metric, AGGREGATION_CHOICES
+from ddpui.models.metric import Metric, KPI, AGGREGATION_CHOICES
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
@@ -30,28 +30,12 @@ VALID_AGGREGATIONS = [choice[0] for choice in AGGREGATION_CHOICES]
 # ── Exceptions ──────────────────────────────────────────────────────────────
 
 
-class MetricServiceError(Exception):
-    def __init__(self, message: str, error_code: str = "METRIC_ERROR"):
-        self.message = message
-        self.error_code = error_code
-        super().__init__(self.message)
-
-
-class MetricNotFoundError(MetricServiceError):
-    def __init__(self, metric_id: int):
-        super().__init__(f"Metric with id {metric_id} not found", "METRIC_NOT_FOUND")
-        self.metric_id = metric_id
-
-
-class MetricValidationError(MetricServiceError):
-    def __init__(self, message: str):
-        super().__init__(message, "VALIDATION_ERROR")
-
-
-class MetricDeleteBlockedError(MetricServiceError):
-    def __init__(self, message: str, consumers: dict):
-        super().__init__(message, "DELETE_BLOCKED")
-        self.consumers = consumers
+from ddpui.core.metric.exceptions import (
+    MetricServiceError,
+    MetricNotFoundError,
+    MetricValidationError,
+    MetricDeleteBlockedError,
+)
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -216,6 +200,7 @@ class MetricService:
             column_expression=column_expression,
             org=orguser.org,
             created_by=orguser,
+            last_modified_by=orguser,
         )
 
         # Validate against warehouse before saving
@@ -282,6 +267,7 @@ class MetricService:
         if org_warehouse:
             MetricService.validate_metric_query(validation_payload, org_warehouse)
 
+        metric.last_modified_by = orguser
         metric.save()
         logger.info(f"Updated metric {metric.id}")
         return metric
@@ -344,8 +330,6 @@ class MetricService:
         """Find charts and KPIs that reference this metric."""
         # Verify metric exists
         MetricService.get_metric(metric_id, org)
-
-        from ddpui.models.metric import KPI
 
         # KPIs via FK
         kpis = list(KPI.objects.filter(metric_id=metric_id, org=org).values("id", "name"))

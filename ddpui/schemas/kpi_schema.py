@@ -92,5 +92,6 @@ class AnnotationEntryResponse(Schema):
     snapshot_value: Optional[float]
     snapshot_pop_change: Optional[float]
     created_by_email: str
+    last_modified_by_email: str
     created_at: datetime
     updated_at: datetime

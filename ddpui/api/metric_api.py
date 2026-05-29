@@ -16,7 +16,7 @@ from ddpui.schemas.metric_schema import (
     MetricValidateResponse,
 )
 from ddpui.models.org import OrgWarehouse
-from ddpui.services.metric_service import (
+from ddpui.core.metric.metric_service import (
     MetricService,
     MetricNotFoundError,
     MetricValidationError,

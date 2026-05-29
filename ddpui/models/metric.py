@@ -62,6 +62,9 @@ class Metric(models.Model):
     created_by = models.ForeignKey(
         OrgUser, on_delete=models.CASCADE, related_name="metrics_created"
     )
+    last_modified_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="metrics_modified"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -112,6 +115,9 @@ class KPI(models.Model):
     # Org scoping + ownership
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="kpis_created")
+    last_modified_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="kpis_modified"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

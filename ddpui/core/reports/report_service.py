@@ -31,8 +31,8 @@ from ddpui.schemas.report_schema import (
 )
 from ddpui.core.charts.charts_service import build_chart_data_payload
 from ddpui.services.dashboard_service import DashboardService
-from ddpui.services.kpi_service import KPIService, compute_rag_status
-from ddpui.services.metric_service import MetricService
+from ddpui.core.kpi.kpi_service import KPIService, compute_rag_status
+from ddpui.core.metric.metric_service import MetricService
 from ddpui.api.charts_api import generate_chart_data_and_config
 
 from .exceptions import (
@@ -394,8 +394,6 @@ class ReportService:
         to KPIService.compute_kpi_data — same warehouse query path
         as the live KPI endpoint. Works even if the KPI is deleted.
         """
-        from ddpui.services.kpi_service import KPIService
-
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
         frozen_charts = snapshot.frozen_chart_configs or {}

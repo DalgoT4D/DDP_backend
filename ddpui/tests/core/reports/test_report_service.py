@@ -1557,7 +1557,7 @@ class TestGetReportKpiData:
         with pytest.raises(SnapshotValidationError, match="not a KPI"):
             ReportService.get_report_kpi_data(sample_snapshot.id, sample_chart.id, org)
 
-    @patch("ddpui.services.kpi_service.KPIService.compute_kpi_data")
+    @patch("ddpui.core.kpi.kpi_service.KPIService.compute_kpi_data")
     def test_returns_kpi_data_from_frozen_config(
         self, mock_compute, orguser, org, sample_chart, sample_kpi
     ):
@@ -1638,7 +1638,7 @@ class TestGetReportKpiData:
         f.delete()
         dashboard.delete()
 
-    @patch("ddpui.services.kpi_service.KPIService.compute_kpi_data")
+    @patch("ddpui.core.kpi.kpi_service.KPIService.compute_kpi_data")
     def test_kpi_survives_deletion(self, mock_compute, orguser, org, sample_chart, sample_kpi):
         """Frozen KPI data is available even after the original KPI is deleted"""
         dashboard = Dashboard.objects.create(
