@@ -733,6 +733,15 @@ def apply_chart_sorting(
                     matching_metric = metric
                     break
 
+            # Fallback: match against aggregation expression e.g. "AVG(total_revenue)"
+            if not matching_metric:
+                for metric in payload.metrics:
+                    if metric.column and metric.aggregation:
+                        agg_expr = f"{metric.aggregation}({metric.column})"
+                        if agg_expr.lower() == column_name.lower():
+                            matching_metric = metric
+                            break
+
         if matching_metric:
             # It's a metric - generate the actual SQL alias that matches SELECT clause
             if matching_metric.aggregation.lower() == "count" and matching_metric.column is None:
