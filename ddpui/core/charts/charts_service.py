@@ -1,7 +1,7 @@
 """Chart service module for handling chart business logic"""
 
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import column, func, and_, or_, text
@@ -609,6 +609,26 @@ def apply_chart_filters(
 
     from collections import defaultdict
 
+    timestamp_types = {
+        "timestamp",
+        "timestamptz",
+        "datetime",
+        "timestamp with time zone",
+        "timestamp without time zone",
+    }
+
+    def _is_timestamp_date(filter_config: dict) -> bool:
+        """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
+        data_type = (filter_config.get("data_type") or "").lower()
+        val = filter_config.get("value", "")
+        return (
+            data_type in timestamp_types
+            and isinstance(val, str)
+            and len(val) == 10
+            and val[4] == "-"
+            and val[7] == "-"
+        )
+
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)
     single_filters = []
@@ -616,27 +636,27 @@ def apply_chart_filters(
     for filter_config in filters:
         column_name = filter_config["column"]
         operator = filter_config["operator"]
-        value = filter_config["value"]
 
         if not column_name or operator is None:
             continue
 
-        # Operators that can be grouped (multiple values with OR)
-        if operator in ["equals", "not_equals"]:
-            grouped_filters[(column_name, operator)].append(value)
+        # Timestamp equals with date-only value needs day-range logic — keep full config
+        if operator == "equals" and _is_timestamp_date(filter_config):
+            single_filters.append(filter_config)
+        elif operator in ["equals", "not_equals"]:
+            grouped_filters[(column_name, operator)].append(filter_config["value"])
         else:
-            # Other operators are applied individually
             single_filters.append(filter_config)
 
     # Apply grouped filters (multiple values with OR logic)
     for (column_name, operator), values in grouped_filters.items():
         if len(values) == 1:
-            # Single value, apply normally
             value = values[0]
             if operator == "equals":
                 query_builder.where_clause(column(column_name) == value)
             elif operator == "not_equals":
                 query_builder.where_clause(column(column_name) != value)
+
         else:
             # Multiple values, use OR logic
             if operator == "equals":
@@ -654,7 +674,15 @@ def apply_chart_filters(
         operator = filter_config["operator"]
         value = filter_config["value"]
 
-        if operator == "greater_than":
+        if operator == "equals" and _is_timestamp_date(filter_config):
+            # Timestamp day-range: match all rows within the selected date
+            next_day = (
+                datetime.strptime(value, "%Y-%m-%d") + timedelta(days=1)
+            ).strftime("%Y-%m-%d")
+            query_builder.where_clause(
+                and_(column(column_name) >= value, column(column_name) < next_day)
+            )
+        elif operator == "greater_than":
             query_builder.where_clause(column(column_name) > value)
         elif operator == "less_than":
             query_builder.where_clause(column(column_name) < value)
