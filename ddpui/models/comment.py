@@ -13,10 +13,11 @@ class CommentTargetType(str, Enum):
 
     CHART = "chart"
     SUMMARY = "summary"
+    KPI = "kpi"
 
 
 class Comment(models.Model):
-    """Comment on a chart or executive summary within a report snapshot"""
+    """Comment on a chart, KPI, or executive summary within a report snapshot"""
 
     id = models.BigAutoField(primary_key=True)
 
@@ -28,12 +29,12 @@ class Comment(models.Model):
         blank=True,
         related_name="comments",
     )
-    # For comments targeting a specific chart within a snapshot.
-    # This is an integer referencing a key in frozen_chart_configs, NOT a FK.
-    snapshot_chart_id = models.IntegerField(
+    # ID of the target entity within frozen_chart_configs (chart ID, KPI ID, etc.)
+    # Null for summary-level comments.
+    target_id = models.IntegerField(
         null=True,
         blank=True,
-        help_text="Chart ID within frozen_chart_configs (not a FK)",
+        help_text="Entity ID within frozen_chart_configs (not a FK)",
     )
 
     content = models.TextField(help_text="Comment text, max 5000 chars enforced at schema level")
@@ -80,10 +81,10 @@ class CommentReadStatus(models.Model):
         ReportSnapshot, on_delete=models.CASCADE, related_name="comment_read_statuses"
     )
     target_type = models.CharField(max_length=20)
-    chart_id = models.IntegerField(
+    target_id = models.IntegerField(
         null=True,
         blank=True,
-        help_text="Chart ID within frozen_chart_configs (for chart-level read status)",
+        help_text="Entity ID for target-level read status (chart ID, KPI ID, etc.)",
     )
     last_read_at = models.DateTimeField()
 
@@ -92,7 +93,7 @@ class CommentReadStatus(models.Model):
 
     class Meta:
         db_table = "comment_read_status"
-        unique_together = [("user", "snapshot", "target_type", "chart_id")]
+        unique_together = [("user", "snapshot", "target_type", "target_id")]
         indexes = [
             models.Index(fields=["user", "snapshot"]),
         ]
