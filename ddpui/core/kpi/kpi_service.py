@@ -139,6 +139,15 @@ class KPIService:
             raise KPINotFoundError(kpi_id)
 
     @staticmethod
+    def get_all_program_tags(org: Org) -> List[str]:
+        """Get all unique program tags across KPIs for the org."""
+        tags = set()
+        for kpi in KPI.objects.filter(org=org).values_list("program_tags", flat=True):
+            for tag in kpi or []:
+                tags.add(tag)
+        return sorted(tags)
+
+    @staticmethod
     def list_kpis(
         org: Org,
         page: int = 1,

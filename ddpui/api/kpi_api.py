@@ -32,6 +32,14 @@ logger = CustomLogger("ddpui")
 kpi_router = Router()
 
 
+@kpi_router.get("/program-tags/", response=list)
+@has_permission(["can_view_kpis"])
+def list_program_tags(request):
+    """Get all unique program tags across KPIs for the organization."""
+    orguser: OrgUser = request.orguser
+    return KPIService.get_all_program_tags(orguser.org)
+
+
 @kpi_router.get("/", response=KPIListResponse)
 @has_permission(["can_view_kpis"])
 def list_kpis(
