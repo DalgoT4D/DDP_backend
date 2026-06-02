@@ -368,15 +368,6 @@ class KPIService:
         else:
             qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
 
-        if date_filter:
-            date_col_expr = column(date_filter["column_name"])
-            qb.where_clause(
-                and_(
-                    date_col_expr >= date_filter["start"],
-                    date_col_expr <= date_filter["end"],
-                )
-            )
-
         if dashboard_filters:
             qb = apply_dashboard_filters(qb, dashboard_filters)
 
@@ -400,6 +391,18 @@ class KPIService:
                     "value": float(value_val) if value_val is not None else None,
                 }
             )
+
+        # Filter periods by date range after grouping (preserves complete periods)
+        if date_filter:
+            start = date_filter["start"]
+            end = date_filter["end"]
+            periods = [
+                p
+                for p in periods
+                if (not start or (p["period_date"] or "") >= start)
+                and (not end or (p["period_date"] or "") <= end)
+            ]
+
         return periods
 
     @staticmethod
