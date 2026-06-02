@@ -394,14 +394,20 @@ class KPIService:
 
         # Filter periods by date range after grouping (preserves complete periods)
         if date_filter:
-            start = date_filter["start"]
-            end = date_filter["end"]
-            periods = [
-                p
-                for p in periods
-                if (not start or (p["period_date"] or "") >= start)
-                and (not end or (p["period_date"] or "") <= end)
-            ]
+            start = datetime.fromisoformat(date_filter["start"]).date()
+            end = datetime.fromisoformat(date_filter["end"]).date()
+            filtered = []
+            for p in periods:
+                if not p["period_date"]:
+                    continue
+                try:
+                    pd = datetime.fromisoformat(p["period_date"]).date()
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Skipping period with invalid date '{p['period_date']}': {e}")
+                    continue
+                if start <= pd <= end:
+                    filtered.append(p)
+            periods = filtered
 
         return periods
 
