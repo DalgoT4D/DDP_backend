@@ -892,7 +892,13 @@ def get_region_geojsons_public(request, region_id: int):
 
 
 @public_router.post("/dashboards/{token}/charts/{chart_id}/download-csv/")
-def download_public_chart_data_csv(request, token: str, chart_id: int, payload: ChartDataPayload):
+def download_public_chart_data_csv(
+    request,
+    token: str,
+    chart_id: int,
+    payload: ChartDataPayload,
+    dashboard_filters: Optional[str] = None,
+):
     """
     Stream and download chart data as CSV for public dashboards
 
@@ -920,6 +926,27 @@ def download_public_chart_data_csv(request, token: str, chart_id: int, payload: 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
             raise HttpError(404, "No warehouse configured for organization")
+
+        # Resolve dashboard filters via column_exists (same as on-screen fetch).
+        if dashboard_filters:
+            try:
+                filter_values = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+                filter_values = None
+
+            if filter_values:
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                filter_defs = DashboardFilter.objects.filter(
+                    id__in=filter_values.keys(), dashboard=dashboard
+                )
+                payload.dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    [f.to_json() for f in filter_defs],
+                    payload.schema_name,
+                    payload.table_name,
+                    warehouse_client,
+                )
 
         # Import the common CSV streaming function
         from ddpui.api.charts_api import stream_chart_data_csv
