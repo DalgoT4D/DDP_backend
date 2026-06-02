@@ -247,7 +247,9 @@ def delete_annotation(request, kpi_id: int, entry_id: int):
     """Delete an annotation entry."""
     orguser: OrgUser = request.orguser
     try:
-        KPIService.delete_annotation(kpi_id, entry_id, orguser.org)
+        KPIService.delete_annotation(kpi_id, entry_id, orguser.org, orguser)
     except KPINotFoundError:
         raise HttpError(404, "Not found") from None
+    except KPIValidationError as e:
+        raise HttpError(403, e.message) from None
     return api_response(success=True)

@@ -618,16 +618,19 @@ class KPIService:
         return KPIService._annotation_entry_to_response(entry)
 
     @staticmethod
-    def delete_annotation(kpi_id: int, entry_id: int, org: Org) -> bool:
-        """Delete an annotation entry."""
+    def delete_annotation(kpi_id: int, entry_id: int, org: Org, orguser: OrgUser) -> bool:
+        """Delete an annotation entry. Only the creator can delete."""
         kpi = KPIService.get_kpi(kpi_id, org)
         annotations = list(kpi.annotations or [])
 
-        original_len = len(annotations)
-        annotations = [e for e in annotations if e["id"] != entry_id]
-
-        if len(annotations) == original_len:
+        entry = next((e for e in annotations if e["id"] == entry_id), None)
+        if not entry:
             raise KPINotFoundError(entry_id)
+
+        if entry.get("created_by_email") != orguser.user.email:
+            raise KPIValidationError("Only the creator can delete this note")
+
+        annotations = [e for e in annotations if e["id"] != entry_id]
 
         kpi.annotations = annotations
         kpi.save(update_fields=["annotations"])
