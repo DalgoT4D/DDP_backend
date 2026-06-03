@@ -4,7 +4,13 @@ from enum import Enum
 from django.db import models
 from django.utils import timezone
 
-from ddpui.ddpprefect import DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE, EDR_WORK_QUEUE
+from ddpui.ddpprefect import (
+    DDP_WORK_QUEUE,
+    MANUL_DBT_WORK_QUEUE,
+    EDR_WORK_QUEUE,
+    SCHEDULED_PIPELINE_QUEUE,
+    CONNECTION_SYNC_QUEUE,
+)
 from ddpui.schemas.org_queue_schema import (
     QueueConfigSchema,
     QueueDetailsSchema,
@@ -47,16 +53,18 @@ class TransformType(str, Enum):
 def get_default_queue_config():
     """Returns the new nested structure as default"""
     default_workpool = os.getenv("PREFECT_WORKER_POOL_NAME") or "default"
+    eks_workpool = os.getenv("PREFECT_EKS_WORKER_POOL_NAME")
+
     return {
         "scheduled_pipeline_queue": {
-            "name": DDP_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "name": SCHEDULED_PIPELINE_QUEUE if eks_workpool else DDP_WORK_QUEUE,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
         "connection_sync_queue": {
-            "name": DDP_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "name": CONNECTION_SYNC_QUEUE if eks_workpool else DDP_WORK_QUEUE,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
         "transform_task_queue": {
             "name": MANUL_DBT_WORK_QUEUE,

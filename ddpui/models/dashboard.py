@@ -25,6 +25,7 @@ class DashboardComponentType(str, Enum):
     CHART = "chart"
     TEXT = "text"
     HEADING = "heading"
+    KPI = "kpi"
 
     @classmethod
     def choices(cls):
@@ -69,6 +70,11 @@ class Dashboard(models.Model):
 
     # Components configuration
     components = models.JSONField(default=dict, help_text="Dashboard components configuration")
+
+    # Tabs configuration - each tab contains its own layout_config and components
+    tabs = models.JSONField(
+        default=list, help_text="Array of tab objects: [{id, title, layout_config, components}]"
+    )
 
     # Filter layout configuration
     filter_layout = models.CharField(
@@ -134,6 +140,7 @@ class Dashboard(models.Model):
             "target_screen_size": self.target_screen_size,
             "layout_config": self.layout_config,
             "components": self.components,
+            "tabs": self.tabs or [],
             "filter_layout": self.filter_layout,
             "is_published": self.is_published,
             "published_at": self.published_at.isoformat() if self.published_at else None,

@@ -261,7 +261,13 @@ class PipelineService:
                     deployment_name=deployment_name,
                     flow_name=deployment_name,
                     orgslug=org.slug,
-                    deployment_params={"config": {"tasks": tasks, "org_slug": org.slug}},
+                    deployment_params={
+                        "config": {
+                            "tasks": tasks,
+                            "org_slug": org.slug,
+                            "continue_on_sync_failure": payload.continueOnSyncFailure,
+                        }
+                    },
                     cron=payload.cron,
                 ),
                 org.get_queue_config().scheduled_pipeline_queue,
@@ -325,7 +331,13 @@ class PipelineService:
         map_org_tasks += transform_org_tasks
 
         # update deployment
-        payload.deployment_params = {"config": {"tasks": tasks, "org_slug": org.slug}}
+        payload.deployment_params = {
+            "config": {
+                "tasks": tasks,
+                "org_slug": org.slug,
+                "continue_on_sync_failure": payload.continueOnSyncFailure,
+            }
+        }
         try:
             prefect_service.update_dataflow_v1(deployment_id, payload)
         except Exception as error:
@@ -466,6 +478,8 @@ class PipelineService:
         deployment["deploymentName"] = deployment["name"]
         deployment["name"] = org_data_flow.name
 
+        config = deployment.get("parameters", {}).get("config", {})
+
         return {
             "name": org_data_flow.name,
             "deploymentName": deployment["deploymentName"],
@@ -474,6 +488,7 @@ class PipelineService:
             "dbtTransform": "yes" if has_transform else "no",
             "transformTasks": transform_tasks,
             "isScheduleActive": deployment["isScheduleActive"],
+            "continueOnSyncFailure": config.get("continue_on_sync_failure", False),
         }
 
     @staticmethod
