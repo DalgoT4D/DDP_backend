@@ -35,12 +35,15 @@ Dependency direction: **API → Core → Models**. One-way only.
 5. **No local imports.** All imports at the top of the file.
 6. **No `to_json`/`to_dict` on models.** Use response schemas with `from_model()`.
 7. **Core feature `__init__.py` stays empty** — no re-exports, no `__all__`.
+8. **Service-layer signatures take a payload schema + org/orguser context.** Never `func(arg1, arg2, arg3, ...)` for fields that belong in a schema.
+9. **Always chain exceptions with `from err`.** Inside any `except` block, re-raise with `from err` (or `from None` if intentionally suppressing). Bare `raise NewError(...)` severs the traceback.
 
 ## Skills (loaded on context match)
 
 - **api-endpoint** — Scaffold a new endpoint (layout, router, response, mistakes)
 - **testing** — Write pytest tests; subfiles: fixtures, api-tests, mocking
 - **warehouse-client** — Talk to a client's warehouse (Postgres / BigQuery) via `WarehouseFactory.get_warehouse_client(...)`; never `old_client`
+- **coding-standards** — Recurring rules: service signature shape, exception chaining, import placement
 
 ## Quick commands
 
