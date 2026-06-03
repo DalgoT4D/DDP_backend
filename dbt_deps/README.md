@@ -12,7 +12,7 @@ This image replaces the process-based dbt execution with containerized job runs 
 
 `prefect` itself is provided by the base image (`prefecthq/prefect:<PREFECT_VERSION>-python3.10-kubernetes`); the integration packages are installed directly on top via the args below — there is no longer a `prefect-integrations/` bundle to maintain. To cut a new image, bump the version args together.
 
-- `PREFECT_VERSION`: Prefect version — drives the base image (default: 3.6.24)
+- `PREFECT_VERSION`: Prefect version — drives the base image (default: 3.6.29)
 - `PREFECT_DBT_VERSION`: prefect-dbt version, installed with `[bigquery,postgres]` extras (default: 0.7.24)
 - `PREFECT_SHELL_VERSION`: prefect-shell version (default: 0.3.5)
 - `PREFECT_AIRBYTE_REF`: git ref (tag/branch) of the `Ishankoradia/prefect-airbyte` fork (default: v0.90)
@@ -24,7 +24,7 @@ This image replaces the process-based dbt execution with containerized job runs 
 Tags track the Prefect upgrade:
 
 - `0.1` → Prefect 3.1.15
-- `0.2` → Prefect 3.6.24
+- `0.2` → Prefect 3.6.29
 
 ### Environment-Specific Builds
 
@@ -32,14 +32,14 @@ Tags track the Prefect upgrade:
 # From the dbt_deps directory
 cd /path/to/DDP_backend/dbt_deps
 
-# Current image (Prefect 3.6.24, tag 0.2). Integration versions default per the args above.
+# Current image (Prefect 3.6.29, tag 0.2). Integration versions default per the args above.
 docker build -f Dockerfile.prefect-job-runner \
-  --build-arg PREFECT_VERSION=3.6.24 \
+  --build-arg PREFECT_VERSION=3.6.29 \
   -t tech4dev/prefect-eks-job-runner:0.2 .
 
 # Override integration versions explicitly
 docker build -f Dockerfile.prefect-job-runner \
-  --build-arg PREFECT_VERSION=3.6.24 \
+  --build-arg PREFECT_VERSION=3.6.29 \
   --build-arg PREFECT_DBT_VERSION=0.7.24 \
   --build-arg PREFECT_SHELL_VERSION=0.3.5 \
   --build-arg PREFECT_AIRBYTE_REF=v0.90 \
@@ -47,7 +47,7 @@ docker build -f Dockerfile.prefect-job-runner \
 
 # Build with custom paths
 docker build -f Dockerfile.prefect-job-runner \
-  --build-arg PREFECT_VERSION=3.6.24 \
+  --build-arg PREFECT_VERSION=3.6.29 \
   --build-arg DBT_VENV=/dev/dbt/venv \
   --build-arg CLIENTDBT_ROOT=/dev/client/dbt \
   -t tech4dev/prefect-eks-job-runner:<tag> .
