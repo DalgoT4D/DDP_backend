@@ -629,6 +629,10 @@ def apply_chart_filters(
             and val[7] == "-"
         )
 
+    def _next_day(val: str) -> str:
+        """Return the next day as yyyy-MM-dd string."""
+        return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)
     single_filters = []
@@ -640,8 +644,8 @@ def apply_chart_filters(
         if not column_name or operator is None:
             continue
 
-        # Timestamp equals with date-only value needs day-range logic — keep full config
-        if operator == "equals" and _is_timestamp_date(filter_config):
+        # Timestamp date filters need day-range logic — keep full config
+        if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):
             single_filters.append(filter_config)
         elif operator in ["equals", "not_equals"]:
             grouped_filters[(column_name, operator)].append(filter_config["value"])
@@ -675,21 +679,25 @@ def apply_chart_filters(
         value = filter_config["value"]
 
         if operator == "equals" and _is_timestamp_date(filter_config):
-            # Timestamp day-range: match all rows within the selected date
-            next_day = (
-                datetime.strptime(value, "%Y-%m-%d") + timedelta(days=1)
-            ).strftime("%Y-%m-%d")
             query_builder.where_clause(
-                and_(column(column_name) >= value, column(column_name) < next_day)
+                and_(column(column_name) >= value, column(column_name) < _next_day(value))
+            )
+        elif operator == "not_equals" and _is_timestamp_date(filter_config):
+            query_builder.where_clause(
+                or_(column(column_name) < value, column(column_name) >= _next_day(value))
             )
         elif operator == "greater_than":
-            query_builder.where_clause(column(column_name) > value)
+            v = _next_day(value) if _is_timestamp_date(filter_config) else value
+            query_builder.where_clause(column(column_name) >= v)
         elif operator == "less_than":
             query_builder.where_clause(column(column_name) < value)
         elif operator == "greater_than_equal":
             query_builder.where_clause(column(column_name) >= value)
         elif operator == "less_than_equal":
-            query_builder.where_clause(column(column_name) <= value)
+            if _is_timestamp_date(filter_config):
+                query_builder.where_clause(column(column_name) < _next_day(value))
+            else:
+                query_builder.where_clause(column(column_name) <= value)
         elif operator == "like":
             query_builder.where_clause(column(column_name).like(f"%{value}%"))
         elif operator == "like_case_insensitive":
