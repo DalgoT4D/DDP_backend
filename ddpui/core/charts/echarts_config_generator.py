@@ -697,3 +697,86 @@ class EChartsConfigGenerator:
                 default_grid["right"] = f"{legend_width}px"
 
         return default_grid
+
+    @staticmethod
+    def generate_kpi_trend_config(
+        trend_data: List[Dict[str, Any]],
+        kpi_meta: Dict[str, Any],
+        compact: bool = False,
+    ) -> Dict:
+        """Generate ECharts config for a KPI trendline.
+
+        Args:
+            trend_data: List of {period, value} dicts
+            kpi_meta: {name, target_value, direction, rag_status, current_value}
+            compact: If True, generate a minimal sparkline (for KPI cards)
+        """
+        periods = [p["period"] for p in trend_data]
+        values = [p["value"] for p in trend_data]
+        target = kpi_meta.get("target_value")
+
+        line_color = "#2563eb"  # Blue
+
+        series: List[Dict] = [
+            {
+                "type": "line",
+                "data": values,
+                "smooth": False,
+                "symbol": "none",
+                "lineStyle": {"width": 2, "color": line_color},
+                "itemStyle": {"color": line_color},
+            }
+        ]
+
+        # Target as a flat dashed line across all periods
+        if target is not None:
+            series.append(
+                {
+                    "type": "line",
+                    "data": [target] * len(periods),
+                    "smooth": False,
+                    "symbol": "none",
+                    "lineStyle": {
+                        "width": 1.5,
+                        "type": "dashed",
+                        "color": "#94a3b8",
+                    },
+                    "itemStyle": {"color": "#94a3b8"},
+                    "tooltip": {"show": False},
+                }
+            )
+
+        if compact:
+            return {
+                "grid": {"left": 0, "right": 0, "top": 2, "bottom": 0, "containLabel": False},
+                "xAxis": {"type": "category", "data": periods, "show": False},
+                "yAxis": {"type": "value", "show": False},
+                "series": series,
+                "tooltip": {"show": False},
+            }
+
+        return {
+            "grid": {"left": 0, "right": 0, "top": 0, "bottom": 0, "containLabel": True},
+            "xAxis": {
+                "type": "category",
+                "data": periods,
+                "axisLine": {"show": False},
+                "axisTick": {"show": False},
+                "axisLabel": {
+                    "fontSize": 11,
+                    "color": "#6b7280",
+                    "hideOverlap": True,
+                },
+                "boundaryGap": True,
+            },
+            "yAxis": {
+                "type": "value",
+                "axisLine": {"show": False},
+                "axisTick": {"show": False},
+                "axisLabel": {"show": False},
+                "splitLine": {"show": False},
+            },
+            "tooltip": {"trigger": "axis"},
+            "legend": {"show": False},
+            "series": series,
+        }

@@ -122,7 +122,7 @@ class TestFetchComments:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart 10 comment",
             author=author_orguser,
             org=org,
@@ -130,19 +130,19 @@ class TestFetchComments:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=20,
+            target_id=20,
             content="Chart 20 comment",
             author=author_orguser,
             org=org,
         )
 
-        comments = CommentService._fetch_comments(snapshot, CommentTargetType.CHART, chart_id=10)
+        comments = CommentService._fetch_comments(snapshot, CommentTargetType.CHART, target_id=10)
         assert len(comments) == 1
-        assert comments[0].snapshot_chart_id == 10
+        assert comments[0].target_id == 10
 
     def test_chart_without_chart_id_raises(self, snapshot):
-        with pytest.raises(CommentValidationError, match="chart_id is required"):
-            CommentService._fetch_comments(snapshot, CommentTargetType.CHART, chart_id=None)
+        with pytest.raises(CommentValidationError, match="target_id is required"):
+            CommentService._fetch_comments(snapshot, CommentTargetType.CHART, target_id=None)
 
     def test_returns_chronological_order(self, snapshot, author_orguser, org):
         c1 = Comment.objects.create(
@@ -175,7 +175,7 @@ class TestFetchComments:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart",
             author=author_orguser,
             org=org,
@@ -241,7 +241,7 @@ class TestAnnotateIsNew:
             user=other_orguser,
             snapshot=snapshot,
             target_type=CommentTargetType.SUMMARY,
-            chart_id=None,
+            target_id=None,
             last_read_at=timezone.now() + timedelta(minutes=1),
         )
 
@@ -258,7 +258,7 @@ class TestAnnotateIsNew:
             user=other_orguser,
             snapshot=snapshot,
             target_type=CommentTargetType.SUMMARY,
-            chart_id=None,
+            target_id=None,
             last_read_at=past,
         )
 
@@ -295,14 +295,14 @@ class TestAnnotateIsNew:
             user=other_orguser,
             snapshot=snapshot,
             target_type=CommentTargetType.CHART,
-            chart_id=10,
+            target_id=10,
             last_read_at=timezone.now() + timedelta(minutes=1),
         )
 
         comment_chart10 = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart 10",
             author=author_orguser,
             org=org,
@@ -310,7 +310,7 @@ class TestAnnotateIsNew:
         comment_chart20 = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=20,
+            target_id=20,
             content="Chart 20",
             author=author_orguser,
             org=org,
@@ -363,7 +363,7 @@ class TestGetCommentStates:
         assert result == []
 
     def test_summary_entry_has_correct_fields(self, snapshot, author_orguser, other_orguser, org):
-        """Summary entry has target_type='summary' and chart_id=None."""
+        """Summary entry has target_type='summary' and target_id=None."""
         Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -378,7 +378,7 @@ class TestGetCommentStates:
         )
         summary = next((e for e in result if e["target_type"] == CommentTargetType.SUMMARY), None)
         assert summary is not None
-        assert summary["chart_id"] is None
+        assert summary["target_id"] is None
         assert summary["state"] in ("unread", "read", "mentioned")
 
     def test_chart_entry_has_correct_fields(self, snapshot, author_orguser, other_orguser, org):
@@ -386,7 +386,7 @@ class TestGetCommentStates:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart comment",
             author=author_orguser,
             org=org,
@@ -398,7 +398,7 @@ class TestGetCommentStates:
         )
         chart_entry = next((e for e in result if e["target_type"] == CommentTargetType.CHART), None)
         assert chart_entry is not None
-        assert chart_entry["chart_id"] == 10
+        assert chart_entry["target_id"] == 10
         assert chart_entry["state"] in ("unread", "read", "mentioned")
 
     def test_mixed_targets_returns_multiple_entries(
@@ -415,7 +415,7 @@ class TestGetCommentStates:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart 10",
             author=author_orguser,
             org=org,
@@ -423,7 +423,7 @@ class TestGetCommentStates:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=20,
+            target_id=20,
             content="Chart 20",
             author=author_orguser,
             org=org,
@@ -434,7 +434,7 @@ class TestGetCommentStates:
             orguser=other_orguser,
         )
         assert len(result) == 3
-        target_types = {(e["target_type"], e["chart_id"]) for e in result}
+        target_types = {(e["target_type"], e["target_id"]) for e in result}
         assert (CommentTargetType.SUMMARY, None) in target_types
         assert (CommentTargetType.CHART, 10) in target_types
         assert (CommentTargetType.CHART, 20) in target_types
@@ -563,7 +563,7 @@ class TestGetCommentStates:
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=10,
+            target_id=10,
             content="Chart comment",
             author=author_orguser,
             org=org,

@@ -10,7 +10,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0160_add_dashboard_tabs"),
+        ("ddpui", "0162_kpi_last_modified_by_metric_last_modified_by"),
     ]
 
     operations = [
