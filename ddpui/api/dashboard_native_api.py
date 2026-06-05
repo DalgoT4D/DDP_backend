@@ -377,8 +377,6 @@ def get_filter_options(
         raise HttpError(400, "No warehouse configured for organization")
 
     # Get filter options from service
-    from ddpui.services.dashboard_service import DashboardService
-
     options = DashboardService.generate_filter_options(
         schema=schema_name,
         table=table_name,

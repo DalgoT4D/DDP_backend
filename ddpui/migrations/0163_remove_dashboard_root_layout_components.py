@@ -9,6 +9,8 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
+    """Drop deprecated root-level layout_config and components columns from dashboard table."""
+
     dependencies = [
         ("ddpui", "0162_kpi_last_modified_by_metric_last_modified_by"),
     ]

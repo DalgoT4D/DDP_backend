@@ -15,6 +15,7 @@ class Command(BaseCommand):
     help = "Remove root-level layout_config and components from frozen_dashboard JSON"
 
     def add_arguments(self, parser):
+        """Add --dry-run argument to preview changes without applying them."""
         parser.add_argument(
             "--dry-run",
             action="store_true",
@@ -22,6 +23,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        """Execute the cleanup, iterating all ReportSnapshot records in batches."""
         dry_run = options["dry_run"]
 
         if dry_run:
