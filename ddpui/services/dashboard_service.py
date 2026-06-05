@@ -953,7 +953,7 @@ class DashboardService:
 
         # Extract chart IDs from tabs
         for tab in dashboard.tabs or []:
-            for component_id, component_config in (tab.get("components") or {}).items():
+            for _, component_config in (tab.get("components") or {}).items():
                 if component_config.get("type") == DashboardComponentType.CHART.value:
                     chart_id = component_config.get("config", {}).get("chartId")
                     if chart_id:
