@@ -97,8 +97,6 @@ def sample_dashboard(orguser, org):
         description="Test Description",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[],
-        components={},
         created_by=orguser,
         org=org,
     )
@@ -419,8 +417,6 @@ class TestDeleteDashboard:
             title="Another Dashboard",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             created_by=orguser,
             org=orguser.org,
         )

@@ -21,6 +21,9 @@ from .mention_service import MentionService
 
 logger = CustomLogger("comments")
 
+# Target types that require a target_id (entity-level comments)
+_ENTITY_TARGET_TYPES = {CommentTargetType.CHART, CommentTargetType.KPI}
+
 
 class CommentService:
     """Service class for report comment operations"""
@@ -30,32 +33,29 @@ class CommentService:
         snapshot_id: int,
         org: Org,
         target_type: str,
-        chart_id: Optional[int] = None,
+        target_id: Optional[int] = None,
         orguser: Optional[OrgUser] = None,
     ) -> list:
-        """List all comments (flat, chronological) for a target.
-
-        Returns comments with an `is_new` attribute based on the
-        requesting user's last_read_at for this target.
-        """
+        """List all comments (flat, chronological) for a target."""
         snapshot = CommentService._get_snapshot(snapshot_id, org)
-        comments = CommentService._fetch_comments(snapshot, target_type, chart_id)
-        CommentService._annotate_is_new(comments, snapshot, target_type, chart_id, orguser)
+        comments = CommentService._fetch_comments(snapshot, target_type, target_id)
+        CommentService._annotate_is_new(comments, snapshot, target_type, target_id, orguser)
         return comments
 
     @staticmethod
     def _fetch_comments(
         snapshot: ReportSnapshot,
         target_type: str,
-        chart_id: Optional[int],
+        target_id: Optional[int],
     ) -> list:
         """Fetch comments for a target, ordered chronologically."""
         query = Q(snapshot=snapshot, target_type=target_type)
 
-        if target_type == CommentTargetType.CHART and chart_id is not None:
-            query &= Q(snapshot_chart_id=chart_id)
-        elif target_type == CommentTargetType.CHART:
-            raise CommentValidationError("chart_id is required for chart comments")
+        if target_type in _ENTITY_TARGET_TYPES:
+            if target_id is not None:
+                query &= Q(target_id=target_id)
+            else:
+                raise CommentValidationError(f"target_id is required for {target_type} comments")
 
         return list(
             Comment.objects.filter(query)
@@ -68,7 +68,7 @@ class CommentService:
         comments: list,
         snapshot: ReportSnapshot,
         target_type: str,
-        chart_id: Optional[int],
+        target_id: Optional[int],
         orguser: Optional[OrgUser],
     ) -> None:
         """Mark each comment with is_new based on the user's read cursor."""
@@ -78,14 +78,11 @@ class CommentService:
                 user=orguser,
                 snapshot=snapshot,
                 target_type=target_type,
-                chart_id=chart_id if target_type == CommentTargetType.CHART else None,
+                target_id=target_id if target_type in _ENTITY_TARGET_TYPES else None,
             ).first()
             if read_status:
                 last_read_at = read_status.last_read_at
 
-        # Own comments are never "new" (you just wrote them).
-        # For others: new if created after the user's last read cursor,
-        # or if the user has never opened this thread (last_read_at is None).
         for comment in comments:
             if orguser and comment.author_id == orguser.id:
                 comment.is_new = False
@@ -99,7 +96,7 @@ class CommentService:
         orguser: OrgUser,
         target_type: str,
         content: str,
-        chart_id: Optional[int] = None,
+        target_id: Optional[int] = None,
         mentioned_emails: Optional[List[str]] = None,
     ) -> Comment:
         """Create a comment on a report snapshot."""
@@ -110,18 +107,18 @@ class CommentService:
         except ValueError:
             raise CommentValidationError(f"Invalid target_type: {target_type}")
 
-        if target_type == CommentTargetType.CHART:
-            if chart_id is None:
-                raise CommentValidationError("chart_id is required for chart comments")
-            if str(chart_id) not in (snapshot.frozen_chart_configs or {}):
+        if target_type in _ENTITY_TARGET_TYPES:
+            if target_id is None:
+                raise CommentValidationError(f"target_id is required for {target_type} comments")
+            if str(target_id) not in (snapshot.frozen_chart_configs or {}):
                 raise CommentValidationError(
-                    f"Chart {chart_id} not found in snapshot {snapshot_id}"
+                    f"{target_type.capitalize()} {target_id} not found in snapshot {snapshot_id}"
                 )
 
         comment = Comment.objects.create(
             target_type=target_type,
             snapshot=snapshot,
-            snapshot_chart_id=chart_id if target_type == CommentTargetType.CHART else None,
+            target_id=target_id if target_type in _ENTITY_TARGET_TYPES else None,
             content=content,
             author=orguser,
             org=org,
@@ -154,7 +151,6 @@ class CommentService:
         comment.mentioned_emails = []
         comment.save()
 
-        # Re-process mentions — always notify all mentioned users on edit
         MentionService.process_mentions(comment, org, orguser, mentioned_emails or [])
 
         logger.info(f"Updated comment {comment.id}")
@@ -169,22 +165,19 @@ class CommentService:
         """Delete a comment. Author-only.
 
         Hard-deletes if no other user has commented in the thread (same
-        snapshot + target_type + chart_id). Soft-deletes otherwise so the
-        "This message was deleted" placeholder is shown alongside others'
-        comments.
+        snapshot + target_type + target_id). Soft-deletes otherwise.
         """
         comment = CommentService._get_comment(comment_id, org)
 
         if comment.author != orguser:
             raise CommentPermissionError("You can only delete your own comments")
 
-        # Check if another author has commented in this thread
         thread_query = Q(
             snapshot=comment.snapshot,
             target_type=comment.target_type,
         )
-        if comment.target_type == CommentTargetType.CHART:
-            thread_query &= Q(snapshot_chart_id=comment.snapshot_chart_id)
+        if comment.target_type in _ENTITY_TARGET_TYPES:
+            thread_query &= Q(target_id=comment.target_id)
 
         has_other_authors = Comment.objects.filter(thread_query).exclude(author=orguser).exists()
 
@@ -202,7 +195,7 @@ class CommentService:
     _COMMENT_STATES_SQL = """
         SELECT
             "comment".target_type,
-            "comment".snapshot_chart_id AS chart_id,
+            "comment".target_id,
             CASE
                 WHEN bool_or(
                     (crs.last_read_at IS NULL
@@ -219,14 +212,14 @@ class CommentService:
         LEFT JOIN comment_read_status crs
             ON crs.snapshot_id = "comment".snapshot_id
             AND crs.target_type = "comment".target_type
-            AND (crs.chart_id = "comment".snapshot_chart_id
-                 OR (crs.chart_id IS NULL
-                     AND "comment".snapshot_chart_id IS NULL))
+            AND (crs.target_id = "comment".target_id
+                 OR (crs.target_id IS NULL
+                     AND "comment".target_id IS NULL))
             AND crs.user_id = %s
         WHERE "comment".snapshot_id = %s
             AND "comment".is_deleted = false
-            AND "comment".target_type IN ('summary', 'chart')
-        GROUP BY "comment".target_type, "comment".snapshot_chart_id
+            AND "comment".target_type IN ('summary', 'chart', 'kpi')
+        GROUP BY "comment".target_type, "comment".target_id
     """
 
     @staticmethod
@@ -239,13 +232,8 @@ class CommentService:
 
         State priority: mentioned > unread > read > none
 
-        Returns a list of dicts with target_type, chart_id, and state.
-        Threads with no comments are absent (frontend treats as 'none').
-
-        Uses a single raw SQL query with a LEFT JOIN to compute state
-        in one pass.
+        Returns a list of dicts with target_type, target_id, and state.
         """
-        # Validate snapshot belongs to org
         CommentService._get_snapshot(snapshot_id, org)
 
         user_email_json = f'"{orguser.user.email}"'
@@ -258,8 +246,8 @@ class CommentService:
             rows = cursor.fetchall()
 
         return [
-            {"target_type": target_type, "chart_id": chart_id, "state": state}
-            for target_type, chart_id, state in rows
+            {"target_type": target_type, "target_id": target_id, "state": state}
+            for target_type, target_id, state in rows
         ]
 
     @staticmethod
@@ -267,14 +255,14 @@ class CommentService:
         snapshot_id: int,
         orguser: OrgUser,
         target_type: str,
-        chart_id: Optional[int] = None,
+        target_id: Optional[int] = None,
     ) -> None:
         """Mark a target's comments as read by upserting CommentReadStatus."""
         CommentReadStatus.objects.update_or_create(
             user=orguser,
             snapshot_id=snapshot_id,
             target_type=target_type,
-            chart_id=chart_id if target_type == CommentTargetType.CHART else None,
+            target_id=target_id if target_type in _ENTITY_TARGET_TYPES else None,
             defaults={"last_read_at": timezone.now()},
         )
 
@@ -287,7 +275,6 @@ class CommentService:
 
     @staticmethod
     def _get_snapshot(snapshot_id: int, org: Org) -> ReportSnapshot:
-        """Get a snapshot, ensuring it belongs to the org."""
         try:
             return ReportSnapshot.objects.get(id=snapshot_id, org=org)
         except ReportSnapshot.DoesNotExist:
@@ -295,7 +282,6 @@ class CommentService:
 
     @staticmethod
     def _get_comment(comment_id: int, org: Org) -> Comment:
-        """Get a comment, ensuring it belongs to the org."""
         try:
             return Comment.objects.get(id=comment_id, org=org)
         except Comment.DoesNotExist:
