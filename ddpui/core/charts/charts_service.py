@@ -687,8 +687,10 @@ def apply_chart_filters(
                 or_(column(column_name) < value, column(column_name) >= _next_day(value))
             )
         elif operator == "greater_than":
-            v = _next_day(value) if _is_timestamp_date(filter_config) else value
-            query_builder.where_clause(column(column_name) >= v)
+            if _is_timestamp_date(filter_config):
+                query_builder.where_clause(column(column_name) >= _next_day(value))
+            else:
+                query_builder.where_clause(column(column_name) > value)
         elif operator == "less_than":
             query_builder.where_clause(column(column_name) < value)
         elif operator == "greater_than_equal":
