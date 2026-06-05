@@ -542,13 +542,19 @@ class TestGetChartDashboards:
             title="Dashboard with Chart",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={
-                "1": {
-                    "type": DashboardComponentType.CHART.value,
-                    "config": {"chartId": sample_chart.id},
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": [],
+                    "components": {
+                        "1": {
+                            "type": DashboardComponentType.CHART.value,
+                            "config": {"chartId": sample_chart.id},
+                        }
+                    },
                 }
-            },
+            ],
             created_by=orguser,
             org=org,
         )

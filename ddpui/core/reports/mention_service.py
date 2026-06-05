@@ -115,25 +115,26 @@ class MentionService:
             or getattr(settings, "FRONTEND_URL", None)
             or "http://localhost:3001"
         )
-        if comment.target_type == CommentTargetType.CHART and comment.snapshot_chart_id is not None:
+        if (
+            comment.target_type in (CommentTargetType.CHART, CommentTargetType.KPI)
+            and comment.target_id is not None
+        ):
             return (
                 f"{frontend_url}/reports/{comment.snapshot_id}"
-                f"?commentTarget=chart&chartId={comment.snapshot_chart_id}"
+                f"?commentTarget={comment.target_type}&chartId={comment.target_id}"
             )
         return f"{frontend_url}/reports/{comment.snapshot_id}?commentTarget=summary"
 
     @staticmethod
     def _resolve_chart_name(comment: Comment) -> Optional[str]:
-        """Resolve chart name from the snapshot's frozen config."""
+        """Resolve entity name from the snapshot's frozen config."""
         if (
-            comment.target_type == CommentTargetType.CHART
-            and comment.snapshot_chart_id is not None
+            comment.target_type in (CommentTargetType.CHART, CommentTargetType.KPI)
+            and comment.target_id is not None
             and comment.snapshot
         ):
-            chart_config = (comment.snapshot.frozen_chart_configs or {}).get(
-                str(comment.snapshot_chart_id), {}
-            )
-            return chart_config.get("title")
+            config = (comment.snapshot.frozen_chart_configs or {}).get(str(comment.target_id), {})
+            return config.get("title")
         return None
 
     @staticmethod
@@ -214,8 +215,8 @@ class MentionService:
             created_at__lt=comment.created_at,
         ).select_related("author", "author__user")
 
-        if comment.target_type == CommentTargetType.CHART:
-            query = query.filter(snapshot_chart_id=comment.snapshot_chart_id)
+        if comment.target_type in (CommentTargetType.CHART, CommentTargetType.KPI):
+            query = query.filter(target_id=comment.target_id)
 
         # Get last N comments before this one, ordered oldest first
         prior_comments = list(query.order_by("-created_at")[:max_prior])

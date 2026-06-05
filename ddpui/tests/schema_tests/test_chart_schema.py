@@ -49,12 +49,9 @@ class TestChartMetricSchema:
         assert metric.aggregation == "count"
 
     def test_chart_metric_missing_aggregation(self):
-        """Test that aggregation is required"""
-        with pytest.raises(ValidationError) as exc_info:
-            ChartMetric(column="revenue")
-
-        errors = exc_info.value.errors()
-        assert any(err["loc"] == ("aggregation",) for err in errors)
+        """Test that aggregation defaults to None when not provided"""
+        metric = ChartMetric(column="revenue")
+        assert metric.aggregation is None
 
     def test_chart_metric_all_aggregation_types(self):
         """Test various aggregation types"""

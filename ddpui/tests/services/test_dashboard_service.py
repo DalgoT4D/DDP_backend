@@ -111,8 +111,6 @@ def sample_dashboard(orguser, org):
         description="Test Description",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[],
-        components={},
         created_by=orguser,
         org=org,
     )
@@ -218,8 +216,6 @@ class TestDeleteDashboardPermissions:
             title="Protected Dashboard",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             created_by=orguser,
             org=org,
         )
@@ -238,8 +234,6 @@ class TestDeleteDashboardPermissions:
             title="Org Default Dashboard",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             is_org_default=True,
             created_by=orguser,
             org=org,
@@ -259,8 +253,6 @@ class TestDeleteDashboardPermissions:
             title="Landing Page Dashboard",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             created_by=orguser,
             org=org,
         )
@@ -283,8 +275,6 @@ class TestDeleteDashboardPermissions:
             title="Locked Dashboard",
             dashboard_type="native",
             grid_columns=12,
-            layout_config=[],
-            components={},
             created_by=orguser,
             org=org,
         )
