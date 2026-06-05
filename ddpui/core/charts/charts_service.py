@@ -706,7 +706,6 @@ def apply_chart_filters(
         """Return the next day as yyyy-MM-dd string."""
         return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
 
-
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)
     single_filters = []
