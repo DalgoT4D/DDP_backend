@@ -323,8 +323,9 @@ class ChartService:
         dashboards = Dashboard.objects.filter(org=org)
 
         for dashboard in dashboards:
-            if dashboard.components:
-                for component_id, component in dashboard.components.items():
+            found = False
+            for tab in dashboard.tabs or []:
+                for component in (tab.get("components") or {}).values():
                     if (
                         component.get("type") == DashboardComponentType.CHART.value
                         and component.get("config", {}).get("chartId") == chart_id
@@ -336,6 +337,9 @@ class ChartService:
                                 "dashboard_type": dashboard.dashboard_type,
                             }
                         )
-                        break  # Found chart in this dashboard
+                        found = True
+                        break
+                if found:
+                    break
 
         return dashboards_with_chart

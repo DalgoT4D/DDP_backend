@@ -272,8 +272,6 @@ class TestKPICRUD:
             title="Test Dashboard",
             org=org,
             created_by=orguser,
-            components={},
-            layout_config=[],
             tabs=[
                 {
                     "id": "tab-1",
