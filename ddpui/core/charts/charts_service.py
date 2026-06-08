@@ -656,6 +656,35 @@ def apply_dashboard_filters(
     return query_builder
 
 
+# Timestamp-family column types that store a time component, so a date-only
+# (yyyy-MM-dd) filter value must be expanded into a full-day range.
+TIMESTAMP_TYPES = {
+    "timestamp",
+    "timestamptz",
+    "datetime",
+    "timestamp with time zone",
+    "timestamp without time zone",
+}
+
+
+def _is_timestamp_date(filter_config: dict) -> bool:
+    """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
+    data_type = (filter_config.get("data_type") or "").lower()
+    val = filter_config.get("value", "")
+    return (
+        data_type in TIMESTAMP_TYPES
+        and isinstance(val, str)
+        and len(val) == 10
+        and val[4] == "-"
+        and val[7] == "-"
+    )
+
+
+def _next_day(val: str) -> str:
+    """Return the next day as yyyy-MM-dd string."""
+    return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def apply_chart_filters(
     query_builder: AggQueryBuilder, filters: List[Dict[str, Any]]
 ) -> AggQueryBuilder:
@@ -679,32 +708,6 @@ def apply_chart_filters(
     """
     if not filters:
         return query_builder
-
-    from collections import defaultdict
-
-    timestamp_types = {
-        "timestamp",
-        "timestamptz",
-        "datetime",
-        "timestamp with time zone",
-        "timestamp without time zone",
-    }
-
-    def _is_timestamp_date(filter_config: dict) -> bool:
-        """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
-        data_type = (filter_config.get("data_type") or "").lower()
-        val = filter_config.get("value", "")
-        return (
-            data_type in timestamp_types
-            and isinstance(val, str)
-            and len(val) == 10
-            and val[4] == "-"
-            and val[7] == "-"
-        )
-
-    def _next_day(val: str) -> str:
-        """Return the next day as yyyy-MM-dd string."""
-        return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
 
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)
