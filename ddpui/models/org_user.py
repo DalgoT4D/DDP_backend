@@ -127,6 +127,7 @@ class OrgUserUpdateNewRole(Schema):
 class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
+    user_id: int
     email: str
     org: Optional[OrgSchema] = None
     active: bool
@@ -137,6 +138,7 @@ class OrgUserResponse(Schema):
     is_llm_active: Optional[bool] = None
     landing_dashboard_id: int | None = None
     org_default_dashboard_id: int | None = None
+    subscription_plan: str | None = None
 
 
 class Invitation(models.Model):
