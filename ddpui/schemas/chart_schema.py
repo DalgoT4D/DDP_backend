@@ -39,9 +39,7 @@ class ChartMetric(Schema):
             )
         # COUNT can stand alone (COUNT(*)); every other aggregation needs a column.
         if self.aggregation != "count" and not self.column:
-            raise ValueError(
-                f"metric with aggregation='{self.aggregation}' requires `column`"
-            )
+            raise ValueError(f"metric with aggregation='{self.aggregation}' requires `column`")
         return self
 
 
@@ -327,9 +325,16 @@ class ChartCreate(Schema):
     def coerce_extra_config_to_typed(self) -> "ChartCreate":
         """Replace the raw `extra_config` dict with the typed sub-schema
         instance for `chart_type`. Raises ValidationError with field-level
-        details on failure (e.g. metrics without dimension_column for bar)."""
+        details on failure (e.g. metrics without dimension_column for bar).
+
+        Rejects non-dict `extra_config` (None, list, string, int) — the field
+        is annotated `Any` to bypass Union resolution, so the dict-shape
+        check has to happen here rather than at the field level.
+        """
+        if not isinstance(self.extra_config, dict):
+            raise ValueError("extra_config must be an object")
         sub_schema = _CHART_CONFIG_BY_TYPE.get(self.chart_type)
-        if sub_schema is not None and isinstance(self.extra_config, dict):
+        if sub_schema is not None:
             # model_dump() on the result preserves extras because each
             # sub-schema sets extra="allow".
             self.extra_config = sub_schema(**self.extra_config)
@@ -408,9 +413,9 @@ class ChartDataPayload(Schema):
     y_axis: Optional[str] = None
 
     # For aggregated data
-    dimension_col: Optional[str] = (
-        None  # later we need to still merge dimension and extra dimension into dimensions list
-    )
+    dimension_col: Optional[
+        str
+    ] = None  # later we need to still merge dimension and extra dimension into dimensions list
     extra_dimension: Optional[str] = None
     dimensions: Optional[List[str]] = None  # Multiple dimensions for table charts
 

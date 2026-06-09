@@ -296,9 +296,7 @@ class TestEdgeCases:
         )
 
         dumped = chart.extra_config.model_dump()
-        assert (
-            dumped["customizations"]["filters"][0]["conditions"][0]["field"] == "a"
-        )
+        assert dumped["customizations"]["filters"][0]["conditions"][0]["field"] == "a"
 
     def test_chart_response_id_coerced_from_string(self):
         """Test that id can be coerced from string to int"""
@@ -646,9 +644,7 @@ class TestChartFilterSortPagination:
     def test_empty_filters_sort_pagination_accepted(self):
         """The UI commonly sends `filters: [], sort: [], pagination: {...}` even
         when the user hasn't configured any. Must not error."""
-        chart = self._build(
-            filters=[], sort=[], pagination={"enabled": False, "page_size": 50}
-        )
+        chart = self._build(filters=[], sort=[], pagination={"enabled": False, "page_size": 50})
         dumped = chart.extra_config.model_dump()
         assert dumped["filters"] == []
         assert dumped["sort"] == []
