@@ -119,8 +119,9 @@ def sample_dashboard(orguser, org):
         grid_columns=12,
         tabs=[
             {
-                "name": "Tab 1",
-                "layout": [{"i": "chart-123", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-123", "x": 0, "y": 0, "w": 6, "h": 4}],
                 "components": {
                     "chart-123": {
                         "id": "chart-123",
@@ -220,8 +221,6 @@ def empty_dashboard(orguser, org):
         description="No charts",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[],
-        components={},
         created_by=orguser,
         org=org,
     )

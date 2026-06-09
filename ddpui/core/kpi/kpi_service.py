@@ -139,6 +139,15 @@ class KPIService:
             raise KPINotFoundError(kpi_id)
 
     @staticmethod
+    def get_all_program_tags(org: Org) -> List[str]:
+        """Get all unique program tags across KPIs for the org."""
+        tags = set()
+        for kpi in KPI.objects.filter(org=org).values_list("program_tags", flat=True):
+            for tag in kpi or []:
+                tags.add(tag)
+        return sorted(tags)
+
+    @staticmethod
     def list_kpis(
         org: Org,
         page: int = 1,
@@ -359,15 +368,6 @@ class KPIService:
         else:
             qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
 
-        if date_filter:
-            date_col_expr = column(date_filter["column_name"])
-            qb.where_clause(
-                and_(
-                    date_col_expr >= date_filter["start"],
-                    date_col_expr <= date_filter["end"],
-                )
-            )
-
         if dashboard_filters:
             qb = apply_dashboard_filters(qb, dashboard_filters)
 
@@ -391,6 +391,24 @@ class KPIService:
                     "value": float(value_val) if value_val is not None else None,
                 }
             )
+
+        # Filter periods by date range after grouping (preserves complete periods)
+        if date_filter:
+            start = datetime.fromisoformat(date_filter["start"]).date()
+            end = datetime.fromisoformat(date_filter["end"]).date()
+            filtered = []
+            for p in periods:
+                if not p["period_date"]:
+                    continue
+                try:
+                    pd = datetime.fromisoformat(p["period_date"]).date()
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Skipping period with invalid date '{p['period_date']}': {e}")
+                    continue
+                if start <= pd <= end:
+                    filtered.append(p)
+            periods = filtered
+
         return periods
 
     @staticmethod
@@ -609,16 +627,19 @@ class KPIService:
         return KPIService._annotation_entry_to_response(entry)
 
     @staticmethod
-    def delete_annotation(kpi_id: int, entry_id: int, org: Org) -> bool:
-        """Delete an annotation entry."""
+    def delete_annotation(kpi_id: int, entry_id: int, org: Org, orguser: OrgUser) -> bool:
+        """Delete an annotation entry. Only the creator can delete."""
         kpi = KPIService.get_kpi(kpi_id, org)
         annotations = list(kpi.annotations or [])
 
-        original_len = len(annotations)
-        annotations = [e for e in annotations if e["id"] != entry_id]
-
-        if len(annotations) == original_len:
+        entry = next((e for e in annotations if e["id"] == entry_id), None)
+        if not entry:
             raise KPINotFoundError(entry_id)
+
+        if entry.get("created_by_email") != orguser.user.email:
+            raise KPIValidationError("Only the creator can delete this note")
+
+        annotations = [e for e in annotations if e["id"] != entry_id]
 
         kpi.annotations = annotations
         kpi.save(update_fields=["annotations"])

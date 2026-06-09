@@ -32,6 +32,14 @@ logger = CustomLogger("ddpui")
 kpi_router = Router()
 
 
+@kpi_router.get("/program-tags/", response=list)
+@has_permission(["can_view_kpis"])
+def list_program_tags(request):
+    """Get all unique program tags across KPIs for the organization."""
+    orguser: OrgUser = request.orguser
+    return KPIService.get_all_program_tags(orguser.org)
+
+
 @kpi_router.get("/", response=KPIListResponse)
 @has_permission(["can_view_kpis"])
 def list_kpis(
@@ -239,7 +247,9 @@ def delete_annotation(request, kpi_id: int, entry_id: int):
     """Delete an annotation entry."""
     orguser: OrgUser = request.orguser
     try:
-        KPIService.delete_annotation(kpi_id, entry_id, orguser.org)
+        KPIService.delete_annotation(kpi_id, entry_id, orguser.org, orguser)
     except KPINotFoundError:
         raise HttpError(404, "Not found") from None
+    except KPIValidationError as e:
+        raise HttpError(403, e.message) from None
     return api_response(success=True)

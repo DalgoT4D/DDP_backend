@@ -62,8 +62,6 @@ class ReportService:
             "description": dashboard.description,
             "grid_columns": dashboard.grid_columns,
             "target_screen_size": dashboard.target_screen_size,
-            "layout_config": dashboard.layout_config,
-            "components": dashboard.components,
             "tabs": dashboard.tabs,
             "filter_layout": dashboard.filter_layout,
             "filters": [f.to_json() for f in filters],
@@ -71,7 +69,7 @@ class ReportService:
 
     @staticmethod
     def _extract_chart_ids(dashboard: Dashboard) -> List[int]:
-        """Extract chart IDs from tabs (new structure) and root components (backward compat)."""
+        """Extract chart IDs from tabs."""
         chart_ids = []
 
         for tab in dashboard.tabs or []:
@@ -80,12 +78,6 @@ class ReportService:
                     chart_id = component.get("config", {}).get("chartId")
                     if chart_id:
                         chart_ids.append(chart_id)
-
-        for component in (dashboard.components or {}).values():
-            if component.get("type") == "chart":
-                chart_id = component.get("config", {}).get("chartId")
-                if chart_id:
-                    chart_ids.append(chart_id)
 
         return list(set(chart_ids))
 

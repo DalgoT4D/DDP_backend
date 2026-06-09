@@ -411,8 +411,6 @@ class TestEdgeCases:
             grid_columns=12,
             target_screen_size="desktop",
             filter_layout="horizontal",
-            layout_config=[],
-            components={},
             is_published=False,
             published_at=None,
             is_locked=False,

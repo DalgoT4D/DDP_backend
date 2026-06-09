@@ -1,7 +1,19 @@
 # Define version as build arg with default
-ARG PREFECT_VERSION=3.1.15
+ARG PREFECT_VERSION=3.6.29
 
 FROM prefecthq/prefect:${PREFECT_VERSION}-python3.10-kubernetes
+
+# Re-declare PREFECT_VERSION post-FROM so it's in scope for the RUN below.
+# (ARGs declared before FROM are only available to the FROM line itself.)
+ARG PREFECT_VERSION
+
+# Prefect integration package versions. `prefect` itself comes from the base image
+# above, but we still re-pin it below so pip doesn't upgrade it to a newer minor
+# while resolving the integrations. Bump these alongside PREFECT_VERSION to cut
+# a new image (e.g. image tag 0.1 was prefect 3.1.15, tag 0.2 is prefect 3.6.29).
+ARG PREFECT_DBT_VERSION=0.7.24
+ARG PREFECT_SHELL_VERSION=0.3.5
+ARG PREFECT_AIRBYTE_REF=v0.90
 
 # Define common paths as build args and env vars after FROM
 ARG DBT_VENV="/home/ddp/dbt"
@@ -19,11 +31,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Prefect dependencies
-COPY prefect-integrations/ /tmp/prefect-integrations/
-RUN cd /tmp/prefect-integrations && \
-    pip install --no-cache-dir . && \
-    rm -rf /tmp/prefect-integrations
+# Install Prefect integration deps. Pin prefect to the base image's version so pip does
+# NOT upgrade it — prefect-dbt only requires `prefect>=3.6.17`, so without this pin pip
+# pulls the latest 3.7.x on top of the base image.
+RUN pip install --no-cache-dir \
+    "prefect==${PREFECT_VERSION}" \
+    "prefect-dbt[bigquery,postgres]==${PREFECT_DBT_VERSION}" \
+    "prefect-shell==${PREFECT_SHELL_VERSION}" \
+    "prefect-airbyte @ git+https://github.com/Ishankoradia/prefect-airbyte.git@${PREFECT_AIRBYTE_REF}"
 
 # Create the exact directory structure matching your current setup
 RUN mkdir -p ${DBT_VENV} \

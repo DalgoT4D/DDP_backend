@@ -272,8 +272,6 @@ class TestKPICRUD:
             title="Test Dashboard",
             org=org,
             created_by=orguser,
-            components={},
-            layout_config=[],
             tabs=[
                 {
                     "id": "tab-1",
@@ -481,14 +479,14 @@ class TestAnnotations:
         sample_kpi.refresh_from_db()
         assert len(sample_kpi.annotations) == 1
 
-        KPIService.delete_annotation(sample_kpi.id, created.id, org)
+        KPIService.delete_annotation(sample_kpi.id, created.id, org, orguser)
 
         sample_kpi.refresh_from_db()
         assert len(sample_kpi.annotations) == 0
 
-    def test_delete_nonexistent(self, org, sample_kpi, seed_db):
+    def test_delete_nonexistent(self, orguser, org, sample_kpi, seed_db):
         with pytest.raises(KPINotFoundError):
-            KPIService.delete_annotation(sample_kpi.id, 99999, org)
+            KPIService.delete_annotation(sample_kpi.id, 99999, org, orguser)
 
     def test_period_date_stored(self, orguser, org, sample_kpi, seed_db):
         from ddpui.schemas.kpi_schema import AnnotationEntryCreate
