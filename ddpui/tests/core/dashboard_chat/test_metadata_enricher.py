@@ -14,26 +14,28 @@ from ddpui.core.dashboard_chat.metadata.schemas import (
 )
 
 
-def test_metadata_enrichment_prompt_forbids_invented_snapshot_semantics():
+def test_metadata_enrichment_prompt_forbids_invented_latest_semantics():
     prompt = METADATA_ENRICHMENT_SYSTEM_PROMPT.lower()
 
-    assert "never assume snapshot semantics" in prompt
-    assert "infer semantics from those facts" in prompt
-    assert "if the evidence is weak, leave fields empty" in prompt
+    assert "never assume cumulative semantics" in prompt
+    assert "latest-row semantics" in prompt
+    assert "as-of-date semantics" in prompt
+    assert "observed physical facts are the source of truth" in prompt
+    assert "leave fields empty" in prompt
+    assert "snapshot" not in prompt
 
 
-def test_enricher_writes_inferred_semantics_without_touching_observed_facts():
+def test_enricher_writes_flat_semantics_and_descriptions():
     enricher = DashboardChatMetadataEnricher(client=None)
     table = DashboardChatMetadataTable(
         table_name="analytics.work_orders",
-        observed={
-            "schema_name": "analytics",
-            "model_name": "work_orders",
-            "table_description": "Work-order metrics table",
-        },
+        schema_name="analytics",
+        model_name="work_orders",
+        description="raw dbt doc",
         columns=[
             DashboardChatMetadataColumn(
-                observed={"name": "work_order_id", "data_type": "text"},
+                column_name="work_order_id",
+                data_type="text",
             )
         ],
     )
@@ -41,32 +43,43 @@ def test_enricher_writes_inferred_semantics_without_touching_observed_facts():
     enriched = enricher._apply_table_enrichment(  # noqa: SLF001
         table,
         {
-            "row_grain": "One row per work order",
-            "natural_keys": ["work_order_name"],
-            "candidate_unique_id_columns": ["work_order_id"],
-            "primary_time_columns": ["date_time"],
-            "preferred_use_cases": ["Program monitoring"],
-            "evidence": ["work_order_id has near-unique distinct counts"],
+            "description": "Aggregated work order records.",
+            "table_type": "row_grain",
+            "primary_entities": ["work_order"],
+            "grain": {
+                "row_definition": "One row per work order",
+                "natural_keys": ["work_order_name"],
+                "candidate_unique_id_columns": ["work_order_id"],
+                "evidence": ["work_order_id has near-unique distinct counts"],
+            },
+            "temporal": {"primary_filter_time_column": "date_time"},
+            "counting": {
+                "entity_counting_guidance": {
+                    "work_order": "COUNT(DISTINCT work_order_id)",
+                }
+            },
             "column_overrides": [
                 {
-                    "name": "work_order_id",
+                    "column_name": "work_order_id",
+                    "description": "Stable work order identifier.",
                     "semantic_role": "identifier",
-                    "entity_tags": ["work_order"],
-                    "confidence": 0.9,
+                    "value_semantics": "entity_identifier",
+                    "pii": False,
                 }
             ],
         },
     )
 
-    assert enriched.observed.model_name == "work_orders"
-    assert enriched.row_grain == "One row per work order"
-    assert enriched.natural_keys == ["work_order_name"]
-    assert enriched.candidate_unique_id_columns == ["work_order_id"]
-    assert enriched.primary_time_columns == ["date_time"]
-    assert "Program monitoring" in enriched.preferred_use_cases
-    assert enriched.inferred.evidence == ["work_order_id has near-unique distinct counts"]
+    assert enriched.model_name == "work_orders"
+    assert enriched.description == "Aggregated work order records."
+    assert enriched.table_type == "row_grain"
+    assert enriched.grain.row_definition == "One row per work order"
+    assert enriched.grain.natural_keys == ["work_order_name"]
+    assert enriched.grain.candidate_unique_id_columns == ["work_order_id"]
+    assert enriched.temporal.primary_filter_time_column == "date_time"
+    assert enriched.columns[0].description == "Stable work order identifier."
     assert enriched.columns[0].semantic_role == "identifier"
-    assert enriched.columns[0].entity_tags == ["work_order"]
+    assert enriched.columns[0].value_semantics == "entity_identifier"
 
 
 def test_enricher_prompt_payload_serializer_handles_dates_and_decimals():

@@ -19,18 +19,29 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_valid
     validate_follow_up_dimension_usage,
     validate_sql_allowlist,
 )
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_verifier import (
+    verify_sql_against_question,
+)
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import (
     DashboardChatTurnContext,
     get_turn_warehouse_tools,
     record_validated_filters_from_sql,
 )
+from ddpui.core.dashboard_chat.orchestration.pii_masking import mask_sql_rows_for_llm
 from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
     publish_runtime_progress,
     raise_if_runtime_cancelled,
 )
 
 
+MAX_SEMANTIC_VERIFIER_REJECTIONS = 2
+VERIFIER_WARNING_SEVERITY = "warning"
+VERIFIER_REPAIR_ONCE_SEVERITY = "repair_once"
+VERIFIER_HARD_BLOCK_SEVERITY = "hard_block"
+
+
 def handle_run_sql_query_tool(
+    llm_client,
     warehouse_tools_factory,
     runtime_config,
     args: dict[str, Any],
@@ -96,6 +107,78 @@ def handle_run_sql_query_tool(
     if missing_columns is not None:
         return missing_columns
 
+    verification = verify_sql_against_question(
+        llm_client,
+        sql=validation.sanitized_sql,
+        state=state,
+    )
+    if not verification.is_valid:
+        severity = (verification.severity or VERIFIER_HARD_BLOCK_SEVERITY).strip().lower()
+        reason_code = (verification.reason_code or "semantic_mismatch").strip().lower()
+        if severity == VERIFIER_WARNING_SEVERITY:
+            _record_verifier_warning(turn_context, verification.reasoning, verification.warnings)
+        elif (
+            severity == VERIFIER_REPAIR_ONCE_SEVERITY
+            and reason_code in turn_context.repaired_reason_codes
+        ):
+            _record_verifier_warning(
+                turn_context,
+                verification.reasoning,
+                [
+                    "SQL verifier requested the same repair more than once; executing the "
+                    "bounded-retry SQL and surfacing the semantic assumption.",
+                    *verification.warnings,
+                ],
+            )
+        elif (
+            severity != VERIFIER_HARD_BLOCK_SEVERITY
+            and turn_context.semantic_verifier_rejections >= MAX_SEMANTIC_VERIFIER_REJECTIONS
+        ):
+            _record_verifier_warning(
+                turn_context,
+                verification.reasoning,
+                [
+                    "SQL verifier retry budget was exhausted; executing the bounded-retry SQL "
+                    "and surfacing the semantic assumption.",
+                    *verification.warnings,
+                ],
+            )
+        else:
+            turn_context.semantic_verifier_rejections += 1
+            if severity == VERIFIER_REPAIR_ONCE_SEVERITY:
+                turn_context.repaired_reason_codes.add(reason_code)
+            retry_message = (
+                "Regenerate the SQL using the repair instructions."
+                if severity == VERIFIER_REPAIR_ONCE_SEVERITY
+                else (
+                    "Choose a different table, grain, measure, time basis, or output shape. "
+                    "Do not retry the same rejected SQL path."
+                )
+            )
+            if turn_context.semantic_verifier_rejections >= MAX_SEMANTIC_VERIFIER_REJECTIONS:
+                retry_message += (
+                    " The semantic verifier retry budget is exhausted after this rejection; "
+                    "make the next SQL attempt use a different concrete plan."
+                )
+            return {
+                "error": "sql_question_mismatch",
+                "severity": verification.severity,
+                "reason_code": verification.reason_code,
+                "issues": verification.issues,
+                "repair_instructions": verification.repair_instructions,
+                "reasoning": verification.reasoning,
+                "risk_flags": verification.risk_flags,
+                "warnings": verification.warnings,
+                "semantic_rejections": turn_context.semantic_verifier_rejections,
+                "message": (
+                    "The generated SQL does not faithfully answer the question yet. "
+                    f"{retry_message}"
+                ),
+            }
+
+    if verification.is_valid and verification.severity == VERIFIER_WARNING_SEVERITY:
+        _record_verifier_warning(turn_context, verification.reasoning, verification.warnings)
+
     turn_context.last_sql = validation.sanitized_sql
     table_label = ", ".join(validation.tables[:2]) if validation.tables else "allowlisted table"
     publish_runtime_progress(
@@ -126,16 +209,34 @@ def handle_run_sql_query_tool(
         }
 
     serialized_rows = json.loads(json.dumps(rows, cls=DjangoJSONEncoder))
-    turn_context.last_sql_results = serialized_rows
+    masked_rows = mask_sql_rows_for_llm(
+        state=state,
+        turn_context=turn_context,
+        sql=validation.sanitized_sql,
+        rows=serialized_rows,
+    )
+    turn_context.last_sql_results = masked_rows
     record_validated_filters_from_sql(
         turn_context=turn_context,
         sql=validation.sanitized_sql,
     )
     return {
         "success": True,
-        "row_count": len(serialized_rows),
+        "row_count": len(masked_rows),
         "error": None,
         "sql_used": validation.sanitized_sql,
-        "columns": list(serialized_rows[0].keys()) if serialized_rows else [],
-        "rows": serialized_rows,
+        "columns": list(masked_rows[0].keys()) if masked_rows else [],
+        "rows": masked_rows,
     }
+
+
+def _record_verifier_warning(
+    turn_context: DashboardChatTurnContext,
+    reasoning: str,
+    warnings: list[str],
+) -> None:
+    """Expose non-blocking semantic verifier concerns to final answer composition."""
+    for warning in [reasoning, *warnings]:
+        normalized_warning = str(warning or "").strip()
+        if normalized_warning and normalized_warning not in turn_context.warnings:
+            turn_context.warnings.append(normalized_warning)

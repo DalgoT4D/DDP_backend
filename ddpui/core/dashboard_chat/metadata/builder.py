@@ -16,12 +16,14 @@ from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
 from ddpui.core.dashboard_chat.metadata.schemas import (
     DashboardChatChartRegistryEntry,
     DashboardChatMetadataArtifactPayload,
+    DashboardChatChartFilterSpec,
+    DashboardChatChartMetricSpec,
+    DashboardChatColumnRangeProfile,
     DashboardChatMetadataChartUsage,
     DashboardChatMetadataColumn,
-    DashboardChatObservedColumn,
-    DashboardChatObservedTable,
     DashboardChatMetadataJoinPath,
     DashboardChatMetadataTable,
+    DashboardChatTableStatistics,
 )
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import (
     chart_dimension_columns,
@@ -38,16 +40,6 @@ def _iso_now() -> str:
     return timezone.now().isoformat()
 
 
-def _token_tags(*parts: str) -> list[str]:
-    tokens: set[str] = set()
-    for part in parts:
-        for raw in part.replace("%", " percent ").replace("_", " ").split():
-            cleaned = raw.strip().lower()
-            if cleaned:
-                tokens.add(cleaned)
-    return sorted(tokens)
-
-
 def _is_numeric_type(data_type: str) -> bool:
     lowered_type = data_type.lower()
     return any(token in lowered_type for token in ["int", "float", "double", "decimal", "numeric", "real"])
@@ -61,99 +53,6 @@ def _is_text_like_type(data_type: str) -> bool:
 def _is_time_type(data_type: str) -> bool:
     lowered_type = data_type.lower()
     return any(token in lowered_type for token in ["date", "time", "timestamp"])
-
-
-_COUNTABLE_ENTITY_HINTS: dict[str, set[str]] = {
-    "student": {"student"},
-    "fellow": {"fellow"},
-    "pm": {"pm", "program_manager", "project_manager"},
-    "farmer": {"farmer"},
-    "district": {"district"},
-    "state": {"state"},
-    "school": {"school"},
-    "teacher": {"teacher"},
-    "dam": {"dam", "waterbody"},
-    "waterbody": {"waterbody", "dam"},
-    "work_order": {"work_order", "workorder", "work_order_id", "workorderid"},
-    "ngo": {"ngo"},
-    "gp": {"gp", "gram_panchayat"},
-    "program": {"program"},
-    "village": {"village"},
-    "city": {"city"},
-    "block": {"block"},
-    "taluka": {"taluka", "tehsil"},
-}
-
-
-def _normalized_entity_text(*parts: str) -> str:
-    combined = " ".join(parts).lower().replace("_", " ").replace("-", " ")
-    return " ".join(token for token in combined.split() if token)
-
-
-def _countable_entity_aliases(column_name: str, description: str, semantic_role: str) -> list[str]:
-    if semantic_role not in {"identifier", "dimension", "label"}:
-        return []
-
-    normalized_name = _normalized_entity_text(column_name)
-    aliases: set[str] = set()
-
-    if normalized_name == "id":
-        return []
-
-    if any(
-        token in normalized_name
-        for token in [
-            "status",
-            "level",
-            "type",
-            "category",
-            "date",
-            "time",
-            "timestamp",
-            "amount",
-            "score",
-            "perc",
-            "percentage",
-            "mastery",
-            "target",
-            "achieved",
-            "rate",
-        ]
-    ):
-        return []
-
-    if normalized_name.endswith(" id"):
-        base_name = normalized_name[: -len(" id")].strip()
-        for alias, hints in _COUNTABLE_ENTITY_HINTS.items():
-            if base_name and any(_normalized_entity_text(hint) in base_name for hint in hints):
-                aliases.add(alias)
-
-    if normalized_name.endswith(" name"):
-        base_name = normalized_name[: -len(" name")].strip()
-        for alias, hints in _COUNTABLE_ENTITY_HINTS.items():
-            if base_name and any(_normalized_entity_text(hint) in base_name for hint in hints):
-                aliases.add(alias)
-
-    for alias, hints in _COUNTABLE_ENTITY_HINTS.items():
-        if any(f" {_normalized_entity_text(hint)} " in f" {normalized_name} " for hint in hints):
-            aliases.add(alias)
-
-    if "dam" in aliases or "waterbody" in aliases:
-        aliases.update({"dam", "waterbody"})
-
-    return sorted(aliases)
-
-
-def _size_hint_from_row_count(total_row_count: int | None) -> str:
-    if total_row_count is None:
-        return ""
-    if total_row_count < 1_000:
-        return "tiny"
-    if total_row_count < 100_000:
-        return "small"
-    if total_row_count < 1_000_000:
-        return "medium"
-    return "large"
 
 
 def _layer_for_schema(schema_name: str) -> str:
@@ -259,14 +158,33 @@ class DashboardChatMetadataArtifactBuilder:
             chart_table_map=chart_table_map,
             tables=tables,
             join_paths=[],
-            entity_index={},
-            measure_index={},
-            column_index={},
         )
 
     def _chart_registry_entry(self, chart: dict[str, Any]) -> DashboardChatChartRegistryEntry:
         dimensions = chart_dimension_columns(chart)
         preferred_table = chart.get("schema_name") and chart.get("table_name")
+        metrics = []
+        for metric in (chart.get("extra_config") or {}).get("metrics") or []:
+            if not isinstance(metric, dict):
+                continue
+            metrics.append(
+                DashboardChatChartMetricSpec(
+                    column=str(metric.get("column") or ""),
+                    aggregation=str(metric.get("aggregation") or ""),
+                    alias=str(metric.get("alias") or ""),
+                )
+            )
+        filters = []
+        for chart_filter in (chart.get("extra_config") or {}).get("filters") or []:
+            if not isinstance(chart_filter, dict):
+                continue
+            filters.append(
+                DashboardChatChartFilterSpec(
+                    column=str(chart_filter.get("column") or ""),
+                    operator=str(chart_filter.get("operator") or ""),
+                    value=str(chart_filter.get("value") or ""),
+                )
+            )
         return DashboardChatChartRegistryEntry(
             chart_id=int(chart.get("id")),
             title=str(chart.get("title") or ""),
@@ -276,8 +194,10 @@ class DashboardChatMetadataArtifactBuilder:
             preferred_table=(
                 f"{chart.get('schema_name')}.{chart.get('table_name')}" if preferred_table else ""
             ),
+            metrics=metrics,
             metric_columns=chart_metric_columns(chart),
             dimension_columns=dimensions,
+            filters=filters,
             time_column=chart_time_column(chart, dimensions),
         )
 
@@ -315,15 +235,19 @@ class DashboardChatMetadataArtifactBuilder:
         for column in (snippet.columns if snippet is not None else []):
             column_name = str(column.get("name") or "")
             resource_column = resource_columns.get(column_name.lower()) or {}
-            data_type = str(column.get("type") or resource_column.get("type") or "")
+            data_type = str(
+                column.get("data_type")
+                or column.get("type")
+                or resource_column.get("data_type")
+                or resource_column.get("type")
+                or ""
+            )
             description = str(resource_column.get("description") or "")
             columns.append(
                 DashboardChatMetadataColumn(
-                    observed=DashboardChatObservedColumn(
-                        name=column_name,
-                        data_type=data_type,
-                        description=description,
-                    ),
+                    column_name=column_name,
+                    data_type=data_type,
+                    description=description,
                 )
             )
 
@@ -334,6 +258,11 @@ class DashboardChatMetadataArtifactBuilder:
                 chart_id=chart.chart_id,
                 chart_title=chart.title,
                 relation="direct",
+                chart_type=chart.chart_type,
+                metrics=self._chart_metric_specs(chart),
+                dimensions=chart.dimension_columns,
+                filters=self._chart_filter_specs(chart),
+                time_column=chart.time_column,
             )
             for chart in chart_registry
             if chart.preferred_table == table_name
@@ -342,19 +271,17 @@ class DashboardChatMetadataArtifactBuilder:
         total_row_count = statistics.get("total_row_count")
         return DashboardChatMetadataTable(
             table_name=table_name,
-            observed=DashboardChatObservedTable(
-                unique_ids=unique_ids,
-                layer=_layer_for_schema(schema_name),
-                schema_name=schema_name,
-                model_name=str(resource.get("name") or raw_table_name),
-                human_label=str(resource.get("name") or raw_table_name).replace("_", " ").title(),
-                table_description=table_description,
-                time_coverage=statistics.get("time_coverage") or {},
-                total_row_count=total_row_count,
-                approximate_size_hint=_size_hint_from_row_count(total_row_count),
+            dbt_unique_id=unique_ids[0] if unique_ids else "",
+            schema_name=schema_name,
+            model_name=str(resource.get("name") or raw_table_name),
+            layer=_layer_for_schema(schema_name),
+            description=table_description,
+            upstream_models=list(resource.get("upstream") or []),
+            chart_usage=chart_usage,
+            statistics=DashboardChatTableStatistics(
+                row_count=total_row_count,
                 column_count=len(columns),
-                chart_usage=chart_usage,
-                statistics=statistics,
+                distinct_counts=dict(statistics.get("distinct_counts") or {}),
             ),
             columns=columns,
         )
@@ -396,9 +323,6 @@ class DashboardChatMetadataArtifactBuilder:
             stats["distinct_counts"] = distinct_counts
         if low_cardinality_samples:
             stats["low_cardinality_samples"] = low_cardinality_samples
-        time_coverage = self._table_time_coverage(profiled_columns)
-        if time_coverage:
-            stats["time_coverage"] = time_coverage
         return profiled_columns, stats
 
     def _apply_range_and_null_stats(
@@ -438,25 +362,33 @@ class DashboardChatMetadataArtifactBuilder:
         for index, column in enumerate(columns):
             null_count = row.get(f"c{index}_null_count")
             if null_count is not None and total_row_count not in {None, 0}:
-                column.observed.null_percentage = round(
+                column.statistics.null_percentage = round(
                     (float(null_count) / float(total_row_count)) * 100,
                     2,
                 )
-                column.observed.nullable = bool(null_count)
+                column.statistics.nullable = bool(null_count)
             if _is_numeric_type(column.data_type):
                 numeric_min = row.get(f"c{index}_numeric_min")
                 numeric_max = row.get(f"c{index}_numeric_max")
-                column.observed.numeric_min = (
+                if column.statistics.range_profile is None:
+                    column.statistics.range_profile = DashboardChatColumnRangeProfile()
+                column.statistics.range_profile.numeric_min = (
                     float(numeric_min) if numeric_min is not None else None
                 )
-                column.observed.numeric_max = (
+                column.statistics.range_profile.numeric_max = (
                     float(numeric_max) if numeric_max is not None else None
                 )
             if _is_time_type(column.data_type):
                 time_min = row.get(f"c{index}_time_min")
                 time_max = row.get(f"c{index}_time_max")
-                column.observed.time_min = str(time_min) if time_min is not None else None
-                column.observed.time_max = str(time_max) if time_max is not None else None
+                if column.statistics.range_profile is None:
+                    column.statistics.range_profile = DashboardChatColumnRangeProfile()
+                column.statistics.range_profile.time_min = (
+                    str(time_min) if time_min is not None else None
+                )
+                column.statistics.range_profile.time_max = (
+                    str(time_max) if time_max is not None else None
+                )
         return columns
 
     def _apply_distinct_and_sample_stats(
@@ -490,7 +422,6 @@ class DashboardChatMetadataArtifactBuilder:
         for index, column in profiled_candidates:
             distinct_count = row.get(f"c{index}_distinct_count")
             parsed_count = int(distinct_count) if distinct_count is not None else None
-            column.observed.distinct_count = parsed_count
             distinct_counts[column.name] = parsed_count
             if (
                 parsed_count is not None
@@ -513,30 +444,11 @@ class DashboardChatMetadataArtifactBuilder:
                         for sample_row in sample_rows
                         if sample_row.get("value") is not None
                     ]
-                    column.observed.sample_values = samples
+                    column.statistics.sample_values = samples
                     low_cardinality_samples[column.name] = samples
                 except Exception:
                     continue
         return columns, distinct_counts, low_cardinality_samples
-
-    def _table_time_coverage(
-        self,
-        columns: list[DashboardChatMetadataColumn],
-    ) -> dict[str, Any]:
-        time_columns = [column for column in columns if _is_time_type(column.data_type)]
-        if not time_columns:
-            return {}
-        return {
-            "columns": [
-                {
-                    "column": column.name,
-                    "min": column.time_min,
-                    "max": column.time_max,
-                }
-                for column in time_columns
-                if column.time_min is not None or column.time_max is not None
-            ]
-        }
 
     def _quote_table_name(
         self,
@@ -588,7 +500,6 @@ class DashboardChatMetadataArtifactBuilder:
                         target_table=target.table_name,
                         via_columns=shared_ids[:3],
                         cardinality=cardinality,
-                        confidence=0.9 if cardinality != "unknown" else 0.7,
                         preferred=cardinality in {"many_to_one", "one_to_one"},
                         dashboard_relevant=True,
                         required_for_entity_names=any("name" in column.name.lower() for column in target.columns),
@@ -605,8 +516,8 @@ class DashboardChatMetadataArtifactBuilder:
     ) -> str:
         source_rows = source.total_row_count
         target_rows = target.total_row_count
-        source_distinct = source.statistics.get("distinct_counts", {}).get(shared_column)
-        target_distinct = target.statistics.get("distinct_counts", {}).get(shared_column)
+        source_distinct = source.statistics.distinct_counts.get(shared_column)
+        target_distinct = target.statistics.distinct_counts.get(shared_column)
         if None in {source_rows, target_rows, source_distinct, target_distinct}:
             return "unknown"
         if source_distinct == source_rows and target_distinct == target_rows:
@@ -619,38 +530,25 @@ class DashboardChatMetadataArtifactBuilder:
             return "many_to_many"
         return "unknown"
 
-    def _build_entity_index(self, tables: list[DashboardChatMetadataTable]) -> dict[str, list[str]]:
-        index: dict[str, set[str]] = defaultdict(set)
-        for table in tables:
-            for entity in table.primary_entities:
-                index[entity].add(table.table_name)
-        return {key: sorted(values) for key, values in index.items()}
-
-    def _build_measure_index(self, tables: list[DashboardChatMetadataTable]) -> dict[str, list[str]]:
-        index: dict[str, set[str]] = defaultdict(set)
-        for table in tables:
-            for column in table.columns:
-                for tag in column.measure_tags:
-                    index[tag].add(table.table_name)
-        return {key: sorted(values) for key, values in index.items()}
-
-    def _build_column_index(self, tables: list[DashboardChatMetadataTable]) -> dict[str, list[str]]:
-        index: dict[str, set[str]] = defaultdict(set)
-        for table in tables:
-            for column in table.columns:
-                index[column.name.lower()].add(table.table_name)
-        return {key: sorted(values) for key, values in index.items()}
-
     def rebuild_derived_indexes(
         self,
         payload: DashboardChatMetadataArtifactPayload,
     ) -> DashboardChatMetadataArtifactPayload:
         """Recompute join graph and search indexes after enrichment overrides."""
         payload.join_paths = self._build_join_paths(payload.tables)
-        payload.entity_index = self._build_entity_index(payload.tables)
-        payload.measure_index = self._build_measure_index(payload.tables)
-        payload.column_index = self._build_column_index(payload.tables)
         return payload
+
+    def _chart_metric_specs(
+        self,
+        chart: DashboardChatChartRegistryEntry,
+    ) -> list[DashboardChatChartMetricSpec]:
+        return [metric.model_copy(deep=True) for metric in chart.metrics]
+
+    def _chart_filter_specs(
+        self,
+        chart: DashboardChatChartRegistryEntry,
+    ) -> list[DashboardChatChartFilterSpec]:
+        return [chart_filter.model_copy(deep=True) for chart_filter in chart.filters]
 
     def _fingerprint(
         self,

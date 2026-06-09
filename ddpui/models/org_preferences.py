@@ -26,6 +26,7 @@ class OrgPreferences(models.Model):
         blank=True,
     )
     ai_data_sharing_consented_at = models.DateTimeField(null=True, blank=True)
+    dashboard_chat_share_pii_with_llms = models.BooleanField(default=True)
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)

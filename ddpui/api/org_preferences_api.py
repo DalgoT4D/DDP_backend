@@ -9,11 +9,23 @@ from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.dashboard_chat import OrgAIContext
+from ddpui.models.dashboard_chat import (
+    DashboardChatMetadataArtifact,
+    DashboardChatMetadataArtifactStatus,
+    DashboardChatPIIColumnOverride,
+    OrgAIContext,
+)
 from ddpui.core.dashboard_chat.metadata.build_service import (
     DashboardChatMetadataBuildService,
     summarize_dashboard_metadata_status,
 )
+from ddpui.core.dashboard_chat.metadata.pii_overrides import (
+    load_pii_overrides_for_org,
+    metadata_table_identity,
+    payload_column_keys,
+    pii_override_key,
+)
+from ddpui.core.dashboard_chat.metadata.schemas import DashboardChatMetadataArtifactPayload
 from ddpui.celeryworkers.tasks import build_dashboard_chat_metadata_artifacts
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
@@ -23,7 +35,9 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateOrgAIDashboardChatSchema,
     OrgAIDashboardChatStatusResponse,
     OrgAIDashboardChatMetadataStatusResponse,
+    OrgAIDashboardChatPIIColumnsResponse,
     TriggerOrgAIDashboardChatMetadataBuildSchema,
+    UpdateDashboardChatPIIColumnOverridesSchema,
 )
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
@@ -44,7 +58,9 @@ orgpreference_router = Router()
 
 def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
     org_dbt = org.dbt
-    native_dashboards = list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+    native_dashboards = list(
+        Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id")
+    )
     metadata_summary = summarize_dashboard_metadata_status(native_dashboards)
     return OrgAIDashboardChatSettingsResponse(
         feature_flag_enabled=get_all_feature_flags_for_org(org).get(
@@ -52,6 +68,7 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
             False,
         ),
         ai_data_sharing_enabled=bool(org_preferences.ai_data_sharing_enabled),
+        dashboard_chat_share_pii_with_llms=bool(org_preferences.dashboard_chat_share_pii_with_llms),
         ai_data_sharing_consented_by=(
             org_preferences.ai_data_sharing_consented_by.user.email
             if org_preferences.ai_data_sharing_consented_by
@@ -72,7 +89,9 @@ def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
 
 def _serialize_ai_dashboard_chat_status(org, org_preferences):
     org_dbt = org.dbt
-    native_dashboards = list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+    native_dashboards = list(
+        Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id")
+    )
     metadata_summary = summarize_dashboard_metadata_status(native_dashboards)
     feature_flag_enabled = get_all_feature_flags_for_org(org).get(
         "AI_DASHBOARD_CHAT",
@@ -96,6 +115,77 @@ def _serialize_ai_dashboard_chat_status(org, org_preferences):
         metadata_ready_dashboard_count=metadata_summary["ready_dashboard_count"],
         metadata_total_dashboard_count=metadata_summary["total_dashboard_count"],
     )
+
+
+def _load_dashboard_chat_metadata_payloads(
+    org,
+) -> list[tuple[Dashboard, DashboardChatMetadataArtifactPayload]]:
+    artifacts = (
+        DashboardChatMetadataArtifact.objects.filter(
+            dashboard__org=org,
+            dashboard__dashboard_type="native",
+            status=DashboardChatMetadataArtifactStatus.READY,
+        )
+        .select_related("dashboard")
+        .order_by("dashboard_id")
+    )
+    payloads: list[tuple[Dashboard, DashboardChatMetadataArtifactPayload]] = []
+    for artifact in artifacts:
+        if not artifact.artifact_json:
+            continue
+        try:
+            payload = DashboardChatMetadataArtifactPayload.model_validate(artifact.artifact_json)
+        except Exception:
+            continue
+        payloads.append((artifact.dashboard, payload))
+    return payloads
+
+
+def _serialize_dashboard_chat_pii_columns(org) -> OrgAIDashboardChatPIIColumnsResponse:
+    payloads = _load_dashboard_chat_metadata_payloads(org)
+    overrides = load_pii_overrides_for_org(org)
+    columns: list[dict] = []
+    for dashboard, payload in payloads:
+        for table in payload.tables:
+            schema_name, bare_table_name, full_table_name = metadata_table_identity(table)
+            for column in table.columns:
+                key = pii_override_key(schema_name, bare_table_name, column.column_name)
+                override_pii = overrides.get(key)
+                inferred_pii = bool(column.pii)
+                effective_pii = inferred_pii if override_pii is None else override_pii
+                columns.append(
+                    {
+                        "dashboard_id": dashboard.id,
+                        "dashboard_title": str(dashboard.title or ""),
+                        "schema_name": schema_name,
+                        "table_name": bare_table_name,
+                        "full_table_name": full_table_name,
+                        "model_name": table.model_name,
+                        "column_name": column.column_name,
+                        "data_type": column.data_type,
+                        "description": column.description,
+                        "semantic_role": column.semantic_role,
+                        "value_semantics": column.value_semantics,
+                        "inferred_pii": inferred_pii,
+                        "override_pii": override_pii,
+                        "effective_pii": effective_pii,
+                    }
+                )
+
+    columns.sort(
+        key=lambda item: (
+            item["dashboard_title"].lower(),
+            item["full_table_name"].lower(),
+            item["column_name"].lower(),
+        )
+    )
+    return OrgAIDashboardChatPIIColumnsResponse(
+        columns=columns,
+        total_column_count=len(columns),
+        pii_column_count=sum(1 for column in columns if column["effective_pii"]),
+    )
+
+
 @orgpreference_router.post("/")
 def create_org_preferences(request, payload: CreateOrgPreferencesSchema):
     """Creates preferences for an organization"""
@@ -249,6 +339,11 @@ def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChat
     if payload.ai_data_sharing_enabled is not None:
         org_preferences.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
 
+    if payload.dashboard_chat_share_pii_with_llms is not None:
+        org_preferences.dashboard_chat_share_pii_with_llms = (
+            payload.dashboard_chat_share_pii_with_llms
+        )
+
     if payload.org_context_markdown is not None:
         if not target_ai_data_sharing_enabled:
             raise HttpError(
@@ -299,6 +394,64 @@ def get_ai_dashboard_chat_metadata_status(request):
             list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
         )
     )
+
+
+@orgpreference_router.get(
+    "/ai-dashboard-chat/pii-columns",
+    response=OrgAIDashboardChatPIIColumnsResponse,
+)
+@has_permission(["can_manage_org_settings"])
+def get_ai_dashboard_chat_pii_columns(request):
+    """Return metadata columns and reviewed PII state for the current org."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+    return _serialize_dashboard_chat_pii_columns(org)
+
+
+@orgpreference_router.put(
+    "/ai-dashboard-chat/pii-columns",
+    response=OrgAIDashboardChatPIIColumnsResponse,
+)
+@has_permission(["can_manage_org_settings"])
+@transaction.atomic
+def update_ai_dashboard_chat_pii_columns(
+    request,
+    payload: UpdateDashboardChatPIIColumnOverridesSchema,
+):
+    """Persist user-reviewed PII overrides for dashboard chat metadata columns."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+
+    metadata_payloads = [
+        metadata_payload for _, metadata_payload in _load_dashboard_chat_metadata_payloads(org)
+    ]
+    available_keys = payload_column_keys(metadata_payloads)
+    for override in payload.overrides:
+        schema_name = str(override.schema_name or "").strip()
+        table_name = str(override.table_name or "").strip()
+        column_name = str(override.column_name or "").strip()
+        key = pii_override_key(schema_name, table_name, column_name)
+        if key not in available_keys:
+            raise HttpError(
+                404,
+                f"Column {schema_name}.{table_name}.{column_name} was not found in ready metadata",
+            )
+        DashboardChatPIIColumnOverride.objects.update_or_create(
+            org=org,
+            schema_name=key[0],
+            table_name=key[1],
+            column_name=key[2],
+            defaults={
+                "pii": bool(override.pii),
+                "updated_by": orguser,
+            },
+        )
+
+    return _serialize_dashboard_chat_pii_columns(org)
 
 
 @orgpreference_router.post(

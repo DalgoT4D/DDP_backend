@@ -356,6 +356,7 @@ class DashboardChatRuntime:
             "sql": None,
             "sql_validation": None,
             "sql_results": None,
+            "pii_value_map": {},
             "timing_breakdown": {
                 "graph_nodes_ms": {},
                 "tool_calls_ms": [],

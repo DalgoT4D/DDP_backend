@@ -31,6 +31,7 @@ class DashboardChatGraphState(TypedDict, total=False):
     sql: str | None
     sql_validation: dict[str, Any] | None
     sql_results: list[dict[str, Any]] | None
+    pii_value_map: dict[str, str]
     warnings: list[str]
     usage: dict[str, Any]
     response: dict[str, Any]

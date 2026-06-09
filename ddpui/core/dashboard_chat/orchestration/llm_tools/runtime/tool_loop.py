@@ -191,6 +191,7 @@ def execute_tool_loop(
                     args = {}
             tool_started_at = perf_counter()
             result = execute_tool_call(
+                llm_client,
                 warehouse_tools_factory,
                 runtime_config,
                 tool_name=str(tool_call.get("name") or ""),
@@ -223,7 +224,15 @@ def execute_tool_loop(
             )
             raise_if_runtime_cancelled()
             if tool_name == "run_sql_query" and result.get("success"):
-                continue
+                return build_tool_loop_result(
+                    answer_text=fallback_answer_text(
+                        turn_context.retrieved_documents,
+                        turn_context.last_sql_results,
+                    ),
+                    turn_context=turn_context,
+                    max_turns_reached=False,
+                    tool_loop_started_at=tool_loop_started_at,
+                )
 
     return build_tool_loop_result(
         answer_text=max_turns_message(
@@ -237,6 +246,7 @@ def execute_tool_loop(
 
 
 def execute_tool_call(
+    llm_client,
     warehouse_tools_factory,
     runtime_config,
     *,
@@ -280,7 +290,7 @@ def execute_tool_call(
             )
         if tool_name == "run_sql_query":
             return handle_run_sql_query_tool(
-                warehouse_tools_factory, runtime_config, args, state, turn_context
+                llm_client, warehouse_tools_factory, runtime_config, args, state, turn_context
             )
         if tool_name == "check_table_row_count":
             return handle_check_table_row_count_tool(
@@ -320,5 +330,6 @@ def build_tool_loop_result(
         "sql": turn_context.last_sql,
         "sql_validation": turn_context.last_sql_validation,
         "sql_results": turn_context.last_sql_results,
+        "pii_value_map": dict(turn_context.pii_value_map),
         "warnings": warnings,
     }

@@ -35,6 +35,7 @@ def extract_conversation_context(
         payload = message.payload or {}
         sql = payload.get("sql")
         metadata = payload.get("metadata") or {}
+        llm_safe_answer_text = str(metadata.get("pii_masked_answer_text") or message.content)
         citations = payload.get("citations") or []
         chart_ids = extract_chart_ids_from_payload(payload)
 
@@ -74,7 +75,7 @@ def extract_conversation_context(
                 last_dimensions=extract_dimensions_from_sql(str(sql)),
                 last_filters=extract_filters_from_sql(str(sql)),
                 last_response_type="sql_result",
-                last_answer_text=message.content,
+                last_answer_text=llm_safe_answer_text,
                 last_intent=str(payload.get("intent") or ""),
             )
             if chart_ids:
@@ -85,7 +86,7 @@ def extract_conversation_context(
             context = DashboardChatConversationContext(
                 last_chart_ids=chart_ids,
                 last_response_type="metadata_answer",
-                last_answer_text=message.content,
+                last_answer_text=llm_safe_answer_text,
                 last_intent=str(payload.get("intent") or ""),
             )
 

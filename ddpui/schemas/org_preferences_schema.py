@@ -46,6 +46,7 @@ class OrgAIDashboardChatSettingsResponse(Schema):
 
     feature_flag_enabled: bool
     ai_data_sharing_enabled: bool
+    dashboard_chat_share_pii_with_llms: bool
     ai_data_sharing_consented_by: Optional[str]
     ai_data_sharing_consented_at: Optional[datetime]
     org_context_markdown: str
@@ -61,6 +62,7 @@ class UpdateOrgAIDashboardChatSchema(Schema):
     """Request schema for org-level dashboard chat settings updates."""
 
     ai_data_sharing_enabled: Optional[bool] = None
+    dashboard_chat_share_pii_with_llms: Optional[bool] = None
     org_context_markdown: Optional[str] = None
 
 
@@ -107,6 +109,48 @@ class TriggerOrgAIDashboardChatMetadataBuildSchema(Schema):
 
     dashboard_id: Optional[int] = None
     builder_model: Optional[str] = "o4-mini"
+
+
+class DashboardChatPIIColumnReviewItem(Schema):
+    """One metadata column with inferred and user-reviewed PII state."""
+
+    dashboard_id: int
+    dashboard_title: str
+    schema_name: str
+    table_name: str
+    full_table_name: str
+    model_name: str
+    column_name: str
+    data_type: str
+    description: str
+    semantic_role: str
+    value_semantics: str
+    inferred_pii: bool
+    override_pii: Optional[bool] = None
+    effective_pii: bool
+
+
+class OrgAIDashboardChatPIIColumnsResponse(Schema):
+    """Org-scoped list of metadata columns available for PII review."""
+
+    columns: list[DashboardChatPIIColumnReviewItem]
+    total_column_count: int
+    pii_column_count: int
+
+
+class DashboardChatPIIColumnOverrideInput(Schema):
+    """User-reviewed PII value for one metadata column."""
+
+    schema_name: str = ""
+    table_name: str
+    column_name: str
+    pii: bool
+
+
+class UpdateDashboardChatPIIColumnOverridesSchema(Schema):
+    """Batch update request for dashboard-chat PII overrides."""
+
+    overrides: list[DashboardChatPIIColumnOverrideInput]
 
 
 class CreateOrgSupersetDetailsSchema(Schema):

@@ -49,5 +49,34 @@ def test_extract_table_names_handles_join_and_ignores_cte_names() -> None:
     """
 
     assert DashboardChatSqlGuard._extract_table_names(sql) == [
+        "dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25",
         "dev_analytics_niti_2025_reports_aggregated.ss_farmer_agg_niti_25"
+    ]
+
+
+def test_extract_table_names_includes_physical_tables_inside_ctes() -> None:
+    sql = """
+        WITH latest_per_work_order AS (
+            SELECT
+                work_order_name,
+                MAX(date_time) AS latest_date
+            FROM dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25
+            GROUP BY work_order_name
+        ), latest_metrics AS (
+            SELECT
+                t.work_order_name,
+                t.date_time,
+                t.silt_target,
+                t.silt_achieved
+            FROM dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25 t
+            JOIN latest_per_work_order l
+              ON t.work_order_name = l.work_order_name
+             AND t.date_time = l.latest_date
+        )
+        SELECT SUM(silt_target) AS total_silt_target_cum_cu_m
+        FROM latest_metrics
+    """
+
+    assert DashboardChatSqlGuard._extract_table_names(sql) == [
+        "dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25"
     ]
