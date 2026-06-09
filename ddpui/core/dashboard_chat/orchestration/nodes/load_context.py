@@ -19,6 +19,10 @@ from ddpui.core.dashboard_chat.metadata.builder import (
 from ddpui.core.dashboard_chat.metadata.storage import (
     load_dashboard_chat_metadata_artifact,
 )
+from ddpui.core.dashboard_chat.metadata.pii_overrides import (
+    apply_pii_overrides_to_payload,
+    load_pii_overrides_for_org,
+)
 from ddpui.services.dashboard_service import DashboardService
 
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
@@ -46,17 +50,28 @@ def load_context_node(state: DashboardChatGraphState) -> dict[str, Any]:
         dashboard_id,
         org,
     )
-    metadata_artifact = DashboardChatMetadataArtifact.objects.filter(
-        dashboard_id=dashboard_id
-    ).only("status", "schema_version").first()
+    metadata_artifact = (
+        DashboardChatMetadataArtifact.objects.filter(dashboard_id=dashboard_id)
+        .only("status", "schema_version")
+        .first()
+    )
     metadata_payload = load_dashboard_chat_metadata_artifact(dashboard)
     if metadata_payload is not None:
         allowlist = DashboardChatAllowlistBuilder.build_from_metadata_artifact(metadata_payload)
     else:
         allowlist = DashboardChatAllowlist()
     metadata_status = metadata_artifact.status if metadata_artifact is not None else "missing"
-    if metadata_artifact is not None and metadata_artifact.status == "ready" and metadata_payload is None:
+    if (
+        metadata_artifact is not None
+        and metadata_artifact.status == "ready"
+        and metadata_payload is None
+    ):
         metadata_status = "stale"
+    if metadata_payload is not None:
+        metadata_payload = apply_pii_overrides_to_payload(
+            metadata_payload,
+            load_pii_overrides_for_org(org),
+        )
     org_context_markdown = (
         OrgAIContext.objects.filter(org=org).values_list("markdown", flat=True).first() or ""
     )

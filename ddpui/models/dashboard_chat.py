@@ -53,6 +53,10 @@ class DashboardChatPromptTemplateKey(models.TextChoices):
         "follow_up_system",
         "Follow-up System",
     )
+    SQL_VERIFICATION = (
+        "sql_verification",
+        "SQL Verification",
+    )
     FINAL_ANSWER_COMPOSITION = (
         "final_answer_composition",
         "Final Answer Composition",
@@ -137,7 +141,7 @@ class DashboardChatMetadataArtifact(models.Model):
         on_delete=models.CASCADE,
         related_name="chat_metadata_artifact",
     )
-    schema_version = models.PositiveIntegerField(default=2)
+    schema_version = models.PositiveIntegerField(default=4)
     status = models.CharField(
         max_length=16,
         choices=DashboardChatMetadataArtifactStatus.choices,
@@ -190,6 +194,44 @@ class DashboardChatMetadataBuildRun(models.Model):
         indexes = [
             models.Index(fields=["dashboard", "started_at"], name="dchat_meta_run_dash_idx"),
             models.Index(fields=["status"], name="dchat_meta_run_status_idx"),
+        ]
+
+
+class DashboardChatPIIColumnOverride(models.Model):
+    """User-reviewed PII decision for one dashboard-chat metadata column."""
+
+    org = models.ForeignKey(
+        Org,
+        on_delete=models.CASCADE,
+        related_name="dashboard_chat_pii_column_overrides",
+    )
+    schema_name = models.CharField(max_length=255, blank=True, default="")
+    table_name = models.CharField(max_length=255)
+    column_name = models.CharField(max_length=255)
+    pii = models.BooleanField()
+    updated_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dashboard_chat_pii_column_overrides",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dashboard_chat_pii_column_override"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "schema_name", "table_name", "column_name"],
+                name="dchat_pii_override_unique",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["org", "schema_name", "table_name"],
+                name="dchat_pii_override_table_idx",
+            ),
         ]
 
 

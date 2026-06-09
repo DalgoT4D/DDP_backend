@@ -123,26 +123,15 @@ class DashboardChatSqlGuard:
         )
 
         tables: list[str] = []
-        depth = 0
         index = 0
         sql_length = len(sql_without_quotes)
+        sql_upper = sql_without_quotes.upper()
         while index < sql_length:
-            character = sql_without_quotes[index]
-            if character == "(":
-                depth += 1
-                index += 1
-                continue
-            if character == ")":
-                depth = max(depth - 1, 0)
-                index += 1
-                continue
-
             keyword = None
-            if depth == 0:
-                if cls._matches_keyword(sql_without_quotes.upper(), index, "FROM"):
-                    keyword = "FROM"
-                elif cls._matches_keyword(sql_without_quotes.upper(), index, "JOIN"):
-                    keyword = "JOIN"
+            if cls._matches_keyword(sql_upper, index, "FROM"):
+                keyword = "FROM"
+            elif cls._matches_keyword(sql_upper, index, "JOIN"):
+                keyword = "JOIN"
 
             if keyword is None:
                 index += 1

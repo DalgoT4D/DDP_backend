@@ -64,29 +64,36 @@ def search_metadata_tables(
     time_tokens = set(tokenize(" ".join(time_terms or [])))
     shape_tokens = tokenize(required_output_shape or "")
     type_tokens = tokenize(question_type or "")
-
     ranked: list[tuple[int, dict[str, Any]]] = []
     for table in artifact.tables:
         haystack = " ".join(
             [
                 table.table_name,
                 table.model_name,
-                table.human_label,
-                table.table_description,
-                table.table_purpose,
+                table.description,
                 table.row_grain,
                 " ".join(table.primary_entities),
-                " ".join(table.preferred_use_cases),
-                " ".join(table.anti_pattern_use_cases),
-                " ".join(table.example_questions),
-                " ".join(table.required_join_patterns),
+                " ".join(table.upstream_models),
+                " ".join(table.temporal.time_column_meanings.values()),
+                " ".join(table.temporal.period_notes),
+                " ".join(table.counting.entity_counting_guidance.values()),
+                " ".join(table.answerability.retained_dimensions),
+                " ".join(table.answerability.rolled_up_over),
+                " ".join(table.answerability.comparison_axes_available),
+                " ".join(table.answerability.direct_answer_capabilities),
+                " ".join(
+                    limitation.question_need
+                    + " "
+                    + limitation.resolution
+                    + " "
+                    + limitation.details
+                    for limitation in table.answerability.answerability_limitations
+                ),
                 " ".join(table.ambiguity_notes),
                 " ".join(col.name for col in table.columns),
                 " ".join(col.description for col in table.columns),
-                " ".join(tag for col in table.columns for tag in col.entity_tags),
-                " ".join(tag for col in table.columns for tag in col.measure_tags),
                 " ".join(col.semantic_role for col in table.columns),
-                " ".join(hint for col in table.columns for hint in col.aggregation_hints),
+                " ".join(col.value_semantics for col in table.columns),
             ]
         )
         haystack_tokens = tokenize(haystack)
@@ -124,7 +131,10 @@ def search_metadata_tables(
             score += 2 * len(type_tokens & haystack_tokens)
         if table.table_type in {"fact", "row_grain"}:
             score += 2
-        if "join" in " ".join(table.required_join_patterns).lower():
+        if any(
+            limitation.resolution == "requires_join"
+            for limitation in table.answerability.answerability_limitations
+        ):
             score += 1
         if score <= 0:
             continue
@@ -137,7 +147,7 @@ def search_metadata_tables(
                     "layer": table.layer,
                     "row_grain": table.row_grain,
                     "table_type": table.table_type,
-                    "preferred_use_cases": table.preferred_use_cases[:5],
+                    "description": table.description,
                     "reasons": reasons,
                 },
             )
@@ -176,10 +186,8 @@ def search_columns_by_name(
                         "data_type": column.data_type,
                         "description": column.description,
                         "semantic_role": column.semantic_role,
-                        "entity_tags": column.entity_tags,
-                        "measure_tags": column.measure_tags,
+                        "value_semantics": column.value_semantics,
                         "pii": column.pii,
-                        "aggregation_hints": column.aggregation_hints,
                         "table_row_grain": table.row_grain,
                         "table_type": table.table_type,
                     },
@@ -218,12 +226,11 @@ def get_related_tables(
             " ".join(
                 [
                     table.table_name,
-                    table.table_description,
-                    table.table_purpose,
+                    table.description,
                     " ".join(table.primary_entities),
                     " ".join(col.name for col in table.columns),
-                    " ".join(tag for col in table.columns for tag in col.entity_tags),
-                    " ".join(tag for col in table.columns for tag in col.measure_tags),
+                    " ".join(col.description for col in table.columns),
+                    " ".join(col.value_semantics for col in table.columns),
                 ]
             )
         )
@@ -235,7 +242,6 @@ def get_related_tables(
             "table_type": table.table_type,
             "join_columns": join_path.via_columns,
             "join_cardinality": join_path.cardinality,
-            "join_confidence": join_path.confidence,
             "preferred": join_path.preferred,
         }
         if existing is None or score > existing.get("_score", -1):

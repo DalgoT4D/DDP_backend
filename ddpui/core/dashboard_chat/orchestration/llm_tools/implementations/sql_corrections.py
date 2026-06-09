@@ -6,6 +6,7 @@ from typing import Any
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
     best_table_for_missing_columns,
+    extract_cte_names,
     cte_schema_snippets,
     find_tables_with_column,
     primary_table_name,
@@ -43,6 +44,7 @@ def missing_columns_in_primary_table(
         tables=referenced_tables,
     )
     synthetic_cte_snippets = cte_schema_snippets(sql)
+    cte_names = extract_cte_names(sql)
     schema_snippets_by_table = {**synthetic_cte_snippets, **schema_snippets_by_table}
     all_schema_snippets_by_table = {
         **synthetic_cte_snippets,
@@ -73,6 +75,9 @@ def missing_columns_in_primary_table(
             if len(matching_tables) > 1:
                 continue
             target_table = primary_table_name(sql) or tables_in_query[0]
+
+        if target_table.lower() in cte_names and target_table not in schema_snippets_by_table:
+            continue
 
         missing_columns_by_table.setdefault(target_table, set()).add(column_name)
         candidate_tables_by_column[column_name] = find_tables_with_column(

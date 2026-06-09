@@ -134,6 +134,48 @@ def extract_cte_output_columns(sql: str) -> dict[str, set[str]]:
     return cte_columns
 
 
+def extract_cte_names(sql: str) -> set[str]:
+    """Return leading CTE names, even when their output columns cannot be inferred."""
+    stripped_sql = sql.lstrip()
+    if not stripped_sql[:4].lower() == "with":
+        return set()
+
+    cursor = 4
+    cte_names: set[str] = set()
+    if stripped_sql[cursor:].lstrip().lower().startswith("recursive"):
+        cursor = stripped_sql.lower().index("recursive", cursor) + len("recursive")
+
+    while cursor < len(stripped_sql):
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", stripped_sql[cursor:])
+        if not name_match:
+            break
+        cte_names.add(name_match.group(1).lower())
+        cursor += len(name_match.group(1))
+
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        if cursor < len(stripped_sql) and stripped_sql[cursor] == "(":
+            _, cursor = _read_balanced_parentheses(stripped_sql, cursor)
+            while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+                cursor += 1
+
+        as_match = re.match(r"AS\s*\(", stripped_sql[cursor:], flags=re.IGNORECASE)
+        if not as_match:
+            break
+        cursor += as_match.end() - 1
+        _, cursor = _read_balanced_parentheses(stripped_sql, cursor)
+
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        if cursor < len(stripped_sql) and stripped_sql[cursor] == ",":
+            cursor += 1
+            continue
+        break
+    return cte_names
+
+
 def cte_schema_snippets(sql: str) -> dict[str, DashboardChatSchemaSnippet]:
     """Build synthetic schema snippets for leading CTEs based on their output columns."""
     snippets: dict[str, DashboardChatSchemaSnippet] = {}
@@ -350,9 +392,25 @@ def extract_identifier_refs_from_sql_segment(
         "CURRENT_DATE",
         "CURRENT_TIMESTAMP",
         "EXTRACT",
+        "GROUPING",
+        "SETS",
         "YEAR",
         "MONTH",
         "DAY",
+        "NUMERIC",
+        "DECIMAL",
+        "INTEGER",
+        "BIGINT",
+        "SMALLINT",
+        "TEXT",
+        "VARCHAR",
+        "CHAR",
+        "BOOLEAN",
+        "TIMESTAMP",
+        "DOUBLE",
+        "PRECISION",
+        "FLOAT",
+        "REAL",
         "ASC",
         "DESC",
         "ON",
@@ -371,6 +429,8 @@ def extract_identifier_refs_from_sql_segment(
         if identifier.upper() in ignored_tokens:
             continue
         if identifier.lower() in table_aliases or identifier.lower() in ignored_identifiers:
+            continue
+        if normalized_segment[max(0, match.start() - 2) : match.start()] == "::":
             continue
         preceding_text = normalized_segment[: match.start()]
         preceding_token_match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", preceding_text)

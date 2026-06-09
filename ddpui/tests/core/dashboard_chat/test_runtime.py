@@ -18,8 +18,10 @@ from ddpui.core.dashboard_chat.orchestration.tool_loop_message_builder import (
     build_new_query_messages,
 )
 from ddpui.core.dashboard_chat.orchestration.nodes.load_context import load_context_node
+from ddpui.core.dashboard_chat.orchestration.nodes.route_intent import route_intent_node
 from ddpui.core.dashboard_chat.orchestration.orchestrator import DashboardChatRuntime
 from ddpui.core.dashboard_chat.orchestration.response_composer import (
+    build_fast_path_intent,
     compose_final_answer_text,
     determine_response_format,
 )
@@ -55,6 +57,7 @@ from ddpui.core.dashboard_chat.contracts.retrieval_contracts import (
     DashboardChatRetrievedDocument,
     DashboardChatSourceType,
 )
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlVerificationResult
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.dashboard_chat import (
@@ -293,6 +296,33 @@ class PrototypeLlmBase:
         return "Hi! I can help with your program data and metrics. What would you like to know?"
 
 
+class WarningSqlVerifierLlm:
+    """LLM verifier stub that allows SQL through with a surfaced warning."""
+
+    def verify_sql_against_question(self, **kwargs):
+        return DashboardChatSqlVerificationResult(
+            is_valid=False,
+            severity="warning",
+            reason_code="allowed_dashboard_default",
+            reasoning="Using the current dashboard reporting basis.",
+            warnings=["State the dashboard-default reporting basis in the final answer."],
+        )
+
+
+class RepairOnceSqlVerifierLlm:
+    """LLM verifier stub that repeats the same one-repair semantic rejection."""
+
+    def verify_sql_against_question(self, **kwargs):
+        return DashboardChatSqlVerificationResult(
+            is_valid=False,
+            severity="repair_once",
+            reason_code="allowed_dashboard_default_missing",
+            reasoning="Use the dashboard default before asking for clarification.",
+            issues=["Default basis was not stated."],
+            repair_instructions=["Use the dashboard default and state the basis."],
+        )
+
+
 class FollowUpCorrectionLlm(PrototypeLlmBase):
     """LLM stub that corrects itself after the runtime rejects the wrong follow-up table/column choice."""
 
@@ -508,11 +538,12 @@ def ready_metadata_artifact(primary_dashboard):
         dashboard=primary_dashboard,
         status=DashboardChatMetadataArtifactStatus.READY,
         artifact_json={
-            "schema_version": 2,
+            "schema_version": 3,
             "dashboard_id": primary_dashboard.id,
             "org_id": primary_dashboard.org_id,
             "dashboard_title": primary_dashboard.title,
             "dashboard_description": primary_dashboard.description or "",
+            "dashboard_built_on_models": ["analytics.program_reach"],
             "allowlisted_tables": ["analytics.program_reach"],
             "chart_table_map": {"analytics.program_reach": ["1"]},
             "tables": [],
@@ -808,6 +839,7 @@ def test_run_sql_keeps_join_tables_intact(primary_dashboard):
     )
 
     result = handle_run_sql_query_tool(
+        object(),
         lambda org: fake_warehouse,
         DashboardChatRuntimeConfig(
             retrieval_limit=6,
@@ -836,6 +868,118 @@ def test_run_sql_keeps_join_tables_intact(primary_dashboard):
     assert result["success"] is True
     assert "analytics.facilitator_effectiveness_quarterly f" in result["sql_used"]
     assert "analytics.district_funding_efficiency_quarterly d" in result["sql_used"]
+
+
+def test_run_sql_executes_verifier_warning_with_warning(primary_dashboard):
+    """Allowed dashboard-default assumptions should execute instead of starting a repair loop."""
+    fake_warehouse = FakeWarehouseTools()
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(allowed_tables={"analytics.program_reach"}),
+        intent_decision=DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+            confidence=0.9,
+            reason="Dashboard KPI question",
+            force_tool_usage=True,
+        ),
+        user_query="How many beneficiaries participated overall?",
+    )
+    turn_context = build_turn_context(warehouse_tools=fake_warehouse)
+
+    result = handle_run_sql_query_tool(
+        WarningSqlVerifierLlm(),
+        lambda org: fake_warehouse,
+        DashboardChatRuntimeConfig(
+            retrieval_limit=6,
+            max_query_rows=200,
+            max_distinct_values=20,
+            max_schema_tables=4,
+        ),
+        {"sql": "SELECT COUNT(*) AS beneficiary_count FROM analytics.program_reach"},
+        state,
+        turn_context,
+    )
+
+    assert result["success"] is True
+    assert fake_warehouse.executed_sql
+    assert "Using the current dashboard reporting basis." in turn_context.warnings
+    assert (
+        "State the dashboard-default reporting basis in the final answer."
+        in turn_context.warnings
+    )
+
+
+def test_run_sql_caps_repeated_repair_once_verifier_rejection(primary_dashboard):
+    """The same repair-once verifier reason should not consume the whole tool loop."""
+    fake_warehouse = FakeWarehouseTools()
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(allowed_tables={"analytics.program_reach"}),
+        intent_decision=DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+            confidence=0.9,
+            reason="Dashboard KPI question",
+            force_tool_usage=True,
+        ),
+        user_query="How many beneficiaries participated overall?",
+    )
+    turn_context = build_turn_context(warehouse_tools=fake_warehouse)
+    runtime_config = DashboardChatRuntimeConfig(
+        retrieval_limit=6,
+        max_query_rows=200,
+        max_distinct_values=20,
+        max_schema_tables=4,
+    )
+    args = {"sql": "SELECT COUNT(*) AS beneficiary_count FROM analytics.program_reach"}
+
+    first_result = handle_run_sql_query_tool(
+        RepairOnceSqlVerifierLlm(),
+        lambda org: fake_warehouse,
+        runtime_config,
+        args,
+        state,
+        turn_context,
+    )
+    second_result = handle_run_sql_query_tool(
+        RepairOnceSqlVerifierLlm(),
+        lambda org: fake_warehouse,
+        runtime_config,
+        args,
+        state,
+        turn_context,
+    )
+
+    assert first_result["error"] == "sql_question_mismatch"
+    assert first_result["semantic_rejections"] == 1
+    assert second_result["success"] is True
+    assert fake_warehouse.executed_sql
+    assert any("same repair more than once" in warning for warning in turn_context.warnings)
+
+
+def test_missing_distinct_allows_absent_value_after_exhaustive_distinct_lookup(primary_dashboard):
+    """Absent validated values should be allowed to return zero rows instead of looping."""
+    fake_warehouse = FakeWarehouseTools()
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(allowed_tables={"analytics.program_reach"}),
+    )
+    turn_context = build_turn_context(warehouse_tools=fake_warehouse)
+
+    distinct_result = handle_get_distinct_values_tool(
+        lambda org: fake_warehouse,
+        {"table": "analytics.program_reach", "column": "program_name", "limit": 50},
+        state,
+        turn_context,
+    )
+    missing = find_missing_distinct_filters(
+        lambda org: fake_warehouse,
+        "SELECT COUNT(*) FROM analytics.program_reach WHERE program_name = 'Water'",
+        state,
+        turn_context,
+    )
+
+    assert distinct_result["values"] == ["Education", "Health"]
+    assert missing == []
 
 
 def test_missing_distinct_resolves_join_filter_to_qualified_table(primary_dashboard):
@@ -1322,3 +1466,35 @@ def test_determine_response_format_prefers_table_for_grouped_breakdowns():
     )
 
     assert response_format == "text_with_table"
+
+
+def test_determine_response_format_keeps_manageable_name_lists_as_text():
+    """Name-list questions should let the answer writer list all names directly when manageable."""
+    response_format = determine_response_format(
+        user_query="Give me the names of students below 20 percent in endline maths",
+        sql_results=[
+            {"student_name_end": "Ameenabee F", "math_mastery_end": 12},
+            {"student_name_end": "Arasu R", "math_mastery_end": 18},
+        ],
+    )
+
+    assert response_format == "text"
+
+
+def test_build_fast_path_intent_routes_advisory_questions_without_sql():
+    """Advisory recommendation questions should skip SQL-first routing by default."""
+    intent = build_fast_path_intent("How can we improve grade 5 reading comprehension?")
+
+    assert intent is not None
+    assert intent.intent == DashboardChatIntent.QUERY_WITHOUT_SQL
+
+
+def test_route_intent_node_does_not_attach_small_talk_response_for_advisory_fast_path():
+    """Advisory fast-path routing should not reuse the small-talk response slot."""
+    result = route_intent_node(
+        {"user_query": "How can we improve grade 5 reading comprehension?", "conversation_history": []},
+        llm_client=None,
+    )
+
+    assert result["intent_decision"]["intent"] == DashboardChatIntent.QUERY_WITHOUT_SQL
+    assert "small_talk_response" not in result

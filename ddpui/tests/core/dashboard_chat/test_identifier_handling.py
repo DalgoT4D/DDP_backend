@@ -15,6 +15,7 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsi
 )
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context import (
     DashboardChatTurnContext,
+    current_validated_distinct_payloads,
 )
 
 
@@ -163,6 +164,22 @@ def test_schema_tools_preserve_mixed_case_table_names():
     assert fake_warehouse.distinct_requests[0][0] == table_name
 
 
+def test_validated_distinct_payload_serialization_skips_exhaustive_markers():
+    """Turn-only exhaustive markers should not crash checkpoint-safe serialization."""
+    turn_context = _build_turn_context()
+    turn_context.validated_distinct_values.update(
+        {
+            ("analytics.program_reach", "state"),
+            ("*", "state"),
+            ("analytics.program_reach", "state", "bihar"),
+        }
+    )
+
+    assert current_validated_distinct_payloads(turn_context) == {
+        "analytics.program_reach": {"state": ["bihar"]}
+    }
+
+
 def test_sql_identifier_parser_ignores_schema_table_refs_inside_subqueries():
     """Schema-qualified tables inside nested SELECTs should not be treated as column refs."""
     sql = """
@@ -263,3 +280,92 @@ def test_missing_columns_check_allows_outer_query_filters_on_cte_output_columns(
         state=state,
         turn_context=turn_context,
     ) is None
+
+
+def test_missing_columns_check_allows_cte_select_star_outputs():
+    """CTEs that project alias.* should not be rejected before warehouse execution."""
+    table_name = "dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25"
+    state = _build_state(DashboardChatAllowlist(allowed_tables={table_name}))
+    turn_context = _build_turn_context(
+        schema_snippets_by_table={
+            table_name: _schema_snippet(
+                table_name,
+                [
+                    {"name": "work_order_name", "data_type": "text", "nullable": False},
+                    {"name": "date_time", "data_type": "date", "nullable": False},
+                    {"name": "state", "data_type": "text", "nullable": False},
+                    {"name": "silt_achieved", "data_type": "numeric", "nullable": False},
+                ],
+            )
+        }
+    )
+    sql = """
+        WITH latest_per_work_order AS (
+            SELECT work_order_name, MAX(date_time) AS max_date_time
+            FROM dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25
+            GROUP BY work_order_name
+        ),
+        latest_rows AS (
+            SELECT t.*
+            FROM dev_analytics_niti_2025_reports_cleaned.ss_work_order_metric_niti_25 t
+            JOIN latest_per_work_order l
+              ON t.work_order_name = l.work_order_name
+             AND t.date_time = l.max_date_time
+        )
+        SELECT
+            SUM(CASE WHEN state = 'Maharashtra' THEN silt_achieved ELSE 0 END) AS maharashtra_silt,
+            SUM(silt_achieved) AS total_silt
+        FROM latest_rows
+    """
+
+    assert missing_columns_in_primary_table(
+        lambda org: None,
+        sql=sql,
+        state=state,
+        turn_context=turn_context,
+    ) is None
+
+
+def test_identifier_parser_ignores_grouping_sets_and_postgres_cast_targets():
+    """GROUPING SETS and ::numeric casts should not be treated as missing columns."""
+    sql = """
+        WITH rc AS (
+            SELECT
+                city,
+                grade,
+                rc_level,
+                CASE
+                    WHEN rc_level = 'Emergent' THEN CAST(0 AS NUMERIC)
+                    WHEN rc_level ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST(rc_level AS NUMERIC)
+                    ELSE NULL
+                END AS level_num,
+                student_count_base,
+                student_count_end
+            FROM dev_prod.overall_RC_analysis_levels_2525
+        )
+        SELECT
+            CASE
+                WHEN GROUPING(city) = 1 AND GROUPING(grade) = 1 THEN 'OVERALL'
+                ELSE 'CITY_GRADE'
+            END AS cut,
+            ROUND(
+                (
+                    SUM(level_num * student_count_end)
+                    / NULLIF(SUM(student_count_end), 0)
+                )::numeric,
+                3
+            ) AS endline_avg_level
+        FROM rc
+        GROUP BY GROUPING SETS ((city, grade), ())
+        ORDER BY
+            CASE WHEN GROUPING(city) = 1 THEN 0 ELSE 1 END,
+            city,
+            grade
+    """
+
+    assert referenced_sql_identifier_refs(sql) == [
+        (None, "city"),
+        (None, "grade"),
+        (None, "level_num"),
+        (None, "student_count_end"),
+    ]

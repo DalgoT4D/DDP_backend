@@ -12,6 +12,7 @@ from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntentDecision,
 )
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlVerificationResult
 
 
 class FakePromptStore:
@@ -302,6 +303,89 @@ def test_compose_final_answer_keeps_freeform_markdown_for_text_responses():
     payload = json.loads(messages[1]["content"])
     assert payload["response_format"] == "text"
     assert llm_client.usage_summary()["calls"][0]["operation"] == "final_answer_composition"
+
+
+def test_compose_final_answer_payload_keeps_full_manageable_name_lists():
+    """Manageable name-list answers should send the full row set to the final answer writer."""
+    fake_client = FakeClient()
+    fake_client.chat.completions.response_content = "- Ameenabee F\n- Arasu R"
+    llm_client = OpenAIDashboardChatLlmClient(
+        api_key="test-key",
+        client=fake_client,
+        prompt_store=FakePromptStore(),
+    )
+
+    llm_client.compose_final_answer(
+        user_query="Give me the names of students below 20 percent in endline maths",
+        intent=DashboardChatIntent.QUERY_WITH_SQL,
+        response_format="text",
+        draft_answer=None,
+        retrieved_documents=[],
+        sql=None,
+        sql_results=[
+            {"student_name_end": "Ameenabee F", "math_mastery_end": 12},
+            {"student_name_end": "Arasu R", "math_mastery_end": 18},
+        ],
+        warnings=[],
+    )
+
+    payload = json.loads(fake_client.chat.completions.calls[0]["messages"][1]["content"])
+    assert payload["requested_name_list"] is True
+    assert payload["full_name_list_is_manageable"] is True
+    assert payload["displayed_row_count"] == 2
+    assert len(payload["sql_results"]) == 2
+
+
+def test_verify_sql_against_question_uses_sql_verification_prompt():
+    """SQL verifier should use the DB-backed verification prompt and structured payload."""
+    fake_client = FakeClient()
+    fake_client.chat.completions.response_content = json.dumps(
+        {
+            "is_valid": False,
+            "severity": "repair_once",
+            "reason_code": "unsafe_latest_logic",
+            "reasoning": "Uses latest-row logic without the user asking for it.",
+            "issues": ["latest-row logic changes the requested time scope"],
+            "repair_instructions": ["Use direct date filters within the requested period instead of latest-row logic."],
+            "risk_flags": ["uses_latest_row_logic_without_explicit_latest_request"],
+            "warnings": [],
+        }
+    )
+    llm_client = OpenAIDashboardChatLlmClient(
+        api_key="test-key",
+        client=fake_client,
+        prompt_store=FakePromptStore(),
+    )
+
+    result = llm_client.verify_sql_against_question(
+        user_query="How much total silt was excavated this year?",
+        intent=DashboardChatIntent.QUERY_WITH_SQL,
+        sql="SELECT * FROM analytics.work_orders",
+        risk_flags=["uses_latest_row_logic_without_explicit_latest_request"],
+        referenced_tables=[{"table_name": "analytics.work_orders", "table_type": "row_grain"}],
+        structural_dimensions=["state"],
+    )
+
+    assert result == DashboardChatSqlVerificationResult(
+        is_valid=False,
+        severity="repair_once",
+        reason_code="unsafe_latest_logic",
+        reasoning="Uses latest-row logic without the user asking for it.",
+        issues=["latest-row logic changes the requested time scope"],
+        repair_instructions=[
+            "Use direct date filters within the requested period instead of latest-row logic."
+        ],
+        risk_flags=["uses_latest_row_logic_without_explicit_latest_request"],
+        warnings=[],
+    )
+    messages = fake_client.chat.completions.calls[0]["messages"]
+    assert messages[0] == {
+        "role": "system",
+        "content": "prompt:sql_verification",
+    }
+    payload = json.loads(messages[1]["content"])
+    assert payload["user_query"] == "How much total silt was excavated this year?"
+    assert payload["risk_flags"] == ["uses_latest_row_logic_without_explicit_latest_request"]
 
 
 def test_compose_final_answer_uses_faster_final_answer_model_without_reasoning():

@@ -9,6 +9,10 @@ from django.utils import timezone
 
 from ddpui.core.dashboard_chat.metadata.builder import DashboardChatMetadataArtifactBuilder
 from ddpui.core.dashboard_chat.metadata.enricher import DashboardChatMetadataEnricher
+from ddpui.core.dashboard_chat.metadata.pii_overrides import (
+    apply_pii_overrides_to_payload,
+    load_pii_overrides_for_org,
+)
 from ddpui.core.dashboard_chat.metadata.schemas import DASHBOARD_CHAT_METADATA_SCHEMA_VERSION
 from ddpui.core.dashboard_chat.metadata.storage import persist_dashboard_chat_metadata_artifact
 from ddpui.core.dashboard_chat.warehouse.warehouse_access_tools import DashboardChatWarehouseTools
@@ -76,7 +80,13 @@ class DashboardChatMetadataBuildService:
             artifact.builder_model = builder_model
             artifact.error_payload = None
             artifact.save(
-                update_fields=["schema_version", "status", "builder_model", "error_payload", "updated_at"]
+                update_fields=[
+                    "schema_version",
+                    "status",
+                    "builder_model",
+                    "error_payload",
+                    "updated_at",
+                ]
             )
 
             try:
@@ -86,9 +96,7 @@ class DashboardChatMetadataBuildService:
                     warehouse_tools=warehouse_tools,
                 )
                 org_context_markdown = (
-                    OrgAIContext.objects.filter(org=org)
-                    .values_list("markdown", flat=True)
-                    .first()
+                    OrgAIContext.objects.filter(org=org).values_list("markdown", flat=True).first()
                     or ""
                 )
                 dashboard_context_markdown = (
@@ -102,6 +110,10 @@ class DashboardChatMetadataBuildService:
                     org_context_markdown=org_context_markdown,
                     dashboard_context_markdown=dashboard_context_markdown,
                     warehouse_tools=warehouse_tools,
+                )
+                payload = apply_pii_overrides_to_payload(
+                    payload,
+                    load_pii_overrides_for_org(org),
                 )
                 payload = self.builder.rebuild_derived_indexes(payload)
                 saved_artifact = persist_dashboard_chat_metadata_artifact(
@@ -128,7 +140,9 @@ class DashboardChatMetadataBuildService:
                         join_path_count=len(payload.join_paths),
                         chart_count=len(payload.chart_table_map),
                         source_fingerprint=payload.source_fingerprint,
-                        built_at=saved_artifact.built_at.isoformat() if saved_artifact.built_at else None,
+                        built_at=saved_artifact.built_at.isoformat()
+                        if saved_artifact.built_at
+                        else None,
                     )
                 )
             except Exception as error:
@@ -168,7 +182,13 @@ class DashboardChatMetadataBuildService:
             artifact.builder_model = builder_model
             artifact.error_payload = None
             artifact.save(
-                update_fields=["schema_version", "status", "builder_model", "error_payload", "updated_at"]
+                update_fields=[
+                    "schema_version",
+                    "status",
+                    "builder_model",
+                    "error_payload",
+                    "updated_at",
+                ]
             )
 
 
@@ -178,8 +198,9 @@ def summarize_dashboard_metadata_status(
     """Return org-scoped dashboard metadata status for settings pages."""
     artifacts = {
         artifact.dashboard_id: artifact
-        for artifact in DashboardChatMetadataArtifact.objects.filter(dashboard__in=dashboards)
-        .select_related("dashboard")
+        for artifact in DashboardChatMetadataArtifact.objects.filter(
+            dashboard__in=dashboards
+        ).select_related("dashboard")
     }
     dashboard_rows: list[dict[str, Any]] = []
     ready_count = 0
@@ -213,7 +234,11 @@ def summarize_dashboard_metadata_status(
         else:
             missing_count += 1
 
-        if artifact and artifact.built_at and (last_built_at is None or artifact.built_at > last_built_at):
+        if (
+            artifact
+            and artifact.built_at
+            and (last_built_at is None or artifact.built_at > last_built_at)
+        ):
             last_built_at = artifact.built_at
 
         dashboard_rows.append(

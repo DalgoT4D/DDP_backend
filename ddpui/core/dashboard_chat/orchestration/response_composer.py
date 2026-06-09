@@ -4,6 +4,7 @@ from collections.abc import Sequence
 import re
 from typing import Any
 
+from ddpui.core.dashboard_chat.agents.final_answer_formatting import query_requests_name_list
 from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntent,
     DashboardChatIntentDecision,
@@ -12,6 +13,7 @@ from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardCha
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
+from ddpui.core.dashboard_chat.orchestration.pii_masking import unmask_pii_text
 
 logger = CustomLogger("dashboard_chat")
 
@@ -19,6 +21,52 @@ SMALL_TALK_FAST_PATH_PATTERN = re.compile(
     r"^\s*(hi|hello|hey|yo|good\s+morning|good\s+afternoon|good\s+evening|thanks|thank\s+you|what\s+can\s+you\s+do|who\s+are\s+you)\b[\s!.?]*$",
     re.IGNORECASE,
 )
+ADVISORY_FAST_PATH_PATTERN = re.compile(
+    r"^\s*(?:please\s+)?(how can we improve|what should we do|what can we do to improve|how to improve|what do you recommend|recommend)\b",
+    re.IGNORECASE,
+)
+
+
+def _query_explicitly_requests_numeric_evidence(user_query: str) -> bool:
+    """Return whether an advisory question explicitly asks for numeric evidence."""
+    normalized_query = (user_query or "").lower()
+    numeric_evidence_markers = [
+        "how many",
+        "count",
+        "number of",
+        "what percent",
+        "percentage",
+        "trend",
+        "compare",
+        "ranking",
+        "rank",
+        "top ",
+        "bottom ",
+        "numeric evidence",
+        "use data",
+        "use the data",
+        "with numbers",
+        "show numbers",
+        "exact figures",
+        "breakdown",
+    ]
+    return any(marker in normalized_query for marker in numeric_evidence_markers)
+
+
+def _query_looks_referential(user_query: str) -> bool:
+    """Return whether the query likely depends on the immediately prior turn."""
+    normalized_query = f" {(user_query or '').lower()} "
+    referential_markers = [
+        " that ",
+        " this ",
+        " those ",
+        " these ",
+        " it ",
+        " them ",
+        " they ",
+        " same ",
+    ]
+    return any(marker in normalized_query for marker in referential_markers)
 
 
 def serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +177,7 @@ def compose_final_answer_text(
     """Compose one final markdown answer for all non-trivial routes."""
     normalized_sql_results = normalize_sql_results_for_answer(execution_result.get("sql_results"))
     draft_answer = (execution_result.get("answer_text") or "").strip() or None
+    pii_value_map = dict(execution_result.get("pii_value_map") or {})
     if hasattr(llm_client, "compose_final_answer"):
         try:
             answer_text = llm_client.compose_final_answer(
@@ -144,14 +193,17 @@ def compose_final_answer_text(
                 warnings=list(execution_result.get("warnings") or []),
             )
             if answer_text:
-                return answer_text
+                return unmask_pii_text(answer_text, pii_value_map)
         except Exception:
             logger.exception("Dashboard chat final answer composition failed")
-    return fallback_answer_text(
-        execution_result.get("retrieved_documents") or [],
-        normalized_sql_results,
-        response_format=response_format,
-        draft_answer=draft_answer,
+    return unmask_pii_text(
+        fallback_answer_text(
+            execution_result.get("retrieved_documents") or [],
+            normalized_sql_results,
+            response_format=response_format,
+            draft_answer=draft_answer,
+        ),
+        pii_value_map,
     )
 
 
@@ -162,6 +214,8 @@ def determine_response_format(
 ) -> str:
     """Return how the frontend should present the final answer."""
     if not sql_results:
+        return "text"
+    if query_requests_name_list(user_query):
         return "text"
     first_row = sql_results[0] if sql_results else {}
     column_count = len(first_row.keys()) if isinstance(first_row, dict) else 0
@@ -218,14 +272,26 @@ def compose_small_talk_response(llm_client, user_query: str) -> str:
 
 
 def build_fast_path_intent(user_query: str) -> DashboardChatIntentDecision | None:
-    """Handle obvious greetings without an LLM round trip."""
-    if not SMALL_TALK_FAST_PATH_PATTERN.match(user_query.strip()):
-        return None
-    return DashboardChatIntentDecision(
-        intent=DashboardChatIntent.SMALL_TALK,
-        confidence=1.0,
-        reason="Obvious small-talk fast path",
-    )
+    """Handle obvious greetings and advisory asks without an LLM round trip."""
+    stripped_query = user_query.strip()
+    if SMALL_TALK_FAST_PATH_PATTERN.match(stripped_query):
+        return DashboardChatIntentDecision(
+            intent=DashboardChatIntent.SMALL_TALK,
+            confidence=1.0,
+            reason="Obvious small-talk fast path",
+        )
+    if (
+        ADVISORY_FAST_PATH_PATTERN.match(stripped_query)
+        and not _query_explicitly_requests_numeric_evidence(stripped_query)
+        and not _query_looks_referential(stripped_query)
+    ):
+        return DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITHOUT_SQL,
+            confidence=0.95,
+            reason="Advisory recommendation fast path",
+            force_tool_usage=False,
+        )
+    return None
 
 
 def build_fast_path_small_talk_response(user_query: str) -> str:

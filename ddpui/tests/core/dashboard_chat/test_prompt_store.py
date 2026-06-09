@@ -26,6 +26,7 @@ def test_prompt_store_returns_default_when_no_db_override_exists():
 
     prompt = store.get(DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION)
     final_answer_prompt = store.get(DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION)
+    verifier_prompt = store.get(DashboardChatPromptTemplateKey.SQL_VERIFICATION)
 
     assert (
         prompt
@@ -34,6 +35,10 @@ def test_prompt_store_returns_default_when_no_db_override_exists():
     assert (
         final_answer_prompt
         == DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.FINAL_ANSWER_COMPOSITION]
+    )
+    assert (
+        verifier_prompt
+        == DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.SQL_VERIFICATION]
     )
     assert "Which fellow performed best in midline RF for grade 3?" in prompt
     assert '"How many beneficiaries participated?" means count beneficiaries, not sum services delivered.' in (
@@ -59,8 +64,13 @@ def test_default_new_query_prompt_requires_joins_for_cross_table_questions():
     assert "Interpret a calendar year as January 1 through December 31 of that year" in prompt
     assert "Interpret calendar quarters as Q1 = January 1 to March 31" in prompt
     assert "Interpret a financial year or fiscal year such as 2025-26 or FY 2025-26 as April 1, 2025 through March 31, 2026" in prompt
-    assert "Do not use latest-row logic, latest-date logic, MAX(date) filters" in prompt
+    assert "Do not invent latest-row logic, latest-date logic, MAX(date) filters" in prompt
+    assert "current dashboard KPI, overall program total, remaining amount" in prompt
     assert "For quarter and year questions, use direct date filters and aggregate within that window" in prompt
+    assert "If the user asks for names or a list of entities, return one row per entity name" in prompt
+    assert "If the question asks for an overall ranking, count, or performance comparison and does not name a stage" in prompt
+    assert "Choose the table set that fully preserves the requested grain, dimensions, filters, and comparison logic" in prompt
+    assert "If a surfaced chart table or aggregate table has already rolled up over a dimension" in prompt
     assert "snapshot" not in prompt.lower()
 
 
@@ -70,9 +80,31 @@ def test_default_follow_up_prompt_requires_joins_when_follow_up_needs_another_ta
 
     assert "If the current tables cannot fully answer the follow-up" in prompt
     assert "related tables and join paths" in prompt
-    assert "Do not use latest-row logic, latest-date logic, MAX(date) filters" in prompt
+    assert "Do not invent latest-row logic, latest-date logic, MAX(date) filters" in prompt
+    assert "current dashboard KPI, overall program total, remaining amount" in prompt
     assert "financial or fiscal year such as 2025-26 as April 1, 2025 through March 31, 2026" in prompt
+    assert "If the follow-up asks for names or a list of entities, return one row per entity name" in prompt
+    assert "If the follow-up asks for an overall ranking, count, or performance comparison and does not name a stage" in prompt
+    assert "If a surfaced chart table or aggregate table has already rolled up over something the follow-up now needs" in prompt
     assert "snapshot" not in prompt.lower()
+
+
+def test_default_intent_prompt_routes_advisory_questions_without_sql():
+    """Advisory questions should be routed to the context/advice path by default."""
+    prompt = DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.INTENT_CLASSIFICATION]
+
+    assert '"how can we improve", "what should we do", "what do you recommend", or "how to improve"' in prompt
+    assert "overall available scope" in prompt
+
+
+def test_default_sql_verification_prompt_rejects_latest_row_and_name_aggregation_patterns():
+    """Verifier prompt should explicitly guard against known semantic SQL anti-patterns."""
+    prompt = DEFAULT_DASHBOARD_CHAT_PROMPTS[DashboardChatPromptTemplateKey.SQL_VERIFICATION]
+
+    assert "Reject SQL if it invents latest-row" in prompt
+    assert "Use severity \"warning\"" in prompt
+    assert "Reject SQL if it aggregates names into one string" in prompt
+    assert "Reject SQL if it relies on a table that has already rolled up over a dimension" in prompt
 
 
 def test_prompt_store_uses_db_override_after_save():

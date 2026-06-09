@@ -11,8 +11,6 @@ from typing import Any
 from openai import OpenAI
 
 from ddpui.core.dashboard_chat.metadata.schemas import (
-    DashboardChatInferredColumn,
-    DashboardChatInferredTable,
     DashboardChatMetadataArtifactPayload,
     DashboardChatMetadataColumn,
     DashboardChatMetadataTable,
@@ -31,7 +29,8 @@ Your job is to decide whether more evidence is needed to infer:
 - row grain
 - natural keys
 - candidate unique id columns
-- primary time columns and their meaning
+- primary filter time column and time-column meaning
+- whether the table has already rolled up over detail needed for common question shapes
 
 RULES
 1. Use the observed facts first. Request extra profiling only if the current evidence is insufficient.
@@ -62,55 +61,72 @@ Return JSON in this exact shape:
 
 METADATA_ENRICHMENT_SYSTEM_PROMPT = """You are enriching structured table metadata for a dashboard chat SQL agent.
 
-Your job is to infer semantic metadata for ONE table from observed physical facts and optional profiling results.
+Your job is to infer semantic metadata for ONE table from observed physical facts, raw docs, chart usage, and optional profiling results.
 
 RULES
 1. Never invent tables, columns, joins, metrics, or time coverage that are not supported by the input.
-2. The observed facts are the source of truth for physical data. Infer semantics from those facts; do not contradict them.
-3. Infer, do not guess blindly. If the evidence is weak, leave fields empty or express uncertainty through lower confidence and ambiguity notes.
-4. Never assume snapshot semantics, cumulative semantics, latest-row semantics, as-of semantics, or one-row-per-entity-per-time semantics unless the observed facts or profiling results explicitly support them.
-5. Be generic and reusable. Do not mention a specific NGO unless the table facts make that necessary.
-6. For row-grain tables, be explicit about the inferred entity/event grain.
-7. For aggregate tables, be explicit that they are not suitable for row-level name lists unless joined to a row-grain table.
-8. For each column override, only set fields you are confident about.
+2. Observed physical facts are the source of truth for names, stats, and lineage. Infer semantics from those facts; do not contradict them.
+3. Infer, do not guess blindly. If the evidence is weak, leave fields empty and explain uncertainty in ambiguity notes.
+4. Never assume cumulative semantics, latest-row semantics, as-of-date semantics, or one-row-per-entity-per-time semantics unless the observed facts or profiling results explicitly support them.
+5. Write the final human-readable table description and column descriptions. Do not simply copy sparse dbt docs verbatim.
+6. Prefer compact structured answerability guidance over broad prose lists.
+7. Be generic and reusable. Do not mention a specific NGO unless the table facts make that necessary.
+8. PII marking must be semantic, not a naive column-name rule. Mark pii=true for human names, person-identifying free text, mobile/contact numbers, and government-issued identifiers such as MGNREGA numbers, national IDs, Aadhaar IDs, voter IDs, ration-card IDs, or other official identity numbers. Mark pii=false for ordinary system-generated warehouse/application identifiers such as farmer_id, student_id, work_order_id, facility_id, school_id, district_id, or other surrogate keys when context indicates they are internal IDs rather than official identity numbers. If a column name contains "name" but the context clearly means an organization/place/program/grade/status label, do not mark it as PII. If a column name is ambiguous, use table description, entity context, value semantics, and sample value shape to decide; record uncertainty in ambiguity_notes.
 9. Output valid JSON only.
 
 Return JSON in this exact shape:
 {
-  "table_purpose": "string",
+  "description": "string",
   "table_type": "fact | dim | aggregate | bridge | row_grain",
-  "row_grain": "string",
-  "row_grain_confidence": 0.0,
   "primary_entities": ["..."],
-  "natural_keys": ["..."],
-  "natural_key_confidence": 0.0,
-  "candidate_unique_id_columns": ["..."],
-  "primary_time_columns": ["..."],
-  "primary_time_confidence": 0.0,
-  "preferred_use_cases": ["..."],
-  "anti_pattern_use_cases": ["..."],
-  "example_questions": ["..."],
-  "entity_counting_guidance": {
-    "entity_name": "string guidance"
+  "grain": {
+    "row_definition": "string",
+    "natural_keys": ["..."],
+    "candidate_unique_id_columns": ["..."],
+    "evidence": ["..."]
   },
-  "grain_warnings": ["..."],
-  "required_join_patterns": ["..."],
+  "temporal": {
+    "primary_filter_time_column": "column_name",
+    "time_column_meanings": {
+      "date_time": "reporting_date"
+    },
+    "period_notes": ["..."]
+  },
+  "counting": {
+    "default_row_count_entity": "string",
+    "entity_counting_guidance": {
+      "entity_name": "string guidance"
+    }
+  },
+  "answerability": {
+    "retained_dimensions": ["..."],
+    "rolled_up_over": ["..."],
+    "comparison_axes_available": ["..."],
+    "direct_answer_capabilities": ["..."],
+    "answerability_limitations": [
+      {
+        "question_need": "string",
+        "resolution": "requires_join | use_lower_grain_table | not_sufficient",
+        "details": "string"
+      }
+    ],
+    "action_filter_rules": [
+      {
+        "action": "string",
+        "entity": "string",
+        "required_conditions": ["..."]
+      }
+    ]
+  },
   "ambiguity_notes": ["..."],
-  "evidence": ["..."],
   "column_overrides": [
     {
-      "name": "column_name",
+      "column_name": "column_name",
+      "description": "string",
       "semantic_role": "identifier | dimension | metric | time | status | label",
-      "entity_tags": ["..."],
-      "measure_tags": ["..."],
+      "value_semantics": "entity_identifier | entity_label | geography_label | additive_numeric_metric | non_additive_numeric_metric | percentage | ordinal_band | reporting_date | event_date | status_label | free_text | other",
       "pii": true,
-      "pii_type": "direct_identifier | quasi_identifier | sensitive_attribute",
-      "aggregation_hints": ["..."],
-      "filter_usefulness": "low | medium | high",
-      "join_usefulness": "low | medium | high",
-      "ambiguity_notes": ["..."],
-      "confidence": 0.0,
-      "evidence": ["..."]
+      "ambiguity_notes": ["..."]
     }
   ]
 }
@@ -191,8 +207,10 @@ class DashboardChatMetadataEnricher:
 
         planning_payload = {
             "table_name": table.table_name,
-            "observed": self._serialize_observed_table(table),
-            "columns": [self._serialize_observed_column(column) for column in table.columns],
+            "table": self._serialize_table_for_enrichment(table),
+            "columns": [
+                self._serialize_column_for_enrichment(table, column) for column in table.columns
+            ],
         }
         response = self.client.chat.completions.create(
             model=self.model,
@@ -271,9 +289,7 @@ class DashboardChatMetadataEnricher:
             distinct_expression = f"COUNT(DISTINCT {quoted_columns[0]}) AS distinct_rows"
         else:
             distinct_expression = (
-                "COUNT(DISTINCT ("
-                + ", ".join(quoted_columns)
-                + ")) AS distinct_rows"
+                "COUNT(DISTINCT (" + ", ".join(quoted_columns) + ")) AS distinct_rows"
             )
         null_expressions = [
             f"SUM(CASE WHEN {quoted_column} IS NULL THEN 1 ELSE 0 END) AS c{index}_nulls"
@@ -293,8 +309,7 @@ class DashboardChatMetadataEnricher:
             "total_rows": row.get("total_rows"),
             "distinct_rows": row.get("distinct_rows"),
             "null_counts": {
-                columns[index]: row.get(f"c{index}_nulls")
-                for index in range(len(columns))
+                columns[index]: row.get(f"c{index}_nulls") for index in range(len(columns))
             },
         }
 
@@ -335,10 +350,9 @@ class DashboardChatMetadataEnricher:
             "org_context_excerpt": (org_context_markdown or "")[:3000],
             "dashboard_context_excerpt": (dashboard_context_markdown or "")[:3000],
             "table_name": table.table_name,
-            "observed_table": self._serialize_observed_table(table),
-            "observed_columns": [
-                self._serialize_observed_column(column)
-                for column in table.columns
+            "table": self._serialize_table_for_enrichment(table),
+            "columns": [
+                self._serialize_column_for_enrichment(table, column) for column in table.columns
             ],
             "profiling_results": profiling_results,
         }
@@ -374,37 +388,46 @@ class DashboardChatMetadataEnricher:
             return float(value)
         return str(value)
 
-    def _serialize_observed_table(self, table: DashboardChatMetadataTable) -> dict[str, Any]:
+    def _serialize_table_for_enrichment(self, table: DashboardChatMetadataTable) -> dict[str, Any]:
         return {
-            "unique_ids": table.observed.unique_ids,
-            "layer": table.observed.layer,
-            "schema_name": table.observed.schema_name,
-            "model_name": table.observed.model_name,
-            "human_label": table.observed.human_label,
-            "table_description": table.observed.table_description,
-            "time_coverage": table.observed.time_coverage,
-            "total_row_count": table.observed.total_row_count,
-            "approximate_size_hint": table.observed.approximate_size_hint,
-            "column_count": table.observed.column_count,
-            "chart_usage": [
-                usage.model_dump(mode="json") for usage in table.observed.chart_usage
-            ],
-            "statistics": table.observed.statistics,
+            "dbt_unique_id": table.dbt_unique_id,
+            "layer": table.layer,
+            "schema_name": table.schema_name,
+            "model_name": table.model_name,
+            "existing_description": table.description,
+            "upstream_models": table.upstream_models,
+            "chart_usage": [usage.model_dump(mode="json") for usage in table.chart_usage],
+            "statistics": table.statistics.model_dump(mode="json"),
+            "current_primary_entities": table.primary_entities,
+            "current_grain": table.grain.model_dump(mode="json"),
+            "current_temporal": table.temporal.model_dump(mode="json"),
+            "current_counting": table.counting.model_dump(mode="json"),
+            "current_answerability": table.answerability.model_dump(mode="json"),
+            "current_ambiguity_notes": table.ambiguity_notes,
         }
 
-    def _serialize_observed_column(self, column: DashboardChatMetadataColumn) -> dict[str, Any]:
+    def _serialize_column_for_enrichment(
+        self,
+        table: DashboardChatMetadataTable,
+        column: DashboardChatMetadataColumn,
+    ) -> dict[str, Any]:
         return {
-            "name": column.observed.name,
-            "data_type": column.observed.data_type,
-            "description": column.observed.description,
-            "nullable": column.observed.nullable,
-            "null_percentage": column.observed.null_percentage,
-            "distinct_count": column.observed.distinct_count,
-            "sample_values": column.observed.sample_values[:10],
-            "numeric_min": column.observed.numeric_min,
-            "numeric_max": column.observed.numeric_max,
-            "time_min": column.observed.time_min,
-            "time_max": column.observed.time_max,
+            "column_name": column.column_name,
+            "data_type": column.data_type,
+            "existing_description": column.description,
+            "semantic_role": column.semantic_role,
+            "value_semantics": column.value_semantics,
+            "pii": column.pii,
+            "nullable": column.statistics.nullable,
+            "null_percentage": column.statistics.null_percentage,
+            "distinct_count": table.statistics.distinct_counts.get(column.column_name),
+            "sample_values": column.statistics.sample_values[:10],
+            "range_profile": (
+                column.statistics.range_profile.model_dump(mode="json")
+                if column.statistics.range_profile is not None
+                else None
+            ),
+            "ambiguity_notes": column.ambiguity_notes,
         }
 
     def _apply_table_enrichment(
@@ -413,54 +436,38 @@ class DashboardChatMetadataEnricher:
         enrichment: dict[str, Any],
     ) -> DashboardChatMetadataTable:
         table_copy = table.model_copy(deep=True)
-        table_inferred = table_copy.inferred.model_copy(deep=True)
-        list_fields = {
-            "primary_entities",
-            "natural_keys",
-            "candidate_unique_id_columns",
-            "primary_time_columns",
-            "preferred_use_cases",
-            "anti_pattern_use_cases",
-            "example_questions",
-            "grain_warnings",
-            "required_join_patterns",
-            "ambiguity_notes",
-            "evidence",
-        }
-        for field_name in [
-            "table_purpose",
-            "table_type",
-            "row_grain",
-            "row_grain_confidence",
-            "primary_entities",
-            "natural_keys",
-            "natural_key_confidence",
-            "candidate_unique_id_columns",
-            "primary_time_columns",
-            "primary_time_confidence",
-            "preferred_use_cases",
-            "anti_pattern_use_cases",
-            "example_questions",
-            "entity_counting_guidance",
-            "grain_warnings",
-            "required_join_patterns",
-            "ambiguity_notes",
-            "evidence",
-        ]:
-            if field_name not in enrichment or not self._has_value(enrichment[field_name]):
-                continue
-            value = enrichment[field_name]
-            if field_name in list_fields:
-                value = self._normalize_string_list(value)
-                if not value:
-                    continue
-            setattr(table_inferred, field_name, value)
-        table_copy.inferred = table_inferred
+
+        if enrichment.get("description"):
+            table_copy.description = str(enrichment.get("description") or "").strip()
+        if enrichment.get("table_type"):
+            table_copy.table_type = str(enrichment.get("table_type") or "").strip()
+        if "primary_entities" in enrichment:
+            table_copy.primary_entities = self._normalize_string_list(
+                enrichment.get("primary_entities")
+            )
+        if enrichment.get("grain"):
+            table_copy.grain = type(table_copy.grain).model_validate(enrichment.get("grain") or {})
+        if enrichment.get("temporal"):
+            table_copy.temporal = type(table_copy.temporal).model_validate(
+                enrichment.get("temporal") or {}
+            )
+        if enrichment.get("counting"):
+            table_copy.counting = type(table_copy.counting).model_validate(
+                enrichment.get("counting") or {}
+            )
+        if enrichment.get("answerability"):
+            table_copy.answerability = type(table_copy.answerability).model_validate(
+                enrichment.get("answerability") or {}
+            )
+        if "ambiguity_notes" in enrichment:
+            table_copy.ambiguity_notes = self._normalize_string_list(
+                enrichment.get("ambiguity_notes")
+            )
 
         overrides_by_name = {
-            str(item.get("name") or ""): item
+            str(item.get("column_name") or item.get("name") or ""): item
             for item in (enrichment.get("column_overrides") or [])
-            if item.get("name")
+            if item.get("column_name") or item.get("name")
         }
         enriched_columns: list[DashboardChatMetadataColumn] = []
         for column in table_copy.columns:
@@ -468,16 +475,20 @@ class DashboardChatMetadataEnricher:
             if not override:
                 enriched_columns.append(column)
                 continue
-            inferred_column = column.inferred.model_copy(
-                update={
-                    key: self._normalize_override_value(key, value)
-                    for key, value in override.items()
-                    if key != "name" and self._has_value(value)
-                }
-            )
-            enriched_columns.append(
-                column.model_copy(update={"inferred": inferred_column})
-            )
+            column_copy = column.model_copy(deep=True)
+            if override.get("description"):
+                column_copy.description = str(override.get("description") or "").strip()
+            if override.get("semantic_role"):
+                column_copy.semantic_role = str(override.get("semantic_role") or "").strip()
+            if override.get("value_semantics"):
+                column_copy.value_semantics = str(override.get("value_semantics") or "").strip()
+            if "pii" in override:
+                column_copy.pii = bool(override.get("pii"))
+            if "ambiguity_notes" in override:
+                column_copy.ambiguity_notes = self._normalize_string_list(
+                    override.get("ambiguity_notes")
+                )
+            enriched_columns.append(column_copy)
         table_copy.columns = enriched_columns
         return table_copy
 
@@ -493,8 +504,8 @@ class DashboardChatMetadataEnricher:
         if getattr(warehouse_tools.org_warehouse, "wtype", None) == "bigquery":
             return warehouse_tools._quote_bigquery_table_ref(schema_name, bare_table_name)
         return (
-            f'{warehouse_tools._quote_postgres_identifier(schema_name)}.'
-            f'{warehouse_tools._quote_postgres_identifier(bare_table_name)}'
+            f"{warehouse_tools._quote_postgres_identifier(schema_name)}."
+            f"{warehouse_tools._quote_postgres_identifier(bare_table_name)}"
         )
 
     def _quote_column_name(
@@ -506,26 +517,6 @@ class DashboardChatMetadataEnricher:
         if getattr(warehouse_tools.org_warehouse, "wtype", None) == "bigquery":
             return f"`{normalized}`"
         return warehouse_tools._quote_postgres_identifier(normalized)
-
-    def _has_value(self, value: Any) -> bool:
-        if value is None:
-            return False
-        if isinstance(value, str):
-            return value != ""
-        if isinstance(value, (list, dict, tuple, set)):
-            return len(value) > 0
-        return True
-
-    def _normalize_override_value(self, key: str, value: Any) -> Any:
-        if key in {
-            "entity_tags",
-            "measure_tags",
-            "aggregation_hints",
-            "ambiguity_notes",
-            "evidence",
-        }:
-            return self._normalize_string_list(value)
-        return value
 
     def _normalize_string_list(self, value: Any) -> list[str]:
         if value is None:

@@ -10,6 +10,7 @@ from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntentDecision,
 )
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlVerificationResult
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 
 
@@ -55,3 +56,15 @@ class DashboardChatLlmClient(Protocol):
         warnings: list[str],
     ) -> str:
         """Compose the final user-facing markdown answer."""
+
+    def verify_sql_against_question(
+        self,
+        *,
+        user_query: str,
+        intent: DashboardChatIntent,
+        sql: str,
+        risk_flags: list[str],
+        referenced_tables: list[dict[str, Any]],
+        structural_dimensions: list[str],
+    ) -> DashboardChatSqlVerificationResult:
+        """Verify whether generated SQL matches the user's requested logic."""

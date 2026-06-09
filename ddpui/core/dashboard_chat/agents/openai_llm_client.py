@@ -22,6 +22,7 @@ from ddpui.core.dashboard_chat.contracts.intent_contracts import (
     DashboardChatIntentDecision,
 )
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
+from ddpui.core.dashboard_chat.contracts.sql_contracts import DashboardChatSqlVerificationResult
 from ddpui.models.dashboard_chat import DashboardChatPromptTemplateKey
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.openai_client import get_shared_openai_client
@@ -219,6 +220,62 @@ class OpenAIDashboardChatLlmClient:
         self._record_usage("final_answer_composition", response)
         answer = response.choices[0].message.content or ""
         return answer.strip()
+
+    def verify_sql_against_question(
+        self,
+        *,
+        user_query: str,
+        intent: DashboardChatIntent,
+        sql: str,
+        risk_flags: list[str],
+        referenced_tables: list[dict[str, Any]],
+        structural_dimensions: list[str],
+    ) -> DashboardChatSqlVerificationResult:
+        """Use an LLM verifier to check semantic SQL fit before execution."""
+        try:
+            result = self._complete_json(
+                operation="sql_verification",
+                system_prompt=self.prompt_store.get(
+                    DashboardChatPromptTemplateKey.SQL_VERIFICATION
+                ),
+                user_prompt=json.dumps(
+                    {
+                        "user_query": user_query,
+                        "intent": intent.value,
+                        "sql": sql,
+                        "risk_flags": risk_flags,
+                        "structural_dimensions": structural_dimensions,
+                        "referenced_tables": referenced_tables,
+                    },
+                    ensure_ascii=False,
+                ),
+                model_override=self.model,
+                reasoning_effort=self.reasoning_effort,
+            )
+            return DashboardChatSqlVerificationResult(
+                is_valid=bool(result.get("is_valid")),
+                severity=str(result.get("severity") or "hard_block"),
+                reason_code=str(result.get("reason_code") or ""),
+                reasoning=str(result.get("reasoning") or ""),
+                issues=[str(item) for item in (result.get("issues") or []) if item],
+                repair_instructions=[
+                    str(item) for item in (result.get("repair_instructions") or []) if item
+                ],
+                risk_flags=[str(item) for item in (result.get("risk_flags") or []) if item],
+                warnings=[str(item) for item in (result.get("warnings") or []) if item],
+            )
+        except Exception:
+            logger.exception("Dashboard chat SQL verification failed")
+            return DashboardChatSqlVerificationResult(
+                is_valid=True,
+                severity="warning",
+                reason_code="verifier_failed_open",
+                reasoning="SQL verifier failed open",
+                issues=[],
+                repair_instructions=[],
+                risk_flags=risk_flags,
+                warnings=["SQL verifier failed open."],
+            )
 
     def get_prompt(self, prompt_key: DashboardChatPromptTemplateKey | str) -> str:
         """Return one stored dashboard chat prompt."""

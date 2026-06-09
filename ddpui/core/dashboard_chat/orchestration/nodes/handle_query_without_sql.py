@@ -49,6 +49,7 @@ def handle_query_without_sql_node(
         if sql_validation is not None
         else None,
         "sql_results": execution_result["sql_results"],
+        "pii_value_map": execution_result["pii_value_map"],
         "warnings": execution_result["warnings"],
         "timing_breakdown": merge_tool_loop_timing(state, execution_result),
         "schema_snippet_payloads": execution_result["schema_snippet_payloads"],

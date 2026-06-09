@@ -19,6 +19,7 @@ from ddpui.core.dashboard_chat.metadata.search import (
     search_metadata_tables,
     table_lookup,
 )
+from ddpui.core.dashboard_chat.orchestration.pii_masking import mask_metadata_artifact_for_llm
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 QUARTER_PATTERN = re.compile(r"\bq([1-4])(?:\s*[-–]\s*q([1-4]))?\b", re.IGNORECASE)
@@ -35,6 +36,20 @@ def _load_metadata_artifact(
     if not payload:
         return None
     return DashboardChatMetadataArtifactPayload.model_validate(payload)
+
+
+def _load_metadata_artifact_for_tool(
+    state: DashboardChatGraphState,
+    turn_context,
+) -> DashboardChatMetadataArtifactPayload | None:
+    artifact = _load_metadata_artifact(state)
+    if artifact is None:
+        return None
+    return mask_metadata_artifact_for_llm(
+        state=state,
+        turn_context=turn_context,
+        artifact=artifact,
+    )
 
 
 def _load_chart_registry(
@@ -61,12 +76,14 @@ def handle_get_chart_table_metadata_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return chart entries plus metadata for the chart tables they use."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
 
     chart_ids = {int(value) for value in (args.get("chart_ids") or []) if value is not None}
-    chart_titles = {str(value).strip().lower() for value in (args.get("chart_titles") or []) if value}
+    chart_titles = {
+        str(value).strip().lower() for value in (args.get("chart_titles") or []) if value
+    }
     table_names = {str(value).strip() for value in (args.get("table_names") or []) if value}
 
     registry = _load_chart_registry(state)
@@ -107,7 +124,7 @@ def handle_search_metadata_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Search the enriched metadata artifact using structured query-brief fields."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
 
@@ -131,12 +148,16 @@ def handle_get_table_metadata_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return full metadata entries for the requested tables."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     requested_tables = [str(value) for value in (args.get("tables") or []) if value]
     by_name = table_lookup(artifact)
-    tables = [by_name[table_name].model_dump(mode="json") for table_name in requested_tables if table_name in by_name]
+    tables = [
+        by_name[table_name].model_dump(mode="json")
+        for table_name in requested_tables
+        if table_name in by_name
+    ]
     return {"count": len(tables), "tables": tables}
 
 
@@ -146,11 +167,13 @@ def handle_get_column_metadata_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return matching columns from the requested tables."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     requested_tables = {str(value) for value in (args.get("tables") or []) if value}
-    column_terms = [str(value).strip().lower() for value in (args.get("column_terms") or []) if value]
+    column_terms = [
+        str(value).strip().lower() for value in (args.get("column_terms") or []) if value
+    ]
     matches: list[dict[str, Any]] = []
     for table in artifact.tables:
         if requested_tables and table.table_name not in requested_tables:
@@ -160,9 +183,8 @@ def handle_get_column_metadata_tool(
                 [
                     column.name.lower(),
                     column.description.lower(),
-                    " ".join(column.entity_tags).lower(),
-                    " ".join(column.measure_tags).lower(),
                     column.semantic_role.lower(),
+                    column.value_semantics.lower(),
                 ]
             )
             if column_terms and not all(term in haystack for term in column_terms):
@@ -184,7 +206,7 @@ def handle_search_columns_by_name_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Find all allowlisted tables containing a column-name match."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     column_name = str(args.get("column_name") or "").strip()
@@ -202,7 +224,7 @@ def handle_get_join_paths_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return join paths touching the requested tables."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     table_names = [str(value) for value in (args.get("tables") or []) if value]
@@ -220,7 +242,7 @@ def handle_get_table_statistics_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return precomputed statistics for the requested tables."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     requested_tables = [str(value) for value in (args.get("tables") or []) if value]
@@ -236,8 +258,8 @@ def handle_get_table_statistics_tool(
                 "row_grain": table.row_grain,
                 "table_type": table.table_type,
                 "total_row_count": table.total_row_count,
-                "time_coverage": table.time_coverage,
-                "statistics": table.statistics,
+                "temporal": table.temporal.model_dump(mode="json"),
+                "statistics": table.statistics.model_dump(mode="json"),
             }
         )
     return {"count": len(stats), "tables": stats}
@@ -249,7 +271,7 @@ def handle_get_related_tables_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return related tables connected through the metadata join graph."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     related = get_related_tables(
@@ -267,7 +289,7 @@ def handle_read_full_metadata_tool(
     turn_context,
 ) -> dict[str, Any]:
     """Return the full enriched dashboard metadata artifact. Extreme last resort only."""
-    artifact = _load_metadata_artifact(state)
+    artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     return artifact.model_dump(mode="json")

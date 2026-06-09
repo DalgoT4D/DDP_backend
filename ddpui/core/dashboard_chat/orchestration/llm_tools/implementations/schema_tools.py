@@ -15,6 +15,8 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     get_turn_warehouse_tools,
     record_validated_distinct_values,
 )
+from ddpui.core.dashboard_chat.orchestration.pii_masking import mask_distinct_values_for_llm
+
 
 def _build_table_profile(columns: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize whether a table is row-grain, aggregate-like, or score-bearing."""
@@ -197,12 +199,20 @@ def handle_get_distinct_values_tool(
         table_name=table_name,
         column_name=column_name,
         values=values,
+        column_values_exhaustive=len(values) < limit,
+    )
+    masked_values = mask_distinct_values_for_llm(
+        state=state,
+        turn_context=turn_context,
+        table_name=table_name,
+        column_name=column_name,
+        values=values,
     )
     return {
         "table": table_name,
         "column": column_name,
-        "values": values,
-        "count": len(values),
+        "values": masked_values,
+        "count": len(masked_values),
     }
 
 

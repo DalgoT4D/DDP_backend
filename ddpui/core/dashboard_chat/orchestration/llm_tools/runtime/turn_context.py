@@ -46,7 +46,12 @@ class DashboardChatTurnContext:
     last_sql: str | None = None
     last_sql_results: list[dict[str, Any]] | None = None
     last_sql_validation: DashboardChatSqlValidationResult | None = None
+    semantic_verifier_rejections: int = 0
+    repaired_reason_codes: set[str] = field(default_factory=set)
     timing_breakdown: dict[str, Any] = field(default_factory=dict)
+    pii_value_map: dict[str, str] = field(default_factory=dict)
+    pii_tokens_by_value: dict[str, str] = field(default_factory=dict)
+    pii_token_counters: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_state(
@@ -107,7 +112,10 @@ def current_schema_snippet_payloads(turn_context: DashboardChatTurnContext) -> d
 def current_validated_distinct_payloads(turn_context: DashboardChatTurnContext) -> dict[str, Any]:
     """Serialize the current turn's validated distinct values back into checkpoint-safe payloads."""
     serialized: dict[str, dict[str, list[str]]] = {}
-    for table_name, column_name, value in turn_context.validated_distinct_values:
+    for validated_entry in turn_context.validated_distinct_values:
+        if len(validated_entry) != 3:
+            continue
+        table_name, column_name, value = validated_entry
         serialized.setdefault(table_name, {}).setdefault(column_name, []).append(value)
     return {
         table_name: {column_name: sorted(set(values)) for column_name, values in column_map.items()}
@@ -189,11 +197,15 @@ def record_validated_distinct_values(
     table_name: str,
     column_name: str,
     values: Sequence[Any],
+    column_values_exhaustive: bool = False,
 ) -> None:
     """Persist exact validated filter values into the current turn state."""
     normalized_table = table_name.lower()
     normalized_column = column_name.lower()
     validated_distinct_values = turn_context.validated_distinct_values
+    if column_values_exhaustive:
+        validated_distinct_values.add((normalized_table, normalized_column))
+        validated_distinct_values.add(("*", normalized_column))
     for value in values:
         normalized_value = normalize_distinct_value(value)
         validated_distinct_values.add((normalized_table, normalized_column, normalized_value))
