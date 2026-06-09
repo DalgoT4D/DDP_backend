@@ -1,5 +1,6 @@
 """Chart API endpoints"""
 
+import json
 from typing import Optional, List, Dict, Any
 import copy
 import csv
@@ -18,7 +19,6 @@ from ddpui.models.dashboard import DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-from ddpui.core.charts.chart_validator import ChartValidator
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -952,8 +952,6 @@ def download_chart_data_csv(
     request, payload: ChartDataPayload, dashboard_filters: Optional[str] = None
 ):
     """Stream and download chart data as CSV with all filters/aggregations applied (authenticated)"""
-    import json
-
     orguser: OrgUser = request.orguser
 
     # Validate user has access to schema/table
@@ -1094,8 +1092,8 @@ def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
 
-    # ChartData / ChartService / ChartValidator still operate on dicts internally;
-    # ChartCreate.extra_config is now a typed sub-schema, so convert back here.
+    # ChartData / ChartService operate on dicts internally; ChartCreate.extra_config
+    # is a typed sub-schema (validated already), so convert back here.
     extra_config = payload.extra_config.model_dump()
 
     # Log the incoming payload for debugging

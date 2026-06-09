@@ -5,15 +5,44 @@ from ninja import Schema
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class ChartMetric(Schema):
-    """Schema for individual chart metric"""
+# The aggregations the chart pipeline supports. None is allowed too — it's
+# valid when the metric carries a `column_expression` (raw SQL) instead.
+ChartMetricAggregation = Literal["sum", "avg", "count", "min", "max", "count_distinct"]
 
-    column: Optional[str] = None  # Column name, null for COUNT(*) operations
-    aggregation: Optional[str] = None  # SUM, COUNT, AVG, MAX, MIN, etc.
-    alias: Optional[str] = None  # Display name for the metric
-    # Expression path: raw SQL expression (e.g. "SUM(col_a) / COUNT(DISTINCT id)")
-    # Mutually exclusive with column + aggregation
+
+class ChartMetric(Schema):
+    """Schema for individual chart metric.
+
+    Three valid shapes:
+    1. `column_expression` set → raw SQL; `aggregation` / `column` ignored.
+    2. `aggregation == "count"` → `column` may be None (COUNT(*)).
+    3. Otherwise → both `aggregation` and `column` required.
+
+    Rule (3) is enforced by the model_validator below; without it Pydantic
+    would happily accept aggregation="sum" with column=None, which the SQL
+    builder later rejects with a much worse error.
+    """
+
+    column: Optional[str] = None
+    aggregation: Optional[ChartMetricAggregation] = None
+    alias: Optional[str] = None
     column_expression: Optional[str] = None
+
+    @model_validator(mode="after")
+    def check_aggregation_column_pair(self) -> "ChartMetric":
+        # Expression metrics bypass the aggregation/column requirement.
+        if self.column_expression:
+            return self
+        if self.aggregation is None:
+            raise ValueError(
+                "metric requires either `aggregation` (with optional `column`) or `column_expression`"
+            )
+        # COUNT can stand alone (COUNT(*)); every other aggregation needs a column.
+        if self.aggregation != "count" and not self.column:
+            raise ValueError(
+                f"metric with aggregation='{self.aggregation}' requires `column`"
+            )
+        return self
 
 
 # ── Shared filter / sort / pagination sub-schemas ──────────────────────────
@@ -22,8 +51,8 @@ class ChartMetric(Schema):
 # / objects, even when empty.
 
 
-# All operators the UI's filter editor exposes. Used by chart_validator and by
-# the query builder when translating filters into WHERE clauses.
+# All operators the UI's filter editor exposes. Used by the query builder
+# when translating filters into WHERE clauses.
 FilterOperator = Literal[
     "equals",
     "not_equals",
@@ -66,6 +95,43 @@ class ChartSort(BaseModel):
     direction: Literal["asc", "desc"]
 
 
+# Per-chart-type customizations — typed where the chart pipeline actually
+# constrains values. `_ChartConfigBase.customizations` is plain dict for
+# chart_types we don't constrain (bar/line/pie/table).
+
+
+NumberFormat = Literal[
+    "default",
+    "percentage",
+    "currency",
+    "indian",
+    "international",
+    "european",
+    "adaptive_international",
+    "adaptive_indian",
+]
+
+
+class NumberChartCustomizations(BaseModel):
+    """`extra_config.customizations` for chart_type='number'."""
+
+    model_config = ConfigDict(extra="allow")
+
+    numberFormat: Optional[NumberFormat] = None
+    decimalPlaces: Optional[int] = Field(default=None, ge=0, le=10)
+
+
+MapColorScheme = Literal["Blues", "Reds", "Greens", "Purples", "Oranges", "Greys"]
+
+
+class MapChartCustomizations(BaseModel):
+    """`extra_config.customizations` for chart_type='map'."""
+
+    model_config = ConfigDict(extra="allow")
+
+    colorScheme: Optional[MapColorScheme] = None
+
+
 class ChartPagination(BaseModel):
     """Pagination on `extra_config.pagination` — the persisted chart-level
     config (whether to paginate, page size). This is distinct from the
@@ -80,7 +146,22 @@ class ChartPagination(BaseModel):
 
 
 class TableChartDimension(BaseModel):
-    """A dimension entry on `TableChartConfig.dimensions`."""
+    """A dimension entry on `TableChartConfig.dimensions`.
+
+    This is the "rich" dimension shape introduced for the drill-down feature.
+    The UI persists it alongside two older fields:
+
+    - `TableChartConfig.dimension_columns: List[str]` — a flat list of the
+      column names, written for backward compatibility. **This is the field
+      the backend render path currently reads** (`build_chart_data_payload`
+      and `normalize_dimensions` in `charts_service.py`).
+    - `TableChartConfig.dimension_column: Optional[str]` — a scalar carried
+      over from the universal chart payload shape. Not read for tables.
+
+    `enable_drill_down` is currently only consumed for a log line in the
+    create endpoint; the drill-down feature itself is wired up at the
+    frontend. Future render-path migration could read `dimensions` directly.
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -132,29 +213,46 @@ class NumberChartConfig(_ChartConfigBase):
     """extra_config payload for chart_type='number'. One metric, no dimension."""
 
     metrics: List[ChartMetric] = Field(..., min_length=1, max_length=1)
+    # Override the base's plain-dict customizations with a typed model that
+    # enforces numberFormat / decimalPlaces.
+    customizations: Optional[NumberChartCustomizations] = None
 
 
 class MapChartConfig(_ChartConfigBase):
-    """extra_config payload for chart_type='map'. Requires geographic + value cols."""
+    """extra_config payload for chart_type='map'. Requires `geographic_column`
+    and `selected_geojson_id`. `value_column` is Optional because COUNT(*)
+    metrics don't carry a measured column — the deleted ChartValidator only
+    enforced geographic_column + selected_geojson_id, and the UI omits
+    value_column for count-based maps.
+    """
 
     geographic_column: str
-    value_column: str
+    value_column: Optional[str] = None
     selected_geojson_id: int
+    customizations: Optional[MapChartCustomizations] = None
 
 
 class TableChartConfig(_ChartConfigBase):
     """extra_config payload for chart_type='table'.
 
-    Table charts come in two flavours and the chart_validator enforces
-    nothing on either, so all fields are declared Optional. They are
-    declared (rather than left as untyped extras) so the LLM / OpenAPI
-    schema see the contract:
+    Table charts come in two flavours and the render path enforces nothing
+    on either, so all fields are Optional:
 
     - Raw-data table → populate `table_columns` with the columns to display.
-    - Aggregated table → populate `dimensions` + `metrics`.
+    - Aggregated table → populate `dimensions` (+ optional `metrics`).
 
-    Any combination is accepted at the schema layer; additional UI fields
-    pass through via `extra="allow"`.
+    `dimensions` is the canonical shape (per-row drill-down flags).
+    `dimension_columns: List[str]` is the flat-list mirror the backend
+    render path actually reads (`build_chart_data_payload` →
+    `normalize_dimensions`). If the caller supplies `dimensions` without
+    `dimension_columns`, the validator below backfills the mirror so the
+    backend still sees a value. When the render path eventually reads
+    `dimensions` directly, the derived field can be retired.
+
+    The UI also writes a scalar `dimension_column` on every chart save
+    (universal-payload leftover). The backend ignores it for tables; we
+    let it pass through via `extra="allow"` rather than declaring it,
+    keeping the LLM / OpenAPI contract focused on the fields that matter.
     """
 
     # Raw-data table shape
@@ -165,9 +263,17 @@ class TableChartConfig(_ChartConfigBase):
     dimension_columns: Optional[List[str]] = None
     metrics: Optional[List[ChartMetric]] = None
 
-    # Scalar dimension + aggregate the UI also sends on table-chart saves
-    dimension_column: Optional[str] = None
     aggregate_function: Optional[str] = None
+
+    @model_validator(mode="after")
+    def derive_dimension_columns(self) -> "TableChartConfig":
+        """Mirror `dimensions[].column` onto `dimension_columns` if the caller
+        didn't already supply it. The backend render path reads
+        `dimension_columns` today; this keeps that path working when a
+        modern caller only sends the rich `dimensions` shape."""
+        if self.dimensions and not self.dimension_columns:
+            self.dimension_columns = [d.column for d in self.dimensions if d.column]
+        return self
 
 
 ChartExtraConfig = Union[
@@ -195,17 +301,19 @@ class ChartCreate(Schema):
     `extra_config` is typed per-chart-type — the actual sub-schema is chosen
     by the after-validator below (e.g. bar → BarChartConfig). Invalid
     combinations (bar without dimension_column, map without
-    geographic_column, pie with > 1 metric, etc.) are rejected at the schema
-    layer rather than deeper in the chart_validator.
+    geographic_column, pie with > 1 metric, metric with aggregation='sum'
+    and no column, etc.) are rejected here rather than deeper in the SQL
+    builder.
 
-    Each sub-schema declares only the fields the downstream chart_validator
-    actually requires; all other UI-sent fields pass through via
-    `extra="allow"` so existing payloads are not lossy.
+    Each sub-schema declares the fields the render path requires; all other
+    UI-sent fields pass through via `extra="allow"` so existing payloads
+    are not lossy.
 
-    Implementation note: `extra_config` is declared as `dict` rather than as
-    a `Union[...]` so the per-chart-type dispatch is explicit (Pydantic's
-    smart Union resolution would always pick TableChartConfig, which has no
-    required fields, as the loose match for every payload).
+    Implementation note: `extra_config` is declared as `Any` rather than
+    `Union[BarChartConfig, …]` because Pydantic's smart Union resolution
+    would always pick `TableChartConfig` (no required fields → loosest
+    match) for every payload, defeating per-type validation. We dispatch
+    explicitly in `coerce_extra_config_to_typed` keyed on `chart_type`.
     """
 
     title: str
@@ -213,23 +321,16 @@ class ChartCreate(Schema):
     chart_type: Literal["bar", "line", "pie", "number", "map", "table"]
     schema_name: str
     table_name: str
-    # Typed as Any at the field level — the actual runtime type is one of the
-    # per-chart-type config models (BarChartConfig, MapChartConfig, etc.) set
-    # by the validator below. Declaring it as a `Union[...]` here would let
-    # Pydantic's smart Union resolution always pick TableChartConfig (no
-    # required fields → loosest match), which defeats per-type validation.
     extra_config: Any
 
     @model_validator(mode="after")
     def coerce_extra_config_to_typed(self) -> "ChartCreate":
-        """Validate the raw `extra_config` dict against the per-chart-type sub-schema.
-
-        Raises ValidationError with field-level details if the user passed
-        e.g. metrics without dimension_column for a bar chart.
-        """
+        """Replace the raw `extra_config` dict with the typed sub-schema
+        instance for `chart_type`. Raises ValidationError with field-level
+        details on failure (e.g. metrics without dimension_column for bar)."""
         sub_schema = _CHART_CONFIG_BY_TYPE.get(self.chart_type)
         if sub_schema is not None and isinstance(self.extra_config, dict):
-            # .model_dump() on the result will preserve extras because each
+            # model_dump() on the result preserves extras because each
             # sub-schema sets extra="allow".
             self.extra_config = sub_schema(**self.extra_config)
         return self
@@ -239,13 +340,13 @@ class ChartUpdate(Schema):
     """Schema for updating a chart.
 
     All fields are Optional — callers can send any subset (e.g. just a title
-    change). When both `chart_type` and `extra_config` are present, the same
+    change). When both `chart_type` and `extra_config` are present the same
     per-type validation as `ChartCreate` is applied. When only `extra_config`
-    is sent without `chart_type`, we cannot infer which sub-schema to apply
+    is sent without `chart_type` we cannot infer which sub-schema to apply
     (the existing chart_type lives in the DB, not on the payload), so the
-    dict passes through and downstream `ChartValidator.validate_for_update`
-    catches structural errors. In practice the chart-builder UI always sends
-    both, so the typed path is the live path.
+    dict passes through unchecked. In practice the chart-builder UI always
+    sends both (see `app/charts/[id]/edit/page.tsx`), so the typed path is
+    the live path.
     """
 
     title: Optional[str] = None

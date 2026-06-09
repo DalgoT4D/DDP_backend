@@ -48,18 +48,32 @@ class TestChartMetricSchema:
         assert metric.column is None
         assert metric.aggregation == "count"
 
-    def test_chart_metric_missing_aggregation(self):
-        """Test that aggregation defaults to None when not provided"""
-        metric = ChartMetric(column="revenue")
-        assert metric.aggregation is None
+    def test_chart_metric_missing_aggregation_rejected(self):
+        """A metric with no aggregation and no column_expression is invalid."""
+        with pytest.raises(ValidationError):
+            ChartMetric(column="revenue")
+
+    def test_chart_metric_sum_without_column_rejected(self):
+        """Non-count aggregations need a column (count can stand alone for COUNT(*))."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="sum")
+
+    def test_chart_metric_column_expression_bypasses_rules(self):
+        """An expression metric is valid without aggregation/column."""
+        metric = ChartMetric(column_expression="SUM(a) / COUNT(DISTINCT id)")
+        assert metric.column_expression.startswith("SUM(a)")
 
     def test_chart_metric_all_aggregation_types(self):
-        """Test various aggregation types"""
+        """All six valid aggregations accepted."""
         aggregations = ["sum", "avg", "count", "min", "max", "count_distinct"]
 
         for agg in aggregations:
             metric = ChartMetric(column="value", aggregation=agg)
             assert metric.aggregation == agg
+
+    def test_chart_metric_unknown_aggregation_rejected(self):
+        with pytest.raises(ValidationError):
+            ChartMetric(column="value", aggregation="median")
 
 
 # ================================================================================
@@ -378,7 +392,10 @@ class TestChartCreateTypedExtraConfig:
                 },
             )
 
-    def test_map_requires_geographic_and_value_columns(self):
+    def test_map_requires_geographic_and_geojson_id(self):
+        """Map needs geographic_column + selected_geojson_id; value_column is
+        Optional because COUNT(*) metrics don't carry a measured column (the
+        UI omits value_column for count-based maps)."""
         with pytest.raises(ValidationError):
             ChartCreate(
                 title="t",
@@ -387,6 +404,21 @@ class TestChartCreateTypedExtraConfig:
                 table_name="users",
                 extra_config={"geographic_column": "state"},
             )
+
+    def test_map_accepts_count_without_value_column(self):
+        """A map with COUNT(*) metric and no value_column must validate."""
+        chart = ChartCreate(
+            title="t",
+            chart_type="map",
+            schema_name="public",
+            table_name="regional_sales",
+            extra_config={
+                "geographic_column": "region",
+                "selected_geojson_id": 1,
+                "metrics": [{"column": None, "aggregation": "count"}],
+            },
+        )
+        assert chart.extra_config.value_column is None
 
     # ── valid happy paths per chart_type ─────────────────────────────────
 
@@ -489,12 +521,14 @@ class TestChartCreateTypedExtraConfig:
                 "geographic_column": "region",
                 "value_column": "sales",
                 "selected_geojson_id": 1,
-                "customizations": {"theme": "dark"},
+                "customizations": {"colorScheme": "Blues", "theme": "dark"},
                 "layers": [{"name": "states"}],
             },
         )
         outer = chart.model_dump()
-        assert outer["extra_config"]["customizations"] == {"theme": "dark"}
+        # Typed map customizations include the declared field + UI extras.
+        assert outer["extra_config"]["customizations"]["colorScheme"] == "Blues"
+        assert outer["extra_config"]["customizations"]["theme"] == "dark"
         assert outer["extra_config"]["layers"] == [{"name": "states"}]
 
     # ── invalid chart_type ───────────────────────────────────────────────
@@ -754,6 +788,126 @@ class TestRealWorldTableChartPayload:
                 table_name="users",
                 extra_config={"dimensions": [{"enable_drill_down": True}]},
             )
+
+    def test_dimension_columns_auto_derived_when_missing(self):
+        """If a caller sends `dimensions` without `dimension_columns`, the
+        validator backfills the mirror so the backend render path still
+        sees a value."""
+        chart = ChartCreate(
+            title="t",
+            chart_type="table",
+            schema_name="public",
+            table_name="users",
+            extra_config={
+                "dimensions": [
+                    {"column": "country", "enable_drill_down": True},
+                    {"column": "state", "enable_drill_down": False},
+                ],
+                # dimension_columns intentionally omitted
+            },
+        )
+        assert chart.extra_config.dimension_columns == ["country", "state"]
+
+    def test_dimension_columns_preserved_when_supplied(self):
+        """If the caller supplies `dimension_columns`, we don't overwrite it."""
+        chart = ChartCreate(
+            title="t",
+            chart_type="table",
+            schema_name="public",
+            table_name="users",
+            extra_config={
+                "dimensions": [{"column": "country", "enable_drill_down": False}],
+                "dimension_columns": ["country", "extra_legacy_col"],
+            },
+        )
+        assert chart.extra_config.dimension_columns == ["country", "extra_legacy_col"]
+
+
+# ================================================================================
+# Typed customizations — Number / Map charts (ported from ChartValidator rules)
+# ================================================================================
+
+
+class TestTypedCustomizations:
+    """Number and Map charts have typed `customizations` sub-schemas that
+    constrain the enums the old ChartValidator used to enforce.
+    """
+
+    # ── Number chart ─────────────────────────────────────────────────────
+
+    def _number(self, **customizations):
+        return ChartCreate(
+            title="t",
+            chart_type="number",
+            schema_name="public",
+            table_name="users",
+            extra_config={
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
+                "customizations": customizations,
+            },
+        )
+
+    def test_number_accepts_valid_format(self):
+        chart = self._number(numberFormat="percentage", decimalPlaces=2)
+        assert chart.extra_config.customizations.numberFormat == "percentage"
+        assert chart.extra_config.customizations.decimalPlaces == 2
+
+    def test_number_rejects_unknown_format(self):
+        with pytest.raises(ValidationError):
+            self._number(numberFormat="binary")
+
+    def test_number_rejects_negative_decimal_places(self):
+        with pytest.raises(ValidationError):
+            self._number(decimalPlaces=-1)
+
+    def test_number_rejects_decimal_places_above_10(self):
+        with pytest.raises(ValidationError):
+            self._number(decimalPlaces=11)
+
+    def test_number_customizations_extras_pass_through(self):
+        """UI may add fields like prefix/suffix; those should survive."""
+        chart = self._number(numberFormat="currency", prefix="$", suffix="")
+        dumped = chart.extra_config.customizations.model_dump()
+        assert dumped["prefix"] == "$"
+
+    def test_number_customizations_optional(self):
+        chart = ChartCreate(
+            title="t",
+            chart_type="number",
+            schema_name="public",
+            table_name="users",
+            extra_config={"metrics": [{"column": "x", "aggregation": "sum"}]},
+        )
+        assert chart.extra_config.customizations is None
+
+    # ── Map chart ────────────────────────────────────────────────────────
+
+    def _map(self, **customizations):
+        return ChartCreate(
+            title="t",
+            chart_type="map",
+            schema_name="public",
+            table_name="regional_sales",
+            extra_config={
+                "geographic_column": "region",
+                "value_column": "sales",
+                "selected_geojson_id": 1,
+                "customizations": customizations,
+            },
+        )
+
+    def test_map_accepts_valid_color_scheme(self):
+        chart = self._map(colorScheme="Blues")
+        assert chart.extra_config.customizations.colorScheme == "Blues"
+
+    def test_map_rejects_unknown_color_scheme(self):
+        with pytest.raises(ValidationError):
+            self._map(colorScheme="Viridis")
+
+    def test_map_customizations_extras_pass_through(self):
+        chart = self._map(colorScheme="Greens", strokeWidth=2)
+        dumped = chart.extra_config.customizations.model_dump()
+        assert dumped["strokeWidth"] == 2
 
 
 # ================================================================================
