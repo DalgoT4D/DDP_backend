@@ -364,11 +364,18 @@ class ChartUpdate(Schema):
     @model_validator(mode="after")
     def coerce_extra_config_to_typed(self) -> "ChartUpdate":
         """Per-type validation runs only when both chart_type and extra_config
-        are sent. Otherwise the dict passes through untouched."""
+        are sent. Otherwise the dict passes through untouched.
+
+        `extra_config` is annotated `Any` (to bypass Union resolution), so we
+        enforce the dict-shape here. None remains valid — it means the caller
+        is doing a partial update that doesn't touch extra_config.
+        """
+        if self.extra_config is not None and not isinstance(self.extra_config, dict):
+            raise ValueError("extra_config must be an object")
         if self.chart_type is None or self.extra_config is None:
             return self
         sub_schema = _CHART_CONFIG_BY_TYPE.get(self.chart_type)
-        if sub_schema is not None and isinstance(self.extra_config, dict):
+        if sub_schema is not None:
             self.extra_config = sub_schema(**self.extra_config)
         return self
 

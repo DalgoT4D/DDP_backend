@@ -541,6 +541,21 @@ class TestChartCreateTypedExtraConfig:
                 extra_config={},
             )
 
+    # ── non-dict extra_config rejected at schema layer ───────────────────
+
+    @pytest.mark.parametrize("bad", [None, "string", 42, [1, 2, 3], 3.14, True])
+    def test_extra_config_non_dict_rejected(self, bad):
+        """ChartCreate must reject non-dict `extra_config` at validation time
+        so the endpoint never reaches `.model_dump()` on a primitive."""
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="bar",
+                schema_name="public",
+                table_name="users",
+                extra_config=bad,
+            )
+
 
 # ================================================================================
 # Test typed filters / sort / pagination on extra_config
@@ -953,6 +968,14 @@ class TestChartUpdateTypedExtraConfig:
     def test_unknown_chart_type_rejected(self):
         with pytest.raises(ValidationError):
             ChartUpdate(chart_type="heatmap")
+
+    @pytest.mark.parametrize("bad", ["string", 42, [1, 2, 3], 3.14, True])
+    def test_extra_config_non_dict_rejected(self, bad):
+        """ChartUpdate must reject non-dict (and non-None) `extra_config`
+        regardless of whether chart_type is also sent — None remains valid
+        because it means the partial update doesn't touch extra_config."""
+        with pytest.raises(ValidationError):
+            ChartUpdate(extra_config=bad)
 
     def test_filters_validated_on_update(self):
         """Filter operator validation runs the same way as on create."""
