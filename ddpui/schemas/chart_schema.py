@@ -269,7 +269,7 @@ class TableChartConfig(_ChartConfigBase):
         didn't already supply it. The backend render path reads
         `dimension_columns` today; this keeps that path working when a
         modern caller only sends the rich `dimensions` shape."""
-        if self.dimensions and not self.dimension_columns:
+        if self.dimensions and self.dimension_columns is None:
             self.dimension_columns = [d.column for d in self.dimensions if d.column]
         return self
 
