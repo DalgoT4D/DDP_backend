@@ -57,6 +57,10 @@ DDP_WORK_QUEUE = "ddp"
 MANUL_DBT_WORK_QUEUE = "manual-dbt"
 EDR_WORK_QUEUE = "edr"
 
+# Prefect EKS worker related - Queue names
+SCHEDULED_PIPELINE_QUEUE = "scheduled_pipeline"
+CONNECTION_SYNC_QUEUE = "airbyte_sync"
+
 # Kind
 FLOW_RUN_KIND = "flow-run"
 TASK_RUN_KIND = "task-run"

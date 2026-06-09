@@ -236,7 +236,7 @@ def test_seed_data(seed_db):
 
 def test_seed_master_tasks(seed_master_tasks_db):
     """a test to seed the database"""
-    assert Task.objects.count() == 12
+    assert Task.objects.count() == 13
 
 
 # ================================================================================
@@ -340,7 +340,7 @@ def test_get_prefect_transformation_tasks_success(orguser_transform_tasks):
 
     get_prefect_transformation_tasks(request)
 
-    assert OrgTask.objects.filter(org=request.orguser.org).count() == 7  # including git, dbt
+    assert OrgTask.objects.filter(org=request.orguser.org).count() == 8  # including git, dbt
 
 
 @patch.multiple(

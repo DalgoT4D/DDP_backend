@@ -378,10 +378,10 @@ def test_get_transform_type_none(orguser: OrgUser):
 
 def test_get_transform_type_non_none(orguser: OrgUser):
     """tests get_transform_type"""
-    orguser.org.dbt = OrgDbt(transform_type="ui")
+    orguser.org.dbt = OrgDbt(transform_type="github")
     request = mock_request(orguser)
     retval = get_transform_type(request)
-    assert retval == {"transform_type": "ui"}
+    assert retval == {"transform_type": "github"}
 
 
 def test_post_run_dbt_commands_no_payload(orguser: OrgUser, f_org_tasks):

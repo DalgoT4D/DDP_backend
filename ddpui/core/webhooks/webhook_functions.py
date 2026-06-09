@@ -1,6 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
+import sentry_sdk
 from ninja.errors import HttpError
 from django.db.models import F
 from django.utils.dateparse import parse_datetime
@@ -90,6 +91,7 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
             return org
 
     logger.error("didn't find the org slug inside the webhook function")
+    sentry_sdk.set_tag("org_slug", "__unknown__")
 
     return None
 
@@ -346,6 +348,7 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
         ]:
             org = get_org_from_flow_run(flow_run)
             if org:
+                sentry_sdk.set_tag("org_slug", org.slug)
                 if (
                     state
                     in [

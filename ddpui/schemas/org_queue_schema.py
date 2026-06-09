@@ -7,6 +7,7 @@ class QueueDetailsSchema(Schema):
 
     name: str
     workpool: str
+    is_workpool_eks: bool = False
 
 
 class QueueConfigSchema(Schema):

@@ -29,27 +29,22 @@ class ReportSnapshot(models.Model):
         blank=True,
         help_text="Start of reporting period (inclusive). NULL = no lower bound.",
     )
-    period_end = models.DateField(help_text="End of reporting period (inclusive)")
+    period_end = models.DateField(
+        null=True,
+        blank=True,
+        help_text="End of reporting period (inclusive). NULL for snapshots without date filtering.",
+    )
 
-    # --- FROZEN DATA (2 layers) ---
-
-    # Layer 1: Dashboard layout, structure & filters
-    # Contains: title, description, grid_columns, target_screen_size,
-    #           layout_config, components, filter_layout, filters
     frozen_dashboard = models.JSONField(
         default=dict,
         help_text="Frozen dashboard config + filters at snapshot time",
     )
 
-    # Layer 2: Full chart configs keyed by chart_id
-    # {str(chart_id): {id, title, description, chart_type, schema_name, table_name, extra_config}}
-    # CRITICAL: ensures snapshots survive chart deletion or editing
     frozen_chart_configs = models.JSONField(
         default=dict,
         help_text="Frozen chart configs keyed by chart_id",
     )
 
-    # User-editable summary (the ONLY mutable field)
     summary = models.TextField(
         blank=True,
         null=True,
@@ -72,6 +67,14 @@ class ReportSnapshot(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         help_text="User who created this snapshot",
+    )
+    last_modified_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modified_snapshots",
+        help_text="User who last modified the summary",
     )
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
