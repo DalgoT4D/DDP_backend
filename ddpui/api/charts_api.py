@@ -948,8 +948,11 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
 
 @charts_router.post("/download-csv/")
 @has_permission(["can_view_charts"])
-def download_chart_data_csv(request, payload: ChartDataPayload):
+def download_chart_data_csv(
+    request, payload: ChartDataPayload, dashboard_filters: Optional[str] = None
+):
     """Stream and download chart data as CSV with all filters/aggregations applied (authenticated)"""
+    import json
 
     orguser: OrgUser = request.orguser
 
@@ -961,6 +964,26 @@ def download_chart_data_csv(request, payload: ChartDataPayload):
 
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
+
+    # Resolve dashboard filters server-side (same as get_chart_data_by_id) so the
+    # CSV matches the on-screen chart.
+    if dashboard_filters:
+        try:
+            filter_values = json.loads(dashboard_filters)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            filter_values = None
+
+        if filter_values:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            payload.dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                payload.schema_name,
+                payload.table_name,
+                warehouse_client,
+            )
 
     # Generate filename from chart configuration
     chart_type = payload.chart_type or "chart"

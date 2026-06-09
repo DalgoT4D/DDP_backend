@@ -8,8 +8,11 @@ class ChartMetric(Schema):
     """Schema for individual chart metric"""
 
     column: Optional[str] = None  # Column name, null for COUNT(*) operations
-    aggregation: str  # SUM, COUNT, AVG, MAX, MIN, etc.
+    aggregation: Optional[str] = None  # SUM, COUNT, AVG, MAX, MIN, etc.
     alias: Optional[str] = None  # Display name for the metric
+    # Expression path: raw SQL expression (e.g. "SUM(col_a) / COUNT(DISTINCT id)")
+    # Mutually exclusive with column + aggregation
+    column_expression: Optional[str] = None
 
 
 class ChartCreate(Schema):

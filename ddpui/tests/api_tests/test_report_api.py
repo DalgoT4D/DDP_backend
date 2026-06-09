@@ -117,14 +117,20 @@ def sample_dashboard(orguser, org):
         description="Test Description",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[{"i": "chart-123", "x": 0, "y": 0, "w": 6, "h": 4}],
-        components={
-            "chart-123": {
-                "id": "chart-123",
-                "type": "chart",
-                "config": {"chartId": 1, "chartType": "bar", "title": "Test Bar Chart"},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-123", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {
+                    "chart-123": {
+                        "id": "chart-123",
+                        "type": "chart",
+                        "config": {"chartId": 1, "chartType": "bar", "title": "Test Bar Chart"},
+                    }
+                },
             }
-        },
+        ],
         created_by=orguser,
         org=org,
     )
@@ -215,8 +221,6 @@ def empty_dashboard(orguser, org):
         description="No charts",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[],
-        components={},
         created_by=orguser,
         org=org,
     )
@@ -413,7 +417,7 @@ class TestCreateSnapshot:
         # Check frozen_dashboard (layout + filters merged)
         assert snapshot.frozen_dashboard["title"] == "Test Dashboard"
         assert snapshot.frozen_dashboard["grid_columns"] == 12
-        assert "chart-123" in snapshot.frozen_dashboard["components"]
+        assert "chart-123" in snapshot.frozen_dashboard["tabs"][0]["components"]
 
         # Check frozen filters inside frozen_dashboard
         assert len(snapshot.frozen_dashboard["filters"]) == 1

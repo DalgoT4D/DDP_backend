@@ -489,7 +489,7 @@ class TestBuildReportUrl:
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=1,
+            target_id=1,
             content="test",
             author=author_orguser,
             org=org,
@@ -528,7 +528,7 @@ class TestResolveChartName:
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=1,
+            target_id=1,
             content="test",
             author=author_orguser,
             org=org,
@@ -555,7 +555,7 @@ class TestResolveChartName:
         comment = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=999,
+            target_id=999,
             content="test",
             author=author_orguser,
             org=org,
@@ -850,7 +850,7 @@ class TestGetThreadContext:
         c_other_chart = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=99,
+            target_id=99,
             content="Other chart comment",
             author=author_orguser,
             org=org,
@@ -858,7 +858,7 @@ class TestGetThreadContext:
         c_same_chart = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=1,
+            target_id=1,
             content="Same chart comment",
             author=author_orguser,
             org=org,
@@ -866,7 +866,7 @@ class TestGetThreadContext:
         current = Comment.objects.create(
             target_type=CommentTargetType.CHART,
             snapshot=snapshot,
-            snapshot_chart_id=1,
+            target_id=1,
             content="Current",
             author=author_orguser,
             org=org,
