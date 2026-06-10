@@ -2,6 +2,7 @@
 
 import base64
 import time
+from urllib.parse import urlparse
 
 import requests as http_requests
 from django.conf import settings
@@ -129,6 +130,9 @@ class PdfExportService:
                     display_w = item["w"]
                     display_h = item["h"]
                     try:
+                        parsed = urlparse(svg_url)
+                        if parsed.scheme != "https" or not parsed.netloc:
+                            continue
                         resp = http_requests.get(svg_url, timeout=10)
                         if not resp.ok:
                             continue
