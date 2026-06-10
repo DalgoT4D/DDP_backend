@@ -13,7 +13,7 @@ from datetime import datetime
 from pydantic import ValidationError
 from unittest.mock import MagicMock
 
-from ddpui.schemas.chart_schema import (
+from ddpui.schemas.chart_schemas import (
     ChartMetric,
     ChartCreate,
     ChartUpdate,
@@ -484,8 +484,10 @@ class TestChartCreateTypedExtraConfig:
                 "dimension_column": "country",
                 "extra_dimension_column": "year",
                 "metrics": [{"column": "revenue", "aggregation": "sum"}],
-                # All of these are NOT declared on BarChartConfig but the UI sends them.
-                "customizations": {"colors": ["#fff"]},
+                # filters/sort/pagination are declared on _ChartConfigBase;
+                # customizations is now a typed BarChartCustomizations (extras pass through);
+                # time_grain/x_axis_column/etc. are undeclared UI extras.
+                "customizations": {"orientation": "vertical", "colors": ["#fff"]},
                 "filters": [{"column": "active", "operator": "equals", "value": True}],
                 "sort": [{"column": "country", "direction": "asc"}],
                 "pagination": {"enabled": False, "page_size": 50},
@@ -498,7 +500,8 @@ class TestChartCreateTypedExtraConfig:
         )
 
         dumped = chart.extra_config.model_dump()
-        assert dumped["customizations"] == {"colors": ["#fff"]}
+        assert dumped["customizations"]["orientation"] == "vertical"
+        assert dumped["customizations"]["colors"] == ["#fff"]
         assert dumped["filters"][0]["column"] == "active"
         assert dumped["sort"][0]["direction"] == "asc"
         assert dumped["pagination"] == {"enabled": False, "page_size": 50}
@@ -996,3 +999,355 @@ class TestChartUpdateTypedExtraConfig:
         assert "title" in data
         assert "description" not in data
         assert "chart_type" not in data
+
+
+# ================================================================================
+# Real UI-payload round-trip: one per chart_type
+# ================================================================================
+
+from ddpui.tests.common.fixtures.chart_ui_payloads import CHART_UI_PAYLOADS
+
+
+class TestRealUIPayloadRoundTrip:
+    """For each chart_type, the captured webapp_v2 payload (incl. customizations)
+    must (1) construct a ChartCreate without errors and (2) round-trip every
+    typed customization value through model_dump(). When the UI shape drifts,
+    update the fixture — these tests fail until you do."""
+
+    @pytest.mark.parametrize("chart_type", list(CHART_UI_PAYLOADS.keys()))
+    def test_ui_payload_accepted(self, chart_type):
+        payload = CHART_UI_PAYLOADS[chart_type]
+        chart = ChartCreate(**payload)
+        assert chart.chart_type == chart_type
+
+    @pytest.mark.parametrize("chart_type", list(CHART_UI_PAYLOADS.keys()))
+    def test_customizations_round_trip(self, chart_type):
+        payload = CHART_UI_PAYLOADS[chart_type]
+        chart = ChartCreate(**payload)
+        dumped = chart.extra_config.model_dump()
+        sent_cust = payload["extra_config"]["customizations"]
+        # Every key the UI sent must survive — value-preserving.
+        for k, v in sent_cust.items():
+            assert dumped["customizations"][k] == v, (
+                f"{chart_type}.customizations.{k} drifted: sent={v!r} got={dumped['customizations'][k]!r}"
+            )
+
+
+# ================================================================================
+# Enum-rejection sweep: every Literal on the typed customizations
+# ================================================================================
+
+
+def _bar(**cust):
+    return dict(BAR_BASE, extra_config={**BAR_BASE["extra_config"], "customizations": cust})
+
+
+def _line(**cust):
+    return dict(LINE_BASE, extra_config={**LINE_BASE["extra_config"], "customizations": cust})
+
+
+def _pie(**cust):
+    return dict(PIE_BASE, extra_config={**PIE_BASE["extra_config"], "customizations": cust})
+
+
+def _number(**cust):
+    return dict(NUM_BASE, extra_config={**NUM_BASE["extra_config"], "customizations": cust})
+
+
+def _map(**cust):
+    return dict(MAP_BASE, extra_config={**MAP_BASE["extra_config"], "customizations": cust})
+
+
+def _table(**cust):
+    return dict(TABLE_BASE, extra_config={**TABLE_BASE["extra_config"], "customizations": cust})
+
+
+# Minimal valid bases — just enough to satisfy required fields per type.
+BAR_BASE = {
+    "title": "t",
+    "chart_type": "bar",
+    "schema_name": "public",
+    "table_name": "u",
+    "extra_config": {
+        "dimension_column": "x",
+        "metrics": [{"column": "r", "aggregation": "sum"}],
+    },
+}
+LINE_BASE = {**BAR_BASE, "chart_type": "line"}
+PIE_BASE = {
+    "title": "t",
+    "chart_type": "pie",
+    "schema_name": "public",
+    "table_name": "u",
+    "extra_config": {
+        "dimension_column": "x",
+        "metrics": [{"column": "r", "aggregation": "sum"}],
+    },
+}
+NUM_BASE = {
+    "title": "t",
+    "chart_type": "number",
+    "schema_name": "public",
+    "table_name": "u",
+    "extra_config": {"metrics": [{"column": "r", "aggregation": "sum"}]},
+}
+MAP_BASE = {
+    "title": "t",
+    "chart_type": "map",
+    "schema_name": "public",
+    "table_name": "u",
+    "extra_config": {"geographic_column": "g", "selected_geojson_id": 1},
+}
+TABLE_BASE = {
+    "title": "t",
+    "chart_type": "table",
+    "schema_name": "public",
+    "table_name": "u",
+    "extra_config": {},
+}
+
+
+class TestCustomizationEnumRejection:
+    """Every Literal field on the typed customizations must reject unknown values.
+    One bad-value test per enum, plus the cross-cutting numeric-range / nested cases."""
+
+    # ── Bar ──────────────────────────────────────────────────────────────
+    def test_bar_rejects_invalid_orientation(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_bar(orientation="diagonal"))
+
+    def test_bar_rejects_invalid_dataLabelPosition(self):
+        # Bar's enum is "top|inside|insideBottom" — "outside" is Pie's.
+        with pytest.raises(ValidationError):
+            ChartCreate(**_bar(dataLabelPosition="outside"))
+
+    def test_bar_rejects_invalid_axisLabelRotation(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_bar(xAxisLabelRotation="90"))
+
+    # ── Line ─────────────────────────────────────────────────────────────
+    def test_line_rejects_invalid_lineStyle(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_line(lineStyle="dashed"))
+
+    def test_line_rejects_invalid_dataLabelPosition(self):
+        # Line's enum is cardinal "top|bottom|left|right" — "inside" is Bar/Pie.
+        with pytest.raises(ValidationError):
+            ChartCreate(**_line(dataLabelPosition="inside"))
+
+    # ── Pie ──────────────────────────────────────────────────────────────
+    def test_pie_rejects_invalid_chartStyle(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_pie(chartStyle="square"))
+
+    def test_pie_rejects_invalid_labelFormat(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_pie(labelFormat="percentage_only"))
+
+    def test_pie_rejects_invalid_dataLabelPosition(self):
+        # Pie's enum is "outside|inside" — "top" is Bar/Line's.
+        with pytest.raises(ValidationError):
+            ChartCreate(**_pie(dataLabelPosition="top"))
+
+    # ── Shared on bar/line/pie ───────────────────────────────────────────
+    def test_legendDisplay_rejects_unknown(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_bar(legendDisplay="hidden"))
+
+    def test_cardinal_legendPosition_rejects_corner_form(self):
+        # Bar/line/pie use cardinal "top|bottom|left|right" — not corner-form.
+        with pytest.raises(ValidationError):
+            ChartCreate(**_pie(legendPosition="top-left"))
+
+    # ── Number ───────────────────────────────────────────────────────────
+    def test_number_rejects_invalid_numberSize(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_number(numberSize="huge"))
+
+    def test_number_rejects_invalid_numberFormat(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_number(numberFormat="binary"))
+
+    def test_number_rejects_decimalPlaces_out_of_range(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_number(decimalPlaces=11))
+
+    # ── Map ──────────────────────────────────────────────────────────────
+    def test_map_rejects_invalid_colorScheme(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(**_map(colorScheme="Viridis"))
+
+    def test_map_rejects_cardinal_legendPosition(self):
+        # Map uses corner-form "top-left|...|bottom-right" — cardinal is wrong.
+        with pytest.raises(ValidationError):
+            ChartCreate(**_map(legendPosition="top"))
+
+    # ── Table (nested ColumnNumberFormat / ColumnDateFormat) ─────────────
+    def test_table_rejects_invalid_nested_numberFormat(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                **_table(columnFormatting={"col": {"numberFormat": "bogus"}})
+            )
+
+    def test_table_rejects_invalid_nested_dateFormat(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                **_table(dateColumnFormatting={"col": {"dateFormat": "not_a_real_format"}})
+            )
+
+
+# ================================================================================
+# Payloads that don't match the typed shape — must raise ValidationError
+# ================================================================================
+
+
+class TestPayloadShapeRejection:
+    """Every per-chart-type required field must be enforced, and the top-level
+    ChartCreate shape must reject missing required fields and wrong primitive
+    types. These guard the contract: if the dispatch silently accepts a
+    malformed payload, the typed schema has lost its purpose."""
+
+    # ── Top-level required fields ────────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        "missing",
+        ["title", "chart_type", "schema_name", "table_name", "extra_config"],
+    )
+    def test_top_level_missing_required_field(self, missing):
+        base = {
+            "title": "t",
+            "chart_type": "bar",
+            "schema_name": "public",
+            "table_name": "u",
+            "extra_config": {
+                "dimension_column": "x",
+                "metrics": [{"column": "r", "aggregation": "sum"}],
+            },
+        }
+        del base[missing]
+        with pytest.raises(ValidationError):
+            ChartCreate(**base)
+
+    @pytest.mark.parametrize(
+        "field,bad_value",
+        [
+            ("chart_type", 42),  # int instead of Literal[str]
+            ("schema_name", None),  # None instead of str
+            ("table_name", ["a"]),  # list instead of str
+            ("title", {}),  # dict instead of str
+        ],
+    )
+    def test_top_level_wrong_primitive_type(self, field, bad_value):
+        base = {
+            "title": "t",
+            "chart_type": "bar",
+            "schema_name": "public",
+            "table_name": "u",
+            "extra_config": {
+                "dimension_column": "x",
+                "metrics": [{"column": "r", "aggregation": "sum"}],
+            },
+        }
+        base[field] = bad_value
+        with pytest.raises(ValidationError):
+            ChartCreate(**base)
+
+    # ── Per-chart-type: each required field on extra_config ──────────────
+
+    def test_line_requires_dimension_column(self):
+        # Line inherits BarChartConfig — same required fields.
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="line",
+                schema_name="public",
+                table_name="u",
+                extra_config={"metrics": [{"column": "r", "aggregation": "sum"}]},
+            )
+
+    def test_pie_requires_dimension_column(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="pie",
+                schema_name="public",
+                table_name="u",
+                extra_config={"metrics": [{"column": "r", "aggregation": "sum"}]},
+            )
+
+    def test_pie_requires_at_least_one_metric(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="pie",
+                schema_name="public",
+                table_name="u",
+                extra_config={"dimension_column": "x", "metrics": []},
+            )
+
+    def test_number_requires_at_least_one_metric(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="number",
+                schema_name="public",
+                table_name="u",
+                extra_config={"metrics": []},
+            )
+
+    def test_map_requires_geographic_column(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="map",
+                schema_name="public",
+                table_name="u",
+                extra_config={"selected_geojson_id": 1},
+            )
+
+    def test_map_requires_selected_geojson_id(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="map",
+                schema_name="public",
+                table_name="u",
+                extra_config={"geographic_column": "state"},
+            )
+
+    # ── Wrong shapes inside extra_config ─────────────────────────────────
+
+    def test_metrics_must_be_a_list(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="bar",
+                schema_name="public",
+                table_name="u",
+                extra_config={"dimension_column": "x", "metrics": "not a list"},
+            )
+
+    def test_filters_item_must_have_operator(self):
+        # Nested ChartFilter missing required `operator`.
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="bar",
+                schema_name="public",
+                table_name="u",
+                extra_config={
+                    "dimension_column": "x",
+                    "metrics": [{"column": "r", "aggregation": "sum"}],
+                    "filters": [{"column": "c"}],
+                },
+            )
+
+    def test_table_dimension_item_must_have_column(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="table",
+                schema_name="public",
+                table_name="u",
+                extra_config={"dimensions": [{"enable_drill_down": True}]},
+            )

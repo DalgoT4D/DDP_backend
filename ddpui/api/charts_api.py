@@ -28,7 +28,7 @@ from ddpui.services.chart_service import (
     ChartPermissionError,
 )
 from ddpui.services.dashboard_service import DashboardService
-from ddpui.schemas.chart_schema import (
+from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartCreate,
     ChartMetric,
