@@ -117,11 +117,11 @@ class PdfExportService:
                 img_items = page.evaluate(
                     """
                     () => [...document.querySelectorAll('img')]
-                        .filter(img => img.src)
-                        .map(img => {
+                        .map((img, idx) => {
                             const r = img.getBoundingClientRect();
-                            return { src: img.src, w: r.width || 76, h: r.height || 48 };
+                            return { src: img.src, w: r.width || 76, h: r.height || 48, idx: idx };
                         })
+                        .filter(item => item.src)
                 """
                 )
 
@@ -129,6 +129,7 @@ class PdfExportService:
                     svg_url = item["src"]
                     display_w = item["w"]
                     display_h = item["h"]
+                    img_idx = item["idx"]
                     try:
                         parsed = urlparse(svg_url)
                         if parsed.scheme != "https" or not parsed.netloc:
@@ -166,11 +167,10 @@ class PdfExportService:
                         if png_data_uri:
                             page.evaluate(
                                 """(args) => {
-                                    document.querySelectorAll('img').forEach(img => {
-                                        if (img.src === args.src) img.src = args.png;
-                                    });
+                                    const img = document.querySelectorAll('img')[args.idx];
+                                    if (img) img.src = args.png;
                                 }""",
-                                {"src": svg_url, "png": png_data_uri},
+                                {"idx": img_idx, "png": png_data_uri},
                             )
                     except Exception as e:
                         logger.warning(f"SVG to PNG conversion failed for {svg_url}: {e}")
