@@ -109,9 +109,7 @@ class PieChartCustomizations(BaseModel):
     legendPosition: Optional[CardinalLegendPosition] = None
     showTooltip: Optional[bool] = None
     showDataLabels: Optional[bool] = None
-    labelFormat: Optional[
-        Literal["percentage", "value", "name_percentage", "name_value"]
-    ] = None
+    labelFormat: Optional[Literal["percentage", "value", "name_percentage", "name_value"]] = None
     dataLabelPosition: Optional[Literal["outside", "inside"]] = None
     # null = "show all"; otherwise typically 3/5/10
     maxSlices: Optional[int] = None

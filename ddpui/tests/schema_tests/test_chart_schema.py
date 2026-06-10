@@ -1028,9 +1028,9 @@ class TestRealUIPayloadRoundTrip:
         sent_cust = payload["extra_config"]["customizations"]
         # Every key the UI sent must survive — value-preserving.
         for k, v in sent_cust.items():
-            assert dumped["customizations"][k] == v, (
-                f"{chart_type}.customizations.{k} drifted: sent={v!r} got={dumped['customizations'][k]!r}"
-            )
+            assert (
+                dumped["customizations"][k] == v
+            ), f"{chart_type}.customizations.{k} drifted: sent={v!r} got={dumped['customizations'][k]!r}"
 
 
 # ================================================================================
@@ -1185,15 +1185,11 @@ class TestCustomizationEnumRejection:
     # ── Table (nested ColumnNumberFormat / ColumnDateFormat) ─────────────
     def test_table_rejects_invalid_nested_numberFormat(self):
         with pytest.raises(ValidationError):
-            ChartCreate(
-                **_table(columnFormatting={"col": {"numberFormat": "bogus"}})
-            )
+            ChartCreate(**_table(columnFormatting={"col": {"numberFormat": "bogus"}}))
 
     def test_table_rejects_invalid_nested_dateFormat(self):
         with pytest.raises(ValidationError):
-            ChartCreate(
-                **_table(dateColumnFormatting={"col": {"dateFormat": "not_a_real_format"}})
-            )
+            ChartCreate(**_table(dateColumnFormatting={"col": {"dateFormat": "not_a_real_format"}}))
 
 
 # ================================================================================
