@@ -13,7 +13,6 @@ logger = CustomLogger("ddpui.core.org_logo")
 
 
 class OrgLogoService:
-
     @staticmethod
     def get_logo(org: Org) -> Org:
         """Return the org if it has a logo, else raise OrgLogoNotFoundError."""

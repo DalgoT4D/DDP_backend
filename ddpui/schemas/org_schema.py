@@ -49,7 +49,7 @@ class CreateFreeTrialOrgSchema(CreateOrgSchema):
 class OrgLogoResponse(Schema):
     """Response schema for org logo"""
 
-    logo_url: str
+    logo_url: Optional[str] = None
     logo_filename: Optional[str] = None
     updated_at: datetime
 

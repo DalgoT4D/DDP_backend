@@ -111,16 +111,20 @@ class PdfExportService:
                 # renders it at 4× the display size as a PNG and swaps the src.
                 # The logo keeps its original CSS display size but is now a crisp
                 # high-res PNG instead of a tiny rasterised SVG.
-                svg_items = page.evaluate("""
+                # Collect all img srcs — SVG detection happens server-side via
+                # Content-Type so extensionless/CDN/querystring SVG URLs are caught too
+                img_items = page.evaluate(
+                    """
                     () => [...document.querySelectorAll('img')]
-                        .filter(img => img.src && img.src.toLowerCase().includes('.svg'))
+                        .filter(img => img.src)
                         .map(img => {
                             const r = img.getBoundingClientRect();
                             return { src: img.src, w: r.width || 76, h: r.height || 48 };
                         })
-                """)
+                """
+                )
 
-                for item in svg_items:
+                for item in img_items:
                     svg_url = item["src"]
                     display_w = item["w"]
                     display_h = item["h"]
@@ -128,7 +132,18 @@ class PdfExportService:
                         resp = http_requests.get(svg_url, timeout=10)
                         if not resp.ok:
                             continue
-                        svg_data_uri = "data:image/svg+xml;base64," + base64.b64encode(resp.content).decode()
+                        content_type = resp.headers.get("content-type", "").lower()
+                        body_start = resp.content[:100].lstrip()
+                        is_svg = (
+                            "image/svg+xml" in content_type
+                            or body_start.startswith(b"<svg")
+                            or body_start.startswith(b"<?xml")
+                        )
+                        if not is_svg:
+                            continue
+                        svg_data_uri = (
+                            "data:image/svg+xml;base64," + base64.b64encode(resp.content).decode()
+                        )
                         png_data_uri = page.evaluate(
                             """async (args) => {
                                 const img = new Image();

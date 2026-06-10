@@ -67,15 +67,21 @@ def upload_logo_from_url(request, payload: OrgLogoUrlPayload):
     """Store an external image URL directly as the org logo — no S3 upload"""
     orguser: OrgUser = request.orguser
 
-    org = OrgLogoService.upload_logo_from_url(
-        image_url=payload.image_url,
-        org=orguser.org,
-    )
-    return api_response(
-        success=True,
-        data=OrgLogoResponse.from_model(org),
-        message="Logo URL saved successfully",
-    )
+    try:
+        org = OrgLogoService.upload_logo_from_url(
+            image_url=payload.image_url,
+            org=orguser.org,
+        )
+        return api_response(
+            success=True,
+            data=OrgLogoResponse.from_model(org),
+            message="Logo URL saved successfully",
+        )
+    except OrgLogoValidationError as e:
+        raise HttpError(400, str(e)) from e
+    except Exception as e:
+        logger.error(f"Failed to save logo URL for {orguser.org.slug}: {e}")
+        raise HttpError(500, "Failed to save logo URL") from e
 
 
 @org_logo_router.delete("/", response=ApiResponse)
