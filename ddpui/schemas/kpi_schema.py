@@ -50,6 +50,7 @@ class KPIResponse(Schema):
     metric_type_tag: Optional[str]
     program_tags: List[str]
     display_order: int
+    created_by: str  # creator's email
     created_at: datetime
     updated_at: datetime
 

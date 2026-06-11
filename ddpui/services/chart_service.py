@@ -80,7 +80,7 @@ class ChartService:
             ChartNotFoundError: If chart doesn't exist or doesn't belong to org
         """
         try:
-            return Chart.objects.get(id=chart_id, org=org)
+            return Chart.objects.select_related("created_by__user").get(id=chart_id, org=org)
         except Chart.DoesNotExist:
             raise ChartNotFoundError(chart_id)
 
@@ -117,7 +117,9 @@ class ChartService:
         if chart_type and chart_type != "all":
             query &= Q(chart_type=chart_type)
 
-        queryset = Chart.objects.filter(query).order_by("-updated_at")
+        queryset = (
+            Chart.objects.filter(query).select_related("created_by__user").order_by("-updated_at")
+        )
         total = queryset.count()
 
         # Apply pagination
@@ -164,6 +166,10 @@ class ChartService:
         )
 
         logger.info(f"Created chart {chart.id} for org {orguser.org.id}")
+
+        # Re-load with relations pre-fetched so building the API response
+        # (chart.created_by.user.email) doesn't trigger extra lazy queries
+        chart = Chart.objects.select_related("created_by__user").get(id=chart.id)
         return chart
 
     @staticmethod

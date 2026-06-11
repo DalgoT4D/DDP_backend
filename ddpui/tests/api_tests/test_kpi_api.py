@@ -119,6 +119,14 @@ class TestListKPIs:
         response = list_kpis(request, search="nonexistent_xyz")
         assert response.total == 0
 
+    def test_list_kpis_includes_created_by(self, orguser, sample_kpi, seed_db):
+        """list_kpis returns the creator's email in created_by"""
+        request = mock_request(orguser)
+
+        response = list_kpis(request)
+
+        assert response.data[0].created_by == "kpiapiuser@test.com"
+
 
 class TestCreateKPI:
     def test_create_success(self, orguser, sample_metric, seed_db):
@@ -132,6 +140,7 @@ class TestCreateKPI:
         response = create_kpi(request, payload)
         assert response.id is not None
         assert response.name == sample_metric.name
+        assert response.created_by == "kpiapiuser@test.com"
         KPI.objects.filter(id=response.id).delete()
 
     def test_create_invalid_metric(self, orguser, seed_db):
@@ -163,6 +172,7 @@ class TestGetKPI:
         response = get_kpi(request, sample_kpi.id)
         assert response.id == sample_kpi.id
         assert response.metric.id == sample_kpi.metric_id
+        assert response.created_by == "kpiapiuser@test.com"
 
     def test_get_not_found(self, orguser, seed_db):
         request = mock_request(orguser)

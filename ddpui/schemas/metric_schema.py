@@ -34,6 +34,7 @@ class MetricResponse(Schema):
     column: Optional[str]
     aggregation: Optional[str]
     column_expression: Optional[str]
+    created_by: str  # creator's email
     created_at: datetime
     updated_at: datetime
 

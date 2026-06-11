@@ -115,6 +115,7 @@ class KPIService:
                 column=m.column,
                 aggregation=m.aggregation,
                 column_expression=m.column_expression,
+                created_by=m.created_by.user.email,
                 created_at=m.created_at,
                 updated_at=m.updated_at,
             ),
@@ -127,6 +128,7 @@ class KPIService:
             metric_type_tag=kpi.metric_type_tag,
             program_tags=kpi.program_tags,
             display_order=kpi.display_order,
+            created_by=kpi.created_by.user.email,
             created_at=kpi.created_at,
             updated_at=kpi.updated_at,
         )
@@ -134,7 +136,9 @@ class KPIService:
     @staticmethod
     def get_kpi(kpi_id: int, org: Org) -> KPI:
         try:
-            return KPI.objects.select_related("metric").get(id=kpi_id, org=org)
+            return KPI.objects.select_related("metric__created_by__user", "created_by__user").get(
+                id=kpi_id, org=org
+            )
         except KPI.DoesNotExist:
             raise KPINotFoundError(kpi_id)
 
@@ -167,7 +171,7 @@ class KPIService:
 
         queryset = (
             KPI.objects.filter(query)
-            .select_related("metric")
+            .select_related("metric__created_by__user", "created_by__user")
             .order_by("display_order", "-updated_at")
         )
         total = queryset.count()
@@ -200,7 +204,11 @@ class KPIService:
         )
 
         logger.info(f"Created KPI {kpi.id} '{kpi.name}' for org {orguser.org.id}")
-        return kpi
+        # Reload with relation chains prefetched so kpi_to_response (which reads
+        # created_by.user.email and metric.created_by.user.email) does not fire lazy queries
+        return KPI.objects.select_related("metric__created_by__user", "created_by__user").get(
+            id=kpi.id
+        )
 
     @staticmethod
     def update_kpi(kpi_id: int, org: Org, orguser: OrgUser, payload: KPIUpdate) -> KPI:
@@ -225,7 +233,11 @@ class KPIService:
         kpi.last_modified_by = orguser
         kpi.save()
         logger.info(f"Updated KPI {kpi.id}")
-        return kpi
+        # Reload with relation chains prefetched (the in-memory instance may have a
+        # reassigned metric); avoids lazy queries in kpi_to_response's created_by reads
+        return KPI.objects.select_related("metric__created_by__user", "created_by__user").get(
+            id=kpi.id
+        )
 
     @staticmethod
     def get_kpi_dashboards(kpi_id: int, org: Org) -> List[dict]:
@@ -271,7 +283,7 @@ class KPIService:
         """Batch compute all KPIs with current values + RAG for the KPI page."""
         kpis = (
             KPI.objects.filter(org=org)
-            .select_related("metric")
+            .select_related("metric__created_by__user", "created_by__user")
             .order_by("display_order", "-updated_at")
         )
         org_warehouse = OrgWarehouse.objects.filter(org=org).first()
