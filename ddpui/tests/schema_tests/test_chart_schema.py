@@ -284,6 +284,7 @@ class TestEdgeCases:
             schema_name="public",
             table_name="users",
             extra_config={},
+            created_by="test@example.com",
             created_at=now,
             updated_at=now,
         )
