@@ -1,5 +1,7 @@
 """Org logo service — business logic for logo upload and deletion"""
 
+import requests as http_requests
+
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.s3_utils import upload_org_logo, delete_org_logo
@@ -19,6 +21,20 @@ class OrgLogoService:
         if not org.logo_url:
             raise OrgLogoNotFoundError()
         return org
+
+    @staticmethod
+    def get_logo_bytes(org: Org) -> tuple[bytes, str]:
+        """Fetch raw logo bytes from the stored URL for server-side proxying."""
+        if not org.logo_url:
+            raise OrgLogoNotFoundError()
+        try:
+            resp = http_requests.get(org.logo_url, timeout=10)
+        except http_requests.RequestException as e:
+            raise OrgLogoS3Error("Failed to fetch logo from storage") from e
+        if not resp.ok:
+            raise OrgLogoS3Error("Failed to fetch logo from storage")
+        content_type = resp.headers.get("content-type", "image/png")
+        return resp.content, content_type
 
     @staticmethod
     def upload_logo_from_file(file_bytes: bytes, content_type: str, filename: str, org: Org) -> Org:

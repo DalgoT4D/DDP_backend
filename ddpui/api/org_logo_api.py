@@ -1,5 +1,7 @@
 """Org logo upload/delete API endpoints"""
 
+from django.http import HttpResponse
+
 from ninja import Router, File
 from ninja.files import UploadedFile
 from ninja.errors import HttpError
@@ -93,6 +95,20 @@ def delete_logo(request):
     try:
         OrgLogoService.delete_logo(orguser.org)
         return api_response(success=True, message="Logo deleted successfully")
+    except OrgLogoNotFoundError as e:
+        raise HttpError(404, str(e)) from e
+    except OrgLogoS3Error as e:
+        raise HttpError(502, str(e)) from e
+
+
+@org_logo_router.get("/proxy/")
+@has_permission(["can_view_orgusers"])
+def proxy_org_logo_image(request):
+    """Return raw logo bytes so the frontend can use them in canvas without CORS issues."""
+    orguser: OrgUser = request.orguser
+    try:
+        image_bytes, content_type = OrgLogoService.get_logo_bytes(orguser.org)
+        return HttpResponse(image_bytes, content_type=content_type)
     except OrgLogoNotFoundError as e:
         raise HttpError(404, str(e)) from e
     except OrgLogoS3Error as e:
