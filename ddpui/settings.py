@@ -316,6 +316,22 @@ FIXTURE_DIRS = [
 PRODUCTION = os.getenv("ENVIRONMENT", "") == "production"
 
 
+# ── Celery Beat ─────────────────────────────────────────────────────────────
+# Periodic tasks. `app.config_from_object("django.conf:settings", namespace="CELERY")`
+# in ddpui/celery.py picks these up. Beat is run by the `django-celery-beat`
+# PM2 service.
+
+CELERY_BEAT_SCHEDULE = {
+    # Alerts dispatcher — wakes once a minute, enqueues evaluators for any
+    # alerts whose most recent cron tick hasn't been claimed yet. See
+    # ddpui/celeryworkers/alert_tasks.py.
+    "alerts-dispatcher": {
+        "task": "alerts.dispatch_due_alerts",
+        "schedule": 60.0,  # seconds
+    },
+}
+
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRY_HOURS", "12"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRY_DAYS", "30"))),

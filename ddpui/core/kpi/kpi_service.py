@@ -228,6 +228,24 @@ class KPIService:
         return kpi
 
     @staticmethod
+    def get_kpi_consumers(kpi_id: int, org: Org) -> dict:
+        """Find dashboards and alerts that reference this KPI.
+
+        Alerts CASCADE on KPI delete — included for UI visibility (so the user
+        sees what will be removed alongside) but do not contribute to delete-
+        blocking.
+        """
+        KPIService.get_kpi(kpi_id, org)
+        dashboards = KPIService.get_kpi_dashboards(kpi_id, org)
+
+        from ddpui.models.alert import Alert  # local import to avoid circular
+
+        alerts = list(
+            Alert.objects.filter(kpi_id=kpi_id, org=org).values("id", "name", "alert_type")
+        )
+        return {"dashboards": dashboards, "alerts": alerts}
+
+    @staticmethod
     def get_kpi_dashboards(kpi_id: int, org: Org) -> List[dict]:
         """Get list of dashboards that use this KPI."""
         KPIService.get_kpi(kpi_id, org)

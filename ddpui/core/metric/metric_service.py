@@ -327,7 +327,12 @@ class MetricService:
 
     @staticmethod
     def get_metric_consumers(metric_id: int, org: Org) -> dict:
-        """Find charts and KPIs that reference this metric."""
+        """Find charts, KPIs, and alerts that reference this metric.
+
+        Note: alerts CASCADE on Metric delete (see Alert.metric on_delete=CASCADE).
+        They appear in this list so the Metrics-page UI can warn users about what
+        will be deleted alongside; they do NOT contribute to delete-blocking.
+        """
         # Verify metric exists
         MetricService.get_metric(metric_id, org)
 
@@ -346,4 +351,13 @@ class MetricService:
                     )
                     break
 
-        return {"charts": charts, "kpis": kpis}
+        # Alerts via FK (Alert.metric_id)
+        from ddpui.models.alert import Alert  # local import to avoid circular at module load
+
+        alerts = list(
+            Alert.objects.filter(metric_id=metric_id, org=org).values(
+                "id", "name", "alert_type"
+            )
+        )
+
+        return {"charts": charts, "kpis": kpis, "alerts": alerts}
