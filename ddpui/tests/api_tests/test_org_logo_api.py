@@ -78,7 +78,9 @@ def orguser(authuser, org, seed_db):
 
 
 def test_get_org_logo_not_found_raises_404(orguser):
-    with patch("ddpui.api.org_logo_api.OrgLogoService.get_logo", side_effect=OrgLogoNotFoundError()):
+    with patch(
+        "ddpui.api.org_logo_api.OrgLogoService.get_logo", side_effect=OrgLogoNotFoundError()
+    ):
         with pytest.raises(HttpError) as exc:
             get_org_logo(mock_request(orguser))
     assert exc.value.status_code == 404
@@ -128,7 +130,9 @@ def test_upload_logo_from_url_validation_error_raises_400(orguser):
 
 
 def test_delete_logo_not_found_raises_404(orguser):
-    with patch("ddpui.api.org_logo_api.OrgLogoService.delete_logo", side_effect=OrgLogoNotFoundError()):
+    with patch(
+        "ddpui.api.org_logo_api.OrgLogoService.delete_logo", side_effect=OrgLogoNotFoundError()
+    ):
         with pytest.raises(HttpError) as exc:
             delete_logo(mock_request(orguser))
     assert exc.value.status_code == 404

@@ -134,9 +134,7 @@ def test_upload_logo_from_url_success(org):
 
 
 def test_upload_logo_from_url_deletes_old_s3_key(org_with_logo):
-    with patch(
-        "ddpui.core.org_logo.org_logo_service.delete_org_logo"
-    ) as mock_delete:
+    with patch("ddpui.core.org_logo.org_logo_service.delete_org_logo") as mock_delete:
         OrgLogoService.upload_logo_from_url("https://example.com/new.png", org_with_logo)
 
     mock_delete.assert_called_once_with("orgs/logo-test-org/logo/abc.png")
@@ -146,9 +144,7 @@ def test_upload_logo_from_url_deletes_old_s3_key(org_with_logo):
 
 
 def test_upload_logo_from_url_no_s3_delete_when_no_prior_key(org):
-    with patch(
-        "ddpui.core.org_logo.org_logo_service.delete_org_logo"
-    ) as mock_delete:
+    with patch("ddpui.core.org_logo.org_logo_service.delete_org_logo") as mock_delete:
         OrgLogoService.upload_logo_from_url("https://example.com/logo.png", org)
 
     mock_delete.assert_not_called()
