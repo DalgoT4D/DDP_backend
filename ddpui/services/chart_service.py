@@ -7,6 +7,7 @@ separating it from the API layer for better testability and maintainability.
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.db.models import Q
 
 from ddpui.models.visualization import Chart
@@ -260,10 +261,58 @@ class ChartService:
             raise ChartPermissionError("You can only delete charts you created.")
 
         chart_title = chart.title
-        chart.delete()
+
+        # Cascade cleanup + delete must succeed together: either the chart is gone AND
+        # every dashboard reference to it is stripped, or neither happens. Otherwise a
+        # dashboard would keep a dangling chart tile that renders as a broken "Chart Error".
+        with transaction.atomic():
+            ChartService._remove_chart_from_dashboards([chart_id], org)
+            chart.delete()
 
         logger.info(f"Deleted chart '{chart_title}' (id={chart_id}) by {orguser.user.email}")
         return True
+
+    @staticmethod
+    def _remove_chart_from_dashboards(chart_ids: List[int], org: Org) -> None:
+        """Strip the given charts from every dashboard in the org that embeds them.
+
+        Removes the chart component(s) from each tab's ``components`` map and drops the
+        matching grid items from ``layout_config`` (keyed by component id). Saves only
+        dashboards that actually changed.
+        """
+        chart_id_set = set(chart_ids)
+
+        for dashboard in Dashboard.objects.filter(org=org):
+            changed = False
+
+            for tab in dashboard.tabs or []:
+                components = tab.get("components") or {}
+                component_ids_to_remove = [
+                    component_id
+                    for component_id, component in components.items()
+                    if component.get("type") == DashboardComponentType.CHART.value
+                    and component.get("config", {}).get("chartId") in chart_id_set
+                ]
+
+                if not component_ids_to_remove:
+                    continue
+
+                for component_id in component_ids_to_remove:
+                    components.pop(component_id, None)
+                tab["components"] = components
+                tab["layout_config"] = [
+                    item
+                    for item in (tab.get("layout_config") or [])
+                    if item.get("i") not in component_ids_to_remove
+                ]
+                changed = True
+
+            if changed:
+                dashboard.save(update_fields=["tabs", "updated_at"])
+                logger.info(
+                    f"Removed chart(s) {sorted(chart_id_set)} from dashboard "
+                    f"'{dashboard.title}' (id={dashboard.id})"
+                )
 
     @staticmethod
     def bulk_delete_charts(chart_ids: List[int], org: Org, orguser: OrgUser) -> Dict[str, Any]:
@@ -293,8 +342,10 @@ class ChartService:
         if missing_ids:
             logger.warning(f"Charts not found or not accessible: {missing_ids}")
 
-        # Delete the charts
-        deleted_count = charts.delete()[0]
+        # Cascade cleanup + delete atomically so dashboards never keep dangling tiles.
+        with transaction.atomic():
+            ChartService._remove_chart_from_dashboards(found_ids, org)
+            deleted_count = charts.delete()[0]
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
 

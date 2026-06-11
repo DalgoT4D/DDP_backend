@@ -279,6 +279,191 @@ class TestGetChartDashboards:
 
 
 # ================================================================================
+# Test cascade cleanup: deleting a chart strips it from dashboards that embed it
+# ================================================================================
+
+
+class TestDeleteChartCascadeCleanup:
+    """Tests that delete_chart / bulk_delete_charts remove the chart from dashboards.
+
+    Without this, the dashboard keeps a dangling chart tile that renders as a broken
+    "Chart Error" because it points at a deleted chart id.
+    """
+
+    def _make_dashboard_with_chart(self, orguser, org, chart_id, extra_components=None):
+        """Build a dashboard whose tab embeds chart_id as component 'chart-comp-1'.
+
+        The grid layout_config references the component by its key under 'i'.
+        """
+        components = {
+            "chart-comp-1": {
+                "id": "chart-comp-1",
+                "type": DashboardComponentType.CHART.value,
+                "config": {"chartId": chart_id},
+            }
+        }
+        layout_config = [{"i": "chart-comp-1", "x": 0, "y": 0, "w": 6, "h": 4}]
+        if extra_components:
+            components.update(extra_components)
+            for comp_id in extra_components:
+                layout_config.append({"i": comp_id, "x": 6, "y": 0, "w": 6, "h": 4})
+
+        return Dashboard.objects.create(
+            title="Dashboard With Chart",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": layout_config,
+                    "components": components,
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+
+    def test_delete_chart_removes_it_from_dashboard(self, orguser, org, seed_db):
+        """Deleting a chart strips its component + layout item from the dashboard."""
+        chart = Chart.objects.create(
+            title="Embedded Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        dashboard = self._make_dashboard_with_chart(orguser, org, chart.id)
+
+        ChartService.delete_chart(chart.id, org, orguser)
+
+        dashboard.refresh_from_db()
+        tab = dashboard.tabs[0]
+        assert "chart-comp-1" not in tab["components"]
+        assert all(item["i"] != "chart-comp-1" for item in tab["layout_config"])
+        assert not Chart.objects.filter(id=chart.id).exists()
+
+        dashboard.delete()
+
+    def test_delete_chart_leaves_other_components_intact(self, orguser, org, seed_db):
+        """Only the deleted chart's component is removed; siblings stay."""
+        chart = Chart.objects.create(
+            title="Embedded Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        other_component = {
+            "text-comp-1": {"id": "text-comp-1", "type": "text", "config": {"content": "hi"}}
+        }
+        dashboard = self._make_dashboard_with_chart(
+            orguser, org, chart.id, extra_components=other_component
+        )
+
+        ChartService.delete_chart(chart.id, org, orguser)
+
+        dashboard.refresh_from_db()
+        tab = dashboard.tabs[0]
+        assert "chart-comp-1" not in tab["components"]
+        assert "text-comp-1" in tab["components"]
+        assert any(item["i"] == "text-comp-1" for item in tab["layout_config"])
+
+        dashboard.delete()
+
+    def test_delete_chart_not_in_any_dashboard_is_noop(self, orguser, org, seed_db):
+        """A chart used by no dashboard deletes cleanly without touching dashboards."""
+        chart = Chart.objects.create(
+            title="Lonely Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        # A dashboard that embeds a DIFFERENT chart id must be left untouched.
+        dashboard = self._make_dashboard_with_chart(orguser, org, chart_id=999999)
+
+        ChartService.delete_chart(chart.id, org, orguser)
+
+        dashboard.refresh_from_db()
+        assert "chart-comp-1" in dashboard.tabs[0]["components"]
+        assert not Chart.objects.filter(id=chart.id).exists()
+
+        dashboard.delete()
+
+    def test_bulk_delete_removes_charts_from_dashboard(self, orguser, org, seed_db):
+        """Bulk delete strips every deleted chart from the dashboards using them."""
+        chart1 = Chart.objects.create(
+            title="Chart 1",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        chart2 = Chart.objects.create(
+            title="Chart 2",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        dashboard = Dashboard.objects.create(
+            title="Dashboard Two Charts",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": [
+                        {"i": "c1", "x": 0, "y": 0, "w": 6, "h": 4},
+                        {"i": "c2", "x": 6, "y": 0, "w": 6, "h": 4},
+                    ],
+                    "components": {
+                        "c1": {
+                            "id": "c1",
+                            "type": DashboardComponentType.CHART.value,
+                            "config": {"chartId": chart1.id},
+                        },
+                        "c2": {
+                            "id": "c2",
+                            "type": DashboardComponentType.CHART.value,
+                            "config": {"chartId": chart2.id},
+                        },
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+
+        result = ChartService.bulk_delete_charts([chart1.id, chart2.id], org, orguser)
+
+        assert result["deleted_count"] == 2
+        dashboard.refresh_from_db()
+        tab = dashboard.tabs[0]
+        assert tab["components"] == {}
+        assert tab["layout_config"] == []
+
+        dashboard.delete()
+
+
+# ================================================================================
 # Test get_org_warehouse
 # ================================================================================
 
