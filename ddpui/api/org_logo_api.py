@@ -15,6 +15,7 @@ from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
     OrgLogoValidationError,
     OrgLogoS3Error,
+    OrgLogoFetchError,
 )
 from ddpui.schemas.org_schema import OrgLogoResponse, OrgLogoUrlPayload
 
@@ -111,5 +112,5 @@ def proxy_org_logo_image(request):
         return HttpResponse(image_bytes, content_type=content_type)
     except OrgLogoNotFoundError as e:
         raise HttpError(404, str(e)) from e
-    except OrgLogoS3Error as e:
+    except (OrgLogoS3Error, OrgLogoFetchError) as e:
         raise HttpError(502, str(e)) from e

@@ -29,3 +29,10 @@ class OrgLogoS3Error(OrgLogoError):
 
     def __init__(self, message: str):
         super().__init__(message, "ORG_LOGO_S3_ERROR")
+
+
+class OrgLogoFetchError(OrgLogoError):
+    """Raised when fetching logo bytes from org.logo_url via HTTP fails"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "ORG_LOGO_FETCH_ERROR")

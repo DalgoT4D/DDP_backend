@@ -4,11 +4,12 @@ import requests as http_requests
 
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.s3_utils import upload_org_logo, delete_org_logo
+from ddpui.utils.s3_utils import upload_org_logo, delete_org_logo, MAX_FILE_SIZE_BYTES
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
     OrgLogoValidationError,
     OrgLogoS3Error,
+    OrgLogoFetchError,
 )
 
 logger = CustomLogger("ddpui.core.org_logo")
@@ -28,13 +29,28 @@ class OrgLogoService:
         if not org.logo_url:
             raise OrgLogoNotFoundError()
         try:
-            resp = http_requests.get(org.logo_url, timeout=10)
+            resp = http_requests.get(org.logo_url, timeout=10, stream=True)
         except http_requests.RequestException as e:
-            raise OrgLogoS3Error("Failed to fetch logo from storage") from e
+            raise OrgLogoFetchError("Failed to fetch logo from storage") from e
         if not resp.ok:
-            raise OrgLogoS3Error("Failed to fetch logo from storage")
+            resp.close()
+            raise OrgLogoFetchError("Failed to fetch logo from storage")
         content_type = resp.headers.get("content-type", "image/png")
-        return resp.content, content_type
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            for chunk in resp.iter_content(chunk_size=65536):  # 64 KB per read
+                total += len(chunk)
+                if total > MAX_FILE_SIZE_BYTES:
+                    raise OrgLogoFetchError("Logo exceeds maximum allowed size")
+                chunks.append(chunk)
+        except OrgLogoFetchError:
+            raise
+        except Exception as e:
+            raise OrgLogoFetchError("Failed to read logo from storage") from e
+        finally:
+            resp.close()
+        return b"".join(chunks), content_type
 
     @staticmethod
     def upload_logo_from_file(file_bytes: bytes, content_type: str, filename: str, org: Org) -> Org:
