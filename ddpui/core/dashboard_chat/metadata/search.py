@@ -75,7 +75,6 @@ def search_metadata_tables(
                 " ".join(table.primary_entities),
                 " ".join(table.upstream_models),
                 " ".join(table.temporal.time_column_meanings.values()),
-                " ".join(table.temporal.period_notes),
                 " ".join(table.counting.entity_counting_guidance.values()),
                 " ".join(table.answerability.retained_dimensions),
                 " ".join(table.answerability.rolled_up_over),
@@ -89,7 +88,6 @@ def search_metadata_tables(
                     + limitation.details
                     for limitation in table.answerability.answerability_limitations
                 ),
-                " ".join(table.ambiguity_notes),
                 " ".join(col.name for col in table.columns),
                 " ".join(col.description for col in table.columns),
                 " ".join(col.semantic_role for col in table.columns),

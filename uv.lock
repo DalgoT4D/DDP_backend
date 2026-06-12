@@ -582,49 +582,6 @@ wheels = [
 ]
 
 [[package]]
-name = "chromadb"
-version = "1.5.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "bcrypt" },
-    { name = "build" },
-    { name = "grpcio" },
-    { name = "httpx" },
-    { name = "importlib-resources" },
-    { name = "jsonschema" },
-    { name = "kubernetes" },
-    { name = "mmh3" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "onnxruntime" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-grpc" },
-    { name = "opentelemetry-sdk" },
-    { name = "orjson" },
-    { name = "overrides" },
-    { name = "pybase64" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pypika" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "tenacity" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
-    { name = "typer" },
-    { name = "typing-extensions" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/78/52/73280325b5cabb4a9fb5c37a3b57144f6cc8c5863748444c52f47ae736f3/chromadb-1.5.6.tar.gz", hash = "sha256:fff5ea5c93d3ec2058619db652715fdc521bbe5c7bac7cc26647bcb937f75c4c", size = 2475230, upload-time = "2026-04-07T03:00:23.959Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/bf/66dcbe7f387ed4a39c89c2816496f74d7c7007b742df1b06fea8f48a478e/chromadb-1.5.6-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:1a6469c57e0bf8f4c3ac918ae6f2e598af505648135ed23d716cf5993d8660b7", size = 21647992, upload-time = "2026-04-07T03:00:21.467Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/e8/66cc0c8cbc65257002223eb2f050a703128b40e5d997c03df6400b8f63fa/chromadb-1.5.6-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:8027d891d5ff0f99c19403f5133cbddd31a19b0537a7d2e974a85ed5af461be2", size = 20821587, upload-time = "2026-04-07T03:00:18.408Z" },
-    { url = "https://files.pythonhosted.org/packages/93/68/d80940279ed39c6a9b280811434f89932df7a49dde7b4b46358fd46cd91d/chromadb-1.5.6-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8f849351f3ebe17ee4da218e98f5611975c4b8c2265ee3c98b15df8a0bab6519", size = 21827142, upload-time = "2026-04-07T03:00:11.411Z" },
-    { url = "https://files.pythonhosted.org/packages/7b/61/0705612adbc8435dbb60bfdc613c9bdec3cafcc59b2a5b161fe633cf4238/chromadb-1.5.6-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0c00b1d60e665243cfbc6bfa44e6deb855faa654f80e79f2c5ff02456f245ed5", size = 22447796, upload-time = "2026-04-07T03:00:14.683Z" },
-    { url = "https://files.pythonhosted.org/packages/3d/60/5cff40b4e04ae6ad39c2d16371f13cc63029d16ef9967e3c233d6b385974/chromadb-1.5.6-cp39-abi3-win_amd64.whl", hash = "sha256:4bff2dd1a9e07178df149f955ea239ee801596eb1eb628a65a88a67fc4c8dda1", size = 22490932, upload-time = "2026-04-07T03:00:26Z" },
-]
-
-[[package]]
 name = "click"
 version = "8.1.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1094,7 +1051,6 @@ dependencies = [
     { name = "channels" },
     { name = "channels-redis" },
     { name = "charset-normalizer" },
-    { name = "chromadb" },
     { name = "click" },
     { name = "click-didyoumean" },
     { name = "click-plugins" },
@@ -1369,7 +1325,6 @@ requires-dist = [
     { name = "channels", specifier = "==4.1.0" },
     { name = "channels-redis", specifier = "==4.2.0" },
     { name = "charset-normalizer", specifier = "==3.1.0" },
-    { name = "chromadb", specifier = "==1.5.6" },
     { name = "click", specifier = "==8.1.3" },
     { name = "click-didyoumean", specifier = "==0.3.0" },
     { name = "click-plugins", specifier = "==1.1.1" },

@@ -66,13 +66,31 @@ Your job is to infer semantic metadata for ONE table from observed physical fact
 RULES
 1. Never invent tables, columns, joins, metrics, or time coverage that are not supported by the input.
 2. Observed physical facts are the source of truth for names, stats, and lineage. Infer semantics from those facts; do not contradict them.
-3. Infer, do not guess blindly. If the evidence is weak, leave fields empty and explain uncertainty in ambiguity notes.
-4. Never assume cumulative semantics, latest-row semantics, as-of-date semantics, or one-row-per-entity-per-time semantics unless the observed facts or profiling results explicitly support them.
+3. Infer, do not guess blindly. If the evidence is weak, leave fields empty instead of writing caveats.
+4. Do not infer table-state semantics. Do not write output that implies rows should be collapsed to one final row per entity, or that values represent progress up to a reporting/current state, unless source documentation explicitly defines that metric meaning.
 5. Write the final human-readable table description and column descriptions. Do not simply copy sparse dbt docs verbatim.
 6. Prefer compact structured answerability guidance over broad prose lists.
 7. Be generic and reusable. Do not mention a specific NGO unless the table facts make that necessary.
-8. PII marking must be semantic, not a naive column-name rule. Mark pii=true for human names, person-identifying free text, mobile/contact numbers, and government-issued identifiers such as MGNREGA numbers, national IDs, Aadhaar IDs, voter IDs, ration-card IDs, or other official identity numbers. Mark pii=false for ordinary system-generated warehouse/application identifiers such as farmer_id, student_id, work_order_id, facility_id, school_id, district_id, or other surrogate keys when context indicates they are internal IDs rather than official identity numbers. If a column name contains "name" but the context clearly means an organization/place/program/grade/status label, do not mark it as PII. If a column name is ambiguous, use table description, entity context, value semantics, and sample value shape to decide; record uncertainty in ambiguity_notes.
-9. Output valid JSON only.
+8. Do not put query strategy into metadata. Metadata can describe row grain, natural keys, metrics, dimensions, and the primary time column. It must not tell the SQL generator to collapse rows per entity, use max values per entity, or use reporting-state logic.
+9. For repeated entity/date rows, describe only the observed grain, for example "one row per entity per date". Do not infer that values must be deduplicated to one row per entity unless source documentation explicitly defines that query requirement.
+10. For time-bounded questions, metadata should support direct filtering on the primary time column and aggregation of matching rows. Do not encode instructions that replace a date window with one-row-per-entity or max-per-entity logic.
+11. PII marking must be semantic, not a naive column-name rule. Mark pii=true for human names, person-identifying free text, mobile/contact numbers, and government-issued identifiers such as MGNREGA numbers, national IDs, Aadhaar IDs, voter IDs, ration-card IDs, or other official identity numbers. Mark pii=false for ordinary system-generated warehouse/application identifiers such as farmer_id, student_id, work_order_id, facility_id, school_id, district_id, or other surrogate keys when context indicates they are internal IDs rather than official identity numbers. If a column name contains "name" but the context clearly means an organization/place/program/grade/status label, do not mark it as PII.
+12. Metric descriptions must not imply that values include prior rows or prior days unless source documentation explicitly defines that. Prefer wording like "recorded for this row" or "on the row date" when the table has a date column.
+13. Output valid JSON only.
+
+ANSWERABILITY FIELD MEANINGS
+- retained_dimensions: dimensions physically present as columns in this table that can be filtered, grouped, or compared directly.
+- rolled_up_over: dimensions or lower-grain entities that are not physically available because this table has already aggregated across them. Do not list columns that exist in this table here. Leave empty if the missing lower grain is not clear.
+- comparison_axes_available: columns physically present in this table that can support comparisons.
+- direct_answer_capabilities: question types this table can answer without joins or lower-grain tables.
+- answerability_limitations: question needs this table cannot answer directly, with the required join or lower-grain table resolution when known.
+- action_filter_rules: only domain action phrases that imply a required metric/status condition, for example "carted silt" requires a positive carted-silt metric. Do not create generic non-null rules for ordinary dimensions, dates, or dashboard filters.
+
+GRAIN FIELD MEANINGS
+- row_definition: one concise sentence describing the physical row grain.
+- natural_keys: columns that define the natural row grain.
+- candidate_unique_id_columns: columns that participate in a single-column or composite unique row identifier. If profiling proves a column combination uniquely identifies rows, list those columns here.
+- primary_entities: entity concepts represented by rows, for example "work_order" or "farmer"; do not use raw column names unless the column name is the entity label itself.
 
 Return JSON in this exact shape:
 {
@@ -89,8 +107,7 @@ Return JSON in this exact shape:
     "primary_filter_time_column": "column_name",
     "time_column_meanings": {
       "date_time": "reporting_date"
-    },
-    "period_notes": ["..."]
+    }
   },
   "counting": {
     "default_row_count_entity": "string",
@@ -118,15 +135,13 @@ Return JSON in this exact shape:
       }
     ]
   },
-  "ambiguity_notes": ["..."],
   "column_overrides": [
     {
       "column_name": "column_name",
       "description": "string",
       "semantic_role": "identifier | dimension | metric | time | status | label",
       "value_semantics": "entity_identifier | entity_label | geography_label | additive_numeric_metric | non_additive_numeric_metric | percentage | ordinal_band | reporting_date | event_date | status_label | free_text | other",
-      "pii": true,
-      "ambiguity_notes": ["..."]
+      "pii": true
     }
   ]
 }
@@ -403,7 +418,6 @@ class DashboardChatMetadataEnricher:
             "current_temporal": table.temporal.model_dump(mode="json"),
             "current_counting": table.counting.model_dump(mode="json"),
             "current_answerability": table.answerability.model_dump(mode="json"),
-            "current_ambiguity_notes": table.ambiguity_notes,
         }
 
     def _serialize_column_for_enrichment(
@@ -427,7 +441,6 @@ class DashboardChatMetadataEnricher:
                 if column.statistics.range_profile is not None
                 else None
             ),
-            "ambiguity_notes": column.ambiguity_notes,
         }
 
     def _apply_table_enrichment(
@@ -459,10 +472,6 @@ class DashboardChatMetadataEnricher:
             table_copy.answerability = type(table_copy.answerability).model_validate(
                 enrichment.get("answerability") or {}
             )
-        if "ambiguity_notes" in enrichment:
-            table_copy.ambiguity_notes = self._normalize_string_list(
-                enrichment.get("ambiguity_notes")
-            )
 
         overrides_by_name = {
             str(item.get("column_name") or item.get("name") or ""): item
@@ -484,10 +493,6 @@ class DashboardChatMetadataEnricher:
                 column_copy.value_semantics = str(override.get("value_semantics") or "").strip()
             if "pii" in override:
                 column_copy.pii = bool(override.get("pii"))
-            if "ambiguity_notes" in override:
-                column_copy.ambiguity_notes = self._normalize_string_list(
-                    override.get("ambiguity_notes")
-                )
             enriched_columns.append(column_copy)
         table_copy.columns = enriched_columns
         return table_copy

@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-DASHBOARD_CHAT_METADATA_SCHEMA_VERSION = 4
+DASHBOARD_CHAT_METADATA_SCHEMA_VERSION = 5
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -67,7 +67,6 @@ class DashboardChatMetadataColumn(BaseModel):
     value_semantics: str = ""
     pii: bool = False
     statistics: DashboardChatColumnStatistics = Field(default_factory=DashboardChatColumnStatistics)
-    ambiguity_notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -108,15 +107,7 @@ class DashboardChatMetadataColumn(BaseModel):
                 )
                 else None,
             },
-            "ambiguity_notes": value.get("ambiguity_notes")
-            or inferred.get("ambiguity_notes")
-            or [],
         }
-
-    @field_validator("ambiguity_notes", mode="before")
-    @classmethod
-    def _normalize_ambiguity_notes(cls, value: Any) -> list[str]:
-        return _normalize_string_list(value)
 
     @property
     def name(self) -> str:
@@ -216,12 +207,6 @@ class DashboardChatTableTemporal(BaseModel):
 
     primary_filter_time_column: str = ""
     time_column_meanings: dict[str, str] = Field(default_factory=dict)
-    period_notes: list[str] = Field(default_factory=list)
-
-    @field_validator("period_notes", mode="before")
-    @classmethod
-    def _normalize_period_notes(cls, value: Any) -> list[str]:
-        return _normalize_string_list(value)
 
 
 class DashboardChatTableCounting(BaseModel):
@@ -306,7 +291,6 @@ class DashboardChatMetadataTable(BaseModel):
     answerability: DashboardChatTableAnswerability = Field(
         default_factory=DashboardChatTableAnswerability
     )
-    ambiguity_notes: list[str] = Field(default_factory=list)
     columns: list[DashboardChatMetadataColumn] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -368,7 +352,6 @@ class DashboardChatMetadataTable(BaseModel):
                     else ""
                 ),
                 "time_column_meanings": {},
-                "period_notes": [],
             },
             "counting": value.get("counting")
             or {
@@ -376,11 +359,10 @@ class DashboardChatMetadataTable(BaseModel):
                 "entity_counting_guidance": inferred.get("entity_counting_guidance") or {},
             },
             "answerability": value.get("answerability") or {},
-            "ambiguity_notes": value.get("ambiguity_notes") or inferred.get("ambiguity_notes") or [],
             "columns": value.get("columns") or [],
         }
 
-    @field_validator("upstream_models", "primary_entities", "ambiguity_notes", mode="before")
+    @field_validator("upstream_models", "primary_entities", mode="before")
     @classmethod
     def _normalize_lists(cls, value: Any) -> list[str]:
         return _normalize_string_list(value)

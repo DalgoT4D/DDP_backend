@@ -11,6 +11,9 @@ from ddpui.core.dashboard_chat.orchestration.conversation_context import (
     build_follow_up_context_prompt,
     detect_sql_modification_type,
 )
+from ddpui.core.dashboard_chat.orchestration.time_scope import (
+    build_required_time_scope_prompt,
+)
 from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationContext,
 )
@@ -21,11 +24,12 @@ from ddpui.core.dashboard_chat.contracts.intent_contracts import (
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
 
-def build_runtime_date_prompt() -> str:
+def build_runtime_date_prompt(current_date=None) -> str:
     """Return runtime date context for relative time interpretation."""
+    current_date = current_date or timezone.localdate()
     return (
         "RUNTIME DATE CONTEXT:\n"
-        f"- Today is {timezone.localdate().isoformat()}.\n"
+        f"- Today is {current_date.isoformat()}.\n"
         "- Use this date for phrases like 'this year', 'this quarter', and 'this month' unless the user clearly names a different fiscal year, program year, or explicit date range."
     )
 
@@ -94,12 +98,19 @@ def build_new_query_messages(
 ) -> list[dict[str, Any]]:
     """Build the new-query message stack."""
     system_prompt = llm_client.get_prompt(DashboardChatPromptTemplateKey.NEW_QUERY_SYSTEM)
+    current_date = timezone.localdate()
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "system", "content": build_runtime_date_prompt()},
+        {"role": "system", "content": build_runtime_date_prompt(current_date)},
         {"role": "system", "content": build_inline_dashboard_assets_prompt(state)},
         {"role": "user", "content": state["user_query"]},
     ]
+    required_time_scope_prompt = build_required_time_scope_prompt(
+        state["user_query"],
+        current_date,
+    )
+    if required_time_scope_prompt:
+        messages.insert(2, {"role": "system", "content": required_time_scope_prompt})
     route_guidance = build_route_guidance_prompt(state)
     if route_guidance:
         messages.insert(3, {"role": "system", "content": route_guidance})
@@ -113,9 +124,10 @@ def build_follow_up_messages(
     """Build the follow-up message stack."""
     modification_type = detect_sql_modification_type(state["user_query"])
     system_prompt = llm_client.get_prompt(DashboardChatPromptTemplateKey.FOLLOW_UP_SYSTEM)
+    current_date = timezone.localdate()
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "system", "content": build_runtime_date_prompt()},
+        {"role": "system", "content": build_runtime_date_prompt(current_date)},
         {"role": "system", "content": build_inline_dashboard_assets_prompt(state)},
         {
             "role": "system",
@@ -129,6 +141,12 @@ def build_follow_up_messages(
         {"role": "system", "content": f"MODIFICATION_TYPE: {modification_type}"},
         {"role": "user", "content": state["user_query"]},
     ]
+    required_time_scope_prompt = build_required_time_scope_prompt(
+        state["user_query"],
+        current_date,
+    )
+    if required_time_scope_prompt:
+        messages.insert(2, {"role": "system", "content": required_time_scope_prompt})
     route_guidance = build_route_guidance_prompt(state)
     if route_guidance:
         messages.insert(3, {"role": "system", "content": route_guidance})
