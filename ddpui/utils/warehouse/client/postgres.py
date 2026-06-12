@@ -1,4 +1,5 @@
 import tempfile
+from typing import Union
 from urllib.parse import quote
 
 from sqlalchemy.engine import create_engine
@@ -117,3 +118,31 @@ class PostgresClient(Warehouse):
             if col.get("name") == column_name:
                 return True
         return False
+
+    def get_distinct_values(
+        self, db_schema: str, db_table: str, column_name: str, limit: Union[int, None] = None
+    ) -> list[str]:
+        """Return distinct non-empty values for a column, ordered alphabetically."""
+        q_schema = self._quote(db_schema)
+        q_table = self._quote(db_table)
+        q_column = self._quote(column_name)
+        sql = (
+            f"SELECT DISTINCT {q_column} AS value"
+            f" FROM {q_schema}.{q_table}"
+            f" WHERE {q_column} IS NOT NULL"
+            f" AND TRIM(CAST({q_column} AS TEXT)) != ''"
+            f" ORDER BY value"
+        )
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        rows = self.execute(sql)
+        return [
+            str(row.get("value"))
+            for row in rows
+            if row.get("value") is not None and str(row.get("value")).strip()
+        ]
+
+    @staticmethod
+    def _quote(identifier: str) -> str:
+        """Quote a Postgres identifier."""
+        return '"' + identifier.replace('"', '""') + '"'

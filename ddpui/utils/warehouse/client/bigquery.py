@@ -1,4 +1,5 @@
 import sqlalchemy.types as types
+from typing import Union
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy import inspect
@@ -105,3 +106,30 @@ class BigqueryClient(Warehouse):
             if col.get("name") == column_name:
                 return True
         return False
+
+    def get_distinct_values(
+        self, db_schema: str, db_table: str, column_name: str, limit: Union[int, None] = None
+    ) -> list[str]:
+        """Return distinct non-empty values for a column, ordered alphabetically."""
+        q_column = self._quote(column_name)
+        q_table = f"`{db_schema}.{db_table}`"
+        sql = (
+            f"SELECT DISTINCT {q_column} AS value"
+            f" FROM {q_table}"
+            f" WHERE {q_column} IS NOT NULL"
+            f" AND TRIM(CAST({q_column} AS STRING)) != ''"
+            f" ORDER BY value"
+        )
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        rows = self.execute(sql)
+        return [
+            str(row.get("value"))
+            for row in rows
+            if row.get("value") is not None and str(row.get("value")).strip()
+        ]
+
+    @staticmethod
+    def _quote(identifier: str) -> str:
+        """Quote a BigQuery identifier."""
+        return "`" + identifier.replace("`", "") + "`"

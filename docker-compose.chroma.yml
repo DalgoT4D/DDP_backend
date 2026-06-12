@@ -1,0 +1,18 @@
+name: dalgo-vector-store
+
+services:
+  chroma:
+    image: chromadb/chroma:1.5.6
+    ports:
+      - "8003:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SEGMENT_CACHE_POLICY=${CHROMA_SEGMENT_CACHE_POLICY:-LRU}
+      - CHROMA_MEMORY_LIMIT_BYTES=${CHROMA_MEMORY_LIMIT_BYTES:-3221225472} # 3Gi
+    restart: unless-stopped
+
+volumes:
+  chroma_data:

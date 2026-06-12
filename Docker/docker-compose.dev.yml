@@ -102,6 +102,15 @@ services:
   celery_worker:
     image: dalgo_backend:0.1
     command: celery
+    depends_on:
+      backend:
+        condition: service_started
+      redis_server:
+        condition: service_started
+      initdb:
+        condition: service_completed_successfully
+    networks:
+      - dalgo-network
     environment:
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
@@ -112,15 +121,6 @@ services:
       - DBPASSWORD=${DBPASSWORD}
       - DBADMINUSER=${DBADMINUSER}
       - DBADMINPASSWORD=${DBADMINPASSWORD}
-    depends_on:
-      backend:
-        condition: service_started
-      redis_server:
-        condition: service_started
-      initdb:
-        condition: service_completed_successfully
-    networks:
-      - dalgo-network
   celery_beat:
     image: dalgo_backend:0.1
     command: beat

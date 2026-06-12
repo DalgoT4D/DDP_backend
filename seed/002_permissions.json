@@ -646,5 +646,13 @@
             "name": "Can Delete KPIs",
             "slug": "can_delete_kpis"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 82,
+        "fields": {
+            "name": "Can Manage Organization Settings",
+            "slug": "can_manage_org_settings"
+        }
     }
 ]
