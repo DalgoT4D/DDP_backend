@@ -8,33 +8,37 @@
   GMAIL COMPATIBILITY RULES — DO NOT BREAK THESE
   ────────────────────────────────────────────────
   1. All styles MUST be inline (style="..."). Gmail strips <style> blocks.
-  2. NO CSS gradients (linear-gradient, radial-gradient). Gmail drops them
-     silently, leaving a white background — use solid background-color only.
-  3. NO CSS variables, animations, or shorthand background property with images.
-  4. Table-based layout only for structural columns. Flexbox is unreliable.
-  5. Skip any section entirely when there is nothing to report — never write
+  2. NO CSS gradients. Gmail silently drops them, leaving white background.
+  3. For background colours on <td> you MUST use BOTH:
+       - the HTML attribute:  bgcolor="#1e3a5f"
+       - the inline style:    style="background-color:#1e3a5f"
+     Gmail's sanitiser strips inline background-color on its own.
+  4. NO overflow:hidden or border-radius on <table> elements. Gmail rewrites
+     table structure when it sees these, breaking background colours.
+  5. Table-based layout only. Flexbox is unreliable in email clients.
+  6. Skip any section entirely when there is nothing to report — never write
      "nothing to report."
-  6. Recurring calendar events must NOT appear in the Schedule section.
-  7. Coverage Notes section lists data sources that could not be reached.
+  7. Recurring calendar events must NOT appear in the Schedule section.
+  8. Coverage Notes section lists data sources that could not be reached.
 
   PLACEHOLDER TOKENS — replace before sending
   ─────────────────────────────────────────────
   {{DATE_FULL}}           Friday, 12 June 2026
   {{DATE_SHORT}}          12 Jun 2026
 
-  Per schedule event → duplicate the <!-- EVENT ROW --> block:
+  Per schedule event → duplicate the EVENT ROW block:
     {{EVENT_TIME}}        10:30 AM
     {{EVENT_TITLE}}       Meeting title
     {{EVENT_ATTENDEES}}   Comma-separated names
     {{EVENT_PREP}}        Prep note (remove the prep row entirely if not needed)
 
-  Per Linear completed issue → duplicate the <!-- ISSUE CARD --> block:
+  Per Linear completed issue → duplicate the ISSUE CARD block:
     {{ISSUE_ID}}          DALGO-1418
     {{ISSUE_TITLE}}       Issue title text
     {{ISSUE_ASSIGNEE}}    Assignee display name
     {{ISSUE_META}}        One-line context
 
-  Per PR → duplicate the <!-- PR ROW --> block:
+  Per PR → duplicate the PR ROW block:
     {{PR_CHIP}}           DDP #1409
     {{PR_URL}}            GitHub PR URL
     {{PR_TITLE}}          PR title text
@@ -43,17 +47,17 @@
     {{PR_META}}           Short description
     {{PR_FLAG}}           Warning text — remove the flag span entirely if unused
 
-  Per Discord mention → duplicate the <!-- MENTION --> block:
+  Per Discord mention → duplicate the MENTION block:
     {{DISCORD_CHANNEL}}   #general
     {{DISCORD_AUTHOR}}    Author name
     {{DISCORD_SNIPPET}}   Message excerpt
 
-  Per action item → duplicate the <!-- ACTION --> block:
+  Per action item → duplicate the ACTION block:
     {{ACTION_NUM}}        1
     {{ACTION_TITLE}}      Bold action line
     {{ACTION_DESC}}       Supporting detail (can include <strong> and <code>)
 
-  Per coverage note → duplicate the <!-- NOTE --> block:
+  Per coverage note → duplicate the NOTE block:
     {{NOTE_ICON}}         📅
     {{NOTE_BODY}}         Note text (can include <strong> and <em>)
 -->
@@ -64,45 +68,40 @@
 </head>
 <body style="margin:0;padding:0;background-color:#dde3ea;font-family:'Segoe UI',Helvetica,Arial,sans-serif;color:#1a202c;">
 
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#dde3ea;">
+<!-- Outer wrapper -->
+<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#dde3ea" style="background-color:#dde3ea;">
 <tr><td align="center" style="padding:28px 12px;">
 
-  <!-- ═══════════════ OUTER CARD ═══════════════ -->
+  <!-- Card — NO overflow:hidden, NO border-radius on table (Gmail breaks bgcolor when present) -->
   <table width="640" cellpadding="0" cellspacing="0" border="0"
-         style="max-width:640px;width:100%;background-color:#ffffff;
-                border-radius:12px;overflow:hidden;">
+         style="max-width:640px;width:100%;background-color:#ffffff;">
 
-    <!-- ══════════ HEADER ══════════
-         IMPORTANT: solid background-color ONLY — no gradients, Gmail drops them.
-    ════════════════════════════════ -->
+    <!-- ══════════════════════════════════
+         HEADER
+         bgcolor attribute is REQUIRED — Gmail strips inline background-color
+         on <td> without it.
+    ══════════════════════════════════════ -->
     <tr>
-      <td style="background-color:#1e3a5f;padding:28px 36px 26px;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
-          <tr>
-            <td>
-              <div style="font-size:28px;font-weight:800;color:#ffffff;
-                          line-height:1.2;margin:0 0 8px;letter-spacing:-0.3px;">
-                ☀️ Good Morning, Pradeep
-              </div>
-              <div style="font-size:15px;color:#93c5fd;margin:0;font-weight:500;">
-                {{DATE_FULL}} &nbsp;·&nbsp; Daily Briefing
-              </div>
-            </td>
-          </tr>
-        </table>
+      <td bgcolor="#1e3a5f" style="background-color:#1e3a5f;padding:28px 36px 26px;">
+        <div style="font-size:28px;font-weight:800;color:#ffffff;line-height:1.2;
+                    margin:0 0 8px;letter-spacing:-0.3px;">
+          ☀️ Good Morning, Pradeep
+        </div>
+        <div style="font-size:15px;color:#93c5fd;margin:0;font-weight:500;">
+          {{DATE_FULL}} &nbsp;·&nbsp; Daily Briefing
+        </div>
       </td>
     </tr>
 
-    <!-- ══════════════════════════════════════════
+
+    <!-- ══════════════════════════════════
          SECTION: SCHEDULE
          Only non-recurring, important meetings.
          Remove this entire <tr> block if nothing qualifies.
-    ═══════════════════════════════════════════════ -->
+    ══════════════════════════════════════ -->
     <tr>
       <td style="padding:22px 36px 18px;border-bottom:2px solid #edf2f7;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
-          <!-- Section heading -->
           <tr>
             <td style="padding-bottom:14px;">
               <span style="font-size:18px;vertical-align:middle;">📅</span>
@@ -115,30 +114,28 @@
           <!-- EVENT ROW — duplicate for each non-recurring event -->
           <tr>
             <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td width="76" valign="top" style="padding-right:14px;padding-top:2px;">
-                    <span style="display:inline-block;background-color:#dbeafe;
-                                 color:#1d4ed8;font-size:12px;font-weight:700;
-                                 padding:5px 8px;border-radius:6px;white-space:nowrap;
-                                 text-align:center;">{{EVENT_TIME}}</span>
-                  </td>
-                  <td valign="top">
-                    <div style="font-size:15px;font-weight:700;color:#1e293b;margin:0 0 4px;">
-                      {{EVENT_TITLE}}
-                    </div>
-                    <div style="font-size:13px;color:#64748b;margin:0 0 5px;">
-                      👥 {{EVENT_ATTENDEES}}
-                    </div>
-                    <!-- Remove this row entirely if no prep needed -->
-                    <div style="font-size:12px;color:#92400e;background-color:#fef3c7;
-                                border-left:3px solid #f59e0b;padding:4px 10px;
-                                border-radius:0 4px 4px 0;display:inline-block;">
-                      📌 Prep: {{EVENT_PREP}}
-                    </div>
-                  </td>
-                </tr>
-              </table>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                <td width="80" valign="top" style="padding-right:14px;padding-top:2px;">
+                  <span style="display:inline-block;background-color:#dbeafe;
+                               color:#1d4ed8;font-size:12px;font-weight:700;
+                               padding:5px 8px;border-radius:6px;white-space:nowrap;
+                               text-align:center;">{{EVENT_TIME}}</span>
+                </td>
+                <td valign="top">
+                  <div style="font-size:15px;font-weight:700;color:#1e293b;margin:0 0 4px;">
+                    {{EVENT_TITLE}}
+                  </div>
+                  <div style="font-size:13px;color:#64748b;margin:0 0 5px;">
+                    👥 {{EVENT_ATTENDEES}}
+                  </div>
+                  <!-- Remove this row entirely if no prep needed -->
+                  <div style="font-size:12px;color:#92400e;background-color:#fef3c7;
+                              border-left:3px solid #f59e0b;padding:4px 10px;
+                              display:inline-block;">
+                    📌 Prep: {{EVENT_PREP}}
+                  </div>
+                </td>
+              </tr></table>
             </td>
           </tr>
           <!-- /EVENT ROW -->
@@ -149,15 +146,14 @@
     <!-- /SCHEDULE -->
 
 
-    <!-- ══════════════════════════════════════════
+    <!-- ══════════════════════════════════
          SECTION: LINEAR COMPLETED TASKS
          Issues closed/completed YESTERDAY by the 4-person team.
          Remove this entire <tr> block if none.
-    ═══════════════════════════════════════════════ -->
+    ══════════════════════════════════════ -->
     <tr>
       <td style="padding:22px 36px 18px;border-bottom:2px solid #edf2f7;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
           <tr>
             <td style="padding-bottom:14px;">
               <span style="font-size:18px;vertical-align:middle;">✅</span>
@@ -172,7 +168,7 @@
             <td style="padding:5px 0;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
                 <td style="background-color:#f0fdf4;border-left:4px solid #22c55e;
-                            border-radius:0 8px 8px 0;padding:12px 16px;">
+                            padding:12px 16px;">
                   <div style="font-size:15px;font-weight:700;color:#14532d;margin:0 0 5px;">
                     {{ISSUE_ID}} — {{ISSUE_TITLE}}
                     <span style="display:inline-block;background-color:#bbf7d0;
@@ -195,15 +191,14 @@
     <!-- /LINEAR COMPLETED -->
 
 
-    <!-- ══════════════════════════════════════════
+    <!-- ══════════════════════════════════
          SECTION: NEW PULL REQUESTS
          PRs opened yesterday across DDP_backend / webapp_v2.
          Remove this entire <tr> block if none.
-    ═══════════════════════════════════════════════ -->
+    ══════════════════════════════════════ -->
     <tr>
       <td style="padding:22px 36px 18px;border-bottom:2px solid #edf2f7;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
           <tr>
             <td style="padding-bottom:14px;">
               <span style="font-size:18px;vertical-align:middle;">🔀</span>
@@ -217,14 +212,12 @@
           <tr>
             <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-                <!-- Repo / PR chip -->
                 <td width="92" valign="top" style="padding-right:14px;padding-top:3px;">
                   <span style="display:inline-block;background-color:#dbeafe;
                                color:#1e40af;font-size:11px;font-weight:700;
                                padding:5px 9px;border-radius:6px;
                                white-space:nowrap;text-align:center;">{{PR_CHIP}}</span>
                 </td>
-                <!-- PR detail -->
                 <td valign="top">
                   <div style="font-size:15px;font-weight:700;color:#1e293b;margin:0 0 5px;">
                     <a href="{{PR_URL}}" style="color:#2563eb;text-decoration:none;">{{PR_TITLE}}</a>
@@ -234,14 +227,12 @@
                     &nbsp;·&nbsp; Reviewer: <strong style="color:#334155;">{{PR_REVIEWER}}</strong>
                     &nbsp;·&nbsp; {{PR_META}}
                   </div>
-                  <!-- Remove this entire div if no flag/warning -->
+                  <!-- Remove this div entirely if no flag/warning -->
                   <div style="margin-top:6px;">
                     <span style="display:inline-block;background-color:#fef2f2;
                                  color:#dc2626;font-size:11px;font-weight:700;
                                  padding:3px 9px;border-radius:4px;
-                                 border:1px solid #fecaca;">
-                      ⚠️ {{PR_FLAG}}
-                    </span>
+                                 border:1px solid #fecaca;">⚠️ {{PR_FLAG}}</span>
                   </div>
                 </td>
               </tr></table>
@@ -255,15 +246,14 @@
     <!-- /PULL REQUESTS -->
 
 
-    <!-- ══════════════════════════════════════════
+    <!-- ══════════════════════════════════
          SECTION: DISCORD MENTIONS
          @Pradeep mentions needing a response today.
          Remove this entire <tr> block if none.
-    ═══════════════════════════════════════════════ -->
+    ══════════════════════════════════════ -->
     <tr>
       <td style="padding:22px 36px 18px;border-bottom:2px solid #edf2f7;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
           <tr>
             <td style="padding-bottom:14px;">
               <span style="font-size:18px;vertical-align:middle;">💬</span>
@@ -277,8 +267,7 @@
           <tr>
             <td style="padding:5px 0;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-                <td style="background-color:#f5f3ff;border-left:4px solid #7c3aed;
-                            border-radius:0 8px 8px 0;padding:12px 16px;">
+                <td style="background-color:#f5f3ff;border-left:4px solid #7c3aed;padding:12px 16px;">
                   <div style="font-size:12px;font-weight:700;color:#5b21b6;
                                margin:0 0 6px;text-transform:uppercase;letter-spacing:0.5px;">
                     {{DISCORD_CHANNEL}} &nbsp;·&nbsp; {{DISCORD_AUTHOR}}
@@ -299,14 +288,13 @@
     <!-- /DISCORD -->
 
 
-    <!-- ══════════════════════════════════════════
+    <!-- ══════════════════════════════════
          SECTION: YOUR ACTION ITEMS
          Decisions, reviews, and follow-ups required by Pradeep.
-    ═══════════════════════════════════════════════ -->
+    ══════════════════════════════════════ -->
     <tr>
       <td style="padding:22px 36px 18px;border-bottom:2px solid #edf2f7;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
           <tr>
             <td style="padding-bottom:14px;">
               <span style="font-size:18px;vertical-align:middle;">🎯</span>
@@ -320,8 +308,7 @@
           <tr>
             <td style="padding:5px 0;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-                <td style="background-color:#fffbeb;border-left:4px solid #f59e0b;
-                            border-radius:0 8px 8px 0;padding:13px 16px;">
+                <td style="background-color:#fffbeb;border-left:4px solid #f59e0b;padding:13px 16px;">
                   <div style="font-size:15px;font-weight:700;color:#78350f;margin:0 0 6px;">
                     {{ACTION_NUM}} &nbsp;·&nbsp; {{ACTION_TITLE}}
                   </div>
@@ -340,15 +327,14 @@
     <!-- /ACTION ITEMS -->
 
 
-    <!-- ══════════════════════════════════════════
+    <!-- ══════════════════════════════════
          SECTION: COVERAGE NOTES
          Data sources that could not be reached this run.
          Remove this entire <tr> block if all sources were accessible.
-    ═══════════════════════════════════════════════ -->
+    ══════════════════════════════════════ -->
     <tr>
       <td style="padding:18px 36px 16px;border-bottom:2px solid #edf2f7;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
           <tr>
             <td style="padding-bottom:12px;">
               <span style="font-size:17px;vertical-align:middle;">📋</span>
@@ -363,8 +349,7 @@
             <td style="padding:3px 0;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
                 <td style="background-color:#f8fafc;border:1px solid #e2e8f0;
-                            border-radius:6px;padding:10px 14px;
-                            font-size:13px;color:#475569;line-height:1.55;">
+                            padding:10px 14px;font-size:13px;color:#475569;line-height:1.55;">
                   {{NOTE_ICON}} {{NOTE_BODY}}
                 </td>
               </tr></table>
@@ -378,9 +363,9 @@
     <!-- /COVERAGE NOTES -->
 
 
-    <!-- ══════════ FOOTER ══════════ -->
+    <!-- FOOTER — bgcolor attribute required, same as header -->
     <tr>
-      <td style="background-color:#1e3a5f;padding:14px 36px;text-align:center;">
+      <td bgcolor="#1e3a5f" style="background-color:#1e3a5f;padding:14px 36px;text-align:center;">
         <div style="font-size:12px;color:#93c5fd;">
           Generated by Claude Code &nbsp;·&nbsp; {{DATE_SHORT}}
           &nbsp;·&nbsp; Google Calendar · Linear · GitHub · Discord
@@ -389,10 +374,11 @@
     </tr>
 
   </table>
-  <!-- /OUTER CARD -->
+  <!-- /Card -->
 
 </td></tr>
 </table>
+<!-- /Outer wrapper -->
 
 </body>
 </html>
