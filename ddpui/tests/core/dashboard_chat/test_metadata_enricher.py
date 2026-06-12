@@ -17,12 +17,18 @@ from ddpui.core.dashboard_chat.metadata.schemas import (
 def test_metadata_enrichment_prompt_forbids_invented_latest_semantics():
     prompt = METADATA_ENRICHMENT_SYSTEM_PROMPT.lower()
 
-    assert "never assume cumulative semantics" in prompt
-    assert "latest-row semantics" in prompt
-    assert "as-of-date semantics" in prompt
+    assert "do not infer table-state semantics" in prompt
+    assert "collapsed to one final row per entity" in prompt
+    assert "direct filtering on the primary time column" in prompt
+    assert "do not list columns that exist in this table" in prompt
+    assert "do not create generic non-null rules" in prompt
+    assert "list those columns here" in prompt
+    assert "prior rows or prior days" in prompt
     assert "observed physical facts are the source of truth" in prompt
     assert "leave fields empty" in prompt
     assert "snapshot" not in prompt
+    assert "period_notes" not in prompt
+    assert "ambiguity_notes" not in prompt
 
 
 def test_enricher_writes_flat_semantics_and_descriptions():

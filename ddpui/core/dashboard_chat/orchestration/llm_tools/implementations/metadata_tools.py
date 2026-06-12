@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from datetime import date
 from typing import Any
 
 from django.utils import timezone
@@ -21,11 +19,8 @@ from ddpui.core.dashboard_chat.metadata.search import (
 )
 from ddpui.core.dashboard_chat.orchestration.pii_masking import mask_metadata_artifact_for_llm
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-
-QUARTER_PATTERN = re.compile(r"\bq([1-4])(?:\s*[-–]\s*q([1-4]))?\b", re.IGNORECASE)
-FISCAL_YEAR_PATTERN = re.compile(
-    r"\b(?:fy\s*)?(20\d{2}|\d{2})\s*[-/]\s*(20\d{2}|\d{2})\b",
-    re.IGNORECASE,
+from ddpui.core.dashboard_chat.orchestration.time_scope import (
+    resolve_time_scope,
 )
 
 
@@ -303,107 +298,9 @@ def handle_resolve_time_scope_tool(
     """Resolve relative or quarter-based time language into explicit ranges."""
     question_text = str(args.get("question_text") or state.get("user_query") or "").strip()
     current_date = timezone.localdate()
-    resolved_ranges = _resolve_time_scope(question_text, current_date)
+    resolved_ranges = resolve_time_scope(question_text, current_date)
     return {
         "question_text": question_text,
         "current_date": current_date.isoformat(),
         "resolved_ranges": resolved_ranges,
     }
-
-
-def _resolve_time_scope(question_text: str, current_date: date) -> list[dict[str, Any]]:
-    """Resolve common relative and quarter-based time scopes."""
-    lowered = question_text.lower()
-    ranges: list[dict[str, Any]] = []
-
-    fiscal_year_match = FISCAL_YEAR_PATTERN.search(lowered)
-    quarter_match = QUARTER_PATTERN.search(lowered)
-    if quarter_match:
-        start_quarter = int(quarter_match.group(1))
-        end_quarter = int(quarter_match.group(2) or quarter_match.group(1))
-        fiscal_year_start = _infer_fiscal_year_start(fiscal_year_match, current_date)
-        for quarter_number in range(start_quarter, end_quarter + 1):
-            start_date, end_date = _fiscal_quarter_dates(fiscal_year_start, quarter_number)
-            ranges.append(
-                {
-                    "label": f"Q{quarter_number}",
-                    "start_date": start_date.isoformat(),
-                    "end_date_exclusive": end_date.isoformat(),
-                    "calendar_basis": f"fiscal year starting {fiscal_year_start}-04-01",
-                }
-            )
-        return ranges
-
-    if "this year" in lowered or "current year" in lowered:
-        start_date = date(current_date.year, 1, 1)
-        end_date = date(current_date.year + 1, 1, 1)
-        ranges.append(
-            {
-                "label": "current_calendar_year",
-                "start_date": start_date.isoformat(),
-                "end_date_exclusive": end_date.isoformat(),
-            }
-        )
-    if "this month" in lowered or "current month" in lowered:
-        start_date = date(current_date.year, current_date.month, 1)
-        if current_date.month == 12:
-            end_date = date(current_date.year + 1, 1, 1)
-        else:
-            end_date = date(current_date.year, current_date.month + 1, 1)
-        ranges.append(
-            {
-                "label": "current_calendar_month",
-                "start_date": start_date.isoformat(),
-                "end_date_exclusive": end_date.isoformat(),
-            }
-        )
-    if "this quarter" in lowered or "current quarter" in lowered:
-        quarter_start_month = ((current_date.month - 1) // 3) * 3 + 1
-        start_date = date(current_date.year, quarter_start_month, 1)
-        if quarter_start_month == 10:
-            end_date = date(current_date.year + 1, 1, 1)
-        else:
-            end_date = date(current_date.year, quarter_start_month + 3, 1)
-        ranges.append(
-            {
-                "label": "current_calendar_quarter",
-                "start_date": start_date.isoformat(),
-                "end_date_exclusive": end_date.isoformat(),
-            }
-        )
-    return ranges
-
-
-def _infer_fiscal_year_start(
-    fiscal_year_match: re.Match[str] | None,
-    current_date: date,
-) -> int:
-    """Infer the April-start fiscal year base year."""
-    if fiscal_year_match is None:
-        return current_date.year if current_date.month >= 4 else current_date.year - 1
-    start_token = fiscal_year_match.group(1)
-    start_year = int(start_token)
-    if start_year < 100:
-        start_year += 2000
-    return start_year
-
-
-def _fiscal_quarter_dates(fiscal_year_start: int, quarter_number: int) -> tuple[date, date]:
-    """Return inclusive start and exclusive end dates for an April-based fiscal quarter."""
-    month_lookup = {
-        1: (4, 7),
-        2: (7, 10),
-        3: (10, 13),
-        4: (1, 4),
-    }
-    start_month, end_month = month_lookup[quarter_number]
-    if quarter_number == 4:
-        start_date = date(fiscal_year_start + 1, start_month, 1)
-        end_date = date(fiscal_year_start + 1, end_month, 1)
-    else:
-        start_date = date(fiscal_year_start, start_month, 1)
-        if end_month == 13:
-            end_date = date(fiscal_year_start + 1, 1, 1)
-        else:
-            end_date = date(fiscal_year_start, end_month, 1)
-    return start_date, end_date

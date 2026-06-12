@@ -14,6 +14,7 @@ from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.pii_masking import unmask_pii_text
+from ddpui.core.dashboard_chat.orchestration.retrieval_support import compact_snippet
 
 logger = CustomLogger("dashboard_chat")
 
@@ -341,8 +342,6 @@ def fallback_answer_text(
     draft_answer: str | None = None,
 ) -> str:
     """Fallback response when the model returns no final text."""
-    from .retrieval_support import compact_snippet
-
     if draft_answer:
         return draft_answer
     if sql_results is not None:

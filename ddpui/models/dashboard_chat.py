@@ -141,7 +141,7 @@ class DashboardChatMetadataArtifact(models.Model):
         on_delete=models.CASCADE,
         related_name="chat_metadata_artifact",
     )
-    schema_version = models.PositiveIntegerField(default=4)
+    schema_version = models.PositiveIntegerField(default=5)
     status = models.CharField(
         max_length=16,
         choices=DashboardChatMetadataArtifactStatus.choices,

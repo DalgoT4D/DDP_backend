@@ -114,7 +114,6 @@ class OrgDbt(models.Model):
     )
 
     docs_generated_at = models.DateTimeField(null=True, blank=True)
-    vector_last_ingested_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

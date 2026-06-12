@@ -7,7 +7,7 @@ def _state_with_student_metadata():
     return {
         "org_id": 1,
         "metadata_artifact_payload": {
-            "schema_version": 4,
+            "schema_version": 5,
             "dashboard_id": 1,
             "org_id": 1,
             "allowlisted_tables": ["dev.students"],

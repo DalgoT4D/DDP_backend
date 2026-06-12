@@ -207,10 +207,7 @@ class DashboardChatConsumer(BaseConsumer):
     ) -> None:
         """Reuse the existing turn state for duplicate client-message retries."""
 
-        if (
-            turn.status == DashboardChatTurnStatus.COMPLETED
-            and turn.assistant_message is not None
-        ):
+        if turn.status == DashboardChatTurnStatus.COMPLETED and turn.assistant_message is not None:
             publish_dashboard_chat_assistant_message(
                 session=session,
                 turn=turn,
@@ -269,9 +266,6 @@ class DashboardChatConsumer(BaseConsumer):
 
         if self.orguser.org.dbt is None:
             raise Exception("Chat with dashboards is not available because dbt is not configured")
-
-        if self.orguser.org.dbt.vector_last_ingested_at is None:
-            raise Exception("Chat with dashboards is still being prepared for this organization")
 
     def _has_permission(self, permission_slug: str) -> bool:
         """Check the authenticated orguser's role permission directly."""

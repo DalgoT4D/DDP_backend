@@ -12,7 +12,9 @@ from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
     DashboardChatAllowlistBuilder,
 )
 from ddpui.core.dashboard_chat.config import DashboardChatRuntimeConfig
-from ddpui.core.dashboard_chat.orchestration.conversation_context import extract_conversation_context
+from ddpui.core.dashboard_chat.orchestration.conversation_context import (
+    extract_conversation_context,
+)
 from ddpui.core.dashboard_chat.orchestration.tool_loop_message_builder import (
     build_follow_up_messages,
     build_new_query_messages,
@@ -275,7 +277,9 @@ class FakeWarehouseTools:
 
     @staticmethod
     def _schema_snippet(table_name, columns):
-        from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
+        from ddpui.core.dashboard_chat.contracts.retrieval_contracts import (
+            DashboardChatSchemaSnippet,
+        )
 
         return DashboardChatSchemaSnippet(table_name=table_name, columns=columns)
 
@@ -517,13 +521,20 @@ def primary_dashboard(org, orguser, primary_chart):
         title="Impact Overview",
         description="Program KPIs and reach",
         dashboard_type="native",
-        components={
-            "chart-1": {
-                "id": "chart-1",
-                "type": "chart",
-                "config": {"chartId": primary_chart.id},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Overview",
+                "layout_config": {},
+                "components": {
+                    "chart-1": {
+                        "id": "chart-1",
+                        "type": "chart",
+                        "config": {"chartId": primary_chart.id},
+                    }
+                },
             }
-        },
+        ],
         created_by=orguser,
         last_modified_by=orguser,
         org=org,
@@ -538,7 +549,7 @@ def ready_metadata_artifact(primary_dashboard):
         dashboard=primary_dashboard,
         status=DashboardChatMetadataArtifactStatus.READY,
         artifact_json={
-            "schema_version": 3,
+            "schema_version": 5,
             "dashboard_id": primary_dashboard.id,
             "org_id": primary_dashboard.org_id,
             "dashboard_title": primary_dashboard.title,
@@ -904,8 +915,7 @@ def test_run_sql_executes_verifier_warning_with_warning(primary_dashboard):
     assert fake_warehouse.executed_sql
     assert "Using the current dashboard reporting basis." in turn_context.warnings
     assert (
-        "State the dashboard-default reporting basis in the final answer."
-        in turn_context.warnings
+        "State the dashboard-default reporting basis in the final answer." in turn_context.warnings
     )
 
 
@@ -1492,7 +1502,10 @@ def test_build_fast_path_intent_routes_advisory_questions_without_sql():
 def test_route_intent_node_does_not_attach_small_talk_response_for_advisory_fast_path():
     """Advisory fast-path routing should not reuse the small-talk response slot."""
     result = route_intent_node(
-        {"user_query": "How can we improve grade 5 reading comprehension?", "conversation_history": []},
+        {
+            "user_query": "How can we improve grade 5 reading comprehension?",
+            "conversation_history": [],
+        },
         llm_client=None,
     )
 

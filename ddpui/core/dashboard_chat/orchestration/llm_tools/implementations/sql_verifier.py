@@ -28,7 +28,21 @@ NAME_AGGREGATION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LATEST_REQUEST_PATTERN = re.compile(
-    r"\b(latest|most recent|recent|as of|as-of|latest available)\b",
+    r"\b(latest|most recent|recent|as of|as-of|latest available)\b"
+    r"|\bcurrent\s+(?:dashboard\s+)?snapshot\b",
+    re.IGNORECASE,
+)
+RELATIVE_TIME_REQUEST_PATTERN = re.compile(
+    r"\b(?:this|current)\s+(?:year|quarter|month)\b"
+    r"|\b(?:fiscal|financial)\s+year\b"
+    r"|\bfy\s*\d{2,4}\b"
+    r"|\bq[1-4]\b"
+    r"|\b\d{4}\s*-\s*\d{2}\b",
+    re.IGNORECASE,
+)
+DIRECT_TIME_FILTER_PATTERN = re.compile(
+    r"(?:date|time|timestamp)[\w.\"`]*\s*(?:>=|>|<=|<|=|between)\s*(?:date\s*)?['\"]?\d{4}-\d{2}-\d{2}"
+    r"|extract\s*\(\s*(?:year|quarter|month)\s+from\s+[^)]+\)\s*=\s*\d{1,4}",
     re.IGNORECASE,
 )
 NAME_LIST_PATTERN = re.compile(
@@ -54,7 +68,17 @@ def verify_sql_against_question(
     except Exception:
         artifact = None
         referenced_tables = []
-    risk_flags = build_sql_risk_flags(sql=sql, user_query=state["user_query"], tables=referenced_tables)
+    risk_flags = build_sql_risk_flags(
+        sql=sql, user_query=state["user_query"], tables=referenced_tables
+    )
+    deterministic_result = _deterministic_temporal_verification(
+        sql=sql,
+        user_query=state["user_query"],
+        risk_flags=risk_flags,
+    )
+    if deterministic_result is not None:
+        return deterministic_result
+
     intent = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {}).intent
     return llm_client.verify_sql_against_question(
         user_query=state["user_query"],
@@ -88,6 +112,67 @@ def build_sql_risk_flags(
     return flags
 
 
+def _deterministic_temporal_verification(
+    *,
+    sql: str,
+    user_query: str,
+    risk_flags: list[str],
+) -> DashboardChatSqlVerificationResult | None:
+    """Hard-block temporal semantics that must not be left to LLM judgment."""
+    uses_latest_logic = (
+        "uses_max_date_without_explicit_latest_request" in risk_flags
+        or "uses_latest_row_logic_without_explicit_latest_request" in risk_flags
+    )
+    if uses_latest_logic:
+        return DashboardChatSqlVerificationResult(
+            is_valid=False,
+            severity="hard_block",
+            reason_code="latest_logic_without_user_request",
+            reasoning=(
+                "SQL uses latest-row, latest-date, MAX(date), or ROW_NUMBER-over-date "
+                "logic, but the user did not explicitly ask for latest, most recent, "
+                "as-of, or current-snapshot semantics."
+            ),
+            issues=[
+                "Unrequested latest/as-of logic changes the user's requested time basis.",
+            ],
+            repair_instructions=[
+                "Remove latest-row/latest-date logic.",
+                "Use direct filters and aggregate over the requested rows or period.",
+                "Only use latest/as-of logic when the user explicitly asks for it.",
+            ],
+            risk_flags=risk_flags,
+        )
+
+    if (
+        RELATIVE_TIME_REQUEST_PATTERN.search(user_query)
+        and LATEST_REQUEST_PATTERN.search(user_query)
+        and (MAX_DATE_PATTERN.search(sql) or LATEST_ROW_PATTERN.search(sql))
+        and not DIRECT_TIME_FILTER_PATTERN.search(sql)
+    ):
+        return DashboardChatSqlVerificationResult(
+            is_valid=False,
+            severity="hard_block",
+            reason_code="latest_logic_without_relative_time_filter",
+            reasoning=(
+                "The user asked for a relative period and latest/as-of semantics, but "
+                "the SQL uses latest-row/date logic without applying a concrete date "
+                "window for that period."
+            ),
+            issues=[
+                "Relative time questions require a resolved date window before latest/as-of logic can be used.",
+            ],
+            repair_instructions=[
+                "Resolve the relative period to concrete start and end dates.",
+                "Add direct date filters for that period.",
+                "Then apply latest/as-of logic only within the filtered period if it is still explicitly requested.",
+            ],
+            risk_flags=risk_flags,
+        )
+
+    return None
+
+
 def _referenced_table_metadata(
     sql: str,
     artifact: DashboardChatMetadataArtifactPayload,
@@ -112,9 +197,7 @@ def _referenced_table_metadata(
                 "primary_entities": table.primary_entities,
                 "primary_filter_time_column": table.temporal.primary_filter_time_column,
                 "time_column_meanings": table.temporal.time_column_meanings,
-                "period_notes": table.temporal.period_notes,
                 "entity_counting_guidance": table.counting.entity_counting_guidance,
-                "ambiguity_notes": table.ambiguity_notes,
                 "answerability": table.answerability.model_dump(mode="json"),
                 "columns": [
                     {
