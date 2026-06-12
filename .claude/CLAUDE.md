@@ -79,3 +79,14 @@ uv run python manage.py create-system-orguser
 ## Testing workflow
 
 Write one test → run it → fix → run again → next test. Never batch-write multiple tests before running each. See the `testing` skill for full patterns.
+
+## Daily Briefing Email
+
+When composing a daily briefing email, always:
+
+1. **Read `.claude/daily_briefing_template.html` first** — use it as the outer shell (header, accent stripe, body card, footer). Never regenerate the shell from scratch.
+2. **Do not alter the template file itself** — only fill in the `{{GREETING}}`, `{{DATE_LINE}}`, and `{{BODY_CONTENT}}` placeholders.
+3. **Key fixes baked into the template (do not revert):**
+   - Header `td` has `background-color:#1B2A4A` declared *before* the gradient — Gmail fallback so white title text stays readable on a white background.
+   - Accent stripe uses three separate solid-colour `td` cells, not a single gradient (Gmail strips gradients).
+4. Use `background-color:` not the `background:` shorthand for all other coloured elements.
