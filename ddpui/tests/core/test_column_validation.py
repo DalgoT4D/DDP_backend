@@ -11,7 +11,7 @@ django.setup()
 from ddpui.core.charts.charts_service import (
     normalize_dimensions,
 )
-from ddpui.schemas.chart_schema import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload
 
 
 class TestNormalizeDimensions:

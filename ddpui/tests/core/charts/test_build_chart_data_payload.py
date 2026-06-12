@@ -9,7 +9,7 @@ django.setup()
 
 import pytest
 from ddpui.core.charts.charts_service import build_chart_data_payload
-from ddpui.schemas.chart_schema import ChartConfig
+from ddpui.schemas.chart_schemas import ChartConfig
 
 pytestmark = pytest.mark.django_db
 
