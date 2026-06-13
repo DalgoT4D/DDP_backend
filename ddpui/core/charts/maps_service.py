@@ -6,7 +6,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.models.georegion import GeoRegion
 from ddpui.models.geojson import GeoJSON
 from ddpui.core.charts import charts_service
-from ddpui.schemas.chart_schema import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.maps")

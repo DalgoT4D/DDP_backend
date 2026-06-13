@@ -21,7 +21,7 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
-from ddpui.schemas.chart_schema import ChartDataResponse
+from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.celeryworkers.report_tasks import send_report_email_task
 from ddpui.schemas.report_schema import (
