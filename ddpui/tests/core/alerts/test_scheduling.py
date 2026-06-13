@@ -63,14 +63,33 @@ def test_previous_fire_before_first_tick():
 # ── is_due ─────────────────────────────────────────────────────────────────
 
 
-def _fake_alert(cron, last_evaluated_at):
-    return SimpleNamespace(schedule_cron=cron, last_evaluated_at=last_evaluated_at)
+def _fake_alert(cron, last_evaluated_at, created_at=None):
+    if created_at is None:
+        # Default far in the past so created_at floor doesn't interfere with
+        # tests that focus on last_evaluated_at semantics.
+        created_at = dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)
+    return SimpleNamespace(
+        schedule_cron=cron,
+        last_evaluated_at=last_evaluated_at,
+        created_at=created_at,
+    )
 
 
-def test_is_due_when_never_evaluated():
+def test_is_due_when_never_evaluated_and_created_before_last_tick():
     now = dt.datetime(2026, 6, 11, 10, 0, 0, tzinfo=dt.timezone.utc)
-    alert = _fake_alert("0 9 * * *", last_evaluated_at=None)
+    # created yesterday; today's 09:00 tick has passed and not been served
+    created_at = dt.datetime(2026, 6, 10, 8, 0, 0, tzinfo=dt.timezone.utc)
+    alert = _fake_alert("0 9 * * *", last_evaluated_at=None, created_at=created_at)
     assert scheduling.is_due(alert, now) is True
+
+
+def test_is_not_due_when_never_evaluated_and_created_after_last_tick():
+    now = dt.datetime(2026, 6, 11, 10, 0, 0, tzinfo=dt.timezone.utc)
+    # alert created at 09:30 today — last scheduled tick (09:00) predates creation,
+    # so dispatcher should NOT fire it; the alert should wait for tomorrow's 09:00
+    created_at = dt.datetime(2026, 6, 11, 9, 30, 0, tzinfo=dt.timezone.utc)
+    alert = _fake_alert("0 9 * * *", last_evaluated_at=None, created_at=created_at)
+    assert scheduling.is_due(alert, now) is False
 
 
 def test_is_due_when_last_eval_before_scheduled_tick():

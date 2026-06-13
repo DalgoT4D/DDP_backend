@@ -41,15 +41,18 @@ def previous_fire(cron_expr: str, now: Optional[datetime] = None) -> datetime:
 def is_due(alert: Alert, now: Optional[datetime] = None) -> bool:
     """Whether an alert's most recent scheduled instant has not yet been evaluated.
 
-    Spec — plan §4.5: dispatcher loops active alerts; each is due iff
-    `last_evaluated_at` is NULL or strictly less than the most recent cron tick.
+    An alert is due iff its most recent scheduled cron tick is strictly after the
+    later of (a) its last evaluation and (b) its creation. The created_at floor
+    prevents a freshly created alert from firing on the dispatcher's very next
+    tick just because `last_evaluated_at` is NULL — without it, an alert set up
+    at 2pm with cron "0 9 * * *" would fire immediately because the previous 9am
+    tick is in the past and unclaimed.
     """
     if now is None:
         now = timezone.now()
     last_scheduled = previous_fire(alert.schedule_cron, now)
-    if alert.last_evaluated_at is None:
-        return True
-    return alert.last_evaluated_at < last_scheduled
+    last_eval = alert.last_evaluated_at or alert.created_at
+    return last_eval < last_scheduled
 
 
 def derive_frequency_label(cron_expr: str) -> str:
