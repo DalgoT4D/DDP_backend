@@ -204,6 +204,14 @@ class TestListCharts:
         assert response.total == 0
         assert len(response.data) == 0
 
+    def test_list_charts_includes_created_by(self, orguser, sample_chart, seed_db):
+        """list_charts returns the creator's email in created_by"""
+        request = mock_request(orguser)
+
+        response = list_charts(request, page=1, page_size=10)
+
+        assert response.data[0].created_by == "chartapiuser@test.com"
+
 
 # ================================================================================
 # Test get_chart endpoint
@@ -222,6 +230,14 @@ class TestGetChart:
         assert response.id == sample_chart.id
         assert response.title == "Test Chart"
         assert response.chart_type == "bar"
+
+    def test_get_chart_includes_created_by(self, orguser, sample_chart, seed_db):
+        """get_chart returns the creator's email in created_by"""
+        request = mock_request(orguser)
+
+        response = get_chart(request, sample_chart.id)
+
+        assert response.created_by == "chartapiuser@test.com"
 
     def test_get_chart_not_found(self, orguser, seed_db):
         """Test getting non-existent chart returns 404"""
@@ -296,6 +312,7 @@ class TestCreateChart:
         assert response.title == "New Chart"
         assert response.chart_type == "line"
         assert response.id is not None
+        assert response.created_by == "chartapiuser@test.com"
 
         # Cleanup
         Chart.objects.filter(id=response.id).delete()
