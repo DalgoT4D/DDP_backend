@@ -47,7 +47,7 @@ class MetricService:
     @staticmethod
     def get_metric(metric_id: int, org: Org) -> Metric:
         try:
-            return Metric.objects.get(id=metric_id, org=org)
+            return Metric.objects.select_related("created_by__user").get(id=metric_id, org=org)
         except Metric.DoesNotExist:
             raise MetricNotFoundError(metric_id)
 
@@ -71,7 +71,9 @@ class MetricService:
         if table_name:
             query &= Q(table_name=table_name)
 
-        queryset = Metric.objects.filter(query).order_by("-updated_at")
+        queryset = (
+            Metric.objects.filter(query).select_related("created_by__user").order_by("-updated_at")
+        )
         total = queryset.count()
 
         offset = (page - 1) * page_size
@@ -218,6 +220,7 @@ class MetricService:
 
         metric.save()
         logger.info(f"Created metric {metric.id} '{metric.name}' for org {orguser.org.id}")
+        metric = Metric.objects.select_related("created_by__user").get(id=metric.id)
         return metric
 
     @staticmethod
