@@ -16,7 +16,7 @@ from ddpui.schemas.kpi_schema import (
     KPIResponse,
     KPIListResponse,
 )
-from ddpui.schemas.chart_schema import ChartDataResponse
+from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
