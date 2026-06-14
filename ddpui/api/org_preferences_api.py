@@ -8,27 +8,25 @@ from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_supersets import OrgSupersets
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
-from ddpui.models.dashboard import Dashboard
-from ddpui.models.dashboard_chat import (
-    OrgAIContext,
-)
-from ddpui.core.dashboard_chat.metadata.build_service import (
-    DashboardChatMetadataBuildService,
-    summarize_dashboard_metadata_status,
+from ddpui.core.dashboard_chat.settings_service import (
+    DashboardChatAIDataSharingDisabledError,
+    DashboardChatDashboardNotFoundError,
+    DashboardChatDbtNotConfiguredError,
+    DashboardChatFeatureDisabledError,
+    get_dashboard_chat_metadata_status,
+    get_dashboard_chat_pii_columns,
+    get_dashboard_chat_settings,
+    get_dashboard_chat_status,
+    trigger_dashboard_chat_metadata_build,
+    update_dashboard_chat_pii_columns,
+    update_dashboard_chat_settings,
 )
 from ddpui.core.dashboard_chat.metadata.exceptions import DashboardChatPIIColumnNotFoundError
-from ddpui.core.dashboard_chat.metadata.pii_overrides import (
-    serialize_dashboard_chat_pii_columns,
-    update_dashboard_chat_pii_column_overrides,
-)
-from ddpui.celeryworkers.tasks import build_dashboard_chat_metadata_artifacts
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
-    OrgAIDashboardChatSettingsResponse,
     UpdateOrgAIDashboardChatSchema,
-    OrgAIDashboardChatStatusResponse,
     OrgAIDashboardChatMetadataStatusResponse,
     OrgAIDashboardChatPIIColumnsResponse,
     TriggerOrgAIDashboardChatMetadataBuildSchema,
@@ -46,70 +44,8 @@ from ddpui.ddpprefect import (
 )
 from ddpui.utils.awsses import send_text_message
 from ddpui.utils.redis_client import RedisClient
-from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 orgpreference_router = Router()
-
-
-def _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context):
-    org_dbt = org.dbt
-    native_dashboards = list(
-        Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id")
-    )
-    metadata_summary = summarize_dashboard_metadata_status(native_dashboards)
-    return OrgAIDashboardChatSettingsResponse(
-        feature_flag_enabled=get_all_feature_flags_for_org(org).get(
-            "AI_DASHBOARD_CHAT",
-            False,
-        ),
-        ai_data_sharing_enabled=bool(org_preferences.ai_data_sharing_enabled),
-        dashboard_chat_share_pii_with_llms=bool(org_preferences.dashboard_chat_share_pii_with_llms),
-        ai_data_sharing_consented_by=(
-            org_preferences.ai_data_sharing_consented_by.user.email
-            if org_preferences.ai_data_sharing_consented_by
-            else None
-        ),
-        ai_data_sharing_consented_at=org_preferences.ai_data_sharing_consented_at,
-        org_context_markdown=org_context.markdown,
-        org_context_updated_by=org_context.updated_by.user.email
-        if org_context.updated_by
-        else None,
-        org_context_updated_at=org_context.updated_at,
-        dbt_configured=org_dbt is not None,
-        metadata_last_built_at=metadata_summary["last_built_at"],
-        metadata_ready_dashboard_count=metadata_summary["ready_dashboard_count"],
-        metadata_total_dashboard_count=metadata_summary["total_dashboard_count"],
-    )
-
-
-def _serialize_ai_dashboard_chat_status(org, org_preferences):
-    org_dbt = org.dbt
-    native_dashboards = list(
-        Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id")
-    )
-    metadata_summary = summarize_dashboard_metadata_status(native_dashboards)
-    feature_flag_enabled = get_all_feature_flags_for_org(org).get(
-        "AI_DASHBOARD_CHAT",
-        False,
-    )
-    ai_data_sharing_enabled = bool(org_preferences.ai_data_sharing_enabled)
-    dbt_configured = org_dbt is not None
-    last_built_at = metadata_summary["last_built_at"]
-
-    return OrgAIDashboardChatStatusResponse(
-        feature_flag_enabled=feature_flag_enabled,
-        ai_data_sharing_enabled=ai_data_sharing_enabled,
-        chat_available=(
-            feature_flag_enabled
-            and ai_data_sharing_enabled
-            and dbt_configured
-            and metadata_summary["ready_dashboard_count"] > 0
-        ),
-        dbt_configured=dbt_configured,
-        metadata_last_built_at=last_built_at,
-        metadata_ready_dashboard_count=metadata_summary["ready_dashboard_count"],
-        metadata_total_dashboard_count=metadata_summary["total_dashboard_count"],
-    )
 
 
 @orgpreference_router.post("/")
@@ -227,17 +163,13 @@ def get_org_preferences(request):
 def get_ai_dashboard_chat_settings(request):
     """Load org-level dashboard chat settings and org AI context."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
-    org_context, _ = OrgAIContext.objects.get_or_create(org=org)
+    try:
+        settings = get_dashboard_chat_settings(orguser.org)
+    except DashboardChatFeatureDisabledError as err:
+        raise HttpError(404, str(err)) from err
 
-    return {
-        "success": True,
-        "res": _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context).dict(),
-    }
+    return {"success": True, "res": settings.dict()}
 
 
 @orgpreference_router.put("/ai-dashboard-chat")
@@ -246,62 +178,27 @@ def get_ai_dashboard_chat_settings(request):
 def update_ai_dashboard_chat_settings(request, payload: UpdateOrgAIDashboardChatSchema):
     """Update org-level dashboard chat consent and org AI context."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
-    org_context, _ = OrgAIContext.objects.get_or_create(org=org)
-    target_ai_data_sharing_enabled = (
-        payload.ai_data_sharing_enabled
-        if payload.ai_data_sharing_enabled is not None
-        else org_preferences.ai_data_sharing_enabled
-    )
-
-    if payload.ai_data_sharing_enabled is True and org_preferences.ai_data_sharing_enabled is False:
-        org_preferences.ai_data_sharing_consented_by = orguser
-        org_preferences.ai_data_sharing_consented_at = timezone.now()
-
-    if payload.ai_data_sharing_enabled is not None:
-        org_preferences.ai_data_sharing_enabled = payload.ai_data_sharing_enabled
-
-    if payload.dashboard_chat_share_pii_with_llms is not None:
-        org_preferences.dashboard_chat_share_pii_with_llms = (
-            payload.dashboard_chat_share_pii_with_llms
+    try:
+        settings = update_dashboard_chat_settings(
+            org=orguser.org,
+            orguser=orguser,
+            payload=payload,
         )
+    except DashboardChatFeatureDisabledError as err:
+        raise HttpError(404, str(err)) from err
+    except DashboardChatAIDataSharingDisabledError as err:
+        raise HttpError(409, str(err)) from err
 
-    if payload.org_context_markdown is not None:
-        if not target_ai_data_sharing_enabled:
-            raise HttpError(
-                409,
-                "Enable AI data sharing before updating organization AI context",
-            )
-        org_context.markdown = payload.org_context_markdown
-        org_context.updated_by = orguser
-        org_context.updated_at = timezone.now()
-        org_context.save()
-
-    org_preferences.updated_at = timezone.now()
-    org_preferences.save()
-
-    return {
-        "success": True,
-        "res": _serialize_ai_dashboard_chat_settings(org, org_preferences, org_context).dict(),
-    }
+    return {"success": True, "res": settings.dict()}
 
 
 @orgpreference_router.get("/ai-dashboard-chat/status")
 def get_ai_dashboard_chat_status(request):
     """Return feature readiness for dashboard chat for the current org."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-
-    org_preferences, _ = OrgPreferences.objects.get_or_create(org=org)
-
-    return {
-        "success": True,
-        "res": _serialize_ai_dashboard_chat_status(org, org_preferences).dict(),
-    }
+    status = get_dashboard_chat_status(orguser.org)
+    return {"success": True, "res": status.dict()}
 
 
 @orgpreference_router.get(
@@ -312,14 +209,11 @@ def get_ai_dashboard_chat_status(request):
 def get_ai_dashboard_chat_metadata_status(request):
     """Return per-dashboard metadata build status for the current org."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-    return OrgAIDashboardChatMetadataStatusResponse(
-        **summarize_dashboard_metadata_status(
-            list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
-        )
-    )
+
+    try:
+        return get_dashboard_chat_metadata_status(orguser.org)
+    except DashboardChatFeatureDisabledError as err:
+        raise HttpError(404, str(err)) from err
 
 
 @orgpreference_router.get(
@@ -330,10 +224,11 @@ def get_ai_dashboard_chat_metadata_status(request):
 def get_ai_dashboard_chat_pii_columns(request):
     """Return metadata columns and reviewed PII state for the current org."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-    return serialize_dashboard_chat_pii_columns(org)
+
+    try:
+        return get_dashboard_chat_pii_columns(orguser.org)
+    except DashboardChatFeatureDisabledError as err:
+        raise HttpError(404, str(err)) from err
 
 
 @orgpreference_router.put(
@@ -348,16 +243,15 @@ def update_ai_dashboard_chat_pii_columns(
 ):
     """Persist user-reviewed PII overrides for dashboard chat metadata columns."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
 
     try:
-        return update_dashboard_chat_pii_column_overrides(
-            org=org,
+        return update_dashboard_chat_pii_columns(
+            org=orguser.org,
             orguser=orguser,
             payload=payload,
         )
+    except DashboardChatFeatureDisabledError as err:
+        raise HttpError(404, str(err)) from err
     except DashboardChatPIIColumnNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
@@ -373,36 +267,19 @@ def build_ai_dashboard_chat_metadata(
 ):
     """Manually build dashboard metadata artifacts for the current org."""
     orguser: OrgUser = request.orguser
-    org = orguser.org
 
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-    if org.dbt is None:
-        raise HttpError(409, "Configure dbt before building dashboard chat metadata")
-
-    dashboards = list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
-    if payload.dashboard_id is not None:
-        dashboards = [dashboard for dashboard in dashboards if dashboard.id == payload.dashboard_id]
-        if not dashboards:
-            raise HttpError(404, "Dashboard not found")
-
-    builder_model = str(payload.builder_model or "o4-mini")
-    build_service = DashboardChatMetadataBuildService()
-    build_service.mark_dashboards_building(
-        dashboards=dashboards,
-        builder_model=builder_model,
-    )
-    build_dashboard_chat_metadata_artifacts.delay(
-        org.id,
-        [dashboard.id for dashboard in dashboards],
-        builder_model,
-        orguser.id,
-    )
-    return OrgAIDashboardChatMetadataStatusResponse(
-        **summarize_dashboard_metadata_status(
-            list(Dashboard.objects.filter(org=org, dashboard_type="native").order_by("id"))
+    try:
+        return trigger_dashboard_chat_metadata_build(
+            org=orguser.org,
+            orguser=orguser,
+            payload=payload,
         )
-    )
+    except DashboardChatFeatureDisabledError as err:
+        raise HttpError(404, str(err)) from err
+    except DashboardChatDashboardNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except DashboardChatDbtNotConfiguredError as err:
+        raise HttpError(409, str(err)) from err
 
 
 @orgpreference_router.get("/toolinfo")
