@@ -26,6 +26,10 @@ from ddpui.models.dashboard_chat import (
 )
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.utils.custom_logger import CustomLogger
+
+
+logger = CustomLogger("ddpui")
 
 
 @dataclass
@@ -146,6 +150,7 @@ class DashboardChatMetadataBuildService:
                     )
                 )
             except Exception as error:
+                logger.exception(error)
                 error_message = str(error)
                 artifact.status = DashboardChatMetadataArtifactStatus.FAILED
                 artifact.error_payload = {"error": error_message}
