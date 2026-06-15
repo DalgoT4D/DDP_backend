@@ -94,9 +94,6 @@ def _execute_standalone(
     return value, sql_str
 
 
-# ── Public API ──────────────────────────────────────────────────────────────
-
-
 def compute(
     alert: Alert, org_warehouse: OrgWarehouse
 ) -> Tuple[Optional[float], str, Optional[str]]:
@@ -157,9 +154,6 @@ def compute_from_config(
         return value, sql_str, None
 
     raise AlertValidationError(f"unknown alert_type {alert_type!r}")
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────────
 
 
 def _extract_scalar(results: Any, key: str) -> Optional[float]:
