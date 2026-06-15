@@ -17,7 +17,6 @@ from ddpui.api.alert_api import (
     get_alert,
     get_alert_logs,
     list_alerts,
-    list_firing_alerts,
     list_recipient_candidates,
     toggle_alert,
     update_alert,
@@ -328,15 +327,6 @@ def test_list_alerts_filter_by_active(seed_db, orguser, sample_metric):
     assert enabled.total == 1
     assert disabled.total == 1
     assert disabled.data[0].name == "A1"
-
-
-def test_list_firing_alerts_empty_when_no_logs(seed_db, orguser, sample_metric):
-    request = mock_request(orguser)
-    create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
-
-    firing = list_firing_alerts(request)
-
-    assert firing.total == 0
 
 
 # ── Update / Toggle / Delete ────────────────────────────────────────────────

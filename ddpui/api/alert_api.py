@@ -110,19 +110,14 @@ def _build_list_item(alert: Alert) -> AlertListItem:
         table = cfg.get("table_name") or ""
         source_name = f"{schema}.{table}".strip(".") if (schema or table) else None
 
-    # Last log entry — gives us last_fire_at and most_recent_fired
+    # Last log entry — gives us last_fire_at
     latest_log = (
-        AlertLog.objects.filter(alert=alert)
+        AlertLog.objects.filter(alert=alert, fired=True)
         .order_by("-evaluated_at")
-        .only("evaluated_at", "fired")
+        .only("evaluated_at")
         .first()
     )
-    last_fire_at = None
-    most_recent_fired = False
-    if latest_log:
-        if latest_log.fired:
-            last_fire_at = latest_log.evaluated_at
-        most_recent_fired = latest_log.fired
+    last_fire_at = latest_log.evaluated_at if latest_log else None
 
     rag_states = None
     kpi_rag_context = None
@@ -154,7 +149,6 @@ def _build_list_item(alert: Alert) -> AlertListItem:
         is_active=alert.is_active,
         last_fire_at=last_fire_at,
         fire_streak=AlertService.compute_fire_streak(alert),
-        most_recent_fired=most_recent_fired,
     )
 
 
@@ -202,12 +196,8 @@ def list_alerts(
     search: Optional[str] = None,
     is_active: Optional[bool] = None,
     frequency: Optional[str] = None,
-    fired: Optional[bool] = None,
 ):
-    """Paginated list of alerts for the org.
-
-    `fired=true` narrows to alerts whose most recent evaluation fired (active alerts only).
-    """
+    """Paginated list of alerts for the org."""
     orguser: OrgUser = request.orguser
     if page < 1:
         page = 1
@@ -221,29 +211,7 @@ def list_alerts(
         search=search,
         is_active=is_active,
         frequency=frequency,
-        fired=fired,
     )
-    total_pages = (total + page_size - 1) // page_size if total else 0
-    return AlertListResponse(
-        data=[_build_list_item(a) for a in alerts],
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
-    )
-
-
-@alert_router.get("/firing/", response=AlertListResponse)
-@has_permission(["can_view_alerts"])
-def list_firing_alerts(request, page: int = 1, page_size: int = 10):
-    """Alerts whose most recent evaluation fired."""
-    orguser: OrgUser = request.orguser
-    if page < 1:
-        page = 1
-    if page_size < 1 or page_size > 100:
-        page_size = 10
-
-    alerts, total = AlertService.list_firing(orguser.org, page=page, page_size=page_size)
     total_pages = (total + page_size - 1) // page_size if total else 0
     return AlertListResponse(
         data=[_build_list_item(a) for a in alerts],

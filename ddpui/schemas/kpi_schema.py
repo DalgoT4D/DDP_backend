@@ -15,8 +15,8 @@ class KPICreate(Schema):
     name: Optional[str] = None  # defaults to metric name
     target_value: Optional[float] = None
     direction: str  # "increase" or "decrease"
-    green_threshold_pct: float = 100.0
-    amber_threshold_pct: float = 80.0
+    green_threshold_pct: float = 80.0
+    amber_threshold_pct: float = 50.0
     time_grain: str  # daily/weekly/monthly/quarterly/yearly
     time_dimension_column: Optional[str] = None
     metric_type_tag: Optional[str] = None

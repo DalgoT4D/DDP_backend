@@ -1,4 +1,4 @@
-"""AlertService — CRUD + listing + firing/log queries + dry-run.
+"""AlertService — CRUD + listing + log queries + dry-run.
 
 The Celery evaluator lives in `ddpui.celeryworkers.alert_tasks` and reuses
 `alert_query`, `condition`, `rendering`, and `delivery` modules from
@@ -8,7 +8,7 @@ The Celery evaluator lives in `ddpui.celeryworkers.alert_tasks` and reuses
 from typing import List, Optional, Tuple
 
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import F, OuterRef, Q, Subquery
 
 from ddpui.core.alerts import alert_query
 from ddpui.core.alerts import condition as condition_helpers
@@ -139,7 +139,6 @@ class AlertService:
         search: Optional[str] = None,
         is_active: Optional[bool] = None,
         frequency: Optional[str] = None,  # daily/weekly/monthly
-        fired: Optional[bool] = None,  # True → only alerts whose latest log fired
     ) -> Tuple[List[Alert], int]:
         query = Q(org=org)
         if search:
@@ -147,19 +146,17 @@ class AlertService:
         if is_active is not None:
             query &= Q(is_active=is_active)
 
-        queryset = Alert.objects.filter(query).select_related("metric", "kpi")
-
-        # Filter to "firing" — alerts whose most recent AlertLog has fired=True.
-        # Disabled alerts are excluded (spec Story 5: never appear on Firing tab).
-        if fired:
-            latest_log = AlertLog.objects.filter(alert=OuterRef("pk")).order_by("-evaluated_at")
-            queryset = (
-                queryset.filter(is_active=True)
-                .annotate(latest_fired=Subquery(latest_log.values("fired")[:1]))
-                .filter(latest_fired=True)
-            )
-
-        queryset = queryset.order_by("-updated_at")
+        # Default sort: most-recently-fired first, NULLS LAST (never-fired alerts
+        # sink to the bottom). Tie-break by latest update.
+        latest_fire = AlertLog.objects.filter(alert=OuterRef("pk"), fired=True).order_by(
+            "-evaluated_at"
+        )
+        queryset = (
+            Alert.objects.filter(query)
+            .select_related("metric", "kpi")
+            .annotate(latest_fire_at=Subquery(latest_fire.values("evaluated_at")[:1]))
+            .order_by(F("latest_fire_at").desc(nulls_last=True), "-updated_at")
+        )
 
         # Frequency filter is post-fetch because schedule_cron is a string we
         # parse via scheduling.derive_frequency_label. At v1 scale this is fine.
@@ -172,31 +169,10 @@ class AlertService:
             queryset = (
                 Alert.objects.filter(id__in=ids)
                 .select_related("metric", "kpi")
-                .order_by("-updated_at")
+                .annotate(latest_fire_at=Subquery(latest_fire.values("evaluated_at")[:1]))
+                .order_by(F("latest_fire_at").desc(nulls_last=True), "-updated_at")
             )
 
-        total = queryset.count()
-        offset = (page - 1) * page_size
-        return list(queryset[offset : offset + page_size]), total
-
-    @staticmethod
-    def list_firing(
-        org: Org,
-        page: int = 1,
-        page_size: int = 10,
-    ) -> Tuple[List[Alert], int]:
-        """Alerts whose most recent AlertLog has fired=True.
-
-        Disabled alerts never appear here (spec Story 5).
-        """
-        latest_log = AlertLog.objects.filter(alert=OuterRef("pk")).order_by("-evaluated_at")
-        queryset = (
-            Alert.objects.filter(org=org, is_active=True)
-            .annotate(latest_fired=Subquery(latest_log.values("fired")[:1]))
-            .filter(latest_fired=True)
-            .select_related("metric", "kpi")
-            .order_by("-updated_at")
-        )
         total = queryset.count()
         offset = (page - 1) * page_size
         return list(queryset[offset : offset + page_size]), total

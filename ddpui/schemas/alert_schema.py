@@ -169,7 +169,6 @@ class AlertListItem(Schema):
     is_active: bool
     last_fire_at: Optional[datetime] = None
     fire_streak: int = 0
-    most_recent_fired: bool = False
 
 
 class AlertListResponse(Schema):
