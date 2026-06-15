@@ -108,29 +108,12 @@ def _validate_source(payload_or_alert) -> None:
         raise AlertValidationError(f"Unknown alert_type '{at}'")
 
 
-def _serialize_standalone_config(cfg) -> Optional[dict]:
-    if cfg is None:
-        return None
-    # cfg is a pydantic Schema (.dict() works) or already a dict
-    if hasattr(cfg, "dict"):
-        return cfg.dict()
-    return cfg
+def _serialize_recipients(recipients: list) -> list:
+    """RecipientIn → dict, dropping None fields so the JSONField stays tidy.
 
-
-def _serialize_condition(cond) -> dict:
-    if hasattr(cond, "dict"):
-        return cond.dict()
-    return cond
-
-
-def _serialize_recipients(recipients) -> list:
-    out = []
-    for r in recipients:
-        if hasattr(r, "dict"):
-            r = r.dict()
-        # Strip Nones for cleanliness
-        out.append({k: v for k, v in r.items() if v is not None})
-    return out
+    e.g. a `type="orguser"` recipient doesn't need to persist `email: null`.
+    """
+    return [{k: v for k, v in r.model_dump().items() if v is not None} for r in recipients]
 
 
 # ── Service ────────────────────────────────────────────────────────────────
@@ -264,7 +247,7 @@ class AlertService:
         except ValueError as e:
             raise AlertValidationError(str(e))
 
-        condition_dict = _serialize_condition(payload.condition)
+        condition_dict = payload.condition.model_dump()
         try:
             condition_helpers.validate_condition(payload.alert_type, condition_dict)
         except ValueError as e:
@@ -294,7 +277,9 @@ class AlertService:
             alert_type=payload.alert_type,
             metric=metric,
             kpi=kpi,
-            standalone_config=_serialize_standalone_config(payload.standalone_config),
+            standalone_config=(
+                payload.standalone_config.model_dump() if payload.standalone_config else None
+            ),
             condition=condition_dict,
             schedule_cron=payload.schedule_cron,
             delivery_channels=list(payload.delivery_channels),
@@ -320,10 +305,10 @@ class AlertService:
             alert.name = payload.name
 
         if payload.standalone_config is not None:
-            alert.standalone_config = _serialize_standalone_config(payload.standalone_config)
+            alert.standalone_config = payload.standalone_config.model_dump()
 
         if payload.condition is not None:
-            cond_dict = _serialize_condition(payload.condition)
+            cond_dict = payload.condition.model_dump()
             try:
                 condition_helpers.validate_condition(alert.alert_type, cond_dict)
             except ValueError as e:
@@ -401,7 +386,7 @@ class AlertService:
                 metric_id=payload.metric_id,
                 kpi_id=payload.kpi_id,
                 standalone_config=(
-                    payload.standalone_config.dict() if payload.standalone_config else None
+                    payload.standalone_config.model_dump() if payload.standalone_config else None
                 ),
             )
         except AlertValidationError as e:
@@ -415,7 +400,7 @@ class AlertService:
             )
 
         # Convert pydantic condition Union → plain dict for downstream helpers
-        cond_dict = payload.condition.dict()
+        cond_dict = payload.condition.model_dump()
 
         # Evaluator's input is the value for threshold; the RAG state for kpi_rag
         eval_input = rag_status if payload.alert_type == AlertType.KPI_RAG else value
