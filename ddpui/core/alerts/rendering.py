@@ -16,6 +16,7 @@ import re
 from typing import Any, Mapping, Optional
 
 from ddpui.models.alert import Alert, AlertType
+from ddpui.schemas.alert_schema import StandaloneConfig
 
 
 TOKENS_BY_TYPE = {
@@ -107,11 +108,9 @@ def tokens_for_alert(
     kpi_name = alert.kpi.name if alert.kpi_id and alert.kpi else None
 
     dataset_name: Optional[str] = None
-    if alert.alert_type == AlertType.STANDALONE:
-        cfg = alert.standalone_config or {}
-        schema = cfg.get("schema_name") or ""
-        table = cfg.get("table_name") or ""
-        dataset_name = f"{schema}.{table}".strip(".") or None
+    if alert.alert_type == AlertType.STANDALONE and alert.standalone_config:
+        cfg = StandaloneConfig(**alert.standalone_config)
+        dataset_name = f"{cfg.schema_name}.{cfg.table_name}".strip(".") or None
 
     target_value: Any = None
     if alert.alert_type == AlertType.KPI_RAG:

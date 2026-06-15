@@ -189,11 +189,15 @@ def test_dispatch_due_alerts_enqueues_active_due_alerts(
         lambda alert_id: enqueued.append(alert_id),
     )
 
-    create_alert(mock_request(orguser), _base_alert(orguser, metric_id=sample_metric.id))
-    create_alert(
+    a1 = create_alert(mock_request(orguser), _base_alert(orguser, metric_id=sample_metric.id))
+    a2 = create_alert(
         mock_request(orguser),
         _base_alert(orguser, metric_id=sample_metric.id, cron="* * * * *"),
     )
+    # is_due gates on created_at when last_evaluated_at is NULL — backdate so a
+    # scheduled tick has occurred since creation and the dispatcher picks them up.
+    past = timezone.now() - timezone.timedelta(minutes=5)
+    Alert.objects.filter(id__in=[a1.id, a2.id]).update(created_at=past)
 
     n = alert_tasks.dispatch_due_alerts()
     assert n == 2

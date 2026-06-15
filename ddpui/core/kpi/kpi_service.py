@@ -442,6 +442,78 @@ class KPIService:
         return periods
 
     @staticmethod
+    def compute_latest_value(
+        kpi: KPI, org_warehouse: OrgWarehouse
+    ) -> tuple[Optional[float], str, Optional[str]]:
+        """Most-recent-period value for the KPI + SQL string + RAG status.
+
+        Used by the alert evaluator and the dry-run preview. Mirrors the
+        "current value" shown in the KPI detail drawer: aggregates the
+        underlying metric by the KPI's time_grain and returns the most recent
+        complete period.
+
+        If the KPI has no time_dimension_column/time_grain, falls back to a
+        whole-dataset aggregate via MetricService.
+        """
+        metric = kpi.metric
+
+        # Fallback: KPI without time grain → whole-dataset aggregate
+        if not kpi.time_dimension_column or not kpi.time_grain:
+            value, sql_str = MetricService.compute_metric_value_with_sql(metric, org_warehouse)
+            rag = compute_rag_status(
+                value,
+                kpi.target_value,
+                kpi.direction,
+                kpi.green_threshold_pct,
+                kpi.amber_threshold_pct,
+            )
+            return value, sql_str, rag
+
+        warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
+        warehouse_type = (org_warehouse.wtype or "postgres").lower()
+        sql_grain = TIME_GRAIN_TO_SQL.get(kpi.time_grain, "month")
+
+        qb = AggQueryBuilder()
+        qb.fetch_from(metric.table_name, metric.schema_name)
+        time_col = column(kpi.time_dimension_column)
+        time_expr = apply_time_grain(time_col, sql_grain, warehouse_type).label("period")
+        qb.add_column(time_expr)
+        qb.group_cols_by(time_expr)
+        if metric.column_expression:
+            qb.add_column(literal_column(metric.column_expression).label("value"))
+        else:
+            qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
+        qb.order_cols_by([("period", "desc")])
+        qb.limit_rows(1)
+
+        sql_stmt = qb.build()
+        compiled = sql_stmt.compile(bind=warehouse.engine, compile_kwargs={"literal_binds": True})
+        try:
+            sql_str = str(compiled).strip()
+        except Exception:
+            sql_str = "<sql unavailable>"
+
+        results = warehouse.execute(compiled)
+        value: Optional[float] = None
+        if results and len(results) > 0:
+            row = results[0]
+            raw = row.get("value") if isinstance(row, dict) else row[0]
+            if raw is not None:
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    value = None
+
+        rag = compute_rag_status(
+            value,
+            kpi.target_value,
+            kpi.direction,
+            kpi.green_threshold_pct,
+            kpi.amber_threshold_pct,
+        )
+        return value, sql_str, rag
+
+    @staticmethod
     def compute_kpi_data(
         kpi_response: KPIResponse,
         org: Org,
