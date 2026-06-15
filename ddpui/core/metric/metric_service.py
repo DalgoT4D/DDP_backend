@@ -358,9 +358,7 @@ class MetricService:
         from ddpui.models.alert import Alert  # local import to avoid circular at module load
 
         alerts = list(
-            Alert.objects.filter(metric_id=metric_id, org=org).values(
-                "id", "name", "alert_type"
-            )
+            Alert.objects.filter(metric_id=metric_id, org=org).values("id", "name", "alert_type")
         )
 
         return {"charts": charts, "kpis": kpis, "alerts": alerts}
