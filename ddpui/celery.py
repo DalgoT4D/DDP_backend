@@ -47,6 +47,14 @@ app.conf.task_routes = {
 app.conf.worker_prefetch_multiplier = 1
 
 
+# ── Observability ─────────────────────────────────────────────────────────
+# Emit task-lifecycle events to the broker so celery-exporter / Flower can see
+# per-task timings, success/fail rates, and queue latency. Equivalent to the
+# `-E` worker flag plus producer-side `task-sent` events.
+app.conf.worker_send_task_events = True
+app.conf.task_send_sent_event = True
+
+
 # ── Beat (redbeat, Redis-backed) ──────────────────────────────────────────
 # Replaces the default PersistentScheduler which writes celerybeat-schedule.db
 # locally and corrupts under hard kills. All beat state now lives in Redis.
