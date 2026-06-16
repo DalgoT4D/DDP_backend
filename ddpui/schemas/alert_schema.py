@@ -95,8 +95,6 @@ class AlertToggle(Schema):
     is_active: bool
 
 
-
-
 # ── Response shapes ─────────────────────────────────────────────────────────
 
 
