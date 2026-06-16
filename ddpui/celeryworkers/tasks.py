@@ -15,6 +15,7 @@ import yaml
 from celery.schedules import crontab
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
+from ddpui.celeryworkers.alert_tasks import dispatch_due_alerts
 from ddpui.settings import PRODUCTION
 
 
@@ -1271,6 +1272,10 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
 
     # clear canvas locks every; every 60 seconds or 1 minute
     sender.add_periodic_task(60 * 1.0, delete_old_canvaslocks.s(), name="remove old canvaslocks")
+
+    # alerts dispatcher; wakes once a minute and enqueues evaluators for any
+    # alerts whose most recent cron tick hasn't been claimed yet
+    sender.add_periodic_task(60.0, dispatch_due_alerts.s(), name="alerts dispatcher")
 
     # clear stuck task locks; every 5 minutes
     sender.add_periodic_task(300.0, clear_stuck_locks.s(), name="clear stuck task locks")

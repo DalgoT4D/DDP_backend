@@ -309,6 +309,19 @@ class MetricService:
     @staticmethod
     def compute_metric_value(metric: Metric, org_warehouse: OrgWarehouse) -> Any:
         """Build and execute a query to compute the metric's scalar value."""
+        value, _ = MetricService.compute_metric_value_with_sql(metric, org_warehouse)
+        return value
+
+    @staticmethod
+    def compute_metric_value_with_sql(
+        metric: Metric, org_warehouse: OrgWarehouse
+    ) -> Tuple[Optional[float], str]:
+        """Same as `compute_metric_value` but also returns the executed SQL string.
+
+        Used by the alert evaluator which persists the exact SQL into the
+        AlertLog audit row. Keeps query-building logic centralized here so
+        alerts don't reimplement it.
+        """
         warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
         qb = AggQueryBuilder()
         qb.fetch_from(metric.table_name, metric.schema_name)
@@ -320,17 +333,31 @@ class MetricService:
 
         sql_stmt = qb.build()
         compiled = sql_stmt.compile(bind=warehouse.engine, compile_kwargs={"literal_binds": True})
-        results = warehouse.execute(compiled)
+        try:
+            sql_str = str(compiled).strip()
+        except Exception:
+            sql_str = "<sql unavailable>"
 
+        results = warehouse.execute(compiled)
+        value: Optional[float] = None
         if results and len(results) > 0:
             row = results[0]
-            value = row.get("metric_value") if isinstance(row, dict) else row[0]
-            return float(value) if value is not None else None
-        return None
+            raw = row.get("metric_value")
+            if raw is not None:
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    value = None
+        return value, sql_str
 
     @staticmethod
     def get_metric_consumers(metric_id: int, org: Org) -> dict:
-        """Find charts and KPIs that reference this metric."""
+        """Find charts, KPIs, and alerts that reference this metric.
+
+        Note: alerts CASCADE on Metric delete (see Alert.metric on_delete=CASCADE).
+        They appear in this list so the Metrics-page UI can warn users about what
+        will be deleted alongside; they do NOT contribute to delete-blocking.
+        """
         # Verify metric exists
         MetricService.get_metric(metric_id, org)
 
@@ -349,4 +376,11 @@ class MetricService:
                     )
                     break
 
-        return {"charts": charts, "kpis": kpis}
+        # Alerts via FK (Alert.metric_id)
+        from ddpui.models.alert import Alert  # local import to avoid circular at module load
+
+        alerts = list(
+            Alert.objects.filter(metric_id=metric_id, org=org).values("id", "name", "alert_type")
+        )
+
+        return {"charts": charts, "kpis": kpis, "alerts": alerts}
