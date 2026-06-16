@@ -17,7 +17,6 @@ from ddpui.api.alert_api import (
     get_alert,
     get_alert_logs,
     list_alerts,
-    list_recipient_candidates,
     toggle_alert,
     update_alert,
 )
@@ -468,20 +467,6 @@ def test_slack_webhook_endpoint_rejects_empty_url(seed_db, orguser):
     with pytest.raises(HttpError) as exc:
         run_slack_webhook_test(request, SlackTestRequest(webhook_url=""))
     assert "webhook_url" in str(exc.value)
-
-
-# ── Recipient candidates ────────────────────────────────────────────────────
-
-
-def test_list_recipient_candidates_returns_active_orgusers(seed_db, orguser):
-    """The recipient picker endpoint returns OrgUsers in the requestor's org."""
-    request = mock_request(orguser)
-    candidates = list_recipient_candidates(request)
-
-    assert any(c.orguser_id == orguser.id for c in candidates)
-    found = next(c for c in candidates if c.orguser_id == orguser.id)
-    assert found.email == orguser.user.email
-    assert found.name  # falls back to email if no first/last name
 
 
 # ── Dry-run (POST /api/alerts/test/) ────────────────────────────────────────

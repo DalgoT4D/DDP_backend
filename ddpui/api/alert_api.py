@@ -28,7 +28,6 @@ from ddpui.schemas.alert_schema import (
     KpiRagContext,
     LogDeliveryOut,
     LogListResponse,
-    RecipientCandidate,
     RecipientOut,
     SlackTestRequest,
     SlackTestResponse,
@@ -256,29 +255,6 @@ def test_slack_webhook(request, payload: SlackTestRequest):
         raise HttpError(400, "webhook_url is required")
     success, http_status, body = AlertService.test_slack_webhook(payload.webhook_url.strip())
     return SlackTestResponse(success=success, http_status=http_status, response_body=body)
-
-
-@alert_router.get("/recipients/orgusers/", response=list[RecipientCandidate])
-@has_permission(["can_view_alerts"])
-def list_recipient_candidates(request):
-    """OrgUsers in the requestor's org, shaped for the alert recipient picker.
-
-    Returns orguser_id (the Alert recipient foreign key target) along with
-    email + display name. Active users only.
-    """
-    orguser: OrgUser = request.orguser
-    candidates: list[RecipientCandidate] = []
-    qs = OrgUser.objects.filter(org=orguser.org, user__is_active=True).select_related("user")
-    for ou in qs:
-        full = (ou.user.first_name + " " + ou.user.last_name).strip()
-        candidates.append(
-            RecipientCandidate(
-                orguser_id=ou.id,
-                email=ou.user.email,
-                name=full or ou.user.email,
-            )
-        )
-    return candidates
 
 
 @alert_router.get("/{alert_id}/", response=AlertResponse)

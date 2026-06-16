@@ -342,7 +342,7 @@ class MetricService:
         value: Optional[float] = None
         if results and len(results) > 0:
             row = results[0]
-            raw = row.get("metric_value") if isinstance(row, dict) else row[0]
+            raw = row.get("metric_value")
             if raw is not None:
                 try:
                     value = float(raw)

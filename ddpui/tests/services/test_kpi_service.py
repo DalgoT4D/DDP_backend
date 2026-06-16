@@ -172,6 +172,8 @@ class TestKPICRUD:
             name="Custom KPI Name",
             direction="decrease",
             time_grain="quarterly",
+            green_threshold_pct=80.0,
+            amber_threshold_pct=110.0,
         )
         kpi = KPIService.create_kpi(payload, orguser)
         assert kpi.name == "Custom KPI Name"
@@ -195,6 +197,28 @@ class TestKPICRUD:
             time_grain="hourly",
         )
         with pytest.raises(KPIValidationError, match="Invalid time_grain"):
+            KPIService.create_kpi(payload, orguser)
+
+    def test_create_kpi_invalid_thresholds_increase(self, orguser, sample_metric, seed_db):
+        payload = KPICreate(
+            metric_id=sample_metric.id,
+            direction="increase",
+            time_grain="monthly",
+            green_threshold_pct=50.0,
+            amber_threshold_pct=80.0,
+        )
+        with pytest.raises(KPIValidationError, match="green_threshold_pct"):
+            KPIService.create_kpi(payload, orguser)
+
+    def test_create_kpi_invalid_thresholds_decrease(self, orguser, sample_metric, seed_db):
+        payload = KPICreate(
+            metric_id=sample_metric.id,
+            direction="decrease",
+            time_grain="monthly",
+            green_threshold_pct=80.0,
+            amber_threshold_pct=50.0,
+        )
+        with pytest.raises(KPIValidationError, match="amber_threshold_pct"):
             KPIService.create_kpi(payload, orguser)
 
     def test_create_kpi_invalid_metric(self, orguser, seed_db):

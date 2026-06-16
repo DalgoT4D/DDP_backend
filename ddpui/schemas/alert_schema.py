@@ -91,12 +91,6 @@ class AlertToggle(Schema):
     is_active: bool
 
 
-class RecipientCandidate(Schema):
-    """An OrgUser the wizard's recipient picker can select."""
-
-    orguser_id: int
-    email: str
-    name: str  # full name if available, else email
 
 
 # ── Response shapes ─────────────────────────────────────────────────────────

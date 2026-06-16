@@ -85,7 +85,13 @@ from ddpui.core.kpi.exceptions import (
 
 class KPIService:
     @staticmethod
-    def _validate_fields(direction: str, time_grain: str, metric_type_tag: Optional[str]):
+    def _validate_fields(
+        direction: str,
+        time_grain: str,
+        metric_type_tag: Optional[str],
+        green_pct: float,
+        amber_pct: float,
+    ):
         if direction not in VALID_DIRECTIONS:
             raise KPIValidationError(
                 f"Invalid direction '{direction}'. Must be one of: {VALID_DIRECTIONS}"
@@ -97,6 +103,19 @@ class KPIService:
         if metric_type_tag and metric_type_tag not in VALID_METRIC_TYPE_TAGS:
             raise KPIValidationError(
                 f"Invalid metric_type_tag '{metric_type_tag}'. Must be one of: {VALID_METRIC_TYPE_TAGS}"
+            )
+        # RAG bands assume green is the easier target to clear and amber sits below it.
+        # For increase, achievement is checked green-first (≥ green → green, ≥ amber → amber),
+        # so green_pct must be ≥ amber_pct. For decrease, the comparisons invert.
+        if direction == "increase" and green_pct < amber_pct:
+            raise KPIValidationError(
+                f"For direction 'increase', green_threshold_pct ({green_pct}) "
+                f"must be ≥ amber_threshold_pct ({amber_pct})"
+            )
+        if direction == "decrease" and amber_pct < green_pct:
+            raise KPIValidationError(
+                f"For direction 'decrease', amber_threshold_pct ({amber_pct}) "
+                f"must be ≥ green_threshold_pct ({green_pct})"
             )
 
     @staticmethod
@@ -182,7 +201,13 @@ class KPIService:
 
     @staticmethod
     def create_kpi(payload: KPICreate, orguser: OrgUser) -> KPI:
-        KPIService._validate_fields(payload.direction, payload.time_grain, payload.metric_type_tag)
+        KPIService._validate_fields(
+            payload.direction,
+            payload.time_grain,
+            payload.metric_type_tag,
+            payload.green_threshold_pct,
+            payload.amber_threshold_pct,
+        )
 
         # Verify metric exists and belongs to org
         metric = MetricService.get_metric(payload.metric_id, orguser.org)
@@ -225,7 +250,9 @@ class KPIService:
         direction = update_data.get("direction", kpi.direction)
         time_grain = update_data.get("time_grain", kpi.time_grain)
         metric_type_tag = update_data.get("metric_type_tag", kpi.metric_type_tag)
-        KPIService._validate_fields(direction, time_grain, metric_type_tag)
+        green_pct = update_data.get("green_threshold_pct", kpi.green_threshold_pct)
+        amber_pct = update_data.get("amber_threshold_pct", kpi.amber_threshold_pct)
+        KPIService._validate_fields(direction, time_grain, metric_type_tag, green_pct, amber_pct)
 
         for field_name, value in update_data.items():
             setattr(kpi, field_name, value)
@@ -411,8 +438,8 @@ class KPIService:
 
         periods = []
         for row in results:
-            period_val = row.get("period") if isinstance(row, dict) else row[0]
-            value_val = row.get("value") if isinstance(row, dict) else row[1]
+            period_val = row.get("period")
+            value_val = row.get("value")
             period_label = format_time_grain_label(period_val, sql_grain)
             periods.append(
                 {
@@ -497,7 +524,7 @@ class KPIService:
         value: Optional[float] = None
         if results and len(results) > 0:
             row = results[0]
-            raw = row.get("value") if isinstance(row, dict) else row[0]
+            raw = row.get("value")
             if raw is not None:
                 try:
                     value = float(raw)

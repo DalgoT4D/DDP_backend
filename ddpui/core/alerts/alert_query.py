@@ -160,7 +160,7 @@ def _extract_scalar(results: Any, key: str) -> Optional[float]:
     if not results:
         return None
     row = results[0]
-    value = row.get(key) if isinstance(row, dict) else row[0]
+    value = row.get(key)
     if value is None:
         return None
     try:
