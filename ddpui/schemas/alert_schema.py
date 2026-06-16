@@ -77,6 +77,10 @@ class AlertCreate(Schema):
 
 class AlertUpdate(Schema):
     name: Optional[str] = None
+    # Source — only the field matching the alert's existing alert_type is honored;
+    # alert_type itself is immutable. Switching alert types requires delete + recreate.
+    metric_id: Optional[int] = None
+    kpi_id: Optional[int] = None
     standalone_config: Optional[StandaloneConfig] = None
     condition: Optional[Condition] = None
     schedule_cron: Optional[str] = None

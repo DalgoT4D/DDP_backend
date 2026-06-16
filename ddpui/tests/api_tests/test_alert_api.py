@@ -346,6 +346,76 @@ def test_update_alert(seed_db, orguser, sample_metric):
     assert updated.condition.value == 100.0
 
 
+def test_update_metric_threshold_alert_change_metric(seed_db, orguser, org, sample_metric):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    other_metric = Metric.objects.create(
+        name="Other Metric",
+        schema_name="public",
+        table_name="other",
+        column="id",
+        aggregation="count",
+        org=org,
+        created_by=orguser,
+    )
+    try:
+        updated = update_alert(request, created.id, AlertUpdate(metric_id=other_metric.id))
+
+        assert updated.metric_id == other_metric.id
+        assert updated.metric_name == "Other Metric"
+    finally:
+        Alert.objects.filter(id=created.id).delete()
+        other_metric.delete()
+
+
+def test_update_kpi_rag_alert_change_kpi(seed_db, orguser, org, sample_metric, sample_kpi):
+    request = mock_request(orguser)
+    created = create_alert(
+        request,
+        _base_payload(
+            orguser,
+            alert_type="kpi_rag",
+            kpi_id=sample_kpi.id,
+            condition=RagCondition(rag_states=["red"]),
+        ),
+    )
+
+    other_kpi = KPI.objects.create(
+        name="Other KPI",
+        metric=sample_metric,
+        target_value=500.0,
+        direction="increase",
+        time_grain="monthly",
+        org=org,
+        created_by=orguser,
+    )
+    try:
+        updated = update_alert(request, created.id, AlertUpdate(kpi_id=other_kpi.id))
+
+        assert updated.kpi_id == other_kpi.id
+    finally:
+        # alert references other_kpi; PROTECT on KPI.metric needs alert cleared first.
+        Alert.objects.filter(id=created.id).delete()
+        other_kpi.delete()
+
+
+def test_update_alert_rejects_mismatched_source(seed_db, orguser, sample_metric, sample_kpi):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    with pytest.raises(HttpError, match="kpi_id can only be updated on kpi_rag alerts"):
+        update_alert(request, created.id, AlertUpdate(kpi_id=sample_kpi.id))
+
+
+def test_update_alert_rejects_missing_metric(seed_db, orguser, sample_metric):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    with pytest.raises(HttpError, match="metric 99999 not found"):
+        update_alert(request, created.id, AlertUpdate(metric_id=99999))
+
+
 def test_toggle_alert(seed_db, orguser, sample_metric):
     request = mock_request(orguser)
     created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))

@@ -280,7 +280,31 @@ class AlertService:
                 raise AlertValidationError(f"An alert named '{payload.name}' already exists")
             alert.name = payload.name
 
+        # Source change — only the field matching the alert's existing alert_type is
+        # honored; alert_type itself is immutable on update.
+        if payload.metric_id is not None:
+            if alert.alert_type != AlertType.METRIC_THRESHOLD:
+                raise AlertValidationError(
+                    "metric_id can only be updated on metric_threshold alerts"
+                )
+            try:
+                alert.metric = Metric.objects.get(id=payload.metric_id, org=org)
+            except Metric.DoesNotExist:
+                raise AlertValidationError(f"metric {payload.metric_id} not found")
+
+        if payload.kpi_id is not None:
+            if alert.alert_type != AlertType.KPI_RAG:
+                raise AlertValidationError("kpi_id can only be updated on kpi_rag alerts")
+            try:
+                alert.kpi = KPI.objects.get(id=payload.kpi_id, org=org)
+            except KPI.DoesNotExist:
+                raise AlertValidationError(f"kpi {payload.kpi_id} not found")
+
         if payload.standalone_config is not None:
+            if alert.alert_type != AlertType.STANDALONE:
+                raise AlertValidationError(
+                    "standalone_config can only be updated on standalone alerts"
+                )
             alert.standalone_config = payload.standalone_config.model_dump()
 
         if payload.condition is not None:
