@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 from pydantic import HttpUrl
 
 from ninja import Schema
@@ -14,6 +15,7 @@ class OrgSchema(Schema):
     viz_login_type: Optional[str] = None
     tnc_accepted: Optional[bool] = None
     is_demo: bool = False
+    created_at: Optional[datetime] = None
 
 
 class CreateOrgSchema(Schema):
