@@ -149,11 +149,15 @@ WSGI_APPLICATION = "ddpui.wsgi.application"
 ASGI_APPLICATION = "ddpui.asgi.application"  # for websockets
 
 
+from ddpui.utils.redis_db import RedisDB  # noqa: E402
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [(os.getenv("REDIS_HOST", "localhost"), os.getenv("REDIS_PORT", "6379"))]
+            "hosts": [
+                f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/{int(RedisDB.CHANNELS)}"
+            ]
         },
     }
 }

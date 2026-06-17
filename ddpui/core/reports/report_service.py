@@ -18,7 +18,7 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.chart_schema import ChartConfig
+from ddpui.schemas.chart_schemas import ChartConfig
 from ddpui.schemas.kpi_schema import KPIResponse
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (

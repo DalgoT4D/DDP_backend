@@ -57,10 +57,15 @@ class MetricPreviewResponse(Schema):
 
 
 class MetricConsumersResponse(Schema):
-    """Response for metric consumers (charts and KPIs referencing this metric)"""
+    """Response for metric consumers (charts, KPIs, alerts referencing this metric).
+
+    Alerts are CASCADE on Metric delete — included so the UI can warn the user
+    what will be deleted alongside; they do not contribute to delete-blocking.
+    """
 
     charts: List[dict]  # [{id, title, chart_type}]
     kpis: List[dict]  # [{id, name}]
+    alerts: List[dict] = []  # [{id, name, alert_type}]
 
 
 class MetricValidateResponse(Schema):
