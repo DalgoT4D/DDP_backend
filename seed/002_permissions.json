@@ -646,5 +646,37 @@
             "name": "Can Delete KPIs",
             "slug": "can_delete_kpis"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 82,
+        "fields": {
+            "name": "Can View Alerts",
+            "slug": "can_view_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 83,
+        "fields": {
+            "name": "Can Create Alerts",
+            "slug": "can_create_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 84,
+        "fields": {
+            "name": "Can Edit Alerts",
+            "slug": "can_edit_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 85,
+        "fields": {
+            "name": "Can Delete Alerts",
+            "slug": "can_delete_alerts"
+        }
     }
 ]

@@ -1,36 +1,62 @@
+"""Celery app and configuration — single source of truth.
+
+All Celery-related configuration lives here. Do NOT add CELERY_* prefixed
+variables to settings.py; this module no longer pulls them in. If a future
+contributor needs a new Celery setting, add it as `app.conf.X = ...` below.
+"""
+
 import os
 
 from celery import Celery
 
-# Set the default Django settings module for the 'celery' program.
+from ddpui.utils.redis_db import RedisDB
+
+# Django must be configured before any task module imports Django ORM bits.
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 
+
+# ── Redis connection ──────────────────────────────────────────────────────
+# See ddpui/utils/redis_db.py for the canonical DB index assignments.
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
 
-# Here we use redis as both Celery message broker(delivering task messages) and backend(for task status storage)
-app = Celery(
-    "ddpui",
-    backend=f"redis://{REDIS_HOST}:{REDIS_PORT}",
-    broker=f"redis://{REDIS_HOST}:{REDIS_PORT}",
-)
+BROKER_URL = f"{REDIS_URL}/{int(RedisDB.BROKER)}"
+RESULT_BACKEND_URL = f"{REDIS_URL}/{int(RedisDB.RESULTS)}"
+REDBEAT_URL = f"{REDIS_URL}/{int(RedisDB.BEAT)}"
 
-# Using a string here means the worker doesn't have to serialize
-# the configuration object to child processes.
-# - namespace='CELERY' means all celery-related configuration keys
-#   should have a `CELERY_` prefix.
-app.config_from_object("django.conf:settings", namespace="CELERY")
 
-# Load task modules from all registered Django apps.
+# ── Celery app ────────────────────────────────────────────────────────────
+app = Celery("ddpui", broker=BROKER_URL, backend=RESULT_BACKEND_URL)
 app.autodiscover_tasks()
 
-# Task routing configuration
+
+# ── Routing ───────────────────────────────────────────────────────────────
+# Long-running dbt jobs and time-sensitive alerts get their own queues so
+# they can't starve each other or the default queue.
+app.conf.task_default_queue = "default"
 app.conf.task_routes = {
     "ddpui.celeryworkers.tasks.run_dbt_commands": {"queue": "canvas_dbt"},
+    "alerts.dispatch_due_alerts": {"queue": "alerts"},
+    "alerts.evaluate_alert": {"queue": "alerts"},
 }
 
-# Default queue
-app.conf.task_default_queue = "default"
 
-# Worker configuration for better task distribution
-app.conf.worker_prefetch_multiplier = 1  # Fair task distribution
+# ── Worker behaviour ──────────────────────────────────────────────────────
+# Fair task distribution — workers don't hoard tasks they can't run yet.
+app.conf.worker_prefetch_multiplier = 1
+
+
+# ── Observability ─────────────────────────────────────────────────────────
+# Emit task-lifecycle events to the broker so celery-exporter / Flower can see
+# per-task timings, success/fail rates, and queue latency. Equivalent to the
+# `-E` worker flag plus producer-side `task-sent` events.
+app.conf.worker_send_task_events = True
+app.conf.task_send_sent_event = True
+
+
+# ── Beat (redbeat, Redis-backed) ──────────────────────────────────────────
+# Replaces the default PersistentScheduler which writes celerybeat-schedule.db
+# locally and corrupts under hard kills. All beat state now lives in Redis.
+app.conf.beat_scheduler = "redbeat.RedBeatScheduler"
+app.conf.redbeat_redis_url = REDBEAT_URL

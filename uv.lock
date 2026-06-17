@@ -447,6 +447,18 @@ wheels = [
 ]
 
 [[package]]
+name = "celery-redbeat"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "celery" },
+    { name = "python-dateutil" },
+    { name = "redis" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/0d/63cf4db35c111554913199a54f32be3495526ff08189f9d79a879abcc6ad/celery-redbeat-2.2.0.tar.gz", hash = "sha256:71104729380d4eaefd91a9b7d270ba7851bfff9ad55a43ac8365acbb0c608b77", size = 21372, upload-time = "2023-12-22T13:34:29.853Z" }
+
+[[package]]
 name = "certifi"
 version = "2022.12.7"
 source = { registry = "https://pypi.org/simple" }
@@ -1013,6 +1025,7 @@ dependencies = [
     { name = "botocore" },
     { name = "cachetools" },
     { name = "celery" },
+    { name = "celery-redbeat" },
     { name = "certifi" },
     { name = "cffi" },
     { name = "cfgv" },
@@ -1282,6 +1295,7 @@ requires-dist = [
     { name = "botocore", specifier = "==1.42.32" },
     { name = "cachetools", specifier = "==5.3.0" },
     { name = "celery", specifier = "==5.2.7" },
+    { name = "celery-redbeat", specifier = "==2.2.0" },
     { name = "certifi", specifier = "==2022.12.7" },
     { name = "cffi", specifier = "==1.15.1" },
     { name = "cfgv", specifier = "==3.4.0" },

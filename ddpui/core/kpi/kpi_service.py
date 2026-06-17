@@ -85,7 +85,13 @@ from ddpui.core.kpi.exceptions import (
 
 class KPIService:
     @staticmethod
-    def _validate_fields(direction: str, time_grain: str, metric_type_tag: Optional[str]):
+    def _validate_fields(
+        direction: str,
+        time_grain: str,
+        metric_type_tag: Optional[str],
+        green_pct: float,
+        amber_pct: float,
+    ):
         if direction not in VALID_DIRECTIONS:
             raise KPIValidationError(
                 f"Invalid direction '{direction}'. Must be one of: {VALID_DIRECTIONS}"
@@ -97,6 +103,19 @@ class KPIService:
         if metric_type_tag and metric_type_tag not in VALID_METRIC_TYPE_TAGS:
             raise KPIValidationError(
                 f"Invalid metric_type_tag '{metric_type_tag}'. Must be one of: {VALID_METRIC_TYPE_TAGS}"
+            )
+        # RAG bands assume green is the easier target to clear and amber sits below it.
+        # For increase, achievement is checked green-first (≥ green → green, ≥ amber → amber),
+        # so green_pct must be ≥ amber_pct. For decrease, the comparisons invert.
+        if direction == "increase" and green_pct < amber_pct:
+            raise KPIValidationError(
+                f"For direction 'increase', green_threshold_pct ({green_pct}) "
+                f"must be ≥ amber_threshold_pct ({amber_pct})"
+            )
+        if direction == "decrease" and amber_pct < green_pct:
+            raise KPIValidationError(
+                f"For direction 'decrease', amber_threshold_pct ({amber_pct}) "
+                f"must be ≥ green_threshold_pct ({green_pct})"
             )
 
     @staticmethod
@@ -182,7 +201,13 @@ class KPIService:
 
     @staticmethod
     def create_kpi(payload: KPICreate, orguser: OrgUser) -> KPI:
-        KPIService._validate_fields(payload.direction, payload.time_grain, payload.metric_type_tag)
+        KPIService._validate_fields(
+            payload.direction,
+            payload.time_grain,
+            payload.metric_type_tag,
+            payload.green_threshold_pct,
+            payload.amber_threshold_pct,
+        )
 
         # Verify metric exists and belongs to org
         metric = MetricService.get_metric(payload.metric_id, orguser.org)
@@ -225,7 +250,9 @@ class KPIService:
         direction = update_data.get("direction", kpi.direction)
         time_grain = update_data.get("time_grain", kpi.time_grain)
         metric_type_tag = update_data.get("metric_type_tag", kpi.metric_type_tag)
-        KPIService._validate_fields(direction, time_grain, metric_type_tag)
+        green_pct = update_data.get("green_threshold_pct", kpi.green_threshold_pct)
+        amber_pct = update_data.get("amber_threshold_pct", kpi.amber_threshold_pct)
+        KPIService._validate_fields(direction, time_grain, metric_type_tag, green_pct, amber_pct)
 
         for field_name, value in update_data.items():
             setattr(kpi, field_name, value)
@@ -238,6 +265,24 @@ class KPIService:
         return KPI.objects.select_related("metric__created_by__user", "created_by__user").get(
             id=kpi.id
         )
+
+    @staticmethod
+    def get_kpi_consumers(kpi_id: int, org: Org) -> dict:
+        """Find dashboards and alerts that reference this KPI.
+
+        Alerts CASCADE on KPI delete — included for UI visibility (so the user
+        sees what will be removed alongside) but do not contribute to delete-
+        blocking.
+        """
+        KPIService.get_kpi(kpi_id, org)
+        dashboards = KPIService.get_kpi_dashboards(kpi_id, org)
+
+        from ddpui.models.alert import Alert  # local import to avoid circular
+
+        alerts = list(
+            Alert.objects.filter(kpi_id=kpi_id, org=org).values("id", "name", "alert_type")
+        )
+        return {"dashboards": dashboards, "alerts": alerts}
 
     @staticmethod
     def get_kpi_dashboards(kpi_id: int, org: Org) -> List[dict]:
@@ -393,8 +438,8 @@ class KPIService:
 
         periods = []
         for row in results:
-            period_val = row.get("period") if isinstance(row, dict) else row[0]
-            value_val = row.get("value") if isinstance(row, dict) else row[1]
+            period_val = row.get("period")
+            value_val = row.get("value")
             period_label = format_time_grain_label(period_val, sql_grain)
             periods.append(
                 {
@@ -422,6 +467,78 @@ class KPIService:
             periods = filtered
 
         return periods
+
+    @staticmethod
+    def compute_latest_value(
+        kpi: KPI, org_warehouse: OrgWarehouse
+    ) -> tuple[Optional[float], str, Optional[str]]:
+        """Most-recent-period value for the KPI + SQL string + RAG status.
+
+        Used by the alert evaluator and the dry-run preview. Mirrors the
+        "current value" shown in the KPI detail drawer: aggregates the
+        underlying metric by the KPI's time_grain and returns the most recent
+        complete period.
+
+        If the KPI has no time_dimension_column/time_grain, falls back to a
+        whole-dataset aggregate via MetricService.
+        """
+        metric = kpi.metric
+
+        # Fallback: KPI without time grain → whole-dataset aggregate
+        if not kpi.time_dimension_column or not kpi.time_grain:
+            value, sql_str = MetricService.compute_metric_value_with_sql(metric, org_warehouse)
+            rag = compute_rag_status(
+                value,
+                kpi.target_value,
+                kpi.direction,
+                kpi.green_threshold_pct,
+                kpi.amber_threshold_pct,
+            )
+            return value, sql_str, rag
+
+        warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
+        warehouse_type = (org_warehouse.wtype or "postgres").lower()
+        sql_grain = TIME_GRAIN_TO_SQL.get(kpi.time_grain, "month")
+
+        qb = AggQueryBuilder()
+        qb.fetch_from(metric.table_name, metric.schema_name)
+        time_col = column(kpi.time_dimension_column)
+        time_expr = apply_time_grain(time_col, sql_grain, warehouse_type).label("period")
+        qb.add_column(time_expr)
+        qb.group_cols_by(time_expr)
+        if metric.column_expression:
+            qb.add_column(literal_column(metric.column_expression).label("value"))
+        else:
+            qb.add_aggregate_column(metric.column, metric.aggregation, alias="value")
+        qb.order_cols_by([("period", "desc")])
+        qb.limit_rows(1)
+
+        sql_stmt = qb.build()
+        compiled = sql_stmt.compile(bind=warehouse.engine, compile_kwargs={"literal_binds": True})
+        try:
+            sql_str = str(compiled).strip()
+        except Exception:
+            sql_str = "<sql unavailable>"
+
+        results = warehouse.execute(compiled)
+        value: Optional[float] = None
+        if results and len(results) > 0:
+            row = results[0]
+            raw = row.get("value")
+            if raw is not None:
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    value = None
+
+        rag = compute_rag_status(
+            value,
+            kpi.target_value,
+            kpi.direction,
+            kpi.green_threshold_pct,
+            kpi.amber_threshold_pct,
+        )
+        return value, sql_str, rag
 
     @staticmethod
     def compute_kpi_data(

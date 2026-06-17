@@ -39,8 +39,9 @@ from ddpui.api.charts_api import (
     get_chart_data,
     BulkDeleteRequest,
 )
-from ddpui.schemas.chart_schema import ChartCreate, ChartUpdate, ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartCreate, ChartUpdate, ChartDataPayload
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.common.fixtures.chart_ui_payloads import CHART_UI_PAYLOADS
 
 pytestmark = pytest.mark.django_db
 
@@ -337,6 +338,35 @@ class TestCreateChart:
 
         # Cleanup
         Chart.objects.filter(id=response.id).delete()
+
+
+class TestCreateChartPerType:
+    """One end-to-end create per chart_type with the real UI payload (incl.
+    customizations) from tests/common/fixtures. Validates that the full stack —
+    typed schema dispatch → service layer → DB write → response — round-trips
+    every persisted customization the UI sent."""
+
+    @pytest.mark.parametrize("chart_type", list(CHART_UI_PAYLOADS.keys()))
+    def test_create_with_real_ui_payload(self, chart_type, orguser, org_warehouse, seed_db):
+        request = mock_request(orguser)
+        payload_dict = CHART_UI_PAYLOADS[chart_type]
+        payload = ChartCreate(**payload_dict)
+
+        response = create_chart(request, payload)
+
+        try:
+            assert response.chart_type == chart_type
+            assert response.id is not None
+
+            sent_cust = payload_dict["extra_config"]["customizations"]
+            persisted_cust = response.extra_config["customizations"]
+            for k, v in sent_cust.items():
+                assert persisted_cust[k] == v, (
+                    f"{chart_type}.customizations.{k} drifted: sent={v!r} "
+                    f"persisted={persisted_cust[k]!r}"
+                )
+        finally:
+            Chart.objects.filter(id=response.id).delete()
 
 
 # ================================================================================

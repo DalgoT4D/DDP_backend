@@ -14,7 +14,7 @@ from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.schemas.chart_schema import (
+from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartDataPayload,
     ExecuteChartQuery,
