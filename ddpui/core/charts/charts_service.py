@@ -830,6 +830,11 @@ def apply_chart_sorting(
     if not sort_config:
         return query_builder
 
+    # Collect valid dimension names from the payload to validate sort columns
+    valid_dimensions = set()
+    if payload:
+        valid_dimensions = set(normalize_dimensions(payload))
+
     # Prepare sort columns as list of tuples for order_cols_by method
     sort_cols = []
     for sort_item in sort_config:
@@ -863,7 +868,13 @@ def apply_chart_sorting(
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
         else:
-            # It's a dimension column - use as-is
+            # It's a dimension column - validate it is in the GROUP BY dimensions
+            if valid_dimensions and column_name not in valid_dimensions:
+                logger.warning(
+                    f"Skipping sort column '{column_name}' - not a metric alias "
+                    f"or grouped dimension {valid_dimensions}"
+                )
+                continue
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
