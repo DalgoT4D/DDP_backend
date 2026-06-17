@@ -4,10 +4,9 @@ The API layer is a thin wrapper — business logic is covered in test_org_logo_s
 These tests only verify the exception → HTTP status code mapping.
 
 Tests:
-1. get_org_logo — OrgLogoNotFoundError → 404
-2. upload_logo_file — OrgLogoValidationError → 400, OrgLogoS3Error → 502
-3. upload_logo_from_url — OrgLogoValidationError → 400
-4. delete_logo — OrgLogoNotFoundError → 404, OrgLogoS3Error → 502
+1. upload_logo_file — OrgLogoValidationError → 400, OrgLogoS3Error → 502
+2. upload_logo_from_url — OrgLogoValidationError → 400
+3. delete_logo — OrgLogoNotFoundError → 404, OrgLogoS3Error → 502
 """
 
 import os
@@ -27,7 +26,6 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.org_logo_api import (
-    get_org_logo,
     upload_logo_file,
     upload_logo_from_url,
     delete_logo,
@@ -75,15 +73,6 @@ def orguser(authuser, org, seed_db):
 # ================================================================================
 # Exception → HTTP status code mapping
 # ================================================================================
-
-
-def test_get_org_logo_not_found_raises_404(orguser):
-    with patch(
-        "ddpui.api.org_logo_api.OrgLogoService.get_logo", side_effect=OrgLogoNotFoundError()
-    ):
-        with pytest.raises(HttpError) as exc:
-            get_org_logo(mock_request(orguser))
-    assert exc.value.status_code == 404
 
 
 def test_upload_logo_file_validation_error_raises_400(orguser):

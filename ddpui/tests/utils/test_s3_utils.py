@@ -1,18 +1,20 @@
-"""Tests for s3_utils — validation and upload logic for org logos
+"""Tests for s3_utils — generic S3 upload and delete utilities
 
 Tests:
-1. upload_org_logo — invalid content type, file too large, successful upload (S3 mocked)
-2. _build_s3_url — correct URL format
+1. _build_s3_url — correct URL format
+2. upload_file — calls put_object with correct args, returns correct URL
+3. delete_file — calls delete_object with correct args
+4. download_file — calls get_object and returns response
 """
 
 from unittest.mock import patch, MagicMock
 import pytest
 
 from ddpui.utils.s3_utils import (
-    upload_org_logo,
     _build_s3_url,
-    MAX_FILE_SIZE_BYTES,
-    ALLOWED_CONTENT_TYPES,
+    upload_file,
+    delete_file,
+    download_file,
 )
 
 
@@ -27,91 +29,73 @@ def test_build_s3_url_format():
 
 
 # ================================================================================
-# upload_org_logo — validation (no S3 needed)
+# upload_file
 # ================================================================================
 
 
-def test_upload_org_logo_invalid_content_type():
-    with pytest.raises(ValueError, match="Invalid file type"):
-        upload_org_logo(
-            file_bytes=b"fake",
-            content_type="application/pdf",
-            org_slug="test-org",
-        )
-
-
-def test_upload_org_logo_file_too_large():
-    oversized = b"x" * (MAX_FILE_SIZE_BYTES + 1)
-    with pytest.raises(ValueError, match="5MB"):
-        upload_org_logo(
-            file_bytes=oversized,
-            content_type="image/png",
-            org_slug="test-org",
-        )
-
-
-def test_upload_org_logo_exactly_at_limit_is_allowed():
-    """File exactly at 5MB should not raise."""
-    at_limit = b"x" * MAX_FILE_SIZE_BYTES
+def test_upload_file_returns_correct_url():
     with (
-        patch("ddpui.utils.s3_utils._get_media_bucket", return_value="test-bucket"),
         patch("ddpui.utils.s3_utils._get_s3_region", return_value="ap-south-1"),
         patch("ddpui.utils.s3_utils.AWSClient") as mock_aws,
     ):
         mock_s3 = MagicMock()
         mock_aws.get_instance.return_value = mock_s3
 
-        url, s3_key = upload_org_logo(at_limit, "image/png", "test-org")
+        url = upload_file("test-bucket", "some/key/file.png", b"bytes", "image/png")
 
-    assert url.startswith("https://test-bucket.s3.ap-south-1.amazonaws.com/")
-    assert s3_key.startswith("orgs/test-org/logo/")
-    assert s3_key.endswith(".png")
+    assert url == "https://test-bucket.s3.ap-south-1.amazonaws.com/some/key/file.png"
 
 
-# ================================================================================
-# upload_org_logo — successful upload
-# ================================================================================
-
-
-@pytest.mark.parametrize(
-    "content_type, expected_ext",
-    [
-        ("image/png", ".png"),
-        ("image/jpeg", ".jpg"),
-        ("image/webp", ".webp"),
-        ("image/gif", ".gif"),
-    ],
-)
-def test_upload_org_logo_success(content_type, expected_ext):
+def test_upload_file_calls_put_object_with_correct_args():
     with (
-        patch("ddpui.utils.s3_utils._get_media_bucket", return_value="test-bucket"),
         patch("ddpui.utils.s3_utils._get_s3_region", return_value="ap-south-1"),
         patch("ddpui.utils.s3_utils.AWSClient") as mock_aws,
     ):
         mock_s3 = MagicMock()
         mock_aws.get_instance.return_value = mock_s3
 
-        url, s3_key = upload_org_logo(b"fake-image-bytes", content_type, "my-org")
+        upload_file("test-bucket", "some/key/file.png", b"fake-bytes", "image/webp")
 
-    assert "my-org" in s3_key
-    assert s3_key.endswith(expected_ext)
-    assert url == f"https://test-bucket.s3.ap-south-1.amazonaws.com/{s3_key}"
-    mock_s3.put_object.assert_called_once()
-    call_kwargs = mock_s3.put_object.call_args.kwargs
-    assert call_kwargs["Bucket"] == "test-bucket"
-    assert call_kwargs["Key"] == s3_key
-    assert call_kwargs["ContentType"] == content_type
+    mock_s3.put_object.assert_called_once_with(
+        Bucket="test-bucket",
+        Key="some/key/file.png",
+        Body=b"fake-bytes",
+        ContentType="image/webp",
+    )
 
 
-def test_upload_org_logo_missing_s3_bucket_env():
-    with patch("ddpui.utils.s3_utils._get_media_bucket", side_effect=ValueError("S3_IMAGES")):
-        with pytest.raises(ValueError, match="S3_IMAGES"):
-            upload_org_logo(b"bytes", "image/png", "test-org")
+# ================================================================================
+# delete_file
+# ================================================================================
 
 
-def test_all_allowed_content_types_are_covered():
-    """Every content type in ALLOWED_CONTENT_TYPES must have a matching extension."""
-    from ddpui.utils.s3_utils import CONTENT_TYPE_TO_EXT
+def test_delete_file_calls_delete_object_with_correct_args():
+    with patch("ddpui.utils.s3_utils.AWSClient") as mock_aws:
+        mock_s3 = MagicMock()
+        mock_aws.get_instance.return_value = mock_s3
 
-    for ct in ALLOWED_CONTENT_TYPES:
-        assert ct in CONTENT_TYPE_TO_EXT, f"{ct} missing from CONTENT_TYPE_TO_EXT"
+        delete_file("test-bucket", "some/key/file.png")
+
+    mock_s3.delete_object.assert_called_once_with(
+        Bucket="test-bucket",
+        Key="some/key/file.png",
+    )
+
+
+# ================================================================================
+# download_file
+# ================================================================================
+
+
+def test_download_file_calls_get_object_and_returns_response():
+    mock_response = {"Body": MagicMock(), "LastModified": "2024-01-01"}
+
+    with patch("ddpui.utils.s3_utils.AWSClient") as mock_aws:
+        mock_s3 = MagicMock()
+        mock_aws.get_instance.return_value = mock_s3
+        mock_s3.get_object.return_value = mock_response
+
+        result = download_file("test-bucket", "some/key/file.html")
+
+    mock_s3.get_object.assert_called_once_with(Bucket="test-bucket", Key="some/key/file.html")
+    assert result == mock_response

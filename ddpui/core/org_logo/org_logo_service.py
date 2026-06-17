@@ -1,10 +1,14 @@
 """Org logo service — business logic for logo upload and deletion"""
 
-import requests as http_requests
+import os
+import uuid
+from urllib.parse import urlparse
+
+from ddpui.utils.http import dalgo_get, dalgo_head
 
 from ddpui.models.org import Org
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.s3_utils import upload_org_logo, delete_org_logo, MAX_FILE_SIZE_BYTES
+from ddpui.utils.s3_utils import upload_file, delete_file
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
     OrgLogoValidationError,
@@ -14,23 +18,33 @@ from ddpui.core.org_logo.exceptions import (
 
 logger = CustomLogger("ddpui.core.org_logo")
 
+ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+CONTENT_TYPE_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+}
+
+
+def _get_logo_bucket() -> str:
+    bucket = os.getenv("S3_IMAGES_BUCKET")
+    if not bucket:
+        raise OrgLogoS3Error("S3_IMAGES_BUCKET environment variable is not set")
+    return bucket
+
 
 class OrgLogoService:
-    @staticmethod
-    def get_logo(org: Org) -> Org:
-        """Return the org if it has a logo, else raise OrgLogoNotFoundError."""
-        if not org.logo_url:
-            raise OrgLogoNotFoundError()
-        return org
-
     @staticmethod
     def get_logo_bytes(org: Org) -> tuple[bytes, str]:
         """Fetch raw logo bytes from the stored URL for server-side proxying."""
         if not org.logo_url:
             raise OrgLogoNotFoundError()
         try:
-            resp = http_requests.get(org.logo_url, timeout=10, stream=True)
-        except http_requests.RequestException as e:
+            resp = dalgo_get(org.logo_url, raw=True, timeout=10, stream=True)
+        except Exception as e:
             raise OrgLogoFetchError("Failed to fetch logo from storage") from e
         if not resp.ok:
             resp.close()
@@ -70,16 +84,25 @@ class OrgLogoService:
             OrgLogoS3Error: If S3 upload fails
         """
         try:
-            logo_url, s3_key = upload_org_logo(
-                file_bytes=file_bytes,
-                content_type=content_type,
-                org_slug=org.slug,
-            )
+            if content_type not in ALLOWED_CONTENT_TYPES:
+                raise ValueError(
+                    f"Invalid file type: {content_type}. Allowed types: {', '.join(ALLOWED_CONTENT_TYPES)}"
+                )
+            if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+                raise ValueError("File size exceeds the 5MB limit")
+
+            ext = CONTENT_TYPE_TO_EXT[content_type]
+            s3_key = f"orgs/{org.slug}/logo/{uuid.uuid4()}.{ext}"
+            bucket = _get_logo_bucket()
+            logo_url = upload_file(bucket, s3_key, file_bytes, content_type)
+            logger.info(f"Uploaded org logo for {org.slug} to s3://{bucket}/{s3_key}")
         except ValueError as e:
-            raise OrgLogoValidationError(str(e))
+            raise OrgLogoValidationError(str(e)) from e
+        except OrgLogoValidationError:
+            raise
         except Exception as e:
             logger.error(f"S3 upload failed for {org.slug}: {e}")
-            raise OrgLogoS3Error("Failed to upload logo to S3")
+            raise OrgLogoS3Error("Failed to upload logo to S3") from e
 
         OrgLogoService._replace_logo(org, logo_url, s3_key, filename)
         return org
@@ -95,10 +118,24 @@ class OrgLogoService:
         Returns:
             Updated Org instance
         """
-        # Delete old S3 file if the previous logo was uploaded (not a URL)
+        parsed = urlparse(image_url)
+        if parsed.scheme not in ("http", "https"):
+            raise OrgLogoValidationError("URL must use HTTP or HTTPS")
+
+        try:
+            response_headers = dalgo_head(image_url, timeout=10)
+            content_type = response_headers.get("content-type", "").split(";")[0].strip()
+        except Exception as e:
+            raise OrgLogoValidationError("Could not verify the URL serves an image") from e
+
+        if content_type not in ALLOWED_CONTENT_TYPES:
+            raise OrgLogoValidationError(
+                f"URL does not point to a valid image. Allowed types: {', '.join(ALLOWED_CONTENT_TYPES)}"
+            )
+
         if org.logo_s3_key:
             try:
-                delete_org_logo(org.logo_s3_key)
+                delete_file(_get_logo_bucket(), org.logo_s3_key)
             except Exception as e:
                 logger.warning(f"Failed to delete old S3 logo for {org.slug}: {e}")
 
@@ -125,10 +162,10 @@ class OrgLogoService:
 
         if org.logo_s3_key:
             try:
-                delete_org_logo(org.logo_s3_key)
+                delete_file(_get_logo_bucket(), org.logo_s3_key)
             except Exception as e:
                 logger.error(f"S3 delete failed for {org.slug}: {e}")
-                raise OrgLogoS3Error("Failed to delete logo from S3")
+                raise OrgLogoS3Error("Failed to delete logo from S3") from e
 
         org.logo_url = None
         org.logo_s3_key = None
@@ -141,7 +178,7 @@ class OrgLogoService:
         """Delete old S3 file if exists, then persist new logo on Org."""
         if org.logo_s3_key:
             try:
-                delete_org_logo(org.logo_s3_key)
+                delete_file(_get_logo_bucket(), org.logo_s3_key)
             except Exception as e:
                 logger.warning(f"Failed to delete old logo from S3 for {org.slug}: {e}")
 

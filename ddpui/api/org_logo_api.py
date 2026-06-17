@@ -24,22 +24,6 @@ logger = CustomLogger("ddpui.org_logo_api")
 org_logo_router = Router()
 
 
-@org_logo_router.get("/", response=ApiResponse[OrgLogoResponse])
-@has_permission(["can_view_orgusers"])
-def get_org_logo(request):
-    """Get the current org logo"""
-    orguser: OrgUser = request.orguser
-
-    try:
-        org = OrgLogoService.get_logo(orguser.org)
-        return api_response(
-            success=True,
-            data=OrgLogoResponse.from_model(org),
-        )
-    except OrgLogoNotFoundError as e:
-        raise HttpError(404, str(e)) from e
-
-
 @org_logo_router.post("/upload/", response=ApiResponse[OrgLogoResponse])
 @has_permission(["can_edit_org_notification_settings"])
 def upload_logo_file(request, file: UploadedFile = File(...)):
