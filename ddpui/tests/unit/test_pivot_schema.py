@@ -1,5 +1,5 @@
 import pytest
-from ddpui.schemas.chart_schema import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload
 
 
 class TestPivotTablePayload:

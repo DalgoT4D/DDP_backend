@@ -1,6 +1,6 @@
 """Schemas for chart data fetch, transform, and preview endpoints."""
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from ninja import Schema
 
@@ -31,6 +31,16 @@ class ChartDataPayload(Schema):
     geographic_column: Optional[str] = None
     value_column: Optional[str] = None
     selected_geojson_id: Optional[int] = None
+
+    # Pivot table fields
+    row_dimensions: Optional[List[str]] = None
+    column_dimensions: Optional[List[str]] = None  # multiple column dimensions (pivot axes)
+    column_time_grains: Optional[
+        Dict[str, str]
+    ] = None  # {column_name: grain} e.g. {"enrollment_date": "month"}
+    show_row_subtotals: bool = False
+    show_column_subtotals: bool = False
+    show_grand_total: bool = True
 
     customizations: Optional[dict] = None
     extra_config: Optional[dict] = None

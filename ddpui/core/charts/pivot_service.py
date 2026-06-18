@@ -9,7 +9,7 @@ column_time_grains (dict mapping column name → grain).
 from sqlalchemy import func, select, column
 from sqlalchemy.sql.expression import table as sa_table
 
-from ddpui.schemas.chart_schema import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload
 from ddpui.models.org import OrgWarehouse
 from ddpui.core.charts.pivot_transform import rotate_to_pivot, MAX_PIVOT_COLUMNS
 from ddpui.core.charts.charts_service import (

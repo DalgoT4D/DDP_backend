@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from ddpui.schemas.chart_schema import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload
 from ddpui.core.charts.pivot_service import check_pivot_cardinality
 
 
