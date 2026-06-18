@@ -53,7 +53,7 @@ from ddpui.models.org_user import (
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
 )
@@ -162,7 +162,7 @@ def mock_request(orguser: OrgUser = None):
 
 def test_seed_data(seed_db):
     """a test to seed the database"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
 
@@ -644,7 +644,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
-    new_role = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
+    new_role = Role.objects.filter(slug=ADMIN_ROLE).first()
     another_org_user = OrgUser.objects.create(org=another_org, user=another_user, new_role=new_role)
     Invitation.objects.create(
         invited_email="inivted_email",

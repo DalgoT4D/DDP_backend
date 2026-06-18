@@ -45,9 +45,9 @@ class Command(BaseCommand):
             print("User already in org")
             return
 
-        role = Role.objects.filter(slug="account-manager").first()
+        role = Role.objects.filter(slug="admin").first()
         if role is None:
-            print('Role "account-manager" not found')
+            print('Role "admin" not found')
             return
 
         OrgUser.objects.create(user=user, org=org, new_role=role)

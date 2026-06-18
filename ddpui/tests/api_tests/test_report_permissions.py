@@ -49,7 +49,7 @@ from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.auth import (
     SUPER_ADMIN_ROLE,
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
 )
@@ -130,7 +130,9 @@ def account_manager_user(org, seed_db):
 
 @pytest.fixture
 def pipeline_manager_user(org, seed_db):
-    user, orguser = _create_orguser("pipemgr", "pipemgr@test.com", org, PIPELINE_MANAGER_ROLE)
+    # pipeline-manager merged into admin in Access Control v2; these tests now exercise an
+    # admin-role user (still a high role with full dashboard/report permissions).
+    user, orguser = _create_orguser("pipemgr", "pipemgr@test.com", org, ADMIN_ROLE)
     yield orguser
     orguser.delete()
     user.delete()

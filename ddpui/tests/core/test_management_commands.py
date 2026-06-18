@@ -32,7 +32,7 @@ class TestCreateOrgAndUserCommand:
         """Test creating a new organization and user successfully"""
         org_name = "Test Organization"
         user_email = "test@example.com"
-        role_slug = "account-manager"
+        role_slug = "admin"
 
         # Mock organization creation to avoid external dependencies
         def create_org_side_effect(org_schema):
@@ -77,11 +77,11 @@ class TestCreateOrgAndUserCommand:
         # Ensure no OrgUser exists yet
         assert not OrgUser.objects.filter(org=org, user=user).exists()
 
-        call_command("createorganduser", org.name, user.email, role="account-manager")
+        call_command("createorganduser", org.name, user.email, role="admin")
 
         # Verify OrgUser was created
         orguser = OrgUser.objects.get(org=org, user=user)
-        assert orguser.new_role.slug == "account-manager"
+        assert orguser.new_role.slug == "admin"
         assert orguser.email_verified is True
 
     def test_create_with_existing_orguser(self, seed_db):
@@ -91,11 +91,11 @@ class TestCreateOrgAndUserCommand:
         user = User.objects.create_user(
             username="existing@example.com", email="existing@example.com", password="password"
         )
-        role = Role.objects.get(slug="account-manager")
+        role = Role.objects.get(slug="admin")
         OrgUser.objects.create(org=org, user=user, new_role=role)
 
         # Command should succeed without error
-        call_command("createorganduser", org.name, user.email, role="account-manager")
+        call_command("createorganduser", org.name, user.email, role="admin")
 
         # Should still only have one OrgUser
         assert OrgUser.objects.filter(org=org, user=user).count() == 1
@@ -124,7 +124,7 @@ class TestCreateOrgAndUserCommand:
 
         # This should not raise TypeError: OrgUser() got unexpected keyword arguments: 'role'
         with patch("getpass.getpass", return_value="testpassword123"):
-            call_command("createorganduser", org_name, user_email, role="account-manager")
+            call_command("createorganduser", org_name, user_email, role="admin")
 
         # Verify the OrgUser was created successfully
         org = Org.objects.get(name=org_name)
@@ -133,7 +133,7 @@ class TestCreateOrgAndUserCommand:
 
         # Verify the role was set correctly using new_role field (not old role field)
         assert orguser.new_role is not None
-        assert orguser.new_role.slug == "account-manager"
+        assert orguser.new_role.slug == "admin"
 
         # Verify no 'role' field exists (this would cause the original error)
         # If this fails, it means the model has a 'role' field which would be unexpected
@@ -152,12 +152,12 @@ class TestCreateOrgAndUserCommand:
         org = Org.objects.create(name=org_name, slug="mock-test-org")
 
         with patch("getpass.getpass", return_value="testpassword123"):
-            call_command("createorganduser", org_name, user_email, role="account-manager")
+            call_command("createorganduser", org_name, user_email, role="admin")
 
         # Verify user and orguser were created
         user = User.objects.get(email=user_email)
         orguser = OrgUser.objects.get(org=org, user=user)
-        assert orguser.new_role.slug == "account-manager"
+        assert orguser.new_role.slug == "admin"
 
     @patch("ddpui.core.orgfunctions.create_organization")
     def test_password_via_environment_variable(self, mock_create_org, seed_db):
@@ -173,7 +173,7 @@ class TestCreateOrgAndUserCommand:
         mock_create_org.side_effect = create_org_side_effect
         # test password via environment variable
         with patch.dict(os.environ, {"PASSWORD": "env_password123"}):
-            call_command("createorganduser", org_name, user_email, role="account-manager")
+            call_command("createorganduser", org_name, user_email, role="admin")
 
         # Verify user was created with correct password
         user = User.objects.get(email=user_email)

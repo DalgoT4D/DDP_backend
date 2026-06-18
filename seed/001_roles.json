@@ -12,18 +12,9 @@
         "model": "ddpui.Role",
         "pk": 2,
         "fields": {
-            "name": "Account Manager",
-            "slug": "account-manager",
+            "name": "Admin",
+            "slug": "admin",
             "level": 4
-        }
-    },
-    {
-        "model": "ddpui.Role",
-        "pk": 3,
-        "fields": {
-            "name": "Pipeline Manager",
-            "slug": "pipeline-manager",
-            "level": 3
         }
     },
     {
@@ -39,8 +30,8 @@
         "model": "ddpui.Role",
         "pk": 5,
         "fields": {
-            "name": "Guest",
-            "slug": "guest",
+            "name": "Member",
+            "slug": "member",
             "level": 1
         }
     }
