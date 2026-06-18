@@ -30,9 +30,8 @@ sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
     integrations=[
         DjangoIntegration(),
-        # Capture logging records as breadcrumbs (INFO+) and events (WARNING+)
-        # Custom logger level overrides this configuration so ideally keep both at same level
-        LoggingIntegration(level=logging.INFO, event_level=logging.WARNING),
+        # Capture logging records as breadcrumbs (INFO+) and Sentry issues (ERROR+)
+        LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
     ],
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for performance monitoring.
@@ -150,11 +149,15 @@ WSGI_APPLICATION = "ddpui.wsgi.application"
 ASGI_APPLICATION = "ddpui.asgi.application"  # for websockets
 
 
+from ddpui.utils.redis_db import RedisDB  # noqa: E402
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [(os.getenv("REDIS_HOST", "localhost"), os.getenv("REDIS_PORT", "6379"))]
+            "hosts": [
+                f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/{int(RedisDB.CHANNELS)}"
+            ]
         },
     }
 }

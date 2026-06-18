@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import build_chart_data_payload
-from ddpui.schemas.chart_schema import (
+from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartDataPayload,
     ChartMetric,

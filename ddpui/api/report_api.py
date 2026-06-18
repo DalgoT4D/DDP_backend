@@ -21,7 +21,7 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
-from ddpui.schemas.chart_schema import ChartDataResponse
+from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.celeryworkers.report_tasks import send_report_email_task
 from ddpui.schemas.report_schema import (
@@ -77,9 +77,9 @@ def create_snapshot(request, payload: SnapshotCreate):
         s = ReportService.create_snapshot(
             title=payload.title,
             dashboard_id=payload.dashboard_id,
-            date_column=payload.date_column.model_dump(),
-            period_end=payload.period_end,
             orguser=orguser,
+            date_column=payload.date_column.model_dump() if payload.date_column else {},
+            period_end=payload.period_end,
             period_start=payload.period_start,
         )
         return api_response(
@@ -142,6 +142,31 @@ def get_report_chart_data(
         raise HttpError(404, str(err)) from err
     except SnapshotValidationError as err:
         raise HttpError(400, str(err)) from err
+
+
+@report_router.get("/{snapshot_id}/kpis/{kpi_id}/data/", response=ChartDataResponse)
+@has_permission(["can_view_dashboards"])
+def get_report_kpi_data(
+    request, snapshot_id: int, kpi_id: int, dashboard_filters: Optional[str] = None
+):
+    """Get KPI data for a specific KPI in a report snapshot."""
+    orguser: OrgUser = request.orguser
+    try:
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+
+        result = ReportService.get_report_kpi_data(
+            snapshot_id, kpi_id, orguser.org, dashboard_filters=parsed_filters
+        )
+        return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    except SnapshotValidationError as err:
+        raise HttpError(400, str(err)) from err
     except SnapshotExternalServiceError as err:
         raise HttpError(502, str(err)) from err
     except Exception as e:
@@ -155,7 +180,7 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
     try:
-        snapshot = ReportService.update_snapshot(snapshot_id, orguser.org, payload)
+        snapshot = ReportService.update_snapshot(snapshot_id, payload, orguser)
         return api_response(
             success=True,
             data=SnapshotUpdateResponse.from_model(snapshot),
@@ -337,7 +362,7 @@ def mark_as_read(request, snapshot_id: int, payload: MarkReadRequest):
             snapshot_id=snapshot_id,
             orguser=orguser,
             target_type=payload.target_type,
-            chart_id=payload.chart_id,
+            target_id=payload.target_id,
         )
         return api_response(success=True, message="Marked as read")
     except CommentValidationError as err:
@@ -350,7 +375,7 @@ def list_comments(
     request,
     snapshot_id: int,
     target_type: str,
-    chart_id: int = None,
+    target_id: int = None,
 ):
     """List comments for a report target"""
     orguser: OrgUser = request.orguser
@@ -360,7 +385,7 @@ def list_comments(
             snapshot_id=snapshot_id,
             org=orguser.org,
             target_type=target_type,
-            chart_id=chart_id,
+            target_id=target_id,
             orguser=orguser,
         )
         return api_response(
@@ -384,7 +409,7 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
             orguser=orguser,
             target_type=payload.target_type,
             content=payload.content,
-            chart_id=payload.chart_id,
+            target_id=payload.target_id,
             mentioned_emails=payload.mentioned_emails,
         )
         return api_response(

@@ -28,8 +28,6 @@ TRANSFORM_TASKS_SEQ = {
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
-    TASK_DBTCLEAN,
-    TASK_DBTDEPS,
     TASK_DBTRUN,
     TASK_DBTTEST,
     TASK_DBTCLOUD_JOB,

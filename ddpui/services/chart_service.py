@@ -13,7 +13,6 @@ from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
-from ddpui.core.charts.chart_validator import ChartValidator
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.chart_service")
@@ -80,7 +79,7 @@ class ChartService:
             ChartNotFoundError: If chart doesn't exist or doesn't belong to org
         """
         try:
-            return Chart.objects.get(id=chart_id, org=org)
+            return Chart.objects.select_related("created_by__user").get(id=chart_id, org=org)
         except Chart.DoesNotExist:
             raise ChartNotFoundError(chart_id)
 
@@ -117,7 +116,9 @@ class ChartService:
         if chart_type and chart_type != "all":
             query &= Q(chart_type=chart_type)
 
-        queryset = Chart.objects.filter(query).order_by("-updated_at")
+        queryset = (
+            Chart.objects.filter(query).select_related("created_by__user").order_by("-updated_at")
+        )
         total = queryset.count()
 
         # Apply pagination
@@ -137,20 +138,12 @@ class ChartService:
         Returns:
             Created Chart instance
 
-        Raises:
-            ChartValidationError: If chart configuration is invalid
+        Note:
+            The caller is expected to pass a validated payload — the API
+            layer's `ChartCreate` schema enforces per-chart_type rules
+            (required dimension_column, metric aggregation enum, customizations
+            constraints, etc.) before reaching this method.
         """
-        # Validate chart configuration
-        is_valid, error_message = ChartValidator.validate_chart_config(
-            chart_type=data.chart_type,
-            extra_config=data.extra_config,
-            schema_name=data.schema_name,
-            table_name=data.table_name,
-        )
-
-        if not is_valid:
-            raise ChartValidationError(error_message)
-
         chart = Chart.objects.create(
             title=data.title,
             description=data.description,
@@ -164,6 +157,10 @@ class ChartService:
         )
 
         logger.info(f"Created chart {chart.id} for org {orguser.org.id}")
+
+        # Re-load with relations pre-fetched so building the API response
+        # (chart.created_by.user.email) doesn't trigger extra lazy queries
+        chart = Chart.objects.select_related("created_by__user").get(id=chart.id)
         return chart
 
     @staticmethod
@@ -196,26 +193,13 @@ class ChartService:
 
         Raises:
             ChartNotFoundError: If chart doesn't exist
-            ChartValidationError: If updated configuration is invalid
+
+        Note:
+            The caller is expected to pass a validated payload — the API
+            layer's `ChartUpdate` schema runs per-chart_type validation when
+            both `chart_type` and `extra_config` are present.
         """
         chart = ChartService.get_chart(chart_id, org)
-
-        # Prepare updated values for validation
-        updated_extra_config = extra_config if extra_config is not None else chart.extra_config
-        updated_schema_name = schema_name if schema_name is not None else chart.schema_name
-        updated_table_name = table_name if table_name is not None else chart.table_name
-
-        # Validate the updated configuration
-        is_valid, error_message = ChartValidator.validate_for_update(
-            existing_chart_type=chart.chart_type,
-            new_chart_type=chart_type,
-            extra_config=updated_extra_config,
-            schema_name=updated_schema_name,
-            table_name=updated_table_name,
-        )
-
-        if not is_valid:
-            raise ChartValidationError(error_message)
 
         # Apply updates
         if title is not None:
@@ -323,8 +307,9 @@ class ChartService:
         dashboards = Dashboard.objects.filter(org=org)
 
         for dashboard in dashboards:
-            if dashboard.components:
-                for component_id, component in dashboard.components.items():
+            found = False
+            for tab in dashboard.tabs or []:
+                for component in (tab.get("components") or {}).values():
                     if (
                         component.get("type") == DashboardComponentType.CHART.value
                         and component.get("config", {}).get("chartId") == chart_id
@@ -336,6 +321,9 @@ class ChartService:
                                 "dashboard_type": dashboard.dashboard_type,
                             }
                         )
-                        break  # Found chart in this dashboard
+                        found = True
+                        break
+                if found:
+                    break
 
         return dashboards_with_chart

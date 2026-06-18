@@ -76,8 +76,6 @@ def sample_dashboard(orguser, org):
         description="Test Description",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[],
-        components={},
         created_by=orguser,
         org=org,
     )
@@ -139,8 +137,14 @@ def test_dashboard_create_success(orguser, org, seed_db):
         description="Test Description",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
-        components={"chart-1": {"type": "chart", "chart_id": 1}},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4}],
+                "components": {"chart-1": {"type": "chart", "config": {"chartId": 1}}},
+            }
+        ],
         created_by=orguser,
         org=org,
     )
@@ -171,8 +175,7 @@ def test_dashboard_create_with_defaults(orguser, org, seed_db):
     assert dashboard.is_published is False
     assert dashboard.is_public is False
     assert dashboard.public_access_count == 0
-    assert dashboard.layout_config == []
-    assert dashboard.components == {}
+    assert dashboard.tabs == []
 
     dashboard.delete()
 
@@ -253,8 +256,14 @@ def test_dashboard_to_json(orguser, org, seed_db):
         description="JSON Description",
         dashboard_type="native",
         grid_columns=12,
-        layout_config=[{"i": "1", "x": 0, "y": 0}],
-        components={"1": {"type": "chart"}},
+        tabs=[
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "1", "x": 0, "y": 0}],
+                "components": {"1": {"type": "chart"}},
+            }
+        ],
         created_by=orguser,
         org=org,
     )
@@ -266,8 +275,9 @@ def test_dashboard_to_json(orguser, org, seed_db):
     assert json_data["description"] == "JSON Description"
     assert json_data["dashboard_type"] == "native"
     assert json_data["grid_columns"] == 12
-    assert json_data["layout_config"] == [{"i": "1", "x": 0, "y": 0}]
-    assert json_data["components"] == {"1": {"type": "chart"}}
+    assert len(json_data["tabs"]) == 1
+    assert json_data["tabs"][0]["layout_config"] == [{"i": "1", "x": 0, "y": 0}]
+    assert json_data["tabs"][0]["components"] == {"1": {"type": "chart"}}
     assert json_data["is_published"] is False
     assert json_data["created_by"] == "dashmodeluser@test.com"
     assert json_data["org_id"] == org.id

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
+import time
 import uuid
 
 from django.core.cache import cache
@@ -33,6 +34,7 @@ from ddpui.core.charts.charts_service import (
     execute_chart_query,
     transform_data_for_chart,
 )
+from ddpui.schemas.dashboard_schema import DashboardTabSchema
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -236,12 +238,7 @@ class DashboardService:
 
     @staticmethod
     def get_dashboard_response(dashboard: Dashboard) -> Dict[str, Any]:
-        """Convert dashboard model to response dict with migration support.
-
-        This method handles:
-        - Migration of old filter format to new format
-        - Adding lock information
-        - Formatting filters data
+        """Convert dashboard model to response dict.
 
         Args:
             dashboard: The dashboard instance
@@ -250,53 +247,6 @@ class DashboardService:
             Dictionary containing dashboard response data
         """
         lock = getattr(dashboard, "lock", None)
-
-        # Check if components need migration from old filter format to new format
-        components = dashboard.components or {}
-        needs_update = False
-
-        for comp_id, component in components.items():
-            if component.get("type") == "filter":
-                # Check if this is old format (full config) vs new format (just filterId reference)
-                config = component.get("config", {})
-                if "filterId" not in config and "column_name" in config:
-                    # This is old format, needs migration
-                    # Find or create matching filter in DashboardFilter table
-                    matching_filter = dashboard.filters.filter(
-                        column_name=config.get("column_name"),
-                        table_name=config.get("table_name", ""),
-                        schema_name=config.get("schema_name", ""),
-                    ).first()
-
-                    if not matching_filter:
-                        # Create filter if it doesn't exist
-                        matching_filter = DashboardFilter.objects.create(
-                            dashboard=dashboard,
-                            name=config.get("name", config.get("column_name", "")),
-                            filter_type=config.get("filter_type", "value"),
-                            schema_name=config.get("schema_name", ""),
-                            table_name=config.get("table_name", ""),
-                            column_name=config.get("column_name", ""),
-                            settings=config.get("settings", {}),
-                            order=0,
-                        )
-
-                    # Update component to new format with just filterId reference
-                    components[comp_id] = {
-                        "id": comp_id,
-                        "type": "filter",
-                        "config": {
-                            "filterId": matching_filter.id,
-                            "name": config.get("name", matching_filter.column_name),
-                        },
-                    }
-                    needs_update = True
-
-        if needs_update:
-            # Save migrated components back to database
-            dashboard.components = components
-            dashboard.save(update_fields=["components"])
-            logger.info(f"Migrated filter components for dashboard {dashboard.id}")
 
         response_data = dashboard.to_json()
         response_data["is_locked"] = bool(lock and not lock.is_expired())
@@ -360,10 +310,19 @@ class DashboardService:
         Returns:
             Created Dashboard instance
         """
+        # Generate default tab for new dashboard
+        default_tab = DashboardTabSchema(
+            id=f"tab-{int(time.time() * 1000)}",
+            title="Untitled Tab 1",
+            layout_config=[],
+            components={},
+        ).model_dump()
+
         dashboard = Dashboard.objects.create(
             title=data.title,
             description=data.description,
             grid_columns=data.grid_columns,
+            tabs=[default_tab],  # Initialize with default tab
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
@@ -410,10 +369,9 @@ class DashboardService:
             dashboard.grid_columns = data.grid_columns
         if data.target_screen_size is not None:
             dashboard.target_screen_size = data.target_screen_size
-        if data.layout_config is not None:
-            dashboard.layout_config = data.layout_config
-        if data.components is not None:
-            dashboard.components = data.components
+        if data.tabs is not None:
+            # Convert Pydantic models to dicts for JSON storage
+            dashboard.tabs = [tab.model_dump() for tab in data.tabs]
         if data.filter_layout is not None:
             dashboard.filter_layout = data.filter_layout
         if data.is_published is not None:
@@ -769,27 +727,27 @@ class DashboardService:
         if not org_warehouse:
             raise ValueError("No warehouse configured for organization")
 
-        # Get all chart components from dashboard
-        components = dashboard.components
+        # Get all chart components from tabs
         chart_results = {}
 
-        for component_id, component_config in components.items():
-            if component_config.get("type") == DashboardComponentType.CHART.value:
-                chart_id = component_config.get("config", {}).get("chartId")
-                if chart_id:
-                    try:
-                        # Get chart configuration
-                        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+        for tab in dashboard.tabs or []:
+            for component_id, component_config in (tab.get("components") or {}).items():
+                if component_config.get("type") == DashboardComponentType.CHART.value:
+                    chart_id = component_config.get("config", {}).get("chartId")
+                    if chart_id:
+                        try:
+                            # Get chart configuration
+                            chart = Chart.objects.get(id=chart_id, org=orguser.org)
 
-                        # Apply filters to chart query
-                        filtered_data = DashboardService._apply_filters_to_chart(
-                            chart, dashboard.filters.all(), filters, org_warehouse
-                        )
+                            # Apply filters to chart query
+                            filtered_data = DashboardService._apply_filters_to_chart(
+                                chart, dashboard.filters.all(), filters, org_warehouse
+                            )
 
-                        chart_results[component_id] = {"success": True, "data": filtered_data}
-                    except Exception as e:
-                        logger.error(f"Error applying filters to chart {chart_id}: {str(e)}")
-                        chart_results[component_id] = {"success": False, "error": str(e)}
+                            chart_results[component_id] = {"success": True, "data": filtered_data}
+                        except Exception as e:
+                            logger.error(f"Error applying filters to chart {chart_id}: {str(e)}")
+                            chart_results[component_id] = {"success": False, "error": str(e)}
 
         return chart_results
 
@@ -991,15 +949,15 @@ class DashboardService:
         except Dashboard.DoesNotExist:
             raise ValueError("Dashboard not found")
 
-        components = dashboard.components
         chart_ids = []
 
-        # Extract chart IDs from components
-        for component_id, component_config in components.items():
-            if component_config.get("type") == DashboardComponentType.CHART.value:
-                chart_id = component_config.get("config", {}).get("chartId")
-                if chart_id:
-                    chart_ids.append(chart_id)
+        # Extract chart IDs from tabs
+        for tab in dashboard.tabs or []:
+            for _, component_config in (tab.get("components") or {}).items():
+                if component_config.get("type") == DashboardComponentType.CHART.value:
+                    chart_id = component_config.get("config", {}).get("chartId")
+                    if chart_id:
+                        chart_ids.append(chart_id)
 
         # Fetch chart details
         charts = Chart.objects.filter(id__in=chart_ids, org=orguser.org)
@@ -1016,6 +974,56 @@ class DashboardService:
         ]
 
     @staticmethod
+    @staticmethod
+    def copy_tabs_with_filter_remapping(tabs: list, filter_id_mapping: Dict[str, str]) -> list:
+        """Copy tabs and remap filter IDs to match newly created filter copies.
+
+        When duplicating a dashboard, filters get new IDs. This method updates
+        any filter references inside tab layout_config and components to point
+        to the new filter IDs.
+
+        Args:
+            tabs: List of tab dicts from the original dashboard
+            filter_id_mapping: Mapping of old filter ID (str) -> new filter ID (str)
+
+        Returns:
+            New list of tab dicts with updated filter references
+        """
+        import copy as _copy
+
+        new_tabs = []
+        for tab in _copy.deepcopy(tabs):
+            for layout_item in tab.get("layout_config", []):
+                item_id = layout_item.get("i", "")
+                if item_id.startswith("filter-"):
+                    old_filter_id = item_id.replace("filter-", "")
+                    if old_filter_id in filter_id_mapping:
+                        layout_item["i"] = f"filter-{filter_id_mapping[old_filter_id]}"
+
+            updated_tab_components = {}
+            for component_id, component_data in tab.get("components", {}).items():
+                new_component_id = component_id
+                new_component_data = _copy.deepcopy(component_data)
+
+                if component_id.startswith("filter-"):
+                    old_filter_id = component_id.replace("filter-", "")
+                    if old_filter_id in filter_id_mapping:
+                        new_filter_id = filter_id_mapping[old_filter_id]
+                        new_component_id = f"filter-{new_filter_id}"
+                        if (
+                            "config" in new_component_data
+                            and "filterId" in new_component_data["config"]
+                        ):
+                            new_component_data["config"]["filterId"] = int(new_filter_id)
+
+                updated_tab_components[new_component_id] = new_component_data
+
+            tab["components"] = updated_tab_components
+            new_tabs.append(tab)
+
+        return new_tabs
+
+    @staticmethod
     def validate_dashboard_config(dashboard: Dashboard) -> Dict[str, Any]:
         """Validate dashboard configuration
 
@@ -1028,36 +1036,37 @@ class DashboardService:
         errors = []
         warnings = []
 
-        # Validate layout config
-        layout_config = dashboard.layout_config or {}
-        components = dashboard.components or {}
+        # Validate layout config per tab
+        for tab in dashboard.tabs or []:
+            layout_config = {item["i"]: item for item in (tab.get("layout_config") or [])}
+            components = tab.get("components") or {}
 
-        # Check all components have layout entries
-        for component_id in components:
-            if component_id not in layout_config:
-                warnings.append(f"Component {component_id} has no layout configuration")
+            for component_id in components:
+                if component_id not in layout_config:
+                    warnings.append(f"Component {component_id} has no layout configuration")
 
-        # Check all layout entries have components
-        for layout_id in layout_config:
-            if layout_id not in components:
-                errors.append(f"Layout entry {layout_id} has no corresponding component")
+            for layout_id in layout_config:
+                if layout_id not in components:
+                    errors.append(f"Layout entry {layout_id} has no corresponding component")
 
-        # Validate component configurations
-        for component_id, component_config in components.items():
-            component_type = component_config.get("type")
+        # Validate component configurations across all tabs
+        for tab in dashboard.tabs or []:
+            components = tab.get("components") or {}
+            for component_id, component_config in components.items():
+                component_type = component_config.get("type")
 
-            if not component_type:
-                errors.append(f"Component {component_id} has no type specified")
-                continue
+                if not component_type:
+                    errors.append(f"Component {component_id} has no type specified")
+                    continue
 
-            if component_type not in [ct.value for ct in DashboardComponentType]:
-                errors.append(f"Component {component_id} has invalid type: {component_type}")
+                if component_type not in [ct.value for ct in DashboardComponentType]:
+                    errors.append(f"Component {component_id} has invalid type: {component_type}")
 
-            # Validate chart components
-            if component_type == DashboardComponentType.CHART.value:
-                config = component_config.get("config", {})
-                if not config.get("chartId"):
-                    errors.append(f"Chart component {component_id} has no chartId")
+                # Validate chart components
+                if component_type == DashboardComponentType.CHART.value:
+                    config = component_config.get("config", {})
+                    if not config.get("chartId"):
+                        errors.append(f"Chart component {component_id} has no chartId")
 
         # Validate filters
         for filter in dashboard.filters.all():

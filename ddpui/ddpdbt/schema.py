@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 from ninja import Schema
 from pathlib import Path
 
