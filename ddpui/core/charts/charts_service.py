@@ -830,6 +830,40 @@ def apply_chart_sorting(
     if not sort_config:
         return query_builder
 
+    # Build set of valid sort columns (dimensions in GROUP BY + metric aliases)
+    valid_columns = set()
+
+    # Add dimension columns from the payload
+    if payload:
+        if getattr(payload, "dimension_col", None):
+            valid_columns.add(payload.dimension_col)
+        if getattr(payload, "extra_dimension", None):
+            valid_columns.add(payload.extra_dimension)
+        if getattr(payload, "dimensions", None):
+            for dim in payload.dimensions:
+                if isinstance(dim, str):
+                    valid_columns.add(dim)
+                elif isinstance(dim, dict) and dim.get("column"):
+                    valid_columns.add(dim["column"])
+
+    # Add column names from the query builder's group_by_clauses
+    for clause in query_builder.group_by_clauses:
+        if hasattr(clause, "name"):
+            valid_columns.add(clause.name)
+        elif hasattr(clause, "key"):
+            valid_columns.add(clause.key)
+
+    # Add metric aliases as valid sort targets
+    metric_aliases = set()
+    if payload and payload.metrics:
+        for metric in payload.metrics:
+            if metric.alias:
+                metric_aliases.add(metric.alias)
+            if metric.column:
+                metric_aliases.add(
+                    f"{metric.aggregation}_{metric.column}"
+                )
+
     # Prepare sort columns as list of tuples for order_cols_by method
     sort_cols = []
     for sort_item in sort_config:
@@ -863,7 +897,13 @@ def apply_chart_sorting(
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
         else:
-            # It's a dimension column - use as-is
+            # Validate that the column is in GROUP BY / dimensions before using it
+            if column_name not in valid_columns:
+                logger.warning(
+                    f"Sort column '{column_name}' is not in GROUP BY or an aggregate; "
+                    f"skipping to avoid SQL error. Valid columns: {valid_columns}"
+                )
+                continue
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
