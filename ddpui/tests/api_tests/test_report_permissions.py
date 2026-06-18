@@ -518,9 +518,9 @@ class TestSharingStatusOwnerCheck:
 class TestDeleteOwnerCheck:
     """Test that non-owners get 403 from the service layer even with delete permission."""
 
-    def test_non_owner_with_delete_permission_gets_403(self, pipeline_manager_user, snapshot):
-        """Pipeline Manager has can_delete_dashboards but isn't the creator → 403."""
-        request = mock_request(pipeline_manager_user)
+    def test_non_owner_with_delete_permission_gets_403(self, analyst_user, snapshot):
+        """Analyst isn't the owner or an admin → 403 on delete."""
+        request = mock_request(analyst_user)
         with pytest.raises(HttpError) as exc_info:
             delete_snapshot(request, snapshot.id)
         assert exc_info.value.status_code == 403

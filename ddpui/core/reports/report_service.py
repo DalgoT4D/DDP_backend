@@ -749,9 +749,10 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        # Only allow deletion if the current user is the creator
-        if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("You can only delete reports you created.")
+        from ddpui.core.ownership import can_delete_resource
+
+        if not can_delete_resource(orguser, snapshot):
+            raise SnapshotPermissionError("Only the owner or an admin can delete this report.")
 
         snapshot.delete()
         logger.info(f"Deleted snapshot {snapshot_id} by user {orguser.user.email}")

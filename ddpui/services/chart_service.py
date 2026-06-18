@@ -239,9 +239,11 @@ class ChartService:
         """
         chart = ChartService.get_chart(chart_id, org)
 
-        # Only allow deletion if the current user is the creator
-        if chart.created_by != orguser:
-            raise ChartPermissionError("You can only delete charts you created.")
+        # Only allow deletion if the user is the owner or an admin
+        from ddpui.core.ownership import can_delete_resource
+
+        if not can_delete_resource(orguser, chart):
+            raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
         chart.delete()

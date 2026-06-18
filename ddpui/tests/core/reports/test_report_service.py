@@ -29,7 +29,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
@@ -90,7 +90,7 @@ def other_orguser(other_authuser, org):
     orguser = OrgUser.objects.create(
         user=other_authuser,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()

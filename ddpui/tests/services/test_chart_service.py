@@ -23,7 +23,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.visualization import Chart
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.services.chart_service import (
     ChartService,
     ChartData,
@@ -104,7 +104,7 @@ def orguser2(authuser2, org):
     orguser = OrgUser.objects.create(
         user=authuser2,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -159,7 +159,7 @@ class TestDeleteChartPermissions:
             ChartService.delete_chart(chart.id, org, orguser2)
 
         assert excinfo.value.error_code == "PERMISSION_DENIED"
-        assert "only delete charts you created" in excinfo.value.message
+        assert "Only the owner or an admin can delete this chart." in excinfo.value.message
 
         # Cleanup
         chart.delete()
