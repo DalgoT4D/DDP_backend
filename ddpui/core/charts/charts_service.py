@@ -1,18 +1,20 @@
 """Chart service module for handling chart business logic"""
 
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
+from collections import defaultdict
 
-from sqlalchemy import column, func, and_, or_, text
+from sqlalchemy import column, func, and_, or_, text, literal_column
 
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.metric import Metric
 from ddpui.models.visualization import Chart
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.schemas.chart_schema import (
+from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartDataPayload,
     ExecuteChartQuery,
@@ -94,17 +96,21 @@ def format_time_grain_label(value: Any, time_grain: str) -> str:
 
     # Format based on time grain
     if time_grain == "year":
-        return dt.strftime("%Y")
+        return dt.strftime("%Y")  # "2025"
+    elif time_grain == "quarter":
+        return dt.strftime("%b %d, %Y")  # "Jan 01, 2025" (start of quarter)
     elif time_grain == "month":
-        return dt.strftime("%b %Y")  # "Jan 2024"
+        return dt.strftime("%b %d, %Y")  # "May 01, 2026"
+    elif time_grain == "week":
+        return dt.strftime("%b %d, %Y")  # "Aug 03, 2026" (start of week)
     elif time_grain == "day":
-        return dt.strftime("%b %d, %Y")  # "Jan 15, 2024"
+        return dt.strftime("%b %d, %Y")  # "Aug 03, 2026"
     elif time_grain == "hour":
-        return dt.strftime("%b %d,%Y %H:00")  # "Jan 15, 2024 14:00"
+        return dt.strftime("%b %d, %Y %H:00")  # "Jan 15, 2024 14:00"
     elif time_grain == "minute":
-        return dt.strftime("%b %d,%Y %H:%M")  # "Jan 15, 2024 14:30"
+        return dt.strftime("%b %d, %Y %H:%M")  # "Jan 15, 2024 14:30"
     elif time_grain == "second":
-        return dt.strftime("%b %d,%Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
+        return dt.strftime("%b %d, %Y %H:%M:%S")  # "Jan 15, 2024 14:30:45"
     else:
         return str(value)  # Default fallback
 
@@ -162,6 +168,50 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     return final_dims
 
 
+def _resolve_saved_metrics(metrics_list: Optional[list]) -> Optional[list]:
+    """Resolve saved_metric_id references in a metrics list to inline ChartMetric dicts.
+
+    Entries with saved_metric_id are looked up from the Metric model and converted
+    to {column, aggregation, alias} dicts (simple path) or
+    {column_expression, alias} dicts (expression path).
+    Regular ad-hoc metric dicts are passed through unchanged.
+    """
+    if not metrics_list:
+        return metrics_list
+
+    resolved = []
+    for m in metrics_list:
+        if not isinstance(m, dict):
+            resolved.append(m)
+            continue
+
+        saved_id = m.get("saved_metric_id")
+        if saved_id is None:
+            resolved.append(m)
+            continue
+
+        try:
+            metric = Metric.objects.get(id=saved_id)
+        except Metric.DoesNotExist:
+            logger.warning(f"Saved metric {saved_id} not found, skipping")
+            continue
+
+        alias = m.get("alias") or metric.name
+
+        if metric.column_expression:
+            resolved.append({"column_expression": metric.column_expression, "alias": alias})
+        else:
+            resolved.append(
+                {
+                    "column": metric.column,
+                    "aggregation": metric.aggregation,
+                    "alias": alias,
+                }
+            )
+
+    return resolved if resolved else None
+
+
 def build_chart_data_payload(
     chart_config: ChartConfig,
     resolved_dashboard_filters: Optional[List[Dict[str, Any]]] = None,
@@ -180,6 +230,10 @@ def build_chart_data_payload(
     if chart_config.title:
         customizations["title"] = chart_config.title
 
+    # Resolve any saved_metric_id references to inline metric definitions
+    raw_metrics = ec.get("metrics")
+    resolved_metrics = _resolve_saved_metrics(raw_metrics)
+
     payload = ChartDataPayload(
         chart_type=chart_config.chart_type,
         schema_name=chart_config.schema_name,
@@ -189,7 +243,7 @@ def build_chart_data_payload(
         dimension_col=ec.get("dimension_column"),
         extra_dimension=ec.get("extra_dimension_column"),
         dimensions=ec.get("dimension_columns"),
-        metrics=ec.get("metrics"),
+        metrics=resolved_metrics,
         geographic_column=ec.get("geographic_column"),
         value_column=ec.get("value_column"),
         selected_geojson_id=ec.get("selected_geojson_id"),
@@ -312,11 +366,22 @@ def build_multi_metric_query(
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
         for metric in payload.metrics:
+            # Expression path: inline raw SQL expression
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                query_builder.add_column(literal_column(metric.column_expression).label(alias))
+                continue
+
+            # Simple path: column + aggregation
             if not metric.aggregation:
                 raise ValueError(f"Aggregation function is required for metric")
 
             # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 if not metric.column:
@@ -418,7 +483,11 @@ def build_chart_query(
             metric = payload.metrics[0]
 
             # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 if not metric.column:
@@ -457,7 +526,11 @@ def build_chart_query(
             metric = payload.metrics[0]
 
             # Handle count with None column case
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 if not metric.column:
@@ -583,6 +656,35 @@ def apply_dashboard_filters(
     return query_builder
 
 
+# Timestamp-family column types that store a time component, so a date-only
+# (yyyy-MM-dd) filter value must be expanded into a full-day range.
+TIMESTAMP_TYPES = {
+    "timestamp",
+    "timestamptz",
+    "datetime",
+    "timestamp with time zone",
+    "timestamp without time zone",
+}
+
+
+def _is_timestamp_date(filter_config: dict) -> bool:
+    """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
+    data_type = (filter_config.get("data_type") or "").lower()
+    val = filter_config.get("value", "")
+    return (
+        data_type in TIMESTAMP_TYPES
+        and isinstance(val, str)
+        and len(val) == 10
+        and val[4] == "-"
+        and val[7] == "-"
+    )
+
+
+def _next_day(val: str) -> str:
+    """Return the next day as yyyy-MM-dd string."""
+    return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def apply_chart_filters(
     query_builder: AggQueryBuilder, filters: List[Dict[str, Any]]
 ) -> AggQueryBuilder:
@@ -607,8 +709,6 @@ def apply_chart_filters(
     if not filters:
         return query_builder
 
-    from collections import defaultdict
-
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)
     single_filters = []
@@ -616,27 +716,27 @@ def apply_chart_filters(
     for filter_config in filters:
         column_name = filter_config["column"]
         operator = filter_config["operator"]
-        value = filter_config["value"]
 
         if not column_name or operator is None:
             continue
 
-        # Operators that can be grouped (multiple values with OR)
-        if operator in ["equals", "not_equals"]:
-            grouped_filters[(column_name, operator)].append(value)
+        # Timestamp date filters need day-range logic — keep full config
+        if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):
+            single_filters.append(filter_config)
+        elif operator in ["equals", "not_equals"]:
+            grouped_filters[(column_name, operator)].append(filter_config["value"])
         else:
-            # Other operators are applied individually
             single_filters.append(filter_config)
 
     # Apply grouped filters (multiple values with OR logic)
     for (column_name, operator), values in grouped_filters.items():
         if len(values) == 1:
-            # Single value, apply normally
             value = values[0]
             if operator == "equals":
                 query_builder.where_clause(column(column_name) == value)
             elif operator == "not_equals":
                 query_builder.where_clause(column(column_name) != value)
+
         else:
             # Multiple values, use OR logic
             if operator == "equals":
@@ -654,14 +754,28 @@ def apply_chart_filters(
         operator = filter_config["operator"]
         value = filter_config["value"]
 
-        if operator == "greater_than":
-            query_builder.where_clause(column(column_name) > value)
+        if operator == "equals" and _is_timestamp_date(filter_config):
+            query_builder.where_clause(
+                and_(column(column_name) >= value, column(column_name) < _next_day(value))
+            )
+        elif operator == "not_equals" and _is_timestamp_date(filter_config):
+            query_builder.where_clause(
+                or_(column(column_name) < value, column(column_name) >= _next_day(value))
+            )
+        elif operator == "greater_than":
+            if _is_timestamp_date(filter_config):
+                query_builder.where_clause(column(column_name) >= _next_day(value))
+            else:
+                query_builder.where_clause(column(column_name) > value)
         elif operator == "less_than":
             query_builder.where_clause(column(column_name) < value)
         elif operator == "greater_than_equal":
             query_builder.where_clause(column(column_name) >= value)
         elif operator == "less_than_equal":
-            query_builder.where_clause(column(column_name) <= value)
+            if _is_timestamp_date(filter_config):
+                query_builder.where_clause(column(column_name) < _next_day(value))
+            else:
+                query_builder.where_clause(column(column_name) <= value)
         elif operator == "like":
             query_builder.where_clause(column(column_name).like(f"%{value}%"))
         elif operator == "like_case_insensitive":
@@ -735,7 +849,11 @@ def apply_chart_sorting(
 
         if matching_metric:
             # It's a metric - generate the actual SQL alias that matches SELECT clause
-            if matching_metric.aggregation.lower() == "count" and matching_metric.column is None:
+            if (
+                matching_metric.aggregation
+                and matching_metric.aggregation.lower() == "count"
+                and matching_metric.column is None
+            ):
                 sort_column = (
                     f"count_all_{matching_metric.alias}" if matching_metric.alias else "count_all"
                 )
@@ -840,7 +958,14 @@ def execute_chart_query(
     # Handle metrics - metrics are required for all charts (except table charts without metrics)
     if payload.metrics:
         for metric in payload.metrics:
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+            elif (
+                metric.aggregation
+                and metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -888,7 +1013,11 @@ def transform_data_for_chart(
 
                 # Store each metric value for this dimension-x_value combination
                 for metric in payload.metrics:
-                    if metric.aggregation.lower() == "count" and metric.column is None:
+                    if (
+                        metric.aggregation
+                        and metric.aggregation.lower() == "count"
+                        and metric.column is None
+                    ):
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     else:
                         alias = metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -967,7 +1096,11 @@ def transform_data_for_chart(
             legend_data = []
 
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -998,7 +1131,7 @@ def transform_data_for_chart(
 
         # Use first metric for pie charts
         metric = payload.metrics[0]
-        if metric.aggregation.lower() == "count" and metric.column is None:
+        if metric.aggregation and metric.aggregation.lower() == "count" and metric.column is None:
             alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             display_name = metric.alias or "Total Count"
         else:
@@ -1086,7 +1219,11 @@ def transform_data_for_chart(
 
                 # Store each metric value for this dimension-x_value combination
                 for metric in payload.metrics:
-                    if metric.aggregation.lower() == "count" and metric.column is None:
+                    if (
+                        metric.aggregation
+                        and metric.aggregation.lower() == "count"
+                        and metric.column is None
+                    ):
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     else:
                         alias = metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -1163,7 +1300,11 @@ def transform_data_for_chart(
             legend_data = []
 
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1252,7 +1393,11 @@ def transform_data_for_chart(
             # Add all metric columns if present
             if payload.metrics:
                 for metric in payload.metrics:
-                    if metric.aggregation.lower() == "count" and metric.column is None:
+                    if (
+                        metric.aggregation
+                        and metric.aggregation.lower() == "count"
+                        and metric.column is None
+                    ):
                         alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                         display_name = metric.alias or "Total Count"
                     else:
@@ -1272,7 +1417,11 @@ def transform_data_for_chart(
         # Add all metric columns
         if payload.metrics:
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1295,7 +1444,11 @@ def transform_data_for_chart(
             metric = payload.metrics[0]
             row = results[0] if results else {}
 
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                 display_name = metric.alias or "Total Count"
             else:
@@ -1366,7 +1519,11 @@ def get_chart_data_table_preview(
     if payload.metrics:
         for metric in payload.metrics:
             # Handle COUNT(*) case - SQL alias includes count_all_ prefix
-            if metric.aggregation.lower() == "count" and metric.column is None:
+            if (
+                metric.aggregation
+                and metric.aggregation.lower() == "count"
+                and metric.column is None
+            ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                 display_name = metric.alias or "Total Count"
             else:
@@ -1407,7 +1564,11 @@ def get_chart_data_table_preview(
         # Transform metric columns from alias to display_name
         if payload.metrics:
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
                     display_name = metric.alias or "Total Count"
                 else:
@@ -1432,7 +1593,11 @@ def get_chart_data_table_preview(
         expected_columns = dimensions.copy()
         if payload.metrics:
             for metric in payload.metrics:
-                if metric.aggregation.lower() == "count" and metric.column is None:
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
                     display_name = metric.alias or "Total Count"
                 else:
                     display_name = metric.alias or f"{metric.aggregation}({metric.column})"

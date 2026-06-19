@@ -114,6 +114,7 @@ def get_current_user_v2(request, org_slug: str = None):
 
         res.append(
             OrgUserResponse(
+                user_id=user.id,
                 email=user.email,
                 org=curr_orguser.org,
                 active=user.is_active,
@@ -129,6 +130,8 @@ def get_current_user_v2(request, org_slug: str = None):
                 is_llm_active=org_preferences.llm_optin,
                 landing_dashboard_id=curr_orguser.landing_dashboard_id,
                 org_default_dashboard_id=org_default_dashboard,
+                subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
+                work_domain=curr_orguser.work_domain,
             )
         )
 
@@ -277,6 +280,7 @@ def get_organization_users(request):
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
         res.append(
             OrgUserResponse(
+                user_id=curr_orguser.user.id,
                 email=curr_orguser.user.email,
                 org=curr_orguser.org,
                 active=curr_orguser.user.is_active,
@@ -289,6 +293,7 @@ def get_organization_users(request):
                 is_demo=(
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
+                subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
             )
         )
 

@@ -1,0 +1,131 @@
+"""Alert message template rendering.
+
+Spec calls for Mustache templates with a closed, per-alert-type token set. v1
+ships with simple `{{token}}` substitution (no sections, no loops) — equivalent
+to pystache for this constrained surface, and keeps the dependency footprint
+small. Missing tokens are preserved as `{{token}}` so authors see which ones
+still need data (matches the frontend live preview).
+
+Token sets are intentionally hardcoded here AND mirrored in webapp_v2's
+`types/alerts.ts` so the template editor can offer autocomplete chips.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Mapping, Optional
+
+from ddpui.models.alert import Alert, AlertType
+from ddpui.schemas.alert_schema import StandaloneConfig
+
+
+TOKENS_BY_TYPE = {
+    AlertType.METRIC_THRESHOLD: ["alert_name", "metric_name", "target_value", "current_value"],
+    AlertType.KPI_RAG: [
+        "alert_name",
+        "kpi_name",
+        "target_value",
+        "current_value",
+        "rag_status",
+    ],
+    AlertType.STANDALONE: ["alert_name", "dataset_name", "target_value", "current_value"],
+}
+
+
+_TOKEN_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+
+def render(template: str, values: Mapping[str, Any]) -> str:
+    """Substitute `{{token}}` occurrences in template with values[token].
+
+    Missing tokens (or values that are None / empty string) are left in place
+    so the author can spot un-resolved variables in previews.
+    """
+
+    def replace(match: re.Match) -> str:
+        token = match.group(1)
+        if token not in values:
+            return match.group(0)
+        v = values[token]
+        if v is None or v == "":
+            return match.group(0)
+        return str(v)
+
+    return _TOKEN_RE.sub(replace, template or "")
+
+
+def resolve_tokens(
+    alert_type: str,
+    *,
+    alert_name: str,
+    metric_name: Optional[str] = None,
+    kpi_name: Optional[str] = None,
+    dataset_name: Optional[str] = None,
+    target_value: Any = None,
+    current_value: Any = None,
+    rag_status: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build the {token: value} dict that `render()` consumes for an alert.
+
+    Caller supplies the raw inputs; this function picks the relevant subset
+    for the alert_type and returns a dict the renderer can substitute into a
+    template.
+    """
+    base: dict[str, Any] = {"alert_name": alert_name}
+    if alert_type == AlertType.METRIC_THRESHOLD:
+        base.update(
+            {
+                "metric_name": metric_name,
+                "target_value": target_value,
+                "current_value": current_value,
+            }
+        )
+    elif alert_type == AlertType.KPI_RAG:
+        base.update(
+            {
+                "kpi_name": kpi_name,
+                "target_value": target_value,
+                "current_value": current_value,
+                "rag_status": rag_status,
+            }
+        )
+    elif alert_type == AlertType.STANDALONE:
+        base.update(
+            {
+                "dataset_name": dataset_name,
+                "target_value": target_value,
+                "current_value": current_value,
+            }
+        )
+    return base
+
+
+def tokens_for_alert(
+    alert: Alert, *, current_value: Any, rag_status: Optional[str] = None
+) -> dict[str, Any]:
+    """Convenience helper — builds tokens from an Alert instance + a value."""
+    metric_name = alert.metric.name if alert.metric_id and alert.metric else None
+    kpi_name = alert.kpi.name if alert.kpi_id and alert.kpi else None
+
+    dataset_name: Optional[str] = None
+    if alert.alert_type == AlertType.STANDALONE and alert.standalone_config:
+        cfg = StandaloneConfig(**alert.standalone_config)
+        dataset_name = f"{cfg.schema_name}.{cfg.table_name}".strip(".") or None
+
+    target_value: Any = None
+    if alert.alert_type == AlertType.KPI_RAG:
+        target_value = alert.kpi.target_value if alert.kpi_id and alert.kpi else None
+    else:
+        cond = alert.condition or {}
+        target_value = cond.get("value")
+
+    return resolve_tokens(
+        alert.alert_type,
+        alert_name=alert.name,
+        metric_name=metric_name,
+        kpi_name=kpi_name,
+        dataset_name=dataset_name,
+        target_value=target_value,
+        current_value=current_value,
+        rag_status=rag_status,
+    )

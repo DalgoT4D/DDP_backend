@@ -1,5 +1,6 @@
 """Chart API endpoints"""
 
+import json
 from typing import Optional, List, Dict, Any
 import copy
 import csv
@@ -18,7 +19,6 @@ from ddpui.models.dashboard import DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-from ddpui.core.charts.chart_validator import ChartValidator
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -28,7 +28,7 @@ from ddpui.services.chart_service import (
     ChartPermissionError,
 )
 from ddpui.services.dashboard_service import DashboardService
-from ddpui.schemas.chart_schema import (
+from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartCreate,
     ChartMetric,
@@ -299,6 +299,7 @@ def list_charts(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
+            created_by=chart.created_by.user.email,
             extra_config=chart.extra_config,
             created_at=chart.created_at,
             updated_at=chart.updated_at,
@@ -948,9 +949,10 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
 
 @charts_router.post("/download-csv/")
 @has_permission(["can_view_charts"])
-def download_chart_data_csv(request, payload: ChartDataPayload):
+def download_chart_data_csv(
+    request, payload: ChartDataPayload, dashboard_filters: Optional[str] = None
+):
     """Stream and download chart data as CSV with all filters/aggregations applied (authenticated)"""
-
     orguser: OrgUser = request.orguser
 
     # Validate user has access to schema/table
@@ -961,6 +963,26 @@ def download_chart_data_csv(request, payload: ChartDataPayload):
 
     if not org_warehouse:
         raise HttpError(404, "Please set up your warehouse first")
+
+    # Resolve dashboard filters server-side (same as get_chart_data_by_id) so the
+    # CSV matches the on-screen chart.
+    if dashboard_filters:
+        try:
+            filter_values = json.loads(dashboard_filters)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            filter_values = None
+
+        if filter_values:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            filter_defs = DashboardFilter.objects.filter(id__in=filter_values.keys())
+            payload.dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                filter_values,
+                [f.to_json() for f in filter_defs],
+                payload.schema_name,
+                payload.table_name,
+                warehouse_client,
+            )
 
     # Generate filename from chart configuration
     chart_type = payload.chart_type or "chart"
@@ -996,6 +1018,7 @@ def get_chart(request, chart_id: int):
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
+        created_by=chart.created_by.user.email,
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
@@ -1071,9 +1094,13 @@ def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
 
+    # ChartData / ChartService operate on dicts internally; ChartCreate.extra_config
+    # is a typed sub-schema (validated already), so convert back here.
+    extra_config = payload.extra_config.model_dump()
+
     # Log the incoming payload for debugging
     if payload.chart_type == "table":
-        dimensions = payload.extra_config.get("dimensions", [])
+        dimensions = extra_config.get("dimensions", [])
         if dimensions:
             drill_down_count = sum(
                 1 for d in dimensions if isinstance(d, dict) and d.get("enable_drill_down") is True
@@ -1089,7 +1116,7 @@ def create_chart(request, payload: ChartCreate):
             chart_type=payload.chart_type,
             schema_name=payload.schema_name,
             table_name=payload.table_name,
-            extra_config=payload.extra_config,
+            extra_config=extra_config,
         )
         chart = ChartService.create_chart(chart_data, orguser)
 
@@ -1109,6 +1136,7 @@ def create_chart(request, payload: ChartCreate):
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
+        created_by=chart.created_by.user.email,
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
@@ -1121,6 +1149,13 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
 
+    # ChartUpdate.extra_config is a typed sub-schema when chart_type was sent
+    # alongside it; otherwise it's still a raw dict (or None). Either way the
+    # service layer wants a dict.
+    extra_config = payload.extra_config
+    if extra_config is not None and not isinstance(extra_config, dict):
+        extra_config = extra_config.model_dump()
+
     try:
         chart = ChartService.update_chart(
             chart_id=chart_id,
@@ -1131,7 +1166,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             chart_type=payload.chart_type,
             schema_name=payload.schema_name,
             table_name=payload.table_name,
-            extra_config=payload.extra_config,
+            extra_config=extra_config,
         )
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
@@ -1145,6 +1180,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
+        created_by=chart.created_by.user.email,
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,

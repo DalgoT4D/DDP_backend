@@ -32,7 +32,7 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schema import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDataPayload
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -224,7 +224,7 @@ def get_public_chart_data(request, token: str, chart_id: int):
         from ddpui.models.visualization import Chart
         from ddpui.models.org import OrgWarehouse
         from ddpui.api.charts_api import generate_chart_data_and_config
-        from ddpui.schemas.chart_schema import ChartDataPayload
+        from ddpui.schemas.chart_schemas import ChartDataPayload
 
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
@@ -713,7 +713,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
             )
 
         # Build chart payload for map data query (same logic as private API)
-        from ddpui.schemas.chart_schema import ChartDataPayload, ExecuteChartQuery
+        from ddpui.schemas.chart_schemas import ChartDataPayload, ExecuteChartQuery
 
         chart_payload = ChartDataPayload(
             chart_type="map",
@@ -892,7 +892,13 @@ def get_region_geojsons_public(request, region_id: int):
 
 
 @public_router.post("/dashboards/{token}/charts/{chart_id}/download-csv/")
-def download_public_chart_data_csv(request, token: str, chart_id: int, payload: ChartDataPayload):
+def download_public_chart_data_csv(
+    request,
+    token: str,
+    chart_id: int,
+    payload: ChartDataPayload,
+    dashboard_filters: Optional[str] = None,
+):
     """
     Stream and download chart data as CSV for public dashboards
 
@@ -920,6 +926,27 @@ def download_public_chart_data_csv(request, token: str, chart_id: int, payload: 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
             raise HttpError(404, "No warehouse configured for organization")
+
+        # Resolve dashboard filters via column_exists (same as on-screen fetch).
+        if dashboard_filters:
+            try:
+                filter_values = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+                filter_values = None
+
+            if filter_values:
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                filter_defs = DashboardFilter.objects.filter(
+                    id__in=filter_values.keys(), dashboard=dashboard
+                )
+                payload.dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    [f.to_json() for f in filter_defs],
+                    payload.schema_name,
+                    payload.table_name,
+                    warehouse_client,
+                )
 
         # Import the common CSV streaming function
         from ddpui.api.charts_api import stream_chart_data_csv
@@ -1319,7 +1346,7 @@ def get_public_report_map_data(request, token: str):
 
         extra_config = copy.deepcopy(map_payload.extra_config or {})
 
-        from ddpui.schemas.chart_schema import ExecuteChartQuery
+        from ddpui.schemas.chart_schemas import ExecuteChartQuery
 
         chart_payload = ChartDataPayload(
             chart_type="map",

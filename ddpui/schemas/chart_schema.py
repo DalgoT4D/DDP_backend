@@ -8,8 +8,11 @@ class ChartMetric(Schema):
     """Schema for individual chart metric"""
 
     column: Optional[str] = None  # Column name, null for COUNT(*) operations
-    aggregation: str  # SUM, COUNT, AVG, MAX, MIN, etc.
+    aggregation: Optional[str] = None  # SUM, COUNT, AVG, MAX, MIN, etc.
     alias: Optional[str] = None  # Display name for the metric
+    # Expression path: raw SQL expression (e.g. "SUM(col_a) / COUNT(DISTINCT id)")
+    # Mutually exclusive with column + aggregation
+    column_expression: Optional[str] = None
 
 
 class ChartCreate(Schema):
@@ -45,6 +48,7 @@ class ChartResponse(Schema):
     chart_type: str
     schema_name: str
     table_name: str
+    created_by: str  # creator's email (mirrors Dashboard owner pattern)
     extra_config: dict  # Contains all column configuration and customizations
     # Note: render_config removed - charts fetch fresh config via /data endpoint
     created_at: datetime
