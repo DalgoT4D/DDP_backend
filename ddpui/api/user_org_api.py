@@ -190,37 +190,34 @@ def post_login_token(request):
     return retval
 
 
+def _blacklist_jti_in_redis(token_str, token_class):
+    """Stores a token's JTI in Redis with TTL equal to its remaining lifetime."""
+    try:
+        token = token_class(token_str)
+        jti = token.payload.get("jti")
+        exp = token.payload.get("exp")
+        if jti and exp:
+            ttl = int(exp - time.time())
+            if ttl > 0:
+                redis_client = RedisClient.get_instance()
+                redis_client.set(f"blacklisted_jti:{jti}", "1", ex=ttl)
+    except (TokenError, Exception):
+        pass
+
+
 @user_org_router.post("/logout/")
 def post_logout(request):
     """
     Blacklists the refresh token on logout and clears httpOnly cookies.
     Gets refresh token from cookies for cookie-based authentication.
     """
-    # Blacklist the access token JTI in Redis so it cannot be reused after logout
     access_token_str = request.COOKIES.get("access_token")
     if access_token_str:
-        try:
-            access_token = AccessToken(access_token_str)
-            jti = access_token.payload.get("jti")
-            exp = access_token.payload.get("exp")
-            if jti and exp:
-                ttl = int(exp - time.time())
-                if ttl > 0:
-                    redis_client = RedisClient.get_instance()
-                    redis_client.set(f"blacklisted_jti:{jti}", "1", ex=ttl)
-        except (TokenError, Exception):
-            pass
+        _blacklist_jti_in_redis(access_token_str, AccessToken)
 
-    # Blacklist the refresh token
-    refresh_token = request.COOKIES.get("refresh_token")
-    if refresh_token:
-        try:
-            token = RefreshToken(refresh_token)
-            token_user_id = token.payload.get("user_id")
-            if request.user and request.user.id == token_user_id:
-                token.blacklist()
-        except (TokenError, Exception):
-            pass
+    refresh_token_str = request.COOKIES.get("refresh_token")
+    if refresh_token_str:
+        _blacklist_jti_in_redis(refresh_token_str, RefreshToken)
 
     response = JsonResponse({"success": True})
     response.delete_cookie("access_token", path="/")

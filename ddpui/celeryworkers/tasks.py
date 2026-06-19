@@ -1170,10 +1170,6 @@ def sync_airbyte_job_stats_for_all_connections(
     )
 
 
-@app.task()
-def flush_blacklisted_tokens():
-    """Flush expired tokens from the blacklist app"""
-    call_command("flushexpiredtokens")
 
 
 @app.task(bind=False)
@@ -1300,14 +1296,6 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour=0),
         check_org_plan_expiry_notify_people.s(),
         name="check org plan expiry and notify the right people",
-    )
-
-    # flush expired blacklisted tokens every 24 hours
-    # this is a custom command in the token_blacklist app
-    sender.add_periodic_task(
-        crontab(minute=0, hour=0),
-        flush_blacklisted_tokens.s(),
-        name="flush expired blacklisted tokens",
     )
 
     # sync airbyte job stats for connections; every 24 hours

@@ -6,7 +6,7 @@ from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
 from rest_framework.authtoken.models import Token
-from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.tokens import AccessToken, TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
@@ -101,18 +101,20 @@ class CustomJwtAuthMiddleware(HttpBearer):
             logger.info(
                 "CustomJwtAuthMiddleware: prioritizing Authorization header for /api/login_token/"
             )
-            # First try Authorization header
             return super().__call__(request)
 
-        # For all other endpoints, prioritize cookies first
         cookie_token = request.COOKIES.get("access_token")
 
-        # If we have a cookie token, use it directly
-        if cookie_token:
-            return self.authenticate(request, cookie_token)
+        if not cookie_token:
+            return super().__call__(request)
 
-        # Otherwise, fall back to the default HttpBearer behavior (Authorization header)
-        return super().__call__(request)
+        # If access token is expired, return 498 so the frontend uses the refresh token
+        try:
+            AccessToken(cookie_token)
+        except TokenError:
+            raise HttpError(498, "Token expired")
+
+        return self.authenticate(request, cookie_token)
 
     def authenticate(self, request, token=None):
         if not token:
@@ -250,6 +252,14 @@ class CustomTokenRefreshSerializer(TokenRefreshSerializer):
         data = super().validate(attrs)
         # Get the user from the refresh token
         refresh = self.token_class(attrs["refresh"])
+
+        # Reject if this refresh token was blacklisted in Redis (e.g. user already logged out)
+        refresh_jti = refresh.payload.get("jti")
+        if refresh_jti:
+            redis_client = RedisClient.get_instance()
+            if redis_client.get(f"blacklisted_jti:{refresh_jti}"):
+                raise TokenError("Refresh token has been invalidated")
+
         user_id = refresh.payload.get("user_id")
         user = User.objects.filter(id=user_id).first()
         if user:
