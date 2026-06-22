@@ -744,7 +744,7 @@ def get_iframe_token(request):
     }
 
 
-@user_org_router.post("/org/logo/upload/", response=ApiResponse[OrgLogoResponse])
+@user_org_router.post("/org/logo/", response=ApiResponse[OrgLogoResponse])
 @has_permission(["can_edit_org_notification_settings"])
 def upload_logo_file(request, file: UploadedFile = File(...)):
     """Upload an image file as the org logo"""
@@ -768,7 +768,7 @@ def upload_logo_file(request, file: UploadedFile = File(...)):
         raise HttpError(502, str(e)) from e
 
 
-@user_org_router.post("/org/logo/url/", response=ApiResponse[OrgLogoResponse])
+@user_org_router.put("/org/logo/", response=ApiResponse[OrgLogoResponse])
 @has_permission(["can_edit_org_notification_settings"])
 def upload_logo_from_url(request, payload: OrgLogoUrlPayload):
     """Store an external image URL directly as the org logo — no S3 upload"""
@@ -806,7 +806,7 @@ def delete_logo(request):
         raise HttpError(502, str(e)) from e
 
 
-@user_org_router.get("/org/logo/proxy/")
+@user_org_router.get("/org/logo/")
 @has_permission(["can_view_orgusers"])
 def proxy_org_logo_image(request):
     """Return raw logo bytes so the frontend can use them in canvas without CORS issues."""
