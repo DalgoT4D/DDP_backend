@@ -1,6 +1,6 @@
 """API tests for org logo endpoints
 
-The API layer is a thin wrapper — business logic is covered in test_org_logo_service.py.
+The API layer is a thin wrapper — business logic is covered in tests/core/org_logo/test_org_logo_service.py.
 These tests only verify the exception → HTTP status code mapping.
 
 Tests:
@@ -25,7 +25,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.api.org_logo_api import (
+from ddpui.api.user_org_api import (
     upload_logo_file,
     upload_logo_from_url,
     delete_logo,
@@ -82,7 +82,7 @@ def test_upload_logo_file_validation_error_raises_400(orguser):
     mock_file.name = "doc.pdf"
 
     with patch(
-        "ddpui.api.org_logo_api.OrgLogoService.upload_logo_from_file",
+        "ddpui.api.user_org_api.orgfunctions.upload_logo_from_file",
         side_effect=OrgLogoValidationError("Invalid file type"),
     ):
         with pytest.raises(HttpError) as exc:
@@ -97,7 +97,7 @@ def test_upload_logo_file_s3_error_raises_502(orguser):
     mock_file.name = "logo.png"
 
     with patch(
-        "ddpui.api.org_logo_api.OrgLogoService.upload_logo_from_file",
+        "ddpui.api.user_org_api.orgfunctions.upload_logo_from_file",
         side_effect=OrgLogoS3Error("S3 unavailable"),
     ):
         with pytest.raises(HttpError) as exc:
@@ -107,7 +107,7 @@ def test_upload_logo_file_s3_error_raises_502(orguser):
 
 def test_upload_logo_from_url_validation_error_raises_400(orguser):
     with patch(
-        "ddpui.api.org_logo_api.OrgLogoService.upload_logo_from_url",
+        "ddpui.api.user_org_api.orgfunctions.upload_logo_from_url",
         side_effect=OrgLogoValidationError("Invalid URL"),
     ):
         with pytest.raises(HttpError) as exc:
@@ -120,7 +120,7 @@ def test_upload_logo_from_url_validation_error_raises_400(orguser):
 
 def test_delete_logo_not_found_raises_404(orguser):
     with patch(
-        "ddpui.api.org_logo_api.OrgLogoService.delete_logo", side_effect=OrgLogoNotFoundError()
+        "ddpui.api.user_org_api.orgfunctions.delete_logo", side_effect=OrgLogoNotFoundError()
     ):
         with pytest.raises(HttpError) as exc:
             delete_logo(mock_request(orguser))
@@ -129,7 +129,7 @@ def test_delete_logo_not_found_raises_404(orguser):
 
 def test_delete_logo_s3_error_raises_502(orguser):
     with patch(
-        "ddpui.api.org_logo_api.OrgLogoService.delete_logo",
+        "ddpui.api.user_org_api.orgfunctions.delete_logo",
         side_effect=OrgLogoS3Error("S3 failed"),
     ):
         with pytest.raises(HttpError) as exc:

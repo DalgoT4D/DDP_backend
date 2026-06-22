@@ -1,4 +1,4 @@
-"""Tests for OrgLogoService
+"""Tests for org logo functions in orgfunctions
 
 Tests:
 1. upload_logo_from_file — success, validation error (inline), S3 error
@@ -18,7 +18,7 @@ django.setup()
 
 from django.contrib.auth.models import User
 from ddpui.models.org import Org
-from ddpui.core.org_logo.org_logo_service import OrgLogoService
+from ddpui.core import orgfunctions
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
     OrgLogoValidationError,
@@ -57,15 +57,15 @@ def org_with_logo(org):
 def test_upload_logo_from_file_success(org):
     with (
         patch(
-            "ddpui.core.org_logo.org_logo_service._get_logo_bucket",
+            "ddpui.core.orgfunctions._get_logo_bucket",
             return_value="test-bucket",
         ),
         patch(
-            "ddpui.core.org_logo.org_logo_service.upload_file",
+            "ddpui.core.orgfunctions.upload_file",
             return_value="https://test-bucket.s3.ap-south-1.amazonaws.com/orgs/logo-test-org/logo/new.png",
         ),
     ):
-        OrgLogoService.upload_logo_from_file(
+        orgfunctions.upload_logo_from_file(
             file_bytes=b"fake",
             content_type="image/png",
             filename="logo.png",
@@ -82,9 +82,8 @@ def test_upload_logo_from_file_success(org):
 
 
 def test_upload_logo_from_file_validation_error(org):
-    # Validation is now inline in upload_logo_from_file — no mock needed
     with pytest.raises(OrgLogoValidationError, match="Invalid file type"):
-        OrgLogoService.upload_logo_from_file(
+        orgfunctions.upload_logo_from_file(
             file_bytes=b"fake",
             content_type="application/pdf",
             filename="doc.pdf",
@@ -95,16 +94,16 @@ def test_upload_logo_from_file_validation_error(org):
 def test_upload_logo_from_file_s3_error(org):
     with (
         patch(
-            "ddpui.core.org_logo.org_logo_service._get_logo_bucket",
+            "ddpui.core.orgfunctions._get_logo_bucket",
             return_value="test-bucket",
         ),
         patch(
-            "ddpui.core.org_logo.org_logo_service.upload_file",
+            "ddpui.core.orgfunctions.upload_file",
             side_effect=Exception("S3 connection refused"),
         ),
     ):
         with pytest.raises(OrgLogoS3Error):
-            OrgLogoService.upload_logo_from_file(
+            orgfunctions.upload_logo_from_file(
                 file_bytes=b"fake",
                 content_type="image/png",
                 filename="logo.png",
@@ -119,10 +118,10 @@ def test_upload_logo_from_file_s3_error(org):
 
 def test_upload_logo_from_url_success(org):
     with patch(
-        "ddpui.core.org_logo.org_logo_service.dalgo_head",
+        "ddpui.core.orgfunctions.dalgo_head",
         return_value={"content-type": "image/png"},
     ):
-        OrgLogoService.upload_logo_from_url("https://example.com/logo.png", org)
+        orgfunctions.upload_logo_from_url("https://example.com/logo.png", org)
 
     org.refresh_from_db()
     assert org.logo_url == "https://example.com/logo.png"
@@ -133,16 +132,16 @@ def test_upload_logo_from_url_success(org):
 def test_upload_logo_from_url_deletes_old_s3_key(org_with_logo):
     with (
         patch(
-            "ddpui.core.org_logo.org_logo_service.dalgo_head",
+            "ddpui.core.orgfunctions.dalgo_head",
             return_value={"content-type": "image/png"},
         ),
         patch(
-            "ddpui.core.org_logo.org_logo_service._get_logo_bucket",
+            "ddpui.core.orgfunctions._get_logo_bucket",
             return_value="test-bucket",
         ),
-        patch("ddpui.core.org_logo.org_logo_service.delete_file") as mock_delete,
+        patch("ddpui.core.orgfunctions.delete_file") as mock_delete,
     ):
-        OrgLogoService.upload_logo_from_url("https://example.com/new.png", org_with_logo)
+        orgfunctions.upload_logo_from_url("https://example.com/new.png", org_with_logo)
 
     mock_delete.assert_called_once_with("test-bucket", "orgs/logo-test-org/logo/abc.png")
     org_with_logo.refresh_from_db()
@@ -153,12 +152,12 @@ def test_upload_logo_from_url_deletes_old_s3_key(org_with_logo):
 def test_upload_logo_from_url_no_s3_delete_when_no_prior_key(org):
     with (
         patch(
-            "ddpui.core.org_logo.org_logo_service.dalgo_head",
+            "ddpui.core.orgfunctions.dalgo_head",
             return_value={"content-type": "image/png"},
         ),
-        patch("ddpui.core.org_logo.org_logo_service.delete_file") as mock_delete,
+        patch("ddpui.core.orgfunctions.delete_file") as mock_delete,
     ):
-        OrgLogoService.upload_logo_from_url("https://example.com/logo.png", org)
+        orgfunctions.upload_logo_from_url("https://example.com/logo.png", org)
 
     mock_delete.assert_not_called()
 
@@ -170,18 +169,18 @@ def test_upload_logo_from_url_no_s3_delete_when_no_prior_key(org):
 
 def test_delete_logo_raises_when_no_logo(org):
     with pytest.raises(OrgLogoNotFoundError):
-        OrgLogoService.delete_logo(org)
+        orgfunctions.delete_logo(org)
 
 
 def test_delete_logo_success(org_with_logo):
     with (
         patch(
-            "ddpui.core.org_logo.org_logo_service._get_logo_bucket",
+            "ddpui.core.orgfunctions._get_logo_bucket",
             return_value="test-bucket",
         ),
-        patch("ddpui.core.org_logo.org_logo_service.delete_file") as mock_delete,
+        patch("ddpui.core.orgfunctions.delete_file") as mock_delete,
     ):
-        OrgLogoService.delete_logo(org_with_logo)
+        orgfunctions.delete_logo(org_with_logo)
 
     mock_delete.assert_called_once_with("test-bucket", "orgs/logo-test-org/logo/abc.png")
     org_with_logo.refresh_from_db()
@@ -193,13 +192,13 @@ def test_delete_logo_success(org_with_logo):
 def test_delete_logo_s3_error_raises(org_with_logo):
     with (
         patch(
-            "ddpui.core.org_logo.org_logo_service._get_logo_bucket",
+            "ddpui.core.orgfunctions._get_logo_bucket",
             return_value="test-bucket",
         ),
         patch(
-            "ddpui.core.org_logo.org_logo_service.delete_file",
+            "ddpui.core.orgfunctions.delete_file",
             side_effect=Exception("S3 unavailable"),
         ),
     ):
         with pytest.raises(OrgLogoS3Error):
-            OrgLogoService.delete_logo(org_with_logo)
+            orgfunctions.delete_logo(org_with_logo)
