@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0163_remove_dashboard_root_layout_components"),
+        ("ddpui", "0164_alert_models"),
     ]
 
     operations = [
