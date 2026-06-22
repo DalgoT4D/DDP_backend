@@ -16,7 +16,7 @@ from ddpui.schemas.kpi_schema import (
     KPIResponse,
     KPIListResponse,
 )
-from ddpui.schemas.chart_schema import ChartDataResponse
+from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
@@ -155,6 +155,17 @@ def get_kpi_dashboards(request, kpi_id: int):
     orguser: OrgUser = request.orguser
     try:
         return KPIService.get_kpi_dashboards(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+
+
+@kpi_router.get("/{kpi_id}/consumers/")
+@has_permission(["can_view_kpis"])
+def get_kpi_consumers(request, kpi_id: int):
+    """List dashboards and alerts that reference this KPI (for the consumers UI)."""
+    orguser: OrgUser = request.orguser
+    try:
+        return KPIService.get_kpi_consumers(kpi_id, orguser.org)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 

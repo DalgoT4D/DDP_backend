@@ -39,8 +39,9 @@ from ddpui.api.charts_api import (
     get_chart_data,
     BulkDeleteRequest,
 )
-from ddpui.schemas.chart_schema import ChartCreate, ChartUpdate, ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartCreate, ChartUpdate, ChartDataPayload
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from ddpui.tests.common.fixtures.chart_ui_payloads import CHART_UI_PAYLOADS
 
 pytestmark = pytest.mark.django_db
 
@@ -203,6 +204,14 @@ class TestListCharts:
         assert response.total == 0
         assert len(response.data) == 0
 
+    def test_list_charts_includes_created_by(self, orguser, sample_chart, seed_db):
+        """list_charts returns the creator's email in created_by"""
+        request = mock_request(orguser)
+
+        response = list_charts(request, page=1, page_size=10)
+
+        assert response.data[0].created_by == "chartapiuser@test.com"
+
 
 # ================================================================================
 # Test get_chart endpoint
@@ -221,6 +230,14 @@ class TestGetChart:
         assert response.id == sample_chart.id
         assert response.title == "Test Chart"
         assert response.chart_type == "bar"
+
+    def test_get_chart_includes_created_by(self, orguser, sample_chart, seed_db):
+        """get_chart returns the creator's email in created_by"""
+        request = mock_request(orguser)
+
+        response = get_chart(request, sample_chart.id)
+
+        assert response.created_by == "chartapiuser@test.com"
 
     def test_get_chart_not_found(self, orguser, seed_db):
         """Test getting non-existent chart returns 404"""
@@ -295,6 +312,7 @@ class TestCreateChart:
         assert response.title == "New Chart"
         assert response.chart_type == "line"
         assert response.id is not None
+        assert response.created_by == "chartapiuser@test.com"
 
         # Cleanup
         Chart.objects.filter(id=response.id).delete()
@@ -320,6 +338,35 @@ class TestCreateChart:
 
         # Cleanup
         Chart.objects.filter(id=response.id).delete()
+
+
+class TestCreateChartPerType:
+    """One end-to-end create per chart_type with the real UI payload (incl.
+    customizations) from tests/common/fixtures. Validates that the full stack —
+    typed schema dispatch → service layer → DB write → response — round-trips
+    every persisted customization the UI sent."""
+
+    @pytest.mark.parametrize("chart_type", list(CHART_UI_PAYLOADS.keys()))
+    def test_create_with_real_ui_payload(self, chart_type, orguser, org_warehouse, seed_db):
+        request = mock_request(orguser)
+        payload_dict = CHART_UI_PAYLOADS[chart_type]
+        payload = ChartCreate(**payload_dict)
+
+        response = create_chart(request, payload)
+
+        try:
+            assert response.chart_type == chart_type
+            assert response.id is not None
+
+            sent_cust = payload_dict["extra_config"]["customizations"]
+            persisted_cust = response.extra_config["customizations"]
+            for k, v in sent_cust.items():
+                assert persisted_cust[k] == v, (
+                    f"{chart_type}.customizations.{k} drifted: sent={v!r} "
+                    f"persisted={persisted_cust[k]!r}"
+                )
+        finally:
+            Chart.objects.filter(id=response.id).delete()
 
 
 # ================================================================================

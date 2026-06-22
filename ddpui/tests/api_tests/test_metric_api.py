@@ -97,6 +97,14 @@ class TestListMetrics:
         assert response.total >= 1
         assert any(m.id == sample_metric.id for m in response.data)
 
+    def test_list_metrics_includes_created_by(self, orguser, sample_metric, seed_db):
+        """list_metrics returns the creator's email in created_by"""
+        request = mock_request(orguser)
+
+        response = list_metrics(request)
+
+        assert response.data[0].created_by == "metricapiuser@test.com"
+
     def test_list_metrics_search(self, orguser, sample_metric, seed_db):
         request = mock_request(orguser)
         response = list_metrics(request, search="API Test")
@@ -131,6 +139,7 @@ class TestCreateMetric:
         response = create_metric(request, payload)
         assert response.id is not None
         assert response.name == "New API Metric"
+        assert response.created_by == "metricapiuser@test.com"
         Metric.objects.filter(id=response.id).delete()
 
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
@@ -183,6 +192,7 @@ class TestGetMetric:
         response = get_metric(request, sample_metric.id)
         assert response.id == sample_metric.id
         assert response.name == sample_metric.name
+        assert response.created_by == "metricapiuser@test.com"
 
     def test_get_metric_not_found(self, orguser, seed_db):
         request = mock_request(orguser)

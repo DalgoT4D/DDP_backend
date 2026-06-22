@@ -18,7 +18,7 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.chart_schema import ChartConfig
+from ddpui.schemas.chart_schemas import ChartConfig
 from ddpui.schemas.kpi_schema import KPIResponse
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (
@@ -414,6 +414,7 @@ class ReportService:
                 column=metric_info.get("column"),
                 aggregation=metric_info.get("aggregation"),
                 column_expression=metric_info.get("column_expression"),
+                created_by=metric_info.get("created_by", ""),
                 created_at=now,
                 updated_at=now,
             ),
@@ -426,6 +427,8 @@ class ReportService:
             metric_type_tag=kpi_config.get("metric_type_tag"),
             program_tags=kpi_config.get("program_tags", []),
             display_order=0,
+            # created_by is intentionally not frozen into report snapshots; shown only on the live KPI list
+            created_by=kpi_config.get("created_by", ""),
             created_at=now,
             updated_at=now,
         )

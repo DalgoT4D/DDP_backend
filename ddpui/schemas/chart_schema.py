@@ -48,6 +48,7 @@ class ChartResponse(Schema):
     chart_type: str
     schema_name: str
     table_name: str
+    created_by: str  # creator's email (mirrors Dashboard owner pattern)
     extra_config: dict  # Contains all column configuration and customizations
     # Note: render_config removed - charts fetch fresh config via /data endpoint
     created_at: datetime

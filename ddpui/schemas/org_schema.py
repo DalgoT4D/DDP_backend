@@ -17,6 +17,7 @@ class OrgSchema(Schema):
     is_demo: bool = False
     logo_url: Optional[str] = None
     logo_filename: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
 class CreateOrgSchema(Schema):

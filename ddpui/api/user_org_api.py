@@ -137,6 +137,7 @@ def get_current_user_v2(request, org_slug: str = None):
                 landing_dashboard_id=curr_orguser.landing_dashboard_id,
                 org_default_dashboard_id=org_default_dashboard,
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
+                work_domain=curr_orguser.work_domain,
             )
         )
 

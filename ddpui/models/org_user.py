@@ -139,6 +139,7 @@ class OrgUserResponse(Schema):
     landing_dashboard_id: int | None = None
     org_default_dashboard_id: int | None = None
     subscription_plan: str | None = None
+    work_domain: str | None = None
 
 
 class Invitation(models.Model):
