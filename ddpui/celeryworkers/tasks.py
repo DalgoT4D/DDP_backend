@@ -1170,8 +1170,6 @@ def sync_airbyte_job_stats_for_all_connections(
     )
 
 
-
-
 @app.task(bind=False)
 def clear_stuck_locks():
     """Process stuck locks by calling webhook handler for flow runs that finished >5 minutes ago"""
