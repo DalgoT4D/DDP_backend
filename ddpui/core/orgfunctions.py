@@ -43,6 +43,21 @@ def _get_logo_bucket() -> str:
     return bucket
 
 
+def _replace_logo(org: Org, logo_url: str, s3_key: str, filename: str) -> None:
+    """Delete the old S3 file if one exists, then persist the new logo on Org."""
+    if org.logo_s3_key:
+        try:
+            delete_file(_get_logo_bucket(), org.logo_s3_key)
+        except Exception as e:
+            logger.warning(f"Failed to delete old logo from S3 for {org.slug}: {e}")
+
+    org.logo_url = logo_url
+    org.logo_s3_key = s3_key
+    org.logo_filename = filename
+    org.save(update_fields=["logo_url", "logo_s3_key", "logo_filename"])
+    logger.info(f"Org logo saved for {org.slug}")
+
+
 def get_logo_bytes(logo_url: str) -> tuple[bytes, str]:
     """Fetch raw logo bytes from the stored URL for server-side proxying."""
     try:
@@ -114,17 +129,7 @@ def upload_logo_from_url(image_url: str, org: Org) -> Org:
             f"URL does not point to a valid image. Allowed types: {', '.join(ALLOWED_LOGO_CONTENT_TYPES)}"
         )
 
-    if org.logo_s3_key:
-        try:
-            delete_file(_get_logo_bucket(), org.logo_s3_key)
-        except Exception as e:
-            logger.warning(f"Failed to delete old S3 logo for {org.slug}: {e}")
-
-    org.logo_url = image_url
-    org.logo_s3_key = None
-    org.logo_filename = None
-    org.save(update_fields=["logo_url", "logo_s3_key", "logo_filename"])
-    logger.info(f"Org logo URL saved directly for {org.slug}")
+    _replace_logo(org, logo_url=image_url, s3_key=None, filename=None)
     return org
 
 
@@ -145,21 +150,6 @@ def delete_logo(org: Org) -> None:
     org.logo_filename = None
     org.save(update_fields=["logo_url", "logo_s3_key", "logo_filename"])
     logger.info(f"Org logo deleted for {org.slug}")
-
-
-def _replace_logo(org: Org, logo_url: str, s3_key: str, filename: str) -> None:
-    """Delete the old S3 file if one exists, then persist the new logo on Org."""
-    if org.logo_s3_key:
-        try:
-            delete_file(_get_logo_bucket(), org.logo_s3_key)
-        except Exception as e:
-            logger.warning(f"Failed to delete old logo from S3 for {org.slug}: {e}")
-
-    org.logo_url = logo_url
-    org.logo_s3_key = s3_key
-    org.logo_filename = filename
-    org.save(update_fields=["logo_url", "logo_s3_key", "logo_filename"])
-    logger.info(f"Org logo saved for {org.slug}")
 
 
 def create_organization(payload: CreateOrgSchema):
