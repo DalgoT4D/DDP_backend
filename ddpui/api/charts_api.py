@@ -577,6 +577,15 @@ def get_chart_data_preview(
                 warehouse_client,
             )
 
+    # Validate that at least one dimension field is provided for table charts
+    if payload.chart_type == "table":
+        has_dimensions = payload.dimensions and any(d and d.strip() for d in payload.dimensions)
+        if not has_dimensions and not payload.dimension_col and not payload.extra_dimension:
+            raise HttpError(
+                400,
+                "At least one dimension column is required for table chart preview",
+            )
+
     # Create a modified payload with dashboard filters
     # Log the incoming payload to debug dimension issues
     logger.info(

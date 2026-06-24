@@ -155,6 +155,13 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             final_dims = filtered_dims if filtered_dims else []
 
+        # Fallback to dimension_col + extra_dimension for backward compatibility
+        if not final_dims:
+            if payload.dimension_col:
+                final_dims.append(payload.dimension_col)
+            if payload.extra_dimension:
+                final_dims.append(payload.extra_dimension)
+
     else:
         # For other charts, include both dimension_col and extra_dimension if present
         if payload.dimension_col:
@@ -1505,7 +1512,7 @@ def get_chart_data_table_preview(
             f"Payload had: dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, "
             f"extra_dimension={payload.extra_dimension}"
         )
-        logger.error(error_msg)
+        logger.warning(error_msg)
         raise ValueError("At least one dimension is required for table charts")
 
     for dim_col in dimensions:
