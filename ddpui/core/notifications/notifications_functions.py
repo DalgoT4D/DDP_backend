@@ -176,8 +176,10 @@ def get_notification_history(
     """returns history of sent notifications"""
     notifications = Notification.objects
 
-    if read_status:
-        notifications = notifications.filter(read_status=(read_status == 1))
+    if read_status is not None:
+        notifications = notifications.filter(
+            notifications_received__read_status=(read_status == 1)
+        ).distinct()
 
     notifications = notifications.all().order_by("-timestamp")
 
