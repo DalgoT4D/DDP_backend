@@ -48,26 +48,24 @@ class TestDefault:
         assert format_number_v2(42, "wild-and-crazy", 0) == "42"
 
 
-# ── percentage ─────────────────────────────────────────────────────────────
+# ── percentage (value is a ratio — multiply by 100) ────────────────────────
 
 
 class TestPercentage:
-    def test_zero_decimals(self):
-        assert format_number_v2(85, "percentage", 0) == "85%"
+    def test_ratio_zero_decimals(self):
+        assert format_number_v2(0.85, "percentage", 0) == "85%"
 
-    def test_two_decimals(self):
-        assert format_number_v2(85.5, "percentage", 2) == "85.50%"
+    def test_ratio_two_decimals(self):
+        assert format_number_v2(0.855, "percentage", 2) == "85.50%"
 
+    def test_one_renders_as_hundred(self):
+        assert format_number_v2(1, "percentage", 0) == "100%"
 
-# ── currency ───────────────────────────────────────────────────────────────
+    def test_negative_ratio(self):
+        assert format_number_v2(-0.25, "percentage", 1) == "-25.0%"
 
-
-class TestCurrency:
-    def test_no_decimals(self):
-        assert format_number_v2(1234, "currency", 0) == "$1,234"
-
-    def test_two_decimals(self):
-        assert format_number_v2(1234.5, "currency", 2) == "$1,234.50"
+    def test_zero(self):
+        assert format_number_v2(0, "percentage", 2) == "0.00%"
 
 
 # ── international (en_US grouping) ─────────────────────────────────────────
@@ -159,11 +157,6 @@ class TestPrefixSuffix:
     def test_prefix_and_suffix(self):
         assert format_number_v2(1234, "indian", 0, prefix="₹", suffix=" total") == "₹1,234 total"
 
-    def test_currency_prefix_combines_with_user_prefix(self):
-        # currency adds its own "$"; user prefix wraps on the outside
-        # (e.g. user prefix "USD " → "USD $1,234")
-        assert format_number_v2(1234, "currency", 0, prefix="USD ") == "USD $1,234"
-
 
 # ── decimal-place clamping (mirrors frontend MAX_DECIMAL_PLACES=10 / min 0) ─
 
@@ -187,10 +180,10 @@ class TestDecimalClamping:
 
 
 class TestBackwardCompatWithEChartsGenerator:
-    """The old ``EChartsConfigGenerator._format_number`` now delegates to
-    ``format_number_v2``. These tests pin the output for the three formats it
-    handled before (default / percentage / currency) so the delegation is
-    behavior-preserving for existing chart consumers."""
+    """The old ``EChartsConfigGenerator._format_number`` delegates to
+    ``format_number_v2``. These tests pin the output for the two formats it
+    still supports (default / percentage) — note that percentage semantics
+    changed in v1.1: value is now treated as a ratio (0.85 → 85.00%)."""
 
     def test_default_int(self):
         assert format_number_v2(100, "default", 0) == "100"
@@ -198,8 +191,8 @@ class TestBackwardCompatWithEChartsGenerator:
     def test_default_float_with_decimals(self):
         assert format_number_v2(99.5, "default", 1) == "99.5"
 
-    def test_percentage(self):
-        assert format_number_v2(50.5, "percentage", 2) == "50.50%"
-
-    def test_currency(self):
-        assert format_number_v2(1000, "currency", 2) == "$1,000.00"
+    def test_percentage_ratio_semantics(self):
+        # New semantics: multiplies by 100. A legacy chart that stored raw
+        # percentages (e.g. 50) needs to be migrated to ratio form (0.50) or
+        # to numberFormat="default" + numberSuffix="%".
+        assert format_number_v2(0.505, "percentage", 2) == "50.50%"

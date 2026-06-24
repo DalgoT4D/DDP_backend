@@ -22,7 +22,6 @@ from babel.numbers import format_decimal
 _SUPPORTED_FORMATS = {
     "default",
     "percentage",
-    "currency",
     "indian",
     "international",
     "european",
@@ -74,18 +73,16 @@ def format_number_v2(
     decimal_places = max(0, min(10, decimal_places or 0))
 
     if format_type == "default":
-        formatted = _fixed(value, decimal_places) if decimal_places > 0 else (
-            str(int(value)) if value == int(value) else str(value)
+        formatted = (
+            _fixed(value, decimal_places)
+            if decimal_places > 0
+            else (str(int(value)) if value == int(value) else str(value))
         )
 
     elif format_type == "percentage":
-        formatted = _fixed(value, decimal_places) + "%"
-
-    elif format_type == "currency":
-        # "$" + en_US grouping (matches frontend)
-        formatted = "$" + format_decimal(
-            value, locale="en_US", format=_babel_format_string(decimal_places)
-        )
+        # Percentage semantics: value is a ratio (0.85 → 85.00%). Multiply by 100
+        # then render with the requested decimals + '%'.
+        formatted = _fixed(value * 100, decimal_places) + "%"
 
     elif format_type == "international":
         formatted = format_decimal(
@@ -110,8 +107,10 @@ def format_number_v2(
 
     else:
         # Unknown format → default (matches frontend's `default` branch behavior)
-        formatted = _fixed(value, decimal_places) if decimal_places > 0 else (
-            str(int(value)) if value == int(value) else str(value)
+        formatted = (
+            _fixed(value, decimal_places)
+            if decimal_places > 0
+            else (str(int(value)) if value == int(value) else str(value))
         )
 
     if prefix or suffix:

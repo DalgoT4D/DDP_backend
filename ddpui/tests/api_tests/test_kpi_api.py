@@ -187,7 +187,9 @@ class TestGetKPI:
 class TestUpdateKPI:
     def test_update_success(self, orguser, sample_kpi, seed_db):
         request = mock_request(orguser)
-        payload = KPIUpdate(name="Updated API KPI", target_value=2000.0, extra_config=KPIExtraConfig())
+        payload = KPIUpdate(
+            name="Updated API KPI", target_value=2000.0, extra_config=KPIExtraConfig()
+        )
         response = update_kpi(request, sample_kpi.id, payload)
         assert response.name == "Updated API KPI"
         assert response.target_value == 2000.0
