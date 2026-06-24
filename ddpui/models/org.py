@@ -139,6 +139,9 @@ class Org(models.Model):
         default=get_default_queue_config,
         help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue, edr_queue)",
     )
+    logo_url = models.URLField(max_length=500, null=True, blank=True)
+    logo_s3_key = models.CharField(max_length=500, null=True, blank=True)
+    logo_filename = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
