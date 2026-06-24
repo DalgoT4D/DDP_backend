@@ -7,6 +7,7 @@ from google.cloud.exceptions import NotFound
 from google.oauth2 import service_account
 import json
 from ddpui.core.dbt_automation.utils.columnutils import quote_columnname
+from ddpui.utils.warehouse.exceptions import TableNotFoundError
 from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
 
 basicConfig(level=INFO)
@@ -236,6 +237,9 @@ class BigQueryClient(WarehouseInterface):
                 total_rows = row[0]
                 break
             return total_rows
+        except NotFound as e:
+            logger.warning(f"Table not found: {schema}.{table}: {e}")
+            raise TableNotFoundError(f"{schema}.{table}") from e
         except Exception as e:
             logger.error(f"Failed to fetch total rows for {schema}.{table}: {e}")
             raise

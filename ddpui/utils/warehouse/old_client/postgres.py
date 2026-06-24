@@ -4,8 +4,10 @@ import os
 import tempfile
 from logging import basicConfig, getLogger, INFO
 import psycopg2
+import psycopg2.errors
 from sshtunnel import SSHTunnelForwarder
 from ddpui.core.dbt_automation.utils.columnutils import quote_columnname
+from ddpui.utils.warehouse.exceptions import TableNotFoundError
 from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
 
 
@@ -343,6 +345,9 @@ class PostgresClient(WarehouseInterface):
             )
             total_rows = resultset[0][0] if resultset else 0
             return total_rows
+        except psycopg2.errors.UndefinedTable as e:
+            logger.warning(f"Table not found: {schema}.{table}: {e}")
+            raise TableNotFoundError(f"{schema}.{table}") from e
         except Exception as e:
             logger.error(f"Failed to fetch total rows for {schema}.{table}: {e}")
             raise
