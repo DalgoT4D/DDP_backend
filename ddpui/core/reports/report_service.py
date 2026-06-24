@@ -169,6 +169,10 @@ class ReportService:
                     metric_type_tag=kpi.metric_type_tag,
                     program_tags=kpi.program_tags,
                     periods=periods,
+                    # Freeze the KPI's display customizations so the snapshot
+                    # renders with the format active at snapshot time, not the
+                    # current live KPI's format.
+                    extra_config=kpi.extra_config or {},
                 )
                 frozen[str(kpi.id)] = frozen_kpi.model_dump()
 
@@ -427,8 +431,9 @@ class ReportService:
             metric_type_tag=kpi_config.get("metric_type_tag"),
             program_tags=kpi_config.get("program_tags", []),
             display_order=0,
-            # M3 will wire the actual customizations from the frozen blob.
-            # For pre-v1.1 snapshots this stays empty — renders with no formatting,
+            # Read customizations from the frozen blob (frozen at snapshot
+            # creation time — see ReportService._freeze_chart_configs). For
+            # pre-v1.1 snapshots this falls back to {} → no formatting,
             # matching what those snapshots showed before v1.1.
             extra_config=KPIExtraConfig(**kpi_config.get("extra_config", {})),
             # created_by is intentionally not frozen into report snapshots; shown only on the live KPI list
