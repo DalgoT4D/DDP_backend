@@ -183,6 +183,45 @@ class TestDeleteChartPermissions:
         assert result is True
         assert not Chart.objects.filter(id=chart_id).exists()
 
+    def test_delete_chart_non_admin_creator_can_delete_own(self, orguser2, org, seed_db):
+        """A non-admin (analyst) can delete a chart they created — ownership is keyed off
+        created_by, so the creator never loses delete rights on their own content."""
+        chart = Chart.objects.create(
+            title="Analyst Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser2,
+            last_modified_by=orguser2,
+            org=org,
+        )
+        chart_id = chart.id
+
+        result = ChartService.delete_chart(chart_id, org, orguser2)
+
+        assert result is True
+        assert not Chart.objects.filter(id=chart_id).exists()
+
+    def test_delete_chart_admin_can_delete_others(self, orguser, orguser2, org, seed_db):
+        """An admin can delete a chart created by someone else (org-level override)."""
+        chart = Chart.objects.create(
+            title="Someone Else's Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser2,
+            last_modified_by=orguser2,
+            org=org,
+        )
+        chart_id = chart.id
+
+        result = ChartService.delete_chart(chart_id, org, orguser)
+
+        assert result is True
+        assert not Chart.objects.filter(id=chart_id).exists()
+
 
 # ================================================================================
 # Test bulk_delete_charts (NOT fully covered by API tests)

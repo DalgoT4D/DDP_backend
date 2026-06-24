@@ -109,14 +109,6 @@ class Dashboard(models.Model):
 
     # Metadata
     created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, db_column="created_by")
-    owner = models.ForeignKey(
-        OrgUser,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="owned_dashboards",
-        db_column="owner",
-    )
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     last_modified_by = models.ForeignKey(
         OrgUser,

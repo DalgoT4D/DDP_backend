@@ -1,26 +1,22 @@
 """
-Access Control v2 — data-migration behavior (0165_collapse_roles_rbac_v2).
+Access Control v2 — role-collapse behavior of the `migrate_rbac_v2_roles` command.
 
-The migration no-ops at migrate-time (roles come from seed fixtures, not migrations),
-so its remap logic is exercised here by building a pre-v2 four-role world inside the
-test transaction and invoking the RunPython functions directly.
+Fresh installs get the 3-role world from seed fixtures; this command transforms an
+existing pre-v2 four-role database. The test builds a pre-v2 world inside the test
+transaction and runs the command, asserting the remap.
 """
 
-import importlib
-
 import pytest
-from django.apps import apps as global_apps
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.utils import timezone
 
+from ddpui.management.commands import migrate_rbac_v2_roles as cmd
 from ddpui.models.org import Org
 from ddpui.models.org_user import Invitation, OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 
 pytestmark = pytest.mark.django_db
-
-migration = importlib.import_module("ddpui.migrations.0165_collapse_roles_rbac_v2")
 
 
 def _grant(role, *slugs):
@@ -29,9 +25,8 @@ def _grant(role, *slugs):
 
 
 @pytest.fixture
-def old_world(monkeypatch):
+def old_world():
     """A clean pre-v2 role world built within the test transaction (rolled back after)."""
-    monkeypatch.setattr(migration, "_refresh_redis", lambda: None)
     RolePermission.objects.all().delete()
     Role.objects.all().delete()
     Permission.objects.all().delete()
@@ -85,8 +80,8 @@ def old_world(monkeypatch):
     return {"roles": roles, "ousers": ousers}
 
 
-def _run_forward():
-    migration.collapse_roles_forward(global_apps, None)
+def _run():
+    call_command("migrate_rbac_v2_roles")
 
 
 def slugs_for(role_slug):
@@ -94,8 +89,8 @@ def slugs_for(role_slug):
     return set(RolePermission.objects.filter(role=role).values_list("permission__slug", flat=True))
 
 
-def test_forward_collapses_to_three_customer_roles(old_world):
-    _run_forward()
+def test_collapses_to_three_customer_roles(old_world):
+    _run()
     existing = set(Role.objects.values_list("slug", flat=True))
     assert {"super-admin", "admin", "analyst", "member"} == existing
     assert "account-manager" not in existing
@@ -103,8 +98,8 @@ def test_forward_collapses_to_three_customer_roles(old_world):
     assert "guest" not in existing
 
 
-def test_forward_repoints_users_and_invites(old_world):
-    _run_forward()
+def test_repoints_users_and_invites(old_world):
+    _run()
     ousers = old_world["ousers"]
     assert OrgUser.objects.get(pk=ousers["am"].pk).new_role.slug == "admin"
     assert OrgUser.objects.get(pk=ousers["pm"].pk).new_role.slug == "admin"  # PM merged
@@ -114,33 +109,30 @@ def test_forward_repoints_users_and_invites(old_world):
     assert Invitation.objects.first().invited_new_role.slug == "admin"
 
 
-def test_forward_strips_analyst_infra_write_keeps_view(old_world):
-    _run_forward()
+def test_strips_analyst_infra_write_keeps_view(old_world):
+    _run()
     analyst = slugs_for("analyst")
     assert not ({"can_sync_sources", "can_run_orgtask", "can_create_dbt_model"} & analyst)
     assert "can_view_warehouses" in analyst
     assert {"can_create_dashboards", "can_delete_charts"} <= analyst
 
 
-def test_forward_makes_member_view_only(old_world):
-    _run_forward()
+def test_makes_member_view_only(old_world):
+    _run()
     member = slugs_for("member")
-    assert member == set(migration.MEMBER_SLUGS)
+    assert member == set(cmd.MEMBER_SLUGS)
     # the prod-drift create slug is gone
     assert "can_create_dashboards" not in member
     assert "can_view_warehouses" not in member  # infra view stripped
 
 
-def test_forward_leaves_super_admin_untouched(old_world):
-    _run_forward()
+def test_leaves_super_admin_untouched(old_world):
+    _run()
     assert "can_create_org" in slugs_for("super-admin")
 
 
-def test_reverse_round_trip_restores_four_roles_and_super_admin(old_world):
-    _run_forward()
-    migration.collapse_roles_reverse(global_apps, None)
+def test_idempotent_second_run_is_noop(old_world):
+    _run()
+    _run()  # must not raise or alter the collapsed world
     existing = set(Role.objects.values_list("slug", flat=True))
-    assert {"super-admin", "account-manager", "pipeline-manager", "analyst", "guest"} == existing
-    assert "can_create_org" in slugs_for("super-admin")
-    # guest permission set restored
-    assert "can_view_warehouses" in slugs_for("guest")
+    assert {"super-admin", "admin", "analyst", "member"} == existing
