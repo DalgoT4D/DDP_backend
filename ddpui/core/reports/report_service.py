@@ -19,7 +19,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
 from ddpui.schemas.chart_schemas import ChartConfig
-from ddpui.schemas.kpi_schema import KPIResponse
+from ddpui.schemas.kpi_schema import KPIResponse, KPIExtraConfig
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
@@ -427,6 +427,10 @@ class ReportService:
             metric_type_tag=kpi_config.get("metric_type_tag"),
             program_tags=kpi_config.get("program_tags", []),
             display_order=0,
+            # M3 will wire the actual customizations from the frozen blob.
+            # For pre-v1.1 snapshots this stays empty — renders with no formatting,
+            # matching what those snapshots showed before v1.1.
+            extra_config=KPIExtraConfig(**kpi_config.get("extra_config", {})),
             # created_by is intentionally not frozen into report snapshots; shown only on the live KPI list
             created_by=kpi_config.get("created_by", ""),
             created_at=now,
