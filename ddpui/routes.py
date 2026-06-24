@@ -28,7 +28,6 @@ from ddpui.api.metric_api import metric_router
 from ddpui.api.kpi_api import kpi_router
 from ddpui.api.alert_api import alert_router
 
-
 src_api = NinjaAPI(
     urls_namespace="api",
     title="Dalgo backend apis",

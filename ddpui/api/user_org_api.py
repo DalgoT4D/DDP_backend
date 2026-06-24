@@ -4,14 +4,15 @@ from typing import List
 from datetime import timedelta
 
 from dotenv import load_dotenv
-from ninja import Router
+from ninja import Router, File
 from ninja.errors import HttpError
+from ninja.files import UploadedFile
 from rest_framework.authtoken import views
 from django.utils.text import slugify
 from django.db.models import Prefetch
 from django.contrib.auth.models import User
 from django.db.models import F
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
 
@@ -43,7 +44,7 @@ from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.models.org_preferences import OrgPreferences
 
-from ddpui.schemas.org_schema import OrgSchema, CreateOrgSchema
+from ddpui.schemas.org_schema import OrgSchema, CreateOrgSchema, OrgLogoResponse, OrgLogoUrlPayload
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 
 from ddpui.services.org_cleanup_service import OrgCleanupService
@@ -52,6 +53,13 @@ from ddpui.ddpairbyte import airbytehelpers
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 from ddpui.utils.redis_client import RedisClient
+from ddpui.utils.response_wrapper import api_response, ApiResponse
+from ddpui.core.org_logo.exceptions import (
+    OrgLogoNotFoundError,
+    OrgLogoValidationError,
+    OrgLogoS3Error,
+    OrgLogoFetchError,
+)
 
 from django.db import transaction
 
@@ -732,3 +740,79 @@ def get_iframe_token(request):
         "expires_in": 120,  # 2 minutes in seconds
         "org_slug": orguser.org.slug,
     }
+
+
+@user_org_router.put("/org/logo/", response=ApiResponse[OrgLogoResponse])
+@has_permission(["can_edit_org_notification_settings"])
+def upload_logo_file(request, file: UploadedFile = File(...)):
+    """Upload an image file as the org logo"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        org = orgfunctions.upload_logo_from_file(
+            file_bytes=file.read(),
+            content_type=file.content_type or "",
+            filename=file.name or "",
+            org=orguser.org,
+        )
+        return api_response(
+            success=True,
+            data=OrgLogoResponse.from_model(org),
+            message="Logo uploaded successfully",
+        )
+    except OrgLogoValidationError as e:
+        raise HttpError(400, str(e)) from e
+    except OrgLogoS3Error as e:
+        raise HttpError(502, str(e)) from e
+
+
+@user_org_router.put("/org/logo/url/", response=ApiResponse[OrgLogoResponse])
+@has_permission(["can_edit_org_notification_settings"])
+def upload_logo_from_url(request, payload: OrgLogoUrlPayload):
+    """Store an external image URL directly as the org logo — no S3 upload"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        org = orgfunctions.upload_logo_from_url(
+            image_url=payload.image_url,
+            org=orguser.org,
+        )
+        return api_response(
+            success=True,
+            data=OrgLogoResponse.from_model(org),
+            message="Logo URL saved successfully",
+        )
+    except OrgLogoValidationError as e:
+        raise HttpError(400, str(e)) from e
+    except Exception as e:
+        logger.error(f"Failed to save logo URL for {orguser.org.slug}: {e}")
+        raise HttpError(500, "Failed to save logo URL") from e
+
+
+@user_org_router.delete("/org/logo/", response=ApiResponse)
+@has_permission(["can_edit_org_notification_settings"])
+def delete_logo(request):
+    """Delete the org logo from S3 and clear the fields on Org"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        orgfunctions.delete_logo(orguser.org)
+        return api_response(success=True, message="Logo deleted successfully")
+    except OrgLogoNotFoundError as e:
+        raise HttpError(404, str(e)) from e
+    except OrgLogoS3Error as e:
+        raise HttpError(502, str(e)) from e
+
+
+@user_org_router.get("/org/logo/")
+@has_permission(["can_view_orgusers"])
+def proxy_org_logo_image(request):
+    """Return raw logo bytes so the frontend can use them in canvas without CORS issues."""
+    orguser: OrgUser = request.orguser
+    if not orguser.org.logo_url:
+        raise HttpError(404, "No logo found")
+    try:
+        image_bytes, content_type = orgfunctions.get_logo_bytes(orguser.org.logo_url)
+        return HttpResponse(image_bytes, content_type=content_type)
+    except (OrgLogoS3Error, OrgLogoFetchError) as e:
+        raise HttpError(502, str(e)) from e
