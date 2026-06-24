@@ -365,6 +365,7 @@ def build_multi_metric_query(
 
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
+        seen_metrics = set()
         for metric in payload.metrics:
             # Expression path: inline raw SQL expression
             if metric.column_expression:
@@ -388,6 +389,16 @@ def build_multi_metric_query(
                     raise ValueError(f"Column is required for {metric.aggregation} aggregation")
 
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+            # Deduplicate metrics by (column, aggregation) to prevent
+            # duplicate SQL column aliases causing ambiguous column errors
+            metric_key = (metric.column, metric.aggregation.lower())
+            if metric_key in seen_metrics:
+                logger.warning(
+                    f"Skipping duplicate metric: {metric.aggregation}({metric.column})"
+                )
+                continue
+            seen_metrics.add(metric_key)
 
             # Note: We don't validate aliases because they can be human-readable display names
             # with spaces and special characters (e.g., "Total Count", "Average Price")
