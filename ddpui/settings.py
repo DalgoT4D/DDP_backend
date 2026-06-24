@@ -115,6 +115,8 @@ REST_FRAMEWORK = {
 MIDDLEWARE = [
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
+    # Django only auto-parses request.FILES for POST; this lets PUT/PATCH carry file uploads too.
+    "ninja.compatibility.files.fix_request_files_middleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",

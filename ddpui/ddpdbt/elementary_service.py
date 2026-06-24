@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 from django.utils import timezone as djantotimezone
 
 from ddpui import settings
-from ddpui.utils.aws_client import AWSClient
+from ddpui.utils.s3_utils import download_file
 from ddpui.models.org import Org, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgDataFlowv1
@@ -310,13 +310,9 @@ def fetch_elementary_report(org: Org):
     if not os.path.exists(project_dir / "elementary_profiles"):
         return "set up elementary profile first", None
 
-    s3 = AWSClient.get_instance("s3")
     bucket_file_path = make_edr_report_s3_path(org)
     try:
-        s3response = s3.get_object(
-            Bucket=os.getenv("ELEMENTARY_S3_BUCKET"),
-            Key=bucket_file_path,
-        )
+        s3response = download_file(os.getenv("ELEMENTARY_S3_BUCKET"), bucket_file_path)
         logger.info("fetched s3response")
     except boto3.exceptions.botocore.exceptions.ClientError:
         return "report has not been generated", None

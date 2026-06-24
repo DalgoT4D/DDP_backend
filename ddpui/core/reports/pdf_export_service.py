@@ -1,7 +1,10 @@
 """PDF export service using Playwright for server-side report rendering"""
 
+import base64
 import time
+from urllib.parse import urlparse
 
+import requests as http_requests
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 
@@ -102,6 +105,75 @@ class PdfExportService:
 
                 # Brief wait for ECharts to render canvases from received data
                 time.sleep(POST_IDLE_WAIT_S)
+
+                # SVG images are rasterized by Playwright at their CSS display size,
+                # so small logos look blurry. Fix: Python fetches the SVG (no CORS
+                # restrictions), converts to a base64 data URI, then JS canvas
+                # renders it at 4× the display size as a PNG and swaps the src.
+                # The logo keeps its original CSS display size but is now a crisp
+                # high-res PNG instead of a tiny rasterised SVG.
+                # Collect all img srcs — SVG detection happens server-side via
+                # Content-Type so extensionless/CDN/querystring SVG URLs are caught too
+                img_items = page.evaluate(
+                    """
+                    () => [...document.querySelectorAll('img')]
+                        .map((img, idx) => {
+                            const r = img.getBoundingClientRect();
+                            return { src: img.src, w: r.width || 76, h: r.height || 48, idx: idx };
+                        })
+                        .filter(item => item.src)
+                """
+                )
+
+                for item in img_items:
+                    svg_url = item["src"]
+                    display_w = item["w"]
+                    display_h = item["h"]
+                    img_idx = item["idx"]
+                    try:
+                        parsed = urlparse(svg_url)
+                        if parsed.scheme != "https" or not parsed.netloc:
+                            continue
+                        resp = http_requests.get(svg_url, timeout=10)
+                        if not resp.ok:
+                            continue
+                        content_type = resp.headers.get("content-type", "").lower()
+                        body_start = resp.content[:100].lstrip()
+                        is_svg = (
+                            "image/svg+xml" in content_type
+                            or body_start.startswith(b"<svg")
+                            or body_start.startswith(b"<?xml")
+                        )
+                        if not is_svg:
+                            continue
+                        svg_data_uri = (
+                            "data:image/svg+xml;base64," + base64.b64encode(resp.content).decode()
+                        )
+                        png_data_uri = page.evaluate(
+                            """async (args) => {
+                                const img = new Image();
+                                img.src = args.svgDataUri;
+                                await new Promise(r => { img.onload = r; img.onerror = r; });
+                                const scale = 4;
+                                const canvas = document.createElement('canvas');
+                                canvas.width = args.w * scale;
+                                canvas.height = args.h * scale;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                                return canvas.toDataURL('image/png');
+                            }""",
+                            {"svgDataUri": svg_data_uri, "w": display_w, "h": display_h},
+                        )
+                        if png_data_uri:
+                            page.evaluate(
+                                """(args) => {
+                                    const img = document.querySelectorAll('img')[args.idx];
+                                    if (img) img.src = args.png;
+                                }""",
+                                {"idx": img_idx, "png": png_data_uri},
+                            )
+                    except Exception as e:
+                        logger.warning(f"SVG to PNG conversion failed for {svg_url}: {e}")
 
                 if failed_requests:
                     logger.warning(
