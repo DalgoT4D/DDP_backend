@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from ninja import Schema
+from pydantic import model_validator
 
 
 class ChartMetric(Schema):
@@ -106,6 +107,16 @@ class ChartDataPayload(Schema):
     # Pagination
     offset: int = 0
     limit: int = 100
+
+    @model_validator(mode="after")
+    def validate_metrics_for_aggregated_charts(self):
+        """Ensure metrics are provided for chart types that require aggregation."""
+        if self.chart_type not in ("table", "map"):
+            if not self.metrics:
+                raise ValueError(
+                    "At least one metric is required for aggregated charts"
+                )
+        return self
 
 
 class ChartDataResponse(Schema):
