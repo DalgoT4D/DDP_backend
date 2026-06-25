@@ -19,7 +19,7 @@ from ddpui.models.dashboard import DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-from ddpui.core.charts.pivot_service import get_pivot_table_data
+from ddpui.core.charts.pivot_service import get_pivot_table_data, PIVOT_DEFAULT_PAGE_SIZE
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -1064,8 +1064,18 @@ def get_chart(request, chart_id: int):
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
 @has_permission(["can_view_charts"])
-def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str] = None):
-    """Get chart data using saved chart configuration with optional dashboard filters"""
+def get_chart_data_by_id(
+    request,
+    chart_id: int,
+    dashboard_filters: Optional[str] = None,
+    page: int = 1,
+    page_size: int = PIVOT_DEFAULT_PAGE_SIZE,
+):
+    """Get chart data using saved chart configuration with optional dashboard filters.
+
+    `page`/`page_size` only apply to pivot tables (group-level pagination); other
+    chart types ignore them.
+    """
     import json
 
     orguser = request.orguser
@@ -1084,6 +1094,12 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 
     # Build payload from chart config
     extra_config = chart.extra_config.copy() if chart.extra_config else {}
+
+    # Pivot tables paginate by top-level row groups; thread the requested page
+    # through extra_config so generate_chart_data_and_config picks it up.
+    if chart.chart_type == "pivot_table":
+        extra_config["page"] = page if page >= 1 else 1
+        extra_config["page_size"] = page_size if page_size >= 1 else PIVOT_DEFAULT_PAGE_SIZE
 
     # Parse and resolve dashboard filters if provided
     resolved_dashboard_filters = None

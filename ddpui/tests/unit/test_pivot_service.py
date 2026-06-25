@@ -7,7 +7,7 @@ from ddpui.core.charts.pivot_service import check_pivot_cardinality
 class TestCheckPivotCardinality:
     def test_raises_on_high_cardinality(self):
         warehouse = MagicMock()
-        warehouse.execute.return_value = [{"cnt": 100}]
+        warehouse.execute.return_value = [{"cnt": 101}]
         payload = ChartDataPayload(
             chart_type="pivot_table",
             schema_name="public",

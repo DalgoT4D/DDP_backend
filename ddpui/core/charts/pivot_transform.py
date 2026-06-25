@@ -122,6 +122,30 @@ def _get_column_key(
     return tuple(key_parts)
 
 
+def _get_raw_column_key(row: dict, num_col_dims: int) -> tuple:
+    """Extract the unformatted composite column key for chronological ordering."""
+    return tuple(row.get(f"pivot_col_{i}") for i in range(num_col_dims))
+
+
+def _get_raw_column_subtotal_key(row: dict, num_col_dims: int) -> tuple:
+    """Extract the unformatted parent column key for a column subtotal row."""
+    parts = []
+    for i in range(num_col_dims):
+        if row.get(f"_grp_pivot_col_{i}", 0) == 1:
+            break
+        parts.append(row.get(f"pivot_col_{i}"))
+    return tuple(parts)
+
+
+def _raw_sort_key(raw_key: tuple) -> tuple:
+    """Sort key that orders NULLs last and compares raw values directly.
+
+    Raw values keep their native type (datetime for time grains, str/num
+    otherwise), so time-grained headers sort chronologically, not lexically.
+    """
+    return tuple((v is None, v) for v in raw_key)
+
+
 def _is_leaf_column_row(row: dict, num_col_dims: int) -> bool:
     """Check if all column dimension GROUPING flags are 0 (a leaf-level cell)."""
     return all(row.get(f"_grp_pivot_col_{i}", 0) == 0 for i in range(num_col_dims))
@@ -138,6 +162,7 @@ def rotate_to_pivot(
     page_size: int = 50,
     metric_display_names: list[str] | None = None,
     show_column_subtotals: bool = False,
+    show_row_subtotals: bool = True,
 ) -> dict:
     """
     Transform flat ROLLUP rows into pivoted JSON response.
@@ -158,12 +183,14 @@ def rotate_to_pivot(
     """
     has_col_dims = num_col_dims > 0
 
-    # Collect unique leaf-level column keys (sorted tuples)
+    # Collect unique leaf-level column keys, ordered by their RAW values so
+    # time-grained headers sort chronologically instead of lexicographically.
+    # formatted_by_raw maps raw tuple → display tuple; we sort on raw, emit formatted.
     column_keys: list[tuple[str, ...]] = []
     column_subtotal_keys: list[tuple[str, ...]] = []
     if has_col_dims:
-        raw_keys = set()
-        raw_subtotal_keys = set()
+        formatted_by_raw: dict[tuple, tuple[str, ...]] = {}
+        formatted_by_raw_subtotal: dict[tuple, tuple[str, ...]] = {}
         for row in flat_rows:
             if _is_leaf_column_row(row, num_col_dims) and not is_column_total(row, num_col_dims):
                 key = _get_column_key(row, num_col_dims, col_dim_names, time_grains)
@@ -171,12 +198,15 @@ def rotate_to_pivot(
                 if NULL_DISPLAY_LABEL not in key or all(
                     row.get(f"_grp_pivot_col_{i}", 0) == 0 for i in range(num_col_dims)
                 ):
-                    raw_keys.add(key)
+                    formatted_by_raw[_get_raw_column_key(row, num_col_dims)] = key
             elif show_column_subtotals and is_column_subtotal(row, num_col_dims):
                 sub_key = _get_column_subtotal_key(row, num_col_dims, col_dim_names, time_grains)
-                raw_subtotal_keys.add(sub_key)
-        column_keys = sorted(raw_keys)
-        column_subtotal_keys = sorted(raw_subtotal_keys)
+                formatted_by_raw_subtotal[_get_raw_column_subtotal_key(row, num_col_dims)] = sub_key
+        column_keys = [formatted_by_raw[r] for r in sorted(formatted_by_raw, key=_raw_sort_key)]
+        column_subtotal_keys = [
+            formatted_by_raw_subtotal[r]
+            for r in sorted(formatted_by_raw_subtotal, key=_raw_sort_key)
+        ]
 
     # Map each column subtotal key to the leaf column index it should appear after.
     # A subtotal key like ("CA",) should appear after the last leaf key starting with "CA".
@@ -194,6 +224,10 @@ def rotate_to_pivot(
 
     for row in flat_rows:
         row_type = classify_row(row, row_dim_cols)
+        # ROLLUP always emits intermediate subtotal rows; drop them when the
+        # payload only asked for a grand total (show_row_subtotals=False).
+        if row_type == "subtotal" and not show_row_subtotals:
+            continue
         row_labels = tuple(get_row_labels(row, row_dim_cols))
         col_total = is_column_total(row, num_col_dims) if has_col_dims else False
 

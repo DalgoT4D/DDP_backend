@@ -264,6 +264,60 @@ class TestRotateToPivotMultiColumn:
         assert result["grand_total"]["row_total"] == [8]
 
 
+class TestRowSubtotalToggle:
+    def test_subtotals_dropped_when_disabled(self):
+        # SAMPLE_ROWS_SINGLE_COL contains a Mumbai subtotal row. With
+        # show_row_subtotals=False (grand-total-only request), ROLLUP still
+        # emits it but the transform must drop it; grand total is preserved.
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_SINGLE_COL,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count", "Spend"],
+            show_row_subtotals=False,
+        )
+        assert all(not r["is_subtotal"] for r in result["rows"])
+        assert result["grand_total"] is not None
+        assert result["grand_total"]["row_total"] == [3, 1050]
+
+    def test_subtotals_kept_when_enabled(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_SINGLE_COL,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count", "Spend"],
+            show_row_subtotals=True,
+        )
+        assert any(r["is_subtotal"] for r in result["rows"])
+
+
+class TestColumnKeyChronologicalOrder:
+    def test_time_grain_columns_sorted_chronologically(self):
+        # Raw month values arrive out of order; formatted labels ("Mar 2026"...)
+        # would sort lexicographically (Feb, Jan, Mar). Must sort by raw value.
+        rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": f"2026-{m:02d}-01 00:00:00",
+                "Count": c,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            }
+            for m, c in [(3, 30), (1, 10), (2, 20)]
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["month"],
+            metric_aliases=["Count"],
+            time_grains={"month": "month"},
+        )
+        assert result["column_keys"] == [["Jan 2026"], ["Feb 2026"], ["Mar 2026"]]
+
+
 class TestFormatPivotColumnHeader:
     def test_month_grain(self):
         assert format_pivot_column_header("2026-01-01 00:00:00", "month") == "Jan 2026"
