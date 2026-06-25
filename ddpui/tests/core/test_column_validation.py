@@ -29,7 +29,7 @@ class TestNormalizeDimensions:
         assert dims == ["dim1", "dim-2", "dim 3"]
 
     def test_normalize_dimensions_table_chart_no_dimensions(self):
-        """Test that table charts without dimensions array return empty list"""
+        """Test that table charts without dimensions array fall back to dimension_col and extra_dimension"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
@@ -38,7 +38,7 @@ class TestNormalizeDimensions:
             extra_dimension="dim 2",
         )
         dims = normalize_dimensions(payload)
-        assert dims == []
+        assert dims == ["dim-1", "dim 2"]
 
     def test_normalize_dimensions_bar_chart(self):
         """Test normalize_dimensions for bar chart"""
