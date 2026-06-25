@@ -32,6 +32,9 @@ from ddpui.api.user_org_api import (
     post_organization_accept_tnc,
     get_organization_wren,
     delete_organization_warehouses_v1,
+    upload_logo_file,
+    upload_logo_from_url,
+    delete_logo,
 )
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -51,6 +54,12 @@ from ddpui.models.org_user import (
     DeleteOrgUserPayload,
 )
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
+from ddpui.schemas.org_schema import OrgLogoUrlPayload
+from ddpui.core.org_logo.exceptions import (
+    OrgLogoNotFoundError,
+    OrgLogoValidationError,
+    OrgLogoS3Error,
+)
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
     ADMIN_ROLE,
@@ -1137,3 +1146,70 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
         instance.delete_warehouse.assert_called_once()
         instance.delete_transformation_layer.assert_called_once()
         assert response == {"success": 1}
+
+
+# ================================================================================
+# Org logo endpoint tests — exception → HTTP status code mapping
+# ================================================================================
+
+
+def test_upload_logo_file_validation_error_raises_400(orguser, seed_db):
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"fake"
+    mock_file.content_type = "application/pdf"
+    mock_file.name = "doc.pdf"
+
+    with patch(
+        "ddpui.api.user_org_api.orgfunctions.upload_logo_from_file",
+        side_effect=OrgLogoValidationError("Invalid file type"),
+    ):
+        with pytest.raises(HttpError) as exc:
+            upload_logo_file(mock_request(orguser), file=mock_file)
+    assert exc.value.status_code == 400
+
+
+def test_upload_logo_file_s3_error_raises_502(orguser, seed_db):
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"fake"
+    mock_file.content_type = "image/png"
+    mock_file.name = "logo.png"
+
+    with patch(
+        "ddpui.api.user_org_api.orgfunctions.upload_logo_from_file",
+        side_effect=OrgLogoS3Error("S3 unavailable"),
+    ):
+        with pytest.raises(HttpError) as exc:
+            upload_logo_file(mock_request(orguser), file=mock_file)
+    assert exc.value.status_code == 502
+
+
+def test_upload_logo_from_url_validation_error_raises_400(orguser, seed_db):
+    with patch(
+        "ddpui.api.user_org_api.orgfunctions.upload_logo_from_url",
+        side_effect=OrgLogoValidationError("Invalid URL"),
+    ):
+        with pytest.raises(HttpError) as exc:
+            upload_logo_from_url(
+                mock_request(orguser),
+                payload=OrgLogoUrlPayload(image_url="https://example.com/logo.png"),
+            )
+    assert exc.value.status_code == 400
+
+
+def test_delete_logo_not_found_raises_404(orguser, seed_db):
+    with patch(
+        "ddpui.api.user_org_api.orgfunctions.delete_logo", side_effect=OrgLogoNotFoundError()
+    ):
+        with pytest.raises(HttpError) as exc:
+            delete_logo(mock_request(orguser))
+    assert exc.value.status_code == 404
+
+
+def test_delete_logo_s3_error_raises_502(orguser, seed_db):
+    with patch(
+        "ddpui.api.user_org_api.orgfunctions.delete_logo",
+        side_effect=OrgLogoS3Error("S3 failed"),
+    ):
+        with pytest.raises(HttpError) as exc:
+            delete_logo(mock_request(orguser))
+    assert exc.value.status_code == 502

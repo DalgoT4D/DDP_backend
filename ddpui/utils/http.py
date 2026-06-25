@@ -12,8 +12,8 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 
-def dalgo_get(endpoint: str, **kwargs) -> dict:
-    """make a GET request"""
+def dalgo_get(endpoint: str, raw: bool = False, **kwargs):
+    """make a GET request; returns parsed JSON by default, or the raw response object if raw=True"""
     headers = kwargs.pop("headers", {})
     timeout = kwargs.pop("timeout", None)
 
@@ -32,7 +32,26 @@ def dalgo_get(endpoint: str, **kwargs) -> dict:
     except Exception as error:
         logger.exception(error)
         raise HttpError(res.status_code, res.text) from error
+    if raw:
+        return res  # caller handles binary response (e.g. streaming image bytes)
     return res.json()
+
+
+def dalgo_head(endpoint: str, **kwargs) -> dict:
+    """Make a HEAD request and return the response headers."""
+    headers = kwargs.pop("headers", {})
+    timeout = kwargs.pop("timeout", None)
+    try:
+        res = requests.head(endpoint, headers=headers, timeout=timeout, **kwargs)
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(500, "connection error") from error
+    try:
+        res.raise_for_status()
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(res.status_code, res.text) from error
+    return res.headers
 
 
 def dalgo_post(endpoint: str, json: dict = None, files: dict = None, **kwargs) -> dict:
