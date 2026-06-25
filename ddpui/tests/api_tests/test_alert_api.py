@@ -22,7 +22,7 @@ from ddpui.api.alert_api import (
 )
 from ddpui.api.alert_api import test_alert as run_dry_run
 from ddpui.api.alert_api import test_slack_webhook as run_slack_webhook_test
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.models.alert import Alert
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
@@ -77,6 +77,22 @@ def orguser(authuser, org):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def analyst_orguser(org):
+    """A second user in the same org with the (non-admin) analyst role."""
+    user = User.objects.create(
+        username="alertapianalyst", email="alertapianalyst@test.com", password="testpassword"
+    )
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
 
 
 @pytest.fixture
@@ -432,6 +448,30 @@ def test_delete_alert(seed_db, orguser, sample_metric):
     created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
 
     delete_alert(request, created.id)
+
+    assert not Alert.objects.filter(id=created.id).exists()
+
+
+def test_delete_alert_non_owner_analyst_gets_403(seed_db, orguser, analyst_orguser, sample_metric):
+    """An analyst who is neither the creator nor an admin cannot delete the alert."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        delete_alert(mock_request(analyst_orguser), created.id)
+
+    assert exc_info.value.status_code == 403
+    assert Alert.objects.filter(id=created.id).exists()
+
+
+def test_delete_alert_admin_can_delete_others(seed_db, orguser, analyst_orguser, sample_metric):
+    """An admin (orguser) can delete an alert created by someone else (analyst)."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    delete_alert(mock_request(orguser), created.id)
 
     assert not Alert.objects.filter(id=created.id).exists()
 

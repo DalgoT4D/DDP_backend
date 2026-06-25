@@ -17,3 +17,8 @@ class AlertNotFoundError(AlertServiceError):
 class AlertValidationError(AlertServiceError):
     def __init__(self, message: str):
         super().__init__(message, "VALIDATION_ERROR")
+
+
+class AlertPermissionError(AlertServiceError):
+    def __init__(self, message: str):
+        super().__init__(message, "PERMISSION_DENIED")

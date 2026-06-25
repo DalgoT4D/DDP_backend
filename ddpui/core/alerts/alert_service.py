@@ -15,8 +15,10 @@ from ddpui.core.alerts import condition as condition_helpers
 from ddpui.core.alerts import rendering, scheduling
 from ddpui.core.alerts.exceptions import (
     AlertNotFoundError,
+    AlertPermissionError,
     AlertValidationError,
 )
+from ddpui.core.ownership import can_delete_resource
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
@@ -362,6 +364,9 @@ class AlertService:
     @staticmethod
     def delete_alert(alert_id: int, org: Org, orguser: OrgUser) -> None:
         alert = AlertService.get_alert(alert_id, org)
+        # Only allow deletion if the user is the owner (creator) or an admin
+        if not can_delete_resource(orguser, alert):
+            raise AlertPermissionError("Only the owner or an admin can delete this alert.")
         alert_name = alert.name
         alert.delete()
         logger.info(f"Deleted alert '{alert_name}' (id={alert_id}) by {orguser.user.email}")
