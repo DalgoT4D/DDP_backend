@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from ddpui.core.ownership import can_delete_resource
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI
@@ -748,8 +749,6 @@ class ReportService:
             SnapshotPermissionError: If user doesn't have permission
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        from ddpui.core.ownership import can_delete_resource
 
         if not can_delete_resource(orguser, snapshot):
             raise SnapshotPermissionError("Only the owner or an admin can delete this report.")

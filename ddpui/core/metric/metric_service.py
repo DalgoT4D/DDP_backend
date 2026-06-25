@@ -35,7 +35,9 @@ from ddpui.core.metric.exceptions import (
     MetricNotFoundError,
     MetricValidationError,
     MetricDeleteBlockedError,
+    MetricPermissionError,
 )
+from ddpui.core.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -286,12 +288,8 @@ class MetricService:
                 consumers,
             )
 
-        from ddpui.core.ownership import can_delete_resource
-
         if not can_delete_resource(orguser, metric):
-            from ninja.errors import HttpError
-
-            raise HttpError(403, "Only the owner or an admin can delete this metric.")
+            raise MetricPermissionError("Only the owner or an admin can delete this metric.")
 
         metric_name = metric.name
         metric.delete()

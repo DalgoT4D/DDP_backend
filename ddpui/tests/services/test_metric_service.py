@@ -15,13 +15,14 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.visualization import Chart
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.schemas.metric_schema import MetricPayload
 from ddpui.core.metric.metric_service import (
     MetricService,
     MetricNotFoundError,
     MetricValidationError,
     MetricDeleteBlockedError,
+    MetricPermissionError,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
@@ -71,6 +72,20 @@ def orguser(authuser, org):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def analyst_orguser(org):
+    """A second user in the same org with the (non-admin) analyst role."""
+    user = User.objects.create(username="metricsvcanalyst", email="metricsvcanalyst@test.com")
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
 
 
 @pytest.fixture
@@ -457,6 +472,28 @@ class TestMetricCRUD:
         MetricService.delete_metric(metric_id, org, orguser)
         with pytest.raises(MetricNotFoundError):
             MetricService.get_metric(metric_id, org)
+
+    def test_delete_metric_non_owner_analyst_denied(
+        self, analyst_orguser, org, sample_metric, seed_db
+    ):
+        """A non-admin who didn't create the metric cannot delete it."""
+        with pytest.raises(MetricPermissionError):
+            MetricService.delete_metric(sample_metric.id, org, analyst_orguser)
+        assert Metric.objects.filter(id=sample_metric.id).exists()
+
+    def test_delete_metric_non_admin_creator_can_delete_own(self, analyst_orguser, org, seed_db):
+        """A non-admin (analyst) can delete a metric they created."""
+        metric = Metric.objects.create(
+            name="Analyst Metric",
+            schema_name="public",
+            table_name="beneficiaries",
+            column="amount",
+            aggregation="sum",
+            org=org,
+            created_by=analyst_orguser,
+        )
+        MetricService.delete_metric(metric.id, org, analyst_orguser)
+        assert not Metric.objects.filter(id=metric.id).exists()
 
     def test_delete_metric_blocked_by_kpi(self, orguser, org, sample_metric, seed_db):
         kpi = KPI.objects.create(

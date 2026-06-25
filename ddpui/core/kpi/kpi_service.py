@@ -77,7 +77,9 @@ from ddpui.core.kpi.exceptions import (
     KPIServiceError,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
 )
+from ddpui.core.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -318,12 +320,8 @@ class KPIService:
                 "Remove it from these dashboards first."
             )
 
-        from ddpui.core.ownership import can_delete_resource
-
         if not can_delete_resource(orguser, kpi):
-            from ninja.errors import HttpError
-
-            raise HttpError(403, "Only the owner or an admin can delete this KPI.")
+            raise KPIPermissionError("Only the owner or an admin can delete this KPI.")
 
         kpi_name = kpi.name
         kpi.delete()
