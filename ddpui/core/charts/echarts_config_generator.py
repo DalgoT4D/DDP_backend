@@ -1,5 +1,6 @@
 """ECharts configuration generator for different chart types"""
 
+import math
 from typing import Dict, List, Any, Optional
 
 
@@ -21,8 +22,8 @@ class EChartsConfigGenerator:
         number_prefix = customizations.get("numberPrefix", "")
         number_suffix = customizations.get("numberSuffix", "")
 
-        # Handle None values - show "No data" instead of formatting as number
-        if is_null or value is None:
+        # Handle None/NaN values - show "No data" instead of formatting as number
+        if is_null or value is None or (isinstance(value, float) and math.isnan(value)):
             formatted_value = "No data"
         else:
             # Format the value based on customizations
@@ -90,8 +91,8 @@ class EChartsConfigGenerator:
         value: float, format_type: str, decimal_places: int, prefix: str = "", suffix: str = ""
     ) -> str:
         """Format number based on type, decimal places, prefix and suffix"""
-        # Handle None values
-        if value is None:
+        # Handle None/NaN values
+        if value is None or (isinstance(value, float) and math.isnan(value)):
             return "No data"
 
         # Format the number based on type

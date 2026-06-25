@@ -1,5 +1,6 @@
 """Chart service module for handling chart business logic"""
 
+import math
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -1457,8 +1458,8 @@ def transform_data_for_chart(
 
             value = row.get(alias, 0)
 
-            # Handle None values - show "No data" instead of trying to format None as a number
-            if value is None:
+            # Handle None/NaN values - show "No data" instead of trying to format as a number
+            if value is None or (isinstance(value, float) and math.isnan(value)):
                 return {
                     "value": None,
                     "metric_name": display_name,
