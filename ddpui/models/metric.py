@@ -109,6 +109,11 @@ class KPI(models.Model):
 
     annotations = models.JSONField(default=list, blank=True)
 
+    # Display customizations (number format, prefix/suffix). Always a dict; never null.
+    # Nested as {"customizations": {"numberFormat": ..., "decimalPlaces": ...,
+    # "numberPrefix": ..., "numberSuffix": ...}}.
+    extra_config = models.JSONField(default=dict, blank=False, null=False)
+
     # Display order on KPI page
     display_order = models.IntegerField(default=0)
 
