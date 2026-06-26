@@ -19,7 +19,13 @@ from ddpui.core.charts.charts_service import (
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.core.metric.metric_service import MetricService
 from ddpui.services.dashboard_service import DashboardService
-from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIResponse, AnnotationEntryResponse
+from ddpui.schemas.kpi_schema import (
+    KPICreate,
+    KPIUpdate,
+    KPIResponse,
+    KPIExtraConfig,
+    AnnotationEntryResponse,
+)
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.custom_logger import CustomLogger
@@ -149,6 +155,7 @@ class KPIService:
             metric_type_tag=kpi.metric_type_tag,
             program_tags=kpi.program_tags,
             display_order=kpi.display_order,
+            extra_config=KPIExtraConfig(**(kpi.extra_config or {})),
             created_by=kpi.created_by.user.email,
             created_at=kpi.created_at,
             updated_at=kpi.updated_at,
@@ -225,6 +232,7 @@ class KPIService:
             time_dimension_column=payload.time_dimension_column,
             metric_type_tag=payload.metric_type_tag,
             program_tags=payload.program_tags,
+            extra_config=payload.extra_config.model_dump(),
             org=orguser.org,
             created_by=orguser,
             last_modified_by=orguser,
@@ -599,6 +607,14 @@ class KPIService:
             "time_grain": kpi_response.time_grain,
             "periods": periods,
             "data_last_date": data_last_date,
+            # Display customizations — surfaced so the dashboard widget and
+            # snapshot viewer can format the current value without needing a
+            # second fetch for the KPI's extra_config.
+            "customizations": (
+                kpi_response.extra_config.customizations.model_dump()
+                if kpi_response.extra_config and kpi_response.extra_config.customizations
+                else None
+            ),
         }
 
         # Generate echarts config

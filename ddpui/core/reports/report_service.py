@@ -20,7 +20,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
 from ddpui.schemas.chart_schemas import ChartConfig
-from ddpui.schemas.kpi_schema import KPIResponse
+from ddpui.schemas.kpi_schema import KPIResponse, KPIExtraConfig
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (
     DatetimeColumnResponse,
@@ -170,6 +170,10 @@ class ReportService:
                     metric_type_tag=kpi.metric_type_tag,
                     program_tags=kpi.program_tags,
                     periods=periods,
+                    # Freeze the KPI's display customizations so the snapshot
+                    # renders with the format active at snapshot time, not the
+                    # current live KPI's format.
+                    extra_config=kpi.extra_config or {},
                 )
                 frozen[str(kpi.id)] = frozen_kpi.model_dump()
 
@@ -428,6 +432,11 @@ class ReportService:
             metric_type_tag=kpi_config.get("metric_type_tag"),
             program_tags=kpi_config.get("program_tags", []),
             display_order=0,
+            # Read customizations from the frozen blob (frozen at snapshot
+            # creation time — see ReportService._freeze_chart_configs). For
+            # pre-v1.1 snapshots this falls back to {} → no formatting,
+            # matching what those snapshots showed before v1.1.
+            extra_config=KPIExtraConfig(**kpi_config.get("extra_config", {})),
             # created_by is intentionally not frozen into report snapshots; shown only on the live KPI list
             created_by=kpi_config.get("created_by", ""),
             created_at=now,

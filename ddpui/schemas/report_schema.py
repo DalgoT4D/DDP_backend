@@ -77,6 +77,10 @@ class FrozenKpiConfig(Schema):
     metric_type_tag: Optional[str] = None
     program_tags: List[str] = []
     periods: List[Dict[str, Any]] = []
+    # KPI display customizations (numberFormat, decimalPlaces, numberPrefix,
+    # numberSuffix) frozen at snapshot time. Defaults to {} for pre-v1.1
+    # snapshots — render path falls back to raw display in that case.
+    extra_config: Dict[str, Any] = {}
 
 
 # Request schemas

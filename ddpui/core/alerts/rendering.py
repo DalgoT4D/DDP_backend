@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Optional
 
+from ddpui.core.charts.number_formatting import format_number_v2
 from ddpui.models.alert import Alert, AlertType
 from ddpui.schemas.alert_schema import StandaloneConfig
 
@@ -100,10 +101,40 @@ def resolve_tokens(
     return base
 
 
+def _format_via_kpi_customizations(value: Any, customizations: Mapping[str, Any]) -> Any:
+    """Apply KPI display customizations to a numeric value.
+
+    Returns ``value`` unchanged if it's None (so the renderer's None-handling
+    leaves the token unresolved) or if it's not numeric. Otherwise mirrors
+    ``webapp_v2/lib/formatters.ts:formatKPIValue`` so email bodies stay
+    byte-identical with the KPI card.
+    """
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return value
+    return format_number_v2(
+        numeric,
+        format_type=customizations.get("numberFormat", "default") or "default",
+        decimal_places=customizations.get("decimalPlaces") or 0,
+        prefix=customizations.get("numberPrefix") or "",
+        suffix=customizations.get("numberSuffix") or "",
+    )
+
+
 def tokens_for_alert(
     alert: Alert, *, current_value: Any, rag_status: Optional[str] = None
 ) -> dict[str, Any]:
-    """Convenience helper — builds tokens from an Alert instance + a value."""
+    """Convenience helper — builds tokens from an Alert instance + a value.
+
+    For ``kpi_rag`` alerts, ``current_value`` and ``target_value`` are formatted
+    using the KPI's display customizations (``extra_config.customizations``) so
+    email bodies match the KPI card. If no ``numberFormat`` is configured, the
+    raw value passes through unchanged (matching frontend's ``formatKPIValue``
+    fallback to ``String(value)``).
+    """
     metric_name = alert.metric.name if alert.metric_id and alert.metric else None
     kpi_name = alert.kpi.name if alert.kpi_id and alert.kpi else None
 
@@ -118,6 +149,14 @@ def tokens_for_alert(
     else:
         cond = alert.condition or {}
         target_value = cond.get("value")
+
+    # Format kpi_rag current/target via the KPI's display customizations so the
+    # email body matches the KPI card byte-for-byte.
+    if alert.alert_type == AlertType.KPI_RAG and alert.kpi_id and alert.kpi:
+        cust = (alert.kpi.extra_config or {}).get("customizations") or {}
+        if isinstance(cust, dict) and cust.get("numberFormat"):
+            current_value = _format_via_kpi_customizations(current_value, cust)
+            target_value = _format_via_kpi_customizations(target_value, cust)
 
     return resolve_tokens(
         alert.alert_type,

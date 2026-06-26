@@ -2,6 +2,8 @@
 
 from typing import Dict, List, Any, Optional
 
+from ddpui.core.charts.number_formatting import format_number_v2
+
 
 class EChartsConfigGenerator:
     """Generate ECharts configurations based on chart type and data"""
@@ -89,27 +91,8 @@ class EChartsConfigGenerator:
     def _format_number(
         value: float, format_type: str, decimal_places: int, prefix: str = "", suffix: str = ""
     ) -> str:
-        """Format number based on type, decimal places, prefix and suffix"""
-        # Handle None values
-        if value is None:
-            return "No data"
-
-        # Format the number based on type
-        if format_type == "percentage":
-            formatted = f"{value:.{decimal_places}f}%"
-        elif format_type == "currency":
-            formatted = f"${value:,.{decimal_places}f}"
-        else:  # default
-            if decimal_places > 0:
-                formatted = f"{value:.{decimal_places}f}"
-            else:
-                formatted = str(int(value)) if value == int(value) else str(value)
-
-        # Add prefix and suffix if provided
-        if prefix or suffix:
-            return f"{prefix}{formatted}{suffix}"
-
-        return formatted
+        """Format number for chart display. Delegates to the shared formatter."""
+        return format_number_v2(value, format_type, decimal_places, prefix, suffix)
 
     @staticmethod
     def generate_bar_config(data: Dict[str, Any], customizations: Dict[str, Any] = None) -> Dict:
