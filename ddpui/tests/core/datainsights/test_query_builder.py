@@ -63,8 +63,17 @@ def test_order_by_columns():
     query_builder = AggQueryBuilder()
     cols = [("column1", "asc"), ("column2", "desc")]
     assert isinstance(query_builder.order_cols_by(cols), AggQueryBuilder)
-    assert str(query_builder.order_by_clauses[0]) == "column1 ASC"
-    assert str(query_builder.order_by_clauses[1]) == "column2 DESC"
+    assert str(query_builder.order_by_clauses[0]) == '"column1" ASC'
+    assert str(query_builder.order_by_clauses[1]) == '"column2" DESC'
+
+
+def test_order_by_columns_with_spaces():
+    """Aliases with spaces must be quoted to avoid SQL syntax errors (e.g. on BigQuery)."""
+    query_builder = AggQueryBuilder()
+    cols = [("Total Count", "asc"), ("count_all_My Count", "desc")]
+    query_builder.order_cols_by(cols)
+    assert str(query_builder.order_by_clauses[0]) == '"Total Count" ASC'
+    assert str(query_builder.order_by_clauses[1]) == '"count_all_My Count" DESC'
 
 
 def test_where_clause():

@@ -10,6 +10,7 @@ from sqlalchemy.sql.expression import (
     asc,
     desc,
 )
+from sqlalchemy.sql.elements import quoted_name
 
 
 class AggQueryBuilder:
@@ -90,12 +91,14 @@ class AggQueryBuilder:
         return self
 
     def order_cols_by(self, cols: list[tuple[str, str]]):
-        """Group by the columns"""
+        """Order by the columns. Uses quoted_name to ensure identifiers
+        containing spaces or special characters are properly quoted."""
         for col, order in cols:
+            quoted_col = quoted_name(col, quote=True)
             if order.lower() == "asc":
-                self.order_by_clauses.append(asc(column(col)))
+                self.order_by_clauses.append(asc(column(quoted_col)))
             elif order.lower() == "desc":
-                self.order_by_clauses.append(desc(column(col)))
+                self.order_by_clauses.append(desc(column(quoted_col)))
         return self
 
     def where_clause(self, condition):
