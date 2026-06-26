@@ -863,7 +863,17 @@ def apply_chart_sorting(
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
         else:
-            # It's a dimension column - use as-is
+            # Validate that the column exists as a dimension in the payload
+            # to avoid adding invalid references (e.g. aggregate expressions
+            # like "SUM(col)") as quoted identifiers in ORDER BY
+            valid_dimensions = normalize_dimensions(payload) if payload else []
+            if column_name not in valid_dimensions:
+                logger.warning(
+                    f"Sort column '{column_name}' does not match any metric alias "
+                    f"or dimension column; skipping"
+                )
+                continue
+
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
