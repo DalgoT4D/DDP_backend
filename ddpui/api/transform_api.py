@@ -723,7 +723,7 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
             return convert_canvas_node_to_frontend_format(canvas_node)
 
     except CanvasNode.DoesNotExist:
-        logger.error(f"input node {payload.input_node_uuid} not found")
+        logger.warning(f"input node {payload.input_node_uuid} not found")
         raise HttpError(404, "input node not found")
     except HttpError:
         # let domain errors propagate (422/404 from validation helpers)
@@ -770,7 +770,7 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
             uuid=node_uuid, orgdbt=orgdbt, node_type=CanvasNodeType.OPERATION
         )
     except CanvasNode.DoesNotExist:
-        logger.error(f"Operation node {node_uuid} not found")
+        logger.warning(f"Operation node {node_uuid} not found")
         raise HttpError(404, "operation node not found")
 
     try:
@@ -958,7 +958,7 @@ def post_terminate_operation_node(
         return convert_canvas_node_to_frontend_format(model_node)
 
     except CanvasNode.DoesNotExist:
-        logger.error(f"Operation node {node_uuid} not found")
+        logger.warning(f"Operation node {node_uuid} not found")
         raise HttpError(404, "operation node not found")
     except HttpError:
         # let domain errors propagate (422/404 from validation helpers)
@@ -999,7 +999,7 @@ def delete_canvas_node(request, node_uuid: str):
         logger.info(f"canvas node deleted successfully: {node_uuid}")
         return {"success": 1}
     except CanvasNode.DoesNotExist:
-        logger.error(f"Canvas node {node_uuid} not found")
+        logger.warning(f"Canvas node {node_uuid} not found")
         raise HttpError(404, "canvas node not found")
     except HttpError:
         # let domain errors propagate (422/404 from validation helpers)
@@ -1053,7 +1053,7 @@ def get_canvas_node(request, node_uuid: str):
 
         return return_canvas_node
     except CanvasNode.DoesNotExist:
-        logger.error(f"Canvas node {node_uuid} not found")
+        logger.warning(f"Canvas node {node_uuid} not found")
         raise HttpError(404, "canvas node not found")
     except Exception as e:
         logger.error(f"Failed to fetch canvas node {node_uuid}: {str(e)}")
