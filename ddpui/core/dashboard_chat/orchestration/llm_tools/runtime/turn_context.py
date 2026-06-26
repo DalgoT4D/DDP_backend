@@ -19,6 +19,7 @@ from ddpui.utils.custom_logger import CustomLogger
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
     find_matching_dashboard_chat_table_name,
+    normalize_dashboard_chat_table_name,
 )
 from ddpui.models.org import Org
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
@@ -44,10 +45,19 @@ class DashboardChatTurnContext:
     warnings: list[str] = field(default_factory=list)
     warehouse_tools: DashboardChatWarehouseTools | None = None
     last_sql: str | None = None
+    last_attempted_sql: str | None = None
+    last_attempted_answer_plan: dict[str, Any] | None = None
+    last_sql_error: str | None = None
+    last_sql_error_reason: str | None = None
     last_sql_results: list[dict[str, Any]] | None = None
     last_sql_validation: DashboardChatSqlValidationResult | None = None
+    sql_query_plan: dict[str, Any] | None = None
     semantic_verifier_rejections: int = 0
+    last_sql_rejection_reason: str | None = None
+    last_sql_rejection_message: str | None = None
     repaired_reason_codes: set[str] = field(default_factory=set)
+    distinct_validation_failures: dict[str, int] = field(default_factory=dict)
+    forced_sql_continuations: int = 0
     timing_breakdown: dict[str, Any] = field(default_factory=dict)
     pii_value_map: dict[str, str] = field(default_factory=dict)
     pii_tokens_by_value: dict[str, str] = field(default_factory=dict)
@@ -189,6 +199,38 @@ def has_validated_distinct_value(
 def is_text_type(data_type: str) -> bool:
     """Treat common string-like warehouse types as requiring distinct-value lookup."""
     return any(token in data_type for token in ["char", "text", "string", "varchar"])
+
+
+def metadata_column_is_pii(
+    state: DashboardChatGraphState,
+    *,
+    table_name: str,
+    column_name: str,
+) -> bool:
+    """Return whether effective metadata marks a column as PII."""
+    payload = state.get("metadata_artifact_payload") or {}
+    normalized_table_name = normalize_dashboard_chat_table_name(table_name)
+    normalized_column_name = str(column_name or "").strip().lower()
+    if not normalized_table_name or not normalized_column_name:
+        return False
+
+    for table in payload.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        candidate_table_name = normalize_dashboard_chat_table_name(
+            str(table.get("table_name") or "")
+        )
+        if candidate_table_name != normalized_table_name:
+            continue
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict):
+                continue
+            candidate_column_name = str(
+                column.get("column_name") or column.get("name") or ""
+            ).strip().lower()
+            if candidate_column_name == normalized_column_name:
+                return bool(column.get("pii"))
+    return False
 
 
 def record_validated_distinct_values(

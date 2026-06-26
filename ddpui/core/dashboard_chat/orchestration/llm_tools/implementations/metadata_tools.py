@@ -16,6 +16,7 @@ from ddpui.core.dashboard_chat.metadata.search import (
     search_columns_by_name,
     search_metadata_tables,
     table_lookup,
+    tokenize,
 )
 from ddpui.core.dashboard_chat.orchestration.pii_masking import mask_metadata_artifact_for_llm
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
@@ -161,38 +162,100 @@ def handle_get_column_metadata_tool(
     state: DashboardChatGraphState,
     turn_context,
 ) -> dict[str, Any]:
-    """Return matching columns from the requested tables."""
+    """Return ranked relevant columns from the requested tables."""
     artifact = _load_metadata_artifact_for_tool(state, turn_context)
     if artifact is None:
         return _metadata_unavailable_result(state)
     requested_tables = {str(value) for value in (args.get("tables") or []) if value}
-    column_terms = [
-        str(value).strip().lower() for value in (args.get("column_terms") or []) if value
-    ]
-    matches: list[dict[str, Any]] = []
+    column_terms = [str(value).strip() for value in (args.get("column_terms") or []) if value]
+    wanted_tokens = _expanded_column_search_tokens(column_terms)
+    ranked_matches: list[tuple[int, str, str, dict[str, Any]]] = []
     for table in artifact.tables:
         if requested_tables and table.table_name not in requested_tables:
             continue
         for column in table.columns:
-            haystack = " ".join(
+            haystack_text = " ".join(
                 [
-                    column.name.lower(),
-                    column.description.lower(),
-                    column.semantic_role.lower(),
-                    column.value_semantics.lower(),
+                    column.name,
+                    column.description,
+                    column.semantic_role,
+                    column.value_semantics,
                 ]
             )
-            if column_terms and not all(term in haystack for term in column_terms):
+            haystack_tokens = tokenize(haystack_text)
+            matched_tokens = sorted(wanted_tokens & haystack_tokens)
+            if wanted_tokens and not matched_tokens:
                 continue
-            matches.append(
-                {
-                    "table_name": table.table_name,
-                    "column": column.model_dump(mode="json"),
-                    "table_row_grain": table.row_grain,
-                    "table_type": table.table_type,
-                }
+            score = _score_column_match(
+                column_name=column.name,
+                haystack_tokens=haystack_tokens,
+                matched_tokens=matched_tokens,
+                wanted_tokens=wanted_tokens,
             )
+            if score <= 0:
+                continue
+            ranked_matches.append(
+                (
+                    score,
+                    table.table_name,
+                    column.name,
+                    {
+                        "table_name": table.table_name,
+                        "column": column.model_dump(mode="json"),
+                        "matched_terms": matched_tokens,
+                        "table_row_grain": table.row_grain,
+                        "table_type": table.table_type,
+                    },
+                )
+            )
+    ranked_matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+    matches = [payload for _, _, _, payload in ranked_matches[: int(args.get("limit") or 80)]]
     return {"count": len(matches), "columns": matches}
+
+
+def _expanded_column_search_tokens(column_terms: list[str]) -> set[str]:
+    """Expand broad concept words into common warehouse column-name variants."""
+    tokens = tokenize(" ".join(column_terms))
+    expansions = {
+        "student": {"student", "learner", "child", "pupil"},
+        "name": {"name", "label"},
+        "names": {"name", "label"},
+        "math": {"math", "maths", "mathematics"},
+        "maths": {"math", "maths", "mathematics"},
+        "percent": {"percent", "percentage", "perc", "pct"},
+        "percentage": {"percent", "percentage", "perc", "pct"},
+        "score": {"score", "mastery", "perc", "percentage", "percent"},
+        "grade": {"grade", "class", "standard"},
+        "baseline": {"baseline", "base"},
+        "base": {"baseline", "base"},
+        "midline": {"midline", "mid"},
+        "mid": {"midline", "mid"},
+        "endline": {"endline", "end"},
+        "end": {"endline", "end"},
+        "id": {"id", "identifier"},
+    }
+    expanded = set(tokens)
+    for token in list(tokens):
+        expanded.update(expansions.get(token, set()))
+    return expanded
+
+
+def _score_column_match(
+    *,
+    column_name: str,
+    haystack_tokens: set[str],
+    matched_tokens: list[str],
+    wanted_tokens: set[str],
+) -> int:
+    """Rank column matches without requiring all requested concepts in one column."""
+    name_tokens = tokenize(column_name)
+    score = 2 * len(matched_tokens)
+    score += 4 * len(name_tokens & wanted_tokens)
+    if wanted_tokens and wanted_tokens.issubset(haystack_tokens):
+        score += 8
+    if name_tokens and name_tokens.issubset(wanted_tokens):
+        score += 3
+    return score
 
 
 def handle_search_columns_by_name_tool(

@@ -259,8 +259,91 @@ def join_paths_for_tables(
 ) -> list[DashboardChatMetadataJoinPath]:
     """Return join paths touching any of the provided tables."""
     requested = set(table_names)
-    return [
+    existing_paths = [
         join_path
         for join_path in artifact.join_paths
         if join_path.source_table in requested or join_path.target_table in requested
     ]
+    return _with_inferred_natural_key_join_paths(
+        artifact=artifact,
+        requested=requested,
+        existing_paths=existing_paths,
+    )
+
+
+def _with_inferred_natural_key_join_paths(
+    *,
+    artifact: DashboardChatMetadataArtifactPayload,
+    requested: set[str],
+    existing_paths: list[DashboardChatMetadataJoinPath],
+) -> list[DashboardChatMetadataJoinPath]:
+    """Add obvious natural-key joins for older artifacts missing derived join paths."""
+    if not requested:
+        return existing_paths
+
+    paths = list(existing_paths)
+    existing_keys = {
+        (
+            path.source_table,
+            path.target_table,
+            tuple(path.via_columns),
+        )
+        for path in paths
+    }
+    tables = artifact.tables
+    for source in tables:
+        if source.table_name not in requested:
+            continue
+        source_keys = _join_key_candidates(source)
+        if not source_keys:
+            continue
+        for target in tables:
+            if source.table_name == target.table_name:
+                continue
+            target_keys = _join_key_candidates(target)
+            shared_keys = sorted(source_keys & target_keys)
+            if not shared_keys:
+                continue
+            path_key = (source.table_name, target.table_name, tuple(shared_keys[:3]))
+            if path_key in existing_keys:
+                continue
+            existing_keys.add(path_key)
+            paths.append(
+                DashboardChatMetadataJoinPath(
+                    source_table=source.table_name,
+                    target_table=target.table_name,
+                    via_columns=shared_keys[:3],
+                    cardinality=_infer_join_cardinality_from_statistics(source, target, shared_keys[0]),
+                    preferred=True,
+                    dashboard_relevant=True,
+                    required_for_entity_names=any("name" in column.column_name.lower() for column in target.columns),
+                    required_for_metrics=any(column.semantic_role == "metric" for column in target.columns),
+                )
+            )
+    return paths
+
+
+def _join_key_candidates(table: DashboardChatMetadataTable) -> set[str]:
+    return set(table.candidate_unique_id_columns) | set(table.natural_keys)
+
+
+def _infer_join_cardinality_from_statistics(
+    source: DashboardChatMetadataTable,
+    target: DashboardChatMetadataTable,
+    shared_column: str,
+) -> str:
+    source_rows = source.total_row_count
+    target_rows = target.total_row_count
+    source_distinct = source.statistics.distinct_counts.get(shared_column)
+    target_distinct = target.statistics.distinct_counts.get(shared_column)
+    if None in {source_rows, target_rows, source_distinct, target_distinct}:
+        return "unknown"
+    if source_distinct == source_rows and target_distinct == target_rows:
+        return "one_to_one"
+    if source_distinct < source_rows and target_distinct == target_rows:
+        return "many_to_one"
+    if source_distinct == source_rows and target_distinct < target_rows:
+        return "one_to_many"
+    if source_distinct < source_rows and target_distinct < target_rows:
+        return "many_to_many"
+    return "unknown"

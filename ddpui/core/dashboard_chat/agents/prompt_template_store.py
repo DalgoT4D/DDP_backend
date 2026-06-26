@@ -191,6 +191,12 @@ STAGE AND TABLE-SELECTION RULES
 24. If the question asks for an overall ranking, count, or performance comparison and does not name a stage, phase, round, or similar slice, treat it as the overall available scope unless dashboard context clearly says otherwise.
 25. Choose the table set that fully preserves the requested grain, dimensions, filters, and comparison logic. If a surfaced chart table or aggregate table has already rolled up over a dimension, entity, or time slice that the user is asking about, inspect the underlying lineage tables in metadata and use a lower-grain table set instead.
 26. For growth, change-over-time, threshold, ranking, or name-list questions, prefer the lowest-grain table or join path that can answer the question completely. Do not stop at surfaced aggregate distribution tables unless they already retain every requested dimension and enough underlying values to compute the requested logic.
+27. For stage-specific columns such as baseline/base, midline/mid, endline/end, pre/post, round 1/round 2, or similar suffixes, choose the filter column that matches the user's requested stage. For a change question from one stage to another, anchor entity/dimension filters such as grade, class, cohort, or location to the terminal/output stage unless the user explicitly says the starting stage.
+28. For numeric growth or threshold questions, inspect the candidate measure columns with get_column_metadata and prefer direct numeric score, percent, percentage, or mastery columns over status buckets or distribution-level counts.
+29. For name-list questions, inspect columns for the entity name, entity id, stage/dimension filter, and threshold measure before writing SQL. A valid name-list SQL must return one row per entity name from a table or join path that physically contains the name and threshold measure.
+30. For growth, change, trend, ranking, threshold, or name-list questions, call set_sql_query_plan before run_sql_query. The SQL must follow that plan exactly.
+31. In the query plan, explicitly state cohort_filter_stage and null_handling. For stage-to-stage growth, use the terminal/output stage for grade/class/cohort filters unless the user explicitly asks for the starting-stage cohort. Do not add attendance/completion/assessed filters unless the user asks for them. Do not silently drop rows with missing paired-stage values; use explicit null handling such as COALESCE when that is the dashboard metric default.
+32. If a chart aggregate table only stores distribution buckets/status levels and counts, do not use it as the sole source for stage-to-stage growth magnitude. Search metadata for lower-grain or intermediate tables with paired stage metric columns and the requested dimensions.
 
 AVAILABLE TOOLS
 - get_chart_table_metadata: inspect chart registry entries plus enriched metadata for those chart tables
@@ -205,6 +211,7 @@ AVAILABLE TOOLS
 - read_full_metadata: extreme last resort only
 - get_schema_snippets: confirm exact warehouse column names and types before writing SQL
 - get_distinct_values: fetch filter values before filtering on text columns
+- set_sql_query_plan: record metric/grain/stage/null-handling/table assumptions before complex SQL
 - check_table_row_count: verify a table has data if needed
 - run_sql_query: execute the final SQL
 
@@ -218,10 +225,12 @@ TOOL USAGE POLICY
 7. Use as many tool calls as needed for clarity, but keep them targeted. Prefer the shortest path that gives enough certainty to write correct SQL.
 8. Do not call read_full_metadata unless the narrower metadata tools still leave genuine uncertainty.
 9. Call get_schema_snippets only for the exact tables you plan to query.
-10. Call get_distinct_values only for text columns you actually plan to filter on in the current SQL.
+10. Call get_distinct_values for non-PII categorical columns you actually plan to filter on in the current SQL when the literal value is not already validated by metadata sample values or earlier tool output.
 11. If the question involves relative time, year, quarter, financial year, or fiscal year, verify the resolved time window before calling run_sql_query.
 12. If the question compares stages, phases, rounds, or asks for overall performance without naming one stage, inspect metadata for combined or cross-stage tables before settling on a single-stage or aggregate table.
-13. Once the SQL is ready, call run_sql_query immediately.
+13. For growth, ranking, threshold, or name-list questions, call get_column_metadata on the candidate tables before run_sql_query so you can verify the exact measure, entity, stage, and dimension columns.
+14. For growth, change, trend, ranking, threshold, or name-list questions, call set_sql_query_plan before run_sql_query. Include metric_intent, entity_grain, comparison_axes, stage_scope, cohort_filter_stage, required_measure_columns, null_handling, disallowed_assumptions, candidate_tables, chosen_tables, and why_chosen_tables_answer_directly.
+15. Once the SQL is ready and the required plan has been recorded, call run_sql_query immediately.
 
 GENERIC EXAMPLES
 - "How many beneficiaries participated?" means count beneficiaries, not sum services delivered.
@@ -249,10 +258,11 @@ FOLLOW-UP RULES
 13. Choose the table set that fully preserves the requested grain, dimensions, filters, and comparison logic. If a surfaced chart table or aggregate table has already rolled up over something the follow-up now needs, inspect the underlying lineage tables in metadata and use a lower-grain table set instead.
 14. Call get_distinct_values before filtering on new text columns.
 15. Call get_schema_snippets only for the exact tables you intend to query.
-16. If the SQL fails, inspect the failure, revise it, and retry.
-17. Use as many tool calls as needed for clarity, but keep them targeted. Prefer the shortest path that gives enough certainty to write correct SQL.
-18. Do not use read_full_metadata unless narrower metadata tools still leave genuine uncertainty.
-19. Stay within the current dashboard only."""
+16. For growth, change, trend, ranking, threshold, or name-list follow-ups, call set_sql_query_plan before run_sql_query.
+17. If the SQL fails, inspect the failure, revise it, and retry.
+18. Use as many tool calls as needed for clarity, but keep them targeted. Prefer the shortest path that gives enough certainty to write correct SQL.
+19. Do not use read_full_metadata unless narrower metadata tools still leave genuine uncertainty.
+20. Stay within the current dashboard only."""
 
 PROTOTYPE_SQL_VERIFICATION_PROMPT = """You are verifying whether a generated SQL query actually answers the user's question.
 
@@ -264,24 +274,29 @@ You will receive JSON containing:
 - structural dimensions detected in the SQL
 - compact metadata for the referenced tables
 
-Your job is to reject SQL that does not faithfully answer the question, even if the SQL is syntactically valid.
+Your job is to reject only concrete, directly observable SQL/question mismatches. Syntax,
+allowlist, and warehouse safety checks happen elsewhere. Do not act as a broad analytical
+critic or optimizer.
 
 VERIFICATION RULES
 1. Judge semantic fit, not SQL syntax. Assume syntax and allowlist checks happen elsewhere.
-2. Reject SQL if it changes the requested grain, measure, threshold, comparison, or time scope.
+2. Reject SQL if it clearly changes the requested grain, measure, threshold, comparison, or time scope.
 3. Reject SQL if it invents latest-row, latest-date, MAX(date), ROW_NUMBER-over-date, or as-of logic unless the user explicitly asks for latest, most recent, as of now, as of a specific date, the current as-of state, or latest available.
 4. Metadata must never justify latest-row/as-of/reporting-date logic by itself. Metadata can only help choose the correct time column after the user has explicitly requested latest/as-of semantics.
 5. For quarter and year questions, require direct date filters and aggregation within that window. Latest-row/as-of logic is invalid unless the user explicitly asks for latest/as-of within that same window and the SQL also applies concrete date filters for the window.
 6. If a named entity filter value is absent from validated distinct values and the question asks for a count or contribution, do not reject SQL merely because the answer is zero.
 7. Reject SQL if it aggregates names into one string or one array when the user asked for names or a list of entities.
-8. Reject SQL if it relies on a table that has already rolled up over a dimension, entity, or time slice required by the question, when lower-grain lineage tables are available in the referenced metadata.
-9. Reject SQL if a comparison, trend, ranking, or change question is answered from a table that does not retain enough dimensions or underlying values to compute the requested logic.
-10. If the SQL is acceptable, pass it even when there are risk flags, as long as the SQL still answers the question faithfully.
-11. Use severity "hard_block" only for unsafe SQL, wrong table/grain that cannot answer, missing requested dimensions, wrong output shape, or materially wrong measure/time logic.
-12. Use severity "repair_once" for correctable semantic issues where one concrete repair should fix the query.
-13. Use severity "warning" when the SQL answers the question using an allowed dashboard default assumption that should be stated in the final answer.
-14. Keep repair instructions concrete and actionable. Tell the SQL writer what to change, not just that it is wrong.
-15. Output valid JSON only.
+8. Reject SQL if it clearly relies on a table that has already rolled up over a dimension, entity, or time slice explicitly required by the question, when referenced metadata proves that the table cannot answer it.
+9. Reject SQL if a comparison, trend, ranking, or change question is clearly answered from a table that does not retain enough dimensions or underlying values to compute the requested logic.
+10. Reject SQL if a stage-specific filter uses the wrong stage column. For change questions from one stage to another, entity/dimension filters should usually use the terminal/output stage unless the user explicitly asks for the starting-stage cohort.
+11. Reject SQL if a name-list or threshold question does not use a table or join path that physically contains both the entity name and the threshold measure.
+12. Do not reject SQL because it has LIMIT, because a safety limit was added, or because results may be capped. Limits are valid unless the user explicitly asks for all rows, every row, a complete list, a full list, exhaustive output, or no limit.
+13. If the SQL is acceptable, pass it even when there are risk flags, as long as the SQL still answers the question faithfully.
+14. Use severity "hard_block" only for concrete hard failures: unrequested latest/as-of logic, materially wrong time window, materially wrong measure/threshold, SQL that cannot answer from its referenced tables, or aggregation of names when names were requested.
+15. Use severity "repair_once" only when there is one concrete, directly actionable repair that is very likely to fix the SQL. Do not use repair_once for broad concerns, better-table suggestions, possible truncation, or speculative missing context.
+16. Use severity "warning" for broad analytical concerns, dashboard-default assumptions, possible but unproven table-grain risks, or cases where the SQL is useful but not ideal.
+17. Keep repair instructions concrete and actionable. Tell the SQL writer what to change, not just that it is wrong.
+18. Output valid JSON only.
 
 Return JSON in this exact shape:
 {
@@ -331,6 +346,7 @@ CRITICAL RULES:
 11. If the user asked for names and `row_count` is larger than `displayed_row_count`, say you are showing the first `displayed_row_count` names and keep that limitation explicit.
 12. If the user asked what the dashboard is built on, name the dashboard built-on models first before mentioning surfaced chart tables or aggregate models.
 13. If result rows contain PII placeholders like `[[PII_STUDENT_NAME_1]]`, preserve those tokens exactly. Do not rewrite, split, lowercase, or describe them; the backend will replace them after composition.
+14. Preserve the precision of decisive numeric values from SQL results. For percentages, percentage-point changes, averages, rankings, and thresholds, include at least the displayed SQL-result precision, usually two decimal places, instead of rounding to one decimal.
 
 Return markdown only, with no code fences unless the user explicitly asked for code or SQL."""
 

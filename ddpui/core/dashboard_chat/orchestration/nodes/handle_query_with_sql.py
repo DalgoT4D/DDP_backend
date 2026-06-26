@@ -45,10 +45,15 @@ def handle_query_with_sql_node(
         "tool_calls": execution_result["tool_calls"],
         "draft_answer_text": execution_result["answer_text"],
         "sql": execution_result["sql"],
+        "attempted_sql": execution_result["attempted_sql"],
+        "last_sql_error": execution_result["last_sql_error"],
+        "last_sql_error_reason": execution_result["last_sql_error_reason"],
+        "attempted_answer_plan": execution_result["attempted_answer_plan"],
         "sql_validation": sql_validation.model_dump(mode="json")
         if sql_validation is not None
         else None,
         "sql_results": execution_result["sql_results"],
+        "sql_rejection": execution_result.get("sql_rejection"),
         "pii_value_map": execution_result["pii_value_map"],
         "warnings": execution_result["warnings"],
         "timing_breakdown": merge_tool_loop_timing(state, execution_result),

@@ -45,6 +45,9 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     DashboardChatTurnContext,
     seed_validated_distinct_values_from_previous_sql,
 )
+from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.tool_loop import (
+    execute_tool_loop,
+)
 from ddpui.core.dashboard_chat.contracts.conversation_contracts import (
     DashboardChatConversationContext,
     DashboardChatConversationMessage,
@@ -327,6 +330,20 @@ class RepairOnceSqlVerifierLlm:
         )
 
 
+class LimitOnlySqlVerifierLlm:
+    """LLM verifier stub that incorrectly treats result limits as semantic failure."""
+
+    def verify_sql_against_question(self, **kwargs):
+        return DashboardChatSqlVerificationResult(
+            is_valid=False,
+            severity="repair_once",
+            reason_code="results_truncated_by_limit",
+            reasoning="Uses LIMIT 200, potentially excluding qualifying names.",
+            issues=["Uses LIMIT 200, potentially excluding qualifying names."],
+            repair_instructions=["Remove the LIMIT."],
+        )
+
+
 class FollowUpCorrectionLlm(PrototypeLlmBase):
     """LLM stub that corrects itself after the runtime rejects the wrong follow-up table/column choice."""
 
@@ -469,6 +486,22 @@ class FinalAnswerComposerLlm(PrototypeLlmBase):
             }
         )
         return "## District-wise pass rates\nSee the table below for the breakdown."
+
+
+class PrematureInsufficientDataLlm(PrototypeLlmBase):
+    """LLM stub that tries to give up before attempting SQL."""
+
+    def __init__(self):
+        super().__init__()
+        self.messages_seen = []
+
+    def run_tool_loop_turn(self, *, messages, tools, tool_choice, operation):
+        self.messages_seen.append(list(messages))
+        if self.turn == 0:
+            self.turn += 1
+            return {"content": "I couldn't find enough data to answer this.", "tool_calls": []}
+        self.turn += 1
+        return {"content": "I will use SQL instead.", "tool_calls": []}
 
 
 @pytest.fixture
@@ -881,6 +914,41 @@ def test_run_sql_keeps_join_tables_intact(primary_dashboard):
     assert "analytics.district_funding_efficiency_quarterly d" in result["sql_used"]
 
 
+def test_query_with_sql_retries_premature_insufficient_data_answer(primary_dashboard):
+    llm = PrematureInsufficientDataLlm()
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        intent_decision=DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+            confidence=0.9,
+            reason="Needs SQL",
+            force_tool_usage=False,
+        ),
+        user_query="What is the growth from baseline to endline?",
+    )
+
+    result = execute_tool_loop(
+        llm,
+        lambda org: FakeWarehouseTools(),
+        DashboardChatRuntimeConfig(),
+        [],
+        state=state,
+        messages=[{"role": "user", "content": state["user_query"]}],
+        max_turns=3,
+    )
+
+    assert (
+        result["answer_text"]
+        == "I could not complete the SQL-backed answer because no executable SQL query was produced within the tool loop."
+    )
+    assert llm.turn == 3
+    assert any(
+        "requires a SQL-backed answer" in message["content"]
+        for message in llm.messages_seen[1]
+        if message["role"] == "user"
+    )
+
+
 def test_run_sql_executes_verifier_warning_with_warning(primary_dashboard):
     """Allowed dashboard-default assumptions should execute instead of starting a repair loop."""
     fake_warehouse = FakeWarehouseTools()
@@ -964,6 +1032,57 @@ def test_run_sql_caps_repeated_repair_once_verifier_rejection(primary_dashboard)
     assert second_result["success"] is True
     assert fake_warehouse.executed_sql
     assert any("same repair more than once" in warning for warning in turn_context.warnings)
+
+
+def test_run_sql_allows_limit_only_verifier_rejection_for_non_exhaustive_question(
+    primary_dashboard,
+):
+    """Verifier limit objections should not block normal bounded name-list queries."""
+    fake_warehouse = FakeWarehouseTools()
+    state = build_runtime_state(
+        org=primary_dashboard.org,
+        allowlist=DashboardChatAllowlist(allowed_tables={"analytics.program_reach"}),
+        intent_decision=DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+            confidence=0.9,
+            reason="Name list question",
+            force_tool_usage=True,
+        ),
+        user_query="Give me the names of participating programs.",
+    )
+    turn_context = build_turn_context(warehouse_tools=fake_warehouse)
+    turn_context.sql_query_plan = {
+        "metric_intent": "program names",
+        "entity_grain": "program",
+        "stage_scope": "not_applicable",
+        "cohort_filter_stage": "not_applicable",
+        "required_measure_columns": ["program_name"],
+        "null_handling": "not_applicable",
+        "chosen_tables": ["analytics.program_reach"],
+        "why_chosen_tables_answer_directly": "Contains one row per program.",
+    }
+
+    result = handle_run_sql_query_tool(
+        LimitOnlySqlVerifierLlm(),
+        lambda org: fake_warehouse,
+        DashboardChatRuntimeConfig(
+            retrieval_limit=6,
+            max_query_rows=200,
+            max_distinct_values=20,
+            max_schema_tables=4,
+        ),
+        {"sql": "SELECT program_name FROM analytics.program_reach ORDER BY program_name"},
+        state,
+        turn_context,
+    )
+
+    assert result["success"] is True
+    assert fake_warehouse.executed_sql
+    assert fake_warehouse.executed_sql[0].endswith("LIMIT 200")
+    assert any(
+        "Verifier raised a limit/truncation concern" in warning
+        for warning in turn_context.warnings
+    )
 
 
 def test_missing_distinct_allows_absent_value_after_exhaustive_distinct_lookup(primary_dashboard):
@@ -1455,6 +1574,41 @@ def test_compose_final_answer_text_uses_llm_and_normalizes_rate_values():
             "avg_numeracy_pass_rate": "0%",
         },
     ]
+
+
+def test_compose_final_answer_text_does_not_convert_rejected_sql_to_no_data_answer():
+    """Rejected SQL without results should not be summarized as if the dataset had no rows."""
+    llm = FinalAnswerComposerLlm()
+    state = build_runtime_state(
+        user_query="List students below 20 percent in endline maths",
+        intent_decision=DashboardChatIntentDecision(
+            intent=DashboardChatIntent.QUERY_WITH_SQL,
+            confidence=0.9,
+            reason="Needs SQL",
+            force_tool_usage=True,
+        ),
+    )
+
+    answer = compose_final_answer_text(
+        llm,
+        state,
+        {
+            "answer_text": "I couldn't produce a validated SQL query for this question.",
+            "retrieved_documents": [],
+            "sql": None,
+            "sql_results": None,
+            "sql_rejection": {
+                "count": 1,
+                "reason": "sql_question_mismatch",
+                "message": "Wrong output shape.",
+            },
+            "warnings": [],
+        },
+        response_format="text",
+    )
+
+    assert "couldn't produce a validated SQL query" in answer
+    assert llm.compose_calls == []
 
 
 def test_determine_response_format_prefers_table_for_grouped_breakdowns():

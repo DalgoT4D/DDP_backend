@@ -93,7 +93,10 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
         "function": {
             "name": "get_column_metadata",
             "description": (
-                "Inspect columns within specific tables when you already know the likely table set."
+                "Inspect ranked relevant columns within specific tables when you already know the "
+                "likely table set. Pass broad concept terms such as entity, name, grade, stage, "
+                "measure, threshold, score, percentage, or topic; the tool returns the best "
+                "matching columns rather than requiring one column to match every term."
             ),
             "parameters": {
                 "type": "object",
@@ -106,6 +109,7 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
                         "type": "array",
                         "items": {"type": "string"},
                     },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 120, "default": 80},
                 },
                 "required": ["tables"],
             },
@@ -259,6 +263,42 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
                 },
                 "required": ["table", "column"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_sql_query_plan",
+            "description": (
+                "Record the intended SQL metric, grain, stage scope, cohort filters, null handling, "
+                "and chosen tables before executing complex growth, ranking, threshold, or name-list SQL."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "metric_intent": {"type": "string"},
+                    "entity_grain": {"type": "string"},
+                    "comparison_axes": {"type": "array", "items": {"type": "string"}},
+                    "stage_scope": {"type": "string"},
+                    "cohort_filter_stage": {"type": "string"},
+                    "required_measure_columns": {"type": "array", "items": {"type": "string"}},
+                    "null_handling": {"type": "string"},
+                    "disallowed_assumptions": {"type": "array", "items": {"type": "string"}},
+                    "candidate_tables": {"type": "array", "items": {"type": "string"}},
+                    "chosen_tables": {"type": "array", "items": {"type": "string"}},
+                    "why_chosen_tables_answer_directly": {"type": "string"},
+                },
+                "required": [
+                    "metric_intent",
+                    "entity_grain",
+                    "stage_scope",
+                    "cohort_filter_stage",
+                    "required_measure_columns",
+                    "null_handling",
+                    "chosen_tables",
+                    "why_chosen_tables_answer_directly",
+                ],
             },
         },
     },

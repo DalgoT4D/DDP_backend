@@ -13,6 +13,7 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     DashboardChatTurnContext,
     get_or_load_schema_snippets,
     get_turn_warehouse_tools,
+    metadata_column_is_pii,
     record_validated_distinct_values,
 )
 from ddpui.core.dashboard_chat.orchestration.pii_masking import mask_distinct_values_for_llm
@@ -182,6 +183,21 @@ def handle_get_distinct_values_tool(
             "message": (
                 f"Column {column_name} is not available on {table_name}. "
                 "Use a table that contains it, inspect that schema, and retry the lookup."
+            ),
+        }
+
+    if metadata_column_is_pii(
+        state,
+        table_name=table_name,
+        column_name=column_name,
+    ):
+        return {
+            "error": "pii_distinct_values_unavailable",
+            "table": table_name,
+            "column": column_name,
+            "message": (
+                "Distinct values are not available for columns marked as PII. "
+                "Write the SQL without fetching or exposing the distinct values."
             ),
         }
 

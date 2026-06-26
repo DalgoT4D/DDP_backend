@@ -58,6 +58,7 @@ def compose_response_node(
         "retrieved_documents": retrieved_documents,
         "sql": state.get("sql"),
         "sql_results": state.get("sql_results"),
+        "sql_rejection": state.get("sql_rejection"),
         "pii_value_map": state.get("pii_value_map") or {},
         "warnings": list(state.get("warnings") or []),
         "tool_calls": list(state.get("tool_calls") or []),
