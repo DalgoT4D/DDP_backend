@@ -484,13 +484,14 @@ class DashboardChatMetadataArtifactBuilder:
     ) -> list[DashboardChatMetadataJoinPath]:
         joins: list[DashboardChatMetadataJoinPath] = []
         for source in tables:
-            source_ids = set(source.candidate_unique_id_columns)
+            source_ids = set(source.candidate_unique_id_columns) | set(source.natural_keys)
             if not source_ids:
                 continue
             for target in tables:
                 if source.table_name == target.table_name:
                     continue
-                shared_ids = sorted(source_ids & set(target.candidate_unique_id_columns))
+                target_ids = set(target.candidate_unique_id_columns) | set(target.natural_keys)
+                shared_ids = sorted(source_ids & target_ids)
                 if not shared_ids:
                     continue
                 cardinality = self._infer_join_cardinality(source, target, shared_ids[0])

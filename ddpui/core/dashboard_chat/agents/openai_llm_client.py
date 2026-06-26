@@ -250,7 +250,7 @@ class OpenAIDashboardChatLlmClient:
                     ensure_ascii=False,
                 ),
                 model_override=self.model,
-                reasoning_effort=self.reasoning_effort,
+                reasoning_effort="low" if self.model.startswith("gpt-5") else None,
             )
             return DashboardChatSqlVerificationResult(
                 is_valid=bool(result.get("is_valid")),

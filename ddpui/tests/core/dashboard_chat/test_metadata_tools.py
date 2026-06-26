@@ -9,9 +9,12 @@ from ddpui.core.dashboard_chat.metadata.search import (
     search_columns_by_name,
     search_metadata_tables,
 )
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations import metadata_tools
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.metadata_tools import (
-    _resolve_time_scope,
+    handle_get_column_metadata_tool,
+    handle_get_join_paths_tool,
 )
+from ddpui.core.dashboard_chat.orchestration.time_scope import resolve_time_scope
 
 
 def _artifact() -> DashboardChatMetadataArtifactPayload:
@@ -114,8 +117,84 @@ def test_search_metadata_tables_prefers_fact_table_for_metric_question():
     assert matches[0]["table_name"] == "dev_intermediate.student_scores"
 
 
+def test_get_column_metadata_returns_ranked_matches_for_broad_concepts(monkeypatch):
+    artifact = _artifact()
+    monkeypatch.setattr(
+        metadata_tools,
+        "mask_metadata_artifact_for_llm",
+        lambda *, state, turn_context, artifact: artifact,
+    )
+
+    result = handle_get_column_metadata_tool(
+        {
+            "tables": [
+                "dev_intermediate.student_scores",
+                "dev_intermediate.student_dim",
+            ],
+            "column_terms": ["student", "name", "math", "percent", "score", "endline"],
+        },
+        {"metadata_artifact_payload": artifact.model_dump(mode="json")},
+        turn_context=None,
+    )
+
+    columns = {
+        f"{item['table_name']}.{item['column']['column_name']}"
+        for item in result["columns"]
+    }
+    assert "dev_intermediate.student_dim.student_name_end" in columns
+    assert "dev_intermediate.student_scores.math_mastery_end" in columns
+    assert result["count"] >= 2
+
+
+def test_get_join_paths_infers_natural_key_paths_for_existing_artifacts(monkeypatch):
+    artifact = DashboardChatMetadataArtifactPayload(
+        dashboard_id=1,
+        org_id=1,
+        tables=[
+            DashboardChatMetadataTable(
+                table_name="dev_intermediate.student_scores",
+                statistics={"row_count": 120, "distinct_counts": {"student_id": 100}},
+                grain={"natural_keys": ["student_id"]},
+                columns=[
+                    {"column_name": "student_id", "semantic_role": "identifier"},
+                    {"column_name": "math_mastery_end", "semantic_role": "metric"},
+                ],
+            ),
+            DashboardChatMetadataTable(
+                table_name="dev_intermediate.student_dim",
+                statistics={"row_count": 100, "distinct_counts": {"student_id": 100}},
+                grain={"natural_keys": ["student_id"]},
+                columns=[
+                    {"column_name": "student_id", "semantic_role": "identifier"},
+                    {"column_name": "student_name_end", "semantic_role": "label"},
+                ],
+            ),
+        ],
+        join_paths=[],
+    )
+    monkeypatch.setattr(
+        metadata_tools,
+        "mask_metadata_artifact_for_llm",
+        lambda *, state, turn_context, artifact: artifact,
+    )
+
+    result = handle_get_join_paths_tool(
+        {
+            "tables": [
+                "dev_intermediate.student_scores",
+                "dev_intermediate.student_dim",
+            ]
+        },
+        {"metadata_artifact_payload": artifact.model_dump(mode="json")},
+        turn_context=None,
+    )
+
+    assert result["count"] >= 1
+    assert result["joins"][0]["via_columns"] == ["student_id"]
+
+
 def test_resolve_time_scope_maps_april_fiscal_quarters():
-    resolved = _resolve_time_scope(
+    resolved = resolve_time_scope(
         "Compare Q3-Q4 25-26 results",
         current_date=__import__("datetime").date(2026, 5, 18),
     )

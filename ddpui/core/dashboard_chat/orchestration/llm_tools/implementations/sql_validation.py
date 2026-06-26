@@ -31,6 +31,7 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     get_or_load_schema_snippets,
     has_validated_distinct_value,
     is_text_type,
+    metadata_column_is_pii,
 )
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
@@ -183,6 +184,12 @@ def find_missing_distinct_filters(
             continue
         data_type = column_types.get(resolved_table, {}).get(normalized_column, "")
         if not data_type or not is_text_type(data_type):
+            continue
+        if metadata_column_is_pii(
+            state,
+            table_name=resolved_table,
+            column_name=normalized_column,
+        ):
             continue
         if not has_validated_distinct_value(
             turn_context.validated_distinct_values,

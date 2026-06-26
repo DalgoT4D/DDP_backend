@@ -143,9 +143,8 @@ def test_default_sql_verification_prompt_rejects_latest_row_and_name_aggregation
     assert "require direct date filters and aggregation within that window" in prompt
     assert 'Use severity "warning"' in prompt
     assert "Reject SQL if it aggregates names into one string" in prompt
-    assert (
-        "Reject SQL if it relies on a table that has already rolled up over a dimension" in prompt
-    )
+    assert "Do not reject SQL because it has LIMIT" in prompt
+    assert "referenced metadata proves that the table cannot answer it" in prompt
 
 
 def test_prompt_store_uses_db_override_after_save():

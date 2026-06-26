@@ -12,6 +12,7 @@ FISCAL_YEAR_PATTERN = re.compile(
     r"(20\d{2}|\d{2})\s*[-/]\s*(20\d{2}|\d{2})\b",
     re.IGNORECASE,
 )
+YEAR_RANGE_PATTERN = re.compile(r"\b(20\d{2}|\d{2})\s*[-/]\s*(20\d{2}|\d{2})\b")
 CALENDAR_YEAR_PATTERN = re.compile(
     r"\b(?:calendar\s+year|in|during|for)\s+(20\d{2})\b",
     re.IGNORECASE,
@@ -29,8 +30,11 @@ def resolve_time_scope(question_text: str, current_date: date) -> list[dict[str,
     if quarter_match:
         start_quarter = int(quarter_match.group(1))
         end_quarter = int(quarter_match.group(2) or quarter_match.group(1))
-        if fiscal_year_match or FISCAL_CONTEXT_PATTERN.search(lowered):
+        year_range_match = YEAR_RANGE_PATTERN.search(lowered[quarter_match.end() :])
+        if fiscal_year_match or year_range_match or FISCAL_CONTEXT_PATTERN.search(lowered):
             fiscal_year_start = _infer_fiscal_year_start(fiscal_year_match, current_date)
+            if fiscal_year_match is None and year_range_match is not None:
+                fiscal_year_start = _normalize_year_token(year_range_match.group(1))
             for quarter_number in range(start_quarter, end_quarter + 1):
                 start_date, end_date = _fiscal_quarter_dates(fiscal_year_start, quarter_number)
                 ranges.append(
@@ -174,6 +178,13 @@ def _infer_fiscal_year_start(
     if start_year < 100:
         start_year += 2000
     return start_year
+
+
+def _normalize_year_token(year_token: str) -> int:
+    year = int(year_token)
+    if year < 100:
+        year += 2000
+    return year
 
 
 def _calendar_quarter_dates(year: int, quarter_number: int) -> tuple[date, date]:

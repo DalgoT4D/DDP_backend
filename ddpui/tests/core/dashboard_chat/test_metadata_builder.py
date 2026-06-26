@@ -89,3 +89,44 @@ def test_rebuild_derived_indexes_uses_candidate_unique_id_columns_for_join_paths
 
     assert payload.join_paths[0].via_columns == ["student_id"]
     assert payload.join_paths[0].cardinality == "many_to_one"
+
+
+def test_rebuild_derived_indexes_uses_natural_keys_for_join_paths():
+    builder = DashboardChatMetadataArtifactBuilder()
+    payload = builder.rebuild_derived_indexes(
+        DashboardChatMetadataArtifactPayload(
+            dashboard_id=1,
+            org_id=1,
+            tables=[
+                DashboardChatMetadataTable(
+                    table_name="analytics.student_scores",
+                    statistics={
+                        "row_count": 120,
+                        "column_count": 2,
+                        "distinct_counts": {"student_id": 100},
+                    },
+                    grain={"natural_keys": ["student_id"]},
+                    columns=[
+                        {"column_name": "student_id", "semantic_role": "identifier"},
+                        {"column_name": "math_mastery", "semantic_role": "metric"},
+                    ],
+                ),
+                DashboardChatMetadataTable(
+                    table_name="analytics.student_dim",
+                    statistics={
+                        "row_count": 100,
+                        "column_count": 2,
+                        "distinct_counts": {"student_id": 100},
+                    },
+                    grain={"natural_keys": ["student_id"]},
+                    columns=[
+                        {"column_name": "student_id", "semantic_role": "identifier"},
+                        {"column_name": "student_name", "semantic_role": "label"},
+                    ],
+                ),
+            ],
+        )
+    )
+
+    assert payload.join_paths
+    assert payload.join_paths[0].via_columns == ["student_id"]

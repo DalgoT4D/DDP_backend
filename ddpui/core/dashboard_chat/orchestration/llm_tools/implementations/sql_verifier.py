@@ -49,6 +49,14 @@ NAME_LIST_PATTERN = re.compile(
     r"\b(give me the names?|show me the names?|list(?:\s+the)?\s+names?|names?\s+of|who are)\b",
     re.IGNORECASE,
 )
+EXHAUSTIVE_OUTPUT_REQUEST_PATTERN = re.compile(
+    r"\b(all|every|complete|full|entire|exhaustive|no\s+limit|without\s+limit(?:ing)?)\b",
+    re.IGNORECASE,
+)
+LIMIT_REJECTION_PATTERN = re.compile(
+    r"\b(limit|truncat(?:e|ed|ion)|first\s+\d+|top\s+\d+|omit(?:s|ted)?\s+rows?)\b",
+    re.IGNORECASE,
+)
 
 
 def verify_sql_against_question(
@@ -80,7 +88,7 @@ def verify_sql_against_question(
         return deterministic_result
 
     intent = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {}).intent
-    return llm_client.verify_sql_against_question(
+    verification = llm_client.verify_sql_against_question(
         user_query=state["user_query"],
         intent=intent,
         sql=sql,
@@ -88,6 +96,7 @@ def verify_sql_against_question(
         referenced_tables=referenced_tables,
         structural_dimensions=sorted(structural_dimensions_from_sql(sql)),
     )
+    return _normalize_verification_result(verification, user_query=state["user_query"])
 
 
 def build_sql_risk_flags(
@@ -171,6 +180,53 @@ def _deterministic_temporal_verification(
         )
 
     return None
+
+
+def _normalize_verification_result(
+    verification: DashboardChatSqlVerificationResult,
+    *,
+    user_query: str,
+) -> DashboardChatSqlVerificationResult:
+    """Keep semantic verification narrow and prevent limit-only false rejections."""
+    if verification.is_valid:
+        return verification
+    if EXHAUSTIVE_OUTPUT_REQUEST_PATTERN.search(user_query) or not _is_limit_only_rejection(
+        verification
+    ):
+        return verification
+    return DashboardChatSqlVerificationResult(
+        is_valid=True,
+        severity="warning",
+        reason_code=verification.reason_code or "limit_allowed",
+        reasoning=(
+            "Verifier raised a limit/truncation concern, but limits are allowed unless "
+            "the user explicitly asks for exhaustive output."
+        ),
+        issues=[],
+        repair_instructions=[],
+        risk_flags=verification.risk_flags,
+        warnings=[
+            warning
+            for warning in [
+                verification.reasoning,
+                *verification.issues,
+                *verification.warnings,
+            ]
+            if warning
+        ],
+    )
+
+
+def _is_limit_only_rejection(verification: DashboardChatSqlVerificationResult) -> bool:
+    """Return whether the verifier rejection is only objecting to result limits."""
+    reason_code = (verification.reason_code or "").lower()
+    if "limit" in reason_code or "truncat" in reason_code:
+        return True
+    issue_texts = [verification.reasoning, *verification.issues]
+    populated_texts = [text for text in issue_texts if str(text or "").strip()]
+    return bool(populated_texts) and all(
+        LIMIT_REJECTION_PATTERN.search(str(text)) for text in populated_texts
+    )
 
 
 def _referenced_table_metadata(

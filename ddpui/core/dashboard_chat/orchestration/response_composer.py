@@ -140,6 +140,9 @@ def summarize_tool_call(
         entry["error"] = result.get("error")
         entry["count"] = result.get("count", 0)
         entry["values_sample"] = (result.get("values") or [])[:10]
+    elif tool_name == "set_sql_query_plan":
+        entry["success"] = result.get("success", False)
+        entry["plan"] = result.get("plan")
     elif tool_name == "check_table_row_count":
         entry["row_count"] = result.get("row_count")
     elif tool_name == "run_sql_query":
@@ -147,6 +150,11 @@ def summarize_tool_call(
         entry["row_count"] = result.get("row_count", 0)
         entry["sql_used"] = result.get("sql_used")
         entry["error"] = result.get("error")
+        entry["severity"] = result.get("severity")
+        entry["reason_code"] = result.get("reason_code")
+        entry["issues"] = result.get("issues")
+        entry["repair_instructions"] = result.get("repair_instructions")
+        entry["reasoning"] = result.get("reasoning")
     else:
         entry["result"] = result
     return entry
@@ -179,6 +187,13 @@ def compose_final_answer_text(
     normalized_sql_results = normalize_sql_results_for_answer(execution_result.get("sql_results"))
     draft_answer = (execution_result.get("answer_text") or "").strip() or None
     pii_value_map = dict(execution_result.get("pii_value_map") or {})
+    if execution_result.get("sql_rejection") and not normalized_sql_results:
+        return (
+            draft_answer
+            or "I couldn't produce a validated SQL query for this question. "
+            "The generated SQL was rejected because it did not faithfully match the requested "
+            "measure, grain, filters, or output shape."
+        )
     if hasattr(llm_client, "compose_final_answer"):
         try:
             answer_text = llm_client.compose_final_answer(

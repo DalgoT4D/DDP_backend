@@ -4,6 +4,9 @@ from ddpui.core.dashboard_chat.metadata.schemas import (
     DashboardChatMetadataArtifactPayload,
     DashboardChatMetadataTable,
 )
+from ddpui.core.dashboard_chat.contracts.sql_contracts import (
+    DashboardChatSqlVerificationResult,
+)
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_verifier import (
     _referenced_table_metadata,
     build_sql_risk_flags,
@@ -16,6 +19,36 @@ class FailingVerifierLlmClient:
 
     def verify_sql_against_question(self, **_kwargs):
         raise AssertionError("LLM verifier should not be called")
+
+
+class WarningVerifierLlmClient:
+    """Verifier fake that returns a broad warning."""
+
+    def verify_sql_against_question(self, **_kwargs):
+        return DashboardChatSqlVerificationResult(
+            is_valid=True,
+            severity="warning",
+            reason_code="missing_breakdown",
+            reasoning="The SQL only returns the overall roll-up and does not return per-city/per-grade trend.",
+            issues=[],
+            repair_instructions=[],
+            warnings=[],
+        )
+
+
+class LimitRejectionVerifierLlmClient:
+    """Verifier fake that objects only to a result limit."""
+
+    def verify_sql_against_question(self, **_kwargs):
+        return DashboardChatSqlVerificationResult(
+            is_valid=False,
+            severity="repair_once",
+            reason_code="results_truncated_by_limit",
+            reasoning="Uses LIMIT 200, potentially excluding qualifying students from the returned list.",
+            issues=["Uses LIMIT 200, potentially excluding qualifying students."],
+            repair_instructions=["Remove the LIMIT."],
+            warnings=[],
+        )
 
 
 def test_build_sql_risk_flags_detects_latest_row_without_latest_request():
@@ -69,6 +102,75 @@ def test_verify_sql_hard_blocks_latest_request_without_relative_date_filter():
     assert result.is_valid is False
     assert result.severity == "hard_block"
     assert result.reason_code == "latest_logic_without_relative_time_filter"
+
+
+def test_verify_sql_keeps_broad_warnings_non_blocking():
+    result = verify_sql_against_question(
+        WarningVerifierLlmClient(),
+        sql="SELECT SUM(students) FROM dev_prod.overall_rc_analysis",
+        state={
+            "user_query": "Show RC trend across grades and cities",
+            "metadata_artifact_payload": {},
+            "intent_decision": {
+                "intent": "query_with_sql",
+                "confidence": 0.9,
+                "reason": "Needs SQL",
+                "force_tool_usage": True,
+            },
+        },
+    )
+
+    assert result.is_valid is True
+    assert result.severity == "warning"
+    assert result.reason_code == "missing_breakdown"
+
+
+def test_verify_sql_allows_limit_rejections_unless_user_requests_exhaustive_output():
+    result = verify_sql_against_question(
+        LimitRejectionVerifierLlmClient(),
+        sql=(
+            "SELECT student_name_end FROM dev_staging.endline_2425_stg "
+            "WHERE grade_taught_end = 3 AND math_mastery_end < 20 LIMIT 200"
+        ),
+        state={
+            "user_query": "Give me the names of students below 20 percent in endline maths",
+            "metadata_artifact_payload": {},
+            "intent_decision": {
+                "intent": "query_with_sql",
+                "confidence": 0.9,
+                "reason": "Needs SQL",
+                "force_tool_usage": True,
+            },
+        },
+    )
+
+    assert result.is_valid is True
+    assert result.severity == "warning"
+    assert result.reason_code == "results_truncated_by_limit"
+
+
+def test_verify_sql_keeps_limit_rejection_when_user_requests_exhaustive_output():
+    result = verify_sql_against_question(
+        LimitRejectionVerifierLlmClient(),
+        sql=(
+            "SELECT student_name_end FROM dev_staging.endline_2425_stg "
+            "WHERE grade_taught_end = 3 AND math_mastery_end < 20 LIMIT 200"
+        ),
+        state={
+            "user_query": "Give me the complete full list of all students below 20 percent",
+            "metadata_artifact_payload": {},
+            "intent_decision": {
+                "intent": "query_with_sql",
+                "confidence": 0.9,
+                "reason": "Needs SQL",
+                "force_tool_usage": True,
+            },
+        },
+    )
+
+    assert result.is_valid is False
+    assert result.severity == "repair_once"
+    assert result.reason_code == "results_truncated_by_limit"
 
 
 def test_build_sql_risk_flags_detects_name_aggregation_for_name_lists():
