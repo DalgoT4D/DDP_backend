@@ -49,7 +49,7 @@ class TestNormalizeDimensions:
         assert "country" in result
 
     def test_table_chart_without_dimensions_array(self):
-        """Test normalize_dimensions returns empty list when no dimensions array for table chart"""
+        """Test normalize_dimensions falls back to dimension_col/extra_dimension for table chart"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="public",
@@ -61,7 +61,9 @@ class TestNormalizeDimensions:
 
         result = charts_service.normalize_dimensions(payload)
 
-        assert len(result) == 0
+        assert len(result) == 2
+        assert "KEY" in result
+        assert "region" in result
 
     def test_table_chart_filters_empty_dimensions(self):
         """Test normalize_dimensions filters out empty strings"""

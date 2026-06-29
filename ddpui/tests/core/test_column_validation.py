@@ -28,8 +28,8 @@ class TestNormalizeDimensions:
         dims = normalize_dimensions(payload)
         assert dims == ["dim1", "dim-2", "dim 3"]
 
-    def test_normalize_dimensions_table_chart_no_dimensions(self):
-        """Test that table charts without dimensions array return empty list"""
+    def test_normalize_dimensions_table_chart_fallback_to_dimension_col(self):
+        """Test that table charts fallback to dimension_col/extra_dimension"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
@@ -38,7 +38,7 @@ class TestNormalizeDimensions:
             extra_dimension="dim 2",
         )
         dims = normalize_dimensions(payload)
-        assert dims == []
+        assert dims == ["dim-1", "dim 2"]
 
     def test_normalize_dimensions_bar_chart(self):
         """Test normalize_dimensions for bar chart"""
@@ -80,6 +80,51 @@ class TestNormalizeDimensions:
         assert len(dims) == 5
         assert "Total Registrations" in dims
         assert "my-column" in dims
+
+    def test_normalize_dimensions_table_chart_fallback_to_table_columns(self):
+        """Test that table charts fallback to extra_config.table_columns"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            extra_config={"table_columns": ["col1", "col2", "col3"]},
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["col1", "col2", "col3"]
+
+    def test_normalize_dimensions_table_chart_dimensions_over_table_columns(self):
+        """Test that dimensions takes priority over extra_config.table_columns"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=["dim1", "dim2"],
+            extra_config={"table_columns": ["col1", "col2", "col3"]},
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["dim1", "dim2"]
+
+    def test_normalize_dimensions_table_chart_dimension_col_over_table_columns(self):
+        """Test that dimension_col takes priority over extra_config.table_columns"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimension_col="dim1",
+            extra_config={"table_columns": ["col1", "col2", "col3"]},
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["dim1"]
+
+    def test_normalize_dimensions_table_chart_no_dimensions_at_all(self):
+        """Test that table charts with no dimensions anywhere return empty list"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == []
 
     def test_normalize_dimensions_no_dimensions(self):
         """Test normalize_dimensions when no dimensions are provided"""

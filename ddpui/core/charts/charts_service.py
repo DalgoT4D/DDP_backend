@@ -141,7 +141,8 @@ def get_pagination_params(payload: ChartDataPayload):
 def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     """
     Normalize dimensions from payload, handling backward compatibility.
-    For table charts: prefer dimensions list, fallback to dimension_col + extra_dimension
+    For table charts: prefer dimensions list, fallback to dimension_col + extra_dimension,
+                      then fallback to extra_config.table_columns
     For other charts: use dimension_col if present
 
     Returns list of dimension column names.
@@ -154,6 +155,20 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             # Filter out empty strings
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             final_dims = filtered_dims if filtered_dims else []
+
+        # Fallback to dimension_col/extra_dimension
+        if not final_dims:
+            if payload.dimension_col:
+                final_dims.append(payload.dimension_col)
+            if payload.extra_dimension:
+                final_dims.append(payload.extra_dimension)
+
+        # Fallback to extra_config.table_columns
+        if not final_dims and payload.extra_config:
+            table_columns = payload.extra_config.get("table_columns")
+            if table_columns:
+                filtered_cols = [c for c in table_columns if c and c.strip()]
+                final_dims = filtered_cols if filtered_cols else []
 
     else:
         # For other charts, include both dimension_col and extra_dimension if present
