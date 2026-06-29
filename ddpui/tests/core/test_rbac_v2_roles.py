@@ -28,7 +28,7 @@ def slugs_for(role_slug: str) -> set[str]:
     return set(RolePermission.objects.filter(role=role).values_list("permission__slug", flat=True))
 
 
-# the four content resources' view slugs — members and analysts both keep these
+# the four content resources that members may view and analysts may fully manage
 CONTENT_VIEW = {"can_view_dashboards", "can_view_charts", "can_view_metrics", "can_view_kpis"}
 # infra "view" slugs — analysts keep these, members must NOT have them
 INFRA_VIEW = {"can_view_warehouses", "can_view_sources", "can_view_dbt_workspace"}
@@ -39,15 +39,6 @@ INFRA_WRITE = {
     "can_create_dbt_workspace",
     "can_run_orgtask",
     "can_create_orgtask",
-}
-# metric/kpi "write" slugs analysts must lose (view-only on metrics + KPIs)
-METRIC_KPI_WRITE = {
-    "can_create_metrics",
-    "can_edit_metrics",
-    "can_delete_metrics",
-    "can_create_kpis",
-    "can_edit_kpis",
-    "can_delete_kpis",
 }
 
 
@@ -82,11 +73,16 @@ def test_analyst_keeps_infra_view_loses_infra_write(seed_db):
     # read-only on infra
     assert INFRA_VIEW <= analyst
     assert not (INFRA_WRITE & analyst)
-    # full management of dashboards / charts / reports
+    # but full management of content — including metrics + KPIs
     assert {"can_create_dashboards", "can_delete_charts", "can_share_dashboards"} <= analyst
-    # but view-only on metrics + KPIs
-    assert {"can_view_metrics", "can_view_kpis"} <= analyst
-    assert not (METRIC_KPI_WRITE & analyst)
+    assert {
+        "can_create_metrics",
+        "can_edit_metrics",
+        "can_delete_metrics",
+        "can_create_kpis",
+        "can_edit_kpis",
+        "can_delete_kpis",
+    } <= analyst
 
 
 def test_member_is_view_only_content(seed_db):
