@@ -1609,58 +1609,10 @@
     },
     {
         "model": "ddpui.RolePermission",
-        "pk": 202,
-        "fields": {
-            "role": 4,
-            "permission": 75
-        }
-    },
-    {
-        "model": "ddpui.RolePermission",
-        "pk": 203,
-        "fields": {
-            "role": 4,
-            "permission": 76
-        }
-    },
-    {
-        "model": "ddpui.RolePermission",
-        "pk": 204,
-        "fields": {
-            "role": 4,
-            "permission": 77
-        }
-    },
-    {
-        "model": "ddpui.RolePermission",
         "pk": 205,
         "fields": {
             "role": 4,
             "permission": 78
-        }
-    },
-    {
-        "model": "ddpui.RolePermission",
-        "pk": 206,
-        "fields": {
-            "role": 4,
-            "permission": 79
-        }
-    },
-    {
-        "model": "ddpui.RolePermission",
-        "pk": 207,
-        "fields": {
-            "role": 4,
-            "permission": 80
-        }
-    },
-    {
-        "model": "ddpui.RolePermission",
-        "pk": 208,
-        "fields": {
-            "role": 4,
-            "permission": 81
         }
     },
     {

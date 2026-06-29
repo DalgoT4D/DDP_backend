@@ -45,6 +45,17 @@ ANALYST_INFRA_WRITE_REMOVE = [
     "can_run_orgtask",
 ]
 
+# analyst is view-only on metrics + KPIs (builds dashboards/charts/reports, not the
+# underlying metric/kpi definitions). Keeps the can_view_* slugs.
+ANALYST_METRIC_KPI_WRITE_REMOVE = [
+    "can_create_metrics",
+    "can_edit_metrics",
+    "can_delete_metrics",
+    "can_create_kpis",
+    "can_edit_kpis",
+    "can_delete_kpis",
+]
+
 # member is content-view-only: viewing the four content resources + basics. No write of
 # any kind and no infra visibility. Set EXACTLY (delete-all-then-add) so prod drift — e.g.
 # can_create_dashboards granted to guests by migration 0137 — cannot leak through.
@@ -102,11 +113,12 @@ def collapse_roles():
         RolePermission.objects.filter(role=pipeline_manager).delete()
         pipeline_manager.delete()
 
-    # 4. analyst: strip infra write/run slugs (keep content + infra view)
+    # 4. analyst: strip infra write/run + metric/kpi write slugs (keep content + infra view)
     analyst = Role.objects.filter(slug="analyst").first()
     if analyst:
         RolePermission.objects.filter(
-            role=analyst, permission__slug__in=ANALYST_INFRA_WRITE_REMOVE
+            role=analyst,
+            permission__slug__in=ANALYST_INFRA_WRITE_REMOVE + ANALYST_METRIC_KPI_WRITE_REMOVE,
         ).delete()
 
     # 5. member: content-view-only, set exactly
