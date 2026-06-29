@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
 from ddpui.core.dashboard_chat.contracts.intent_contracts import DashboardChatIntentDecision
 from ddpui.core.dashboard_chat.contracts.response_contracts import DashboardChatResponse
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
@@ -13,6 +12,10 @@ from ddpui.core.dashboard_chat.orchestration.response_composer import (
     determine_response_format,
     sql_result_columns,
 )
+from ddpui.core.dashboard_chat.orchestration.pii_masking import (
+    mask_text_with_pii_map,
+    unmask_pii_rows,
+)
 from ddpui.core.dashboard_chat.orchestration.retrieval_support import build_citations
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 
@@ -20,7 +23,6 @@ from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphStat
 def compose_response_node(
     state: DashboardChatGraphState,
     llm_client,
-    vector_store,
 ) -> dict[str, Any]:
     """Compose the final dashboard-chat response from state accumulated by prior nodes."""
     if state.get("response") is not None:
@@ -39,7 +41,6 @@ def compose_response_node(
             ).to_dict()
         }
 
-    allowlist = DashboardChatAllowlist.model_validate(state.get("allowlist_payload") or {})
     retrieved_documents = [
         DashboardChatRetrievedDocument.model_validate(p)
         for p in (state.get("retrieved_documents") or [])
@@ -47,7 +48,6 @@ def compose_response_node(
     citations = build_citations(
         retrieved_documents=retrieved_documents,
         dashboard_export=state.get("dashboard_export_payload") or {},
-        allowlist=allowlist,
     )
     response_format = determine_response_format(
         user_query=state["user_query"],
@@ -58,29 +58,43 @@ def compose_response_node(
         "retrieved_documents": retrieved_documents,
         "sql": state.get("sql"),
         "sql_results": state.get("sql_results"),
+        "sql_rejection": state.get("sql_rejection"),
+        "pii_value_map": state.get("pii_value_map") or {},
         "warnings": list(state.get("warnings") or []),
         "tool_calls": list(state.get("tool_calls") or []),
     }
     intent_decision = DashboardChatIntentDecision.model_validate(state.get("intent_decision") or {})
+    display_sql_results = unmask_pii_rows(
+        state.get("sql_results"),
+        state.get("pii_value_map") or {},
+    )
+    answer_text = compose_final_answer_text(
+        llm_client,
+        state,
+        execution_result,
+        response_format=response_format,
+    )
+    response_metadata = {
+        "response_format": response_format,
+        "table_columns": sql_result_columns(display_sql_results),
+    }
+    pii_value_map = state.get("pii_value_map") or {}
+    if pii_value_map:
+        response_metadata["pii_masked_answer_text"] = mask_text_with_pii_map(
+            answer_text,
+            pii_value_map,
+        )
     return {
         "citations": [c.model_dump(mode="json") for c in citations],
         "response": DashboardChatResponse(
-            answer_text=compose_final_answer_text(
-                llm_client,
-                state,
-                execution_result,
-                response_format=response_format,
-            ),
+            answer_text=answer_text,
             intent=intent_decision.intent,
             citations=citations,
             warnings=list(state.get("warnings") or []),
             sql=state.get("sql"),
-            sql_results=state.get("sql_results"),
-            usage=build_usage_summary(llm_client, vector_store),
+            sql_results=display_sql_results,
+            usage=build_usage_summary(llm_client),
             tool_calls=list(state.get("tool_calls") or []),
-            metadata={
-                "response_format": response_format,
-                "table_columns": sql_result_columns(state.get("sql_results")),
-            },
+            metadata=response_metadata,
         ).to_dict(),
     }

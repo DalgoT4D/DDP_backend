@@ -8,7 +8,6 @@ services:
       - redis_data:/data
     networks:
       - dalgo-network 
-
   backend:
     image: dalgo_backend:latest
     command: backend

@@ -26,8 +26,10 @@ from ddpui.core.webhooks.webhook_functions import (
 from ddpui.core.notifications.delivery import notify_org_managers
 
 from ddpui.ddpdbt import elementary_service
+from ddpui.core.dashboard_chat.metadata.build_service import DashboardChatMetadataBuildService
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
+from ddpui.models.dashboard import Dashboard
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.models.org import (
@@ -75,7 +77,6 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
-from ddpui.core.dashboard_chat.vector.org_vector_context_build_service import OrgVectorBuildService
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
@@ -106,7 +107,43 @@ from ddpui.utils.feature_flags import get_all_feature_flags_for_org
 
 logger = CustomLogger("ddpui")
 UTC = timezone.UTC
-DASHBOARD_CHAT_CONTEXT_BUILD_INTERVAL_SECONDS = 3 * 60 * 60
+
+
+@app.task(bind=False)
+def build_dashboard_chat_metadata_artifacts(
+    org_id: int,
+    dashboard_ids: list[int],
+    builder_model: str = "o4-mini",
+    built_by_id: int | None = None,
+):
+    """Build dashboard chat metadata artifacts in the background."""
+    org = Org.objects.filter(id=org_id).first()
+    if org is None:
+        logger.error("dashboard chat metadata build failed: org %s not found", org_id)
+        return
+
+    dashboards = list(
+        Dashboard.objects.filter(
+            org=org,
+            dashboard_type="native",
+            id__in=list(dashboard_ids or []),
+        ).order_by("id")
+    )
+    if not dashboards:
+        logger.warning(
+            "dashboard chat metadata build skipped: no matching dashboards for org %s",
+            org.slug,
+        )
+        return
+
+    built_by = OrgUser.objects.filter(id=built_by_id).first() if built_by_id else None
+    build_service = DashboardChatMetadataBuildService()
+    build_service.build_dashboards(
+        org=org,
+        dashboards=dashboards,
+        builder_model=builder_model,
+        built_by=built_by,
+    )
 
 
 @app.task(bind=True)
@@ -1258,60 +1295,6 @@ def clear_stuck_locks():
     return processed_count
 
 
-@app.task
-def schedule_dashboard_chat_context_builds():
-    """Fan out one dashboard chat context-build task per eligible org."""
-    candidate_orgs = (
-        Org.objects.select_related("dbt", "preferences")
-        .filter(
-            dbt__isnull=False,
-            preferences__ai_data_sharing_enabled=True,
-        )
-        .order_by("id")
-    )
-    enqueued_org_ids: list[int] = []
-    for org in candidate_orgs:
-        if get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-            build_dashboard_chat_context_for_org.delay(org.id)
-            enqueued_org_ids.append(org.id)
-
-    logger.info("enqueued dashboard chat context builds for org ids=%s", enqueued_org_ids)
-    return {"enqueued_org_ids": enqueued_org_ids}
-
-
-@app.task
-def build_dashboard_chat_context_for_org(org_id: int):
-    """Build dashboard chat retrieval context for one org if the org is eligible."""
-    org = Org.objects.filter(id=org_id).first()
-    orgdbt = org.dbt if org else None
-    if orgdbt is None:
-        logger.warning(
-            "dashboard chat context build skipped: org %s not found or missing dbt",
-            org.slug if org else "unknown",
-        )
-        return {"status": "skipped_missing_org", "org_id": org_id}
-
-    preferences = OrgPreferences.objects.filter(org=org).first()
-    feature_enabled = get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False)
-    if not feature_enabled or preferences is None or not preferences.ai_data_sharing_enabled:
-        logger.info(
-            "dashboard chat context build skipped for org=%s because it is not eligible",
-            org.slug if org else "unknown",
-        )
-        return {"status": "skipped_ineligible", "org_id": org_id}
-
-    result = OrgVectorBuildService().build_org_vector_context(org)
-    return {
-        "status": "completed",
-        "org_id": org_id,
-        "docs_generated_at": (
-            result.docs_generated_at.isoformat() if result.docs_generated_at else None
-        ),
-        "vector_last_ingested_at": result.vector_ingested_at.isoformat(),
-        "source_document_counts": result.source_document_counts,
-    }
-
-
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1338,12 +1321,6 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour="*/6"),
         sync_flow_runs_of_deployments.s(),
         name="sync flow runs of deployments into our db",
-    )
-
-    sender.add_periodic_task(
-        crontab(minute=0, hour="*/3"),
-        schedule_dashboard_chat_context_builds.s(),
-        name="build dashboard chat context",
     )
 
     if os.getenv("ADMIN_EMAIL"):

@@ -1095,6 +1095,16 @@ class DashboardService:
         return list(dict.fromkeys(chart_ids))
 
     @staticmethod
+    def extract_chart_ids_from_tabs(tabs: list[dict] | None) -> list[int]:
+        """Extract referenced chart IDs from dashboard tabs while preserving order."""
+        chart_ids: list[int] = []
+        for tab in tabs or []:
+            chart_ids.extend(
+                DashboardService.extract_chart_ids_from_components(tab.get("components"))
+            )
+        return list(dict.fromkeys(chart_ids))
+
+    @staticmethod
     def export_dashboard_context_for_dashboard(
         dashboard: Dashboard,
         org: Org,
@@ -1102,7 +1112,7 @@ class DashboardService:
     ) -> Dict[str, Any]:
         """Return dashboard data plus chart configs for an already loaded dashboard object."""
         dashboard_response = DashboardService.get_dashboard_response(dashboard)
-        chart_ids = DashboardService.extract_chart_ids_from_components(dashboard.components)
+        chart_ids = DashboardService.extract_chart_ids_from_tabs(dashboard.tabs)
         if charts_by_id is None:
             charts_by_id = {
                 chart.id: chart for chart in Chart.objects.filter(id__in=chart_ids, org=org)

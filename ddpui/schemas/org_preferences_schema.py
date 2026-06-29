@@ -46,19 +46,23 @@ class OrgAIDashboardChatSettingsResponse(Schema):
 
     feature_flag_enabled: bool
     ai_data_sharing_enabled: bool
+    dashboard_chat_share_pii_with_llms: bool
     ai_data_sharing_consented_by: Optional[str]
     ai_data_sharing_consented_at: Optional[datetime]
     org_context_markdown: str
     org_context_updated_by: Optional[str]
     org_context_updated_at: Optional[datetime]
     dbt_configured: bool
-    ai_context_refreshed_at: Optional[datetime]
+    metadata_last_built_at: Optional[datetime]
+    metadata_ready_dashboard_count: int = 0
+    metadata_total_dashboard_count: int = 0
 
 
 class UpdateOrgAIDashboardChatSchema(Schema):
     """Request schema for org-level dashboard chat settings updates."""
 
     ai_data_sharing_enabled: Optional[bool] = None
+    dashboard_chat_share_pii_with_llms: Optional[bool] = None
     org_context_markdown: Optional[str] = None
 
 
@@ -69,7 +73,84 @@ class OrgAIDashboardChatStatusResponse(Schema):
     ai_data_sharing_enabled: bool
     chat_available: bool
     dbt_configured: bool
-    ai_context_refreshed_at: Optional[datetime]
+    metadata_last_built_at: Optional[datetime]
+    metadata_ready_dashboard_count: int = 0
+    metadata_total_dashboard_count: int = 0
+
+
+class DashboardChatMetadataArtifactStatusItem(Schema):
+    """One dashboard metadata artifact summary."""
+
+    dashboard_id: int
+    dashboard_title: str
+    status: str
+    table_count: int
+    chart_count: int
+    builder_model: str
+    source_fingerprint: str
+    built_at: Optional[datetime]
+    error_message: Optional[str] = None
+
+
+class OrgAIDashboardChatMetadataStatusResponse(Schema):
+    """Org-scoped dashboard metadata build/status summary."""
+
+    dashboards: list[DashboardChatMetadataArtifactStatusItem]
+    total_dashboard_count: int
+    ready_dashboard_count: int
+    failed_dashboard_count: int
+    stale_dashboard_count: int
+    missing_dashboard_count: int
+    last_built_at: Optional[datetime]
+
+
+class TriggerOrgAIDashboardChatMetadataBuildSchema(Schema):
+    """Request schema for manual metadata builds."""
+
+    dashboard_id: Optional[int] = None
+    builder_model: Optional[str] = "o4-mini"
+
+
+class DashboardChatPIIColumnReviewItem(Schema):
+    """One metadata column with inferred and user-reviewed PII state."""
+
+    dashboard_id: int
+    dashboard_title: str
+    schema_name: str
+    table_name: str
+    full_table_name: str
+    model_name: str
+    column_name: str
+    data_type: str
+    description: str
+    semantic_role: str
+    value_semantics: str
+    inferred_pii: bool
+    override_pii: Optional[bool] = None
+    effective_pii: bool
+
+
+class OrgAIDashboardChatPIIColumnsResponse(Schema):
+    """Org-scoped list of metadata columns available for PII review."""
+
+    columns: list[DashboardChatPIIColumnReviewItem]
+    total_column_count: int
+    pii_column_count: int
+
+
+class DashboardChatPIIColumnOverrideInput(Schema):
+    """User-reviewed PII value for one metadata column."""
+
+    schema_name: str = ""
+    table_name: str
+    column_name: str
+    pii: bool
+
+
+class UpdateDashboardChatPIIColumnOverridesSchema(Schema):
+    """Batch update request for dashboard-chat PII overrides."""
+
+    overrides: list[DashboardChatPIIColumnOverrideInput]
 
 
 class CreateOrgSupersetDetailsSchema(Schema):

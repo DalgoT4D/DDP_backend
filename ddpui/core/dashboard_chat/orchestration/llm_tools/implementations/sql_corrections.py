@@ -6,6 +6,8 @@ from typing import Any
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
     best_table_for_missing_columns,
+    extract_cte_names,
+    cte_schema_snippets,
     find_tables_with_column,
     primary_table_name,
     referenced_sql_identifier_refs,
@@ -41,7 +43,13 @@ def missing_columns_in_primary_table(
         turn_context,
         tables=referenced_tables,
     )
-    all_schema_snippets_by_table = get_or_load_schema_snippets(warehouse_tools_factory, state, turn_context)
+    synthetic_cte_snippets = cte_schema_snippets(sql)
+    cte_names = extract_cte_names(sql)
+    schema_snippets_by_table = {**synthetic_cte_snippets, **schema_snippets_by_table}
+    all_schema_snippets_by_table = {
+        **synthetic_cte_snippets,
+        **get_or_load_schema_snippets(warehouse_tools_factory, state, turn_context),
+    }
     missing_columns_by_table: dict[str, set[str]] = {}
     candidate_tables_by_column: dict[str, list[str]] = {}
     tables_in_query = list(dict.fromkeys(referenced_tables))
@@ -67,6 +75,9 @@ def missing_columns_in_primary_table(
             if len(matching_tables) > 1:
                 continue
             target_table = primary_table_name(sql) or tables_in_query[0]
+
+        if target_table.lower() in cte_names and target_table not in schema_snippets_by_table:
+            continue
 
         missing_columns_by_table.setdefault(target_table, set()).add(column_name)
         candidate_tables_by_column[column_name] = find_tables_with_column(

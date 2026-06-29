@@ -1,5 +1,4 @@
 import os
-from datetime import timedelta
 
 import django
 import pytest
@@ -112,17 +111,14 @@ def test_org_preferences_ai_consent_persists(org, orguser):
     assert preferences.ai_data_sharing_consented_at == consented_at
 
 
-def test_org_dbt_ai_freshness_fields(org_dbt):
+def test_org_dbt_docs_freshness_field(org_dbt):
     generated_at = timezone.now()
-    ingested_at = generated_at + timedelta(minutes=5)
 
     org_dbt.docs_generated_at = generated_at
-    org_dbt.vector_last_ingested_at = ingested_at
     org_dbt.save()
 
     org_dbt.refresh_from_db()
     assert org_dbt.docs_generated_at == generated_at
-    assert org_dbt.vector_last_ingested_at == ingested_at
 
 
 def test_org_ai_context_one_to_one(org, orguser):

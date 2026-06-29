@@ -80,3 +80,38 @@ def test_parse_table_name_rejects_embedded_dots_and_backticks():
         match="Invalid table name",
     ):
         DashboardChatWarehouseTools._parse_table_name("analytics.program.reach")
+
+
+def test_prepare_postgres_sql_quotes_mixed_case_table_and_columns():
+    """Postgres execution should preserve physical case for mixed-case raw tables."""
+
+    class FakeWarehouseClient:
+        def get_table_columns(self, schema_name, table_name):
+            assert schema_name == "fellowship_24_25"
+            assert table_name == "Raw_Data_Midline"
+            return [
+                {"name": "Fellow_Name"},
+                {"name": "Grade_Taught"},
+                {"name": "Midline_RF_Status"},
+            ]
+
+        def execute(self, sql):
+            raise AssertionError(sql)
+
+    tools = DashboardChatWarehouseTools(
+        org=SimpleNamespace(id=1),
+        org_warehouse=SimpleNamespace(wtype="postgres"),
+        warehouse_client=FakeWarehouseClient(),
+    )
+
+    prepared_sql = tools._prepare_sql_for_execution(
+        "SELECT Fellow_Name FROM fellowship_24_25.Raw_Data_Midline "
+        "WHERE Grade_Taught = '3' AND Midline_RF_Status = 'Advanced' "
+        "ORDER BY Fellow_Name"
+    )
+
+    assert prepared_sql == (
+        'SELECT "Fellow_Name" FROM "fellowship_24_25"."Raw_Data_Midline" '
+        'WHERE "Grade_Taught" = \'3\' AND "Midline_RF_Status" = \'Advanced\' '
+        'ORDER BY "Fellow_Name"'
+    )

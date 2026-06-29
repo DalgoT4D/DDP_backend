@@ -19,6 +19,7 @@ from ddpui.models.dashboard_chat import (
     DashboardAIContext,
     DashboardChatMessage,
     DashboardChatMessageRole,
+    DashboardChatMetadataArtifact,
 )
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
@@ -66,45 +67,20 @@ logger = CustomLogger("ddpui")
 dashboard_native_router = Router()
 
 
-def _get_or_create_dashboard_ai_context(dashboard: Dashboard):
-    context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
-    return context
-
-
 def _serialize_dashboard_ai_context(dashboard: Dashboard, context: DashboardAIContext):
-    org_dbt = dashboard.org.dbt
+    metadata_artifact = (
+        DashboardChatMetadataArtifact.objects.filter(dashboard=dashboard)
+        .only("built_at")
+        .first()
+    )
     return DashboardAIContextResponse(
         dashboard_id=dashboard.id,
         dashboard_title=dashboard.title,
         dashboard_context_markdown=context.markdown,
         dashboard_context_updated_by=context.updated_by.user.email if context.updated_by else None,
         dashboard_context_updated_at=context.updated_at,
-        ai_context_refreshed_at=org_dbt.vector_last_ingested_at if org_dbt else None,
+        metadata_last_built_at=metadata_artifact.built_at if metadata_artifact else None,
     )
-
-
-def _serialize_dashboard_chat_bootstrap(dashboard: Dashboard) -> DashboardChatBootstrapResponse:
-    dashboard_export = DashboardService.export_dashboard_context_for_dashboard(dashboard, dashboard.org)
-
-    return DashboardChatBootstrapResponse(
-        dashboard_id=dashboard.id,
-        suggested_prompts=build_dashboard_suggested_prompts(
-            dashboard_export=dashboard_export,
-        ),
-    )
-
-
-def _ensure_dashboard_chat_feature_enabled(org) -> None:
-    """Hide dashboard chat settings endpoints unless the feature flag is enabled."""
-    if not get_all_feature_flags_for_org(org).get("AI_DASHBOARD_CHAT", False):
-        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
-
-
-def _ensure_dashboard_chat_consent_enabled(org) -> None:
-    """Require consent before writing dashboard-specific AI context."""
-    org_preferences = OrgPreferences.objects.filter(org=org).first()
-    if org_preferences is None or not org_preferences.ai_data_sharing_enabled:
-        raise HttpError(409, "Enable AI data sharing before updating dashboard AI context")
 
 
 # Endpoints
@@ -163,14 +139,15 @@ def export_dashboard(request, dashboard_id: int):
 def get_dashboard_ai_context(request, dashboard_id: int):
     """Load dashboard-level AI context settings for settings management."""
     orguser: OrgUser = request.orguser
-    _ensure_dashboard_chat_feature_enabled(orguser.org)
+    if not get_all_feature_flags_for_org(orguser.org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
 
     try:
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    context = _get_or_create_dashboard_ai_context(dashboard)
+    context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
 
     return _serialize_dashboard_ai_context(dashboard, context)
 
@@ -183,14 +160,21 @@ def get_dashboard_ai_context(request, dashboard_id: int):
 def get_dashboard_chat_bootstrap(request, dashboard_id: int):
     """Return deterministic UI bootstrap data for dashboard chat."""
     orguser: OrgUser = request.orguser
-    _ensure_dashboard_chat_feature_enabled(orguser.org)
+    if not get_all_feature_flags_for_org(orguser.org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
 
     try:
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    return _serialize_dashboard_chat_bootstrap(dashboard)
+    dashboard_export = DashboardService.export_dashboard_context_for_dashboard(dashboard, dashboard.org)
+    return DashboardChatBootstrapResponse(
+        dashboard_id=dashboard.id,
+        suggested_prompts=build_dashboard_suggested_prompts(
+            dashboard_export=dashboard_export,
+        ),
+    )
 
 
 @dashboard_native_router.post(
@@ -207,7 +191,8 @@ def set_dashboard_chat_message_feedback(
 ):
     """Persist one locked thumbs-up/thumbs-down selection for an assistant answer."""
     orguser: OrgUser = request.orguser
-    _ensure_dashboard_chat_feature_enabled(orguser.org)
+    if not get_all_feature_flags_for_org(orguser.org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
 
     message = (
         DashboardChatMessage.objects.select_related("session")
@@ -253,15 +238,18 @@ def update_dashboard_ai_context(
 ):
     """Update dashboard-level AI context markdown for settings management."""
     orguser: OrgUser = request.orguser
-    _ensure_dashboard_chat_feature_enabled(orguser.org)
-    _ensure_dashboard_chat_consent_enabled(orguser.org)
+    if not get_all_feature_flags_for_org(orguser.org).get("AI_DASHBOARD_CHAT", False):
+        raise HttpError(404, "Chat with dashboards is not enabled for this organization")
+    org_preferences = OrgPreferences.objects.filter(org=orguser.org).first()
+    if org_preferences is None or not org_preferences.ai_data_sharing_enabled:
+        raise HttpError(409, "Enable AI data sharing before updating dashboard AI context")
 
     try:
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    context = _get_or_create_dashboard_ai_context(dashboard)
+    context, _ = DashboardAIContext.objects.get_or_create(dashboard=dashboard)
     context.markdown = payload.dashboard_context_markdown
     context.updated_by = orguser
     context.updated_at = timezone.now()

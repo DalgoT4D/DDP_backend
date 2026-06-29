@@ -4,15 +4,199 @@ from collections.abc import Sequence
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import normalize_dashboard_chat_table_name
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
+    find_matching_dashboard_chat_table_name,
+    normalize_dashboard_chat_table_name,
+)
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatSchemaSnippet
 from ddpui.core.dashboard_chat.orchestration.conversation_context import extract_dimensions_from_sql
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
 
+def strip_nested_query_segments(sql: str) -> str:
+    """Replace nested SELECT/WITH subqueries with empty parens for outer-query parsing."""
+    result: list[str] = []
+    stack: list[list[str]] = []
+
+    for char in sql:
+        if char == "(":
+            stack.append(["("])
+            continue
+        if char == ")" and stack:
+            segment = stack.pop()
+            segment.append(")")
+            segment_text = "".join(segment)
+            replacement = "()" if re.search(r"\b(?:select|with)\b", segment_text, re.IGNORECASE) else segment_text
+            if stack:
+                stack[-1].append(replacement)
+            else:
+                result.append(replacement)
+            continue
+        if stack:
+            stack[-1].append(char)
+        else:
+            result.append(char)
+
+    while stack:
+        orphaned_segment = "".join(stack.pop())
+        if stack:
+            stack[-1].append(orphaned_segment)
+        else:
+            result.append(orphaned_segment)
+    return "".join(result)
+
+
+def _read_balanced_parentheses(sql: str, start_index: int) -> tuple[str, int]:
+    """Return one balanced parenthesized segment and the index after it."""
+    depth = 0
+    collected: list[str] = []
+    for index in range(start_index, len(sql)):
+        char = sql[index]
+        collected.append(char)
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return "".join(collected), index + 1
+    return "".join(collected), len(sql)
+
+
+def extract_cte_output_columns(sql: str) -> dict[str, set[str]]:
+    """Infer output columns for leading CTEs so alias-based SQL isn't falsely rejected."""
+    stripped_sql = sql.lstrip()
+    if not stripped_sql[:4].lower() == "with":
+        return {}
+
+    cursor = 4
+    cte_columns: dict[str, set[str]] = {}
+    if stripped_sql[cursor:].lstrip().lower().startswith("recursive"):
+        cursor = stripped_sql.lower().index("recursive", cursor) + len("recursive")
+
+    while cursor < len(stripped_sql):
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", stripped_sql[cursor:])
+        if not name_match:
+            break
+        cte_name = name_match.group(1).lower()
+        cursor += len(name_match.group(1))
+
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+
+        explicit_columns: set[str] = set()
+        if cursor < len(stripped_sql) and stripped_sql[cursor] == "(":
+            column_list_segment, cursor = _read_balanced_parentheses(stripped_sql, cursor)
+            explicit_columns = {
+                token.strip().strip('`"').lower()
+                for token in column_list_segment.strip()[1:-1].split(",")
+                if token.strip()
+            }
+            while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+                cursor += 1
+
+        as_match = re.match(r"AS\s*\(", stripped_sql[cursor:], flags=re.IGNORECASE)
+        if not as_match:
+            break
+        cursor += as_match.end() - 1
+        cte_body_segment, cursor = _read_balanced_parentheses(stripped_sql, cursor)
+        cte_body = cte_body_segment[1:-1]
+
+        columns = set(explicit_columns)
+        if not columns:
+            select_clause = DashboardChatSqlGuard._extract_outer_select_clause(cte_body)
+            if select_clause:
+                for expression in DashboardChatSqlGuard._split_select_expressions(select_clause):
+                    alias_match = re.search(
+                        r"\bAS\s+([A-Za-z_][A-Za-z0-9_]*)\s*$",
+                        expression,
+                        flags=re.IGNORECASE,
+                    )
+                    if alias_match:
+                        columns.add(alias_match.group(1).lower())
+                        continue
+                    simple_column_match = re.fullmatch(
+                        r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)",
+                        expression.strip(),
+                    )
+                    if simple_column_match:
+                        columns.add(simple_column_match.group(1).lower())
+        if columns:
+            cte_columns[cte_name] = columns
+
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        if cursor < len(stripped_sql) and stripped_sql[cursor] == ",":
+            cursor += 1
+            continue
+        break
+    return cte_columns
+
+
+def extract_cte_names(sql: str) -> set[str]:
+    """Return leading CTE names, even when their output columns cannot be inferred."""
+    stripped_sql = sql.lstrip()
+    if not stripped_sql[:4].lower() == "with":
+        return set()
+
+    cursor = 4
+    cte_names: set[str] = set()
+    if stripped_sql[cursor:].lstrip().lower().startswith("recursive"):
+        cursor = stripped_sql.lower().index("recursive", cursor) + len("recursive")
+
+    while cursor < len(stripped_sql):
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", stripped_sql[cursor:])
+        if not name_match:
+            break
+        cte_names.add(name_match.group(1).lower())
+        cursor += len(name_match.group(1))
+
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        if cursor < len(stripped_sql) and stripped_sql[cursor] == "(":
+            _, cursor = _read_balanced_parentheses(stripped_sql, cursor)
+            while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+                cursor += 1
+
+        as_match = re.match(r"AS\s*\(", stripped_sql[cursor:], flags=re.IGNORECASE)
+        if not as_match:
+            break
+        cursor += as_match.end() - 1
+        _, cursor = _read_balanced_parentheses(stripped_sql, cursor)
+
+        while cursor < len(stripped_sql) and stripped_sql[cursor].isspace():
+            cursor += 1
+        if cursor < len(stripped_sql) and stripped_sql[cursor] == ",":
+            cursor += 1
+            continue
+        break
+    return cte_names
+
+
+def cte_schema_snippets(sql: str) -> dict[str, DashboardChatSchemaSnippet]:
+    """Build synthetic schema snippets for leading CTEs based on their output columns."""
+    snippets: dict[str, DashboardChatSchemaSnippet] = {}
+    for cte_name, columns in extract_cte_output_columns(sql).items():
+        snippets[cte_name] = DashboardChatSchemaSnippet(
+            table_name=cte_name,
+            columns=[
+                {"name": column_name, "data_type": "derived", "nullable": True}
+                for column_name in sorted(columns)
+            ],
+        )
+    return snippets
+
+
 def primary_table_name(sql: str) -> str | None:
     """Return the primary FROM table for single-query correction logic."""
-    table_match = re.search(r"\bFROM\s+([`\"]?)([\w\.]+)\1", sql, re.IGNORECASE)
+    table_match = re.search(
+        r"\bFROM\s+([`\"]?)([\w\.]+)\1",
+        strip_nested_query_segments(sql),
+        re.IGNORECASE,
+    )
     if not table_match:
         return None
     return normalize_dashboard_chat_table_name(table_match.group(2))
@@ -20,16 +204,35 @@ def primary_table_name(sql: str) -> str | None:
 
 def table_references(sql: str) -> list[dict[str, str | None]]:
     """Return normalized FROM/JOIN table references and aliases from one SQL statement."""
+    stripped_sql = strip_nested_query_segments(sql)
+    alias_stopwords = {
+        "where",
+        "group",
+        "order",
+        "limit",
+        "join",
+        "on",
+        "left",
+        "right",
+        "inner",
+        "outer",
+        "full",
+        "cross",
+        "union",
+        "having",
+    }
     references: list[dict[str, str | None]] = []
     for match in re.finditer(
         r"\b(?:FROM|JOIN)\s+([`\"]?)([\w\.]+)\1(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?",
-        sql,
+        stripped_sql,
         flags=re.IGNORECASE,
     ):
         table_name = normalize_dashboard_chat_table_name(match.group(2))
         if not table_name:
             continue
         alias = str(match.group(3) or "").lower() or None
+        if alias in alias_stopwords:
+            alias = None
         references.append(
             {
                 "table_name": table_name,
@@ -52,8 +255,8 @@ def resolve_table_qualifier(
         if normalized_qualifier
         in {
             str(reference.get("alias") or ""),
-            str(reference.get("short_name") or ""),
-            str(reference.get("table_name") or ""),
+            str(reference.get("short_name") or "").lower(),
+            str(reference.get("table_name") or "").lower(),
         }
     ]
     deduped_matches = list(dict.fromkeys(match for match in matches if match))
@@ -69,6 +272,19 @@ def table_columns(snippet: DashboardChatSchemaSnippet | Any) -> set[str]:
     }
 
 
+def schema_snippet_for_table(
+    table_name: str,
+    schema_snippets_by_table: dict[str, Any],
+) -> DashboardChatSchemaSnippet | Any | None:
+    """Return a schema snippet using case-insensitive table matching when needed."""
+    if table_name in schema_snippets_by_table:
+        return schema_snippets_by_table[table_name]
+    matched_table_name = find_matching_dashboard_chat_table_name(table_name, schema_snippets_by_table)
+    if matched_table_name is None:
+        return None
+    return schema_snippets_by_table.get(matched_table_name)
+
+
 def tables_with_column(
     column_name: str,
     table_names: Sequence[str],
@@ -79,7 +295,8 @@ def tables_with_column(
     return [
         table_name
         for table_name in table_names
-        if normalized_column_name in table_columns(schema_snippets_by_table.get(table_name))
+        if normalized_column_name
+        in table_columns(schema_snippet_for_table(table_name, schema_snippets_by_table))
     ]
 
 
@@ -95,7 +312,9 @@ def resolve_identifier_table(
         resolved_table = resolve_table_qualifier(qualifier, table_refs)
         if not resolved_table:
             return None
-        if column_name.lower() in table_columns(schema_snippets_by_table.get(resolved_table)):
+        if column_name.lower() in table_columns(
+            schema_snippet_for_table(resolved_table, schema_snippets_by_table)
+        ):
             return resolved_table
         return None
 
@@ -165,7 +384,33 @@ def extract_identifier_refs_from_sql_segment(
         "TRUE",
         "FALSE",
         "NULL",
+        "IS",
         "NOT",
+        "DATE",
+        "CAST",
+        "INTERVAL",
+        "CURRENT_DATE",
+        "CURRENT_TIMESTAMP",
+        "EXTRACT",
+        "GROUPING",
+        "SETS",
+        "YEAR",
+        "MONTH",
+        "DAY",
+        "NUMERIC",
+        "DECIMAL",
+        "INTEGER",
+        "BIGINT",
+        "SMALLINT",
+        "TEXT",
+        "VARCHAR",
+        "CHAR",
+        "BOOLEAN",
+        "TIMESTAMP",
+        "DOUBLE",
+        "PRECISION",
+        "FLOAT",
+        "REAL",
         "ASC",
         "DESC",
         "ON",
@@ -185,6 +430,15 @@ def extract_identifier_refs_from_sql_segment(
             continue
         if identifier.lower() in table_aliases or identifier.lower() in ignored_identifiers:
             continue
+        if normalized_segment[max(0, match.start() - 2) : match.start()] == "::":
+            continue
+        preceding_text = normalized_segment[: match.start()]
+        preceding_token_match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", preceding_text)
+        preceding_token = (
+            preceding_token_match.group(1).upper() if preceding_token_match is not None else None
+        )
+        if preceding_token in {"FROM", "JOIN"}:
+            continue
         trailing_segment = normalized_segment[match.end() :].lstrip()
         if qualifier is None and trailing_segment.startswith("("):
             continue
@@ -194,11 +448,12 @@ def extract_identifier_refs_from_sql_segment(
 
 def referenced_sql_identifier_refs(sql: str) -> list[tuple[str | None, str]]:
     """Extract likely physical identifier references from the outer SQL."""
+    stripped_sql = strip_nested_query_segments(sql)
     table_aliases = {
         alias.lower()
         for alias in re.findall(
             r"\b(?:FROM|JOIN)\s+[`\"]?[\w\.]+[`\"]?(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?",
-            sql,
+            stripped_sql,
             flags=re.IGNORECASE,
         )
         if alias
@@ -218,7 +473,7 @@ def referenced_sql_identifier_refs(sql: str) -> list[tuple[str | None, str]]:
         r"\bGROUP\s+BY\s+(.+?)(?:\bORDER\b|\bLIMIT\b|$)",
         r"\bORDER\s+BY\s+(.+?)(?:\bLIMIT\b|$)",
     ]:
-        match = re.search(pattern, sql, flags=re.IGNORECASE | re.DOTALL)
+        match = re.search(pattern, stripped_sql, flags=re.IGNORECASE | re.DOTALL)
         if match:
             referenced_identifiers.extend(
                 extract_identifier_refs_from_sql_segment(

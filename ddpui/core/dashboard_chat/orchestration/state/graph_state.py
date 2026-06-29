@@ -9,13 +9,16 @@ class DashboardChatGraphState(TypedDict, total=False):
     org_id: int
     dashboard_id: int
     session_id: str | None
-    vector_collection_name: str | None
     user_query: str
     conversation_history: list[dict[str, Any]]
     conversation_context: dict[str, Any]
     small_talk_response: str | None
+    org_context_markdown: str
+    dashboard_context_markdown: str
     dashboard_export_payload: dict[str, Any]
-    dbt_index: dict[str, Any]
+    chart_registry_payload: list[dict[str, Any]]
+    metadata_artifact_payload: dict[str, Any] | None
+    metadata_artifact_status: str | None
     allowlist_payload: dict[str, Any]
     schema_snippet_payloads: dict[str, Any]
     validated_distinct_payloads: dict[str, Any]
@@ -28,6 +31,8 @@ class DashboardChatGraphState(TypedDict, total=False):
     sql: str | None
     sql_validation: dict[str, Any] | None
     sql_results: list[dict[str, Any]] | None
+    sql_rejection: dict[str, Any] | None
+    pii_value_map: dict[str, str]
     warnings: list[str]
     usage: dict[str, Any]
     response: dict[str, Any]

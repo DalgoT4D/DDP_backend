@@ -1,6 +1,7 @@
 """Answer-formatting helpers for dashboard chat LLM responses."""
 
 import json
+import re
 from typing import Any
 
 from ddpui.core.dashboard_chat.contracts.retrieval_contracts import DashboardChatRetrievedDocument
@@ -21,6 +22,16 @@ Rules:
 - Keep key_points to at most 3 concise bullets.
 """.strip()
 
+NAME_LIST_QUERY_PATTERN = re.compile(
+    r"\b(give me the names?|show me the names?|list(?:\s+the)?\s+names?|names?\s+of|who are)\b",
+    re.IGNORECASE,
+)
+
+
+def query_requests_name_list(user_query: str) -> bool:
+    """Return whether the user is explicitly asking for names."""
+    return bool(NAME_LIST_QUERY_PATTERN.search(user_query or ""))
+
 
 def build_final_answer_context_payload(
     *,
@@ -34,15 +45,32 @@ def build_final_answer_context_payload(
     warnings: list[str],
 ) -> dict[str, Any]:
     """Build the prompt payload used for final answer composition."""
+    sql_result_rows = sql_results or []
+    requested_name_list = query_requests_name_list(user_query)
+    full_name_list_is_manageable = requested_name_list and len(sql_result_rows) < 200
+    included_rows = (
+        sql_result_rows
+        if full_name_list_is_manageable
+        else sql_result_rows[:25]
+        if requested_name_list
+        else sql_result_rows[:8]
+    )
     return {
         "user_query": user_query,
         "intent": intent,
         "response_format": response_format,
+        "requested_name_list": requested_name_list,
+        "full_name_list_is_manageable": full_name_list_is_manageable,
         "draft_answer": draft_answer or None,
         "warnings": warnings[:5],
+        "pii_placeholder_rule": (
+            "If result values contain placeholders like [[PII_STUDENT_NAME_1]], preserve those "
+            "tokens exactly; the backend replaces them after answer composition."
+        ),
         "sql": sql,
-        "sql_results": (sql_results or [])[:8],
-        "row_count": len(sql_results or []),
+        "sql_results": included_rows,
+        "row_count": len(sql_result_rows),
+        "displayed_row_count": len(included_rows),
         "retrieved_context": [
             {
                 "source_type": document.source_type,

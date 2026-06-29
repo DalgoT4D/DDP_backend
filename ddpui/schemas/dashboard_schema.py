@@ -220,7 +220,7 @@ class DashboardAIContextResponse(Schema):
     dashboard_context_markdown: str
     dashboard_context_updated_by: Optional[str]
     dashboard_context_updated_at: Optional[datetime]
-    ai_context_refreshed_at: Optional[datetime]
+    metadata_last_built_at: Optional[datetime]
 
 
 class UpdateDashboardAIContextSchema(Schema):
