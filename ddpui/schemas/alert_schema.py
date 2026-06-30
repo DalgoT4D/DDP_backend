@@ -165,6 +165,7 @@ class AlertListItem(Schema):
     is_active: bool
     last_fire_at: Optional[datetime] = None
     fire_streak: int = 0
+    created_by_email: Optional[str] = None  # creator's email; null for legacy rows
 
 
 class AlertListResponse(Schema):

@@ -153,7 +153,7 @@ class AlertService:
         )
         queryset = (
             Alert.objects.filter(query)
-            .select_related("metric", "kpi")
+            .select_related("metric", "kpi", "created_by__user")
             .annotate(latest_fire_at=Subquery(latest_fire.values("evaluated_at")[:1]))
             .order_by(F("latest_fire_at").desc(nulls_last=True), "-updated_at")
         )
@@ -168,7 +168,7 @@ class AlertService:
             ]
             queryset = (
                 Alert.objects.filter(id__in=ids)
-                .select_related("metric", "kpi")
+                .select_related("metric", "kpi", "created_by__user")
                 .annotate(latest_fire_at=Subquery(latest_fire.values("evaluated_at")[:1]))
                 .order_by(F("latest_fire_at").desc(nulls_last=True), "-updated_at")
             )

@@ -148,6 +148,7 @@ def _build_list_item(alert: Alert) -> AlertListItem:
         is_active=alert.is_active,
         last_fire_at=last_fire_at,
         fire_streak=AlertService.compute_fire_streak(alert),
+        created_by_email=alert.created_by.user.email if alert.created_by_id else None,
     )
 
 
