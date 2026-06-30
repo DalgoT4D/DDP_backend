@@ -23,7 +23,7 @@ class AWSClient:
 
     _locks = {"secretsmanager": threading.Lock(), "s3": threading.Lock(), "ses": threading.Lock()}
 
-    _clients = {}  # for various services
+    _clients = {"s3": None, "ses": None, "secretsmanager": None}
 
     # Supported AWS services
     SUPPORTED_SERVICES = {"s3", "ses", "secretsmanager"}
@@ -61,7 +61,7 @@ class AWSClient:
                     finally:
                         cls._locks[service_name].release()
             else:
-                logger.warning(
+                raise RuntimeError(
                     f"Timeout while acquiring lock for {service_name} session initialization"
                 )
 
@@ -116,4 +116,4 @@ class AWSClient:
             except:
                 pass
 
-        cls._clients = {}
+        cls._clients = {s: None for s in cls.SUPPORTED_SERVICES}
