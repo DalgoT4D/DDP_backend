@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from ddpui.core.ownership import can_delete_resource
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI
@@ -758,9 +759,8 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        # Only allow deletion if the current user is the creator
-        if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("You can only delete reports you created.")
+        if not can_delete_resource(orguser, snapshot):
+            raise SnapshotPermissionError("Only the owner or an admin can delete this report.")
 
         snapshot.delete()
         logger.info(f"Deleted snapshot {snapshot_id} by user {orguser.user.email}")

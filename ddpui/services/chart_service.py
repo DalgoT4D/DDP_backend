@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from django.db.models import Q
 
+from ddpui.core.ownership import can_delete_resource
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -239,9 +240,9 @@ class ChartService:
         """
         chart = ChartService.get_chart(chart_id, org)
 
-        # Only allow deletion if the current user is the creator
-        if chart.created_by != orguser:
-            raise ChartPermissionError("You can only delete charts you created.")
+        # Only allow deletion if the user is the owner or an admin
+        if not can_delete_resource(orguser, chart):
+            raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
         chart.delete()

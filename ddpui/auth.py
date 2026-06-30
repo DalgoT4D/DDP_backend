@@ -21,10 +21,18 @@ logger = CustomLogger("ddpui")
 UNAUTHORIZED = "unauthorized"
 
 SUPER_ADMIN_ROLE = "super-admin"
-ACCOUNT_MANAGER_ROLE = "account-manager"
-PIPELINE_MANAGER_ROLE = "pipeline-manager"
+ADMIN_ROLE = "admin"
 ANALYST_ROLE = "analyst"
-GUEST_ROLE = "guest"
+MEMBER_ROLE = "member"
+
+# Deprecated aliases. Access Control v2 (migration 0165) collapsed the four customer roles
+# into three: account-manager was renamed to `admin`, guest to `member`, and
+# pipeline-manager was MERGED into admin (the role no longer exists). These aliases keep
+# existing imports resolving to the role each was renamed to. Do not reintroduce a
+# PIPELINE_MANAGER_ROLE alias — pipeline-manager was a strictly lower role than admin, so
+# aliasing it to "admin" would silently over-grant.
+ACCOUNT_MANAGER_ROLE = ADMIN_ROLE
+GUEST_ROLE = MEMBER_ROLE
 
 
 def has_permission(permission_slugs: list):

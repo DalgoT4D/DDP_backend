@@ -688,4 +688,4 @@ class TestGetChartData:
 
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4

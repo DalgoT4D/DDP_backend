@@ -83,7 +83,9 @@ from ddpui.core.kpi.exceptions import (
     KPIServiceError,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
 )
+from ddpui.core.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -325,6 +327,9 @@ class KPIService:
                 f"Cannot delete KPI '{kpi.name}' — it is used in: {names}. "
                 "Remove it from these dashboards first."
             )
+
+        if not can_delete_resource(orguser, kpi):
+            raise KPIPermissionError("Only the owner or an admin can delete this KPI.")
 
         kpi_name = kpi.name
         kpi.delete()

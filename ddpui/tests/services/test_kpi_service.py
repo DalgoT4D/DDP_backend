@@ -15,12 +15,13 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.dashboard import Dashboard
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIExtraConfig
 from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
     compute_rag_status,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db
@@ -60,6 +61,20 @@ def orguser(authuser, org):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def analyst_orguser(org):
+    """A second user in the same org with the (non-admin) analyst role."""
+    user = User.objects.create(username="kpisvcanalyst", email="kpisvcanalyst@test.com")
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
 
 
 @pytest.fixture
@@ -346,6 +361,28 @@ class TestKPICRUD:
         KPIService.delete_kpi(kpi_id, org, orguser)
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi(kpi_id, org)
+
+    def test_delete_kpi_non_owner_analyst_denied(self, analyst_orguser, org, sample_kpi, seed_db):
+        """A non-admin who didn't create the KPI cannot delete it."""
+        with pytest.raises(KPIPermissionError):
+            KPIService.delete_kpi(sample_kpi.id, org, analyst_orguser)
+        assert KPI.objects.filter(id=sample_kpi.id).exists()
+
+    def test_delete_kpi_non_admin_creator_can_delete_own(
+        self, analyst_orguser, org, sample_metric, seed_db
+    ):
+        """A non-admin (analyst) can delete a KPI they created."""
+        kpi = KPI.objects.create(
+            name="Analyst KPI",
+            metric=sample_metric,
+            target_value=1000.0,
+            direction="increase",
+            time_grain="monthly",
+            org=org,
+            created_by=analyst_orguser,
+        )
+        KPIService.delete_kpi(kpi.id, org, analyst_orguser)
+        assert not KPI.objects.filter(id=kpi.id).exists()
 
     def test_get_kpi_dashboards(self, orguser, org, sample_kpi, seed_db):
         dashboard = Dashboard.objects.create(

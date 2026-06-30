@@ -33,8 +33,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--role",
             type=str,
-            help="Role of the OrgUser; default is 'account-manager'",
-            default="account-manager",
+            help="Role of the OrgUser; default is 'admin'",
+            default="admin",
         )
 
     def handle(self, *args, **options):

@@ -62,7 +62,7 @@ from ddpui.core.org_logo.exceptions import (
 )
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
 )
@@ -171,7 +171,7 @@ def mock_request(orguser: OrgUser = None):
 
 def test_seed_data(seed_db):
     """a test to seed the database"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
 
@@ -187,6 +187,7 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
         user=authuser,
         org=org_without_workspace,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        has_seen_rbac_notice=True,
     )
 
     request = mock_request(orguser2)
@@ -202,10 +203,15 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     if response[0].org.slug == org_with_workspace.slug:
         assert response[0].new_role_slug == orguser1.new_role.slug
         assert response[1].new_role_slug == orguser2.new_role.slug
+        # the one-time RBAC notice flag is surfaced per-orguser on login
+        assert response[0].has_seen_rbac_notice is False
+        assert response[1].has_seen_rbac_notice is True
 
     elif response[1].org.slug == org_with_workspace.slug:
         assert response[1].new_role_slug == orguser1.new_role.slug
         assert response[0].new_role_slug == orguser2.new_role.slug
+        assert response[1].has_seen_rbac_notice is False
+        assert response[0].has_seen_rbac_notice is True
 
 
 # ================================================================================
@@ -433,6 +439,23 @@ def test_put_organization_user_self_v1(orguser):
     assert response.active is new_active_status
 
 
+def test_put_organization_user_self_v1_marks_rbac_notice_seen(orguser):
+    """the requestor can flip the one-time RBAC notice flag on their own OrgUser"""
+    request = mock_request(orguser)
+    assert orguser.has_seen_rbac_notice is False
+
+    payload = OrgUserUpdatev1(
+        toupdate_email="unused-param",
+        has_seen_rbac_notice=True,
+    )
+
+    response = put_organization_user_self_v1(request, payload)
+
+    assert response.has_seen_rbac_notice is True
+    orguser.refresh_from_db()
+    assert orguser.has_seen_rbac_notice is True
+
+
 # ================================================================================
 
 
@@ -653,7 +676,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
-    new_role = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
+    new_role = Role.objects.filter(slug=ADMIN_ROLE).first()
     another_org_user = OrgUser.objects.create(org=another_org, user=another_user, new_role=new_role)
     Invitation.objects.create(
         invited_email="inivted_email",

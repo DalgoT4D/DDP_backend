@@ -17,6 +17,7 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
+from ddpui.core.ownership import can_delete_resource
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
@@ -418,9 +419,9 @@ class DashboardService:
         if dashboard.is_org_default and not force:
             raise DashboardPermissionError("Cannot delete the organization's default dashboard.")
 
-        # Only allow deletion if the current user is the creator
-        if dashboard.created_by != orguser:
-            raise DashboardPermissionError("You can only delete dashboards you created.")
+        # Only allow deletion if the user is the owner or an admin
+        if not can_delete_resource(orguser, dashboard):
+            raise DashboardPermissionError("Only the owner or an admin can delete this dashboard.")
 
         # Check if dashboard is landing page for any user
         if OrgUser.objects.filter(landing_dashboard=dashboard).exists():
