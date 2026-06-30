@@ -394,7 +394,7 @@ def get_job_status(request, job_id):
 def get_job_status_without_logs(request, job_id):
     """get the job info from airbyte"""
     result = airbyte_service.get_job_info_without_logs(job_id)
-    print(result)
+    logger.debug(result)
     return {
         "status": result["job"]["status"],
     }

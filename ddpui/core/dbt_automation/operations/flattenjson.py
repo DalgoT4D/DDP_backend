@@ -5,7 +5,8 @@ from logging import basicConfig, getLogger, INFO
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbt_automation.utils.columnutils import quote_columnname
 from ddpui.core.dbt_automation.utils.columnutils import make_cleaned_column_names, dedup_list
-from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.core.dbt_automation.json_sql import json_extract_expression
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 from ddpui.core.dbt_automation.utils.tableutils import source_or_ref
 
 
@@ -38,10 +39,7 @@ def flattenjson_dbt_sql(
         )
 
     source_columns = [col for col in source_columns if col != json_column]
-
-    dbt_code = (
-        f"SELECT {', '.join([quote_columnname(col, warehouse.name) for col in source_columns])}\n"
-    )
+    select_expressions = [quote_columnname(col, warehouse.name) for col in source_columns]
 
     sql_columns = make_cleaned_column_names(json_columns_to_copy)
 
@@ -51,7 +49,16 @@ def flattenjson_dbt_sql(
     sql_columns = dedup_list(sql_columns)
 
     for json_field, sql_column in zip(json_columns_to_copy, sql_columns):
-        dbt_code += "," + warehouse.json_extract_op(json_column, json_field, sql_column) + "\n"
+        json_column_ref = quote_columnname(json_column, warehouse.name)
+        extracted_expr = json_extract_expression(warehouse.name, json_column_ref, json_field)
+        select_expressions.append(
+            f"{extracted_expr} as {quote_columnname(sql_column, warehouse.name)}"
+        )
+
+    if not select_expressions:
+        raise ValueError("No columns selected for flattenjson output")
+
+    dbt_code = "SELECT\n" + ",\n".join(select_expressions) + "\n"
 
     select_from = source_or_ref(**config["input"])
     if config["input"]["input_type"] == "cte":

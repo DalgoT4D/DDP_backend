@@ -1,6 +1,6 @@
-import os
 import json
 from django.core.management.base import BaseCommand
+from ddpui.auth import get_role_permissions_redis_key
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -21,7 +21,7 @@ class Command(BaseCommand):
         dry_run = options["dry_run"]
 
         # Get the role permissions key from environment
-        role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
+        role_permissions_key = get_role_permissions_redis_key()
 
         try:
             redis_client = RedisClient.get_instance()

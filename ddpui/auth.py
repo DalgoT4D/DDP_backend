@@ -27,6 +27,11 @@ ANALYST_ROLE = "analyst"
 GUEST_ROLE = "guest"
 
 
+def get_role_permissions_redis_key() -> str:
+    """Return the Redis key used to cache role-to-permission mappings."""
+    return os.getenv("ROLE_PERMISSIONS_REDIS_KEY") or "dalgo_permissions_key"
+
+
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
         @wraps(api_endpoint)
@@ -127,7 +132,7 @@ class CustomJwtAuthMiddleware(HttpBearer):
             logger.exception("Invalid or expired token: %s", err)
             raise HttpError(401, "Invalid or expired token") from err
 
-        role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
+        role_permissions_key = get_role_permissions_redis_key()
 
         user_id = token_payload.get("user_id")
         orguser_role_key = token_payload.get(
@@ -203,7 +208,7 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)  # This returns a RefreshToken and Not an AccessToken
 
-        role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
+        role_permissions_key = get_role_permissions_redis_key()
 
         redis_client = RedisClient.get_instance()
         role_permissions = redis_client.get(

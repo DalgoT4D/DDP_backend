@@ -6,9 +6,15 @@ from logging import basicConfig, getLogger, INFO
 from ddpui.core.dbt_automation.utils.sourceschemas import get_source
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbt_automation.utils.dbtconfigs import mk_model_config
-from ddpui.core.dbt_automation.utils.columnutils import make_cleaned_column_names, dedup_list
-from ddpui.utils.warehouse.old_client.warehouse_factory import get_client
-from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.core.dbt_automation.utils.columnutils import (
+    make_cleaned_column_names,
+    dedup_list,
+    quote_columnname,
+)
+from ddpui.core.dbt_automation.json_sql import json_extract_expression
+from ddpui.core.dbt_automation.json_keys_sql import infer_json_keys
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 
 
 basicConfig(level=INFO)
@@ -53,7 +59,13 @@ def flatten_operation(config: dict, warehouse: WarehouseInterface, project_dir: 
         sql_columns = []
         json_fields = []
         # get the field names from the json objects
-        json_fields = warehouse.get_json_columnspec(SOURCE_SCHEMA, tablename, "_airbyte_data")
+        json_fields = infer_json_keys(
+            warehouse,
+            warehouse.name,
+            SOURCE_SCHEMA,
+            tablename,
+            "_airbyte_data",
+        )
 
         # convert to sql-friendly column names
         sql_columns = make_cleaned_column_names(json_fields)
@@ -103,7 +115,9 @@ def mk_dbtmodel(
     dbtmodel += "\n"
 
     for json_field, sql_column in columntuples:
-        dbtmodel += "," + warehouse.json_extract_op("_airbyte_data", json_field, sql_column) + "\n"
+        json_column_ref = quote_columnname("_airbyte_data", warehouse.name)
+        extracted_expr = json_extract_expression(warehouse.name, json_column_ref, json_field)
+        dbtmodel += f",{extracted_expr} as {quote_columnname(sql_column, warehouse.name)}\n"
 
     dbtmodel += f"FROM {{{{source('{sourcename}','{srctablename}')}}}}"
     dbtmodel += "\n"
@@ -113,6 +127,7 @@ def mk_dbtmodel(
 # ================================================================================
 if __name__ == "__main__":
     import os
+    import json
     from dotenv import load_dotenv
     import argparse
 
@@ -127,14 +142,19 @@ if __name__ == "__main__":
     parser.add_argument("--dest-schema", default="staging", help="e.g. staging")
     args = parser.parse_args()
 
-    conn_info = {
-        "host": os.getenv("DBHOST"),
-        "port": os.getenv("DBPORT"),
-        "username": os.getenv("DBUSER"),
-        "password": os.getenv("DBPASSWORD"),
-        "database": os.getenv("DBNAME"),
-    }
-    warehouse_client = get_client(args.warehouse, conn_info)
+    if args.warehouse == "postgres":
+        conn_info = {
+            "host": os.getenv("DBHOST"),
+            "port": os.getenv("DBPORT"),
+            "username": os.getenv("DBUSER"),
+            "password": os.getenv("DBPASSWORD"),
+            "database": os.getenv("DBNAME"),
+        }
+        warehouse_client = WarehouseFactory.connect(conn_info, args.warehouse)
+    else:
+        conn_info = json.loads(os.getenv("TEST_BG_SERVICEJSON", "{}"))
+        bq_location = os.getenv("TEST_BG_LOCATION")
+        warehouse_client = WarehouseFactory.connect(conn_info, args.warehouse, bq_location)
 
     flatten_operation(
         config={"source_schema": args.source_schema, "dest_schema": args.dest_schema},

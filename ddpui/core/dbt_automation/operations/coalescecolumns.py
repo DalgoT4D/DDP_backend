@@ -5,7 +5,7 @@ from logging import basicConfig, getLogger, INFO
 
 from ddpui.core.dbt_automation.utils.dbtproject import dbtProject
 from ddpui.core.dbt_automation.utils.columnutils import quote_columnname, quote_constvalue
-from ddpui.utils.warehouse.old_client.warehouse_interface import WarehouseInterface
+from ddpui.utils.warehouse.client.warehouse_interface import Warehouse as WarehouseInterface
 from ddpui.core.dbt_automation.utils.tableutils import source_or_ref
 
 basicConfig(level=INFO)

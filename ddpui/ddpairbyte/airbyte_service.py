@@ -1121,7 +1121,7 @@ def get_current_airbyte_version():
     """Fetch airbyte version"""
 
     res = abreq("instance_configuration", method="GET")
-    print(res, "AIRBYTE RESPONSE")
+    logger.debug("AIRBYTE RESPONSE: %s", res)
     if "version" not in res:
         logger.error("No version found")
         return None

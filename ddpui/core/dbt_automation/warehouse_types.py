@@ -1,0 +1,41 @@
+from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
+
+
+WAREHOUSE_SUPPORTED_TYPES: dict[str, list[str]] = {
+    WarehouseType.POSTGRES.value: [
+        "boolean",
+        "char",
+        "character varying",
+        "date",
+        "double precision",
+        "float",
+        "integer",
+        "jsonb",
+        "numeric",
+        "text",
+        "time",
+        "timestamp",
+        "timestamp with time zone",
+        "uuid",
+        "varchar",
+    ],
+    WarehouseType.BIGQUERY.value: [
+        "ARRAY",
+        "BIGNUMERIC",
+        "BOOL",
+        "BYTES",
+        "DATE",
+        "DATETIME",
+        "FLOAT64",
+        "GEOGRAPHY",
+        "INT64",
+        "INTERVAL",
+        "JSON",
+        "NUMERIC",
+        "RANGE",
+        "STRING",
+        "STRUCT",
+        "TIME",
+        "TIMESTAMP",
+    ],
+}
