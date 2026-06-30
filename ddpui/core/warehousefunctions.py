@@ -43,6 +43,9 @@ def get_warehouse_data(request, data_type: str, **kwargs):
                 order_by=kwargs["order_by"],
                 order=kwargs["order"],
             )
+    except ValueError as error:
+        logger.error(f"Invalid warehouse config for get_{data_type}: {error}")
+        raise HttpError(400, str(error))
     except Exception as error:
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
         raise HttpError(500, f"Failed to get {data_type}")
