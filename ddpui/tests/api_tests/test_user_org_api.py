@@ -1,5 +1,6 @@
 import uuid
 import os
+import time
 import django
 from datetime import datetime
 from django.core.management import call_command
@@ -14,6 +15,7 @@ django.setup()
 
 from ddpui.api.user_org_api import (
     get_current_user_v2,
+    post_logout,
     post_organization_user,
     get_organization_users,
     delete_organization_users_v1,
@@ -1146,6 +1148,87 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
         instance.delete_warehouse.assert_called_once()
         instance.delete_transformation_layer.assert_called_once()
         assert response == {"success": 1}
+
+
+# ================================================================================
+# Logout tests
+# ================================================================================
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+@patch("ddpui.api.user_org_api.RefreshToken")
+def test_post_logout_blacklists_access_token_jti(mock_refresh_token, mock_access_token, mock_redis):
+    """Test that logout stores the access token JTI in Redis with correct TTL."""
+    access_jti = "access-jti-abc123"
+    refresh_jti = "refresh-jti-xyz789"
+    exp = int(time.time()) + 3600  # expires in 1 hour
+    mock_access_token.return_value.payload = {"jti": access_jti, "exp": exp}
+    mock_refresh_token.return_value.payload = {"jti": refresh_jti, "exp": exp}
+
+    request = Mock()
+    request.COOKIES = {"access_token": "fake-access-token", "refresh_token": "fake-refresh-token"}
+    request.user = Mock(id=1)
+
+    post_logout(request)
+
+    # Two redis.set calls: one for access token, one for refresh token
+    all_calls = mock_redis.return_value.set.call_args_list
+    assert len(all_calls) == 2
+    keys_stored = [c[0][0] for c in all_calls]
+    assert f"blacklisted_jti:{access_jti}" in keys_stored
+    assert f"blacklisted_jti:{refresh_jti}" in keys_stored
+
+
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+@patch("ddpui.api.user_org_api.RefreshToken")
+def test_post_logout_blacklists_refresh_token_jti_in_redis(
+    mock_refresh_token, mock_access_token, mock_redis
+):
+    """Test that logout stores the refresh token JTI in Redis (not DB) with correct TTL."""
+    refresh_jti = "refresh-jti-xyz789"
+    exp = int(time.time()) + 604800  # 7 days
+    mock_access_token.return_value.payload = {"jti": "access-jti", "exp": exp}
+    mock_refresh_token.return_value.payload = {"jti": refresh_jti, "exp": exp}
+
+    request = Mock()
+    request.COOKIES = {"access_token": "fake-access-token", "refresh_token": "fake-refresh-token"}
+    request.user = Mock(id=1)
+
+    post_logout(request)
+
+    all_calls = mock_redis.return_value.set.call_args_list
+    refresh_call = next(c for c in all_calls if c[0][0] == f"blacklisted_jti:{refresh_jti}")
+    assert refresh_call[0][1] == "1"
+    assert abs(refresh_call[1]["ex"] - 604800) < 5
+
+
+@patch("ddpui.api.user_org_api.AccessToken")
+def test_post_logout_no_access_token_cookie(mock_access_token):
+    """Test that logout succeeds gracefully when no access token cookie exists."""
+    request = Mock()
+    request.COOKIES = {}
+    request.user = None
+
+    response = post_logout(request)
+
+    mock_access_token.assert_not_called()
+    assert response.status_code == 200
+
+
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+def test_post_logout_invalid_access_token_still_succeeds(mock_access_token, mock_redis):
+    """Test that logout succeeds even when the access token is already invalid/expired."""
+    mock_access_token.side_effect = Exception("Token is invalid")
+
+    request = Mock()
+    request.COOKIES = {"access_token": "invalid-token"}
+    request.user = None
+
+    response = post_logout(request)
+
+    mock_redis.return_value.set.assert_not_called()
+    assert response.status_code == 200
 
 
 # ================================================================================

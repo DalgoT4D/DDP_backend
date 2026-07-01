@@ -13,9 +13,14 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
-from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
+from ddpui.auth import (
+    has_permission,
+    CustomTokenObtainSerializer,
+    CustomTokenRefreshSerializer,
+    blacklist_jti_in_redis,
+)
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -35,7 +40,6 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
     LoginPayload,
-    TokenRefreshPayload,
     LogoutPayload,
 )
 from ddpui.models.org_plans import OrgPlanType
@@ -174,66 +178,25 @@ def post_login(request, payload: LoginPayload):
     return retval
 
 
-@user_org_router.post("/login_token/")
-def post_login_token(request):
-    """
-    Login user with token (used by embed-token provider).
-    Invalidates the current short-lived iframe token and generates a new session token with longer expiry.
-    """
-    user: User = request.user
-    if not user or not user.username:
-        raise HttpError(401, "Invalid or missing token")
-
-    # Generate new tokens with standard expiry for the session
-    serializer = CustomTokenObtainSerializer.get_token(user)
-    access_token = serializer.access_token
-
-    # Get user data
-    retval = orguserfunctions.lookup_user(user.username)
-    retval["token"] = str(access_token)
-    retval["refresh"] = str(serializer)
-
-    return retval
-
-
 @user_org_router.post("/logout/")
 def post_logout(request):
     """
     Blacklists the refresh token on logout and clears httpOnly cookies.
     Gets refresh token from cookies for cookie-based authentication.
     """
-    # Get refresh token from cookies
-    refresh_token = request.COOKIES.get("refresh_token")
+    access_token_str = request.COOKIES.get("access_token")
+    if access_token_str:
+        blacklist_jti_in_redis(access_token_str, AccessToken)
 
-    # Try to blacklist the refresh token if we have one
-    if refresh_token:
-        try:
-            token = RefreshToken(refresh_token)
-            token_user_id = token.payload.get("user_id")
-            if request.user and request.user.id == token_user_id:
-                token.blacklist()
-        except (TokenError, Exception):
-            # Token is already invalid/expired or other error, continue with logout
-            pass
+    refresh_token_str = request.COOKIES.get("refresh_token")
+    if refresh_token_str:
+        blacklist_jti_in_redis(refresh_token_str, RefreshToken)
 
-    # Create response
     response = JsonResponse({"success": True})
-
-    # Always try to clear cookies (harmless if they don't exist)
-    # delete_cookie only accepts: key, path, domain, samesite
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
 
     return response
-
-
-@user_org_router.post("/token/refresh", auth=None)
-def post_token_refresh(request, payload: TokenRefreshPayload):
-    """Refreshes the JWT token using the refresh token"""
-    serializer = CustomTokenRefreshSerializer(data=payload.model_dump())
-    serializer.is_valid(raise_exception=True)
-    token_data = serializer.validated_data
-    return {"token": token_data["access"]}
 
 
 @user_org_router.get(

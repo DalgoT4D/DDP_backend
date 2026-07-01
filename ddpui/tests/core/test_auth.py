@@ -78,9 +78,10 @@ def test_authenticate_success(
     mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
         mock_org_user
     )
-    mock_redis_client.return_value.get.return_value = json.dumps(
-        {str(mock_org_user.new_role.id): ["perm1", "perm2"]}
-    )
+    permissions_json = json.dumps({str(mock_org_user.new_role.id): ["perm1", "perm2"]})
+    # call 1: JTI blacklist check → None (not blacklisted)
+    # call 2: orguser_role_map, call 3: permissions_map
+    mock_redis_client.return_value.get.side_effect = [None, permissions_json, permissions_json]
     mock_request.headers["x-dalgo-org"] = "test-org"
     token = str(AccessToken.for_user(mock_user))
 
@@ -153,3 +154,16 @@ def test_authenticate_redis_cache_empty(
 
     assert result.permissions == ["perm1"]
     mock_set_roles.assert_called_once()
+
+
+@patch("ddpui.auth.RedisClient.get_instance")
+def test_authenticate_blacklisted_token(mock_redis_client, mock_request, mock_user):
+    """Test that a token whose JTI is blacklisted in Redis is rejected with 401."""
+    mock_redis_client.return_value.get.return_value = "1"  # JTI is blacklisted
+    token = str(AccessToken.for_user(mock_user))
+
+    middleware = CustomJwtAuthMiddleware()
+    with pytest.raises(HttpError) as excinfo:
+        middleware.authenticate(mock_request, token)
+    assert excinfo.value.status_code == 401
+    assert str(excinfo.value) == "Token has been invalidated"
