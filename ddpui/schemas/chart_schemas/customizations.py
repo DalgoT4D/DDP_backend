@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 NumberFormat = Literal[
     "default",
     "percentage",
-    "currency",
     "indian",
     "international",
     "european",

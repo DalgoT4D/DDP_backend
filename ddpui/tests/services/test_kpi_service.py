@@ -16,7 +16,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.dashboard import Dashboard
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate
+from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIExtraConfig
 from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
@@ -158,13 +158,63 @@ class TestKPICRUD:
             direction="increase",
             time_grain="monthly",
             target_value=500.0,
+            extra_config=KPIExtraConfig(),
         )
         kpi = KPIService.create_kpi(payload, orguser)
         assert kpi.id is not None
         assert kpi.name == sample_metric.name  # defaults to metric name
         assert kpi.target_value == 500.0
         assert kpi.direction == "increase"
+        # extra_config defaults to {} on the model — never null
+        assert kpi.extra_config == {"customizations": None}
         kpi.delete()
+
+    def test_create_kpi_with_customizations(self, orguser, sample_metric, seed_db):
+        """v1.1: KPICreate accepts and persists number-format customizations."""
+        from ddpui.schemas.chart_schemas.customizations import NumberChartCustomizations
+
+        payload = KPICreate(
+            metric_id=sample_metric.id,
+            direction="increase",
+            time_grain="monthly",
+            target_value=500.0,
+            extra_config=KPIExtraConfig(
+                customizations=NumberChartCustomizations(
+                    numberFormat="indian",
+                    decimalPlaces=0,
+                    numberPrefix="₹",
+                    numberSuffix="",
+                )
+            ),
+        )
+        kpi = KPIService.create_kpi(payload, orguser)
+        c = kpi.extra_config["customizations"]
+        assert c["numberFormat"] == "indian"
+        assert c["decimalPlaces"] == 0
+        assert c["numberPrefix"] == "₹"
+
+        # Round-trip through kpi_to_response — customizations survives the
+        # Pydantic → dict → Pydantic conversion
+        response = KPIService.kpi_to_response(kpi)
+        assert response.extra_config.customizations.numberFormat == "indian"
+        assert response.extra_config.customizations.numberPrefix == "₹"
+        kpi.delete()
+
+    def test_update_kpi_replaces_customizations(self, orguser, org, sample_kpi, seed_db):
+        """Updating a KPI with a new customizations payload replaces the stored config."""
+        from ddpui.schemas.chart_schemas.customizations import NumberChartCustomizations
+
+        payload = KPIUpdate(
+            name="Updated",
+            extra_config=KPIExtraConfig(
+                customizations=NumberChartCustomizations(
+                    numberFormat="adaptive_indian", decimalPlaces=2
+                )
+            ),
+        )
+        updated = KPIService.update_kpi(sample_kpi.id, org, orguser, payload)
+        assert updated.extra_config["customizations"]["numberFormat"] == "adaptive_indian"
+        assert updated.extra_config["customizations"]["decimalPlaces"] == 2
 
     def test_create_kpi_custom_name(self, orguser, sample_metric, seed_db):
         payload = KPICreate(
@@ -174,6 +224,7 @@ class TestKPICRUD:
             time_grain="quarterly",
             green_threshold_pct=80.0,
             amber_threshold_pct=110.0,
+            extra_config=KPIExtraConfig(),
         )
         kpi = KPIService.create_kpi(payload, orguser)
         assert kpi.name == "Custom KPI Name"
@@ -186,6 +237,7 @@ class TestKPICRUD:
             metric_id=sample_metric.id,
             direction="sideways",
             time_grain="monthly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="Invalid direction"):
             KPIService.create_kpi(payload, orguser)
@@ -195,6 +247,7 @@ class TestKPICRUD:
             metric_id=sample_metric.id,
             direction="increase",
             time_grain="hourly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="Invalid time_grain"):
             KPIService.create_kpi(payload, orguser)
@@ -206,6 +259,7 @@ class TestKPICRUD:
             time_grain="monthly",
             green_threshold_pct=50.0,
             amber_threshold_pct=80.0,
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="green_threshold_pct"):
             KPIService.create_kpi(payload, orguser)
@@ -217,6 +271,7 @@ class TestKPICRUD:
             time_grain="monthly",
             green_threshold_pct=80.0,
             amber_threshold_pct=50.0,
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="amber_threshold_pct"):
             KPIService.create_kpi(payload, orguser)
@@ -228,6 +283,7 @@ class TestKPICRUD:
             metric_id=99999,
             direction="increase",
             time_grain="monthly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(MetricNotFoundError):
             KPIService.create_kpi(payload, orguser)
@@ -275,13 +331,13 @@ class TestKPICRUD:
         kpi.delete()
 
     def test_update_kpi(self, orguser, org, sample_kpi, seed_db):
-        payload = KPIUpdate(name="Updated KPI", target_value=2000.0)
+        payload = KPIUpdate(name="Updated KPI", target_value=2000.0, extra_config=KPIExtraConfig())
         updated = KPIService.update_kpi(sample_kpi.id, org, orguser, payload)
         assert updated.name == "Updated KPI"
         assert updated.target_value == 2000.0
 
     def test_update_kpi_invalid_direction(self, orguser, org, sample_kpi, seed_db):
-        payload = KPIUpdate(direction="sideways")
+        payload = KPIUpdate(direction="sideways", extra_config=KPIExtraConfig())
         with pytest.raises(KPIValidationError):
             KPIService.update_kpi(sample_kpi.id, org, orguser, payload)
 
