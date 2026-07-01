@@ -14,7 +14,6 @@ from ddpui.schemas.chart_schemas.customizations import (
     TableChartCustomizations,
 )
 
-
 # ── Shared sub-schemas (metrics, filters, sort, pagination, table dim) ──────
 
 
@@ -32,6 +31,7 @@ class ChartMetric(Schema):
     aggregation: Optional[ChartMetricAggregation] = None
     alias: Optional[str] = None
     column_expression: Optional[str] = None
+    saved_metric_id: Optional[int] = None
 
     @model_validator(mode="after")
     def check_aggregation_column_pair(self) -> "ChartMetric":

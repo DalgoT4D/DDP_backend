@@ -368,7 +368,7 @@ class MetricService:
         charts = []
         for chart in Chart.objects.filter(org=org):
             ec = chart.extra_config or {}
-            metrics_list = ec.get("metrics", [])
+            metrics_list = ec.get("metrics") or []
             for m in metrics_list:
                 if isinstance(m, dict) and m.get("saved_metric_id") == metric_id:
                     charts.append(

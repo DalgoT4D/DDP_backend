@@ -1,12 +1,13 @@
 import os
+import time
 import uuid
 import json
 from functools import wraps
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
-from rest_framework.authtoken.models import Token
-from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.exceptions import ExpiredTokenError
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken, TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
@@ -51,33 +52,6 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
-class CustomAuthMiddleware(HttpBearer):
-    """new middleware that works based on permissions from db"""
-
-    def authenticate(self, request, token):
-        tokenrecord = Token.objects.filter(key=token).first()
-        if tokenrecord and tokenrecord.user:
-            request.user = tokenrecord.user
-            q_orguser = OrgUser.objects.filter(user=request.user)
-            if request.headers.get("x-dalgo-org"):
-                orgslug = request.headers["x-dalgo-org"]
-                q_orguser = q_orguser.filter(org__slug=orgslug)
-            orguser = q_orguser.select_related("org", "user").first()
-            if orguser is not None:
-                if orguser.org is None:
-                    raise HttpError(400, "register an organization first")
-
-                permission_slugs = RolePermission.objects.filter(role=orguser.new_role).values_list(
-                    "permission__slug", flat=True
-                )
-
-                request.permissions = list(permission_slugs) or []
-                request.orguser = orguser
-                return request
-
-        raise HttpError(400, UNAUTHORIZED)
-
-
 def set_roles_and_permissions_in_redis(
     redis_client: RedisClient, role_permissions_key: str
 ) -> dict:
@@ -91,28 +65,40 @@ def set_roles_and_permissions_in_redis(
     return role_permissions
 
 
+def blacklist_jti_in_redis(token_str, token_class):
+    """Stores a token's JTI in Redis with TTL equal to its remaining lifetime."""
+    try:
+        token = token_class(token_str)
+        jti = token.payload.get("jti")
+        exp = token.payload.get("exp")
+        if jti and exp:
+            ttl = int(exp - time.time())
+            if ttl > 0:
+                redis_client = RedisClient.get_instance()
+                redis_client.set(f"blacklisted_jti:{jti}", "1", ex=ttl)
+    except (TokenError, Exception):
+        pass
+
+
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
     def __call__(self, request):
-        # For /api/login_token/ endpoint, prioritize Authorization header over cookies
-        # This is needed for iframe token validation
-        if request.path == "/api/login_token/":
-            logger.info(
-                "CustomJwtAuthMiddleware: prioritizing Authorization header for /api/login_token/"
-            )
-            # First try Authorization header
-            return super().__call__(request)
-
-        # For all other endpoints, prioritize cookies first
         cookie_token = request.COOKIES.get("access_token")
 
-        # If we have a cookie token, use it directly
-        if cookie_token:
-            return self.authenticate(request, cookie_token)
+        if not cookie_token:
+            return super().__call__(request)
 
-        # Otherwise, fall back to the default HttpBearer behavior (Authorization header)
-        return super().__call__(request)
+        # 498 tells the frontend to refresh; only signal that for genuine expiry.
+        # Malformed / bad-signature / wrong-type tokens should force a re-login (401).
+        try:
+            AccessToken(cookie_token)
+        except ExpiredTokenError as err:
+            raise HttpError(498, "Token expired") from err
+        except TokenError as err:
+            raise HttpError(401, "Invalid token") from err
+
+        return self.authenticate(request, cookie_token)
 
     def authenticate(self, request, token=None):
         if not token:
@@ -126,6 +112,13 @@ class CustomJwtAuthMiddleware(HttpBearer):
         except Exception as err:
             logger.exception("Invalid or expired token: %s", err)
             raise HttpError(401, "Invalid or expired token") from err
+
+        # Check if this token's JTI has been blacklisted (e.g. user logged out)
+        jti = token_payload.get("jti")
+        if jti:
+            redis_client = RedisClient.get_instance()
+            if redis_client.get(f"blacklisted_jti:{jti}"):
+                raise HttpError(401, "Token has been invalidated")
 
         role_permissions_key = os.getenv("ROLE_PERMISSIONS_REDIS_KEY", "dalgo_permissions_key")
 
@@ -243,6 +236,14 @@ class CustomTokenRefreshSerializer(TokenRefreshSerializer):
         data = super().validate(attrs)
         # Get the user from the refresh token
         refresh = self.token_class(attrs["refresh"])
+
+        # Reject if this refresh token was blacklisted in Redis (e.g. user already logged out)
+        refresh_jti = refresh.payload.get("jti")
+        if refresh_jti:
+            redis_client = RedisClient.get_instance()
+            if redis_client.get(f"blacklisted_jti:{refresh_jti}"):
+                raise TokenError("Refresh token has been invalidated")
+
         user_id = refresh.payload.get("user_id")
         user = User.objects.filter(id=user_id).first()
         if user:

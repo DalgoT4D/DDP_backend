@@ -22,7 +22,7 @@ from ddpui.api.kpi_api import (
     update_kpi,
     delete_kpi,
 )
-from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate
+from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIExtraConfig
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -136,6 +136,7 @@ class TestCreateKPI:
             direction="increase",
             time_grain="monthly",
             target_value=500.0,
+            extra_config=KPIExtraConfig(),
         )
         response = create_kpi(request, payload)
         assert response.id is not None
@@ -149,6 +150,7 @@ class TestCreateKPI:
             metric_id=99999,
             direction="increase",
             time_grain="monthly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(HttpError) as exc_info:
             create_kpi(request, payload)
@@ -160,6 +162,7 @@ class TestCreateKPI:
             metric_id=sample_metric.id,
             direction="sideways",
             time_grain="monthly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(HttpError) as exc_info:
             create_kpi(request, payload)
@@ -184,14 +187,16 @@ class TestGetKPI:
 class TestUpdateKPI:
     def test_update_success(self, orguser, sample_kpi, seed_db):
         request = mock_request(orguser)
-        payload = KPIUpdate(name="Updated API KPI", target_value=2000.0)
+        payload = KPIUpdate(
+            name="Updated API KPI", target_value=2000.0, extra_config=KPIExtraConfig()
+        )
         response = update_kpi(request, sample_kpi.id, payload)
         assert response.name == "Updated API KPI"
         assert response.target_value == 2000.0
 
     def test_update_not_found(self, orguser, seed_db):
         request = mock_request(orguser)
-        payload = KPIUpdate(name="Nope")
+        payload = KPIUpdate(name="Nope", extra_config=KPIExtraConfig())
         with pytest.raises(HttpError) as exc_info:
             update_kpi(request, 99999, payload)
         assert exc_info.value.status_code == 404
