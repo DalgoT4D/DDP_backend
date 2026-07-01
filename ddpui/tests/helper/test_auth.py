@@ -2,10 +2,8 @@ from unittest.mock import Mock
 from faker import Faker
 import pytest
 from django.contrib.auth.models import User
-from ddpui.auth import (
-    Token,
-    OrgUser,
-)
+from rest_framework.authtoken.models import Token
+from ddpui.models.org_user import OrgUser
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUserRole
 

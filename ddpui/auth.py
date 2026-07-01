@@ -6,6 +6,7 @@ from functools import wraps
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
+from rest_framework_simplejwt.exceptions import ExpiredTokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken, TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
@@ -88,11 +89,14 @@ class CustomJwtAuthMiddleware(HttpBearer):
         if not cookie_token:
             return super().__call__(request)
 
-        # If access token is expired, return 498 so the frontend uses the refresh token
+        # 498 tells the frontend to refresh; only signal that for genuine expiry.
+        # Malformed / bad-signature / wrong-type tokens should force a re-login (401).
         try:
             AccessToken(cookie_token)
-        except TokenError:
-            raise HttpError(498, "Token expired")
+        except ExpiredTokenError as err:
+            raise HttpError(498, "Token expired") from err
+        except TokenError as err:
+            raise HttpError(401, "Invalid token") from err
 
         return self.authenticate(request, cookie_token)
 
