@@ -195,6 +195,36 @@ class TestGetRowLabels:
         row = {"district": None, "program": "Education", "_grp_district": 0, "_grp_program": 0}
         assert get_row_labels(row, ["district", "program"]) == ["(No value)", "Education"]
 
+    def test_row_time_grain_month(self):
+        # A grained row dimension value (already truncated by SQL) is formatted like a header.
+        row = {
+            "enrolled_at": "2025-08-01T00:00:00",
+            "program": "Education",
+            "_grp_enrolled_at": 0,
+            "_grp_program": 0,
+        }
+        assert get_row_labels(row, ["enrolled_at", "program"], {"enrolled_at": "month"}) == [
+            "Aug 2025",
+            "Education",
+        ]
+
+    def test_row_time_grain_only_applies_to_grained_dim(self):
+        row = {
+            "enrolled_at": "2025-08-01T00:00:00",
+            "program": "Education",
+            "_grp_enrolled_at": 0,
+            "_grp_program": 0,
+        }
+        # program has no grain → passthrough; enrolled_at year-grained
+        assert get_row_labels(row, ["enrolled_at", "program"], {"enrolled_at": "year"}) == [
+            "2025",
+            "Education",
+        ]
+
+    def test_row_time_grain_none_is_raw(self):
+        row = {"enrolled_at": "2025-08-12T20:45:58", "_grp_enrolled_at": 0}
+        assert get_row_labels(row, ["enrolled_at"], None) == ["2025-08-12T20:45:58"]
+
 
 class TestRotateToPivotSingleColumn:
     def test_basic_rotation(self):

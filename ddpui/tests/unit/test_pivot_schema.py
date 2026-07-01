@@ -10,13 +10,11 @@ class TestPivotTablePayload:
             table_name="beneficiaries",
             row_dimensions=["district", "program"],
             column_dimensions=["enrollment_date", "category"],
-            column_time_grains={"enrollment_date": "month"},
             show_row_subtotals=True,
             show_grand_total=True,
         )
         assert payload.row_dimensions == ["district", "program"]
         assert payload.column_dimensions == ["enrollment_date", "category"]
-        assert payload.column_time_grains == {"enrollment_date": "month"}
         assert payload.show_row_subtotals is True
         assert payload.show_grand_total is True
 
@@ -28,7 +26,6 @@ class TestPivotTablePayload:
         )
         assert payload.row_dimensions is None
         assert payload.column_dimensions is None
-        assert payload.column_time_grains is None
         assert payload.show_row_subtotals is False
         assert payload.show_grand_total is True
 

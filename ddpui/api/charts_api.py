@@ -19,7 +19,7 @@ from ddpui.models.dashboard import DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
-from ddpui.core.charts.pivot_service import get_pivot_table_data, PIVOT_DEFAULT_PAGE_SIZE
+from ddpui.core.charts.pivot_service import get_pivot_table_data
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -152,9 +152,7 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
 
     # Handle pivot tables — completely separate pipeline with ROLLUP and rotation
     if payload.chart_type == "pivot_table":
-        page = payload.extra_config.get("page", 1) if payload.extra_config else 1
-        page_size = payload.extra_config.get("page_size", 50) if payload.extra_config else 50
-        pivot_data = get_pivot_table_data(org_warehouse, payload, page, page_size)
+        pivot_data = get_pivot_table_data(org_warehouse, payload)
         logger.info(f"Successfully generated pivot table data for {chart_id_str}")
         return {"data": pivot_data, "echarts_config": {}}
 
@@ -613,7 +611,6 @@ def get_chart_data_preview(
         # Pivot table fields
         row_dimensions=payload.row_dimensions,
         column_dimensions=payload.column_dimensions,
-        column_time_grains=payload.column_time_grains,
         show_row_subtotals=payload.show_row_subtotals,
         show_grand_total=payload.show_grand_total,
     )
@@ -731,7 +728,6 @@ def get_chart_data_preview_total_rows(
         # Pivot table fields
         row_dimensions=payload.row_dimensions,
         column_dimensions=payload.column_dimensions,
-        column_time_grains=payload.column_time_grains,
         show_row_subtotals=payload.show_row_subtotals,
         show_grand_total=payload.show_grand_total,
     )
@@ -1068,14 +1064,8 @@ def get_chart_data_by_id(
     request,
     chart_id: int,
     dashboard_filters: Optional[str] = None,
-    page: int = 1,
-    page_size: int = PIVOT_DEFAULT_PAGE_SIZE,
 ):
-    """Get chart data using saved chart configuration with optional dashboard filters.
-
-    `page`/`page_size` only apply to pivot tables (group-level pagination); other
-    chart types ignore them.
-    """
+    """Get chart data using saved chart configuration with optional dashboard filters."""
     import json
 
     orguser = request.orguser
@@ -1094,12 +1084,6 @@ def get_chart_data_by_id(
 
     # Build payload from chart config
     extra_config = chart.extra_config.copy() if chart.extra_config else {}
-
-    # Pivot tables paginate by top-level row groups; thread the requested page
-    # through extra_config so generate_chart_data_and_config picks it up.
-    if chart.chart_type == "pivot_table":
-        extra_config["page"] = page if page >= 1 else 1
-        extra_config["page_size"] = page_size if page_size >= 1 else PIVOT_DEFAULT_PAGE_SIZE
 
     # Parse and resolve dashboard filters if provided
     resolved_dashboard_filters = None

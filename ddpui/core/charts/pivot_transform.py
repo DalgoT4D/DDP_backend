@@ -65,17 +65,25 @@ def _get_column_subtotal_key(
     return tuple(key_parts)
 
 
-def get_row_labels(row: dict, row_dim_cols: list[str]) -> list[str]:
+def get_row_labels(
+    row: dict, row_dim_cols: list[str], row_time_grains: dict[str, str] | None = None
+) -> list[str]:
     """
     Build display labels for row dimensions.
     Real NULLs → "(No value)". ROLLUP NULLs → stop (subtotal boundary).
+    When a row dimension has a time grain, its (already truncated) value is
+    formatted with the same grain-aware formatter used for column headers.
     """
     labels = []
     for col in row_dim_cols:
         if row[f"_grp_{col}"] == 1:
             break
-        label = row[col] if row[col] is not None else NULL_DISPLAY_LABEL
-        labels.append(str(label))
+        grain = (row_time_grains or {}).get(col)
+        if grain:
+            labels.append(format_pivot_column_header(row[col], grain))
+        else:
+            label = row[col] if row[col] is not None else NULL_DISPLAY_LABEL
+            labels.append(str(label))
     return labels
 
 
@@ -158,11 +166,10 @@ def rotate_to_pivot(
     col_dim_names: list[str],
     metric_aliases: list[str],
     time_grains: dict[str, str] | None = None,
-    page: int = 1,
-    page_size: int = 50,
     metric_display_names: list[str] | None = None,
     show_column_subtotals: bool = False,
     show_row_subtotals: bool = True,
+    row_time_grains: dict[str, str] | None = None,
 ) -> dict:
     """
     Transform flat ROLLUP rows into pivoted JSON response.
@@ -176,9 +183,6 @@ def rotate_to_pivot(
             "metric_headers": ["Count", "Spend"],
             "rows": [...],
             "grand_total": {...} | None,
-            "total_row_groups": int,
-            "page": int,
-            "page_size": int,
         }
     """
     has_col_dims = num_col_dims > 0
@@ -228,7 +232,7 @@ def rotate_to_pivot(
         # payload only asked for a grand total (show_row_subtotals=False).
         if row_type == "subtotal" and not show_row_subtotals:
             continue
-        row_labels = tuple(get_row_labels(row, row_dim_cols))
+        row_labels = tuple(get_row_labels(row, row_dim_cols, row_time_grains))
         col_total = is_column_total(row, num_col_dims) if has_col_dims else False
 
         key = (row_labels, row_type)
@@ -280,21 +284,12 @@ def rotate_to_pivot(
         else:
             data_rows.append(entry)
 
-    # Count top-level groups (unique first label among non-subtotal rows)
-    top_level_groups = set()
-    for entry in data_rows:
-        if not entry["is_subtotal"] and entry["row_labels"]:
-            top_level_groups.add(entry["row_labels"][0])
-
     result = {
         "column_keys": [list(k) for k in column_keys],
         "column_dimension_names": col_dim_names,
         "metric_headers": metric_display_names if metric_display_names else metric_aliases,
         "rows": data_rows,
         "grand_total": grand_total_entry,
-        "total_row_groups": len(top_level_groups),
-        "page": page,
-        "page_size": page_size,
     }
 
     if show_column_subtotals and column_subtotal_keys:
