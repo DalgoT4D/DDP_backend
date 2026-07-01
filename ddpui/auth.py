@@ -1,12 +1,12 @@
 import os
+import time
 import uuid
 import json
 from functools import wraps
 from ninja.security import HttpBearer
 from ninja.errors import HttpError
 
-from rest_framework.authtoken.models import Token
-from rest_framework_simplejwt.tokens import AccessToken, TokenError
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken, TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
@@ -51,33 +51,6 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
-class CustomAuthMiddleware(HttpBearer):
-    """new middleware that works based on permissions from db"""
-
-    def authenticate(self, request, token):
-        tokenrecord = Token.objects.filter(key=token).first()
-        if tokenrecord and tokenrecord.user:
-            request.user = tokenrecord.user
-            q_orguser = OrgUser.objects.filter(user=request.user)
-            if request.headers.get("x-dalgo-org"):
-                orgslug = request.headers["x-dalgo-org"]
-                q_orguser = q_orguser.filter(org__slug=orgslug)
-            orguser = q_orguser.select_related("org", "user").first()
-            if orguser is not None:
-                if orguser.org is None:
-                    raise HttpError(400, "register an organization first")
-
-                permission_slugs = RolePermission.objects.filter(role=orguser.new_role).values_list(
-                    "permission__slug", flat=True
-                )
-
-                request.permissions = list(permission_slugs) or []
-                request.orguser = orguser
-                return request
-
-        raise HttpError(400, UNAUTHORIZED)
-
-
 def set_roles_and_permissions_in_redis(
     redis_client: RedisClient, role_permissions_key: str
 ) -> dict:
@@ -91,18 +64,25 @@ def set_roles_and_permissions_in_redis(
     return role_permissions
 
 
+def blacklist_jti_in_redis(token_str, token_class):
+    """Stores a token's JTI in Redis with TTL equal to its remaining lifetime."""
+    try:
+        token = token_class(token_str)
+        jti = token.payload.get("jti")
+        exp = token.payload.get("exp")
+        if jti and exp:
+            ttl = int(exp - time.time())
+            if ttl > 0:
+                redis_client = RedisClient.get_instance()
+                redis_client.set(f"blacklisted_jti:{jti}", "1", ex=ttl)
+    except (TokenError, Exception):
+        pass
+
+
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
     def __call__(self, request):
-        # For /api/login_token/ endpoint, prioritize Authorization header over cookies
-        # This is needed for iframe token validation
-        if request.path == "/api/login_token/":
-            logger.info(
-                "CustomJwtAuthMiddleware: prioritizing Authorization header for /api/login_token/"
-            )
-            return super().__call__(request)
-
         cookie_token = request.COOKIES.get("access_token")
 
         if not cookie_token:

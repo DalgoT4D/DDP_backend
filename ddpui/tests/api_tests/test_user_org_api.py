@@ -1153,7 +1153,7 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
 # ================================================================================
 # Logout tests
 # ================================================================================
-@patch("ddpui.api.user_org_api.RedisClient.get_instance")
+@patch("ddpui.auth.RedisClient.get_instance")
 @patch("ddpui.api.user_org_api.AccessToken")
 @patch("ddpui.api.user_org_api.RefreshToken")
 def test_post_logout_blacklists_access_token_jti(mock_refresh_token, mock_access_token, mock_redis):
@@ -1178,7 +1178,7 @@ def test_post_logout_blacklists_access_token_jti(mock_refresh_token, mock_access
     assert f"blacklisted_jti:{refresh_jti}" in keys_stored
 
 
-@patch("ddpui.api.user_org_api.RedisClient.get_instance")
+@patch("ddpui.auth.RedisClient.get_instance")
 @patch("ddpui.api.user_org_api.AccessToken")
 @patch("ddpui.api.user_org_api.RefreshToken")
 def test_post_logout_blacklists_refresh_token_jti_in_redis(
@@ -1215,7 +1215,7 @@ def test_post_logout_no_access_token_cookie(mock_access_token):
     assert response.status_code == 200
 
 
-@patch("ddpui.api.user_org_api.RedisClient.get_instance")
+@patch("ddpui.auth.RedisClient.get_instance")
 @patch("ddpui.api.user_org_api.AccessToken")
 def test_post_logout_invalid_access_token_still_succeeds(mock_access_token, mock_redis):
     """Test that logout succeeds even when the access token is already invalid/expired."""

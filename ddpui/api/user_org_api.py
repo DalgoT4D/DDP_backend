@@ -1,5 +1,4 @@
 import json
-import time
 from typing import List
 from datetime import timedelta
 
@@ -14,9 +13,14 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
-from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
-from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
+from ddpui.auth import (
+    has_permission,
+    CustomTokenObtainSerializer,
+    CustomTokenRefreshSerializer,
+    blacklist_jti_in_redis,
+)
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -52,7 +56,6 @@ from ddpui.ddpairbyte import airbytehelpers
 
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.feature_flags import get_all_feature_flags_for_org
-from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.response_wrapper import api_response, ApiResponse
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
@@ -175,43 +178,6 @@ def post_login(request, payload: LoginPayload):
     return retval
 
 
-@user_org_router.post("/login_token/")
-def post_login_token(request):
-    """
-    Login user with token (used by embed-token provider).
-    Invalidates the current short-lived iframe token and generates a new session token with longer expiry.
-    """
-    user: User = request.user
-    if not user or not user.username:
-        raise HttpError(401, "Invalid or missing token")
-
-    # Generate new tokens with standard expiry for the session
-    serializer = CustomTokenObtainSerializer.get_token(user)
-    access_token = serializer.access_token
-
-    # Get user data
-    retval = orguserfunctions.lookup_user(user.username)
-    retval["token"] = str(access_token)
-    retval["refresh"] = str(serializer)
-
-    return retval
-
-
-def _blacklist_jti_in_redis(token_str, token_class):
-    """Stores a token's JTI in Redis with TTL equal to its remaining lifetime."""
-    try:
-        token = token_class(token_str)
-        jti = token.payload.get("jti")
-        exp = token.payload.get("exp")
-        if jti and exp:
-            ttl = int(exp - time.time())
-            if ttl > 0:
-                redis_client = RedisClient.get_instance()
-                redis_client.set(f"blacklisted_jti:{jti}", "1", ex=ttl)
-    except (TokenError, Exception):
-        pass
-
-
 @user_org_router.post("/logout/")
 def post_logout(request):
     """
@@ -220,11 +186,11 @@ def post_logout(request):
     """
     access_token_str = request.COOKIES.get("access_token")
     if access_token_str:
-        _blacklist_jti_in_redis(access_token_str, AccessToken)
+        blacklist_jti_in_redis(access_token_str, AccessToken)
 
     refresh_token_str = request.COOKIES.get("refresh_token")
     if refresh_token_str:
-        _blacklist_jti_in_redis(refresh_token_str, RefreshToken)
+        blacklist_jti_in_redis(refresh_token_str, RefreshToken)
 
     response = JsonResponse({"success": True})
     response.delete_cookie("access_token", path="/")
