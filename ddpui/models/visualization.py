@@ -14,6 +14,8 @@ CHART_TYPE_CHOICES = [
     ("line", "Line Chart"),
     ("number", "Number Chart"),
     ("map", "Map Chart"),
+    ("table", "Table Chart"),
+    ("pivot_table", "Pivot Table"),
 ]
 
 # Deprecated: computation_type is no longer used in chart logic

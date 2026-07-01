@@ -120,9 +120,11 @@ def get_pagination_params(payload: ChartDataPayload):
     Extract pagination parameters from payload.
     Returns (limit, offset) tuple with proper defaults.
     """
-    # Table charts use a custom preview pagination path; avoid inner LIMIT/OFFSET
-    # so that table-specific query logic is applied consistently.
-    if payload.chart_type == "table":
+    # Table charts use a custom preview pagination path. Pivot tables are never
+    # paginated and build a ROLLUP query with grouping columns. Both must avoid the
+    # generic inner LIMIT/OFFSET so their own query logic is applied (and so a legacy
+    # saved pivot with pagination.enabled doesn't hit the incompatible generic path).
+    if payload.chart_type in ("table", "pivot_table"):
         return None, None
 
     # Check if pagination is enabled in extra_config
@@ -255,6 +257,14 @@ def build_chart_data_payload(
     )
 
     payload.dimensions = normalize_dimensions(payload)
+
+    # Pivot table fields live in extra_config when saved, but need to be top-level on the payload
+    if chart_config.chart_type == "pivot_table":
+        payload.row_dimensions = ec.get("row_dimensions", [])
+        payload.column_dimensions = ec.get("column_dimensions", [])
+        payload.show_row_subtotals = ec.get("show_row_subtotals", True)
+        payload.show_column_subtotals = ec.get("show_column_subtotals", False)
+        payload.show_grand_total = ec.get("show_grand_total", True)
 
     return payload
 
@@ -407,6 +417,84 @@ def build_multi_metric_query(
     return query_builder
 
 
+def build_pivot_table_query(
+    payload: ChartDataPayload,
+    query_builder: AggQueryBuilder,
+    org_warehouse=None,
+) -> AggQueryBuilder:
+    """Build ROLLUP query for pivot table with GROUPING() markers.
+
+    Supports multiple column dimensions. Each column dimension becomes
+    pivot_col_0, pivot_col_1, ... in the SELECT with corresponding
+    GROUPING markers _grp_pivot_col_0, _grp_pivot_col_1, ...
+
+    ROLLUP(pivot_col_0, pivot_col_1) produces:
+    - (val0, val1) — leaf cells
+    - (val0, NULL/_grp=1) — column subtotals for val0
+    - (NULL/_grp=1, NULL/_grp=1) — overall column total
+    """
+    if not payload.row_dimensions:
+        raise ValueError("At least one row dimension is required for pivot tables")
+    if not payload.metrics or len(payload.metrics) == 0:
+        raise ValueError("At least one metric is required for pivot tables")
+
+    # The bottom "Total" row (column grand total) requires rolling up all row dimensions.
+    # Fall back to the legacy show_grand_total flag when the new flag is unset.
+    show_column_grand_total = (
+        payload.show_column_grand_total
+        if payload.show_column_grand_total is not None
+        else payload.show_grand_total
+    )
+    needs_row_rollup = payload.show_row_subtotals or show_column_grand_total
+    col_dims = payload.column_dimensions or []
+
+    # Add row dimension columns to SELECT (labelled so get_row_labels can read row[dim_col])
+    for dim_col in payload.row_dimensions:
+        query_builder.add_column(column(dim_col).label(dim_col))
+
+    # Add column dimension columns to SELECT
+    for idx, col_dim in enumerate(col_dims):
+        query_builder.add_column(column(col_dim).label(f"pivot_col_{idx}"))
+
+    # Add metric aggregations to SELECT
+    for metric in payload.metrics:
+        if metric.aggregation.lower() == "count" and metric.column is None:
+            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+        else:
+            if not metric.column:
+                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+        query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
+
+    # Add GROUPING() markers for each row dimension
+    for dim_col in payload.row_dimensions:
+        query_builder.add_grouping_column(column(dim_col), f"_grp_{dim_col}")
+
+    # Add GROUPING() markers for each column dimension
+    for idx, col_dim in enumerate(col_dims):
+        query_builder.add_grouping_column(column(col_dim), f"_grp_pivot_col_{idx}")
+
+    # GROUP BY row dimensions — use ROLLUP when subtotals/grand total are requested
+    row_group_exprs = [column(dim_col) for dim_col in payload.row_dimensions]
+    if needs_row_rollup:
+        query_builder.group_cols_by_rollup(*row_group_exprs)
+    else:
+        query_builder.group_cols_by(*row_group_exprs)
+
+    # GROUP BY column dimensions — ROLLUP so column totals are identifiable
+    if col_dims:
+        query_builder.group_cols_by_rollup(*[column(col_dim) for col_dim in col_dims])
+
+    # ORDER BY row dimensions then column dimensions for consistent output
+    order_cols = [(dim, "asc") for dim in payload.row_dimensions]
+    for idx in range(len(col_dims)):
+        order_cols.append((f"pivot_col_{idx}", "asc"))
+    query_builder.order_cols_by(order_cols)
+
+    return query_builder
+
+
 def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
@@ -438,6 +526,18 @@ def build_chart_query(
         # No pagination, use original table directly
         query_builder = AggQueryBuilder()
         query_builder.fetch_from(payload.table_name, payload.schema_name)
+
+        # Pivot table charts have their own query builder with ROLLUP support
+        if payload.chart_type == "pivot_table":
+            query_builder = build_pivot_table_query(payload, query_builder, org_warehouse)
+
+            # Apply filters
+            if payload.dashboard_filters:
+                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+            if payload.extra_config and payload.extra_config.get("filters"):
+                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+
+            return query_builder
 
         # Now build the rest of the query logic on top of the (possibly paginated) data source
         # Table charts can work with just dimensions (no metrics) - non-aggregated query

@@ -1,0 +1,362 @@
+import pytest
+from ddpui.core.charts.pivot_transform import (
+    classify_row,
+    get_row_labels,
+    rotate_to_pivot,
+    format_pivot_column_header,
+    is_column_total,
+)
+
+# Simulated ROLLUP output rows with ONE column dimension (pivot_col_0)
+SAMPLE_ROWS_SINGLE_COL = [
+    {
+        "district": "Mumbai",
+        "program": "Education",
+        "pivot_col_0": "2026-01-01",
+        "Count": 1,
+        "Spend": 450,
+        "_grp_district": 0,
+        "_grp_program": 0,
+        "_grp_pivot_col_0": 0,
+    },
+    {
+        "district": "Mumbai",
+        "program": "Education",
+        "pivot_col_0": None,
+        "Count": 1,
+        "Spend": 450,
+        "_grp_district": 0,
+        "_grp_program": 0,
+        "_grp_pivot_col_0": 1,
+    },
+    {
+        "district": "Mumbai",
+        "program": "Health",
+        "pivot_col_0": "2026-01-01",
+        "Count": 2,
+        "Spend": 600,
+        "_grp_district": 0,
+        "_grp_program": 0,
+        "_grp_pivot_col_0": 0,
+    },
+    {
+        "district": "Mumbai",
+        "program": "Health",
+        "pivot_col_0": None,
+        "Count": 2,
+        "Spend": 600,
+        "_grp_district": 0,
+        "_grp_program": 0,
+        "_grp_pivot_col_0": 1,
+    },
+    # Subtotal for Mumbai
+    {
+        "district": "Mumbai",
+        "program": None,
+        "pivot_col_0": "2026-01-01",
+        "Count": 3,
+        "Spend": 1050,
+        "_grp_district": 0,
+        "_grp_program": 1,
+        "_grp_pivot_col_0": 0,
+    },
+    {
+        "district": "Mumbai",
+        "program": None,
+        "pivot_col_0": None,
+        "Count": 3,
+        "Spend": 1050,
+        "_grp_district": 0,
+        "_grp_program": 1,
+        "_grp_pivot_col_0": 1,
+    },
+    # Grand total
+    {
+        "district": None,
+        "program": None,
+        "pivot_col_0": "2026-01-01",
+        "Count": 3,
+        "Spend": 1050,
+        "_grp_district": 1,
+        "_grp_program": 1,
+        "_grp_pivot_col_0": 0,
+    },
+    {
+        "district": None,
+        "program": None,
+        "pivot_col_0": None,
+        "Count": 3,
+        "Spend": 1050,
+        "_grp_district": 1,
+        "_grp_program": 1,
+        "_grp_pivot_col_0": 1,
+    },
+]
+
+# Simulated ROLLUP output with TWO column dimensions (pivot_col_0, pivot_col_1)
+SAMPLE_ROWS_MULTI_COL = [
+    # Leaf cells
+    {
+        "district": "Mumbai",
+        "pivot_col_0": "2026-01",
+        "pivot_col_1": "Education",
+        "Count": 5,
+        "_grp_district": 0,
+        "_grp_pivot_col_0": 0,
+        "_grp_pivot_col_1": 0,
+    },
+    {
+        "district": "Mumbai",
+        "pivot_col_0": "2026-01",
+        "pivot_col_1": "Health",
+        "Count": 3,
+        "_grp_district": 0,
+        "_grp_pivot_col_0": 0,
+        "_grp_pivot_col_1": 0,
+    },
+    # Column subtotal (month total across programs) — skipped in rendering
+    {
+        "district": "Mumbai",
+        "pivot_col_0": "2026-01",
+        "pivot_col_1": None,
+        "Count": 8,
+        "_grp_district": 0,
+        "_grp_pivot_col_0": 0,
+        "_grp_pivot_col_1": 1,
+    },
+    # Overall column total
+    {
+        "district": "Mumbai",
+        "pivot_col_0": None,
+        "pivot_col_1": None,
+        "Count": 8,
+        "_grp_district": 0,
+        "_grp_pivot_col_0": 1,
+        "_grp_pivot_col_1": 1,
+    },
+    # Grand total
+    {
+        "district": None,
+        "pivot_col_0": None,
+        "pivot_col_1": None,
+        "Count": 8,
+        "_grp_district": 1,
+        "_grp_pivot_col_0": 1,
+        "_grp_pivot_col_1": 1,
+    },
+]
+
+
+class TestClassifyRow:
+    def test_data_row(self):
+        row = {"_grp_district": 0, "_grp_program": 0}
+        assert classify_row(row, ["district", "program"]) == "data"
+
+    def test_subtotal_row(self):
+        row = {"_grp_district": 0, "_grp_program": 1}
+        assert classify_row(row, ["district", "program"]) == "subtotal"
+
+    def test_grand_total_row(self):
+        row = {"_grp_district": 1, "_grp_program": 1}
+        assert classify_row(row, ["district", "program"]) == "grand_total"
+
+
+class TestIsColumnTotal:
+    def test_single_col_total(self):
+        row = {"_grp_pivot_col_0": 1}
+        assert is_column_total(row, 1) is True
+
+    def test_single_col_not_total(self):
+        row = {"_grp_pivot_col_0": 0}
+        assert is_column_total(row, 1) is False
+
+    def test_multi_col_all_total(self):
+        row = {"_grp_pivot_col_0": 1, "_grp_pivot_col_1": 1}
+        assert is_column_total(row, 2) is True
+
+    def test_multi_col_partial(self):
+        row = {"_grp_pivot_col_0": 0, "_grp_pivot_col_1": 1}
+        assert is_column_total(row, 2) is False
+
+    def test_no_col_dims(self):
+        assert is_column_total({}, 0) is False
+
+
+class TestGetRowLabels:
+    def test_data_row_labels(self):
+        row = {"district": "Mumbai", "program": "Education", "_grp_district": 0, "_grp_program": 0}
+        assert get_row_labels(row, ["district", "program"]) == ["Mumbai", "Education"]
+
+    def test_subtotal_row_labels(self):
+        row = {"district": "Mumbai", "program": None, "_grp_district": 0, "_grp_program": 1}
+        assert get_row_labels(row, ["district", "program"]) == ["Mumbai"]
+
+    def test_null_in_real_data(self):
+        row = {"district": None, "program": "Education", "_grp_district": 0, "_grp_program": 0}
+        assert get_row_labels(row, ["district", "program"]) == ["(No value)", "Education"]
+
+    def test_row_time_grain_month(self):
+        # A grained row dimension value (already truncated by SQL) is formatted like a header.
+        row = {
+            "enrolled_at": "2025-08-01T00:00:00",
+            "program": "Education",
+            "_grp_enrolled_at": 0,
+            "_grp_program": 0,
+        }
+        assert get_row_labels(row, ["enrolled_at", "program"], {"enrolled_at": "month"}) == [
+            "Aug 2025",
+            "Education",
+        ]
+
+    def test_row_time_grain_only_applies_to_grained_dim(self):
+        row = {
+            "enrolled_at": "2025-08-01T00:00:00",
+            "program": "Education",
+            "_grp_enrolled_at": 0,
+            "_grp_program": 0,
+        }
+        # program has no grain → passthrough; enrolled_at year-grained
+        assert get_row_labels(row, ["enrolled_at", "program"], {"enrolled_at": "year"}) == [
+            "2025",
+            "Education",
+        ]
+
+    def test_row_time_grain_none_is_raw(self):
+        row = {"enrolled_at": "2025-08-12T20:45:58", "_grp_enrolled_at": 0}
+        assert get_row_labels(row, ["enrolled_at"], None) == ["2025-08-12T20:45:58"]
+
+
+class TestRotateToPivotSingleColumn:
+    def test_basic_rotation(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_SINGLE_COL,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count", "Spend"],
+        )
+        assert "column_keys" in result
+        assert "column_dimension_names" in result
+        assert "metric_headers" in result
+        assert "rows" in result
+        assert "grand_total" in result
+
+        # Should have 2 data rows + 1 subtotal
+        assert len(result["rows"]) == 3
+        assert result["grand_total"] is not None
+        assert result["grand_total"]["row_total"] == [3, 1050]
+
+    def test_subtotal_row_flagged(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_SINGLE_COL,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count", "Spend"],
+        )
+        subtotal_rows = [r for r in result["rows"] if r["is_subtotal"]]
+        assert len(subtotal_rows) == 1
+        assert subtotal_rows[0]["row_labels"] == ["Mumbai"]
+
+
+class TestRotateToPivotMultiColumn:
+    def test_multi_column_rotation(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_MULTI_COL,
+            row_dim_cols=["district"],
+            num_col_dims=2,
+            col_dim_names=["month", "program"],
+            metric_aliases=["Count"],
+        )
+        # Should have composite column keys
+        assert len(result["column_keys"]) == 2
+        assert result["column_keys"][0] == ["2026-01", "Education"]
+        assert result["column_keys"][1] == ["2026-01", "Health"]
+        assert result["column_dimension_names"] == ["month", "program"]
+
+        # Data row for Mumbai
+        data_rows = [r for r in result["rows"] if not r["is_subtotal"]]
+        assert len(data_rows) == 1
+        assert data_rows[0]["row_labels"] == ["Mumbai"]
+        assert data_rows[0]["values"][0] == [5]
+        assert data_rows[0]["values"][1] == [3]
+        assert data_rows[0]["row_total"] == [8]
+
+    def test_multi_column_grand_total(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_MULTI_COL,
+            row_dim_cols=["district"],
+            num_col_dims=2,
+            col_dim_names=["month", "program"],
+            metric_aliases=["Count"],
+        )
+        assert result["grand_total"] is not None
+        assert result["grand_total"]["row_total"] == [8]
+
+
+class TestRowSubtotalToggle:
+    def test_subtotals_dropped_when_disabled(self):
+        # SAMPLE_ROWS_SINGLE_COL contains a Mumbai subtotal row. With
+        # show_row_subtotals=False (grand-total-only request), ROLLUP still
+        # emits it but the transform must drop it; grand total is preserved.
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_SINGLE_COL,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count", "Spend"],
+            show_row_subtotals=False,
+        )
+        assert all(not r["is_subtotal"] for r in result["rows"])
+        assert result["grand_total"] is not None
+        assert result["grand_total"]["row_total"] == [3, 1050]
+
+    def test_subtotals_kept_when_enabled(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_SINGLE_COL,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count", "Spend"],
+            show_row_subtotals=True,
+        )
+        assert any(r["is_subtotal"] for r in result["rows"])
+
+
+class TestColumnKeyChronologicalOrder:
+    def test_time_grain_columns_sorted_chronologically(self):
+        # Raw month values arrive out of order; formatted labels ("Mar 2026"...)
+        # would sort lexicographically (Feb, Jan, Mar). Must sort by raw value.
+        rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": f"2026-{m:02d}-01 00:00:00",
+                "Count": c,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            }
+            for m, c in [(3, 30), (1, 10), (2, 20)]
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["month"],
+            metric_aliases=["Count"],
+            time_grains={"month": "month"},
+        )
+        assert result["column_keys"] == [["Jan 2026"], ["Feb 2026"], ["Mar 2026"]]
+
+
+class TestFormatPivotColumnHeader:
+    def test_month_grain(self):
+        assert format_pivot_column_header("2026-01-01 00:00:00", "month") == "Jan 2026"
+
+    def test_year_grain(self):
+        assert format_pivot_column_header("2026-01-01 00:00:00", "year") == "2026"
+
+    def test_day_grain(self):
+        assert format_pivot_column_header("2026-01-15 00:00:00", "day") == "Jan 15, 2026"
+
+    def test_no_grain_passthrough(self):
+        assert format_pivot_column_header("CategoryA", None) == "CategoryA"

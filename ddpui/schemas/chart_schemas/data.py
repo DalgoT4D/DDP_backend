@@ -32,6 +32,16 @@ class ChartDataPayload(Schema):
     value_column: Optional[str] = None
     selected_geojson_id: Optional[int] = None
 
+    # Pivot table fields
+    row_dimensions: Optional[List[str]] = None
+    column_dimensions: Optional[List[str]] = None  # multiple column dimensions (pivot axes)
+    show_row_subtotals: bool = False
+    show_column_subtotals: bool = False
+    show_grand_total: bool = True  # legacy — fallback for the two flags below
+    # Independent grand totals (Excel model). When None, fall back to show_grand_total.
+    show_row_grand_total: Optional[bool] = None  # rightmost "Total" column (each row across cols)
+    show_column_grand_total: Optional[bool] = None  # bottom "Total" row (each col across rows)
+
     customizations: Optional[dict] = None
     extra_config: Optional[dict] = None
     dashboard_filters: Optional[list[dict]] = None

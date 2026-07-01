@@ -22,6 +22,7 @@ class AggQueryBuilder:
         self.column_clauses: list[Function | ColumnClause] = []
         self.select_from: TableClause = None
         self.group_by_clauses: list[ColumnClause] = []
+        self.rollup_clauses: list = []  # List of func.rollup() expressions
         self.order_by_clauses: list[ColumnClause] = []
         self.limit_records: int = None
         self.offset_records: int = 0
@@ -84,6 +85,25 @@ class AggQueryBuilder:
                 self.group_by_clauses.append(col)
         return self
 
+    def group_cols_by_rollup(self, *cols):
+        """Group by ROLLUP of the given columns — produces subtotals/grand totals"""
+        resolved = []
+        for col in cols:
+            if isinstance(col, str):
+                resolved.append(column(col))
+            else:
+                resolved.append(col)
+        self.rollup_clauses.append(func.rollup(*resolved))
+        return self
+
+    def add_grouping_column(self, col_expr, alias: str):
+        """Add GROUPING(col) to SELECT — returns 1 for ROLLUP-generated NULLs, 0 for real data"""
+        if isinstance(col_expr, str):
+            col_expr = column(col_expr)
+        grouping_col = func.grouping(col_expr).label(alias)
+        self.column_clauses.append(grouping_col)
+        return self
+
     def having_clause(self, condition):
         """Having clause"""
         self.having_clauses.append(condition)
@@ -125,8 +145,9 @@ class AggQueryBuilder:
             for where_clause in self.where_clauses:
                 stmt = stmt.where(where_clause)
 
-        if len(self.group_by_clauses) > 0:
-            stmt = stmt.group_by(*self.group_by_clauses)
+        all_group_by = list(self.group_by_clauses) + list(self.rollup_clauses)
+        if len(all_group_by) > 0:
+            stmt = stmt.group_by(*all_group_by)
             if len(self.having_clauses) > 0:
                 for having_clause in self.having_clauses:
                     stmt = stmt.having(having_clause)
@@ -151,6 +172,7 @@ class AggQueryBuilder:
         self.column_clauses: list[Function] = []
         self.select_from: TableClause = None
         self.group_by_clauses: list[ColumnClause] = []
+        self.rollup_clauses: list = []
         self.order_by_clauses: list[ColumnClause] = []
         self.limit_records: int = None
         self.offset_records: int = 0
