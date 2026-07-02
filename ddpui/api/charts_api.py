@@ -612,7 +612,9 @@ def get_chart_data_preview(
         row_dimensions=payload.row_dimensions,
         column_dimensions=payload.column_dimensions,
         show_row_subtotals=payload.show_row_subtotals,
-        show_grand_total=payload.show_grand_total,
+        show_column_subtotals=payload.show_column_subtotals,
+        show_row_grand_total=payload.show_row_grand_total,
+        show_column_grand_total=payload.show_column_grand_total,
     )
 
     logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
@@ -729,7 +731,9 @@ def get_chart_data_preview_total_rows(
         row_dimensions=payload.row_dimensions,
         column_dimensions=payload.column_dimensions,
         show_row_subtotals=payload.show_row_subtotals,
-        show_grand_total=payload.show_grand_total,
+        show_column_subtotals=payload.show_column_subtotals,
+        show_row_grand_total=payload.show_row_grand_total,
+        show_column_grand_total=payload.show_column_grand_total,
     )
 
     # Pivot tables handle their own pagination — return 0 for the generic total-rows endpoint

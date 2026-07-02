@@ -195,12 +195,10 @@ class PivotTableChartConfig(_ChartConfigBase):
 
     show_row_subtotals: Optional[bool] = None
     show_column_subtotals: Optional[bool] = None
-    show_grand_total: Optional[bool] = None
     show_row_grand_total: Optional[bool] = None
     show_column_grand_total: Optional[bool] = None
     subtotal_label: Optional[str] = None
     column_subtotal_label: Optional[str] = None
-    grand_total_label: Optional[str] = None
     row_grand_total_label: Optional[str] = None
     column_grand_total_label: Optional[str] = None
 

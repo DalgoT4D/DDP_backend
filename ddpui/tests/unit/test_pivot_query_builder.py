@@ -19,7 +19,6 @@ class TestBuildPivotQuery:
             row_dimensions=["district", "program"],
             column_dimensions=["enrollment_date"],
             show_row_subtotals=True,
-            show_grand_total=True,
             metrics=[
                 ChartMetric(column="id", aggregation="count", alias="Beneficiaries"),
                 ChartMetric(column="amount", aggregation="sum", alias="Total Spend"),
@@ -46,7 +45,6 @@ class TestBuildPivotQuery:
             row_dimensions=["district"],
             column_dimensions=[],
             show_row_subtotals=True,
-            show_grand_total=True,
             metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
         )
         ow = self._make_org_warehouse()
@@ -71,37 +69,17 @@ class TestBuildPivotQuery:
         return "ROLLUP" in str(qb.build().compile(compile_kwargs={"literal_binds": True})).upper()
 
     def test_row_rollup_off_when_no_totals(self):
-        payload = self._rollup_payload(
-            show_row_subtotals=False, show_grand_total=False, show_column_grand_total=False
-        )
+        payload = self._rollup_payload(show_row_subtotals=False, show_column_grand_total=False)
         assert self._has_rollup(payload) is False
 
     def test_row_rollup_on_for_column_grand_total(self):
-        payload = self._rollup_payload(
-            show_row_subtotals=False, show_grand_total=False, show_column_grand_total=True
-        )
+        payload = self._rollup_payload(show_row_subtotals=False, show_column_grand_total=True)
         assert self._has_rollup(payload) is True
 
     def test_row_rollup_on_for_row_subtotals_only(self):
         # Row subtotals alone force the rollup even when column grand total is off
-        payload = self._rollup_payload(
-            show_row_subtotals=True, show_grand_total=False, show_column_grand_total=False
-        )
+        payload = self._rollup_payload(show_row_subtotals=True, show_column_grand_total=False)
         assert self._has_rollup(payload) is True
-
-    def test_row_rollup_falls_back_to_legacy_grand_total(self):
-        # New flag unset → derive from legacy show_grand_total
-        payload = self._rollup_payload(
-            show_row_subtotals=False, show_grand_total=True, show_column_grand_total=None
-        )
-        assert self._has_rollup(payload) is True
-
-    def test_column_grand_total_overrides_legacy(self):
-        # Explicit new flag wins over legacy show_grand_total
-        payload = self._rollup_payload(
-            show_row_subtotals=False, show_grand_total=True, show_column_grand_total=False
-        )
-        assert self._has_rollup(payload) is False
 
     def test_pivot_query_multiple_column_dimensions(self):
         """Multiple column dimensions should produce multiple pivot_col labels and GROUPING markers"""
@@ -112,7 +90,6 @@ class TestBuildPivotQuery:
             row_dimensions=["district"],
             column_dimensions=["state", "program"],
             show_row_subtotals=True,
-            show_grand_total=True,
             metrics=[
                 ChartMetric(column="id", aggregation="count", alias="Count"),
             ],
@@ -135,7 +112,6 @@ class TestBuildPivotQuery:
             table_name="beneficiaries",
             row_dimensions=["district"],
             show_row_subtotals=True,
-            show_grand_total=True,
             metrics=[
                 ChartMetric(column="id", aggregation="count", alias="Count"),
             ],
@@ -159,7 +135,7 @@ class TestBuildPivotQuery:
             row_dimensions=["district"],
             column_dimensions=["month_col"],
             show_row_subtotals=False,
-            show_grand_total=False,
+            show_column_grand_total=False,
             metrics=[
                 ChartMetric(column="id", aggregation="count", alias="Count"),
             ],

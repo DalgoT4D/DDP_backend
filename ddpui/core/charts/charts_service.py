@@ -262,9 +262,10 @@ def build_chart_data_payload(
     if chart_config.chart_type == "pivot_table":
         payload.row_dimensions = ec.get("row_dimensions", [])
         payload.column_dimensions = ec.get("column_dimensions", [])
-        payload.show_row_subtotals = ec.get("show_row_subtotals", True)
+        payload.show_row_subtotals = ec.get("show_row_subtotals", False)
         payload.show_column_subtotals = ec.get("show_column_subtotals", False)
-        payload.show_grand_total = ec.get("show_grand_total", True)
+        payload.show_row_grand_total = ec.get("show_row_grand_total", False)
+        payload.show_column_grand_total = ec.get("show_column_grand_total", False)
 
     return payload
 
@@ -439,13 +440,7 @@ def build_pivot_table_query(
         raise ValueError("At least one metric is required for pivot tables")
 
     # The bottom "Total" row (column grand total) requires rolling up all row dimensions.
-    # Fall back to the legacy show_grand_total flag when the new flag is unset.
-    show_column_grand_total = (
-        payload.show_column_grand_total
-        if payload.show_column_grand_total is not None
-        else payload.show_grand_total
-    )
-    needs_row_rollup = payload.show_row_subtotals or show_column_grand_total
+    needs_row_rollup = payload.show_row_subtotals or payload.show_column_grand_total
     col_dims = payload.column_dimensions or []
 
     # Add row dimension columns to SELECT (labelled so get_row_labels can read row[dim_col])
