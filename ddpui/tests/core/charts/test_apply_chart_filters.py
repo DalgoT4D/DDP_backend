@@ -110,3 +110,65 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    # --- Empty-string on non-text columns ---
+
+    def test_numeric_equals_empty_string_becomes_is_null(self):
+        """numeric column with equals '' must become IS NULL"""
+        sql = get_where_sql([make_filter("AI_Signal", "equals", "", "numeric")])
+        assert len(sql) == 1
+        assert "IS NULL" in sql[0].upper()
+
+    def test_numeric_not_equals_empty_string_becomes_is_not_null(self):
+        """numeric column with not_equals '' must become IS NOT NULL"""
+        sql = get_where_sql([make_filter("AI_Signal", "not_equals", "", "numeric")])
+        assert len(sql) == 1
+        assert "IS NOT NULL" in sql[0].upper()
+
+    def test_integer_equals_empty_string_becomes_is_null(self):
+        """integer column with equals '' must become IS NULL"""
+        sql = get_where_sql([make_filter("count_col", "equals", "", "integer")])
+        assert len(sql) == 1
+        assert "IS NULL" in sql[0].upper()
+
+    def test_boolean_equals_empty_string_becomes_is_null(self):
+        """boolean column with equals '' must become IS NULL"""
+        sql = get_where_sql([make_filter("is_active", "equals", "", "boolean")])
+        assert len(sql) == 1
+        assert "IS NULL" in sql[0].upper()
+
+    def test_date_equals_empty_string_becomes_is_null(self):
+        """date column with equals '' must become IS NULL (not a valid date)"""
+        sql = get_where_sql([make_filter("birth_date", "equals", "", "date")])
+        assert len(sql) == 1
+        assert "IS NULL" in sql[0].upper()
+
+    def test_numeric_greater_than_empty_string_skipped(self):
+        """numeric column with greater_than '' is meaningless and should be skipped"""
+        sql = get_where_sql([make_filter("AI_Signal", "greater_than", "", "numeric")])
+        assert len(sql) == 0
+
+    def test_numeric_less_than_empty_string_skipped(self):
+        """numeric column with less_than '' is meaningless and should be skipped"""
+        sql = get_where_sql([make_filter("AI_Signal", "less_than", "", "numeric")])
+        assert len(sql) == 0
+
+    def test_text_equals_empty_string_preserved(self):
+        """text/varchar columns should still allow equals '' (valid SQL)"""
+        for dtype in ["varchar", "text", "char", "character varying"]:
+            sql = get_where_sql([make_filter("name", "equals", "", dtype)])
+            assert len(sql) == 1
+            assert "IS NULL" not in sql[0].upper(), f"Failed for data_type={dtype}"
+
+    def test_no_data_type_empty_string_preserved(self):
+        """When data_type is missing, empty string value is passed through as-is"""
+        sql = get_where_sql([{"column": "col", "operator": "equals", "value": ""}])
+        assert len(sql) == 1
+        assert "IS NULL" not in sql[0].upper()
+
+    def test_bigint_equals_empty_string_becomes_is_null(self):
+        """bigint column with equals '' must become IS NULL"""
+        for dtype in ["bigint", "float", "double precision", "real", "decimal"]:
+            sql = get_where_sql([make_filter("num_col", "equals", "", dtype)])
+            assert len(sql) == 1
+            assert "IS NULL" in sql[0].upper(), f"Failed for data_type={dtype}"

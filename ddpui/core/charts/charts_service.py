@@ -666,6 +666,35 @@ TIMESTAMP_TYPES = {
     "timestamp without time zone",
 }
 
+# Text-like data types where an empty string is a valid SQL literal.
+# Non-text types (numeric, boolean, date, …) cannot be compared to ''.
+TEXT_TYPES = {
+    "text",
+    "varchar",
+    "char",
+    "character",
+    "character varying",
+    "string",
+    "nvarchar",
+    "nchar",
+    "ntext",
+    "clob",
+    "bpchar",
+}
+
+
+def _is_non_text_empty(filter_config: dict) -> bool:
+    """True when the filter value is an empty string on a non-text column.
+
+    Non-text columns (numeric, boolean, date, etc.) cannot be compared to
+    an empty-string literal in SQL.  Such filters should be converted to
+    IS NULL / IS NOT NULL before the query is built.
+    """
+    data_type = (filter_config.get("data_type") or "").lower().strip()
+    if not data_type:
+        return False
+    return filter_config.get("value") == "" and data_type not in TEXT_TYPES
+
 
 def _is_timestamp_date(filter_config: dict) -> bool:
     """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
@@ -708,6 +737,23 @@ def apply_chart_filters(
     """
     if not filters:
         return query_builder
+
+    # Normalize empty-string values for non-text columns.
+    # Non-text columns (numeric, date, boolean, …) cannot be compared to ''
+    # in SQL.  Convert equals/not_equals to IS NULL / IS NOT NULL; skip other
+    # operators since a comparison to an empty string is meaningless.
+    normalized_filters = []
+    for f in filters:
+        if _is_non_text_empty(f):
+            op = f.get("operator")
+            if op == "equals":
+                normalized_filters.append({**f, "operator": "is_null", "value": None})
+            elif op == "not_equals":
+                normalized_filters.append({**f, "operator": "is_not_null", "value": None})
+            # else: skip — comparison operators with empty value are meaningless
+        else:
+            normalized_filters.append(f)
+    filters = normalized_filters
 
     # Group filters by column+operator combination
     grouped_filters = defaultdict(list)
