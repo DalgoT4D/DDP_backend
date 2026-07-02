@@ -1,15 +1,12 @@
 """
-Pivot table service: orchestrates cardinality checks and the full pivot data pipeline.
+Pivot table service: orchestrates the full pivot data pipeline.
 
 Supports multiple column dimensions via column_dimensions (list).
 """
 
-from sqlalchemy import func, select, column
-from sqlalchemy.sql.expression import table as sa_table
-
 from ddpui.schemas.chart_schemas import ChartDataPayload
 from ddpui.models.org import OrgWarehouse
-from ddpui.core.charts.pivot_transform import rotate_to_pivot, MAX_PIVOT_COLUMNS
+from ddpui.core.charts.pivot_transform import rotate_to_pivot
 from ddpui.core.charts.charts_service import (
     build_chart_query,
     get_warehouse_client,
@@ -19,46 +16,17 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.charts.pivot_service")
 
 
-def check_pivot_cardinality(warehouse_client, payload: ChartDataPayload) -> None:
-    """
-    For each column dimension, check COUNT(DISTINCT col) and raise ValueError
-    if ANY single dimension exceeds MAX_PIVOT_COLUMNS.
-    """
-    col_dims = payload.column_dimensions or []
-    if not col_dims:
-        return
-
-    source = sa_table(payload.table_name, schema=payload.schema_name)
-
-    for col_dim in col_dims:
-        col_expr = column(col_dim)
-
-        stmt = select(func.count(func.distinct(col_expr)).label("cnt")).select_from(source)
-        results = warehouse_client.execute(stmt)
-        cnt = results[0]["cnt"] if results else 0
-
-        if cnt > MAX_PIVOT_COLUMNS:
-            raise ValueError(
-                f"Column dimension '{col_dim}' has too many unique values "
-                f"({cnt} > {MAX_PIVOT_COLUMNS}). Choose a lower-cardinality column."
-            )
-
-
 def get_pivot_table_data(
     org_warehouse: OrgWarehouse,
     payload: ChartDataPayload,
 ) -> dict:
     """
     Full pivot table pipeline:
-    1. Cardinality check per column dimension
-    2. Build & execute ROLLUP query
-    3. Rotate flat rows into pivoted JSON with composite column keys
+    1. Build & execute ROLLUP query
+    2. Rotate flat rows into pivoted JSON with composite column keys
     """
     warehouse_client = get_warehouse_client(org_warehouse)
     col_dims = payload.column_dimensions or []
-
-    # Cardinality guard
-    check_pivot_cardinality(warehouse_client, payload)
 
     # Compute metric aliases (same logic as build_pivot_table_query)
     # metric_aliases are technical SQL column aliases used for query execution

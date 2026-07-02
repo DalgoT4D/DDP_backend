@@ -19,7 +19,7 @@ class ChartCreate(Schema):
 
     title: str
     description: Optional[str] = None
-    chart_type: Literal["bar", "line", "pie", "number", "map", "table"]
+    chart_type: Literal["bar", "line", "pie", "number", "map", "table", "pivot_table"]
     schema_name: str
     table_name: str
     extra_config: Any
@@ -39,7 +39,9 @@ class ChartUpdate(Schema):
 
     title: Optional[str] = None
     description: Optional[str] = None
-    chart_type: Optional[Literal["bar", "line", "pie", "number", "map", "table"]] = None
+    chart_type: Optional[
+        Literal["bar", "line", "pie", "number", "map", "table", "pivot_table"]
+    ] = None
     schema_name: Optional[str] = None
     table_name: Optional[str] = None
     extra_config: Optional[Any] = None

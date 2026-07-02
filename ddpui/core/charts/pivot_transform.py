@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Any
 
 NULL_DISPLAY_LABEL = "(No value)"
-MAX_PIVOT_COLUMNS = 100
 
 
 def classify_row(row: dict, row_dim_cols: list[str]) -> str:
