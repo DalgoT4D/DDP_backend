@@ -362,7 +362,7 @@ class MapDataOverlayPayload(Schema):
     schema_name: str
     table_name: str
     geographic_column: str
-    value_column: str
+    value_column: Optional[str] = None
     metrics: List[ChartMetric]
     filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
     dashboard_filters: Optional[dict[str, Any]] = Field(
@@ -398,10 +398,10 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         filters = payload.filters
 
         # Validate required fields
-        if not all([schema_name, table_name, geographic_column, value_column]):
+        if not all([schema_name, table_name, geographic_column]):
             raise HttpError(
                 400,
-                "Missing required fields: schema_name, table_name, geographic_column, value_column",
+                "Missing required fields: schema_name, table_name, geographic_column",
             )
 
         # Validate metrics exist and are non-empty
