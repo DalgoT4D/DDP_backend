@@ -13,3 +13,8 @@ from ddpui.models.canvas_models import CanvasNode, CanvasEdge
 from ddpui.models.comment import Comment, CommentReadStatus
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.alert import Alert, AlertLog, AlertType
+from ddpui.models.chat_with_data import (
+    ChatWithDataOrgConfig,
+    ChatWithDataSession,
+    ChatWithDataTurnAudit,
+)
