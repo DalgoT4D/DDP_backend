@@ -10,6 +10,8 @@ from ddpui.core.charts.pivot_transform import rotate_to_pivot
 from ddpui.core.charts.charts_service import (
     build_chart_query,
     get_warehouse_client,
+    metric_sql_alias,
+    metric_display_name,
 )
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -28,21 +30,10 @@ def get_pivot_table_data(
     warehouse_client = get_warehouse_client(org_warehouse)
     col_dims = payload.column_dimensions or []
 
-    # Compute metric aliases (same logic as build_pivot_table_query)
-    # metric_aliases are technical SQL column aliases used for query execution
-    # metric_display_names are user-facing display headers
-    metric_aliases = []
-    metric_display_names = []
-    if payload.metrics:
-        for metric in payload.metrics:
-            if metric.aggregation.lower() == "count" and metric.column is None:
-                sql_alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                display_name = metric.alias or "count_all"
-            else:
-                sql_alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                display_name = metric.alias or f"{metric.aggregation}_{metric.column}"
-            metric_aliases.append(sql_alias)
-            metric_display_names.append(display_name)
+    # Metric SQL aliases (for reading result columns) and display headers — the alias
+    # rule is shared with build_pivot_table_query so producer/consumer can't drift.
+    metric_aliases = [metric_sql_alias(m) for m in payload.metrics or []]
+    metric_display_names = [metric_display_name(m) for m in payload.metrics or []]
 
     # Build & execute ROLLUP query over all rows (rotate_to_pivot handles empty results)
     query_builder = build_chart_query(payload, org_warehouse)

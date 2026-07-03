@@ -416,6 +416,26 @@ def build_multi_metric_query(
     return query_builder
 
 
+def metric_sql_alias(metric) -> str:
+    """SQL column alias for a metric aggregate.
+
+    Must stay identical between where the query is built (SELECT alias) and where
+    the result is read back (row.get(alias)), otherwise every cell reads as None.
+    """
+    if metric.aggregation.lower() == "count" and metric.column is None:
+        return f"count_all_{metric.alias}" if metric.alias else "count_all"
+    if not metric.column:
+        raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+    return metric.alias or f"{metric.aggregation}_{metric.column}"
+
+
+def metric_display_name(metric) -> str:
+    """User-facing header label for a metric."""
+    if metric.aggregation.lower() == "count" and metric.column is None:
+        return metric.alias or "count_all"
+    return metric.alias or f"{metric.aggregation}_{metric.column}"
+
+
 def build_pivot_table_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -450,14 +470,9 @@ def build_pivot_table_query(
 
     # Add metric aggregations to SELECT
     for metric in payload.metrics:
-        if metric.aggregation.lower() == "count" and metric.column is None:
-            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-        else:
-            if not metric.column:
-                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-        query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
+        query_builder.add_aggregate_column(
+            metric.column, metric.aggregation, metric_sql_alias(metric)
+        )
 
     # Add GROUPING() markers for each row dimension
     for dim_col in payload.row_dimensions:
@@ -482,7 +497,9 @@ def build_pivot_table_query(
     order_cols = [(dim, "asc") for dim in payload.row_dimensions]
     for idx in range(len(col_dims)):
         order_cols.append((f"pivot_col_{idx}", "asc"))
-    query_builder.order_cols_by(order_cols)
+    # NULLS LAST so ROLLUP subtotal/total rows sort below their group on both
+    # Postgres (NULLS LAST default) and BigQuery (NULLS FIRST default).
+    query_builder.order_cols_by(order_cols, nulls_last=True)
 
     return query_builder
 

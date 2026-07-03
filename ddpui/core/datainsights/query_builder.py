@@ -109,13 +109,24 @@ class AggQueryBuilder:
         self.having_clauses.append(condition)
         return self
 
-    def order_cols_by(self, cols: list[tuple[str, str]]):
-        """Group by the columns"""
+    def order_cols_by(self, cols: list[tuple[str, str]], nulls_last: bool = False):
+        """Order by the columns.
+
+        When nulls_last is True, NULLs sort after real values regardless of the
+        warehouse's default (Postgres puts NULLs last on ASC, BigQuery puts them
+        first). Pivot ROLLUP subtotal/total rows carry NULLs, so this keeps them
+        below their group consistently across warehouses.
+        """
         for col, order in cols:
             if order.lower() == "asc":
-                self.order_by_clauses.append(asc(column(col)))
+                clause = asc(column(col))
             elif order.lower() == "desc":
-                self.order_by_clauses.append(desc(column(col)))
+                clause = desc(column(col))
+            else:
+                continue
+            if nulls_last:
+                clause = clause.nulls_last()
+            self.order_by_clauses.append(clause)
         return self
 
     def where_clause(self, condition):

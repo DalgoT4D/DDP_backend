@@ -150,6 +150,13 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     if payload.chart_type == "map":
         return generate_map_data_and_config(payload, org_warehouse, chart_id)
 
+    # Handle pivot tables — completely separate pipeline with ROLLUP and rotation.
+    # Short-circuit before the generic build/execute so the query runs only once.
+    if payload.chart_type == "pivot_table":
+        pivot_data = get_pivot_table_data(org_warehouse, payload)
+        logger.info(f"Successfully generated pivot table data for {chart_id_str}")
+        return {"data": pivot_data, "echarts_config": {}}
+
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
@@ -191,12 +198,6 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     if payload.chart_type == "table":
         logger.info(f"Successfully generated table data for {chart_id_str}")
         return {"data": chart_data, "echarts_config": {}}
-
-        # Handle pivot tables — completely separate pipeline with ROLLUP and rotation
-    if payload.chart_type == "pivot_table":
-        pivot_data = get_pivot_table_data(org_warehouse, payload)
-        logger.info(f"Successfully generated pivot table data for {chart_id_str}")
-        return {"data": pivot_data, "echarts_config": {}}
 
     # Generate ECharts config for other chart types
     config_generators = {
