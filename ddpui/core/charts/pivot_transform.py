@@ -4,9 +4,6 @@ Pivot table post-processing: classifies ROLLUP rows and rotates into pivoted JSO
 Supports multiple column dimensions. Column keys are tuples like
 ("Maharashtra", "Education") for a two-column-dimension pivot.
 """
-from datetime import datetime
-from typing import Any
-
 NULL_DISPLAY_LABEL = "(No value)"
 
 
@@ -46,8 +43,6 @@ def is_column_subtotal(row: dict, num_col_dims: int) -> bool:
 def _get_column_subtotal_key(
     row: dict,
     num_col_dims: int,
-    col_dim_names: list[str],
-    time_grains: dict[str, str] | None,
 ) -> tuple[str, ...]:
     """Extract the parent column key for a column subtotal row.
 
@@ -58,74 +53,30 @@ def _get_column_subtotal_key(
         if row.get(f"_grp_pivot_col_{i}", 0) == 1:
             break
         raw_val = row.get(f"pivot_col_{i}")
-        grain = (time_grains or {}).get(col_dim_names[i]) if col_dim_names else None
-        formatted = format_pivot_column_header(raw_val, grain)
-        key_parts.append(formatted)
+        key_parts.append(str(raw_val) if raw_val is not None else NULL_DISPLAY_LABEL)
     return tuple(key_parts)
 
 
-def get_row_labels(
-    row: dict, row_dim_cols: list[str], row_time_grains: dict[str, str] | None = None
-) -> list[str]:
+def get_row_labels(row: dict, row_dim_cols: list[str]) -> list[str]:
     """
     Build display labels for row dimensions.
     Real NULLs → "(No value)". ROLLUP NULLs → stop (subtotal boundary).
-    When a row dimension has a time grain, its (already truncated) value is
-    formatted with the same grain-aware formatter used for column headers.
     """
     labels = []
     for col in row_dim_cols:
         if row[f"_grp_{col}"] == 1:
             break
-        grain = (row_time_grains or {}).get(col)
-        if grain:
-            labels.append(format_pivot_column_header(row[col], grain))
-        else:
-            label = row[col] if row[col] is not None else NULL_DISPLAY_LABEL
-            labels.append(str(label))
+        label = row[col] if row[col] is not None else NULL_DISPLAY_LABEL
+        labels.append(str(label))
     return labels
 
 
-def format_pivot_column_header(value: Any, time_grain: str | None) -> str:
-    """Format a pivot column header based on time grain."""
-    if time_grain is None or value is None:
-        return str(value) if value is not None else NULL_DISPLAY_LABEL
-
-    if isinstance(value, str):
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            return str(value)
-    elif isinstance(value, datetime):
-        dt = value
-    else:
-        return str(value)
-
-    formats = {
-        "year": "%Y",
-        "month": "%b %Y",
-        "day": "%b %d, %Y",
-        "hour": "%b %d, %Y %H:00",
-        "minute": "%b %d, %Y %H:%M",
-        "second": "%b %d, %Y %H:%M:%S",
-    }
-    fmt = formats.get(time_grain)
-    return dt.strftime(fmt) if fmt else str(value)
-
-
-def _get_column_key(
-    row: dict,
-    num_col_dims: int,
-    col_dim_names: list[str],
-    time_grains: dict[str, str] | None,
-) -> tuple[str, ...]:
-    """Extract and format the composite column key from a row."""
+def _get_column_key(row: dict, num_col_dims: int) -> tuple[str, ...]:
+    """Extract the composite column key from a row."""
     key_parts = []
     for i in range(num_col_dims):
         raw_val = row.get(f"pivot_col_{i}")
-        grain = (time_grains or {}).get(col_dim_names[i]) if col_dim_names else None
-        formatted = format_pivot_column_header(raw_val, grain)
-        key_parts.append(formatted)
+        key_parts.append(str(raw_val) if raw_val is not None else NULL_DISPLAY_LABEL)
     return tuple(key_parts)
 
 
@@ -164,11 +115,9 @@ def rotate_to_pivot(
     num_col_dims: int,
     col_dim_names: list[str],
     metric_aliases: list[str],
-    time_grains: dict[str, str] | None = None,
     metric_display_names: list[str] | None = None,
     show_column_subtotals: bool = False,
     show_row_subtotals: bool = True,
-    row_time_grains: dict[str, str] | None = None,
 ) -> dict:
     """
     Transform flat ROLLUP rows into pivoted JSON response.
@@ -196,14 +145,14 @@ def rotate_to_pivot(
         formatted_by_raw_subtotal: dict[tuple, tuple[str, ...]] = {}
         for row in flat_rows:
             if _is_leaf_column_row(row, num_col_dims) and not is_column_total(row, num_col_dims):
-                key = _get_column_key(row, num_col_dims, col_dim_names, time_grains)
+                key = _get_column_key(row, num_col_dims)
                 # Skip keys with None values (shouldn't happen for leaf rows but be safe)
                 if NULL_DISPLAY_LABEL not in key or all(
                     row.get(f"_grp_pivot_col_{i}", 0) == 0 for i in range(num_col_dims)
                 ):
                     formatted_by_raw[_get_raw_column_key(row, num_col_dims)] = key
             elif show_column_subtotals and is_column_subtotal(row, num_col_dims):
-                sub_key = _get_column_subtotal_key(row, num_col_dims, col_dim_names, time_grains)
+                sub_key = _get_column_subtotal_key(row, num_col_dims)
                 formatted_by_raw_subtotal[_get_raw_column_subtotal_key(row, num_col_dims)] = sub_key
         column_keys = [formatted_by_raw[r] for r in sorted(formatted_by_raw, key=_raw_sort_key)]
         column_subtotal_keys = [
@@ -231,7 +180,7 @@ def rotate_to_pivot(
         # payload only asked for a grand total (show_row_subtotals=False).
         if row_type == "subtotal" and not show_row_subtotals:
             continue
-        row_labels = tuple(get_row_labels(row, row_dim_cols, row_time_grains))
+        row_labels = tuple(get_row_labels(row, row_dim_cols))
         col_total = is_column_total(row, num_col_dims) if has_col_dims else False
 
         key = (row_labels, row_type)
@@ -255,13 +204,13 @@ def rotate_to_pivot(
             pivoted[key]["row_total"] = metric_values
         elif _is_leaf_column_row(row, num_col_dims):
             # Leaf-level column cell
-            col_key = _get_column_key(row, num_col_dims, col_dim_names, time_grains)
+            col_key = _get_column_key(row, num_col_dims)
             if col_key in column_keys:
                 col_idx = column_keys.index(col_key)
                 pivoted[key]["values"][col_idx] = metric_values
         elif show_column_subtotals and is_column_subtotal(row, num_col_dims):
             # Column subtotal row
-            sub_key = _get_column_subtotal_key(row, num_col_dims, col_dim_names, time_grains)
+            sub_key = _get_column_subtotal_key(row, num_col_dims)
             if sub_key in column_subtotal_keys:
                 sub_idx = column_subtotal_keys.index(sub_key)
                 pivoted[key]["column_subtotal_values"][sub_idx] = metric_values

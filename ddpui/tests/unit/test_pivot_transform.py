@@ -3,7 +3,6 @@ from ddpui.core.charts.pivot_transform import (
     classify_row,
     get_row_labels,
     rotate_to_pivot,
-    format_pivot_column_header,
     is_column_total,
 )
 
@@ -195,35 +194,10 @@ class TestGetRowLabels:
         row = {"district": None, "program": "Education", "_grp_district": 0, "_grp_program": 0}
         assert get_row_labels(row, ["district", "program"]) == ["(No value)", "Education"]
 
-    def test_row_time_grain_month(self):
-        # A grained row dimension value (already truncated by SQL) is formatted like a header.
-        row = {
-            "enrolled_at": "2025-08-01T00:00:00",
-            "program": "Education",
-            "_grp_enrolled_at": 0,
-            "_grp_program": 0,
-        }
-        assert get_row_labels(row, ["enrolled_at", "program"], {"enrolled_at": "month"}) == [
-            "Aug 2025",
-            "Education",
-        ]
-
-    def test_row_time_grain_only_applies_to_grained_dim(self):
-        row = {
-            "enrolled_at": "2025-08-01T00:00:00",
-            "program": "Education",
-            "_grp_enrolled_at": 0,
-            "_grp_program": 0,
-        }
-        # program has no grain → passthrough; enrolled_at year-grained
-        assert get_row_labels(row, ["enrolled_at", "program"], {"enrolled_at": "year"}) == [
-            "2025",
-            "Education",
-        ]
-
-    def test_row_time_grain_none_is_raw(self):
+    def test_raw_datetime_value_passthrough(self):
+        # Row dimension values are rendered verbatim (no server-side formatting).
         row = {"enrolled_at": "2025-08-12T20:45:58", "_grp_enrolled_at": 0}
-        assert get_row_labels(row, ["enrolled_at"], None) == ["2025-08-12T20:45:58"]
+        assert get_row_labels(row, ["enrolled_at"]) == ["2025-08-12T20:45:58"]
 
 
 class TestRotateToPivotSingleColumn:
@@ -324,9 +298,9 @@ class TestRowSubtotalToggle:
 
 
 class TestColumnKeyChronologicalOrder:
-    def test_time_grain_columns_sorted_chronologically(self):
-        # Raw month values arrive out of order; formatted labels ("Mar 2026"...)
-        # would sort lexicographically (Feb, Jan, Mar). Must sort by raw value.
+    def test_columns_sorted_by_raw_value(self):
+        # Raw values arrive out of order; columns must sort by raw value, not
+        # insertion order. ISO datetime strings sort chronologically.
         rows = [
             {
                 "district": "Mumbai",
@@ -343,20 +317,9 @@ class TestColumnKeyChronologicalOrder:
             num_col_dims=1,
             col_dim_names=["month"],
             metric_aliases=["Count"],
-            time_grains={"month": "month"},
         )
-        assert result["column_keys"] == [["Jan 2026"], ["Feb 2026"], ["Mar 2026"]]
-
-
-class TestFormatPivotColumnHeader:
-    def test_month_grain(self):
-        assert format_pivot_column_header("2026-01-01 00:00:00", "month") == "Jan 2026"
-
-    def test_year_grain(self):
-        assert format_pivot_column_header("2026-01-01 00:00:00", "year") == "2026"
-
-    def test_day_grain(self):
-        assert format_pivot_column_header("2026-01-15 00:00:00", "day") == "Jan 15, 2026"
-
-    def test_no_grain_passthrough(self):
-        assert format_pivot_column_header("CategoryA", None) == "CategoryA"
+        assert result["column_keys"] == [
+            ["2026-01-01 00:00:00"],
+            ["2026-02-01 00:00:00"],
+            ["2026-03-01 00:00:00"],
+        ]

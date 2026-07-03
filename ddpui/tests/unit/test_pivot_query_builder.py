@@ -148,6 +148,39 @@ class TestBuildPivotQuery:
 
         assert "GROUP BY" in sql_upper
 
+    def test_pivot_query_compiles_for_bigquery(self):
+        """The pivot ROLLUP/GROUPING SQL must render under the BigQuery dialect.
+
+        BigQuery supports GROUP BY ROLLUP and the GROUPING() function, so the
+        dialect-agnostic builder should compile without error and still emit
+        both constructs (guards against a dialect-specific rendering regression).
+        """
+        from sqlalchemy_bigquery import BigQueryDialect
+
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district", "program"],
+            column_dimensions=["state", "enrollment_month"],
+            show_row_subtotals=True,
+            show_column_grand_total=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Beneficiaries"),
+                ChartMetric(column="amount", aggregation="sum", alias="Total Spend"),
+            ],
+        )
+        qb = build_chart_query(payload, self._make_org_warehouse(wtype="bigquery"))
+        compiled = str(
+            qb.build().compile(dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True})
+        )
+        sql_upper = compiled.upper()
+
+        assert "ROLLUP" in sql_upper
+        assert "GROUPING" in sql_upper
+        assert "_grp_pivot_col_0" in compiled
+        assert "_grp_pivot_col_1" in compiled
+
     def test_pivot_query_applies_filters(self):
         """Dashboard and chart filters should be applied as WHERE clauses"""
         payload = ChartDataPayload(

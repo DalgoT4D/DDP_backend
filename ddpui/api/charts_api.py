@@ -150,12 +150,6 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     if payload.chart_type == "map":
         return generate_map_data_and_config(payload, org_warehouse, chart_id)
 
-    # Handle pivot tables — completely separate pipeline with ROLLUP and rotation
-    if payload.chart_type == "pivot_table":
-        pivot_data = get_pivot_table_data(org_warehouse, payload)
-        logger.info(f"Successfully generated pivot table data for {chart_id_str}")
-        return {"data": pivot_data, "echarts_config": {}}
-
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
@@ -197,6 +191,12 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     if payload.chart_type == "table":
         logger.info(f"Successfully generated table data for {chart_id_str}")
         return {"data": chart_data, "echarts_config": {}}
+
+        # Handle pivot tables — completely separate pipeline with ROLLUP and rotation
+    if payload.chart_type == "pivot_table":
+        pivot_data = get_pivot_table_data(org_warehouse, payload)
+        logger.info(f"Successfully generated pivot table data for {chart_id_str}")
+        return {"data": pivot_data, "echarts_config": {}}
 
     # Generate ECharts config for other chart types
     config_generators = {
@@ -608,30 +608,11 @@ def get_chart_data_preview(
         limit=payload.limit,
         extra_config=payload.extra_config,
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
-        # Pivot table fields
-        row_dimensions=payload.row_dimensions,
-        column_dimensions=payload.column_dimensions,
-        show_row_subtotals=payload.show_row_subtotals,
-        show_column_subtotals=payload.show_column_subtotals,
-        show_row_grand_total=payload.show_row_grand_total,
-        show_column_grand_total=payload.show_column_grand_total,
     )
 
     logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
     try:
-        # Pivot tables use the /chart-data/ endpoint, not preview
-        # Return an empty valid response so the preview hook doesn't error
-        if modified_payload.chart_type == "pivot_table":
-            return DataPreviewResponse(
-                columns=[],
-                column_types={},
-                data=[],
-                page=0,
-                page_size=50,
-                total_rows=0,
-            )
-
         # Get table preview using the same query builder as chart data
         # This ensures preview shows exactly what will be used for the chart
         preview_data = charts_service.get_chart_data_table_preview(
@@ -727,18 +708,7 @@ def get_chart_data_preview_total_rows(
         limit=payload.limit,
         extra_config=payload.extra_config,
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
-        # Pivot table fields
-        row_dimensions=payload.row_dimensions,
-        column_dimensions=payload.column_dimensions,
-        show_row_subtotals=payload.show_row_subtotals,
-        show_column_subtotals=payload.show_column_subtotals,
-        show_row_grand_total=payload.show_row_grand_total,
-        show_column_grand_total=payload.show_column_grand_total,
     )
-
-    # Pivot tables handle their own pagination — return 0 for the generic total-rows endpoint
-    if modified_payload.chart_type == "pivot_table":
-        return 0
 
     # Get total rows using the same query builder as chart data
     total_rows = charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
@@ -1064,12 +1034,8 @@ def get_chart(request, chart_id: int):
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
 @has_permission(["can_view_charts"])
-def get_chart_data_by_id(
-    request,
-    chart_id: int,
-    dashboard_filters: Optional[str] = None,
-):
-    """Get chart data using saved chart configuration with optional dashboard filters."""
+def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str] = None):
+    """Get chart data using saved chart configuration with optional dashboard filters"""
     import json
 
     orguser = request.orguser
