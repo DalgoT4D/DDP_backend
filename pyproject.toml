@@ -233,7 +233,6 @@ dependencies = [
     "ruamel-yaml==0.18.6",
     "ruamel-yaml-clib==0.2.8",
     "s3transfer==0.16.0",
-    "sentry-sdk==2.39.0",
     "sgqlc==16.1",
     "six==1.16.0",
     "slack-sdk==3.29.0",
@@ -277,6 +276,7 @@ dependencies = [
     "langchain-anthropic==1.4.8",
     "langgraph-checkpoint-postgres==3.1.0",
     "psycopg[binary,pool]>=3.3.4",
+    "sentry-sdk==2.39.0",
 ]
 
 
