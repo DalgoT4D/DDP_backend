@@ -185,8 +185,11 @@ class PivotTableChartConfig(_ChartConfigBase):
     """extra_config payload for chart_type='pivot_table'.
 
     Cross-tabulates row dimensions against column dimensions. Requires at least
-    one row dimension and one metric (matches build_pivot_table_query). Customizations
-    stay a loose dict — pivot reuses the table display-formatting options.
+    one row dimension and one metric (matches build_pivot_table_query). Reuses the
+    table display-formatting options, so customizations are typed as
+    TableChartCustomizations (columnFormatting / dateColumnFormatting; the sparse
+    conditionalFormatting / zebraRows / theme / freezeFirstColumn keys pass through
+    via extra="allow").
     """
 
     row_dimensions: List[str] = Field(..., min_length=1)
@@ -197,10 +200,11 @@ class PivotTableChartConfig(_ChartConfigBase):
     show_column_subtotals: Optional[bool] = None
     show_row_grand_total: Optional[bool] = None
     show_column_grand_total: Optional[bool] = None
-    subtotal_label: Optional[str] = None
+    row_subtotal_label: Optional[str] = None
     column_subtotal_label: Optional[str] = None
     row_grand_total_label: Optional[str] = None
     column_grand_total_label: Optional[str] = None
+    customizations: Optional[TableChartCustomizations] = None
 
 
 ChartExtraConfig = Union[
