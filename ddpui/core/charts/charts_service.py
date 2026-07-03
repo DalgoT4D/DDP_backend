@@ -257,10 +257,10 @@ def build_chart_data_payload(
         # Pivot table fields live in extra_config when saved, but need to be top-level on the payload
         row_dimensions=ec.get("row_dimensions"),
         column_dimensions=ec.get("column_dimensions"),
-        show_row_subtotals=ec.get("show_row_subtotals", False),
-        show_column_subtotals=ec.get("show_column_subtotals", False),
-        show_row_grand_total=ec.get("show_row_grand_total", False),
-        show_column_grand_total=ec.get("show_column_grand_total", False),
+        show_row_subtotals=ec.get("show_row_subtotals") or False,
+        show_column_subtotals=ec.get("show_column_subtotals") or False,
+        show_row_grand_total=ec.get("show_row_grand_total") or False,
+        show_column_grand_total=ec.get("show_column_grand_total") or False,
     )
 
     payload.dimensions = normalize_dimensions(payload)

@@ -196,10 +196,10 @@ class PivotTableChartConfig(_ChartConfigBase):
     column_dimensions: Optional[List[str]] = None
     metrics: List[ChartMetric] = Field(..., min_length=1)
 
-    show_row_subtotals: Optional[bool] = None
-    show_column_subtotals: Optional[bool] = None
-    show_row_grand_total: Optional[bool] = None
-    show_column_grand_total: Optional[bool] = None
+    show_row_subtotals: bool = False
+    show_column_subtotals: bool = False
+    show_row_grand_total: bool = False
+    show_column_grand_total: bool = False
     row_subtotal_label: Optional[str] = None
     column_subtotal_label: Optional[str] = None
     row_grand_total_label: Optional[str] = None
