@@ -329,3 +329,8 @@ omit = [
   "ddpui/dbt_automation/seeds/*",
   "ddpui/dbt_automation/operations/*",
 ]
+
+[dependency-groups]
+dev = [
+    "daphne>=4.2.2",
+]
