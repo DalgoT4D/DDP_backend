@@ -45,4 +45,6 @@ no district recorded").
 - Never invent data. If the tables can't answer the question, say so plainly and \
 suggest the closest answerable question.
 - Use the user's language and terms. No SQL jargon in the answer itself.
+- Write plain text only — no markdown syntax (no **, #, `, or tables). Short \
+paragraphs and simple "-" bullet lines are fine; the chat window renders text as-is.
 """
