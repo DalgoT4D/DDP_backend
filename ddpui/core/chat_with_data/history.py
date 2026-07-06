@@ -8,6 +8,7 @@ any executed SQL (and its result table) attached to the answer.
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from ddpui.core.chat_with_data.checkpointer import get_checkpointer
+from ddpui.core.chat_with_data.content import extract_text
 from ddpui.schemas.chat_with_data_schemas import MessageOut, SqlAttachment
 
 
@@ -19,7 +20,7 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
 
     for message in messages:
         if isinstance(message, HumanMessage):
-            out.append(MessageOut(role="user", content=str(message.content)))
+            out.append(MessageOut(role="user", content=extract_text(message.content)))
         elif isinstance(message, ToolMessage) and message.name == "execute_sql":
             artifact = getattr(message, "artifact", None)
             if isinstance(artifact, dict) and artifact.get("sql"):
@@ -33,10 +34,13 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
                     )
                 )
         elif isinstance(message, AIMessage) and message.content:
+            text = extract_text(message.content)
+            if not text:
+                continue  # thinking-only content — nothing to show
             out.append(
                 MessageOut(
                     role="assistant",
-                    content=str(message.content),
+                    content=text,
                     sql_attachments=pending_sql,
                 )
             )

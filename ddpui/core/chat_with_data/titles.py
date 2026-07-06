@@ -9,6 +9,7 @@ import os
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.chat_with_data.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -37,7 +38,7 @@ async def generate_session_title(
     try:
         model = model or get_title_model()
         response = await model.ainvoke(_PROMPT.format(question=question[:500]))
-        title = str(response.content).strip().strip('"').strip()
+        title = extract_text(response.content).strip().strip('"').strip()
         return title[:TITLE_MAX_CHARS] or None
     except Exception:  # pylint: disable=broad-except
         logger.exception("chat_with_data: title generation failed")

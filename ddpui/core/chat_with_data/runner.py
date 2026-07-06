@@ -21,6 +21,7 @@ from asgiref.sync import sync_to_async
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from ddpui.core.chat_with_data.agent import RECURSION_LIMIT
+from ddpui.core.chat_with_data.content import extract_text
 from ddpui.core.chat_with_data.state import RunContext
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
@@ -76,8 +77,12 @@ async def run_turn(
         ):
             if mode == "messages":
                 message_chunk, _meta = chunk
-                if isinstance(message_chunk, AIMessageChunk) and message_chunk.content:
-                    yield {"type": "token", "text": message_chunk.content}
+                if isinstance(message_chunk, AIMessageChunk):
+                    # content may be a block list (thinking/signature + text);
+                    # only the text belongs on the wire
+                    text = extract_text(message_chunk.content)
+                    if text:
+                        yield {"type": "token", "text": text}
                 continue
 
             for update in (chunk or {}).values():
@@ -114,7 +119,9 @@ async def run_turn(
                                 }
                         yield {"type": "tool_end", "tool": message.name, "status": tool_status}
                     if isinstance(message, AIMessage) and message.content:
-                        final_message = str(message.content)
+                        text = extract_text(message.content)
+                        if text:
+                            final_message = text
                         if message.usage_metadata:
                             usage["input_tokens"] += message.usage_metadata.get("input_tokens", 0)
                             usage["output_tokens"] += message.usage_metadata.get("output_tokens", 0)

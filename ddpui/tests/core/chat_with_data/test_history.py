@@ -45,3 +45,22 @@ def test_non_sql_tools_and_empty_ai_messages_are_hidden():
     out = map_messages(messages)
     assert [(m.role, m.content) for m in out] == [("user", "q"), ("assistant", "Answer.")]
     assert out[1].sql_attachments == []
+
+
+def test_block_list_content_renders_only_text():
+    """Thinking-enabled models store content as block lists (signed thinking
+    block + text). History must replay only the text, never the block repr."""
+    messages = [
+        HumanMessage("how many surveys?"),
+        AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "", "signature": "Eq8FCkYIBxgCKkB..."},
+                {"type": "text", "text": "You ran 1,284 surveys."},
+            ]
+        ),
+    ]
+    out = map_messages(messages)
+    assert [(m.role, m.content) for m in out] == [
+        ("user", "how many surveys?"),
+        ("assistant", "You ran 1,284 surveys."),
+    ]

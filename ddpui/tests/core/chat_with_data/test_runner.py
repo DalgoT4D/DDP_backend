@@ -114,3 +114,32 @@ def test_run_turn_streams_events_and_writes_audit(orguser, session):
     assert audit.tools_called == ["execute_sql"]
     assert audit.sql_queries[0]["status"] == "success"
     assert audit.status == "completed"
+
+
+def test_run_turn_extracts_text_from_content_blocks(orguser, session):
+    """Claude Sonnet 5 runs adaptive thinking by default: AIMessage.content is a
+    LIST of blocks (a signed thinking block, then text). Only the text may reach
+    the user — never the raw block reprs."""
+    model = ScriptedChatModel(
+        script=[
+            AIMessage(
+                content=[
+                    {"type": "thinking", "thinking": "", "signature": "Eq8FCkYIBxgCKkB..."},
+                    {"type": "text", "text": "You ran 1,284 surveys."},
+                ]
+            ),
+        ]
+    )
+    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+
+    events = collect_events(agent, session, orguser, "how many surveys?", make_context())
+
+    complete = events[-1]
+    assert complete["type"] == "message_complete"
+    assert complete["message"] == "You ran 1,284 surveys."
+    assert "signature" not in complete["message"]
+
+    for event in events:
+        if event["type"] == "token":
+            assert "signature" not in event["text"]
+            assert not event["text"].startswith("[")  # no stringified block lists
