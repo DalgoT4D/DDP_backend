@@ -50,3 +50,5 @@ class MessageOut(Schema):
     role: str  # "user" | "assistant"
     content: str
     sql_attachments: list[SqlAttachment] = []
+    # charts the agent created in this turn: {chart_id, title, url_path}
+    charts: list[dict] = []

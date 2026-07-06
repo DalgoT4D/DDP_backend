@@ -22,3 +22,7 @@ class RunContext:
     # Warehouse client (ddpui.utils.warehouse.client interface). Typed Any to keep
     # this module import-light for tests; only tools touch it.
     warehouse: Any = None
+    # Who is chatting — needed by tools that create Dalgo artifacts (charts)
+    orguser_id: int | None = None
+    # Resolved from RolePermission at context-build time; tools never query RBAC
+    can_create_charts: bool = False

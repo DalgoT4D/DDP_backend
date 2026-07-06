@@ -36,6 +36,7 @@ TOOL_LABELS = {
     "get_table_details": "Reading table structure…",
     "profile_column": "Checking data values…",
     "execute_sql": "Running query…",
+    "create_chart": "Creating chart…",
 }
 GENERIC_TOOL_LABEL = "Working…"
 
@@ -66,6 +67,7 @@ async def run_turn(
     sql_queries: list[dict] = []
     tools_called: list[str] = []
     last_result_table: dict | None = None
+    created_charts: list[dict] = []
     status = "completed"
 
     try:
@@ -99,7 +101,20 @@ async def run_turn(
                     elif isinstance(message, ToolMessage):
                         artifact = getattr(message, "artifact", None)
                         tool_status = "success"
-                        if isinstance(artifact, dict):
+                        if isinstance(artifact, dict) and artifact.get("type") == "chart":
+                            # create_chart artifact — a saved chart (or a rejection)
+                            if artifact.get("chart_id"):
+                                created_charts.append(
+                                    {
+                                        "chart_id": artifact["chart_id"],
+                                        "title": artifact.get("title", ""),
+                                        "url_path": artifact.get("url_path", ""),
+                                    }
+                                )
+                            else:
+                                tool_status = "error"
+                        elif isinstance(artifact, dict):
+                            # execute_sql artifact — query + result table
                             tool_status = (
                                 "success" if artifact.get("status") == "success" else "error"
                             )
@@ -130,6 +145,7 @@ async def run_turn(
             "type": "message_complete",
             "message": final_message,
             "result_table": last_result_table,
+            "charts": created_charts,
             "usage": usage,
         }
     except Exception:  # pylint: disable=broad-except

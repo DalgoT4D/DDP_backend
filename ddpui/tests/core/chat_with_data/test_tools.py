@@ -184,4 +184,5 @@ def test_registry_exposes_the_v1_tools():
         "get_table_details",
         "profile_column",
         "execute_sql",
+        "create_chart",
     }

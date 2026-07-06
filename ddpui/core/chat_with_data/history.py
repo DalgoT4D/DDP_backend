@@ -17,10 +17,21 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
     results attach to the next assistant answer; other tool chatter is hidden."""
     out: list[MessageOut] = []
     pending_sql: list[SqlAttachment] = []
+    pending_charts: list[dict] = []
 
     for message in messages:
         if isinstance(message, HumanMessage):
             out.append(MessageOut(role="user", content=extract_text(message.content)))
+        elif isinstance(message, ToolMessage) and message.name == "create_chart":
+            artifact = getattr(message, "artifact", None)
+            if isinstance(artifact, dict) and artifact.get("chart_id"):
+                pending_charts.append(
+                    {
+                        "chart_id": artifact["chart_id"],
+                        "title": artifact.get("title", ""),
+                        "url_path": artifact.get("url_path", ""),
+                    }
+                )
         elif isinstance(message, ToolMessage) and message.name == "execute_sql":
             artifact = getattr(message, "artifact", None)
             if isinstance(artifact, dict) and artifact.get("sql"):
@@ -42,9 +53,11 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
                     role="assistant",
                     content=text,
                     sql_attachments=pending_sql,
+                    charts=pending_charts,
                 )
             )
             pending_sql = []
+            pending_charts = []
 
     return out
 

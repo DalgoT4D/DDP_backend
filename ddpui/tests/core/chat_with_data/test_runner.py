@@ -116,6 +116,55 @@ def test_run_turn_streams_events_and_writes_audit(orguser, session):
     assert audit.status == "completed"
 
 
+def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):
+    """A create_chart tool call surfaces the chart link on message_complete."""
+    from ddpui.core.chat_with_data.tools import chart_tools
+
+    class FakeChart:
+        id = 42
+        title = "Surveys by district"
+
+    monkeypatch.setattr(chart_tools, "_save_chart", lambda ctx, data: FakeChart())
+
+    context = make_context()
+    context.orguser_id = orguser.id
+    context.can_create_charts = True
+
+    model = ScriptedChatModel(
+        script=[
+            AIMessage(
+                "",
+                tool_calls=[
+                    {
+                        "name": "create_chart",
+                        "args": {
+                            "title": "Surveys by district",
+                            "chart_type": "bar",
+                            "schema_name": "prod",
+                            "table_name": "surveys",
+                            "dimension_column": "district",
+                        },
+                        "id": "c1",
+                    }
+                ],
+            ),
+            AIMessage(content="Done — the chart is in your Charts page."),
+        ]
+    )
+    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+
+    events = collect_events(agent, session, orguser, "chart surveys by district", context)
+
+    complete = events[-1]
+    assert complete["type"] == "message_complete"
+    assert complete["charts"] == [
+        {"chart_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
+    ]
+
+    audit = ChatWithDataTurnAudit.objects.get(session=session)
+    assert audit.tools_called == ["create_chart"]
+
+
 def test_run_turn_extracts_text_from_content_blocks(orguser, session):
     """Claude Sonnet 5 runs adaptive thinking by default: AIMessage.content is a
     LIST of blocks (a signed thinking block, then text). Only the text may reach

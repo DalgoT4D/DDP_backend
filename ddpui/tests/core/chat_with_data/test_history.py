@@ -64,3 +64,26 @@ def test_block_list_content_renders_only_text():
         ("user", "how many surveys?"),
         ("assistant", "You ran 1,284 surveys."),
     ]
+
+
+def test_created_charts_replay_on_the_answer():
+    messages = [
+        HumanMessage("chart surveys by district"),
+        AIMessage("", tool_calls=[{"name": "create_chart", "args": {}, "id": "c1"}]),
+        ToolMessage(
+            content="Created chart 'Surveys by district' (id 42).",
+            name="create_chart",
+            tool_call_id="c1",
+            artifact={
+                "type": "chart",
+                "chart_id": 42,
+                "title": "Surveys by district",
+                "url_path": "/charts/42",
+            },
+        ),
+        AIMessage("Done — it's in your Charts page."),
+    ]
+    out = map_messages(messages)
+    assert out[1].charts == [
+        {"chart_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
+    ]

@@ -9,6 +9,7 @@ tools never touch the database or trust an LLM-supplied org identifier.
 from ddpui.core.chat_with_data.state import RunContext
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.role_based_access import RolePermission
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 # Never offered to the agent, regardless of what the warehouse contains
@@ -56,6 +57,10 @@ def build_run_context(orguser: OrgUser) -> RunContext:
     org_dbt: OrgDbt | None = org.dbt
     dbt_schema = org_dbt.default_schema if org_dbt else None
 
+    can_create_charts = RolePermission.objects.filter(
+        role=orguser.new_role, permission__slug="can_create_charts"
+    ).exists()
+
     return RunContext(
         org_id=org.id,
         org_slug=org.slug,
@@ -64,4 +69,6 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         max_result_rows=DEFAULT_MAX_RESULT_ROWS,
         query_timeout_s=DEFAULT_QUERY_TIMEOUT_S,
         warehouse=warehouse,
+        orguser_id=orguser.id,
+        can_create_charts=can_create_charts,
     )

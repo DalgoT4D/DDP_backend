@@ -17,6 +17,7 @@ _TOOL_MODULES = (
     "ddpui.core.chat_with_data.tools.schema_tools",
     "ddpui.core.chat_with_data.tools.profile_tools",
     "ddpui.core.chat_with_data.tools.sql_tools",
+    "ddpui.core.chat_with_data.tools.chart_tools",
 )
 
 
