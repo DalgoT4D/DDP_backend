@@ -273,6 +273,61 @@ class TestBulkDeleteCharts:
         assert result["requested_count"] == 0
         assert result["missing_ids"] == []
 
+    def test_bulk_delete_non_admin_cannot_delete_others_charts(
+        self, orguser, orguser2, org, seed_db
+    ):
+        """A non-admin bulk-deleting a mix of own + others' charts only deletes their own;
+        the others are reported in forbidden_ids — same owner-or-admin rule as single delete."""
+        own_chart = Chart.objects.create(
+            title="Analyst Own Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser2,
+            last_modified_by=orguser2,
+            org=org,
+        )
+        others_chart = Chart.objects.create(
+            title="Admin Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+
+        result = ChartService.bulk_delete_charts([own_chart.id, others_chart.id], org, orguser2)
+
+        assert result["deleted_count"] == 1
+        assert result["forbidden_ids"] == [others_chart.id]
+        assert not Chart.objects.filter(id=own_chart.id).exists()
+        assert Chart.objects.filter(id=others_chart.id).exists()
+
+        # Cleanup
+        others_chart.delete()
+
+    def test_bulk_delete_admin_can_delete_others_charts(self, orguser, orguser2, org, seed_db):
+        """An admin can bulk-delete charts created by other users (effective owner)."""
+        chart = Chart.objects.create(
+            title="Analyst Chart",
+            chart_type="bar",
+            schema_name="public",
+            table_name="users",
+            extra_config={},
+            created_by=orguser2,
+            last_modified_by=orguser2,
+            org=org,
+        )
+
+        result = ChartService.bulk_delete_charts([chart.id], org, orguser)
+
+        assert result["deleted_count"] == 1
+        assert result["forbidden_ids"] == []
+        assert not Chart.objects.filter(id=chart.id).exists()
+
 
 # ================================================================================
 # Test get_chart_dashboards (NOT fully covered by API tests)
