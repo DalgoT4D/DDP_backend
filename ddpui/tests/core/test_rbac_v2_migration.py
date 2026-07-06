@@ -9,6 +9,7 @@ transaction and runs the command, asserting the remap.
 import pytest
 from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.utils import timezone
 
 from ddpui.management.commands import migrate_rbac_v2_roles as cmd
@@ -129,6 +130,36 @@ def test_makes_member_view_only(old_world):
 def test_leaves_super_admin_untouched(old_world):
     _run()
     assert "can_create_org" in slugs_for("super-admin")
+
+
+def test_partial_collapse_still_processes_remaining_legacy_roles(old_world):
+    """A partially migrated DB — admin already renamed but guest/pipeline-manager
+    still present — must not be treated as 'already collapsed' and no-op."""
+    account_manager = old_world["roles"]["account-manager"]
+    account_manager.slug = "admin"
+    account_manager.name = "Admin"
+    account_manager.save()
+
+    _run()
+
+    existing = set(Role.objects.values_list("slug", flat=True))
+    assert {"super-admin", "admin", "analyst", "member"} == existing
+    ousers = old_world["ousers"]
+    assert OrgUser.objects.get(pk=ousers["pm"].pk).new_role.slug == "admin"
+    assert OrgUser.objects.get(pk=ousers["guest"].pk).new_role.slug == "member"
+    assert slugs_for("member") == set(cmd.MEMBER_SLUGS)
+
+
+def test_fails_fast_when_member_permission_slug_missing(old_world):
+    """A member slug absent from the Permission table must abort the whole run
+    (transaction rolled back) instead of silently leaving member with a partial set."""
+    Permission.objects.get(slug="can_view_kpis").delete()
+
+    with pytest.raises(CommandError, match="can_view_kpis"):
+        _run()
+
+    # nothing was applied — the rename rolled back with the rest
+    assert Role.objects.filter(slug="account-manager").exists()
 
 
 def test_idempotent_second_run_is_noop(old_world):

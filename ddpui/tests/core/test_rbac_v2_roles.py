@@ -44,11 +44,8 @@ INFRA_WRITE = {
 
 def test_three_customer_roles_plus_superadmin_exist(seed_db):
     existing = set(Role.objects.values_list("slug", flat=True))
-    assert {"super-admin", "admin", "analyst", "member"} <= existing
-    # the collapsed roles are gone
-    assert "account-manager" not in existing
-    assert "pipeline-manager" not in existing
-    assert "guest" not in existing
+    # exact match: the collapsed roles are gone AND no unexpected role slipped in
+    assert {"super-admin", "admin", "analyst", "member"} == existing
 
 
 def test_role_levels(seed_db):
@@ -89,9 +86,10 @@ def test_member_is_view_only_content(seed_db):
     member = slugs_for("member")
     # can view the four content resources
     assert CONTENT_VIEW <= member
-    # no write capability of any kind
-    assert not any(
-        s.startswith(("can_create_", "can_edit_", "can_delete_", "can_share_")) for s in member
-    )
+    # strictly view-only: every slug is a view slug or an explicitly allowed non-view
+    # basic — a blocklist of write prefixes would let can_run_* / can_sync_* slip through
+    allowed_non_view = {"can_request_llm_analysis_feature", "public"}
+    non_view = {s for s in member if not s.startswith("can_view_")}
+    assert non_view <= allowed_non_view
     # no infra visibility
     assert not (INFRA_VIEW & member)

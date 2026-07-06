@@ -33,6 +33,22 @@ def test_admin_can_delete_others_resource():
     assert can_delete_resource(_orguser(1, "admin"), _resource(2)) is True
 
 
+def test_super_admin_can_delete_others_resource():
+    assert can_delete_resource(_orguser(1, "super-admin"), _resource(2)) is True
+
+
+def test_non_creator_with_null_role_is_denied_not_crash():
+    ou = _orguser(1, "analyst")
+    ou.new_role = None
+    assert can_delete_resource(ou, _resource(2)) is False
+
+
+def test_creator_with_null_role_can_still_delete_own_resource():
+    ou = _orguser(1, "analyst")
+    ou.new_role = None
+    assert can_delete_resource(ou, _resource(1)) is True
+
+
 def test_resource_with_null_creator_blocks_non_admin():
     assert can_delete_resource(_orguser(1, "analyst"), _resource(None)) is False
 

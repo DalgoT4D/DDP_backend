@@ -481,6 +481,25 @@ class TestMetricCRUD:
             MetricService.delete_metric(sample_metric.id, org, analyst_orguser)
         assert Metric.objects.filter(id=sample_metric.id).exists()
 
+    def test_delete_metric_non_owner_denied_before_consumers_revealed(
+        self, orguser, analyst_orguser, org, sample_metric, seed_db
+    ):
+        """A non-owner gets a permission error, not the consumers-blocked error —
+        the dependency list must not leak to users who can't delete anyway."""
+        kpi = KPI.objects.create(
+            name="Consumer KPI",
+            metric=sample_metric,
+            direction="increase",
+            time_grain="monthly",
+            org=org,
+            created_by=orguser,
+        )
+        try:
+            with pytest.raises(MetricPermissionError):
+                MetricService.delete_metric(sample_metric.id, org, analyst_orguser)
+        finally:
+            kpi.delete()
+
     def test_delete_metric_non_admin_creator_can_delete_own(self, analyst_orguser, org, seed_db):
         """A non-admin (analyst) can delete a metric they created."""
         metric = Metric.objects.create(

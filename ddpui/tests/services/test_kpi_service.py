@@ -368,6 +368,31 @@ class TestKPICRUD:
             KPIService.delete_kpi(sample_kpi.id, org, analyst_orguser)
         assert KPI.objects.filter(id=sample_kpi.id).exists()
 
+    def test_delete_kpi_non_owner_denied_before_dashboards_revealed(
+        self, orguser, analyst_orguser, org, sample_kpi, seed_db
+    ):
+        """A non-owner gets a permission error, not the used-in-dashboards error —
+        the dashboard list must not leak to users who can't delete anyway."""
+        dashboard = Dashboard.objects.create(
+            title="Dashboard using KPI",
+            org=org,
+            created_by=orguser,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "comp1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
+                    },
+                }
+            ],
+        )
+        try:
+            with pytest.raises(KPIPermissionError):
+                KPIService.delete_kpi(sample_kpi.id, org, analyst_orguser)
+        finally:
+            dashboard.delete()
+
     def test_delete_kpi_non_admin_creator_can_delete_own(
         self, analyst_orguser, org, sample_metric, seed_db
     ):

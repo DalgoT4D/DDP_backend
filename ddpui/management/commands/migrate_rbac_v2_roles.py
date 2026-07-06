@@ -19,7 +19,7 @@ touch Redis: clear the role-permission cache afterwards with
 `python manage.py clear_role_permissions` (the next request rebuilds it).
 """
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from ddpui.models.org_user import Invitation, OrgUser
@@ -62,26 +62,40 @@ MEMBER_SLUGS = [
 
 
 def _set_role_permissions_exactly(role, slugs):
-    """Replace a role's permission rows with exactly `slugs`."""
+    """Replace a role's permission rows with exactly `slugs`.
+
+    Raises CommandError if any slug is absent from the Permission table — silently
+    skipping would leave the role with a partial set while the command reports success.
+    """
+    permissions = list(Permission.objects.filter(slug__in=slugs))
+    missing = set(slugs) - {perm.slug for perm in permissions}
+    if missing:
+        raise CommandError(
+            f"Permission slugs missing from the database: {sorted(missing)} — "
+            "load seed/002_permissions.json first"
+        )
     RolePermission.objects.filter(role=role).delete()
-    for slug in slugs:
-        perm = Permission.objects.filter(slug=slug).first()
-        if perm:
-            RolePermission.objects.create(role=role, permission=perm)
+    RolePermission.objects.bulk_create(
+        [RolePermission(role=role, permission=perm) for perm in permissions]
+    )
 
 
 def collapse_roles():
-    """Apply the v2 role collapse to the current database. Idempotent."""
-    account_manager = Role.objects.filter(slug="account-manager").first()
-    if account_manager is None:
-        logger.info("RBAC v2: account-manager role not present; nothing to collapse")
-        return False
+    """Apply the v2 role collapse to the current database. Idempotent, and each legacy
+    role is handled independently so a partially collapsed DB (e.g. admin already
+    renamed but guest/pipeline-manager still present) is finished, not skipped."""
+    changed = False
 
     # 1. account-manager → admin (same pk/level, new slug + name)
-    account_manager.slug = "admin"
-    account_manager.name = "Admin"
-    account_manager.level = 4
-    account_manager.save()
+    account_manager = Role.objects.filter(slug="account-manager").first()
+    if account_manager:
+        account_manager.slug = "admin"
+        account_manager.name = "Admin"
+        account_manager.level = 4
+        account_manager.save()
+        changed = True
+
+    admin = Role.objects.filter(slug="admin").first()
 
     # 2. guest → member
     guest = Role.objects.filter(slug="guest").first()
@@ -90,31 +104,45 @@ def collapse_roles():
         guest.name = "Member"
         guest.level = 1
         guest.save()
+        changed = True
 
     # 3. merge pipeline-manager into admin: repoint its users + pending invites, then drop it
     pipeline_manager = Role.objects.filter(slug="pipeline-manager").first()
     if pipeline_manager:
-        OrgUser.objects.filter(new_role=pipeline_manager).update(new_role=account_manager)
+        if admin is None:
+            raise CommandError(
+                "pipeline-manager role exists but there is no admin/account-manager "
+                "role to merge it into — refusing to proceed"
+            )
+        OrgUser.objects.filter(new_role=pipeline_manager).update(new_role=admin)
         # invited_new_role is on_delete=CASCADE — repoint before delete or invites vanish
-        Invitation.objects.filter(invited_new_role=pipeline_manager).update(
-            invited_new_role=account_manager
-        )
+        Invitation.objects.filter(invited_new_role=pipeline_manager).update(invited_new_role=admin)
         RolePermission.objects.filter(role=pipeline_manager).delete()
         pipeline_manager.delete()
+        changed = True
 
     # 4. analyst: strip infra write/run slugs (keep content + infra view)
     analyst = Role.objects.filter(slug="analyst").first()
     if analyst:
-        RolePermission.objects.filter(
+        stripped, _ = RolePermission.objects.filter(
             role=analyst, permission__slug__in=ANALYST_INFRA_WRITE_REMOVE
         ).delete()
+        changed = changed or stripped > 0
 
-    # 5. member: content-view-only, set exactly
+    # 5. member: content-view-only, set exactly (skip the rewrite when already exact)
     member = Role.objects.filter(slug="member").first()
     if member:
-        _set_role_permissions_exactly(member, MEMBER_SLUGS)
+        current = set(
+            RolePermission.objects.filter(role=member).values_list("permission__slug", flat=True)
+        )
+        if current != set(MEMBER_SLUGS):
+            _set_role_permissions_exactly(member, MEMBER_SLUGS)
+            changed = True
 
-    return True
+    if not changed:
+        logger.info("RBAC v2: no legacy roles or drifted permissions found; nothing to collapse")
+
+    return changed
 
 
 class Command(BaseCommand):
@@ -132,14 +160,16 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if options["dry_run"]:
             existing = set(Role.objects.values_list("slug", flat=True))
-            if "account-manager" not in existing:
+            legacy = existing & {"account-manager", "pipeline-manager", "guest"}
+            if not legacy:
                 self.stdout.write(
-                    self.style.WARNING("Already collapsed (no account-manager role); no changes.")
+                    self.style.WARNING("Already collapsed (no legacy roles); no changes.")
                 )
                 return
             self.stdout.write(
                 self.style.WARNING(
-                    "DRY RUN — would: rename account-manager→admin, guest→member, "
+                    f"DRY RUN — legacy roles present: {sorted(legacy)}. Would: "
+                    "rename account-manager→admin, guest→member, "
                     "merge pipeline-manager→admin (repoint users + invites, then delete), "
                     "strip analyst infra write/run slugs, set member to view-only."
                 )
