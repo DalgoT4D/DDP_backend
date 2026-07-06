@@ -181,16 +181,28 @@ def test_kpi_rag_no_customizations_leaves_values_raw():
     assert tokens["target_value"] == 10000
 
 
-def test_kpi_rag_customizations_without_numberFormat_leaves_values_raw():
-    """extra_config.customizations present but no numberFormat → no formatting
-    (matches frontend formatKPIValue's String(value) fallback)."""
+def test_kpi_rag_customizations_without_numberFormat_apply_decimal_places():
+    """extra_config.customizations present but no numberFormat → format defaults
+    to "No Formatting" so decimal places (and prefix/suffix) still apply.
+    Matches frontend formatKPIValue."""
     alert = _kpi_rag_alert(
         extra_config={"customizations": {"decimalPlaces": 2}},
         target_value=10000,
     )
     tokens = tokens_for_alert(alert, current_value=9500)
-    assert tokens["current_value"] == 9500
-    assert tokens["target_value"] == 10000
+    assert tokens["current_value"] == "9500.00"
+    assert tokens["target_value"] == "10000.00"
+
+
+def test_kpi_rag_customizations_without_numberFormat_apply_prefix_suffix():
+    """Prefix/suffix without numberFormat should still wrap the raw value."""
+    alert = _kpi_rag_alert(
+        extra_config={"customizations": {"numberPrefix": "₹", "numberSuffix": " total"}},
+        target_value=10000,
+    )
+    tokens = tokens_for_alert(alert, current_value=9500)
+    assert tokens["current_value"] == "₹9500 total"
+    assert tokens["target_value"] == "₹10000 total"
 
 
 def test_kpi_rag_none_current_value_preserved_for_unresolved_token():

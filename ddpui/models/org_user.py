@@ -230,7 +230,3 @@ class LogoutPayload(BaseModel):
     """the payload for the login workflow"""
 
     refresh: str
-
-
-class TokenRefreshPayload(Schema):
-    refresh: str

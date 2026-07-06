@@ -131,9 +131,10 @@ def tokens_for_alert(
 
     For ``kpi_rag`` alerts, ``current_value`` and ``target_value`` are formatted
     using the KPI's display customizations (``extra_config.customizations``) so
-    email bodies match the KPI card. If no ``numberFormat`` is configured, the
-    raw value passes through unchanged (matching frontend's ``formatKPIValue``
-    fallback to ``String(value)``).
+    email bodies match the KPI card. If ``customizations`` is empty/absent, the
+    raw value passes through unchanged. When ``customizations`` exists but has
+    no ``numberFormat``, formatting still runs with format ``default`` so
+    decimal places + prefix/suffix take effect (matches frontend ``formatKPIValue``).
     """
     metric_name = alert.metric.name if alert.metric_id and alert.metric else None
     kpi_name = alert.kpi.name if alert.kpi_id and alert.kpi else None
@@ -154,7 +155,13 @@ def tokens_for_alert(
     # email body matches the KPI card byte-for-byte.
     if alert.alert_type == AlertType.KPI_RAG and alert.kpi_id and alert.kpi:
         cust = (alert.kpi.extra_config or {}).get("customizations") or {}
-        if isinstance(cust, dict) and cust.get("numberFormat"):
+        # Apply formatting whenever any display field is set — decimalPlaces /
+        # numberPrefix / numberSuffix work even with no explicit numberFormat
+        # (treated as "default"), matching frontend formatKPIValue.
+        if isinstance(cust, dict) and any(
+            cust.get(k) is not None
+            for k in ("numberFormat", "decimalPlaces", "numberPrefix", "numberSuffix")
+        ):
             current_value = _format_via_kpi_customizations(current_value, cust)
             target_value = _format_via_kpi_customizations(target_value, cust)
 
