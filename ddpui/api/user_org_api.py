@@ -17,6 +17,8 @@ from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
 from ddpui.core import orgfunctions, orguserfunctions
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -35,7 +37,6 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
     LoginPayload,
-    TokenRefreshPayload,
     LogoutPayload,
 )
 from ddpui.models.org_plans import OrgPlanType
@@ -65,6 +66,29 @@ from django.db import transaction
 user_org_router = Router()
 load_dotenv()
 logger = CustomLogger("ddpui")
+
+
+def _record_audit_log(
+    orguser,
+    resource_type,
+    action,
+    resource_id: str = "",
+    resource_name: str = "",
+    field_changes: dict | None = None,
+):
+    """Emit an audit log for the current org user when available."""
+    if not orguser or not getattr(orguser, "org", None):
+        return
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        resource_name=resource_name,
+        action=action,
+        field_changes=field_changes,
+    )
 
 
 @user_org_router.get("/currentuserv2", response=List[OrgUserResponse])
@@ -157,23 +181,6 @@ def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=
     return retval
 
 
-@user_org_router.post("/login/", auth=None)
-def post_login(request, payload: LoginPayload):
-    """Uses the username and password in the request to return a JWT auth token"""
-    serializer = CustomTokenObtainSerializer(
-        data={
-            "username": payload.username,
-            "password": payload.password,
-        }
-    )
-    serializer.is_valid(raise_exception=True)
-    token_data = serializer.validated_data
-    retval = orguserfunctions.lookup_user(payload.username)
-    retval["token"] = token_data["access"]
-    retval["refresh_token"] = token_data["refresh"]
-    return retval
-
-
 @user_org_router.post("/login_token/")
 def post_login_token(request):
     """
@@ -202,6 +209,9 @@ def post_logout(request):
     Blacklists the refresh token on logout and clears httpOnly cookies.
     Gets refresh token from cookies for cookie-based authentication.
     """
+    # Capture orguser before logout for audit logging
+    orguser = getattr(request, "orguser", None)
+
     # Get refresh token from cookies
     refresh_token = request.COOKIES.get("refresh_token")
 
@@ -224,16 +234,14 @@ def post_logout(request):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
 
+    # Audit log: user logged out
+    _record_audit_log(
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.LOGOUT,
+    )
+
     return response
-
-
-@user_org_router.post("/token/refresh", auth=None)
-def post_token_refresh(request, payload: TokenRefreshPayload):
-    """Refreshes the JWT token using the refresh token"""
-    serializer = CustomTokenRefreshSerializer(data=payload.model_dump())
-    serializer.is_valid(raise_exception=True)
-    token_data = serializer.validated_data
-    return {"token": token_data["access"]}
 
 
 @user_org_router.get(
@@ -306,9 +314,20 @@ def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
     if orguser.org is None:
         raise HttpError(400, "no associated org")
 
+    # Capture the email before deletion for audit log
+    deleted_email = payload.email
+
     _, error = orguserfunctions.delete_orguser_v1(orguser, payload)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: user removed from org
+    _record_audit_log(
+        orguser,
+        AuditLogResourceType.ORG_USER,
+        AuditLogAction.DELETE,
+        resource_name=deleted_email,
+    )
 
     return {"success": 1}
 
@@ -381,8 +400,21 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
     if not orguser_to_be_assigned:
         raise HttpError(400, "User does not exist")
 
+    # Capture old role for audit log
+    old_role_slug = orguser_to_be_assigned.new_role.slug if orguser_to_be_assigned.new_role else None
+
     orguser_to_be_assigned.new_role = role_to_be_assgined
     orguser_to_be_assigned.save()
+
+    # Audit log: user role changed
+    _record_audit_log(
+        orguser,
+        AuditLogResourceType.ORG_USER,
+        AuditLogAction.UPDATE,
+        resource_id=str(orguser_to_be_assigned.id),
+        resource_name=orguser_to_be_assigned.user.email,
+        field_changes={"role": {"old": old_role_slug, "new": role_to_be_assgined.slug}},
+    )
 
     return {"success": 1}
 
@@ -411,19 +443,6 @@ def get_organizations_warehouses(request):
 
 
 @user_org_router.post(
-    "/users/forgot_password/",
-    auth=None,
-)
-def post_forgot_password(request, payload: ForgotPasswordSchema):  # pylint: disable=unused-argument
-    """step 1 of the forgot-password flow"""
-    # Get the origin from request headers
-    _, error = orguserfunctions.request_reset_password(payload.email, False)
-    if error:
-        raise HttpError(400, error)
-    return {"success": 1}
-
-
-@user_org_router.post(
     "/users/forgot_password_v2/",
     auth=None,
 )
@@ -431,10 +450,24 @@ def post_forgot_password_v2(
     request, payload: ForgotPasswordSchema
 ):  # pylint: disable=unused-argument
     """step 1 of the forgot-password flow"""
-    # Get the origin from request headers
     _, error = orguserfunctions.request_reset_password(payload.email, True)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: password reset requested
+    user = User.objects.filter(email__iexact=payload.email).first()
+    if user:
+        orguser = OrgUser.objects.filter(user=user).first()
+        if orguser and orguser.org:
+            create_audit_log(
+                org=orguser.org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.AUTH,
+                resource_id="",
+                resource_name="password_reset_request",
+                action=AuditLogAction.UPDATE,
+            )
+
     return {"success": 1}
 
 
@@ -447,13 +480,24 @@ def post_reset_password(request, payload: ResetPasswordSchema):  # pylint: disab
     return {"success": 1}
 
 
-@user_org_router.post("/users/change_password/")  # from the settings panel
+@user_org_router.post("/users/change_password/")
 def change_password(request, payload: ChangePasswordSchema):  # pylint: disable=unused-argument
-    """step 2 of the forgot-password flow"""
+    """change password from the user menu in the header"""
     orguser = request.orguser
     _, error = orguserfunctions.change_password(payload, orguser)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: password changed
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.AUTH,
+        resource_id="",
+        resource_name="password_change",
+        action=AuditLogAction.UPDATE,
+    )
+
     return {"success": 1}
 
 
@@ -470,9 +514,21 @@ def get_verify_email_resend(request):  # pylint: disable=unused-argument
 @user_org_router.post("/users/verify_email/", auth=None)
 def post_verify_email(request, payload: VerifyEmailSchema):  # pylint: disable=unused-argument
     """step 2 of the verify-email flow"""
-    _, error = orguserfunctions.verify_email(payload)
+    orguser, error = orguserfunctions.verify_email(payload)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: email verified
+    if orguser and orguser.org:
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.AUTH,
+            resource_id="",
+            resource_name="email_verified",
+            action=AuditLogAction.UPDATE,
+        )
+
     return {"success": 1}
 
 
@@ -490,6 +546,19 @@ def post_organization_user_invite_v1(request, payload: NewInvitationSchema):
     retval, error = orguserfunctions.invite_user_v1(orguser, payload)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: invitation sent
+    # resource_id is empty because NewInvitationSchema has no id field;
+    # the invited email in resource_name is sufficient to identify who was invited
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.INVITATION,
+        resource_id="",
+        resource_name=payload.invited_email,
+        action=AuditLogAction.CREATE,
+    )
+
     return retval
 
 
@@ -498,9 +567,41 @@ def post_organization_user_accept_invite_v1(
     request, payload: AcceptInvitationSchema
 ):  # pylint: disable=unused-argument
     """User accepting the invite sent with a valid invite code"""
+    # Get invitation details before it's deleted (for audit log)
+    invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
+    invited_email = invitation.invited_email if invitation else ""
+    invited_by_org = invitation.invited_by.org if invitation and invitation.invited_by else None
+
     retval, error = orguserfunctions.accept_invitation_v1(payload)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: invitation accepted (user added to org)
+    if invited_by_org:
+        # Look up the new orguser
+        new_orguser = OrgUser.objects.filter(
+            user__email__iexact=invited_email, org=invited_by_org
+        ).first()
+        if new_orguser:
+            create_audit_log(
+                org=invited_by_org,
+                orguser=new_orguser,
+                resource_type=AuditLogResourceType.INVITATION,
+                resource_id="",
+                resource_name=invited_email,
+                action=AuditLogAction.UPDATE,
+                field_changes={"status": {"old": "pending", "new": "accepted"}},
+            )
+            # Also log "user added to org"
+            create_audit_log(
+                org=invited_by_org,
+                orguser=new_orguser,
+                resource_type=AuditLogResourceType.ORG_USER,
+                resource_id=str(new_orguser.id),
+                resource_name=invited_email,
+                action=AuditLogAction.CREATE,
+            )
+
     return retval
 
 
@@ -517,14 +618,28 @@ def get_invitations_v1(request):
 @user_org_router.post("/users/invitations/resend/{invitation_id}")
 @has_permission(["can_edit_invitation"])
 def post_resend_invitation(request, invitation_id):
-    """Get all invitations sent by the current user"""
+    """Resend an invitation"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
+    # Get invitation details for audit log
+    invitation = Invitation.objects.filter(id=invitation_id).first()
+
     _, error = orguserfunctions.resend_invitation(invitation_id)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: invitation resent
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.INVITATION,
+        resource_id=str(invitation_id),
+        resource_name=invitation.invited_email if invitation else "",
+        action=AuditLogAction.UPDATE,
+        field_changes={"action": {"old": None, "new": "resent"}},
+    )
 
     return {"success": 1}
 
@@ -532,15 +647,28 @@ def post_resend_invitation(request, invitation_id):
 @user_org_router.delete("/users/invitations/delete/{invitation_id}")
 @has_permission(["can_delete_invitation"])
 def delete_invitation(request, invitation_id):
-    """Get all invitations sent by the current user"""
+    """Delete an invitation"""
     orguser: OrgUser = request.orguser
     if orguser.org is None:
         raise HttpError(400, "create an organization first")
 
     invitation = Invitation.objects.filter(id=invitation_id).first()
 
+    # Capture email before deletion for audit log
+    invited_email = invitation.invited_email if invitation else ""
+
     if invitation:
         invitation.delete()
+
+        # Audit log: invitation deleted
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.INVITATION,
+            resource_id=str(invitation_id),
+            resource_name=invited_email,
+            action=AuditLogAction.DELETE,
+        )
 
     return {"success": 1}
 
@@ -571,6 +699,16 @@ def post_organization_v1(request, payload: CreateOrgSchema):
     org_plan, error = orgfunctions.create_org_plan(payload, org)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: organization created
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ORG,
+        resource_id=str(org.id),
+        resource_name=org.name,
+        action=AuditLogAction.CREATE,
+    )
 
     logger.info(f"{orguser.user.email} created new org {org.name}")
     return OrgSchema(name=org.name, airbyte_workspace_id=org.airbyte_workspace_id, slug=org.slug)
@@ -657,6 +795,20 @@ def post_login_v2(request, payload: LoginPayload):
 
     # Get user data (same as v1)
     retval = orguserfunctions.lookup_user(payload.username)
+
+    # Audit log: user logged in
+    user = User.objects.filter(email__iexact=payload.username).first()
+    if user:
+        orguser = OrgUser.objects.filter(user=user).first()
+        if orguser and orguser.org:
+            create_audit_log(
+                org=orguser.org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.AUTH,
+                resource_id="",
+                resource_name="",
+                action=AuditLogAction.LOGIN,
+            )
 
     # Create JsonResponse and set cookies
     response = JsonResponse(retval)
@@ -751,6 +903,9 @@ def upload_logo_file(request, file: UploadedFile = File(...)):
     """Upload an image file as the org logo"""
     orguser: OrgUser = request.orguser
 
+    # Check if logo already exists (update vs create)
+    had_logo = bool(orguser.org.logo_url)
+
     try:
         org = orgfunctions.upload_logo_from_file(
             file_bytes=file.read(),
@@ -758,6 +913,17 @@ def upload_logo_file(request, file: UploadedFile = File(...)):
             filename=file.name or "",
             org=orguser.org,
         )
+
+        # Audit log: logo uploaded/updated
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.ORG,
+            resource_id=str(orguser.org.id),
+            resource_name="logo",
+            action=AuditLogAction.UPDATE if had_logo else AuditLogAction.CREATE,
+        )
+
         return api_response(
             success=True,
             data=OrgLogoResponse.from_model(org),
@@ -775,11 +941,25 @@ def upload_logo_from_url(request, payload: OrgLogoUrlPayload):
     """Store an external image URL directly as the org logo — no S3 upload"""
     orguser: OrgUser = request.orguser
 
+    # Check if logo already exists (update vs create)
+    had_logo = bool(orguser.org.logo_url)
+
     try:
         org = orgfunctions.upload_logo_from_url(
             image_url=payload.image_url,
             org=orguser.org,
         )
+
+        # Audit log: logo uploaded/updated
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.ORG,
+            resource_id=str(orguser.org.id),
+            resource_name="logo",
+            action=AuditLogAction.UPDATE if had_logo else AuditLogAction.CREATE,
+        )
+
         return api_response(
             success=True,
             data=OrgLogoResponse.from_model(org),
@@ -800,6 +980,17 @@ def delete_logo(request):
 
     try:
         orgfunctions.delete_logo(orguser.org)
+
+        # Audit log: logo deleted
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.ORG,
+            resource_id=str(orguser.org.id),
+            resource_name="logo",
+            action=AuditLogAction.DELETE,
+        )
+
         return api_response(success=True, message="Logo deleted successfully")
     except OrgLogoNotFoundError as e:
         raise HttpError(404, str(e)) from e

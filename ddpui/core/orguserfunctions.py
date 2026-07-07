@@ -484,7 +484,7 @@ def verify_email(payload: VerifyEmailSchema):
         email_verified=True, updated_at=django_timezone.now()
     )
 
-    return None, None
+    return orguser, None
 
 
 def ensure_orguser_for_org(orguser: OrgUser, org):

@@ -23,7 +23,6 @@ from ddpui.api.user_org_api import (
     get_organizations_warehouses,
     post_organization_user_invite_v1,
     post_organization_user_accept_invite_v1,
-    post_forgot_password,
     post_reset_password,
     post_verify_email,
     get_invitations_v1,
@@ -48,7 +47,6 @@ from ddpui.models.org_user import (
     Invitation,
     UserAttributes,
     AcceptInvitationSchema,
-    ForgotPasswordSchema,
     ResetPasswordSchema,
     VerifyEmailSchema,
     DeleteOrgUserPayload,
@@ -871,41 +869,6 @@ def test_post_organization_user_accept_invite_v1_secondaccount(orguser):
 
 
 # ================================================================================
-def test_post_forgot_password_nosuchuser():
-    """success test, invalid email address"""
-    mock_request = Mock()
-    payload = ForgotPasswordSchema(email="no-such-email")
-    response = post_forgot_password(mock_request, payload)
-    assert response["success"] == 1
-
-
-@patch.multiple(
-    "ddpui.utils.awsses",
-    send_password_reset_email=Mock(side_effect=Exception("error")),
-)
-def test_post_forgot_password_emailfailed():
-    """failure test, could not send email"""
-    mock_request = Mock()
-    user = User.objects.create(email="fake-email", username="fake-username")
-    temporguser = OrgUser.objects.create(user=user)
-    payload = ForgotPasswordSchema(email=temporguser.user.email)
-    with pytest.raises(HttpError) as excinfo:
-        post_forgot_password(mock_request, payload)
-    assert str(excinfo.value) == "failed to send email"
-
-
-@patch.multiple("ddpui.utils.awsses", send_password_reset_email=Mock(return_value=1))
-def test_post_forgot_password_success():
-    """success test, forgot password email sent"""
-    mock_request = Mock()
-    user = User.objects.create(email="fake-email", username="fake-username")
-    temporguser = OrgUser.objects.create(user=user)
-    payload = ForgotPasswordSchema(email=temporguser.user.email)
-    response = post_forgot_password(mock_request, payload)
-    assert response["success"] == 1
-
-
-# ================================================================================
 @patch.multiple("redis.Redis", get=Mock(return_value=None))
 def test_post_reset_password_invalid_reset_code():
     """failure test, invalid code"""
@@ -1213,3 +1176,337 @@ def test_delete_logo_s3_error_raises_502(orguser, seed_db):
         with pytest.raises(HttpError) as exc:
             delete_logo(mock_request(orguser))
     assert exc.value.status_code == 502
+
+
+# ================================================================================
+# Audit Log Tests - Verify audit logs are created for user actions
+# ================================================================================
+
+from ddpui.api.user_org_api import (
+    post_login_v2,
+    post_logout,
+    change_password,
+    post_forgot_password_v2,
+    post_verify_email,
+    post_modify_orguser_role,
+)
+from ddpui.models.org_user import (
+    LoginPayload,
+    ChangePasswordSchema,
+    ForgotPasswordSchema,
+    OrgUserUpdateNewRole,
+)
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+def assert_audit_log_call(
+    mock_audit_log,
+    orguser,
+    resource_type,
+    action,
+    resource_name="",
+    resource_id="",
+    field_changes=None,
+):
+    """Assert the common audit-log payload for a success-path API call."""
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["orguser"] == orguser
+    assert call_kwargs["resource_type"] == resource_type
+    assert call_kwargs["action"] == action
+
+    if resource_name != "":
+        assert call_kwargs["resource_name"] == resource_name
+    if resource_id != "":
+        assert call_kwargs["resource_id"] == resource_id
+    if field_changes is not None:
+        assert call_kwargs["field_changes"] == field_changes
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.CustomTokenObtainSerializer")
+@patch("ddpui.api.user_org_api.orguserfunctions.lookup_user")
+def test_login_v2_creates_audit_log(mock_lookup, mock_serializer, mock_audit_log, orguser):
+    """Test that login v2 creates an audit log entry"""
+    # Setup mocks
+    mock_serializer_instance = MagicMock()
+    mock_serializer_instance.is_valid.return_value = True
+    mock_serializer_instance.validated_data = {"access": "token", "refresh": "refresh"}
+    mock_serializer.return_value = mock_serializer_instance
+    mock_lookup.return_value = {"email": orguser.user.email}
+
+    request = Mock()
+    payload = LoginPayload(username=orguser.user.email, password="testpassword")
+
+    post_login_v2(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.LOGIN,
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+def test_logout_creates_audit_log(mock_audit_log, orguser):
+    """Test that logout creates an audit log entry"""
+    request = Mock()
+    request.orguser = orguser
+    request.user = orguser.user
+    request.COOKIES = {}
+
+    post_logout(request)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.LOGOUT,
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.change_password")
+def test_change_password_creates_audit_log(mock_change_pwd, mock_audit_log, orguser):
+    """Test that password change creates an audit log entry"""
+    mock_change_pwd.return_value = (True, None)
+
+    request = mock_request(orguser)
+    payload = ChangePasswordSchema(password="newpassword", confirmPassword="newpassword")
+
+    change_password(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.UPDATE,
+        resource_name="password_change",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.request_reset_password")
+def test_forgot_password_v2_creates_audit_log(mock_reset_pwd, mock_audit_log, orguser):
+    """Test that password reset request creates an audit log entry"""
+    mock_reset_pwd.return_value = (True, None)
+
+    request = Mock()
+    payload = ForgotPasswordSchema(email=orguser.user.email)
+
+    post_forgot_password_v2(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.UPDATE,
+        resource_name="password_reset_request",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.verify_email")
+def test_verify_email_creates_audit_log(mock_verify, mock_audit_log, orguser):
+    """Test that email verification creates an audit log entry"""
+    mock_verify.return_value = (orguser, None)
+
+    request = Mock()
+    payload = VerifyEmailSchema(token="valid-token")
+
+    post_verify_email(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.UPDATE,
+        resource_name="email_verified",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.delete_orguser_v1")
+def test_delete_user_creates_audit_log(mock_delete, mock_audit_log, orguser, seed_db):
+    """Test that deleting a user creates an audit log entry"""
+    mock_delete.return_value = (True, None)
+
+    request = mock_request(orguser)
+    payload = DeleteOrgUserPayload(email="user_to_delete@example.com")
+
+    delete_organization_users_v1(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.ORG_USER,
+        AuditLogAction.DELETE,
+        resource_name="user_to_delete@example.com",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+def test_modify_user_role_creates_audit_log(mock_audit_log, orguser, seed_db):
+    """Test that modifying a user role creates an audit log entry"""
+    # Create a separate target user with a different email
+    from django.contrib.auth.models import User
+
+    target_django_user = User.objects.create_user(
+        username="target_user",
+        email="target@example.com",
+        password="testpassword",
+    )
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    target_orguser = OrgUser.objects.create(
+        user=target_django_user,
+        org=orguser.org,
+        new_role=guest_role,
+    )
+
+    request = mock_request(orguser)
+
+    payload = OrgUserUpdateNewRole(
+        toupdate_email="target@example.com",
+        role_uuid=str(guest_role.uuid),
+    )
+
+    post_modify_orguser_role(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.ORG_USER,
+        AuditLogAction.UPDATE,
+        resource_name="target@example.com",
+    )
+    assert "role" in mock_audit_log.call_args[1]["field_changes"]
+
+    # Cleanup
+    target_orguser.delete()
+    target_django_user.delete()
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.invite_user_v1")
+def test_invite_user_creates_audit_log(mock_invite, mock_audit_log, orguser, seed_db):
+    """Test that inviting a user creates an audit log entry"""
+    mock_invite.return_value = (
+        NewInvitationSchema(
+            invited_email="newuser@example.com",
+            invited_role_uuid=str(Role.objects.filter(slug=GUEST_ROLE).first().uuid),
+        ),
+        None,
+    )
+
+    request = mock_request(orguser)
+    payload = NewInvitationSchema(
+        invited_email="newuser@example.com",
+        invited_role_uuid=str(Role.objects.filter(slug=GUEST_ROLE).first().uuid),
+    )
+
+    post_organization_user_invite_v1(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.INVITATION,
+        AuditLogAction.CREATE,
+        resource_name="newuser@example.com",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.resend_invitation")
+def test_resend_invitation_creates_audit_log(mock_resend, mock_audit_log, orguser):
+    """Test that resending an invitation creates an audit log entry"""
+    mock_resend.return_value = (True, None)
+
+    invitation = Invitation.objects.create(
+        invited_email="test_resend@example.com",
+        invite_code="test-code-resend",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invited_new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+
+    request = mock_request(orguser)
+    post_resend_invitation(request, invitation.id)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.INVITATION,
+        AuditLogAction.UPDATE,
+        resource_id=str(invitation.id),
+    )
+
+    # Cleanup
+    invitation.delete()
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+def test_delete_invitation_creates_audit_log(mock_audit_log, orguser):
+    """Test that deleting an invitation creates an audit log entry"""
+    invitation = Invitation.objects.create(
+        invited_email="delete_test@example.com",
+        invite_code="delete-code",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invited_new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    invitation_id = invitation.id
+
+    request = mock_request(orguser)
+    delete_invitation(request, invitation_id)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.INVITATION,
+        AuditLogAction.DELETE,
+        resource_id=str(invitation_id),
+        resource_name="delete_test@example.com",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orgfunctions.upload_logo_from_file")
+def test_upload_logo_creates_audit_log(mock_upload, mock_audit_log, orguser, seed_db):
+    """Test that uploading a logo creates an audit log entry"""
+    mock_upload.return_value = orguser.org
+
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"fake-image-data"
+    mock_file.content_type = "image/png"
+    mock_file.name = "logo.png"
+
+    request = mock_request(orguser)
+    upload_logo_file(request, file=mock_file)
+
+    # Verify audit log was called
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["orguser"] == orguser
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ORG
+    assert call_kwargs["resource_name"] == "logo"
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orgfunctions.delete_logo")
+def test_delete_logo_creates_audit_log(mock_delete, mock_audit_log, orguser, seed_db):
+    """Test that deleting a logo creates an audit log entry"""
+    mock_delete.return_value = None
+
+    request = mock_request(orguser)
+    delete_logo(request)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.ORG,
+        AuditLogAction.DELETE,
+        resource_name="logo",
+    )
