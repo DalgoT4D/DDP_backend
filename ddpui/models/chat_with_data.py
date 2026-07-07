@@ -48,6 +48,10 @@ class ChatWithDataTurnAudit(models.Model):
     output_tokens = models.IntegerField(default=0)
     latency_ms = models.IntegerField(null=True)
     status = models.CharField(max_length=20, default="completed")  # completed|failed|aborted
+    # router output: {intent, complexity, entities, clarification}
+    intent = models.JSONField(null=True, blank=True)
+    # post-execution validator output: {verdict, assumptions, caveat}
+    validation = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 

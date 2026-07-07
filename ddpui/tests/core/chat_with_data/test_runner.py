@@ -36,6 +36,19 @@ from ddpui.tests.core.chat_with_data.test_tools import FakeWarehouse
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+@pytest.fixture(autouse=True)
+def hermetic_router(monkeypatch):
+    """Tests never construct the real router model (would hit the API when a
+    key is present). Individual tests override with their own routes."""
+    from ddpui.core.chat_with_data import runner as runner_module
+    from ddpui.core.chat_with_data.router import FAIL_OPEN
+
+    async def fail_open_route(question, model=None):
+        return FAIL_OPEN
+
+    monkeypatch.setattr(runner_module, "route_question", fail_open_route)
+
+
 @pytest.fixture
 def orguser(seed_db):
     user = User.objects.create(username="cwdrunner", email="cwdrunner@test.com", password="x")
@@ -114,6 +127,68 @@ def test_run_turn_streams_events_and_writes_audit(orguser, session):
     assert audit.tools_called == ["execute_sql"]
     assert audit.sql_queries[0]["status"] == "success"
     assert audit.status == "completed"
+
+
+def test_small_talk_short_circuits_the_agent(orguser, session, monkeypatch):
+    """Greetings never reach the SQL agent: the router diverts them, a cheap
+    reply comes back, and the exchange still lands in conversation memory."""
+    from ddpui.core.chat_with_data import runner as runner_module
+    from ddpui.core.chat_with_data.router import RouteResult
+
+    async def fake_route(question, model=None):
+        return RouteResult(intent="small_talk")
+
+    async def fake_reply(question, model=None):
+        return "You're welcome! Ask me anything about your data."
+
+    monkeypatch.setattr(runner_module, "route_question", fake_route)
+    monkeypatch.setattr(runner_module, "casual_reply", fake_reply)
+
+    class MustNotRun(ScriptedChatModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            raise AssertionError("the SQL agent must not run for small talk")
+
+    agent = build_agent(checkpointer=InMemorySaver(), model=MustNotRun(script=[]))
+    events = collect_events(agent, session, orguser, "thanks!", make_context())
+
+    assert [e["type"] for e in events] == ["message_complete"]
+    assert "ask me anything" in events[0]["message"].lower()
+
+    audit = ChatWithDataTurnAudit.objects.get(session=session)
+    assert audit.intent["intent"] == "small_talk"
+    assert audit.tools_called == []
+
+    # the exchange is recorded in the thread so follow-ups keep context
+    import asyncio
+
+    state = asyncio.run(agent.aget_state({"configurable": {"thread_id": str(session.thread_id)}}))
+    contents = [m.content for m in state.values["messages"]]
+    assert "thanks!" in contents
+    assert any("ask me anything" in str(c).lower() for c in contents)
+
+
+def test_data_question_records_intent_on_audit(orguser, session, monkeypatch):
+    from ddpui.core.chat_with_data import runner as runner_module
+    from ddpui.core.chat_with_data.router import RouteResult
+
+    async def fake_route(question, model=None):
+        return RouteResult(intent="data_question", complexity="complex", entities=["surveys"])
+
+    monkeypatch.setattr(runner_module, "route_question", fake_route)
+
+    agent = build_agent(
+        checkpointer=InMemorySaver(),
+        model=ScriptedChatModel(script=[AIMessage(content="There are 12 surveys.")]),
+    )
+    context = make_context()
+    events = collect_events(agent, session, orguser, "how many surveys?", context)
+
+    assert events[-1]["type"] == "message_complete"
+    assert context.complexity == "complex"  # reflection gate input (M4)
+
+    audit = ChatWithDataTurnAudit.objects.get(session=session)
+    assert audit.intent["complexity"] == "complex"
+    assert audit.intent["entities"] == ["surveys"]
 
 
 def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):

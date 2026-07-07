@@ -213,6 +213,14 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     async def fake_title(question, answer, model=None):
         return "Survey counts"
 
+    from ddpui.core.chat_with_data import runner as runner_module
+    from ddpui.core.chat_with_data.router import FAIL_OPEN
+
+    async def fail_open_route(question, model=None):
+        return FAIL_OPEN
+
+    monkeypatch.setattr(runner_module, "route_question", fail_open_route)
+
     fake_redis = FakeRedis()
     monkeypatch.setattr(consumer_module, "build_agent", fake_build_agent)
     monkeypatch.setattr(consumer_module, "get_checkpointer", fake_get_checkpointer)

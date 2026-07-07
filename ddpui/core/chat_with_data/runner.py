@@ -13,6 +13,7 @@ verbatim. Event shapes are the WS protocol from plan §4.4:
 After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
 """
 
+import dataclasses
 import os
 import time
 import uuid
@@ -24,6 +25,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from ddpui.core.chat_with_data.agent import DEFAULT_MODEL, RECURSION_LIMIT
 from ddpui.core.chat_with_data.content import extract_text
 from ddpui.core.chat_with_data.observability import start_turn_trace
+from ddpui.core.chat_with_data.router import casual_reply, route_question
 from ddpui.core.chat_with_data.state import RunContext
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
@@ -59,6 +61,25 @@ async def run_turn(
     and always writes the audit row."""
     request_uuid = uuid.uuid4()
     started = time.monotonic()
+
+    # Stage 1: query understanding — one cheap call; fails open to data_question
+    route = await route_question(question)
+    context.question = question
+    context.complexity = route.complexity
+
+    if route.intent in ("small_talk", "needs_clarification"):
+        async for event in _short_circuit_turn(
+            agent=agent,
+            session=session,
+            orguser=orguser,
+            question=question,
+            route=route,
+            request_uuid=request_uuid,
+            started=started,
+        ):
+            yield event
+        return
+
     trace_handler = start_turn_trace(
         session=session,
         orguser=orguser,
@@ -181,6 +202,56 @@ async def run_turn(
                 output_tokens=usage["output_tokens"],
                 latency_ms=latency_ms,
                 status=status,
+                intent=dataclasses.asdict(route),
             )
         except Exception:  # pylint: disable=broad-except
             logger.exception(f"failed to write turn audit request_uuid={request_uuid}")
+
+
+async def _short_circuit_turn(
+    *, agent, session, orguser, question, route, request_uuid, started
+) -> AsyncIterator[dict]:
+    """Answer small talk / ask for clarification without running the SQL agent.
+
+    The exchange is still written into the checkpointer thread so follow-up
+    questions keep their conversational context, and the turn is audited with
+    tools_called=[] — routing effectiveness stays measurable.
+    """
+    from langchain_core.messages import HumanMessage
+
+    if route.intent == "needs_clarification" and route.clarification:
+        reply = route.clarification
+    else:
+        reply = await casual_reply(question)
+
+    yield {
+        "type": "message_complete",
+        "message": reply,
+        "result_table": None,
+        "charts": [],
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+
+    config = {"configurable": {"thread_id": str(session.thread_id)}}
+    try:
+        await agent.aupdate_state(
+            config, {"messages": [HumanMessage(question), AIMessage(content=reply)]}
+        )
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("chat_with_data: failed to record short-circuit turn in thread")
+
+    try:
+        await sync_to_async(ChatWithDataTurnAudit.objects.create)(
+            org=orguser.org,
+            orguser=orguser,
+            session=session,
+            request_uuid=request_uuid,
+            user_message=question,
+            sql_queries=[],
+            tools_called=[],
+            latency_ms=int((time.monotonic() - started) * 1000),
+            status="completed",
+            intent=dataclasses.asdict(route),
+        )
+    except Exception:  # pylint: disable=broad-except
+        logger.exception(f"failed to write turn audit request_uuid={request_uuid}")

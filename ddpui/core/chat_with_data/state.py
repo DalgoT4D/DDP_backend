@@ -26,3 +26,6 @@ class RunContext:
     orguser_id: int | None = None
     # Resolved from RolePermission at context-build time; tools never query RBAC
     can_create_charts: bool = False
+    # Set per turn by the runner (router output) — reflection gate + tool context
+    question: str = ""
+    complexity: str = "simple"
