@@ -866,6 +866,11 @@ def apply_chart_sorting(
             # It's a dimension column - use as-is
             sort_column = column_name
 
+            # For aggregated queries (GROUP BY present), ensure the dimension
+            # column also appears in GROUP BY to prevent PostgreSQL GroupingError.
+            if query_builder.group_by_clauses:
+                query_builder.group_cols_by(column_name)
+
         sort_cols.append((sort_column, direction))
 
     if sort_cols:
