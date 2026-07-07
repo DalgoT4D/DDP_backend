@@ -46,7 +46,11 @@ def hermetic_router(monkeypatch):
     async def fail_open_route(question, model=None):
         return FAIL_OPEN
 
+    async def no_validation(**kwargs):
+        return None
+
     monkeypatch.setattr(runner_module, "route_question", fail_open_route)
+    monkeypatch.setattr(runner_module, "validate_turn", no_validation)
 
 
 @pytest.fixture
@@ -189,6 +193,44 @@ def test_data_question_records_intent_on_audit(orguser, session, monkeypatch):
     audit = ChatWithDataTurnAudit.objects.get(session=session)
     assert audit.intent["complexity"] == "complex"
     assert audit.intent["entities"] == ["surveys"]
+
+
+def test_validation_event_follows_message_complete(orguser, session, monkeypatch):
+    from ddpui.core.chat_with_data import runner as runner_module
+
+    captured = {}
+
+    async def fake_validate(**kwargs):
+        captured.update(kwargs)
+        return {
+            "verdict": "warn",
+            "assumptions": ["counts rows"],
+            "caveat": "This counts visit records, not unique farmers.",
+        }
+
+    monkeypatch.setattr(runner_module, "validate_turn", fake_validate)
+
+    warehouse = FakeWarehouse(rows=[{"n": 1284}])
+    model = ScriptedChatModel(
+        script=[
+            sql_call("SELECT COUNT(*) AS n FROM prod.surveys", "c1"),
+            AIMessage(content="1,284 surveys."),
+        ]
+    )
+    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+    events = collect_events(agent, session, orguser, "how many farmers?", make_context(warehouse))
+
+    types = [e["type"] for e in events]
+    assert types.index("message_complete") < types.index("validation")
+    validation = events[types.index("validation")]
+    assert validation["verdict"] == "warn"
+    assert "unique farmers" in validation["caveat"]
+
+    assert captured["question"] == "how many farmers?"
+    assert captured["sql_queries"][0]["status"] == "success"
+
+    audit = ChatWithDataTurnAudit.objects.get(session=session)
+    assert audit.validation["verdict"] == "warn"
 
 
 def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):

@@ -27,6 +27,7 @@ from ddpui.core.chat_with_data.content import extract_text
 from ddpui.core.chat_with_data.observability import start_turn_trace
 from ddpui.core.chat_with_data.router import casual_reply, route_question
 from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.validator import validate_turn
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
@@ -96,6 +97,7 @@ async def run_turn(
         config["callbacks"] = [trace_handler]
 
     final_message = ""
+    validation: dict | None = None
     usage = {"input_tokens": 0, "output_tokens": 0}
     sql_queries: list[dict] = []
     tools_called: list[str] = []
@@ -181,6 +183,22 @@ async def run_turn(
             "charts": created_charts,
             "usage": usage,
         }
+
+        # Stage 5b: post-execution validation — annotates, never blocks
+        validation = await validate_turn(
+            question=question,
+            sql_queries=sql_queries,
+            result_table=last_result_table,
+            answer=final_message,
+        )
+        if validation is not None:
+            yield {"type": "validation", **validation}
+            if trace_handler is not None:
+                trace_handler.score(
+                    name="result_validation",
+                    value=1 if validation["verdict"] == "ok" else 0,
+                    comment=validation.get("caveat"),
+                )
     except Exception:  # pylint: disable=broad-except
         status = "failed"
         logger.exception(f"chat_with_data turn failed request_uuid={request_uuid}")
@@ -203,6 +221,7 @@ async def run_turn(
                 latency_ms=latency_ms,
                 status=status,
                 intent=dataclasses.asdict(route),
+                validation=validation,
             )
         except Exception:  # pylint: disable=broad-except
             logger.exception(f"failed to write turn audit request_uuid={request_uuid}")

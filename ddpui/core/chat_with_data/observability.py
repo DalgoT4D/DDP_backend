@@ -149,6 +149,14 @@ class LangfuseTurnHandler(BaseCallbackHandler):
 
     # ── turn lifecycle ──────────────────────────────────────────────────────
 
+    def score(self, name: str, value: float, comment: str | None = None):
+        """Attach an evaluation score to this turn's trace (e.g. the result
+        validator's verdict) — the input to Langfuse's evaluation dashboards."""
+        try:
+            self._trace.score(name=name, value=value, comment=comment)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("langfuse score failed")
+
     def finish(self, output: str, status: str):
         try:
             self._trace.update(output=_clip(output), metadata={"status": status})
