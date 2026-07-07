@@ -13,6 +13,7 @@ verbatim. Event shapes are the WS protocol from plan §4.4:
 After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
 """
 
+import os
 import time
 import uuid
 from typing import AsyncIterator
@@ -20,8 +21,9 @@ from typing import AsyncIterator
 from asgiref.sync import sync_to_async
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
-from ddpui.core.chat_with_data.agent import RECURSION_LIMIT
+from ddpui.core.chat_with_data.agent import DEFAULT_MODEL, RECURSION_LIMIT
 from ddpui.core.chat_with_data.content import extract_text
+from ddpui.core.chat_with_data.observability import start_turn_trace
 from ddpui.core.chat_with_data.state import RunContext
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
@@ -57,10 +59,20 @@ async def run_turn(
     and always writes the audit row."""
     request_uuid = uuid.uuid4()
     started = time.monotonic()
+    trace_handler = start_turn_trace(
+        session=session,
+        orguser=orguser,
+        context=context,
+        question=question,
+        request_uuid=request_uuid,
+        model_name=os.getenv("CHAT_WITH_DATA_MODEL", DEFAULT_MODEL),
+    )
     config = {
         "configurable": {"thread_id": str(session.thread_id)},
         "recursion_limit": RECURSION_LIMIT,
     }
+    if trace_handler is not None:
+        config["callbacks"] = [trace_handler]
 
     final_message = ""
     usage = {"input_tokens": 0, "output_tokens": 0}
@@ -154,6 +166,8 @@ async def run_turn(
         yield {"type": "error", "message": USER_FACING_ERROR}
     finally:
         latency_ms = int((time.monotonic() - started) * 1000)
+        if trace_handler is not None:
+            trace_handler.finish(output=final_message, status=status)
         try:
             await sync_to_async(ChatWithDataTurnAudit.objects.create)(
                 org=orguser.org,

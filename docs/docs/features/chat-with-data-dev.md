@@ -28,10 +28,11 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Agent model override; defaults to claude-sonnet-5
 CHAT_WITH_DATA_MODEL=
 
-# LangSmith tracing — dev debugging only, leave off in production
-LANGSMITH_TRACING=false
-LANGSMITH_API_KEY=
-LANGSMITH_PROJECT=dalgo-chat-with-data-dev
+# Langfuse tracing (optional — tracing is OFF when the keys are unset).
+# Self-hostable, so traces never leave the deployment.
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=http://localhost:3000
 ```
 
 ## One-time setup
@@ -58,21 +59,30 @@ you> how many surveys did we run in Pune last month?
 You ran 1,284 surveys in Pune in June. ...
 ```
 
-## Watch what the agent is doing (LangSmith)
+## Watch what the agent is doing (Langfuse)
 
-1. Sign up at [smith.langchain.com](https://smith.langchain.com) — the free
-   Developer tier (5K traces/month) is enough for development.
-2. Create an API key, then set in `.env`:
-   `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY=<key>`,
-   `LANGSMITH_PROJECT=dalgo-chat-with-data-dev`.
-3. Run the REPL and open your project in LangSmith. Every turn shows the full
-   run tree: each model call, each tool call with its arguments (including the
-   generated SQL), token counts, and latency.
+1. Run Langfuse locally (`docker compose` from the
+   [langfuse repo](https://github.com/langfuse/langfuse)) — it serves on port 3000.
+2. In the Langfuse UI: create an organization + project, then copy the API keys
+   from **Project settings → API keys** into `.env`:
+   `LANGFUSE_PUBLIC_KEY=pk-lf-...`, `LANGFUSE_SECRET_KEY=sk-lf-...`,
+   `LANGFUSE_HOST=http://localhost:3000`.
+3. Restart the backend, ask a question, and open **Traces**. Each turn is one
+   trace (grouped by chat session): every model call with token usage, every
+   tool call with its input/output (including the generated SQL), and latency.
 
-Tracing sends prompts and query results to LangSmith's cloud — **never enable it
-against production orgs / real beneficiary data.** (Self-hosted LangSmith is
-enterprise-only; if fully-local tracing ever matters, Langfuse is the
-open-source alternative.)
+Implementation notes (`ddpui/core/chat_with_data/observability.py`): tracing is
+disabled unless both keys are set, and every hook is fail-safe — a Langfuse
+outage can never break a chat turn. Traces are tagged with `org_slug` and
+`dialect`, keyed by opaque session/orguser ids (never emails), and carry the
+turn's `request_uuid` so a trace can be joined to its `ChatWithDataTurnAudit`
+row and log lines. The dbt stack pins `protobuf<5`, which rules out the
+Langfuse v3 SDK — we use the v2 client behind a small `langchain_core`
+callback handler instead.
+
+Traces contain prompts **and query results**. For production orgs this is only
+acceptable against a **self-hosted** Langfuse inside the deployment — never a
+cloud instance the org hasn't consented to.
 
 ## Tests
 
