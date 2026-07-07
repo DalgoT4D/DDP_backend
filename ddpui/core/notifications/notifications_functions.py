@@ -11,7 +11,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.role_based_access import Role
-from ddpui.auth import PIPELINE_MANAGER_ROLE
+from ddpui.auth import ADMIN_ROLE
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.discord import send_discord_notification
@@ -50,12 +50,15 @@ def get_recipients(
     # additional filters (not applicable to single user)
     if sent_to != SentToEnum.SINGLE_USER:
         if manager_or_above:
-            pipeline_manager = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
-            if pipeline_manager:
-                queryset = queryset.filter(new_role__level__gte=pipeline_manager.level)
+            # "manager or above" = admin and super-admin. Pre-v2 this thresholded on the
+            # pipeline-manager level (3); pipeline-manager merged into admin in v2, so the
+            # admin level (4) is the new floor — still excludes analyst (2) and member (1).
+            admin_role = Role.objects.filter(slug=ADMIN_ROLE).first()
+            if admin_role:
+                queryset = queryset.filter(new_role__level__gte=admin_role.level)
             else:
-                logger.error(f"Role with slug '{PIPELINE_MANAGER_ROLE}' not found")
-                return f"Role with slug '{PIPELINE_MANAGER_ROLE}' not found", None
+                logger.error(f"Role with slug '{ADMIN_ROLE}' not found")
+                return f"Role with slug '{ADMIN_ROLE}' not found", None
 
         if superset_clients:
             queryset = queryset.filter(org__viz_url__isnull=False)

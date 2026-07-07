@@ -169,6 +169,8 @@ def update_orguser_v1(orguser: OrgUser, payload: OrgUserUpdatev1):
         orguser.user.is_active = payload.active
     if payload.role_uuid:
         orguser.new_role = Role.objects.filter(uuid=payload.role_uuid).first()
+    if payload.has_seen_rbac_notice is not None:
+        orguser.has_seen_rbac_notice = payload.has_seen_rbac_notice
     orguser.user.save()
     orguser.save()
 

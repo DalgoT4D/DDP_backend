@@ -21,6 +21,7 @@ from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
 )
 from ddpui.core.metric.metric_service import MetricNotFoundError
 from ddpui.utils.custom_logger import CustomLogger
@@ -144,6 +145,8 @@ def delete_kpi(request, kpi_id: int):
         raise HttpError(404, "KPI not found") from None
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
+    except KPIPermissionError as e:
+        raise HttpError(403, e.message) from None
 
     return api_response(success=True)
 
