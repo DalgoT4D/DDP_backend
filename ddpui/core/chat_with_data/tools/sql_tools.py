@@ -12,6 +12,7 @@ carried on the ToolMessage without ever entering the model's context.
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.chat_with_data.guards import sql_guard
+from ddpui.core.chat_with_data.reflection import check_sql
 from ddpui.core.chat_with_data.state import RunContext
 from ddpui.core.chat_with_data.tools import common
 from ddpui.core.chat_with_data.tools.registry import register_tool
@@ -34,6 +35,18 @@ def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
         )
     except sql_guard.GuardError as err:
         return f"SQL rejected: {err}", {"sql": sql, "status": "rejected", "error": str(err)}
+
+    # Reflection gate — complex questions only; the AST guard above covers
+    # safety everywhere. A flagged issue goes back to the model as feedback
+    # (and counts toward its 3-attempt limit) instead of executing.
+    if ctx.complexity == "complex":
+        issue = check_sql(ctx.question, guarded.sql, ctx.dialect)
+        if issue:
+            message = f"reflection found a problem: {issue}. Revise the SQL."
+            return (
+                f"SQL rejected: {message}",
+                {"sql": guarded.sql, "status": "rejected", "error": message},
+            )
 
     try:
         rows = _execute_with_timeout(ctx, guarded.sql)

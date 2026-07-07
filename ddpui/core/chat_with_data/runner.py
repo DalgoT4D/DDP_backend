@@ -7,7 +7,9 @@ verbatim. Event shapes are the WS protocol from plan §4.4:
     {"type": "tool_start", "tool": str, "label": str, "sql": str|None}
     {"type": "tool_end", "tool": str, "status": "success"|"error"}
     {"type": "message_complete", "message": str, "result_table": dict|None,
-     "usage": {"input_tokens": int, "output_tokens": int}}
+     "charts": list, "usage": {"input_tokens": int, "output_tokens": int}}
+    {"type": "validation", "verdict": "ok"|"warn", "assumptions": list,
+     "caveat": str|None}   — post-execution audit, arrives after message_complete
     {"type": "error", "message": str}
 
 After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
