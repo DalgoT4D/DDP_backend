@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+import inspect
 import json
 from functools import wraps
 from ninja.security import HttpBearer
@@ -30,12 +31,10 @@ GUEST_ROLE = "guest"
 
 def has_permission(permission_slugs: list):
     def decorator(api_endpoint):
-        @wraps(api_endpoint)
-        def wrapper(*args, **kwargs):
+        def check(request):
             # request will have set of permissions that are allowed
             # check if permission_slug lies in this set
             # throw error if nots
-            request = args[0]
             try:
                 if not request.permissions or len(request.permissions) == 0:
                     raise HttpError(403, "not allowed")
@@ -45,6 +44,21 @@ def has_permission(permission_slugs: list):
             except:
                 raise HttpError(404, UNAUTHORIZED)
 
+        # Ninja awaits a view only when iscoroutinefunction(view) is True, so an
+        # async endpoint must be wrapped by an async wrapper — a sync wrapper
+        # would hand Ninja an un-awaited coroutine to serialize (HTTP 500).
+        if inspect.iscoroutinefunction(api_endpoint):
+
+            @wraps(api_endpoint)
+            async def async_wrapper(*args, **kwargs):
+                check(args[0])
+                return await api_endpoint(*args, **kwargs)
+
+            return async_wrapper
+
+        @wraps(api_endpoint)
+        def wrapper(*args, **kwargs):
+            check(args[0])
             return api_endpoint(*args, **kwargs)
 
         return wrapper
