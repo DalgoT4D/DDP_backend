@@ -237,10 +237,13 @@ def test_post_source_oauth_consent_without_workspace(seed_db, orguser):
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     get_source_oauth_consent=Mock(return_value={"consentUrl": "https://accounts.google.com/x"}),
+    set_instancewide_source_oauth_params=Mock(return_value={}),
 )
 def test_post_source_oauth_consent_success(seed_db, orguser_workspace, monkeypatch):
-    """consent returns the consent URL and mints a state nonce"""
+    """consent registers client creds, returns the consent URL and mints a state nonce"""
     monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET", "csecret")
     fake_redis = FakeRedis()
     monkeypatch.setattr(
         "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
@@ -253,6 +256,19 @@ def test_post_source_oauth_consent_success(seed_db, orguser_workspace, monkeypat
     assert result["state"]
     # the nonce was stored in redis under its key
     assert f"airbyte_oauth_state:{result['state']}" in fake_redis.store
+
+
+def test_post_source_oauth_consent_missing_client_creds(seed_db, orguser_workspace, monkeypatch):
+    """consent fails cleanly when the Google client id/secret are not configured"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    monkeypatch.delenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET", raising=False)
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_consent(request, SourceOAuthConsentCreate(sourceDefId="gsheets-id"))
+
+    assert str(excinfo.value) == "google oauth client credentials are not configured"
 
 
 def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
@@ -271,10 +287,12 @@ def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    complete_source_oauth=Mock(return_value={"secretId": "airbyte_secret://abc"}),
+    complete_source_oauth=Mock(
+        return_value={"refresh_token": "rt", "client_id": "cid", "client_secret": "cs"}
+    ),
 )
 def test_post_source_oauth_complete_success(seed_db, orguser_workspace, monkeypatch):
-    """complete validates the nonce and returns Airbyte's config fragment"""
+    """complete validates the nonce and returns the credentials fragment to merge"""
     monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
     fake_redis = FakeRedis()
     monkeypatch.setattr(
@@ -288,7 +306,15 @@ def test_post_source_oauth_complete_success(seed_db, orguser_workspace, monkeypa
         SourceOAuthComplete(sourceDefId="gsheets-id", state=state, queryParams={"code": "c"}),
     )
 
-    assert result["secretId"] == "airbyte_secret://abc"
+    # flat payload gets nested under credentials with the Client (OAuth) discriminator
+    assert result == {
+        "credentials": {
+            "auth_type": "Client",
+            "refresh_token": "rt",
+            "client_id": "cid",
+            "client_secret": "cs",
+        }
+    }
     # nonce is single-use — consumed
     assert f"airbyte_oauth_state:{state}" not in fake_redis.store
 

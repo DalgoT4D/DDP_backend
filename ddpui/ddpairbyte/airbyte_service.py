@@ -352,6 +352,8 @@ def get_source_oauth_consent(
             "sourceDefinitionId": source_definition_id,
             "workspaceId": workspace_id,
             "redirectUrl": redirect_url,
+            # Airbyte requires this key present (non-null) even when empty
+            "oAuthInputConfiguration": {},
         },
     )
     if "consentUrl" not in res:
@@ -364,7 +366,12 @@ def get_source_oauth_consent(
 def complete_source_oauth(
     workspace_id: str, source_definition_id: str, redirect_url: str, query_params: dict
 ) -> dict:
-    """Hand Airbyte the OAuth code so it exchanges it for a token and stores it"""
+    """Hand Airbyte the OAuth code; return the credential fragment (auth_payload)
+
+    Airbyte replies with {request_succeeded, request_error, auth_payload}. The
+    auth_payload is the connectionConfiguration fragment (e.g. the `credentials`
+    object with the refresh token) to merge into the source config.
+    """
     res = abreq(
         "source_oauths/complete_oauth",
         {
@@ -372,16 +379,18 @@ def complete_source_oauth(
             "workspaceId": workspace_id,
             "redirectUrl": redirect_url,
             "queryParams": query_params,
-            "returnSecretCoordinate": True,
+            "oAuthInputConfiguration": {},
         },
     )
-    if not isinstance(res, dict) or res.get("status") == "failed" or "message" in res:
+    if not isinstance(res, dict) or not res.get("request_succeeded"):
         error_message = "Failed to complete oauth: " + (
-            res.get("message", json.dumps(res)) if isinstance(res, dict) else str(res)
+            res.get("request_error", res.get("message", json.dumps(res)))
+            if isinstance(res, dict)
+            else str(res)
         )
         logger.error(error_message)
         raise HttpError(500, error_message)
-    return res
+    return res.get("auth_payload", {})
 
 
 def set_instancewide_source_oauth_params(source_definition_id: str, params: dict) -> dict:

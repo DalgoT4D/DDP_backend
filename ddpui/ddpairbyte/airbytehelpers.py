@@ -123,6 +123,19 @@ def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
     redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
     if not redirect_url:
         raise HttpError(500, "oauth redirect url is not configured")
+
+    # Register Dalgo's OAuth client id/secret with Airbyte just-in-time, from env.
+    # Done on every consent call (idempotent) so no manual setup command is needed.
+    # These are registered instance-wide: OSS Airbyte does not implement the
+    # per-workspace override (its public endpoint returns 501).
+    client_id = os.getenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID")
+    client_secret = os.getenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise HttpError(500, "google oauth client credentials are not configured")
+    airbyte_service.set_instancewide_source_oauth_params(
+        source_def_id, {"client_id": client_id, "client_secret": client_secret}
+    )
+
     res = airbyte_service.get_source_oauth_consent(
         orguser.org.airbyte_workspace_id, source_def_id, redirect_url
     )
@@ -138,9 +151,13 @@ def complete_source_oauth(
     redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
     if not redirect_url:
         raise HttpError(500, "oauth redirect url is not configured")
-    return airbyte_service.complete_source_oauth(
+    auth_payload = airbyte_service.complete_source_oauth(
         orguser.org.airbyte_workspace_id, source_def_id, redirect_url, query_params
     )
+    # Airbyte returns a flat payload {client_id, client_secret, refresh_token}. The Google
+    # Sheets connector expects it nested under `credentials` with the Client (OAuth)
+    # discriminator, so shape it into the connectionConfiguration fragment to merge.
+    return {"credentials": {"auth_type": "Client", **auth_payload}}
 
 
 def add_custom_airbyte_connector(
