@@ -319,6 +319,33 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
     return value
 
 
+def _compute_metric_alias(metric) -> str:
+    """Compute the base alias for a single metric."""
+    if metric.column_expression:
+        return metric.alias or "expression_metric"
+    if (
+        metric.aggregation
+        and metric.aggregation.lower() == "count"
+        and metric.column is None
+    ):
+        return f"count_all_{metric.alias}" if metric.alias else "count_all"
+    return metric.alias or f"{metric.aggregation}_{metric.column}"
+
+
+def _deduplicate_aliases(aliases: list[str]) -> list[str]:
+    """Return a list of unique aliases, appending _1, _2, … to duplicates."""
+    seen: dict[str, int] = {}
+    result = []
+    for alias in aliases:
+        if alias not in seen:
+            seen[alias] = 0
+            result.append(alias)
+        else:
+            seen[alias] += 1
+            result.append(f"{alias}_{seen[alias]}")
+    return result
+
+
 def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -365,10 +392,12 @@ def build_multi_metric_query(
 
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
-        for metric in payload.metrics:
+        unique_aliases = _deduplicate_aliases(
+            [_compute_metric_alias(m) for m in payload.metrics]
+        )
+        for metric, alias in zip(payload.metrics, unique_aliases):
             # Expression path: inline raw SQL expression
             if metric.column_expression:
-                alias = metric.alias or "expression_metric"
                 query_builder.add_column(literal_column(metric.column_expression).label(alias))
                 continue
 
@@ -376,22 +405,8 @@ def build_multi_metric_query(
             if not metric.aggregation:
                 raise ValueError(f"Aggregation function is required for metric")
 
-            # Handle count with None column case
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-            # Note: We don't validate aliases because they can be human-readable display names
-            # with spaces and special characters (e.g., "Total Count", "Average Price")
-            # The aliases are only used as dictionary keys in the result set, not in SQL
+            if not metric.column and metric.aggregation.lower() != "count":
+                raise ValueError(f"Column is required for {metric.aggregation} aggregation")
 
             query_builder.add_aggregate_column(
                 metric.column,
@@ -957,18 +972,10 @@ def execute_chart_query(
 
     # Handle metrics - metrics are required for all charts (except table charts without metrics)
     if payload.metrics:
-        for metric in payload.metrics:
-            if metric.column_expression:
-                alias = metric.alias or "expression_metric"
-            elif (
-                metric.aggregation
-                and metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+        unique_aliases = _deduplicate_aliases(
+            [_compute_metric_alias(m) for m in payload.metrics]
+        )
+        for alias in unique_aliases:
             column_mapping.append((alias, col_index))
             col_index += 1
 
