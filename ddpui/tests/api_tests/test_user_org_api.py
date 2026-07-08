@@ -1,5 +1,6 @@
 import uuid
 import os
+import time
 import django
 from datetime import datetime
 from django.core.management import call_command
@@ -14,6 +15,7 @@ django.setup()
 
 from ddpui.api.user_org_api import (
     get_current_user_v2,
+    post_logout,
     post_organization_user,
     get_organization_users,
     delete_organization_users_v1,
@@ -62,7 +64,7 @@ from ddpui.core.org_logo.exceptions import (
 )
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
 )
@@ -171,7 +173,7 @@ def mock_request(orguser: OrgUser = None):
 
 def test_seed_data(seed_db):
     """a test to seed the database"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
 
@@ -187,6 +189,7 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
         user=authuser,
         org=org_without_workspace,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        has_seen_rbac_notice=True,
     )
 
     request = mock_request(orguser2)
@@ -202,10 +205,15 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     if response[0].org.slug == org_with_workspace.slug:
         assert response[0].new_role_slug == orguser1.new_role.slug
         assert response[1].new_role_slug == orguser2.new_role.slug
+        # the one-time RBAC notice flag is surfaced per-orguser on login
+        assert response[0].has_seen_rbac_notice is False
+        assert response[1].has_seen_rbac_notice is True
 
     elif response[1].org.slug == org_with_workspace.slug:
         assert response[1].new_role_slug == orguser1.new_role.slug
         assert response[0].new_role_slug == orguser2.new_role.slug
+        assert response[1].has_seen_rbac_notice is False
+        assert response[0].has_seen_rbac_notice is True
 
 
 # ================================================================================
@@ -433,6 +441,23 @@ def test_put_organization_user_self_v1(orguser):
     assert response.active is new_active_status
 
 
+def test_put_organization_user_self_v1_marks_rbac_notice_seen(orguser):
+    """the requestor can flip the one-time RBAC notice flag on their own OrgUser"""
+    request = mock_request(orguser)
+    assert orguser.has_seen_rbac_notice is False
+
+    payload = OrgUserUpdatev1(
+        toupdate_email="unused-param",
+        has_seen_rbac_notice=True,
+    )
+
+    response = put_organization_user_self_v1(request, payload)
+
+    assert response.has_seen_rbac_notice is True
+    orguser.refresh_from_db()
+    assert orguser.has_seen_rbac_notice is True
+
+
 # ================================================================================
 
 
@@ -653,7 +678,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
-    new_role = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
+    new_role = Role.objects.filter(slug=ADMIN_ROLE).first()
     another_org_user = OrgUser.objects.create(org=another_org, user=another_user, new_role=new_role)
     Invitation.objects.create(
         invited_email="inivted_email",
@@ -1146,6 +1171,87 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
         instance.delete_warehouse.assert_called_once()
         instance.delete_transformation_layer.assert_called_once()
         assert response == {"success": 1}
+
+
+# ================================================================================
+# Logout tests
+# ================================================================================
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+@patch("ddpui.api.user_org_api.RefreshToken")
+def test_post_logout_blacklists_access_token_jti(mock_refresh_token, mock_access_token, mock_redis):
+    """Test that logout stores the access token JTI in Redis with correct TTL."""
+    access_jti = "access-jti-abc123"
+    refresh_jti = "refresh-jti-xyz789"
+    exp = int(time.time()) + 3600  # expires in 1 hour
+    mock_access_token.return_value.payload = {"jti": access_jti, "exp": exp}
+    mock_refresh_token.return_value.payload = {"jti": refresh_jti, "exp": exp}
+
+    request = Mock()
+    request.COOKIES = {"access_token": "fake-access-token", "refresh_token": "fake-refresh-token"}
+    request.user = Mock(id=1)
+
+    post_logout(request)
+
+    # Two redis.set calls: one for access token, one for refresh token
+    all_calls = mock_redis.return_value.set.call_args_list
+    assert len(all_calls) == 2
+    keys_stored = [c[0][0] for c in all_calls]
+    assert f"blacklisted_jti:{access_jti}" in keys_stored
+    assert f"blacklisted_jti:{refresh_jti}" in keys_stored
+
+
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+@patch("ddpui.api.user_org_api.RefreshToken")
+def test_post_logout_blacklists_refresh_token_jti_in_redis(
+    mock_refresh_token, mock_access_token, mock_redis
+):
+    """Test that logout stores the refresh token JTI in Redis (not DB) with correct TTL."""
+    refresh_jti = "refresh-jti-xyz789"
+    exp = int(time.time()) + 604800  # 7 days
+    mock_access_token.return_value.payload = {"jti": "access-jti", "exp": exp}
+    mock_refresh_token.return_value.payload = {"jti": refresh_jti, "exp": exp}
+
+    request = Mock()
+    request.COOKIES = {"access_token": "fake-access-token", "refresh_token": "fake-refresh-token"}
+    request.user = Mock(id=1)
+
+    post_logout(request)
+
+    all_calls = mock_redis.return_value.set.call_args_list
+    refresh_call = next(c for c in all_calls if c[0][0] == f"blacklisted_jti:{refresh_jti}")
+    assert refresh_call[0][1] == "1"
+    assert abs(refresh_call[1]["ex"] - 604800) < 5
+
+
+@patch("ddpui.api.user_org_api.AccessToken")
+def test_post_logout_no_access_token_cookie(mock_access_token):
+    """Test that logout succeeds gracefully when no access token cookie exists."""
+    request = Mock()
+    request.COOKIES = {}
+    request.user = None
+
+    response = post_logout(request)
+
+    mock_access_token.assert_not_called()
+    assert response.status_code == 200
+
+
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.api.user_org_api.AccessToken")
+def test_post_logout_invalid_access_token_still_succeeds(mock_access_token, mock_redis):
+    """Test that logout succeeds even when the access token is already invalid/expired."""
+    mock_access_token.side_effect = Exception("Token is invalid")
+
+    request = Mock()
+    request.COOKIES = {"access_token": "invalid-token"}
+    request.user = None
+
+    response = post_logout(request)
+
+    mock_redis.return_value.set.assert_not_called()
+    assert response.status_code == 200
 
 
 # ================================================================================

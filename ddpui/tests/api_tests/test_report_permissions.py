@@ -49,7 +49,7 @@ from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.auth import (
     SUPER_ADMIN_ROLE,
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
 )
@@ -130,7 +130,9 @@ def account_manager_user(org, seed_db):
 
 @pytest.fixture
 def pipeline_manager_user(org, seed_db):
-    user, orguser = _create_orguser("pipemgr", "pipemgr@test.com", org, PIPELINE_MANAGER_ROLE)
+    # pipeline-manager merged into admin in Access Control v2; these tests now exercise an
+    # admin-role user (still a high role with full dashboard/report permissions).
+    user, orguser = _create_orguser("pipemgr", "pipemgr@test.com", org, ADMIN_ROLE)
     yield orguser
     orguser.delete()
     user.delete()
@@ -516,9 +518,9 @@ class TestSharingStatusOwnerCheck:
 class TestDeleteOwnerCheck:
     """Test that non-owners get 403 from the service layer even with delete permission."""
 
-    def test_non_owner_with_delete_permission_gets_403(self, pipeline_manager_user, snapshot):
-        """Pipeline Manager has can_delete_dashboards but isn't the creator → 403."""
-        request = mock_request(pipeline_manager_user)
+    def test_non_owner_with_delete_permission_gets_403(self, analyst_user, snapshot):
+        """Analyst isn't the owner or an admin → 403 on delete."""
+        request = mock_request(analyst_user)
         with pytest.raises(HttpError) as exc_info:
             delete_snapshot(request, snapshot.id)
         assert exc_info.value.status_code == 403
