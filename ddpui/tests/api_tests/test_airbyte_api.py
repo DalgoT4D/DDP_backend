@@ -222,6 +222,9 @@ class FakeRedis:
     def delete(self, key):
         self.store.pop(key, None)
 
+    def getdel(self, key):
+        return self.store.pop(key, None)
+
 
 def test_post_source_oauth_consent_without_workspace(seed_db, orguser):
     """consent endpoint requires an airbyte workspace"""
@@ -290,17 +293,39 @@ def test_post_source_oauth_complete_success(seed_db, orguser_workspace, monkeypa
         SourceOAuthComplete(sourceDefId="gsheets-id", state=state, queryParams={"code": "c"}),
     )
 
-    # flat payload gets nested under credentials with the Client (OAuth) discriminator
+    # only the refresh_token is kept; any client_id/secret Airbyte echoes back is
+    # stripped so it never reaches the source config or the browser
     assert result == {
         "credentials": {
             "auth_type": "Client",
             "refresh_token": "rt",
-            "client_id": "cid",
-            "client_secret": "cs",
         }
     }
     # nonce is single-use — consumed
     assert f"airbyte_oauth_state:{state}" not in fake_redis.store
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    complete_source_oauth=Mock(return_value={}),
+)
+def test_post_source_oauth_complete_no_refresh_token(seed_db, orguser_workspace, monkeypatch):
+    """complete errors clearly when Airbyte returns no refresh_token"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_complete(
+            request,
+            SourceOAuthComplete(sourceDefId="gsheets-id", state=state, queryParams={"code": "c"}),
+        )
+
+    assert str(excinfo.value) == "oauth did not return a refresh token"
 
 
 def test_post_source_oauth_complete_state_mismatch(seed_db, orguser_workspace, monkeypatch):

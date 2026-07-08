@@ -357,9 +357,8 @@ def get_source_oauth_consent(
         },
     )
     if "consentUrl" not in res:
-        error_message = "Failed to get consent url: " + res.get("message", json.dumps(res))
-        logger.error(error_message)
-        raise HttpError(500, error_message)
+        logger.error("Failed to get oauth consent url from airbyte: %s", json.dumps(res))
+        raise HttpError(500, "failed to start the oauth flow")
     return res
 
 
@@ -383,13 +382,9 @@ def complete_source_oauth(
         },
     )
     if not isinstance(res, dict) or not res.get("request_succeeded"):
-        error_message = "Failed to complete oauth: " + (
-            res.get("request_error", res.get("message", json.dumps(res)))
-            if isinstance(res, dict)
-            else str(res)
-        )
-        logger.error(error_message)
-        raise HttpError(500, error_message)
+        # res carries the OAuth error / credential material; log it, don't return it
+        logger.error("Failed to complete oauth with airbyte: %s", res)
+        raise HttpError(500, "failed to complete the oauth flow")
     return res.get("auth_payload", {})
 
 

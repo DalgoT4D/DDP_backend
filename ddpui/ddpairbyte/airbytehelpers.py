@@ -83,6 +83,15 @@ OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
 OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
 
 
+def _oauth_redirect_url() -> str:
+    """The registered Google redirect URI. Must match a redirect URI in the Google
+    OAuth app and the one Airbyte was configured with; ends in /oauth/airbyte/callback."""
+    redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
+    if not redirect_url:
+        raise HttpError(500, "oauth redirect url is not configured")
+    return redirect_url
+
+
 def _store_oauth_state(orguser: OrgUser, source_def_id: str) -> str:
     """Generate a nonce, remember who/what it belongs to, auto-expire in 10 min"""
     state = secrets.token_urlsafe(48)
@@ -104,10 +113,11 @@ def _pop_oauth_state(orguser: OrgUser, state: str, source_def_id: str) -> dict:
     """Validate + consume a nonce. Rejects missing/expired/reused/cross-org states."""
     redis = RedisClient.get_instance()
     key = f"{OAUTH_STATE_REDIS_PREFIX}:{state}"
-    raw = redis.get(key)
+    # atomic read-and-delete: two concurrent completes can't both read the nonce
+    # before it is consumed (closes the replay window a get+delete would leave open)
+    raw = redis.getdel(key)
     if raw is None:
         raise HttpError(400, "invalid or expired oauth state")
-    redis.delete(key)  # single-use
     stored = json.loads(raw)
     if (
         stored["orguser_id"] != orguser.id
@@ -124,9 +134,7 @@ def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
     Airbyte must already have the instance-wide OAuth client params registered
     (run `manage.py set_airbyte_source_oauth_params` once per deploy).
     """
-    redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
-    if not redirect_url:
-        raise HttpError(500, "oauth redirect url is not configured")
+    redirect_url = _oauth_redirect_url()
 
     res = airbyte_service.get_source_oauth_consent(
         orguser.org.airbyte_workspace_id, source_def_id, redirect_url
@@ -140,16 +148,21 @@ def complete_source_oauth(
 ) -> dict:
     """Finish the Google OAuth flow: validate the nonce, let Airbyte store the token"""
     _pop_oauth_state(orguser, state, source_def_id)
-    redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
-    if not redirect_url:
-        raise HttpError(500, "oauth redirect url is not configured")
+    redirect_url = _oauth_redirect_url()
     auth_payload = airbyte_service.complete_source_oauth(
         orguser.org.airbyte_workspace_id, source_def_id, redirect_url, query_params
     )
-    # Airbyte returns a flat payload {client_id, client_secret, refresh_token}. The Google
-    # Sheets connector expects it nested under `credentials` with the Client (OAuth)
-    # discriminator, so shape it into the connectionConfiguration fragment to merge.
-    return {"credentials": {"auth_type": "Client", **auth_payload}}
+    # The instance-wide client_id/secret are registered with Airbyte once (via
+    # `manage.py set_airbyte_source_oauth_params`) and injected by Airbyte at sync time,
+    # so complete_oauth returns only the refresh_token. The Google Sheets connector
+    # expects it under `credentials` with the Client (OAuth) discriminator.
+    refresh_token = auth_payload.get("refresh_token")
+    if not refresh_token:
+        logger.error(
+            "airbyte complete_oauth returned no refresh_token: keys=%s", list(auth_payload)
+        )
+        raise HttpError(500, "oauth did not return a refresh token")
+    return {"credentials": {"auth_type": "Client", "refresh_token": refresh_token}}
 
 
 def add_custom_airbyte_connector(
