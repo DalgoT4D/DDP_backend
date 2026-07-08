@@ -66,3 +66,24 @@ class ChatWithDataOrgConfig(models.Model):
     allowed_schemas = models.JSONField(null=True, blank=True)
     max_result_rows = models.IntegerField(default=100)
     query_timeout_s = models.IntegerField(default=30)
+
+
+class ChatWithDataTableCard(models.Model):
+    """LLM-enriched metadata for ONE warehouse table (v2 plan §4).
+
+    Built offline by the enrichment job; injected into the agent's system
+    prompt for the tables most relevant to a question (BM25). The fingerprint
+    hashes the live column structure so schema drift invalidates stale cards
+    instead of silently poisoning answers.
+    """
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="chat_table_cards")
+    schema_name = models.CharField(max_length=255)
+    table_name = models.CharField(max_length=255)
+    # {description, grain, time_column, dimensions, metrics, value_notes}
+    card = models.JSONField(default=dict)
+    source_fingerprint = models.CharField(max_length=64)
+    built_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("org", "schema_name", "table_name")

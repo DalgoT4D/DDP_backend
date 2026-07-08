@@ -1378,6 +1378,7 @@ dependencies = [
     { name = "pytzdata" },
     { name = "pyyaml" },
     { name = "pyzmq" },
+    { name = "rank-bm25" },
     { name = "ratelimit" },
     { name = "readchar" },
     { name = "redis" },
@@ -1659,6 +1660,7 @@ requires-dist = [
     { name = "pytzdata", specifier = "==2020.1" },
     { name = "pyyaml", specifier = "==6.0" },
     { name = "pyzmq", specifier = "==25.1.0" },
+    { name = "rank-bm25" },
     { name = "ratelimit", specifier = "==2.2.1" },
     { name = "readchar", specifier = "==4.0.5" },
     { name = "redis", specifier = "==5.0.4" },
@@ -4610,6 +4612,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/04/15/b8ab292f0b74e0440547185fb67167c87454a2b3be429d64de569f7142a2/pyzmq-25.1.0-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:442d3efc77ca4d35bee3547a8e08e8d4bb88dadb54a8377014938ba98d2e074a", size = 1612761, upload-time = "2023-05-26T18:47:13.581Z" },
     { url = "https://files.pythonhosted.org/packages/22/3e/3670e36c6f42e124492ddd2af550ca13bd4a9f1edd562e1ae7c35a1f230b/pyzmq-25.1.0-cp311-cp311-win32.whl", hash = "sha256:65346f507a815a731092421d0d7d60ed551a80d9b75e8b684307d435a5597425", size = 878704, upload-time = "2023-05-26T18:47:15.206Z" },
     { url = "https://files.pythonhosted.org/packages/a0/db/4e586c563b48dec09b8f7c2728b905e29db61af89b5c58e4eba9ad36fdec/pyzmq-25.1.0-cp311-cp311-win_amd64.whl", hash = "sha256:8b45d722046fea5a5694cba5d86f21f78f0052b40a4bbbbf60128ac55bfcc7b6", size = 1135692, upload-time = "2023-05-26T18:45:32.707Z" },
+]
+
+[[package]]
+name = "rank-bm25"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/0a/f9579384aa017d8b4c15613f86954b92a95a93d641cc849182467cf0bb3b/rank_bm25-0.2.2.tar.gz", hash = "sha256:096ccef76f8188563419aaf384a02f0ea459503fdf77901378d4fd9d87e5e51d", size = 8347, upload-time = "2022-02-16T12:10:52.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/21/f691fb2613100a62b3fa91e9988c991e9ca5b89ea31c0d3152a3210344f9/rank_bm25-0.2.2-py3-none-any.whl", hash = "sha256:7bd4a95571adadfc271746fa146a4bcfd89c0cf731e49c3d1ad863290adbe8ae", size = 8584, upload-time = "2022-02-16T12:10:50.626Z" },
 ]
 
 [[package]]
