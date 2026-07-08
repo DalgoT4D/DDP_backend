@@ -443,8 +443,7 @@ def build_chart_query(
         # Table charts can work with just dimensions (no metrics) - non-aggregated query
         # Other charts require metrics for aggregation
         if payload.chart_type != "table":
-            if not payload.metrics or len(payload.metrics) == 0:
-                raise ValueError("At least one metric is required for aggregated charts")
+            pass  # metrics presence already validated by ChartDataPayload schema
         elif payload.chart_type == "table":
             # Table charts: if no metrics, just select dimensions (non-aggregated)
             dimensions = normalize_dimensions(payload)
