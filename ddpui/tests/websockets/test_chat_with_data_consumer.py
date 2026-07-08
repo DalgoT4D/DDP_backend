@@ -216,7 +216,7 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     from ddpui.core.chat_with_data import runner as runner_module
     from ddpui.core.chat_with_data.router import FAIL_OPEN
 
-    async def fail_open_route(question, model=None):
+    async def fail_open_route(question, model=None, history=None):
         return FAIL_OPEN
 
     monkeypatch.setattr(runner_module, "route_question", fail_open_route)

@@ -65,12 +65,20 @@ async def run_turn(
     request_uuid = uuid.uuid4()
     started = time.monotonic()
 
-    # Stage 1: query understanding — one cheap call; fails open to data_question
-    route = await route_question(question)
+    # Stage 1: query understanding — one cheap call; fails open to data_question.
+    # The router sees a compact history tail: without it, follow-ups that say
+    # "this"/"that" look ambiguous in isolation and get wrongly diverted.
+    history_tail = await _thread_tail(agent, session)
+    route = await route_question(question, history=history_tail)
     context.question = question
     context.complexity = route.complexity
 
-    if route.intent in ("small_talk", "needs_clarification"):
+    # needs_clarification may only divert the FIRST turn — with any history the
+    # agent (which holds the full conversation) handles ambiguity itself.
+    diverts = route.intent == "small_talk" or (
+        route.intent == "needs_clarification" and not history_tail
+    )
+    if diverts:
         async for event in _short_circuit_turn(
             agent=agent,
             session=session,
@@ -276,3 +284,35 @@ async def _short_circuit_turn(
         )
     except Exception:  # pylint: disable=broad-except
         logger.exception(f"failed to write turn audit request_uuid={request_uuid}")
+
+
+# History lines shown to the router; each clipped so the prompt stays small
+_TAIL_MESSAGES = 6
+_TAIL_LINE_CHARS = 300
+
+
+async def _thread_tail(agent, session) -> list[str]:
+    """Compact "User:/Assistant:" tail of the conversation for the router.
+    Empty list on a fresh thread or on any failure (routing then treats the
+    turn as a first turn)."""
+    from langchain_core.messages import HumanMessage
+
+    try:
+        state = await agent.aget_state({"configurable": {"thread_id": str(session.thread_id)}})
+        messages = (state.values or {}).get("messages", [])
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("chat_with_data: failed to read thread tail (routing without history)")
+        return []
+
+    lines: list[str] = []
+    for message in messages:
+        if isinstance(message, HumanMessage):
+            role = "User"
+        elif isinstance(message, AIMessage) and not message.tool_calls:
+            role = "Assistant"
+        else:
+            continue  # tool chatter is noise for routing
+        text = extract_text(message.content).strip()
+        if text:
+            lines.append(f"{role}: {text[:_TAIL_LINE_CHARS]}")
+    return lines[-_TAIL_MESSAGES:]

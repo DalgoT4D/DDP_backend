@@ -43,7 +43,7 @@ def hermetic_router(monkeypatch):
     from ddpui.core.chat_with_data import runner as runner_module
     from ddpui.core.chat_with_data.router import FAIL_OPEN
 
-    async def fail_open_route(question, model=None):
+    async def fail_open_route(question, model=None, history=None):
         return FAIL_OPEN
 
     async def no_validation(**kwargs):
@@ -139,7 +139,7 @@ def test_small_talk_short_circuits_the_agent(orguser, session, monkeypatch):
     from ddpui.core.chat_with_data import runner as runner_module
     from ddpui.core.chat_with_data.router import RouteResult
 
-    async def fake_route(question, model=None):
+    async def fake_route(question, model=None, history=None):
         return RouteResult(intent="small_talk")
 
     async def fake_reply(question, model=None):
@@ -175,7 +175,7 @@ def test_data_question_records_intent_on_audit(orguser, session, monkeypatch):
     from ddpui.core.chat_with_data import runner as runner_module
     from ddpui.core.chat_with_data.router import RouteResult
 
-    async def fake_route(question, model=None):
+    async def fake_route(question, model=None, history=None):
         return RouteResult(intent="data_question", complexity="complex", entities=["surveys"])
 
     monkeypatch.setattr(runner_module, "route_question", fake_route)
@@ -231,6 +231,73 @@ def test_validation_event_follows_message_complete(orguser, session, monkeypatch
 
     audit = ChatWithDataTurnAudit.objects.get(session=session)
     assert audit.validation["verdict"] == "warn"
+
+
+def test_clarification_never_short_circuits_a_follow_up(orguser, session, monkeypatch):
+    """Regression: 'can we create a chart of this?' after a prior answer was
+    diverted by the context-blind router and the agent (which holds the
+    memory) never ran. With history present, clarify routes fall through to
+    the agent."""
+    import asyncio
+
+    from ddpui.core.chat_with_data import runner as runner_module
+    from ddpui.core.chat_with_data.router import RouteResult
+    from langchain_core.messages import HumanMessage
+
+    seen_history = {}
+
+    async def fake_route(question, model=None, history=None):
+        seen_history["history"] = history
+        return RouteResult(intent="needs_clarification", clarification="Chart of what?")
+
+    monkeypatch.setattr(runner_module, "route_question", fake_route)
+
+    agent = build_agent(
+        checkpointer=InMemorySaver(),
+        model=ScriptedChatModel(script=[AIMessage(content="Here is the chart answer.")]),
+    )
+    config = {"configurable": {"thread_id": str(session.thread_id)}}
+    # a prior exchange exists in the thread
+    asyncio.run(
+        agent.aupdate_state(
+            config,
+            {
+                "messages": [
+                    HumanMessage("list of top donors"),
+                    AIMessage(content="Top donors: ..."),
+                ]
+            },
+        )
+    )
+
+    events = collect_events(
+        agent, session, orguser, "can we create a chart of this?", make_context()
+    )
+
+    # the agent ran (it answered) instead of the clarify short-circuit
+    assert events[-1]["type"] == "message_complete"
+    assert events[-1]["message"] == "Here is the chart answer."
+    # and the router was shown the recent conversation
+    assert any("top donors" in line.lower() for line in seen_history["history"])
+
+
+def test_clarification_still_short_circuits_the_first_turn(orguser, session, monkeypatch):
+    from ddpui.core.chat_with_data import runner as runner_module
+    from ddpui.core.chat_with_data.router import RouteResult
+
+    async def fake_route(question, model=None, history=None):
+        return RouteResult(intent="needs_clarification", clarification="Compare what to what?")
+
+    monkeypatch.setattr(runner_module, "route_question", fake_route)
+
+    class MustNotRun(ScriptedChatModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            raise AssertionError("agent must not run on a first-turn clarification")
+
+    agent = build_agent(checkpointer=InMemorySaver(), model=MustNotRun(script=[]))
+    events = collect_events(agent, session, orguser, "compare them", make_context())
+    assert [e["type"] for e in events] == ["message_complete"]
+    assert "Compare what to what?" in events[0]["message"]
 
 
 def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):

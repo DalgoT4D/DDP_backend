@@ -28,7 +28,7 @@ INTENTS = {"data_question", "small_talk", "needs_clarification"}
 COMPLEXITIES = {"simple", "complex"}
 
 _PROMPT = """Classify one message sent to a data-analysis chat for an NGO.
-
+{history_block}
 Message: {question}
 
 Return ONLY JSON:
@@ -44,6 +44,11 @@ Rules:
 - needs_clarification: ONLY when the question is so ambiguous no reasonable
   query exists (e.g. "compare them" with no referent). Set "clarification"
   to one short, friendly question to ask back.
+- IMPORTANT: if the message refers to the recent conversation ("this",
+  "that", "the above", "chart it", a short answer to the assistant's last
+  question), it is a data_question — the analyst agent holds the full
+  history and will resolve the reference. Never ask to re-state context
+  that already appears in the conversation.
 - complexity "complex": needs multiple tables, comparisons across groups or
   time periods, or "top N by X" ranking. Otherwise "simple"."""
 
@@ -87,11 +92,25 @@ async def casual_reply(question: str, model: BaseChatModel | None = None) -> str
         return FALLBACK_REPLY
 
 
-async def route_question(question: str, model: BaseChatModel | None = None) -> RouteResult:
-    """Classify the question; on ANY failure return the fail-open route."""
+async def route_question(
+    question: str,
+    model: BaseChatModel | None = None,
+    history: list[str] | None = None,
+) -> RouteResult:
+    """Classify the question; on ANY failure return the fail-open route.
+
+    `history` is a compact tail of the conversation ("User: …"/"Assistant: …"
+    lines) — without it, every follow-up that says "this"/"that" looks
+    ambiguous in isolation and gets wrongly diverted from the agent."""
     try:
         model = model or get_router_model()
-        response = await model.ainvoke(_PROMPT.format(question=question[:1000]))
+        if history:
+            history_block = "\nRecent conversation (oldest first):\n" + "\n".join(history) + "\n"
+        else:
+            history_block = ""
+        response = await model.ainvoke(
+            _PROMPT.format(question=question[:1000], history_block=history_block)
+        )
         raw = extract_text(response.content).strip()
         # tolerate models that wrap JSON in a code fence
         if raw.startswith("```"):

@@ -71,3 +71,26 @@ def test_unknown_values_fail_open():
     route = run(route_question("q", model))
     assert route.intent == "data_question"
     assert route.complexity == "simple"
+
+
+def test_history_reaches_the_router_prompt():
+    class CapturingModel(FakeModel):
+        def __init__(self, content):
+            super().__init__(content)
+            self.prompts = []
+
+        async def ainvoke(self, prompt):
+            self.prompts.append(prompt)
+            return await super().ainvoke(prompt)
+
+    model = CapturingModel(json.dumps({"intent": "data_question", "complexity": "simple"}))
+    run(
+        route_question(
+            "can we create a chart of this?",
+            model,
+            history=["User: list of top donors", "Assistant: Here are the top donors..."],
+        )
+    )
+    prompt = model.prompts[0]
+    assert "list of top donors" in prompt
+    assert "Recent conversation" in prompt
