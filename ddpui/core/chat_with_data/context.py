@@ -57,9 +57,12 @@ def build_run_context(orguser: OrgUser) -> RunContext:
     org_dbt: OrgDbt | None = org.dbt
     dbt_schema = org_dbt.default_schema if org_dbt else None
 
-    can_create_charts = RolePermission.objects.filter(
-        role=orguser.new_role, permission__slug="can_create_charts"
-    ).exists()
+    granted = set(
+        RolePermission.objects.filter(
+            role=orguser.new_role,
+            permission__slug__in=["can_create_charts", "can_create_dashboards"],
+        ).values_list("permission__slug", flat=True)
+    )
 
     return RunContext(
         org_id=org.id,
@@ -70,5 +73,6 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         query_timeout_s=DEFAULT_QUERY_TIMEOUT_S,
         warehouse=warehouse,
         orguser_id=orguser.id,
-        can_create_charts=can_create_charts,
+        can_create_charts="can_create_charts" in granted,
+        can_create_dashboards="can_create_dashboards" in granted,
     )

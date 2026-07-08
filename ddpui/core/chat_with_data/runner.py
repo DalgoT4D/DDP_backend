@@ -44,6 +44,9 @@ TOOL_LABELS = {
     "profile_column": "Checking data values…",
     "execute_sql": "Running query…",
     "create_chart": "Creating chart…",
+    "list_dashboards": "Checking your dashboards…",
+    "create_dashboard": "Creating dashboard…",
+    "add_charts_to_dashboard": "Adding to dashboard…",
 }
 GENERIC_TOOL_LABEL = "Working…"
 
@@ -146,12 +149,16 @@ async def run_turn(
                     elif isinstance(message, ToolMessage):
                         artifact = getattr(message, "artifact", None)
                         tool_status = "success"
-                        if isinstance(artifact, dict) and artifact.get("type") == "chart":
-                            # create_chart artifact — a saved chart (or a rejection)
-                            if artifact.get("chart_id"):
+                        if isinstance(artifact, dict) and artifact.get("type") in (
+                            "chart",
+                            "dashboard",
+                        ):
+                            # created-artifact chip (saved chart or dashboard), or a rejection
+                            artifact_id = artifact.get("chart_id") or artifact.get("dashboard_id")
+                            if artifact_id:
                                 created_charts.append(
                                     {
-                                        "chart_id": artifact["chart_id"],
+                                        "chart_id": artifact_id,
                                         "title": artifact.get("title", ""),
                                         "url_path": artifact.get("url_path", ""),
                                     }
