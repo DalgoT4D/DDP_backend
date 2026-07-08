@@ -1,3 +1,4 @@
+import json
 import os
 import django
 
@@ -105,6 +106,31 @@ def orguser_workspace(authuser, org_with_workspace):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def org_with_workspace_b():
+    """a pytest fixture which creates a second Org (org B) having its own airbyte workspace"""
+    org = Org.objects.create(airbyte_workspace_id="FAKE-WORKSPACE-ID-B", slug="test-org-b-slug")
+    yield org
+    org.delete()
+
+
+@pytest.fixture
+def orguser_workspace_b(org_with_workspace_b):
+    """a pytest fixture representing an OrgUser in a different org (org B), having the
+    account-manager role — used to prove cross-org oauth state nonces are rejected"""
+    user_b = User.objects.create(
+        username="tempusername-b", email="tempuseremail-b", password="tempuserpassword"
+    )
+    orguser = OrgUser.objects.create(
+        user=user_b,
+        org=org_with_workspace_b,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user_b.delete()
 
 
 # ================================================================================
@@ -255,8 +281,21 @@ def test_post_source_oauth_consent_success(seed_db, orguser_workspace, monkeypat
 
     assert result["consentUrl"] == "https://accounts.google.com/x"
     assert result["state"]
+    # airbyte was asked for consent against the *caller's org* workspace, not some
+    # other/default workspace
+    airbyte_service.get_source_oauth_consent.assert_called_once_with(
+        orguser_workspace.org.airbyte_workspace_id,
+        "gsheets-id",
+        "https://app.dalgo.org/oauth/airbyte/callback",
+    )
     # the nonce was stored in redis under its key
-    assert f"airbyte_oauth_state:{result['state']}" in fake_redis.store
+    state_key = f"airbyte_oauth_state:{result['state']}"
+    assert state_key in fake_redis.store
+    # ...and it binds the nonce to the caller's own org workspace (not any workspace)
+    stored_state = json.loads(fake_redis.store[state_key])
+    assert stored_state["workspace_id"] == orguser_workspace.org.airbyte_workspace_id
+    assert stored_state["orguser_id"] == orguser_workspace.id
+    assert stored_state["source_definition_id"] == "gsheets-id"
 
 
 def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
@@ -444,6 +483,36 @@ def test_post_source_oauth_complete_missing_state(seed_db, orguser_workspace, mo
         )
 
     assert str(excinfo.value) == "invalid or expired oauth state"
+
+
+def test_post_source_oauth_complete_cross_org_rejected(
+    seed_db, orguser_workspace, orguser_workspace_b, monkeypatch
+):
+    """a nonce minted for org A's OrgUser cannot be completed by an OrgUser from a
+    different org (org B), even with the same sourceDefId and a valid-looking state"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    # state is minted for org A's OrgUser
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    # but the complete request is made by an OrgUser belonging to a different org (org B)
+    request = mock_request(orguser_workspace_b)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_complete(
+            request,
+            SourceOAuthComplete(
+                sourceDefId="gsheets-id",
+                name="my sheet",
+                config={},
+                state=state,
+                queryParams={},
+            ),
+        )
+
+    assert str(excinfo.value) == "oauth state does not match this request"
 
 
 def test_set_airbyte_source_oauth_params_command(monkeypatch):
