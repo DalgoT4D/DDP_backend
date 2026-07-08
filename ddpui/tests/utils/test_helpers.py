@@ -116,6 +116,29 @@ def test_map_airbyte_keys_to_postgres_keys_sshkey():
     assert conn_info["ssh_pkey"] == "ssh-key"
 
 
+def test_map_airbyte_keys_to_postgres_keys_sshkey_missing():
+    """verifies no KeyError when ssh_key is absent from tunnel config"""
+    conn_info = {
+        "host": "host",
+        "port": 100,
+        "username": "user",
+        "password": "password",
+        "database": "database",
+        "tunnel_method": {
+            "tunnel_method": "SSH_KEY_AUTH",
+            "tunnel_host": "host",
+            "tunnel_port": 22,
+            "tunnel_user": "user",
+        },
+    }
+    conn_info = map_airbyte_keys_to_postgres_keys(conn_info)
+    assert conn_info["ssh_host"] == "host"
+    assert conn_info["ssh_port"] == 22
+    assert conn_info["ssh_username"] == "user"
+    assert conn_info["ssh_pkey"] is None
+    assert conn_info["ssh_private_key_password"] is None
+
+
 def test_map_airbyte_keys_to_postgres_keys_password():
     """verifies the correct mapping of keys"""
     conn_info = {
