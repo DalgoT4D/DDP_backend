@@ -17,9 +17,6 @@ from ddpui.core.chat_with_data.tools.registry import register_tool
 CHART_TYPES = {"bar", "line", "pie", "number"}
 AGGREGATIONS = {"sum", "avg", "count", "min", "max", "count_distinct"}
 
-# chart types whose extra_config wants the grouping column under x_axis_column
-_X_AXIS_TYPES = {"bar", "line"}
-
 
 def _save_chart(ctx: RunContext, chart_data) -> "Chart":  # noqa: F821
     """Persist via the same service the Charts page uses. Sync ORM is fine here:
@@ -78,10 +75,10 @@ def create_chart(
         "aggregation": aggregation,
         "alias": f"{aggregation}_{metric_column}" if metric_column else aggregation,
     }
+    # dimension_column is the grouping key the render path GROUPs BY for every
+    # chart type — the chart builder UI stores bar charts the same way
     extra_config: dict = {"metrics": [metric]}
-    if chart_type in _X_AXIS_TYPES:
-        extra_config["x_axis_column"] = dimension_column
-    elif chart_type == "pie":
+    if chart_type != "number":
         extra_config["dimension_column"] = dimension_column
 
     from ddpui.services.chart_service import ChartData  # light dataclass import

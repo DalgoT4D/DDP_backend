@@ -69,7 +69,10 @@ def test_creates_bar_chart_with_metric(saved):
     }
     data = saved["data"]
     assert data.chart_type == "bar"
-    assert data.extra_config["x_axis_column"] == "district"
+    # the render path groups by dimension_column for EVERY chart type —
+    # x_axis_column is ignored by the query builder (blank-chart regression)
+    assert data.extra_config["dimension_column"] == "district"
+    assert "x_axis_column" not in data.extra_config
     assert data.extra_config["metrics"] == [
         {"column": None, "aggregation": "count", "alias": "count"}
     ]
