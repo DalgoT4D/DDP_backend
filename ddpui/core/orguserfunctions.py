@@ -400,7 +400,7 @@ def request_reset_password(email: str, is_v2: bool = False):
     # To seperate the frontend urls for v1 and v2
     FRONTEND_URL = os.getenv("FRONTEND_URL_V2") if is_v2 else os.getenv("FRONTEND_URL")
 
-    reset_url = f"{FRONTEND_URL}/resetpassword/?token={token.hex}"
+    reset_url = f"{FRONTEND_URL}/resetpassword?token={token.hex}"
 
     try:
         awsses.send_password_reset_email(email, reset_url)
