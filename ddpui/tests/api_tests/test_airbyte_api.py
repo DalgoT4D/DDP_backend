@@ -237,13 +237,10 @@ def test_post_source_oauth_consent_without_workspace(seed_db, orguser):
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     get_source_oauth_consent=Mock(return_value={"consentUrl": "https://accounts.google.com/x"}),
-    set_instancewide_source_oauth_params=Mock(return_value={}),
 )
 def test_post_source_oauth_consent_success(seed_db, orguser_workspace, monkeypatch):
-    """consent registers client creds, returns the consent URL and mints a state nonce"""
+    """consent returns the consent URL and mints a state nonce"""
     monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
-    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID", "cid")
-    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET", "csecret")
     fake_redis = FakeRedis()
     monkeypatch.setattr(
         "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
@@ -256,19 +253,6 @@ def test_post_source_oauth_consent_success(seed_db, orguser_workspace, monkeypat
     assert result["state"]
     # the nonce was stored in redis under its key
     assert f"airbyte_oauth_state:{result['state']}" in fake_redis.store
-
-
-def test_post_source_oauth_consent_missing_client_creds(seed_db, orguser_workspace, monkeypatch):
-    """consent fails cleanly when the Google client id/secret are not configured"""
-    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
-    monkeypatch.delenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID", raising=False)
-    monkeypatch.delenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET", raising=False)
-    request = mock_request(orguser_workspace)
-
-    with pytest.raises(HttpError) as excinfo:
-        post_source_oauth_consent(request, SourceOAuthConsentCreate(sourceDefId="gsheets-id"))
-
-    assert str(excinfo.value) == "google oauth client credentials are not configured"
 
 
 def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
