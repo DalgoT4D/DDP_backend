@@ -31,14 +31,19 @@ from ddpui.api.airbyte_api import (
     get_airbyte_destination,
     get_job_status,
     post_cancel_connection_job,
+    post_source_oauth_consent,
+    post_source_oauth_complete,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteSourceUpdate,
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdateCheckConnection,
+    SourceOAuthConsentCreate,
+    SourceOAuthComplete,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui import ddpprefect
@@ -198,6 +203,266 @@ def test_post_airbyte_source_success(orguser_workspace):
     source = post_airbyte_source(request, fake_payload)
 
     assert source["sourceId"] == "fake-source-id"
+
+
+# ================================================================================
+# Google Sheets OAuth flow
+# ================================================================================
+class FakeRedis:
+    """Minimal in-memory stand-in for RedisClient.get_instance() in tests"""
+
+    def __init__(self):
+        self.store = {}
+
+    def set(self, key, value, ex=None):  # pylint: disable=unused-argument
+        self.store[key] = value
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def delete(self, key):
+        self.store.pop(key, None)
+
+    def getdel(self, key):
+        return self.store.pop(key, None)
+
+
+def test_post_source_oauth_consent_without_workspace(seed_db, orguser):
+    """consent endpoint requires an airbyte workspace"""
+    request = mock_request(orguser)
+
+    fake_payload = SourceOAuthConsentCreate(sourceDefId="fake-id")
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_consent(request, fake_payload)
+
+    assert str(excinfo.value) == "create an airbyte workspace first"
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_source_oauth_consent=Mock(return_value={"consentUrl": "https://accounts.google.com/x"}),
+)
+def test_post_source_oauth_consent_success(seed_db, orguser_workspace, monkeypatch):
+    """consent returns the consent URL and mints a state nonce"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    request = mock_request(orguser_workspace)
+
+    result = post_source_oauth_consent(request, SourceOAuthConsentCreate(sourceDefId="gsheets-id"))
+
+    assert result["consentUrl"] == "https://accounts.google.com/x"
+    assert result["state"]
+    # the nonce was stored in redis under its key
+    assert f"airbyte_oauth_state:{result['state']}" in fake_redis.store
+
+
+def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
+    """helper: pre-store a valid oauth state nonce in the fake redis"""
+    import json as _json
+
+    fake_redis.store[f"airbyte_oauth_state:{state}"] = _json.dumps(
+        {
+            "orguser_id": orguser.id,
+            "workspace_id": orguser.org.airbyte_workspace_id,
+            "source_definition_id": source_def_id,
+        }
+    )
+    return state
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    complete_source_oauth=Mock(
+        return_value={"refresh_token": "rt", "client_id": "cid", "client_secret": "cs"}
+    ),
+    create_source=Mock(return_value={"sourceId": "new-src-id"}),
+)
+def test_post_source_oauth_complete_success(seed_db, orguser_workspace, monkeypatch):
+    """complete validates the nonce, injects credentials server-side, and creates the source"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    request = mock_request(orguser_workspace)
+
+    result = post_source_oauth_complete(
+        request,
+        SourceOAuthComplete(
+            sourceDefId="gsheets-id",
+            name="my sheet",
+            config={"spreadsheet_id": "https://sheet"},
+            state=state,
+            queryParams={"code": "c"},
+        ),
+    )
+
+    # the source is created and only its id is returned — no credentials reach the caller
+    assert result == {"sourceId": "new-src-id"}
+    # backend merged the full credentials (all three keys) into the user's config server-side
+    airbyte_service.create_source.assert_called_once_with(
+        orguser_workspace.org.airbyte_workspace_id,
+        "my sheet",
+        "gsheets-id",
+        {
+            "spreadsheet_id": "https://sheet",
+            "credentials": {
+                "auth_type": "Client",
+                "refresh_token": "rt",
+                "client_id": "cid",
+                "client_secret": "cs",
+            },
+        },
+    )
+    # nonce is single-use — consumed
+    assert f"airbyte_oauth_state:{state}" not in fake_redis.store
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    complete_source_oauth=Mock(
+        return_value={"refresh_token": "rt", "client_id": "cid", "client_secret": "cs"}
+    ),
+    update_source=Mock(return_value={"sourceId": "existing-src-id"}),
+)
+def test_post_source_oauth_complete_reauth_updates(seed_db, orguser_workspace, monkeypatch):
+    """re-authenticating an existing source updates it rather than creating a new one"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    request = mock_request(orguser_workspace)
+
+    result = post_source_oauth_complete(
+        request,
+        SourceOAuthComplete(
+            sourceDefId="gsheets-id",
+            name="my sheet",
+            config={"spreadsheet_id": "https://sheet"},
+            state=state,
+            queryParams={"code": "c"},
+            sourceId="existing-src-id",
+        ),
+    )
+
+    assert result == {"sourceId": "existing-src-id"}
+    airbyte_service.update_source.assert_called_once_with(
+        "existing-src-id",
+        "my sheet",
+        {
+            "spreadsheet_id": "https://sheet",
+            "credentials": {
+                "auth_type": "Client",
+                "refresh_token": "rt",
+                "client_id": "cid",
+                "client_secret": "cs",
+            },
+        },
+        "gsheets-id",
+    )
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    complete_source_oauth=Mock(return_value={}),
+)
+def test_post_source_oauth_complete_no_refresh_token(seed_db, orguser_workspace, monkeypatch):
+    """complete errors clearly when Airbyte returns no refresh_token"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_complete(
+            request,
+            SourceOAuthComplete(
+                sourceDefId="gsheets-id",
+                name="my sheet",
+                config={"spreadsheet_id": "https://sheet"},
+                state=state,
+                queryParams={"code": "c"},
+            ),
+        )
+
+    assert str(excinfo.value) == "oauth did not return a refresh token"
+
+
+def test_post_source_oauth_complete_state_mismatch(seed_db, orguser_workspace, monkeypatch):
+    """a nonce minted for one source definition cannot complete another"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_complete(
+            request,
+            SourceOAuthComplete(
+                sourceDefId="a-different-id",
+                name="my sheet",
+                config={},
+                state=state,
+                queryParams={},
+            ),
+        )
+
+    assert str(excinfo.value) == "oauth state does not match this request"
+
+
+def test_post_source_oauth_complete_missing_state(seed_db, orguser_workspace, monkeypatch):
+    """an unknown or expired nonce is rejected"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_source_oauth_complete(
+            request,
+            SourceOAuthComplete(
+                sourceDefId="gsheets-id",
+                name="my sheet",
+                config={},
+                state="never-issued",
+                queryParams={},
+            ),
+        )
+
+    assert str(excinfo.value) == "invalid or expired oauth state"
+
+
+def test_set_airbyte_source_oauth_params_command(monkeypatch):
+    """the management command registers the Google client id/secret instance-wide"""
+    from django.core.management import call_command
+
+    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID", "the-client-id")
+    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET", "the-client-secret")
+    mock_set = Mock(return_value={})
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbyte_service.set_instancewide_source_oauth_params", mock_set
+    )
+
+    call_command("set_airbyte_source_oauth_params")
+
+    mock_set.assert_called_once_with(
+        "71607ba1-c0ac-4799-8049-7f4b90dd50f7",
+        {"client_id": "the-client-id", "client_secret": "the-client-secret"},
+    )
 
 
 # ================================================================================
