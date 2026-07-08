@@ -454,7 +454,7 @@ def post_forgot_password_v2(
     if error:
         raise HttpError(400, error)
 
-    # Audit log: password reset requested
+    # Audit log: password reset requested (CREATE because a reset token is generated)
     user = User.objects.filter(email__iexact=payload.email).first()
     if user:
         orguser = OrgUser.objects.filter(user=user).first()
@@ -465,7 +465,7 @@ def post_forgot_password_v2(
                 resource_type=AuditLogResourceType.AUTH,
                 resource_id="",
                 resource_name="password_reset_request",
-                action=AuditLogAction.UPDATE,
+                action=AuditLogAction.CREATE,
             )
 
     return {"success": 1}
@@ -474,9 +474,21 @@ def post_forgot_password_v2(
 @user_org_router.post("/users/reset_password/", auth=None)
 def post_reset_password(request, payload: ResetPasswordSchema):  # pylint: disable=unused-argument
     """step 2 of the forgot-password flow"""
-    _, error = orguserfunctions.confirm_reset_password(payload)
+    orguser, error = orguserfunctions.confirm_reset_password(payload)
     if error:
         raise HttpError(400, error)
+
+    # Audit log: password reset completed (UPDATE because password is actually changed)
+    if orguser and orguser.org:
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.AUTH,
+            resource_id="",
+            resource_name="password_reset_completed",
+            action=AuditLogAction.UPDATE,
+        )
+
     return {"success": 1}
 
 

@@ -426,7 +426,7 @@ def confirm_reset_password(payload: ResetPasswordSchema):
     orguser.user.set_password(payload.password.get_secret_value())
     orguser.user.save()
 
-    return None, None
+    return orguser, None
 
 
 def change_password(payload: ChangePasswordSchema, orguser: OrgUser):

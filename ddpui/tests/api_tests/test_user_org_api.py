@@ -1187,6 +1187,7 @@ from ddpui.api.user_org_api import (
     post_logout,
     change_password,
     post_forgot_password_v2,
+    post_reset_password,
     post_verify_email,
     post_modify_orguser_role,
 )
@@ -1194,6 +1195,7 @@ from ddpui.models.org_user import (
     LoginPayload,
     ChangePasswordSchema,
     ForgotPasswordSchema,
+    ResetPasswordSchema,
     OrgUserUpdateNewRole,
 )
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
@@ -1302,8 +1304,28 @@ def test_forgot_password_v2_creates_audit_log(mock_reset_pwd, mock_audit_log, or
         mock_audit_log,
         orguser,
         AuditLogResourceType.AUTH,
-        AuditLogAction.UPDATE,
+        AuditLogAction.CREATE,  # CREATE because a reset token is generated
         resource_name="password_reset_request",
+    )
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.api.user_org_api.orguserfunctions.confirm_reset_password")
+def test_reset_password_creates_audit_log(mock_confirm, mock_audit_log, orguser):
+    """Test that password reset (step 2) creates an audit log entry"""
+    mock_confirm.return_value = (orguser, None)
+
+    request = Mock()
+    payload = ResetPasswordSchema(token="valid-token", password="newpassword123")
+
+    post_reset_password(request, payload)
+
+    assert_audit_log_call(
+        mock_audit_log,
+        orguser,
+        AuditLogResourceType.AUTH,
+        AuditLogAction.UPDATE,  # UPDATE because password is actually changed
+        resource_name="password_reset_completed",
     )
 
 
