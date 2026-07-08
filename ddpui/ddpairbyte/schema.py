@@ -33,6 +33,20 @@ class AirbyteSourceUpdateCheckConnection(Schema):
     config: dict
 
 
+class SourceOAuthConsentCreate(Schema):
+    """Request to start the Google OAuth consent flow for a source"""
+
+    sourceDefId: str
+
+
+class SourceOAuthComplete(Schema):
+    """Request to complete the OAuth flow after the user consents at Google"""
+
+    sourceDefId: str
+    state: str
+    queryParams: dict
+
+
 class AirbyteDestinationCreate(Schema):
     """Docstring"""
 

@@ -3,7 +3,9 @@ functions which work with airbyte and with the dalgo database
 """
 
 import json
+import os
 import re
+import secrets
 from typing import List, Tuple
 from uuid import uuid4
 from datetime import datetime, timedelta
@@ -72,6 +74,73 @@ from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("airbyte")
+
+# Google Sheets OAuth flow ------------------------------------------------------
+# The consent step hands out a short-lived state nonce that the complete step must
+# echo back. The nonce is stored in Redis with a TTL so it self-expires; it binds a
+# login attempt to one orguser + workspace + source definition (CSRF + cross-org guard).
+OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
+OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
+
+
+def _store_oauth_state(orguser: OrgUser, source_def_id: str) -> str:
+    """Generate a nonce, remember who/what it belongs to, auto-expire in 10 min"""
+    state = secrets.token_urlsafe(48)
+    RedisClient.get_instance().set(
+        f"{OAUTH_STATE_REDIS_PREFIX}:{state}",
+        json.dumps(
+            {
+                "orguser_id": orguser.id,
+                "workspace_id": orguser.org.airbyte_workspace_id,
+                "source_definition_id": source_def_id,
+            }
+        ),
+        ex=OAUTH_STATE_TTL_SECONDS,
+    )
+    return state
+
+
+def _pop_oauth_state(orguser: OrgUser, state: str, source_def_id: str) -> dict:
+    """Validate + consume a nonce. Rejects missing/expired/reused/cross-org states."""
+    redis = RedisClient.get_instance()
+    key = f"{OAUTH_STATE_REDIS_PREFIX}:{state}"
+    raw = redis.get(key)
+    if raw is None:
+        raise HttpError(400, "invalid or expired oauth state")
+    redis.delete(key)  # single-use
+    stored = json.loads(raw)
+    if (
+        stored["orguser_id"] != orguser.id
+        or stored["workspace_id"] != orguser.org.airbyte_workspace_id
+        or stored["source_definition_id"] != source_def_id
+    ):
+        raise HttpError(400, "oauth state does not match this request")
+    return stored
+
+
+def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
+    """Start the Google OAuth flow: get the consent URL and mint a state nonce"""
+    redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
+    if not redirect_url:
+        raise HttpError(500, "oauth redirect url is not configured")
+    res = airbyte_service.get_source_oauth_consent(
+        orguser.org.airbyte_workspace_id, source_def_id, redirect_url
+    )
+    state = _store_oauth_state(orguser, source_def_id)
+    return {"consentUrl": res["consentUrl"], "state": state}
+
+
+def complete_source_oauth(
+    orguser: OrgUser, source_def_id: str, state: str, query_params: dict
+) -> dict:
+    """Finish the Google OAuth flow: validate the nonce, let Airbyte store the token"""
+    _pop_oauth_state(orguser, state, source_def_id)
+    redirect_url = os.getenv("AIRBYTE_OAUTH_REDIRECT_URL")
+    if not redirect_url:
+        raise HttpError(500, "oauth redirect url is not configured")
+    return airbyte_service.complete_source_oauth(
+        orguser.org.airbyte_workspace_id, source_def_id, redirect_url, query_params
+    )
 
 
 def add_custom_airbyte_connector(

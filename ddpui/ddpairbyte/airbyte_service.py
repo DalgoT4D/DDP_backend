@@ -342,6 +342,60 @@ def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict)
     return res
 
 
+def get_source_oauth_consent(
+    workspace_id: str, source_definition_id: str, redirect_url: str
+) -> dict:
+    """Ask Airbyte for the Google consent-screen URL for a source definition"""
+    res = abreq(
+        "source_oauths/get_consent_url",
+        {
+            "sourceDefinitionId": source_definition_id,
+            "workspaceId": workspace_id,
+            "redirectUrl": redirect_url,
+        },
+    )
+    if "consentUrl" not in res:
+        error_message = "Failed to get consent url: " + res.get("message", json.dumps(res))
+        logger.error(error_message)
+        raise HttpError(500, error_message)
+    return res
+
+
+def complete_source_oauth(
+    workspace_id: str, source_definition_id: str, redirect_url: str, query_params: dict
+) -> dict:
+    """Hand Airbyte the OAuth code so it exchanges it for a token and stores it"""
+    res = abreq(
+        "source_oauths/complete_oauth",
+        {
+            "sourceDefinitionId": source_definition_id,
+            "workspaceId": workspace_id,
+            "redirectUrl": redirect_url,
+            "queryParams": query_params,
+            "returnSecretCoordinate": True,
+        },
+    )
+    if not isinstance(res, dict) or res.get("status") == "failed" or "message" in res:
+        error_message = "Failed to complete oauth: " + (
+            res.get("message", json.dumps(res)) if isinstance(res, dict) else str(res)
+        )
+        logger.error(error_message)
+        raise HttpError(500, error_message)
+    return res
+
+
+def set_instancewide_source_oauth_params(source_definition_id: str, params: dict) -> dict:
+    """Register instance-wide OAuth client params (client_id/secret) for a source definition"""
+    res = abreq(
+        "source_oauths/oauth_params/create",
+        {
+            "sourceDefinitionId": source_definition_id,
+            "params": params,
+        },
+    )
+    return res
+
+
 def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) -> dict:
     """Update source in an airbyte workspace"""
     if not isinstance(source_id, str):

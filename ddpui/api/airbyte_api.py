@@ -21,6 +21,8 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
+    SourceOAuthConsentCreate,
+    SourceOAuthComplete,
 )
 from ddpui.auth import has_permission
 
@@ -115,6 +117,30 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     )
     logger.info("created source having id " + source["sourceId"])
     return {"sourceId": source["sourceId"]}
+
+
+@airbyte_router.post("/sources/oauth/consent/")
+@has_permission(["can_create_source"])
+def post_source_oauth_consent(request, payload: SourceOAuthConsentCreate):
+    """Start the Google OAuth flow: return the consent URL and a state nonce"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return airbytehelpers.get_source_oauth_consent(orguser, payload.sourceDefId)
+
+
+@airbyte_router.post("/sources/oauth/complete/")
+@has_permission(["can_create_source"])
+def post_source_oauth_complete(request, payload: SourceOAuthComplete):
+    """Complete the Google OAuth flow after the user consents; Airbyte stores the token"""
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return airbytehelpers.complete_source_oauth(
+        orguser, payload.sourceDefId, payload.state, payload.queryParams
+    )
 
 
 @airbyte_router.put("/sources/{source_id}")
