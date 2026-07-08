@@ -58,6 +58,25 @@ def test_polling_celery_no_stp():
     )
 
 
+@patch("ddpui.websockets.airbyte_consumer.SingleTaskProgress.fetch")
+def test_polling_celery_empty_progress(mock_fetch):
+    """tests polling_celery when fetch returns empty list then completed"""
+    consumer = Mock(respond=Mock())
+    task_key = uuid4().hex
+    mock_fetch.side_effect = [
+        [],
+        [{"status": TaskProgressStatus.COMPLETED, "result": "test-result"}],
+    ]
+    polling_celery(consumer, task_key)
+    consumer.respond.assert_called_once_with(
+        WebsocketResponse(
+            data={"status": TaskProgressStatus.COMPLETED, "result": "test-result"},
+            message="Successfully fetched source schema",
+            status=WebsocketResponseStatus.SUCCESS,
+        )
+    )
+
+
 def test_polling_celery_failed():
     """tests polling_celery"""
     consumer = Mock(respond=Mock())

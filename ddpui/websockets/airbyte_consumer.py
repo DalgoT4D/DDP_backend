@@ -195,14 +195,19 @@ def polling_celery(consumer, task_key):
         )
         return
 
-    last_status = task_progress[-1]["status"]
+    last_status = task_progress[-1]["status"] if task_progress else TaskProgressStatus.RUNNING
 
     # Loop to check task progress every two seconds.
     while last_status == TaskProgressStatus.RUNNING:
         logger.info(f"Polling {task_key}")
         time.sleep(2)
         task_progress = SingleTaskProgress.fetch(task_key)
-        last_status = None if task_progress is None else task_progress[-1]["status"]
+        if task_progress is None:
+            last_status = None
+        elif task_progress:
+            last_status = task_progress[-1]["status"]
+        else:
+            last_status = TaskProgressStatus.RUNNING
         logger.info(f"Last status: {last_status}")
 
     if last_status == TaskProgressStatus.FAILED:
