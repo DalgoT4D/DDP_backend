@@ -40,11 +40,21 @@ class SourceOAuthConsentCreate(Schema):
 
 
 class SourceOAuthComplete(Schema):
-    """Request to complete the OAuth flow after the user consents at Google"""
+    """Complete the OAuth flow and create (or update) the source in one step.
+
+    The user fills in `name` + `config` (e.g. spreadsheet_id) before authenticating; on
+    consent we complete the token exchange and save the source server-side, so the OAuth
+    credentials (client_secret, refresh_token) never travel through the browser. `config`
+    must NOT include a `credentials` block — the backend fills it in. Pass `sourceId` to
+    re-authenticate an existing source (update); omit it to create a new one.
+    """
 
     sourceDefId: str
+    name: str
+    config: dict
     state: str
     queryParams: dict
+    sourceId: Optional[str] = None
 
 
 class AirbyteDestinationCreate(Schema):

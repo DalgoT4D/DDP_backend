@@ -39,6 +39,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
+    SourceOAuthComplete,
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -152,17 +153,43 @@ def complete_source_oauth(
     auth_payload = airbyte_service.complete_source_oauth(
         orguser.org.airbyte_workspace_id, source_def_id, redirect_url, query_params
     )
-    # The instance-wide client_id/secret are registered with Airbyte once (via
-    # `manage.py set_airbyte_source_oauth_params`) and injected by Airbyte at sync time,
-    # so complete_oauth returns only the refresh_token. The Google Sheets connector
-    # expects it under `credentials` with the Client (OAuth) discriminator.
-    refresh_token = auth_payload.get("refresh_token")
-    if not refresh_token:
+    # Airbyte returns the full credential fragment {client_id, client_secret, refresh_token}.
+    # The Google Sheets connector's OAuth (Client) branch REQUIRES all three (the config is
+    # schema-validated at save time), so pass them through under `credentials` with the
+    # Client (OAuth) discriminator.
+    if "refresh_token" not in auth_payload:
         logger.error(
             "airbyte complete_oauth returned no refresh_token: keys=%s", list(auth_payload)
         )
         raise HttpError(500, "oauth did not return a refresh token")
-    return {"credentials": {"auth_type": "Client", "refresh_token": refresh_token}}
+    return {"credentials": {"auth_type": "Client", **auth_payload}}
+
+
+def save_oauth_source(orguser: OrgUser, payload: SourceOAuthComplete) -> dict:
+    """Complete the OAuth flow and create (or update) the source in one server-side step.
+
+    The OAuth credentials (client_secret, refresh_token) are fetched from Airbyte, merged
+    into the connector config, and used to save the source without ever being returned to
+    the browser. `payload.config` carries the user-entered fields (e.g. spreadsheet_id);
+    the backend fills in `credentials`. With `payload.sourceId` set it updates that source
+    (re-authenticate); otherwise it creates a new one.
+    """
+    credentials = complete_source_oauth(
+        orguser, payload.sourceDefId, payload.state, payload.queryParams
+    )
+    config = {**payload.config, **credentials}
+    workspace_id = orguser.org.airbyte_workspace_id
+    if payload.sourceId:
+        source = airbyte_service.update_source(
+            payload.sourceId, payload.name, config, payload.sourceDefId
+        )
+        logger.info("updated oauth source having id %s", source["sourceId"])
+    else:
+        source = airbyte_service.create_source(
+            workspace_id, payload.name, payload.sourceDefId, config
+        )
+        logger.info("created oauth source having id %s", source["sourceId"])
+    return {"sourceId": source["sourceId"]}
 
 
 def add_custom_airbyte_connector(

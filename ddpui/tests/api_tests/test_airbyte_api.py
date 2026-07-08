@@ -35,6 +35,7 @@ from ddpui.api.airbyte_api import (
     post_source_oauth_complete,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
     AirbyteSourceUpdate,
@@ -277,9 +278,10 @@ def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
     complete_source_oauth=Mock(
         return_value={"refresh_token": "rt", "client_id": "cid", "client_secret": "cs"}
     ),
+    create_source=Mock(return_value={"sourceId": "new-src-id"}),
 )
 def test_post_source_oauth_complete_success(seed_db, orguser_workspace, monkeypatch):
-    """complete validates the nonce and returns the credentials fragment to merge"""
+    """complete validates the nonce, injects credentials server-side, and creates the source"""
     monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
     fake_redis = FakeRedis()
     monkeypatch.setattr(
@@ -290,19 +292,80 @@ def test_post_source_oauth_complete_success(seed_db, orguser_workspace, monkeypa
 
     result = post_source_oauth_complete(
         request,
-        SourceOAuthComplete(sourceDefId="gsheets-id", state=state, queryParams={"code": "c"}),
+        SourceOAuthComplete(
+            sourceDefId="gsheets-id",
+            name="my sheet",
+            config={"spreadsheet_id": "https://sheet"},
+            state=state,
+            queryParams={"code": "c"},
+        ),
     )
 
-    # only the refresh_token is kept; any client_id/secret Airbyte echoes back is
-    # stripped so it never reaches the source config or the browser
-    assert result == {
-        "credentials": {
-            "auth_type": "Client",
-            "refresh_token": "rt",
-        }
-    }
+    # the source is created and only its id is returned — no credentials reach the caller
+    assert result == {"sourceId": "new-src-id"}
+    # backend merged the full credentials (all three keys) into the user's config server-side
+    airbyte_service.create_source.assert_called_once_with(
+        orguser_workspace.org.airbyte_workspace_id,
+        "my sheet",
+        "gsheets-id",
+        {
+            "spreadsheet_id": "https://sheet",
+            "credentials": {
+                "auth_type": "Client",
+                "refresh_token": "rt",
+                "client_id": "cid",
+                "client_secret": "cs",
+            },
+        },
+    )
     # nonce is single-use — consumed
     assert f"airbyte_oauth_state:{state}" not in fake_redis.store
+
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    complete_source_oauth=Mock(
+        return_value={"refresh_token": "rt", "client_id": "cid", "client_secret": "cs"}
+    ),
+    update_source=Mock(return_value={"sourceId": "existing-src-id"}),
+)
+def test_post_source_oauth_complete_reauth_updates(seed_db, orguser_workspace, monkeypatch):
+    """re-authenticating an existing source updates it rather than creating a new one"""
+    monkeypatch.setenv("AIRBYTE_OAUTH_REDIRECT_URL", "https://app.dalgo.org/oauth/airbyte/callback")
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(
+        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+    )
+    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    request = mock_request(orguser_workspace)
+
+    result = post_source_oauth_complete(
+        request,
+        SourceOAuthComplete(
+            sourceDefId="gsheets-id",
+            name="my sheet",
+            config={"spreadsheet_id": "https://sheet"},
+            state=state,
+            queryParams={"code": "c"},
+            sourceId="existing-src-id",
+        ),
+    )
+
+    assert result == {"sourceId": "existing-src-id"}
+    airbyte_service.update_source.assert_called_once_with(
+        "existing-src-id",
+        "my sheet",
+        {
+            "spreadsheet_id": "https://sheet",
+            "credentials": {
+                "auth_type": "Client",
+                "refresh_token": "rt",
+                "client_id": "cid",
+                "client_secret": "cs",
+            },
+        },
+        "gsheets-id",
+    )
 
 
 @patch.multiple(
@@ -322,7 +385,13 @@ def test_post_source_oauth_complete_no_refresh_token(seed_db, orguser_workspace,
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_complete(
             request,
-            SourceOAuthComplete(sourceDefId="gsheets-id", state=state, queryParams={"code": "c"}),
+            SourceOAuthComplete(
+                sourceDefId="gsheets-id",
+                name="my sheet",
+                config={"spreadsheet_id": "https://sheet"},
+                state=state,
+                queryParams={"code": "c"},
+            ),
         )
 
     assert str(excinfo.value) == "oauth did not return a refresh token"
@@ -341,7 +410,13 @@ def test_post_source_oauth_complete_state_mismatch(seed_db, orguser_workspace, m
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_complete(
             request,
-            SourceOAuthComplete(sourceDefId="a-different-id", state=state, queryParams={}),
+            SourceOAuthComplete(
+                sourceDefId="a-different-id",
+                name="my sheet",
+                config={},
+                state=state,
+                queryParams={},
+            ),
         )
 
     assert str(excinfo.value) == "oauth state does not match this request"
@@ -359,7 +434,13 @@ def test_post_source_oauth_complete_missing_state(seed_db, orguser_workspace, mo
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_complete(
             request,
-            SourceOAuthComplete(sourceDefId="gsheets-id", state="never-issued", queryParams={}),
+            SourceOAuthComplete(
+                sourceDefId="gsheets-id",
+                name="my sheet",
+                config={},
+                state="never-issued",
+                queryParams={},
+            ),
         )
 
     assert str(excinfo.value) == "invalid or expired oauth state"
