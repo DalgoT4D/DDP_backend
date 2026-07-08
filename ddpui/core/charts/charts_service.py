@@ -11,6 +11,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.models.metric import Metric
 from ddpui.models.visualization import Chart
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
@@ -22,6 +23,9 @@ from ddpui.schemas.chart_schemas import (
 )
 
 logger = CustomLogger("ddpui.charts")
+
+# Aggregation functions that require a numeric column
+NUMERIC_ONLY_AGGREGATIONS = {"avg", "sum"}
 
 
 def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):
@@ -319,6 +323,55 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
     return value
 
 
+def validate_metric_column_types(
+    metrics: Optional[List],
+    schema_name: str,
+    table_name: str,
+    org_warehouse: OrgWarehouse,
+) -> None:
+    """Validate that numeric-only aggregations (avg, sum) target numeric columns.
+
+    Raises ``ValueError`` with a user-friendly message when a non-numeric
+    column is paired with an aggregation that requires numeric data.
+    """
+    if not metrics or not org_warehouse:
+        return
+
+    # Collect (column, aggregation) pairs that need a numeric column
+    columns_to_check = []
+    for metric in metrics:
+        if hasattr(metric, "column_expression") and metric.column_expression:
+            continue  # raw SQL expressions bypass validation
+        agg = getattr(metric, "aggregation", None)
+        col = getattr(metric, "column", None)
+        if not agg or not col:
+            continue
+        if agg.lower() in NUMERIC_ONLY_AGGREGATIONS:
+            columns_to_check.append((col, agg))
+
+    if not columns_to_check:
+        return
+
+    # Fetch column metadata from the warehouse
+    try:
+        warehouse = get_warehouse_client(org_warehouse)
+        table_columns = warehouse.get_table_columns(schema_name, table_name)
+    except Exception as e:
+        logger.warning(f"Could not fetch column types for validation: {e}")
+        return  # don't block on metadata lookup failures
+
+    column_type_map = {col_info["name"]: col_info.get("translated_type") for col_info in table_columns}
+
+    for col_name, agg_func in columns_to_check:
+        translated_type = column_type_map.get(col_name)
+        if translated_type is not None and translated_type != TranslateColDataType.NUMERIC:
+            raise ValueError(
+                f"Cannot apply {agg_func.upper()} to column \"{col_name}\" "
+                f"(type: {translated_type}). "
+                f"{agg_func.upper()} requires a numeric column."
+            )
+
+
 def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -411,6 +464,15 @@ def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
     """Build query using unified AggQueryBuilder for both raw and aggregated queries"""
+
+    # Validate metric column types before building the query
+    if payload.metrics and org_warehouse:
+        validate_metric_column_types(
+            payload.metrics,
+            payload.schema_name,
+            payload.table_name,
+            org_warehouse,
+        )
 
     # Get pagination parameters
     limit, offset = get_pagination_params(payload)
