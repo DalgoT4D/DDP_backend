@@ -21,6 +21,7 @@ from ddpui.core.metric.metric_service import (
     MetricNotFoundError,
     MetricValidationError,
     MetricDeleteBlockedError,
+    MetricPermissionError,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
@@ -213,6 +214,8 @@ def delete_metric(request, metric_id: int):
         raise HttpError(404, "Metric not found") from None
     except MetricDeleteBlockedError as e:
         raise HttpError(409, e.message) from None
+    except MetricPermissionError as e:
+        raise HttpError(403, e.message) from None
 
     return api_response(success=True)
 

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from django.db.models import Q
 
+from ddpui.core.ownership import can_delete_resource
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -239,9 +240,9 @@ class ChartService:
         """
         chart = ChartService.get_chart(chart_id, org)
 
-        # Only allow deletion if the current user is the creator
-        if chart.created_by != orguser:
-            raise ChartPermissionError("You can only delete charts you created.")
+        # Only allow deletion if the user is the owner or an admin
+        if not can_delete_resource(orguser, chart):
+            raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
         chart.delete()
@@ -259,13 +260,15 @@ class ChartService:
             orguser: The user deleting the charts
 
         Returns:
-            Dict with deletion results including counts and missing IDs
+            Dict with deletion results including counts, missing IDs, and
+            forbidden IDs (charts the user may not delete — owner-or-admin rule)
         """
         if not chart_ids:
             return {
                 "deleted_count": 0,
                 "requested_count": 0,
                 "missing_ids": [],
+                "forbidden_ids": [],
             }
 
         # Get charts that belong to this org
@@ -277,8 +280,15 @@ class ChartService:
         if missing_ids:
             logger.warning(f"Charts not found or not accessible: {missing_ids}")
 
-        # Delete the charts
-        deleted_count = charts.delete()[0]
+        # Same owner-or-admin rule as single delete: skip charts the user may not delete
+        deletable = [chart for chart in charts if can_delete_resource(orguser, chart)]
+        forbidden_ids = sorted(set(found_ids) - {chart.id for chart in deletable})
+        if forbidden_ids:
+            logger.warning(
+                f"Charts not deletable by {orguser.user.email} (not owner or admin): {forbidden_ids}"
+            )
+
+        deleted_count = Chart.objects.filter(id__in=[chart.id for chart in deletable]).delete()[0]
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
 
@@ -286,6 +296,7 @@ class ChartService:
             "deleted_count": deleted_count,
             "requested_count": len(chart_ids),
             "missing_ids": list(missing_ids),
+            "forbidden_ids": forbidden_ids,
         }
 
     @staticmethod
