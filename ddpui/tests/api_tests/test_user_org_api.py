@@ -1487,6 +1487,7 @@ def test_modify_user_role_creates_audit_log(mock_audit_log, orguser, seed_db):
         password="testpassword",
     )
     guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    account_manager_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
     target_orguser = OrgUser.objects.create(
         user=target_django_user,
         org=orguser.org,
@@ -1495,9 +1496,10 @@ def test_modify_user_role_creates_audit_log(mock_audit_log, orguser, seed_db):
 
     request = mock_request(orguser)
 
+    # Change from guest_role to account_manager_role
     payload = OrgUserUpdateNewRole(
         toupdate_email="target@example.com",
-        role_uuid=str(guest_role.uuid),
+        role_uuid=str(account_manager_role.uuid),
     )
 
     post_modify_orguser_role(request, payload)

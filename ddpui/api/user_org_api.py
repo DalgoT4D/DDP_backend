@@ -22,7 +22,7 @@ from ddpui.auth import (
     blacklist_jti_in_redis,
 )
 from ddpui.core import orgfunctions, orguserfunctions
-from ddpui.core.audit_log_service import create_audit_log
+from ddpui.core.audit_log_service import create_audit_log, compute_changes
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
@@ -427,7 +427,9 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
         AuditLogAction.UPDATE,
         resource_id=str(orguser_to_be_assigned.id),
         resource_name=orguser_to_be_assigned.user.email,
-        field_changes={"role": {"old": old_role_slug, "new": role_to_be_assgined.slug}},
+        field_changes=compute_changes(
+            {"role": old_role_slug}, {"role": role_to_be_assgined.slug}
+        ),
     )
 
     return {"success": 1}
@@ -616,7 +618,9 @@ def post_organization_user_accept_invite_v1(
                 resource_id="",
                 resource_name=invited_email,
                 action=AuditLogAction.UPDATE,
-                field_changes={"status": {"old": "pending", "new": "accepted"}},
+                field_changes=compute_changes(
+                    {"status": "pending"}, {"status": "accepted"}
+                ),
             )
             create_audit_log(
                 org=invited_by_org,
@@ -663,7 +667,7 @@ def post_resend_invitation(request, invitation_id):
         resource_id=str(invitation_id),
         resource_name=invitation.invited_email if invitation else "",
         action=AuditLogAction.UPDATE,
-        field_changes={"action": {"old": None, "new": "resent"}},
+        field_changes=compute_changes({"action": None}, {"action": "resent"}),
     )
 
     return {"success": 1}
