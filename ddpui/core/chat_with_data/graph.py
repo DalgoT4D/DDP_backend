@@ -5,8 +5,11 @@ edges, so they show up in traces, checkpoints, and get_graph() diagrams:
 
     START → route_node ──┬─ small talk        → casual_reply_node → END
                          ├─ needs clarify*    → clarify_node      → END
-                         └─ data question     → sql_agent (subgraph) → END
-                                                (*first turn only)
+                         └─ data question     → retrieve_context_node
+                                                (*first turn only)   ↓
+                                                sql_agent (subgraph node)
+                                                                     ↓
+                                                validate_node → END
 
 The stage brains stay in calls/ — nodes are thin adapters. They are INJECTED
 (route_fn, casual_reply_fn) rather than imported so the runner can pass its
@@ -130,6 +133,12 @@ def build_turn_graph(
     async def clarify_node(state: TurnState) -> dict:
         return {"messages": [AIMessage(content=state["route"]["clarification"])]}
 
+    async def retrieve_context_node(state: TurnState) -> dict:
+        # M5 fills this: BM25 over table cards → system-prompt context block.
+        # A named no-op until then, so the pipeline shape is already the
+        # approach-2 diagram and cards plug in without rewiring.
+        return {}
+
     async def validate_node(state: TurnState) -> dict:
         if validate_fn is None:
             return {"validation": None}
@@ -150,12 +159,13 @@ def build_turn_graph(
         # agent (which holds the full conversation) handles ambiguity itself
         if route["intent"] == "needs_clarification" and not state["has_history"]:
             return "clarify_node" if route.get("clarification") else "casual_reply_node"
-        return "sql_agent"
+        return "retrieve_context_node"
 
     graph = StateGraph(TurnState, context_schema=RunContext)
     graph.add_node("route_node", route_node)
     graph.add_node("casual_reply_node", casual_reply_node)
     graph.add_node("clarify_node", clarify_node)
+    graph.add_node("retrieve_context_node", retrieve_context_node)
     graph.add_node("sql_agent", agent)
     graph.add_node("validate_node", validate_node)
 
@@ -163,8 +173,9 @@ def build_turn_graph(
     graph.add_conditional_edges(
         "route_node",
         route_decision,
-        ["casual_reply_node", "clarify_node", "sql_agent"],
+        ["casual_reply_node", "clarify_node", "retrieve_context_node"],
     )
+    graph.add_edge("retrieve_context_node", "sql_agent")
     graph.add_edge("casual_reply_node", END)
     graph.add_edge("clarify_node", END)
     graph.add_edge("sql_agent", "validate_node")

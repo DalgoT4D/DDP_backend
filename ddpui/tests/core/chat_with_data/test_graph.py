@@ -199,3 +199,30 @@ def test_validate_node_writes_validation_into_state():
     assert captured["sql_queries"][0]["status"] == "success"
     assert captured["result_table"]["rows"] == [["1284"]]
     assert captured["answer"] == "1,284 surveys."
+
+
+def test_graph_shape_matches_the_approach_2_diagram():
+    """The pipeline is visible: every stage is a named node, and the data path
+    is route → retrieve_context → sql_agent → validate. M5 fills the retrieve
+    node with BM25 table cards; until then it is a no-op placeholder."""
+    agent = build_agent(model=ScriptedChatModel(script=[]))
+    graph = build_turn_graph(agent, route_fn=_data_route, casual_reply_fn=_canned_reply)
+    drawable = graph.get_graph()
+
+    assert {
+        "route_node",
+        "retrieve_context_node",
+        "casual_reply_node",
+        "clarify_node",
+        "sql_agent",
+        "validate_node",
+    } <= set(drawable.nodes)
+
+    edges = {(edge.source, edge.target) for edge in drawable.edges}
+    assert ("__start__", "route_node") in edges
+    assert ("route_node", "retrieve_context_node") in edges  # conditional: data path
+    assert ("retrieve_context_node", "sql_agent") in edges
+    assert ("sql_agent", "validate_node") in edges
+    assert ("validate_node", "__end__") in edges
+    assert ("casual_reply_node", "__end__") in edges
+    assert ("clarify_node", "__end__") in edges
