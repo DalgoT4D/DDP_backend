@@ -29,7 +29,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
@@ -90,7 +90,7 @@ def other_orguser(other_authuser, org):
     orguser = OrgUser.objects.create(
         user=other_authuser,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -597,6 +597,47 @@ class TestDeleteSnapshot:
         """Non-creator cannot delete a snapshot"""
         with pytest.raises(SnapshotPermissionError):
             ReportService.delete_snapshot(sample_snapshot.id, org, other_orguser)
+
+    def test_delete_non_admin_creator_can_delete_own(
+        self, org, other_orguser, sample_dashboard, sample_filter, sample_chart, seed_db
+    ):
+        """A non-admin (analyst) creator hits the owner branch — the admin-role
+        `orguser` in test_delete_success passes via the admin override instead"""
+        snapshot = ReportService.create_snapshot(
+            title="Analyst Report",
+            dashboard_id=sample_dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 2, 1),
+            period_end=date(2025, 2, 28),
+            orguser=other_orguser,
+        )
+        result = ReportService.delete_snapshot(snapshot.id, org, other_orguser)
+        assert result is True
+        assert not ReportSnapshot.objects.filter(id=snapshot.id).exists()
+
+    def test_delete_admin_can_delete_others_snapshot(
+        self, org, orguser, other_orguser, sample_dashboard, sample_filter, sample_chart, seed_db
+    ):
+        """An admin can delete a snapshot created by someone else (admin override)"""
+        snapshot = ReportService.create_snapshot(
+            title="Analyst Report",
+            dashboard_id=sample_dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 3, 1),
+            period_end=date(2025, 3, 31),
+            orguser=other_orguser,
+        )
+        result = ReportService.delete_snapshot(snapshot.id, org, orguser)
+        assert result is True
+        assert not ReportSnapshot.objects.filter(id=snapshot.id).exists()
 
     def test_delete_not_found(self, org, orguser):
         """Deleting nonexistent snapshot raises SnapshotNotFoundError"""
@@ -1410,6 +1451,48 @@ class TestFreezeKpiConfigs:
 
         assert kpi_data["periods"] == []
 
+    def test_kpi_extra_config_frozen_with_customizations(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """Customizations on the live KPI are copied into the frozen blob."""
+        mock_org_wh.objects.filter.return_value.first.return_value = None
+        sample_kpi.extra_config = {
+            "customizations": {
+                "numberFormat": "indian",
+                "decimalPlaces": 0,
+                "numberPrefix": "₹",
+                "numberSuffix": "",
+            }
+        }
+        sample_kpi.save(update_fields=["extra_config"])
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert kpi_data["extra_config"] == {
+            "customizations": {
+                "numberFormat": "indian",
+                "decimalPlaces": 0,
+                "numberPrefix": "₹",
+                "numberSuffix": "",
+            }
+        }
+
+    def test_kpi_extra_config_frozen_empty_for_pre_v11_kpi(
+        self, mock_kpi_service, mock_org_wh, kpi_dashboard, sample_kpi
+    ):
+        """A KPI with no customizations freezes extra_config as {} —
+        snapshots taken before v1.1 render with no formatting."""
+        mock_org_wh.objects.filter.return_value.first.return_value = None
+        # sample_kpi fixture creates the row without customizations → JSONField
+        # default = {}, simulating a pre-v1.1 KPI.
+        assert sample_kpi.extra_config == {}
+
+        frozen = ReportService._freeze_chart_configs(kpi_dashboard)
+        kpi_data = frozen[str(sample_kpi.id)]
+
+        assert kpi_data["extra_config"] == {}
+
     def test_kpi_only_dashboard(self, mock_kpi_service, mock_org_wh, orguser, org, sample_kpi):
         """Dashboard with only KPI components (no charts)"""
         mock_org_wh.objects.filter.return_value.first.return_value = None
@@ -1611,6 +1694,64 @@ class TestGetReportKpiData:
 
         snapshot.delete()
         f.delete()
+        dashboard.delete()
+
+    @patch("ddpui.core.kpi.kpi_service.KPIService.compute_kpi_data")
+    def test_snapshot_uses_frozen_customizations_not_live(
+        self, mock_compute, orguser, org, sample_kpi
+    ):
+        """Editing the KPI's customizations AFTER snapshot must not affect the
+        snapshot — the snapshot reads from frozen extra_config."""
+        sample_kpi.extra_config = {
+            "customizations": {
+                "numberFormat": "indian",
+                "decimalPlaces": 0,
+                "numberPrefix": "₹",
+                "numberSuffix": "",
+            }
+        }
+        sample_kpi.save(update_fields=["extra_config"])
+
+        dashboard = Dashboard.objects.create(
+            title="Frozen Cust Test",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "kpi-1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        snapshot = ReportService.create_snapshot(
+            title="Frozen Cust Report",
+            dashboard_id=dashboard.id,
+            date_column={},
+            period_end=date(2025, 3, 31),
+            orguser=orguser,
+        )
+
+        # Now mutate the live KPI's customizations — snapshot should be unaffected.
+        sample_kpi.extra_config = {
+            "customizations": {"numberFormat": "european", "decimalPlaces": 2}
+        }
+        sample_kpi.save(update_fields=["extra_config"])
+
+        mock_compute.return_value = {"data": {}, "echarts_config": {}}
+        ReportService.get_report_kpi_data(snapshot.id, sample_kpi.id, org)
+
+        kpi_response = mock_compute.call_args[0][0]
+        # KPIResponse built from the FROZEN config — original 'indian' format
+        assert kpi_response.extra_config.customizations is not None
+        assert kpi_response.extra_config.customizations.numberFormat == "indian"
+        assert kpi_response.extra_config.customizations.numberPrefix == "₹"
+
+        snapshot.delete()
         dashboard.delete()
 
     @patch("ddpui.core.kpi.kpi_service.KPIService.compute_kpi_data")

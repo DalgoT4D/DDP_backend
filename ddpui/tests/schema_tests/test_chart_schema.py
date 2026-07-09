@@ -881,7 +881,7 @@ class TestTypedCustomizations:
 
     def test_number_customizations_extras_pass_through(self):
         """UI may add fields like prefix/suffix; those should survive."""
-        chart = self._number(numberFormat="currency", prefix="$", suffix="")
+        chart = self._number(numberFormat="international", prefix="$", suffix="")
         dumped = chart.extra_config.customizations.model_dump()
         assert dumped["prefix"] == "$"
 

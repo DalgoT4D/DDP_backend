@@ -4,10 +4,24 @@ from datetime import datetime
 from typing import Optional, List
 
 from ninja import Schema
+from pydantic import ConfigDict
 from ddpui.schemas.metric_schema import MetricResponse
+from ddpui.schemas.chart_schemas.customizations import NumberChartCustomizations
 
 
 # ── KPI Schemas ─────────────────────────────────────────────────────────────
+
+
+class KPIExtraConfig(Schema):
+    """Typed container for ``KPI.extra_config``.
+
+    ``extra_config`` itself is always a dict at DB + API layer (never null).
+    ``customizations`` inside is optional — clients MUST check before reading.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    customizations: Optional[NumberChartCustomizations] = None
 
 
 class KPICreate(Schema):
@@ -21,6 +35,7 @@ class KPICreate(Schema):
     time_dimension_column: Optional[str] = None
     metric_type_tag: Optional[str] = None
     program_tags: List[str] = []
+    extra_config: KPIExtraConfig  # required; clients always send {} or full payload
 
 
 class KPIUpdate(Schema):
@@ -35,6 +50,7 @@ class KPIUpdate(Schema):
     metric_type_tag: Optional[str] = None
     program_tags: Optional[List[str]] = None
     display_order: Optional[int] = None
+    extra_config: KPIExtraConfig  # required on every update
 
 
 class KPIResponse(Schema):
@@ -50,6 +66,7 @@ class KPIResponse(Schema):
     metric_type_tag: Optional[str]
     program_tags: List[str]
     display_order: int
+    extra_config: KPIExtraConfig  # always present — DB column has default=dict, null=False
     created_by: str  # creator's email
     created_at: datetime
     updated_at: datetime

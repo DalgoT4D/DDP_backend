@@ -13,9 +13,14 @@ from django.contrib.auth.models import User
 from django.db.models import F
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
-from ddpui.auth import has_permission, CustomTokenObtainSerializer, CustomTokenRefreshSerializer
+from ddpui.auth import (
+    has_permission,
+    CustomTokenObtainSerializer,
+    CustomTokenRefreshSerializer,
+    blacklist_jti_in_redis,
+)
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
@@ -162,6 +167,7 @@ def get_current_user_v2(request, org_slug: str = None):
                 org_default_dashboard_id=org_default_dashboard,
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
                 work_domain=curr_orguser.work_domain,
+                has_seen_rbac_notice=curr_orguser.has_seen_rbac_notice,
             )
         )
 
@@ -178,6 +184,23 @@ def post_organization_user(request, payload: OrgUserCreate):  # pylint: disable=
     retval, error = orguserfunctions.signup_orguser(payload)
     if error:
         raise HttpError(400, error)
+    return retval
+
+
+@user_org_router.post("/login/", auth=None)
+def post_login(request, payload: LoginPayload):
+    """Uses the username and password in the request to return a JWT auth token"""
+    serializer = CustomTokenObtainSerializer(
+        data={
+            "username": payload.username,
+            "password": payload.password,
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    token_data = serializer.validated_data
+    retval = orguserfunctions.lookup_user(payload.username)
+    retval["token"] = token_data["access"]
+    retval["refresh_token"] = token_data["refresh"]
     return retval
 
 
@@ -199,7 +222,6 @@ def post_login_token(request):
     retval = orguserfunctions.lookup_user(user.username)
     retval["token"] = str(access_token)
     retval["refresh"] = str(serializer)
-
     return retval
 
 
@@ -212,25 +234,17 @@ def post_logout(request):
     # Capture orguser before logout for audit logging
     orguser = getattr(request, "orguser", None)
 
-    # Get refresh token from cookies
-    refresh_token = request.COOKIES.get("refresh_token")
+    # Blacklist access token
+    access_token_str = request.COOKIES.get("access_token")
+    if access_token_str:
+        blacklist_jti_in_redis(access_token_str, AccessToken)
 
-    # Try to blacklist the refresh token if we have one
-    if refresh_token:
-        try:
-            token = RefreshToken(refresh_token)
-            token_user_id = token.payload.get("user_id")
-            if request.user and request.user.id == token_user_id:
-                token.blacklist()
-        except (TokenError, Exception):
-            # Token is already invalid/expired or other error, continue with logout
-            pass
+    # Blacklist refresh token
+    refresh_token_str = request.COOKIES.get("refresh_token")
+    if refresh_token_str:
+        blacklist_jti_in_redis(refresh_token_str, RefreshToken)
 
-    # Create response
     response = JsonResponse({"success": True})
-
-    # Always try to clear cookies (harmless if they don't exist)
-    # delete_cookie only accepts: key, path, domain, samesite
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
 

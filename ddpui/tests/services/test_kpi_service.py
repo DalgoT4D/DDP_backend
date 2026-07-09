@@ -15,12 +15,13 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.dashboard import Dashboard
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
+from ddpui.schemas.kpi_schema import KPICreate, KPIUpdate, KPIExtraConfig
 from ddpui.core.kpi.kpi_service import (
     KPIService,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
     compute_rag_status,
 )
 from ddpui.tests.api_tests.test_user_org_api import seed_db
@@ -60,6 +61,20 @@ def orguser(authuser, org):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def analyst_orguser(org):
+    """A second user in the same org with the (non-admin) analyst role."""
+    user = User.objects.create(username="kpisvcanalyst", email="kpisvcanalyst@test.com")
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
 
 
 @pytest.fixture
@@ -158,13 +173,63 @@ class TestKPICRUD:
             direction="increase",
             time_grain="monthly",
             target_value=500.0,
+            extra_config=KPIExtraConfig(),
         )
         kpi = KPIService.create_kpi(payload, orguser)
         assert kpi.id is not None
         assert kpi.name == sample_metric.name  # defaults to metric name
         assert kpi.target_value == 500.0
         assert kpi.direction == "increase"
+        # extra_config defaults to {} on the model — never null
+        assert kpi.extra_config == {"customizations": None}
         kpi.delete()
+
+    def test_create_kpi_with_customizations(self, orguser, sample_metric, seed_db):
+        """v1.1: KPICreate accepts and persists number-format customizations."""
+        from ddpui.schemas.chart_schemas.customizations import NumberChartCustomizations
+
+        payload = KPICreate(
+            metric_id=sample_metric.id,
+            direction="increase",
+            time_grain="monthly",
+            target_value=500.0,
+            extra_config=KPIExtraConfig(
+                customizations=NumberChartCustomizations(
+                    numberFormat="indian",
+                    decimalPlaces=0,
+                    numberPrefix="₹",
+                    numberSuffix="",
+                )
+            ),
+        )
+        kpi = KPIService.create_kpi(payload, orguser)
+        c = kpi.extra_config["customizations"]
+        assert c["numberFormat"] == "indian"
+        assert c["decimalPlaces"] == 0
+        assert c["numberPrefix"] == "₹"
+
+        # Round-trip through kpi_to_response — customizations survives the
+        # Pydantic → dict → Pydantic conversion
+        response = KPIService.kpi_to_response(kpi)
+        assert response.extra_config.customizations.numberFormat == "indian"
+        assert response.extra_config.customizations.numberPrefix == "₹"
+        kpi.delete()
+
+    def test_update_kpi_replaces_customizations(self, orguser, org, sample_kpi, seed_db):
+        """Updating a KPI with a new customizations payload replaces the stored config."""
+        from ddpui.schemas.chart_schemas.customizations import NumberChartCustomizations
+
+        payload = KPIUpdate(
+            name="Updated",
+            extra_config=KPIExtraConfig(
+                customizations=NumberChartCustomizations(
+                    numberFormat="adaptive_indian", decimalPlaces=2
+                )
+            ),
+        )
+        updated = KPIService.update_kpi(sample_kpi.id, org, orguser, payload)
+        assert updated.extra_config["customizations"]["numberFormat"] == "adaptive_indian"
+        assert updated.extra_config["customizations"]["decimalPlaces"] == 2
 
     def test_create_kpi_custom_name(self, orguser, sample_metric, seed_db):
         payload = KPICreate(
@@ -174,6 +239,7 @@ class TestKPICRUD:
             time_grain="quarterly",
             green_threshold_pct=80.0,
             amber_threshold_pct=110.0,
+            extra_config=KPIExtraConfig(),
         )
         kpi = KPIService.create_kpi(payload, orguser)
         assert kpi.name == "Custom KPI Name"
@@ -186,6 +252,7 @@ class TestKPICRUD:
             metric_id=sample_metric.id,
             direction="sideways",
             time_grain="monthly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="Invalid direction"):
             KPIService.create_kpi(payload, orguser)
@@ -195,6 +262,7 @@ class TestKPICRUD:
             metric_id=sample_metric.id,
             direction="increase",
             time_grain="hourly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="Invalid time_grain"):
             KPIService.create_kpi(payload, orguser)
@@ -206,6 +274,7 @@ class TestKPICRUD:
             time_grain="monthly",
             green_threshold_pct=50.0,
             amber_threshold_pct=80.0,
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="green_threshold_pct"):
             KPIService.create_kpi(payload, orguser)
@@ -217,6 +286,7 @@ class TestKPICRUD:
             time_grain="monthly",
             green_threshold_pct=80.0,
             amber_threshold_pct=50.0,
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(KPIValidationError, match="amber_threshold_pct"):
             KPIService.create_kpi(payload, orguser)
@@ -228,6 +298,7 @@ class TestKPICRUD:
             metric_id=99999,
             direction="increase",
             time_grain="monthly",
+            extra_config=KPIExtraConfig(),
         )
         with pytest.raises(MetricNotFoundError):
             KPIService.create_kpi(payload, orguser)
@@ -275,13 +346,13 @@ class TestKPICRUD:
         kpi.delete()
 
     def test_update_kpi(self, orguser, org, sample_kpi, seed_db):
-        payload = KPIUpdate(name="Updated KPI", target_value=2000.0)
+        payload = KPIUpdate(name="Updated KPI", target_value=2000.0, extra_config=KPIExtraConfig())
         updated = KPIService.update_kpi(sample_kpi.id, org, orguser, payload)
         assert updated.name == "Updated KPI"
         assert updated.target_value == 2000.0
 
     def test_update_kpi_invalid_direction(self, orguser, org, sample_kpi, seed_db):
-        payload = KPIUpdate(direction="sideways")
+        payload = KPIUpdate(direction="sideways", extra_config=KPIExtraConfig())
         with pytest.raises(KPIValidationError):
             KPIService.update_kpi(sample_kpi.id, org, orguser, payload)
 
@@ -290,6 +361,53 @@ class TestKPICRUD:
         KPIService.delete_kpi(kpi_id, org, orguser)
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi(kpi_id, org)
+
+    def test_delete_kpi_non_owner_analyst_denied(self, analyst_orguser, org, sample_kpi, seed_db):
+        """A non-admin who didn't create the KPI cannot delete it."""
+        with pytest.raises(KPIPermissionError):
+            KPIService.delete_kpi(sample_kpi.id, org, analyst_orguser)
+        assert KPI.objects.filter(id=sample_kpi.id).exists()
+
+    def test_delete_kpi_non_owner_denied_before_dashboards_revealed(
+        self, orguser, analyst_orguser, org, sample_kpi, seed_db
+    ):
+        """A non-owner gets a permission error, not the used-in-dashboards error —
+        the dashboard list must not leak to users who can't delete anyway."""
+        dashboard = Dashboard.objects.create(
+            title="Dashboard using KPI",
+            org=org,
+            created_by=orguser,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T",
+                    "components": {
+                        "comp1": {"type": "kpi", "config": {"kpiId": sample_kpi.id}},
+                    },
+                }
+            ],
+        )
+        try:
+            with pytest.raises(KPIPermissionError):
+                KPIService.delete_kpi(sample_kpi.id, org, analyst_orguser)
+        finally:
+            dashboard.delete()
+
+    def test_delete_kpi_non_admin_creator_can_delete_own(
+        self, analyst_orguser, org, sample_metric, seed_db
+    ):
+        """A non-admin (analyst) can delete a KPI they created."""
+        kpi = KPI.objects.create(
+            name="Analyst KPI",
+            metric=sample_metric,
+            target_value=1000.0,
+            direction="increase",
+            time_grain="monthly",
+            org=org,
+            created_by=analyst_orguser,
+        )
+        KPIService.delete_kpi(kpi.id, org, analyst_orguser)
+        assert not KPI.objects.filter(id=kpi.id).exists()
 
     def test_get_kpi_dashboards(self, orguser, org, sample_kpi, seed_db):
         dashboard = Dashboard.objects.create(
