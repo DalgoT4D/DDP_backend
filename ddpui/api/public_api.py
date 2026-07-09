@@ -36,6 +36,7 @@ from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDat
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core import warehousefunctions as _wh_funcs
 from sqlalchemy import func, column, distinct, cast, Float, Date
 
 logger = CustomLogger("ddpui")
@@ -296,6 +297,11 @@ def _execute_filter_preview(
     """
     warehouse_client = get_warehouse_client(org_warehouse)
 
+    if filter_type in ("numerical", "datetime"):
+        _wh_funcs.validate_column_filter_type(
+            warehouse_client, org_warehouse, schema_name, table_name, column_name, filter_type
+        )
+
     if filter_type == "value":
         query_builder = AggQueryBuilder()
         query_builder.add_column(column(column_name).label("value"))
@@ -411,6 +417,8 @@ def get_public_filter_preview(
             org_warehouse, schema_name, table_name, column_name, filter_type, limit
         )
 
+    except HttpError as e:
+        return 404, PublicErrorResponse(error=str(e), is_valid=False)
     except ValueError as e:
         return 404, PublicErrorResponse(error=str(e), is_valid=False)
     except Exception as e:
@@ -451,6 +459,8 @@ def get_public_report_filter_preview(
             org_warehouse, schema_name, table_name, column_name, filter_type, limit
         )
 
+    except HttpError as e:
+        return 404, PublicErrorResponse(error=str(e), is_valid=False)
     except ValueError as e:
         return 404, PublicErrorResponse(error=str(e), is_valid=False)
     except Exception as e:

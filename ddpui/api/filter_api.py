@@ -226,6 +226,11 @@ def get_filter_preview(
     try:
         warehouse_client = get_warehouse_client(org_warehouse)
 
+        if filter_type in ("numerical", "datetime"):
+            _wh_funcs.validate_column_filter_type(
+                warehouse_client, org_warehouse, schema_name, table_name, column_name, filter_type
+            )
+
         if filter_type == "value":
             # Get distinct values with counts for categorical filter
             query_builder = AggQueryBuilder()
@@ -333,6 +338,8 @@ def get_filter_preview(
         else:
             raise HttpError(400, f"Invalid filter type: {filter_type}")
 
+    except HttpError:
+        raise
     except Exception as e:
         logger.error(f"Error getting filter preview: {str(e)}")
         raise HttpError(500, "Error getting filter preview")

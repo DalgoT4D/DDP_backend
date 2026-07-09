@@ -135,3 +135,36 @@ def determine_filter_type_from_column(data_type: str) -> str:
 
     # Default to value filter for text/categorical
     return DashboardFilterType.VALUE.value
+
+
+def validate_column_filter_type(
+    warehouse_client, org_warehouse, schema_name, table_name, column_name, filter_type
+):
+    """Validate that the requested filter_type is compatible with the column's actual data type.
+
+    Looks up the column in information_schema and checks that the column's
+    recommended filter type matches the requested one. This prevents, e.g.,
+    casting a text column to Float for numerical aggregation.
+
+    Returns the column's data_type string on success.
+    Raises HttpError(400) if the column is not found or the type is incompatible.
+    """
+    columns = get_table_columns(warehouse_client, org_warehouse, schema_name, table_name)
+
+    col_info = None
+    for col in columns:
+        if col["column_name"] == column_name:
+            col_info = col
+            break
+
+    if col_info is None:
+        raise HttpError(400, f"Column '{column_name}' not found in {schema_name}.{table_name}")
+
+    actual_filter_type = determine_filter_type_from_column(col_info["data_type"])
+
+    if filter_type != "value" and actual_filter_type != filter_type:
+        raise HttpError(
+            400,
+            f"Column '{column_name}' has data type '{col_info['data_type']}' "
+            f"which is not compatible with filter type '{filter_type}'",
+        )
