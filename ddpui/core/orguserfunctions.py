@@ -366,15 +366,17 @@ def resend_invitation(invitation_id: str):
     """resend email invitation to user"""
     invitation = Invitation.objects.filter(id=invitation_id).first()
 
-    if invitation:
-        invitation.invited_on = timezone.as_utc(datetime.utcnow())
-        invitation.save()
-        # trigger an email to the user
-        frontend_url = os.getenv("FRONTEND_URL")
-        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
-        )
+    if invitation is None:
+        return None, "invitation not found"
+
+    invitation.invited_on = timezone.as_utc(datetime.utcnow())
+    invitation.save()
+    # trigger an email to the user
+    frontend_url = os.getenv("FRONTEND_URL")
+    invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+    awsses.send_invite_user_email(
+        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    )
 
     return None, None
 
