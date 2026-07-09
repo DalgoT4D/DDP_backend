@@ -133,7 +133,7 @@ def build_turn_graph(
     async def clarify_node(state: TurnState) -> dict:
         return {"messages": [AIMessage(content=state["route"]["clarification"])]}
 
-    async def retrieve_context_node(state: TurnState) -> dict:
+    async def retrieve_context_node(_state: TurnState) -> dict:
         # M5 fills this: BM25 over table cards → system-prompt context block.
         # A named no-op until then, so the pipeline shape is already the
         # approach-2 diagram and cards plug in without rewiring.
