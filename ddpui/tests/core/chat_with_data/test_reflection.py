@@ -10,7 +10,7 @@ django.setup()
 
 from langchain_core.messages import AIMessage
 
-from ddpui.core.chat_with_data import reflection
+from ddpui.core.chat_with_data.calls import reflection
 from ddpui.core.chat_with_data.tools import sql_tools
 from ddpui.tests.core.chat_with_data.test_agent_loop import make_context
 from ddpui.tests.core.chat_with_data.test_tools import FakeWarehouse

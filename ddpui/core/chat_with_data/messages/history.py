@@ -7,8 +7,8 @@ any executed SQL (and its result table) attached to the answer.
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from ddpui.core.chat_with_data.checkpointer import get_checkpointer
-from ddpui.core.chat_with_data.content import extract_text
+from ddpui.core.chat_with_data.agent.checkpointer import get_checkpointer
+from ddpui.core.chat_with_data.messages.content import extract_text
 from ddpui.schemas.chat_with_data_schemas import MessageOut, SqlAttachment
 
 

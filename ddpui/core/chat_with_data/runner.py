@@ -24,12 +24,12 @@ from typing import AsyncIterator
 from asgiref.sync import sync_to_async
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
-from ddpui.core.chat_with_data.agent import DEFAULT_MODEL, RECURSION_LIMIT
-from ddpui.core.chat_with_data.content import extract_text
+from ddpui.core.chat_with_data.agent.build import DEFAULT_MODEL, RECURSION_LIMIT
+from ddpui.core.chat_with_data.messages.content import extract_text
 from ddpui.core.chat_with_data.observability import start_turn_trace
-from ddpui.core.chat_with_data.router import casual_reply, route_question
-from ddpui.core.chat_with_data.state import RunContext
-from ddpui.core.chat_with_data.validator import validate_turn
+from ddpui.core.chat_with_data.calls.router import casual_reply, route_question
+from ddpui.core.chat_with_data.agent.state import RunContext
+from ddpui.core.chat_with_data.calls.validator import validate_turn
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger

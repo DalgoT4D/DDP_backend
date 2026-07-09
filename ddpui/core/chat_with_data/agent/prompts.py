@@ -4,7 +4,7 @@ Built per run from RunContext (dialect + allowed schemas change per org), served
 through the dynamic_prompt middleware in middleware.py.
 """
 
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 
 _DIALECT_LABELS = {"postgres": "PostgreSQL", "bigquery": "BigQuery"}
 

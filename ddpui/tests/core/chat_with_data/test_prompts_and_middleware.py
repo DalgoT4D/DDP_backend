@@ -2,9 +2,9 @@
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ddpui.core.chat_with_data.middleware import count_failed_sql_attempts
-from ddpui.core.chat_with_data.prompts import build_system_prompt
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.middleware import count_failed_sql_attempts
+from ddpui.core.chat_with_data.agent.prompts import build_system_prompt
+from ddpui.core.chat_with_data.agent.state import RunContext
 
 
 def failed_tool_msg(text="Query failed: boom"):

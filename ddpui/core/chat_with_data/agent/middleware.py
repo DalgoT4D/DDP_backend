@@ -13,7 +13,7 @@ from langchain.agents.middleware import (
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 
-from ddpui.core.chat_with_data.prompts import MAX_SQL_ATTEMPTS, build_system_prompt
+from ddpui.core.chat_with_data.agent.prompts import MAX_SQL_ATTEMPTS, build_system_prompt
 
 # Token budget for the model request; old turns beyond this are trimmed from the
 # request (NOT from the checkpointed conversation, which the UI renders in full)

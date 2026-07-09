@@ -6,7 +6,7 @@ database_sync_to_async in async consumers), then pass the context into the run â
 tools never touch the database or trust an LLM-supplied org identifier.
 """
 
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import RolePermission

@@ -12,8 +12,8 @@ carried on the ToolMessage without ever entering the model's context.
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.chat_with_data.guards import sql_guard
-from ddpui.core.chat_with_data.reflection import check_sql
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.calls.reflection import check_sql
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.core.chat_with_data.tools import common
 from ddpui.core.chat_with_data.tools.registry import register_tool
 

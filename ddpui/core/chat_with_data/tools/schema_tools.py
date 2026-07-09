@@ -2,7 +2,7 @@
 
 from langchain.tools import ToolRuntime, tool
 
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.core.chat_with_data.tools import common
 from ddpui.core.chat_with_data.tools.registry import register_tool
 

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from ddpui.core.chat_with_data.content import extract_text
+from ddpui.core.chat_with_data.messages.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")

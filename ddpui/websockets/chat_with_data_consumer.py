@@ -19,12 +19,12 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import User
 from rest_framework_simplejwt.tokens import AccessToken
 
-from ddpui.core.chat_with_data import chat_with_data_service
-from ddpui.core.chat_with_data.agent import build_agent
-from ddpui.core.chat_with_data.checkpointer import get_checkpointer
-from ddpui.core.chat_with_data.context import ChatWithDataNotReady, build_run_context
+from ddpui.core.chat_with_data import service
+from ddpui.core.chat_with_data.agent.build import build_agent
+from ddpui.core.chat_with_data.agent.checkpointer import get_checkpointer
+from ddpui.core.chat_with_data.agent.context import ChatWithDataNotReady, build_run_context
 from ddpui.core.chat_with_data.runner import run_turn
-from ddpui.core.chat_with_data.titles import generate_session_title
+from ddpui.core.chat_with_data.calls.titles import generate_session_title
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import RolePermission
@@ -74,8 +74,8 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
         session_id = self.scope["url_route"]["kwargs"]["session_id"]
         try:
-            self.session = await chat_with_data_service.aget_session(self.orguser, session_id)
-        except chat_with_data_service.SessionNotFound:
+            self.session = await service.aget_session(self.orguser, session_id)
+        except service.SessionNotFound:
             logger.info(f"chat_with_data ws: session {session_id} not found for user")
             await self.close(code=WebsocketCloseCodes.FORBIDDEN)
             return
@@ -179,7 +179,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         if not has_perm:
             logger.info("chat_with_data ws: missing permission")
             return False
-        status = chat_with_data_service.get_status(self.orguser)
+        status = service.get_status(self.orguser)
         if not status.enabled:
             logger.info(f"chat_with_data ws: not enabled ({status.reason})")
         return status.enabled

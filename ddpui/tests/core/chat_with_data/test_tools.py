@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.core.chat_with_data.tools.registry import get_tools
 from ddpui.core.chat_with_data.tools.schema_tools import (
     get_table_details,

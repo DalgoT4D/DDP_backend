@@ -18,8 +18,8 @@ from django.core.management.base import BaseCommand, CommandError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ddpui.core.chat_with_data.agent import RECURSION_LIMIT, build_agent, get_chat_model
-from ddpui.core.chat_with_data.context import ChatWithDataNotReady, build_run_context
+from ddpui.core.chat_with_data.agent.build import RECURSION_LIMIT, build_agent, get_chat_model
+from ddpui.core.chat_with_data.agent.context import ChatWithDataNotReady, build_run_context
 from ddpui.models.org_user import OrgUser
 
 

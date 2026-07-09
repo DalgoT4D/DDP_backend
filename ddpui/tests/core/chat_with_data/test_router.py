@@ -11,7 +11,7 @@ django.setup()
 
 from langchain_core.messages import AIMessage
 
-from ddpui.core.chat_with_data.router import RouteResult, route_question
+from ddpui.core.chat_with_data.calls.router import RouteResult, route_question
 
 
 class FakeModel:

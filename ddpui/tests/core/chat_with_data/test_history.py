@@ -2,7 +2,7 @@
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ddpui.core.chat_with_data.history import map_messages
+from ddpui.core.chat_with_data.messages.history import map_messages
 
 
 def test_maps_turns_with_sql_attachments_on_the_answer():

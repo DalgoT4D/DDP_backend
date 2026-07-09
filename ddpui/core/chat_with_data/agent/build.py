@@ -12,13 +12,13 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from ddpui.core.chat_with_data.middleware import (
+from ddpui.core.chat_with_data.agent.middleware import (
     clear_old_tool_results,
     org_system_prompt,
     sql_retry_limiter,
     trim_history,
 )
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.core.chat_with_data.tools.registry import get_tools
 
 # Upper bound on model⇄tool loop steps per turn — backstop against runaway loops

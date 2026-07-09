@@ -1,7 +1,7 @@
 """Tests for checkpointer connection-string building (pure logic only —
 pool/saver lifecycle is exercised by the REPL and consumer integration)."""
 
-from ddpui.core.chat_with_data.checkpointer import build_conninfo
+from ddpui.core.chat_with_data.agent.checkpointer import build_conninfo
 
 
 def test_build_conninfo_from_django_db_settings():

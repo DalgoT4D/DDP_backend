@@ -8,8 +8,9 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
-from ddpui.core.chat_with_data import chat_with_data_service, history
-from ddpui.core.chat_with_data.chat_with_data_service import SessionNotFound
+from ddpui.core.chat_with_data import service
+from ddpui.core.chat_with_data.messages import history
+from ddpui.core.chat_with_data.service import SessionNotFound
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import SessionOut, SessionRename
 from ddpui.utils.custom_logger import CustomLogger
@@ -25,7 +26,7 @@ chat_with_data_router = Router()
 def get_status(request):
     """Whether chat is available for this org, and the blocking reason if not."""
     orguser: OrgUser = request.orguser
-    return api_response(success=True, data=chat_with_data_service.get_status(orguser))
+    return api_response(success=True, data=service.get_status(orguser))
 
 
 @chat_with_data_router.post("/sessions/")
@@ -33,7 +34,7 @@ def get_status(request):
 def create_session(request):
     """Start a new chat session."""
     orguser: OrgUser = request.orguser
-    session = chat_with_data_service.create_session(orguser)
+    session = service.create_session(orguser)
     return api_response(success=True, data=SessionOut.from_model(session))
 
 
@@ -42,7 +43,7 @@ def create_session(request):
 def list_sessions(request):
     """The requesting user's sessions, most recent first."""
     orguser: OrgUser = request.orguser
-    sessions = chat_with_data_service.list_sessions(orguser)
+    sessions = service.list_sessions(orguser)
     return api_response(
         success=True,
         data=[SessionOut.from_model(session).model_dump() for session in sessions],
@@ -55,7 +56,7 @@ def rename_session(request, session_id: int, payload: SessionRename):
     """Rename a session (owner only)."""
     orguser: OrgUser = request.orguser
     try:
-        session = chat_with_data_service.rename_session(orguser, session_id, payload.title)
+        session = service.rename_session(orguser, session_id, payload.title)
     except SessionNotFound as err:
         raise HttpError(404, "session not found") from err
     return api_response(success=True, data=SessionOut.from_model(session))
@@ -67,7 +68,7 @@ def delete_session(request, session_id: int):
     """Soft-delete a session (owner only)."""
     orguser: OrgUser = request.orguser
     try:
-        chat_with_data_service.delete_session(orguser, session_id)
+        service.delete_session(orguser, session_id)
     except SessionNotFound as err:
         raise HttpError(404, "session not found") from err
     return api_response(success=True, message="session deleted")
@@ -79,7 +80,7 @@ async def get_session_messages(request, session_id: int):
     """Conversation history, replayed from the LangGraph checkpointer."""
     orguser: OrgUser = request.orguser
     try:
-        session = await chat_with_data_service.aget_session(orguser, session_id)
+        session = await service.aget_session(orguser, session_id)
     except SessionNotFound as err:
         raise HttpError(404, "session not found") from err
 

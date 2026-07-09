@@ -11,8 +11,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from ddpui.core.chat_with_data.agent import build_agent
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.build import build_agent
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.tests.core.chat_with_data.test_tools import FakeWarehouse
 
 

@@ -6,7 +6,7 @@ interpolated into introspection SQL. A name the warehouse doesn't already know
 never reaches a query string.
 """
 
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 
 # Cap on characters per cell when rendering results/samples for the LLM
 MAX_CELL_CHARS = 120

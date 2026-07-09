@@ -15,7 +15,7 @@ from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-from ddpui.core.chat_with_data.content import extract_text
+from ddpui.core.chat_with_data.messages.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")

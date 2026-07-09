@@ -1,6 +1,6 @@
 """Tests for allowed-schema derivation (pure part of context building)."""
 
-from ddpui.core.chat_with_data.context import derive_allowed_schemas
+from ddpui.core.chat_with_data.agent.context import derive_allowed_schemas
 
 
 class SchemaWarehouse:

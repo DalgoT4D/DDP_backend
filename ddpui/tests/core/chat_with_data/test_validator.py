@@ -11,7 +11,7 @@ django.setup()
 
 from langchain_core.messages import AIMessage
 
-from ddpui.core.chat_with_data.validator import validate_turn
+from ddpui.core.chat_with_data.calls.validator import validate_turn
 
 
 class FakeModel:

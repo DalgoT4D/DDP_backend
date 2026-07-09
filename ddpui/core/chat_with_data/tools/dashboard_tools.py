@@ -13,7 +13,7 @@ and react-grid-layout entries {i, x, y, w, h} on a 12-column grid.
 
 from langchain.tools import ToolRuntime, tool
 
-from ddpui.core.chat_with_data.state import RunContext
+from ddpui.core.chat_with_data.agent.state import RunContext
 from ddpui.core.chat_with_data.tools.registry import register_tool
 
 # Grid placement: 12-column grid, three 4-wide × 3-tall charts per row —

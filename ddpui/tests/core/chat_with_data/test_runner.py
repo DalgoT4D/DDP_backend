@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.chat_with_data.agent import build_agent
+from ddpui.core.chat_with_data.agent.build import build_agent
 from ddpui.core.chat_with_data.runner import run_turn
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org import Org
@@ -41,7 +41,7 @@ def hermetic_router(monkeypatch):
     """Tests never construct the real router model (would hit the API when a
     key is present). Individual tests override with their own routes."""
     from ddpui.core.chat_with_data import runner as runner_module
-    from ddpui.core.chat_with_data.router import FAIL_OPEN
+    from ddpui.core.chat_with_data.calls.router import FAIL_OPEN
 
     async def fail_open_route(question, model=None, history=None):
         return FAIL_OPEN
@@ -137,7 +137,7 @@ def test_small_talk_short_circuits_the_agent(orguser, session, monkeypatch):
     """Greetings never reach the SQL agent: the router diverts them, a cheap
     reply comes back, and the exchange still lands in conversation memory."""
     from ddpui.core.chat_with_data import runner as runner_module
-    from ddpui.core.chat_with_data.router import RouteResult
+    from ddpui.core.chat_with_data.calls.router import RouteResult
 
     async def fake_route(question, model=None, history=None):
         return RouteResult(intent="small_talk")
@@ -173,7 +173,7 @@ def test_small_talk_short_circuits_the_agent(orguser, session, monkeypatch):
 
 def test_data_question_records_intent_on_audit(orguser, session, monkeypatch):
     from ddpui.core.chat_with_data import runner as runner_module
-    from ddpui.core.chat_with_data.router import RouteResult
+    from ddpui.core.chat_with_data.calls.router import RouteResult
 
     async def fake_route(question, model=None, history=None):
         return RouteResult(intent="data_question", complexity="complex", entities=["surveys"])
@@ -241,7 +241,7 @@ def test_clarification_never_short_circuits_a_follow_up(orguser, session, monkey
     import asyncio
 
     from ddpui.core.chat_with_data import runner as runner_module
-    from ddpui.core.chat_with_data.router import RouteResult
+    from ddpui.core.chat_with_data.calls.router import RouteResult
     from langchain_core.messages import HumanMessage
 
     seen_history = {}
@@ -283,7 +283,7 @@ def test_clarification_never_short_circuits_a_follow_up(orguser, session, monkey
 
 def test_clarification_still_short_circuits_the_first_turn(orguser, session, monkeypatch):
     from ddpui.core.chat_with_data import runner as runner_module
-    from ddpui.core.chat_with_data.router import RouteResult
+    from ddpui.core.chat_with_data.calls.router import RouteResult
 
     async def fake_route(question, model=None, history=None):
         return RouteResult(intent="needs_clarification", clarification="Compare what to what?")
