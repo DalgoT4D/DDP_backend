@@ -604,26 +604,25 @@ def post_organization_user_accept_invite_v1(
 
     # Audit log: invitation accepted (user added to org)
     if invited_by_org:
-        # Look up the new orguser
-        new_orguser = OrgUser.objects.filter(
+        # Look up the orguser
+        orguser = OrgUser.objects.filter(
             user__email__iexact=invited_email, org=invited_by_org
         ).first()
-        if new_orguser:
+        if orguser:
             create_audit_log(
                 org=invited_by_org,
-                orguser=new_orguser,
+                orguser=orguser,
                 resource_type=AuditLogResourceType.INVITATION,
                 resource_id="",
                 resource_name=invited_email,
                 action=AuditLogAction.UPDATE,
                 field_changes={"status": {"old": "pending", "new": "accepted"}},
             )
-            # Also log "user added to org"
             create_audit_log(
                 org=invited_by_org,
-                orguser=new_orguser,
+                orguser=orguser,
                 resource_type=AuditLogResourceType.ORG_USER,
-                resource_id=str(new_orguser.id),
+                resource_id=str(orguser.id),
                 resource_name=invited_email,
                 action=AuditLogAction.CREATE,
             )

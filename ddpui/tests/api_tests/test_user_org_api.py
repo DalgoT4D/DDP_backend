@@ -776,7 +776,7 @@ def test_post_organization_user_accept_invite_v1_fail(orguser):
     assert str(excinfo.value) == "invalid invite code"
 
 
-def test_post_organization_user_accept_invite_v1(orguser):
+def test_post_organization_user_accept_invite_v1(orguser, seed_db):
     """success test, accepting an invitation"""
     request = mock_request(orguser)
     payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
@@ -802,7 +802,7 @@ def test_post_organization_user_accept_invite_v1(orguser):
     assert UserAttributes.objects.filter(user__email="invited_email").exists()
 
 
-def test_post_organization_user_accept_invite_v1_lowercase_email(orguser):
+def test_post_organization_user_accept_invite_v1_lowercase_email(orguser, seed_db):
     """success test, accepting an invitation"""
     request = mock_request()
     payload = AcceptInvitationSchema(invite_code="invite_code", password="password")
@@ -827,7 +827,7 @@ def test_post_organization_user_accept_invite_v1_lowercase_email(orguser):
     assert OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count() == 1
 
 
-def test_post_organization_user_accept_invite_v1_firstaccount_fail(orguser):
+def test_post_organization_user_accept_invite_v1_firstaccount_fail(orguser, seed_db):
     """failing test, invalid invite code"""
     request = mock_request(orguser)
     payload = AcceptInvitationSchema(
@@ -848,7 +848,7 @@ def test_post_organization_user_accept_invite_v1_firstaccount_fail(orguser):
     assert str(excinfo.value) == "password is required"
 
 
-def test_post_organization_user_accept_invite_v1_secondaccount(orguser):
+def test_post_organization_user_accept_invite_v1_secondaccount(orguser, seed_db):
     """success test, accepting an invitation"""
     request = mock_request(orguser)
     payload = AcceptInvitationSchema(invite_code="invite_code")
