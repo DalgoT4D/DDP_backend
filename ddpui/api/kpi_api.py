@@ -25,6 +25,7 @@ from ddpui.core.kpi.kpi_service import (
 )
 from ddpui.core.metric.metric_service import MetricNotFoundError
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.gates import require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 import json
@@ -162,6 +163,12 @@ def get_kpi_dashboards(request, kpi_id: int):
     """Get list of dashboards that use this KPI."""
     orguser: OrgUser = request.orguser
     try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_view_access(orguser, "kpi", kpi)
+
+    try:
         return KPIService.get_kpi_dashboards(kpi_id, orguser.org)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
@@ -172,6 +179,12 @@ def get_kpi_dashboards(request, kpi_id: int):
 def get_kpi_consumers(request, kpi_id: int):
     """List dashboards and alerts that reference this KPI (for the consumers UI)."""
     orguser: OrgUser = request.orguser
+    try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_view_access(orguser, "kpi", kpi)
+
     try:
         return KPIService.get_kpi_consumers(kpi_id, orguser.org)
     except KPINotFoundError:
@@ -207,6 +220,12 @@ def get_kpi_data(
             logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
 
     try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_view_access(orguser, "kpi", kpi)
+
+    try:
         result = KPIService.get_kpi_data(
             kpi_id,
             orguser.org,
@@ -232,6 +251,12 @@ def get_kpi_data(
 def list_annotations(request, kpi_id: int):
     """List all annotation entries for a KPI."""
     orguser: OrgUser = request.orguser
+    try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_view_access(orguser, "kpi", kpi)
+
     try:
         return KPIService.list_annotations(kpi_id, orguser.org)
     except KPINotFoundError:

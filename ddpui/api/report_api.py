@@ -21,6 +21,8 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.gates import require_view_access
+from ddpui.services.dashboard_service import DashboardService, DashboardNotFoundError
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
@@ -131,6 +133,13 @@ def get_report_chart_data(
 ):
     """Get chart data for a specific chart in a report snapshot."""
     orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    require_view_access(orguser, "report", snapshot)
+
     try:
         parsed_filters = None
         if dashboard_filters:
@@ -156,6 +165,13 @@ def get_report_kpi_data(
 ):
     """Get KPI data for a specific KPI in a report snapshot."""
     orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    require_view_access(orguser, "report", snapshot)
+
     try:
         parsed_filters = None
         if dashboard_filters:
@@ -230,6 +246,8 @@ def export_report_pdf(request, snapshot_id: int):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
+    require_view_access(orguser, "report", snapshot)
+
     try:
         share_token = ReportService.ensure_share_token(snapshot)
         pdf_bytes = PdfExportService.generate_pdf(snapshot_id, share_token)
@@ -257,6 +275,14 @@ def export_report_pdf(request, snapshot_id: int):
 def list_dashboard_datetime_columns(request, dashboard_id: int):
     """Discover datetime columns from all tables used by a dashboard's charts."""
     orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    require_view_access(orguser, "dashboard", dashboard)
+
     try:
         columns = ReportService.discover_datetime_columns(dashboard_id, orguser.org)
         return api_response(success=True, data=columns)
@@ -317,6 +343,8 @@ def share_report_via_email(request, snapshot_id: int, payload: ReportShareViaEma
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
+    require_view_access(orguser, "report", snapshot)
+
     send_report_email_task.delay(
         snapshot_id=snapshot.id,
         orguser_id=orguser.id,
@@ -341,6 +369,12 @@ def share_report_via_email(request, snapshot_id: int, payload: ReportShareViaEma
 def get_comment_states(request, snapshot_id: int):
     """Get icon states for all targets in a snapshot"""
     orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(400, str(err)) from err
+    require_view_access(orguser, "report", snapshot)
 
     try:
         states = CommentService.get_comment_states(
@@ -384,6 +418,12 @@ def list_comments(
 ):
     """List comments for a report target"""
     orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(400, str(err)) from err
+    require_view_access(orguser, "report", snapshot)
 
     try:
         comments = CommentService.list_comments(

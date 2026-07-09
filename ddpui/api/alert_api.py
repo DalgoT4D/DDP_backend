@@ -15,6 +15,7 @@ from ddpui.core.alerts.exceptions import (
     AlertValidationError,
 )
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.gates import require_view_access
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.alert_schema import (
@@ -320,6 +321,12 @@ def get_alert_logs(request, alert_id: int, page: int = 1, page_size: int = 20):
         page = 1
     if page_size < 1 or page_size > 100:
         page_size = 20
+
+    try:
+        alert = AlertService.get_alert(alert_id, orguser.org)
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    require_view_access(orguser, "alert", alert)
 
     try:
         logs, total = AlertService.get_log(alert_id, orguser.org, page=page, page_size=page_size)

@@ -24,6 +24,7 @@ from ddpui.core.metric.metric_service import (
     MetricPermissionError,
 )
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.gates import require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 
@@ -232,6 +233,12 @@ def preview_metric(request, metric_id: int):
     orguser: OrgUser = request.orguser
 
     try:
+        metric = MetricService.get_metric(metric_id, orguser.org)
+    except MetricNotFoundError:
+        raise HttpError(404, "Metric not found") from None
+    require_view_access(orguser, "metric", metric)
+
+    try:
         result = MetricService.preview_metric_value(metric_id, orguser.org)
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
@@ -244,6 +251,12 @@ def preview_metric(request, metric_id: int):
 def get_metric_consumers(request, metric_id: int):
     """List charts and KPIs that reference this metric"""
     orguser: OrgUser = request.orguser
+
+    try:
+        metric = MetricService.get_metric(metric_id, orguser.org)
+    except MetricNotFoundError:
+        raise HttpError(404, "Metric not found") from None
+    require_view_access(orguser, "metric", metric)
 
     try:
         consumers = MetricService.get_metric_consumers(metric_id, orguser.org)

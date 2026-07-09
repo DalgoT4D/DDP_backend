@@ -18,6 +18,7 @@ from ddpui.models.dashboard import (
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.gates import require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -176,6 +177,11 @@ def duplicate_dashboard(request, dashboard_id: int):
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
+    # Duplicating clones the ORIGINAL dashboard's full content (filters,
+    # tabs) into a new dashboard the caller then owns outright — gate on
+    # the original's view permission, same as reading it directly would be.
+    require_view_access(orguser, "dashboard", original_dashboard)
+
     # Create a copy of the dashboard
     with transaction.atomic():
         new_dashboard = Dashboard.objects.create(
@@ -313,6 +319,12 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
 def get_filter(request, dashboard_id: int, filter_id: int):
     """Get a specific dashboard filter"""
     orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_view_access(orguser, "dashboard", dashboard)
 
     try:
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, orguser.org)
