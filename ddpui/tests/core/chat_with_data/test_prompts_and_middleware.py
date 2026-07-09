@@ -49,3 +49,13 @@ def test_system_prompt_switches_dialect_for_bigquery():
     prompt = build_system_prompt(make_ctx(dialect="bigquery"))
     assert "BigQuery" in prompt
     assert "PostgreSQL" not in prompt
+
+
+def test_system_prompt_allows_exactly_the_markdown_subset_the_ui_renders():
+    """Contract with webapp_v2's AssistantMarkdown: the prompt may only permit
+    what that renderer styles (bold, bullets, numbered lists, ### headings,
+    > callouts) and must ban the rest."""
+    prompt = build_system_prompt(make_ctx())
+    for allowed in ["**bold**", '"- " bullets', '"1." numbered lists', '"### "', '"> "']:
+        assert allowed in prompt
+    assert "no code blocks, no links, no markdown tables" in prompt
