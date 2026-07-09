@@ -27,6 +27,7 @@ class AggQueryBuilder:
         self.offset_records: int = 0
         self.where_clauses: list = []
         self.having_clauses: list = []
+        self._used_aliases: dict[str, int] = {}  # track alias usage counts
 
     def add_column(self, agg_col: Function | ColumnClause):
         """Push a column to select"""
@@ -62,6 +63,12 @@ class AggQueryBuilder:
                 agg_column = agg_functions[agg_func_lower](col)
 
         if alias:
+            # Ensure alias uniqueness to prevent ambiguous column errors
+            if alias in self._used_aliases:
+                self._used_aliases[alias] += 1
+                alias = f"{alias}_{self._used_aliases[alias]}"
+            else:
+                self._used_aliases[alias] = 1
             agg_column = agg_column.label(alias)
 
         self.column_clauses.append(agg_column)
