@@ -19,6 +19,11 @@ from ddpui.models.dashboard import DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
+from ddpui.core.sharing.chart_access import (
+    ChartRenderContext,
+    require_chart_view_access,
+    run_chart_query,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -1002,14 +1007,18 @@ def download_chart_data_csv(
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_charts"])
-def get_chart(request, chart_id: int):
-    """Get a specific chart"""
+def get_chart(request, chart_id: int, dashboard_id: Optional[int] = None):
+    """Get a specific chart. `dashboard_id` is the access context for
+    dashboard tiles — charts are not shareable, so a Member's view access
+    rides on the framing dashboard's (standalone stays Analyst+/owner)."""
     orguser: OrgUser = request.orguser
 
     try:
         chart = ChartService.get_chart(chart_id, orguser.org)
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
+
+    require_chart_view_access(orguser, chart, dashboard_id)
 
     return ChartResponse(
         id=chart.id,
@@ -1027,15 +1036,25 @@ def get_chart(request, chart_id: int):
 
 @charts_router.get("/{chart_id}/data/", response=ChartDataResponse)
 @has_permission(["can_view_charts"])
-def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str] = None):
-    """Get chart data using saved chart configuration with optional dashboard filters"""
-    import json
+def get_chart_data_by_id(
+    request,
+    chart_id: int,
+    dashboard_filters: Optional[str] = None,
+    dashboard_id: Optional[int] = None,
+):
+    """Get chart data using saved chart configuration with optional dashboard filters.
 
+    `dashboard_id` is the ACCESS CONTEXT (which dashboard framed this render;
+    charts are not shareable, so view access rides on the dashboard's).
+    `dashboard_filters` is a filter-values payload — the two are independent.
+    """
     orguser = request.orguser
     try:
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
         raise HttpError(404, "Chart not found") from None
+
+    require_chart_view_access(orguser, chart, dashboard_id)
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -1077,10 +1096,20 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
     )
     payload = charts_service.build_chart_data_payload(config, resolved_dashboard_filters)
 
-    # Use the common function to generate data and config
+    # All warehouse-bound execution on this path goes through the
+    # run_chart_query choke-point (Layer 2/3 hook; a pass-through today).
     try:
-        result = generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id)
+        result = run_chart_query(
+            orguser,
+            chart,
+            ChartRenderContext(dashboard_id=dashboard_id),
+            lambda: generate_chart_data_and_config(payload, org_warehouse, chart_id=chart.id),
+        )
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except HttpError:
+        # a future access check inside run_chart_query must surface as-is,
+        # not be swallowed into the generic 500 below
+        raise
     except ValueError as e:
         raise HttpError(400, str(e))
     except Exception as e:
