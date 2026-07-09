@@ -1622,6 +1622,7 @@ def test_upload_logo_creates_audit_log(mock_upload, mock_audit_log, orguser, see
     assert call_kwargs["orguser"] == orguser
     assert call_kwargs["resource_type"] == AuditLogResourceType.ORG
     assert call_kwargs["resource_name"] == "logo"
+    assert call_kwargs["action"] == AuditLogAction.CREATE
 
 
 @patch("ddpui.api.user_org_api.create_audit_log")
