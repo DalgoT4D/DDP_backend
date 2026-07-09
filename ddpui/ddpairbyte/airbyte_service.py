@@ -342,64 +342,6 @@ def create_source(workspace_id: str, name: str, sourcedef_id: str, config: dict)
     return res
 
 
-def get_source_oauth_consent(
-    workspace_id: str, source_definition_id: str, redirect_url: str
-) -> dict:
-    """Ask Airbyte for the Google consent-screen URL for a source definition"""
-    res = abreq(
-        "source_oauths/get_consent_url",
-        {
-            "sourceDefinitionId": source_definition_id,
-            "workspaceId": workspace_id,
-            "redirectUrl": redirect_url,
-            # Airbyte requires this key present (non-null) even when empty
-            "oAuthInputConfiguration": {},
-        },
-    )
-    if "consentUrl" not in res:
-        logger.error("Failed to get oauth consent url from airbyte: %s", json.dumps(res))
-        raise HttpError(500, "failed to start the oauth flow")
-    return res
-
-
-def complete_source_oauth(
-    workspace_id: str, source_definition_id: str, redirect_url: str, query_params: dict
-) -> dict:
-    """Hand Airbyte the OAuth code; return the credential fragment (auth_payload)
-
-    Airbyte replies with {request_succeeded, request_error, auth_payload}. The
-    auth_payload is the connectionConfiguration fragment (e.g. the `credentials`
-    object with the refresh token) to merge into the source config.
-    """
-    res = abreq(
-        "source_oauths/complete_oauth",
-        {
-            "sourceDefinitionId": source_definition_id,
-            "workspaceId": workspace_id,
-            "redirectUrl": redirect_url,
-            "queryParams": query_params,
-            "oAuthInputConfiguration": {},
-        },
-    )
-    if not isinstance(res, dict) or not res.get("request_succeeded"):
-        # res carries the OAuth error / credential material; log it, don't return it
-        logger.error("Failed to complete oauth with airbyte: %s", res)
-        raise HttpError(500, "failed to complete the oauth flow")
-    return res.get("auth_payload", {})
-
-
-def set_instancewide_source_oauth_params(source_definition_id: str, params: dict) -> dict:
-    """Register instance-wide OAuth client params (client_id/secret) for a source definition"""
-    res = abreq(
-        "source_oauths/oauth_params/create",
-        {
-            "sourceDefinitionId": source_definition_id,
-            "params": params,
-        },
-    )
-    return res
-
-
 def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) -> dict:
     """Update source in an airbyte workspace"""
     if not isinstance(source_id, str):

@@ -22,8 +22,9 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
     SourceOAuthConsentCreate,
-    SourceOAuthComplete,
+    SourceOAuthCreate,
 )
+from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
@@ -122,7 +123,11 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 @airbyte_router.post("/sources/oauth/consent/")
 @has_permission(["can_create_source"])
 def post_source_oauth_consent(request, payload: SourceOAuthConsentCreate):
-    """Start the Google OAuth flow: return the consent URL and a state nonce"""
+    """Start the Google OAuth flow: build the Google consent URL and mint a state nonce.
+
+    Dalgo builds the URL itself (client_id from env, redirect_uri = Dalgo's own backend
+    callback); Airbyte is not involved. Returns {authUrl}; the state nonce stays server-side.
+    """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
@@ -130,14 +135,26 @@ def post_source_oauth_consent(request, payload: SourceOAuthConsentCreate):
     return airbytehelpers.get_source_oauth_consent(orguser, payload.sourceDefId)
 
 
-@airbyte_router.post("/sources/oauth/complete/")
-@has_permission(["can_create_source"])
-def post_source_oauth_complete(request, payload: SourceOAuthComplete):
-    """Complete the Google OAuth flow and save the source in one server-side step.
+@airbyte_router.get("/sources/oauth/callback", auth=None)
+def get_source_oauth_callback(request, state: str = None, code: str = None, error: str = None):
+    """Google's redirect target after consent. PUBLIC — no JWT (a browser redirect carries
+    none); the unguessable `state` nonce is the authentication.
 
-    The OAuth credentials never travel through the browser: the backend exchanges the
-    code with Airbyte, merges the credentials into the config, and creates (or updates,
-    when a sourceId is given) the source.
+    Exchanges the auth code for a refresh_token server-side, stashes it under a single-use
+    opaque `ref`, and 302s the popup back to the frontend callback page carrying only that
+    `ref` (or an `error`). The auth code and refresh_token never reach the browser.
+    """
+    return HttpResponseRedirect(airbytehelpers.oauth_callback_redirect_url(state, code, error))
+
+
+@airbyte_router.post("/sources/oauth/create/")
+@has_permission(["can_create_source"])
+def post_source_oauth_create(request, payload: SourceOAuthCreate):
+    """Create (or update) the source from a redeemed OAuth `ref`.
+
+    Redeems the `ref` for the stashed refresh_token, builds the connector credentials
+    (client_id/secret from env), merges them into the config, and saves the source. The
+    refresh_token never travels through the browser.
     """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:

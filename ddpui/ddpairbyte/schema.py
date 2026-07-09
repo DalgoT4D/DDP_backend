@@ -39,21 +39,21 @@ class SourceOAuthConsentCreate(Schema):
     sourceDefId: str
 
 
-class SourceOAuthComplete(Schema):
-    """Complete the OAuth flow and create (or update) the source in one step.
+class SourceOAuthCreate(Schema):
+    """Create (or update) a source from a redeemed Google OAuth `ref`.
 
-    The user fills in `name` + `config` (e.g. spreadsheet_id) before authenticating; on
-    consent we complete the token exchange and save the source server-side, so the OAuth
-    credentials (client_secret, refresh_token) never travel through the browser. `config`
-    must NOT include a `credentials` block — the backend fills it in. Pass `sourceId` to
-    re-authenticate an existing source (update); omit it to create a new one.
-    """
+    The user fills in `name` + `config` (e.g. spreadsheet_id) and authenticates via Google;
+    the backend has already exchanged the code and stashed the refresh_token server-side
+    under the opaque `ref`. Here the backend redeems `ref`, builds the `credentials` block
+    (from env + refresh_token), and saves the source — so the refresh_token never travels
+    through the browser. `config` must NOT include a `credentials` block — the backend fills
+    it in. Pass `sourceId` to re-authenticate an existing source (update); omit it to create
+    a new one."""
 
     sourceDefId: str
     name: str
     config: dict
-    state: str
-    queryParams: dict
+    ref: str
     sourceId: Optional[str] = None
 
 
