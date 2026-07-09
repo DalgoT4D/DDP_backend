@@ -2,6 +2,19 @@ from ddpui.auth import ADMIN_ROLE, SUPER_ADMIN_ROLE
 from ddpui.models.org_user import OrgUser
 
 
+def is_admin_or_super_admin(orguser: OrgUser) -> bool:
+    """True if orguser holds the admin or super-admin role (org-level override).
+
+    Used to bypass Resource Sharing's `accessible_filter` on list endpoints —
+    the filter is deliberately not admin-aware (plan Sec 4.4), so callers who
+    need "admin sees everything in-org" must check this themselves.
+    """
+    return orguser.new_role is not None and orguser.new_role.slug in (
+        ADMIN_ROLE,
+        SUPER_ADMIN_ROLE,
+    )
+
+
 def can_delete_resource(orguser: OrgUser, resource) -> bool:
     """Return True if orguser may delete resource.
 
@@ -23,6 +36,4 @@ def can_delete_resource(orguser: OrgUser, resource) -> bool:
         created_by_id = getattr(resource, "created_by_id", None)
         if created_by_id is not None and created_by_id == orguser.id:
             return True
-    if orguser.new_role is None:
-        return False
-    return orguser.new_role.slug in (ADMIN_ROLE, SUPER_ADMIN_ROLE)
+    return is_admin_or_super_admin(orguser)

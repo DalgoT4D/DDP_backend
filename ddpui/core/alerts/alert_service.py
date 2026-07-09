@@ -18,7 +18,8 @@ from ddpui.core.alerts.exceptions import (
     AlertPermissionError,
     AlertValidationError,
 )
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
+from ddpui.core.sharing.access_resolver import accessible_filter
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
@@ -136,6 +137,7 @@ class AlertService:
     @staticmethod
     def list_alerts(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
@@ -147,6 +149,8 @@ class AlertService:
             query &= Q(name__icontains=search)
         if is_active is not None:
             query &= Q(is_active=is_active)
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "alert")
 
         # Default sort: most-recently-fired first, NULLS LAST (never-fired alerts
         # sink to the bottom). Tie-break by latest update.

@@ -312,16 +312,16 @@ class TestKPICRUD:
         with pytest.raises(KPINotFoundError):
             KPIService.get_kpi(99999, org)
 
-    def test_list_kpis(self, org, sample_kpi, seed_db):
-        kpis, total = KPIService.list_kpis(org)
+    def test_list_kpis(self, orguser, org, sample_kpi, seed_db):
+        kpis, total = KPIService.list_kpis(org, orguser=orguser)
         assert total >= 1
         assert any(k.id == sample_kpi.id for k in kpis)
 
-    def test_list_kpis_search_by_name(self, org, sample_kpi, seed_db):
-        _, total = KPIService.list_kpis(org, search="Test")
+    def test_list_kpis_search_by_name(self, orguser, org, sample_kpi, seed_db):
+        _, total = KPIService.list_kpis(org, orguser=orguser, search="Test")
         assert total >= 1
 
-        _, total = KPIService.list_kpis(org, search="nonexistent_xyz")
+        _, total = KPIService.list_kpis(org, orguser=orguser, search="nonexistent_xyz")
         assert total == 0
 
     def test_list_kpis_search_by_program_tag(self, orguser, org, sample_metric, seed_db):
@@ -335,12 +335,12 @@ class TestKPICRUD:
             org=org,
             created_by=orguser,
         )
-        kpis, total = KPIService.list_kpis(org, search="Health")
+        kpis, total = KPIService.list_kpis(org, orguser=orguser, search="Health")
         assert total >= 1
         assert any(k.id == kpi.id for k in kpis)
 
         # Search by name still works
-        _, total = KPIService.list_kpis(org, search="Enrollment")
+        _, total = KPIService.list_kpis(org, orguser=orguser, search="Enrollment")
         assert total >= 1
 
         kpi.delete()

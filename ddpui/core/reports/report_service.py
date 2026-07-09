@@ -9,7 +9,8 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
+from ddpui.core.sharing.access_resolver import accessible_filter
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI
@@ -596,6 +597,7 @@ class ReportService:
     @staticmethod
     def list_snapshots(
         org: Org,
+        orguser: OrgUser,
         search: Optional[str] = None,
         dashboard_title: Optional[str] = None,
         created_by_email: Optional[str] = None,
@@ -604,6 +606,9 @@ class ReportService:
 
         Args:
             org: The organization to list snapshots for
+            orguser: The viewer, used to scope results to what Resource
+                Sharing admits (general access, grants, ownership) — admins
+                see everything in-org, unrestricted.
             search: Optional search term to filter snapshots by title (case-insensitive)
             dashboard_title: Optional filter for snapshots from dashboards with matching title
             created_by_email: Optional filter for snapshots created by user with matching email
@@ -618,6 +623,8 @@ class ReportService:
             query &= Q(frozen_dashboard__title__icontains=dashboard_title)
         if created_by_email:
             query &= Q(created_by__user__email__icontains=created_by_email)
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "report")
         return list(
             ReportSnapshot.objects.filter(query)
             .select_related("created_by__user")

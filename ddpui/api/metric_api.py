@@ -23,6 +23,7 @@ from ddpui.core.metric.metric_service import (
     MetricDeleteBlockedError,
     MetricPermissionError,
 )
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 
@@ -51,6 +52,7 @@ def list_metrics(
 
     metrics, total = MetricService.list_metrics(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -153,6 +155,9 @@ def get_metric(request, metric_id: int):
         metric = MetricService.get_metric(metric_id, orguser.org)
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
+
+    if effective_permission(orguser, "metric", metric) is None:
+        raise HttpError(403, "You do not have access to this metric")
 
     return MetricResponse(
         id=metric.id,

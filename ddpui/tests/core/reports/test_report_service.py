@@ -857,56 +857,68 @@ class TestCreateSnapshot:
 class TestListSnapshots:
     """Tests for ReportService.list_snapshots"""
 
-    def test_list_empty(self, org):
+    def test_list_empty(self, org, orguser):
         """No snapshots returns empty list"""
-        result = ReportService.list_snapshots(org)
+        result = ReportService.list_snapshots(org, orguser=orguser)
         assert result == []
 
-    def test_list_with_data(self, org, sample_snapshot):
+    def test_list_with_data(self, org, orguser, sample_snapshot):
         """Returns existing snapshots"""
-        result = ReportService.list_snapshots(org)
+        result = ReportService.list_snapshots(org, orguser=orguser)
         assert len(result) == 1
         assert result[0].id == sample_snapshot.id
 
-    def test_list_with_search(self, org, sample_snapshot):
+    def test_list_with_search(self, org, orguser, sample_snapshot):
         """Search filter works on title"""
-        result = ReportService.list_snapshots(org, search="Jan")
+        result = ReportService.list_snapshots(org, orguser=orguser, search="Jan")
         assert len(result) == 1
 
-        result = ReportService.list_snapshots(org, search="nonexistent")
+        result = ReportService.list_snapshots(org, orguser=orguser, search="nonexistent")
         assert len(result) == 0
 
-    def test_list_filter_by_dashboard_title(self, org, sample_snapshot):
+    def test_list_filter_by_dashboard_title(self, org, orguser, sample_snapshot):
         """Filter by dashboard_title matches frozen_dashboard.title"""
-        result = ReportService.list_snapshots(org, dashboard_title="Test Dashboard")
+        result = ReportService.list_snapshots(
+            org, orguser=orguser, dashboard_title="Test Dashboard"
+        )
         assert len(result) == 1
 
-        result = ReportService.list_snapshots(org, dashboard_title="test dash")
+        result = ReportService.list_snapshots(org, orguser=orguser, dashboard_title="test dash")
         assert len(result) == 1  # icontains
 
-        result = ReportService.list_snapshots(org, dashboard_title="nonexistent")
+        result = ReportService.list_snapshots(org, orguser=orguser, dashboard_title="nonexistent")
         assert len(result) == 0
 
-    def test_list_filter_by_created_by_email(self, org, sample_snapshot):
+    def test_list_filter_by_created_by_email(self, org, orguser, sample_snapshot):
         """Filter by created_by_email matches creator's email"""
-        result = ReportService.list_snapshots(org, created_by_email="svcreportuser@test.com")
+        result = ReportService.list_snapshots(
+            org, orguser=orguser, created_by_email="svcreportuser@test.com"
+        )
         assert len(result) == 1
 
-        result = ReportService.list_snapshots(org, created_by_email="svcreport")
+        result = ReportService.list_snapshots(org, orguser=orguser, created_by_email="svcreport")
         assert len(result) == 1  # icontains
 
-        result = ReportService.list_snapshots(org, created_by_email="nobody@test.com")
+        result = ReportService.list_snapshots(
+            org, orguser=orguser, created_by_email="nobody@test.com"
+        )
         assert len(result) == 0
 
-    def test_list_combined_filters(self, org, sample_snapshot):
+    def test_list_combined_filters(self, org, orguser, sample_snapshot):
         """Multiple filters are combined with AND"""
         result = ReportService.list_snapshots(
-            org, search="Jan", dashboard_title="Test", created_by_email="svcreport"
+            org,
+            orguser=orguser,
+            search="Jan",
+            dashboard_title="Test",
+            created_by_email="svcreport",
         )
         assert len(result) == 1
 
         # One filter mismatches -> no results
-        result = ReportService.list_snapshots(org, search="Jan", dashboard_title="wrong")
+        result = ReportService.list_snapshots(
+            org, orguser=orguser, search="Jan", dashboard_title="wrong"
+        )
         assert len(result) == 0
 
 

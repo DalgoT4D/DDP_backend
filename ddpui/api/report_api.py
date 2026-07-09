@@ -20,6 +20,7 @@ from ddpui.core.reports.exceptions import (
 )
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
@@ -61,6 +62,7 @@ def list_snapshots(
     orguser: OrgUser = request.orguser
     snapshots = ReportService.list_snapshots(
         orguser.org,
+        orguser=orguser,
         search=search,
         dashboard_title=dashboard_title,
         created_by_email=created_by,
@@ -113,6 +115,9 @@ def get_snapshot_view(request, snapshot_id: int):
     """Get snapshot view data for rendering"""
     orguser: OrgUser = request.orguser
     try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+        if effective_permission(orguser, "report", snapshot) is None:
+            raise HttpError(403, "You do not have access to this report")
         view_data = ReportService.get_snapshot_view_data(snapshot_id, orguser.org)
         return api_response(success=True, data=SnapshotViewResponse.from_view_data(view_data))
     except SnapshotNotFoundError as err:

@@ -37,7 +37,8 @@ from ddpui.core.metric.exceptions import (
     MetricDeleteBlockedError,
     MetricPermissionError,
 )
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
+from ddpui.core.sharing.access_resolver import accessible_filter
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ class MetricService:
     @staticmethod
     def list_metrics(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
@@ -72,6 +74,9 @@ class MetricService:
 
         if table_name:
             query &= Q(table_name=table_name)
+
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "metric")
 
         queryset = (
             Metric.objects.filter(query).select_related("created_by__user").order_by("-updated_at")

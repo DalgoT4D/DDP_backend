@@ -24,6 +24,7 @@ from ddpui.core.kpi.kpi_service import (
     KPIPermissionError,
 )
 from ddpui.core.metric.metric_service import MetricNotFoundError
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 import json
@@ -61,6 +62,7 @@ def list_kpis(
 
     kpis, total = KPIService.list_kpis(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -113,6 +115,9 @@ def get_kpi(request, kpi_id: int):
         kpi = KPIService.get_kpi(kpi_id, orguser.org)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
+
+    if effective_permission(orguser, "kpi", kpi) is None:
+        raise HttpError(403, "You do not have access to this KPI")
 
     return KPIService.kpi_to_response(kpi)
 

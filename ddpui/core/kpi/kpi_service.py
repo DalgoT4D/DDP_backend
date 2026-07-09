@@ -18,6 +18,8 @@ from ddpui.core.charts.charts_service import (
 )
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.core.metric.metric_service import MetricService
+from ddpui.core.ownership import is_admin_or_super_admin
+from ddpui.core.sharing.access_resolver import accessible_filter
 from ddpui.services.dashboard_service import DashboardService
 from ddpui.schemas.kpi_schema import (
     KPICreate,
@@ -182,6 +184,7 @@ class KPIService:
     @staticmethod
     def list_kpis(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
@@ -196,6 +199,9 @@ class KPIService:
             query &= Q(program_tags__contains=[program_tag])
         if metric_type:
             query &= Q(metric_type_tag=metric_type)
+
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "kpi")
 
         queryset = (
             KPI.objects.filter(query)

@@ -17,7 +17,8 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
+from ddpui.core.sharing.access_resolver import accessible_filter
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
@@ -272,6 +273,7 @@ class DashboardService:
     @staticmethod
     def list_dashboards(
         org: Org,
+        orguser: OrgUser,
         dashboard_type: Optional[str] = None,
         search: Optional[str] = None,
         is_published: Optional[bool] = None,
@@ -280,6 +282,9 @@ class DashboardService:
 
         Args:
             org: The organization
+            orguser: The viewer, used to scope results to what Resource
+                Sharing admits (general access, grants, ownership) — admins
+                see everything in-org, unrestricted.
             dashboard_type: Optional filter by dashboard type
             search: Optional search term for title/description
             is_published: Optional filter by published status
@@ -297,6 +302,9 @@ class DashboardService:
 
         if is_published is not None:
             query &= Q(is_published=is_published)
+
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "dashboard")
 
         return list(Dashboard.objects.filter(query).order_by("-updated_at"))
 

@@ -17,6 +17,7 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -66,6 +67,7 @@ def list_dashboards(
 
     dashboards = DashboardService.list_dashboards(
         org=orguser.org,
+        orguser=orguser,
         dashboard_type=dashboard_type,
         search=search,
         is_published=is_published,
@@ -84,6 +86,9 @@ def get_dashboard(request, dashboard_id: int):
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
+
+    if effective_permission(orguser, "dashboard", dashboard) is None:
+        raise HttpError(403, "You do not have access to this dashboard")
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 

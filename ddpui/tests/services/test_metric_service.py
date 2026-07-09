@@ -347,25 +347,27 @@ class TestMetricCRUD:
         with pytest.raises(MetricNotFoundError):
             MetricService.get_metric(sample_metric.id, other_org)
 
-    def test_list_metrics(self, org, sample_metric, seed_db):
-        metrics, total = MetricService.list_metrics(org)
+    def test_list_metrics(self, orguser, org, sample_metric, seed_db):
+        metrics, total = MetricService.list_metrics(org, orguser=orguser)
         assert total >= 1
         assert any(m.id == sample_metric.id for m in metrics)
 
-    def test_list_metrics_search(self, org, sample_metric, seed_db):
-        metrics, total = MetricService.list_metrics(org, search="Test")
+    def test_list_metrics_search(self, orguser, org, sample_metric, seed_db):
+        metrics, total = MetricService.list_metrics(org, orguser=orguser, search="Test")
         assert total >= 1
 
-        metrics, total = MetricService.list_metrics(org, search="nonexistent_xyz")
+        metrics, total = MetricService.list_metrics(org, orguser=orguser, search="nonexistent_xyz")
         assert total == 0
 
-    def test_list_metrics_filter_by_dataset(self, org, sample_metric, seed_db):
+    def test_list_metrics_filter_by_dataset(self, orguser, org, sample_metric, seed_db):
         metrics, total = MetricService.list_metrics(
-            org, schema_name="public", table_name="beneficiaries"
+            org, orguser=orguser, schema_name="public", table_name="beneficiaries"
         )
         assert total >= 1
 
-        metrics, total = MetricService.list_metrics(org, schema_name="other_schema")
+        metrics, total = MetricService.list_metrics(
+            org, orguser=orguser, schema_name="other_schema"
+        )
         assert total == 0
 
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")

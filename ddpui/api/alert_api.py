@@ -14,6 +14,7 @@ from ddpui.core.alerts.exceptions import (
     AlertPermissionError,
     AlertValidationError,
 )
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.alert_schema import (
@@ -206,6 +207,7 @@ def list_alerts(
 
     alerts, total = AlertService.list_alerts(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -266,6 +268,8 @@ def get_alert(request, alert_id: int):
         alert = AlertService.get_alert(alert_id, orguser.org)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+    if effective_permission(orguser, "alert", alert) is None:
+        raise HttpError(403, "You do not have access to this alert")
     return _build_alert_response(alert)
 
 
