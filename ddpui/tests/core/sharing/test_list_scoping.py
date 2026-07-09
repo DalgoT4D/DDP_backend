@@ -469,3 +469,24 @@ class TestKPIListScoping:
 
         with django_assert_num_queries(2):
             KPIService.list_kpis(org=org, orguser=member)
+
+
+class TestKPISummaryScoping:
+    def test_member_sees_summaries_only_for_admitted_kpis(self, org, member, analyst):
+        private_hidden = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE, name="s-private")
+        all_users_visible = _kpi_with_metric(org, analyst, GeneralAudience.ALL_USERS, name="s-all")
+
+        results = KPIService.get_kpi_summary(org, member)
+        visible_ids = {r["id"] for r in results}
+
+        assert visible_ids == {all_users_visible.id}
+        assert private_hidden.id not in visible_ids
+
+    def test_admin_sees_all_summaries(self, org, admin, member):
+        k1 = _kpi_with_metric(org, member, GeneralAudience.PRIVATE, name="s-admin-private")
+        k2 = _kpi_with_metric(org, member, GeneralAudience.ALL_USERS, name="s-admin-all")
+
+        results = KPIService.get_kpi_summary(org, admin)
+        visible_ids = {r["id"] for r in results}
+
+        assert visible_ids == {k1.id, k2.id}

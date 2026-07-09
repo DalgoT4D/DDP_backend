@@ -345,10 +345,14 @@ class KPIService:
         return True
 
     @staticmethod
-    def get_kpi_summary(org: Org) -> List[dict]:
+    def get_kpi_summary(org: Org, orguser: OrgUser) -> List[dict]:
         """Batch compute all KPIs with current values + RAG for the KPI page."""
+        query = Q(org=org)
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "kpi")
+
         kpis = (
-            KPI.objects.filter(org=org)
+            KPI.objects.filter(query)
             .select_related("metric__created_by__user", "created_by__user")
             .order_by("display_order", "-updated_at")
         )

@@ -87,7 +87,7 @@ def list_kpis(
 def get_kpi_summary(request):
     """Batch compute all KPIs with current values + RAG for the KPI page."""
     orguser: OrgUser = request.orguser
-    return KPIService.get_kpi_summary(orguser.org)
+    return KPIService.get_kpi_summary(orguser.org, orguser)
 
 
 @kpi_router.post("/", response=KPIResponse)

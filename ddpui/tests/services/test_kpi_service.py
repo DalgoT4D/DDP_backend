@@ -436,8 +436,8 @@ class TestKPICRUD:
 
 
 class TestKPISummary:
-    def test_summary_no_warehouse(self, org, sample_kpi, seed_db):
-        results = KPIService.get_kpi_summary(org)
+    def test_summary_no_warehouse(self, org, orguser, sample_kpi, seed_db):
+        results = KPIService.get_kpi_summary(org, orguser)
         assert len(results) >= 1
         item = next(r for r in results if r["id"] == sample_kpi.id)
         assert item["current_value"] is None
@@ -453,7 +453,7 @@ class TestKPISummary:
         ]
         OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
 
-        results = KPIService.get_kpi_summary(org)
+        results = KPIService.get_kpi_summary(org, orguser)
         item = next(r for r in results if r["id"] == sample_kpi.id)
         assert item["current_value"] == 900.0
         assert item["rag_status"] == "amber"  # 900/1000 = 90%
