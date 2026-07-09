@@ -174,6 +174,9 @@ def start_turn_trace(
         return None
     try:
         trace = client.trace(
+            # deterministic id: the feedback endpoint and the eval runner
+            # address the trace by request_uuid without storing a second id
+            id=str(request_uuid),
             name="chat_with_data_turn",
             session_id=str(session.id),
             user_id=str(orguser.id),

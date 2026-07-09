@@ -89,3 +89,33 @@ def test_handler_never_raises_on_malformed_events():
     handler.on_llm_end(LLMResult(generations=[]), run_id=uuid.uuid4())  # unknown run
     handler.on_tool_end("out", run_id=uuid.uuid4())  # unknown run
     handler.on_tool_error(RuntimeError("x"), run_id=uuid.uuid4())  # unknown run
+
+
+def test_trace_id_is_the_request_uuid(monkeypatch):
+    """The trace id must be deterministic (= request_uuid) so later actors —
+    the feedback endpoint, the eval runner's item.link() — can address the
+    trace without storing a separate id."""
+    from types import SimpleNamespace
+
+    captured = {}
+
+    class StubClient:
+        def trace(self, **kwargs):
+            captured.update(kwargs)
+            return StubTrace()
+
+    monkeypatch.setattr(observability, "_client", StubClient())
+    monkeypatch.setattr(observability, "_client_initialized", True)
+
+    request_uuid = uuid.uuid4()
+    handler = observability.start_turn_trace(
+        session=SimpleNamespace(id=7),
+        orguser=SimpleNamespace(id=3),
+        context=SimpleNamespace(org_slug="ngo", dialect="postgres"),
+        question="how many surveys?",
+        request_uuid=request_uuid,
+        model_name="claude-sonnet-5",
+    )
+
+    assert handler is not None
+    assert captured["id"] == str(request_uuid)
