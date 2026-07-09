@@ -5,6 +5,7 @@ from django.db import models
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
 
 
 class AlertType(models.TextChoices):
@@ -86,8 +87,21 @@ class Alert(models.Model):
     is_active = models.BooleanField(default=True)
     last_evaluated_at = models.DateTimeField(null=True, blank=True)  # UTC
 
+    # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
+    general_audience = models.CharField(
+        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    )
+    general_level = models.CharField(
+        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    )
+
     # Audit
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="alerts_created")
+    created_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="alerts_created"
+    )
+    owner = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="owned_%(class)ss"
+    )
     last_modified_by = models.ForeignKey(
         OrgUser,
         on_delete=models.SET_NULL,

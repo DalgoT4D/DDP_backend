@@ -373,6 +373,37 @@ def test_chart_cascade_delete_on_org_delete(authuser, seed_db):
     assert not Chart.objects.filter(id=chart_id).exists()
 
 
+def test_chart_survives_creator_deletion(authuser, org, seed_db):
+    """Deleting the OrgUser who created a Chart must not delete the Chart
+    (created_by flipped CASCADE -> SET_NULL, Resource Sharing Task 1).
+    """
+    creator = OrgUser.objects.create(
+        user=authuser,
+        org=org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+
+    chart = Chart.objects.create(
+        title="Survives Creator Deletion",
+        chart_type="bar",
+        schema_name="public",
+        table_name="test",
+        extra_config={},
+        created_by=creator,
+        org=org,
+    )
+    chart_id = chart.id
+    creator_id = creator.id
+
+    OrgUser.objects.get(id=creator_id).delete()
+
+    assert Chart.objects.filter(id=chart_id).exists()
+    chart.refresh_from_db()
+    assert chart.created_by_id is None
+
+    chart.delete()
+
+
 # ================================================================================
 # Test Chart Model Queries
 # ================================================================================

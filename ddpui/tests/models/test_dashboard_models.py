@@ -176,6 +176,9 @@ def test_dashboard_create_with_defaults(orguser, org, seed_db):
     assert dashboard.is_public is False
     assert dashboard.public_access_count == 0
     assert dashboard.tabs == []
+    assert dashboard.general_audience == "all_users"
+    assert dashboard.general_level == "view"
+    assert dashboard.owner is None
 
     dashboard.delete()
 
@@ -337,6 +340,30 @@ def test_dashboard_created_by_relationship(orguser, org, seed_db):
 
     assert dashboard.created_by == orguser
     assert dashboard.created_by.user.email == "dashmodeluser@test.com"
+
+    dashboard.delete()
+
+
+def test_dashboard_survives_creator_deletion(orguser, org, seed_db):
+    """Deleting the OrgUser who created a Dashboard must not delete the
+    Dashboard (created_by flipped CASCADE -> SET_NULL, Resource Sharing Task 1).
+    """
+    dashboard = Dashboard.objects.create(
+        title="Survives Creator Deletion",
+        created_by=orguser,
+        org=org,
+    )
+    dashboard_id = dashboard.id
+    orguser_id = orguser.id
+
+    # Delete via a separate row lookup so the `orguser` fixture's own
+    # teardown `.delete()` call (a no-op on an already-gone row) doesn't
+    # blow up on a pk cleared by this delete.
+    OrgUser.objects.get(id=orguser_id).delete()
+
+    assert Dashboard.objects.filter(id=dashboard_id).exists()
+    dashboard.refresh_from_db()
+    assert dashboard.created_by_id is None
 
     dashboard.delete()
 

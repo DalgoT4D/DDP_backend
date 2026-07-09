@@ -3,6 +3,7 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
 
 
 AGGREGATION_CHOICES = [
@@ -57,10 +58,21 @@ class Metric(models.Model):
     # Validated on save by executing a test query against the warehouse
     column_expression = models.TextField(null=True, blank=True)
 
+    # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
+    general_audience = models.CharField(
+        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    )
+    general_level = models.CharField(
+        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    )
+
     # Org scoping + ownership (same pattern as Chart)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_by = models.ForeignKey(
-        OrgUser, on_delete=models.CASCADE, related_name="metrics_created"
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="metrics_created"
+    )
+    owner = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="owned_%(class)ss"
     )
     last_modified_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="metrics_modified"
@@ -117,9 +129,22 @@ class KPI(models.Model):
     # Display order on KPI page
     display_order = models.IntegerField(default=0)
 
+    # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
+    general_audience = models.CharField(
+        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    )
+    general_level = models.CharField(
+        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    )
+
     # Org scoping + ownership
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="kpis_created")
+    created_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="kpis_created"
+    )
+    owner = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="owned_%(class)ss"
+    )
     last_modified_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="kpis_modified"
     )

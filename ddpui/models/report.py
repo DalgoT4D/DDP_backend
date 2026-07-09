@@ -3,6 +3,7 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
 
 
 class ReportSnapshot(models.Model):
@@ -61,12 +62,27 @@ class ReportSnapshot(models.Model):
     public_access_count = models.IntegerField(default=0)
     last_public_accessed = models.DateTimeField(null=True, blank=True)
 
+    # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
+    general_audience = models.CharField(
+        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    )
+    general_level = models.CharField(
+        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    )
+
     # Metadata
     created_by = models.ForeignKey(
         OrgUser,
         on_delete=models.SET_NULL,
         null=True,
         help_text="User who created this snapshot",
+    )
+    owner = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="owned_%(class)ss",
+        help_text="Current owner of this snapshot for delete/transfer purposes",
     )
     last_modified_by = models.ForeignKey(
         OrgUser,

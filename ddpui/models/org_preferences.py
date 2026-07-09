@@ -1,6 +1,7 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
 from django.utils import timezone
 
 
@@ -19,6 +20,16 @@ class OrgPreferences(models.Model):
     )
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
+
+    # Resource Sharing — org-level defaults for newly created shareable resources.
+    default_general_audience = models.CharField(
+        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    )
+    default_general_level = models.CharField(
+        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    )
+    allow_public_sharing = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
