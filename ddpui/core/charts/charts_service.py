@@ -319,6 +319,23 @@ def convert_value(value: Any, preserve_none: bool = False) -> Any:
     return value
 
 
+def _make_unique_alias(alias: str, used_aliases: set) -> str:
+    """Return *alias* if it is not yet taken, otherwise append ``_1``, ``_2``, … until unique.
+
+    The chosen alias is added to *used_aliases* in-place so subsequent
+    calls see it as taken.
+    """
+    if alias not in used_aliases:
+        used_aliases.add(alias)
+        return alias
+    counter = 1
+    while f"{alias}_{counter}" in used_aliases:
+        counter += 1
+    unique = f"{alias}_{counter}"
+    used_aliases.add(unique)
+    return unique
+
+
 def build_multi_metric_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -339,10 +356,19 @@ def build_multi_metric_query(
 
     warehouse_type = org_warehouse.wtype.lower() if org_warehouse else None
 
+    # Track all labels used in the SELECT clause to prevent duplicates.
+    used_aliases: set[str] = set()
+
     for dim_col_str in dimensions:
         if not dim_col_str or not dim_col_str.strip():
             logger.warning(f"Skipping empty dimension column: {dim_col_str}")
             continue
+
+        # Skip duplicate dimension columns
+        if dim_col_str in used_aliases:
+            logger.warning(f"Skipping duplicate dimension column: {dim_col_str}")
+            continue
+        used_aliases.add(dim_col_str)
 
         dimension_col_clause = column(dim_col_str)
         is_primary_dimension = dim_col_str == payload.dimension_col
@@ -369,6 +395,8 @@ def build_multi_metric_query(
             # Expression path: inline raw SQL expression
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
+                alias = _make_unique_alias(alias, used_aliases)
+                metric.alias = alias
                 query_builder.add_column(literal_column(metric.column_expression).label(alias))
                 continue
 
@@ -388,6 +416,12 @@ def build_multi_metric_query(
                     raise ValueError(f"Column is required for {metric.aggregation} aggregation")
 
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+            # Ensure the alias is unique across all SELECT labels
+            unique_alias = _make_unique_alias(alias, used_aliases)
+            if unique_alias != alias:
+                metric.alias = unique_alias
+                alias = unique_alias
 
             # Note: We don't validate aliases because they can be human-readable display names
             # with spaces and special characters (e.g., "Total Count", "Average Price")
@@ -453,9 +487,13 @@ def build_chart_query(
 
             if not payload.metrics or len(payload.metrics) == 0:
                 # Non-aggregated query: just select dimension columns
+                seen_dims: set[str] = set()
                 for dim_col in dimensions:
                     if not dim_col or not dim_col.strip():
                         continue
+                    if dim_col in seen_dims:
+                        continue
+                    seen_dims.add(dim_col)
                     dim_expr = column(dim_col)
                     # Always label to ensure consistent key access
                     dim_expr = dim_expr.label(dim_col)
