@@ -201,7 +201,7 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     async def fake_get_checkpointer():
         return saver
 
-    def fake_context(orguser_arg):
+    def fake_context(orguser_arg, session=None):
         return RunContext(
             org_id=orguser_arg.org.id,
             org_slug=orguser_arg.org.slug,

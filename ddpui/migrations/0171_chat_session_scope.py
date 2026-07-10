@@ -19,4 +19,13 @@ class Migration(migrations.Migration):
             name="scope_type",
             field=models.CharField(default="org", max_length=20),
         ),
+        # Django keeps defaults in Python, not the database. Persist this one at
+        # the DB level so inserts from code that predates the column (other
+        # branches sharing a dev DB, mid-deploy old processes) don't violate
+        # NOT NULL — the exact failure mode we hit with resource-sharing's
+        # general_audience column.
+        migrations.RunSQL(
+            sql="ALTER TABLE ddpui_chatwithdatasession ALTER COLUMN scope_type SET DEFAULT 'org'",
+            reverse_sql="ALTER TABLE ddpui_chatwithdatasession ALTER COLUMN scope_type DROP DEFAULT",
+        ),
     ]
