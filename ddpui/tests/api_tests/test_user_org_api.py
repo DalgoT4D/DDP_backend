@@ -2,7 +2,7 @@ import uuid
 import os
 import time
 import django
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.core.management import call_command
 
 from unittest.mock import Mock, patch, MagicMock
@@ -893,6 +893,54 @@ def test_post_organization_user_accept_invite_v1_secondaccount(orguser):
         == 1
     )
     assert User.objects.filter(email="invited_email").count() == 1
+
+
+def test_post_organization_user_accept_invite_v1_expired(orguser, seed_db):
+    """failing test, invitation has expired"""
+    request = mock_request(orguser)
+    payload = AcceptInvitationSchema(invite_code="expired-code", password="password")
+
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    Invitation.objects.create(
+        invited_email="expired_email",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="expired-code",
+        invited_new_role=guest_role,
+        expires_at=timezone.as_utc(datetime.utcnow()) - timedelta(days=1),
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        post_organization_user_accept_invite_v1(request, payload)
+
+    assert str(excinfo.value) == "this invitation has expired"
+    assert OrgUser.objects.filter(user__email="expired_email").count() == 0
+    # the expired invitation is left for the cleanup task, not deleted inline
+    assert Invitation.objects.filter(invite_code="expired-code").exists()
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+def test_post_resend_invitation_refreshes_expiry_and_unblocks_accept(mock_awsses, orguser, seed_db):
+    """resend refreshes `expires_at`; a previously-expired invite can then be accepted"""
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    invitation = Invitation.objects.create(
+        invited_email="resend_email",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="resend-code",
+        invited_new_role=guest_role,
+        expires_at=timezone.as_utc(datetime.utcnow()) - timedelta(days=1),
+    )
+
+    post_resend_invitation(mock_request(orguser), invitation.id)
+
+    invitation.refresh_from_db()
+    assert invitation.expires_at > timezone.as_utc(datetime.utcnow())
+
+    payload = AcceptInvitationSchema(invite_code="resend-code", password="password")
+    response = post_organization_user_accept_invite_v1(mock_request(orguser), payload)
+    assert response.email == "resend_email"
+    assert OrgUser.objects.filter(user__email="resend_email", new_role=guest_role).count() == 1
 
 
 # ================================================================================

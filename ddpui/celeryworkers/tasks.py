@@ -16,6 +16,7 @@ from celery.schedules import crontab
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
 from ddpui.celeryworkers.alert_tasks import dispatch_due_alerts
+from ddpui.core import orguserfunctions
 from ddpui.settings import PRODUCTION
 
 
@@ -1249,6 +1250,16 @@ def clear_stuck_locks():
     return processed_count
 
 
+@app.task(bind=False)
+def cleanup_expired_invitations():
+    """Delete expired `Invitation` rows and their pending
+    `ResourceShare`/`UserGroupMember` rows (Task 9 / plan Sec 4.6 invites)."""
+    logger.info("Starting periodic cleanup of expired invitations")
+    counts = orguserfunctions.cleanup_expired_invitations()
+    logger.info(f"cleanup_expired_invitations done: {counts}")
+    return counts
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1301,4 +1312,11 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour=0),
         sync_airbyte_job_stats_for_all_connections.s(last_n_days=2),
         name="sync airbyte job stats for all connections",
+    )
+
+    # delete expired invitations + their pending shares/group-memberships; daily at midnight
+    sender.add_periodic_task(
+        crontab(minute=0, hour=0),
+        cleanup_expired_invitations.s(),
+        name="cleanup expired invitations",
     )

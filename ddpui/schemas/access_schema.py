@@ -77,10 +77,19 @@ class GrantCreate(Schema):
 
     Accepts principal_type "user" or "group" (a same-org id in both cases).
     "audience" is deferred by design and always rejected with 400.
+
+    For principal_type="user", the sharing modal may address the principal
+    either by `principal_id` (a same-org OrgUser) or by `email` (Task 9 —
+    the share-flow invite): an `email` belonging to an existing OrgUser
+    grants instantly; an unknown `email` invites them (as a Member) and
+    creates a pending grant that activates when they accept. Exactly one of
+    `principal_id`/`email` must be set; `email` is invalid for
+    principal_type="group".
     """
 
     principal_type: str
-    principal_id: int
+    principal_id: Optional[int] = None
+    email: Optional[str] = None
     permission: str
 
 

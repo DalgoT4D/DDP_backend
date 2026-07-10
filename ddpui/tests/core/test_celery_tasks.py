@@ -27,7 +27,14 @@ from ddpui.celeryworkers.tasks import (
     detect_schema_changes_for_org,
     get_connection_catalog_task,
     clear_stuck_locks,
+    cleanup_expired_invitations,
 )
+from ddpui.models.org_user import Invitation
+from ddpui.models.resource_share import ResourceShare
+from ddpui.models.user_group import UserGroup, UserGroupMember, UserGroupMemberStatus
+from ddpui.models.role_based_access import Role
+from ddpui.auth import GUEST_ROLE
+from django.utils import timezone as django_timezone
 from ddpui.models.tasks import TaskProgressStatus
 from ddpui.core.dbtautomation_service import sync_sources_for_warehouse_v2
 from ddpui.utils.taskprogress import TaskProgress
@@ -816,3 +823,70 @@ def test_clear_stuck_locks_no_time_fields(orguser):
         assert result == 0  # Should not process without time reference
         assert TaskLock.objects.count() == 1  # Lock should still exist
         mock_webhook.assert_not_called()
+
+
+# ================================================================================
+# cleanup_expired_invitations (Task 9)
+# ================================================================================
+
+
+def test_cleanup_expired_invitations(orguser, seed_db):
+    """Stale invitation + its pending grant + pending group row are all
+    removed; a fresh (unexpired) invitation and its pending rows are
+    untouched."""
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+
+    stale_invite = Invitation.objects.create(
+        invited_email="stale@test.com",
+        invited_by=orguser,
+        invited_on=django_timezone.now(),
+        invite_code="stale-code",
+        invited_new_role=guest_role,
+        expires_at=django_timezone.now() - timedelta(days=1),
+    )
+    stale_share = ResourceShare.objects.create(
+        org=orguser.org,
+        resource_type="dashboard",
+        resource_id="1",
+        principal_type="user",
+        principal_id=None,
+        permission="view",
+        status="pending",
+        pending_email="stale@test.com",
+    )
+    group = UserGroup.objects.create(org=orguser.org, name="Cleanup Test Group", created_by=orguser)
+    stale_member = UserGroupMember.objects.create(
+        group=group, pending_email="stale@test.com", status=UserGroupMemberStatus.PENDING
+    )
+
+    fresh_invite = Invitation.objects.create(
+        invited_email="fresh@test.com",
+        invited_by=orguser,
+        invited_on=django_timezone.now(),
+        invite_code="fresh-code",
+        invited_new_role=guest_role,
+    )
+    fresh_share = ResourceShare.objects.create(
+        org=orguser.org,
+        resource_type="dashboard",
+        resource_id="1",
+        principal_type="user",
+        principal_id=None,
+        permission="view",
+        status="pending",
+        pending_email="fresh@test.com",
+    )
+    fresh_member = UserGroupMember.objects.create(
+        group=group, pending_email="fresh@test.com", status=UserGroupMemberStatus.PENDING
+    )
+
+    counts = cleanup_expired_invitations()
+
+    assert counts == {"invitations": 1, "resource_shares": 1, "group_memberships": 1}
+    assert not Invitation.objects.filter(id=stale_invite.id).exists()
+    assert not ResourceShare.objects.filter(id=stale_share.id).exists()
+    assert not UserGroupMember.objects.filter(id=stale_member.id).exists()
+
+    assert Invitation.objects.filter(id=fresh_invite.id).exists()
+    assert ResourceShare.objects.filter(id=fresh_share.id).exists()
+    assert UserGroupMember.objects.filter(id=fresh_member.id).exists()

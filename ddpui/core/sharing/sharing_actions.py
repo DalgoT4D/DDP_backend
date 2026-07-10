@@ -18,6 +18,8 @@ from typing import List, Optional
 from django.db import transaction
 from django.db.models import Count, Q
 
+from ddpui.auth import MEMBER_ROLE
+from ddpui.core import orguserfunctions
 from ddpui.core.sharing.access_resolver import PERMISSION_RANK, effective_permission
 from ddpui.core.sharing.exceptions import (
     GrantNotFoundError,
@@ -26,8 +28,9 @@ from ddpui.core.sharing.exceptions import (
 )
 from ddpui.core.sharing.shareable_types import ShareableType, get_resource_type
 from ddpui.models.general_access import GeneralAudience, GeneralLevel
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import NewInvitationSchema, OrgUser
 from ddpui.models.resource_share import ResourceShare
+from ddpui.models.role_based_access import Role
 from ddpui.models.user_group import UserGroup, UserGroupMemberStatus
 from ddpui.schemas.access_schema import (
     AccessOverviewResponse,
@@ -163,10 +166,78 @@ def get_access_overview(viewer: OrgUser, rtype: str, resource) -> AccessOverview
     )
 
 
+def _invite_and_create_pending_grant(
+    grantor: OrgUser, rtype: str, resource, email: str, permission: str
+) -> GrantOut:
+    """The share-flow invite (Task 9 / Part B): `email` isn't an OrgUser of
+    this org yet. Invite them through the same `invite_user_v1` machinery
+    the standalone invite endpoint uses (so email sending etc. stays
+    consistent), always as a **Member** -- Part C's explicit "non-Admin
+    invites Member only" cap, applied uniformly here (this path never
+    exposes a role choice, so it never re-opens the `inviter.level >=
+    invitee.level` loophole `invite_user_v1` itself still has).
+
+    `invite_user_v1` short-circuits to an *instant* OrgUser when `email`
+    already has a platform account (even one outside this org) -- no
+    `Invitation` is created on that path, so a pending grant would never
+    activate. Match that case and grant instantly instead; otherwise the
+    grant is `status="pending"`, matched later by
+    `orguserfunctions.activate_pending_shares_and_memberships` on accept.
+    """
+    member_role = Role.objects.filter(slug=MEMBER_ROLE).first()
+    if member_role is None:
+        raise SharingValidationError("the Member role is not configured for this org")
+
+    _, error = orguserfunctions.invite_user_v1(
+        grantor, NewInvitationSchema(invited_email=email, invited_role_uuid=member_role.uuid)
+    )
+    if error:
+        raise SharingValidationError(error)
+
+    instant_principal = (
+        OrgUser.objects.filter(org_id=grantor.org_id, user__email__iexact=email)
+        .select_related("user")
+        .first()
+    )
+    if instant_principal is not None:
+        share, _ = ResourceShare.objects.update_or_create(
+            org_id=grantor.org_id,
+            resource_type=rtype,
+            resource_id=str(resource.pk),
+            principal_type="user",
+            principal_id=instant_principal.id,
+            defaults={
+                "permission": permission,
+                "status": "active",
+                "pending_email": None,
+                "created_by": grantor,
+            },
+        )
+        return _grant_out(share, {instant_principal.id: instant_principal}, {})
+
+    share, _ = ResourceShare.objects.update_or_create(
+        org_id=grantor.org_id,
+        resource_type=rtype,
+        resource_id=str(resource.pk),
+        principal_type="user",
+        principal_id=None,
+        pending_email=email,
+        defaults={"permission": permission, "status": "pending", "created_by": grantor},
+    )
+    return _grant_out(share, {}, {})
+
+
 def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -> GrantOut:
     """Grant `payload.permission` on `resource` to a user or group principal.
     A duplicate (same principal, same resource) updates the existing row
-    instead of stacking a second one."""
+    instead of stacking a second one.
+
+    `principal_type="user"` accepts either `principal_id` (a same-org
+    OrgUser) or `email` (Task 9 share-flow invite): an email matching an
+    existing OrgUser in this org grants instantly (activation path 2 -- it
+    never goes through `pending`); an unknown email invites them and
+    creates a pending grant (`_invite_and_create_pending_grant`).
+    """
     entry = _entry_for(rtype)
     if not entry.grants:
         raise SharingValidationError(f"{rtype} does not support per-user grants")
@@ -179,9 +250,46 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
     if payload.permission not in GeneralLevel.values:
         raise SharingValidationError(f"invalid permission '{payload.permission}'")
 
-    orgusers_by_id: dict = {}
-    groups_by_id: dict = {}
-    if payload.principal_type == "user":
+    if payload.principal_type == "group" and payload.email:
+        raise SharingValidationError("email is only valid for principal_type='user'")
+
+    # Re-share cap: a grantor may grant at most their own effective level.
+    # Checked before any invite/pending row is created -- an over-cap
+    # request must not send an email or create an Invitation.
+    grantor_level = effective_permission(grantor, rtype, resource)
+    if PERMISSION_RANK.get(payload.permission, 0) > PERMISSION_RANK.get(grantor_level or "", 0):
+        raise SharingValidationError(
+            "you cannot grant a higher level of access than you have yourself"
+        )
+
+    if payload.principal_type == "group":
+        if payload.principal_id is None:
+            raise SharingValidationError("principal_id is required for group grants")
+        principal = UserGroup.objects.filter(id=payload.principal_id, org_id=grantor.org_id).first()
+        if principal is None:
+            raise PrincipalNotFoundError("group not found in this organization")
+        share, _ = ResourceShare.objects.update_or_create(
+            org_id=grantor.org_id,
+            resource_type=rtype,
+            resource_id=str(resource.pk),
+            principal_type="group",
+            principal_id=principal.id,
+            defaults={
+                "permission": payload.permission,
+                "status": "active",
+                "pending_email": None,
+                "created_by": grantor,
+            },
+        )
+        return _grant_out(share, {}, {principal.id: principal})
+
+    # principal_type == "user"
+    if payload.principal_id is not None and payload.email:
+        raise SharingValidationError("provide only one of principal_id or email")
+    if payload.principal_id is None and not payload.email:
+        raise SharingValidationError("principal_id or email is required")
+
+    if payload.principal_id is not None:
         principal = (
             OrgUser.objects.filter(id=payload.principal_id, org_id=grantor.org_id)
             .select_related("user")
@@ -189,25 +297,23 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
         )
         if principal is None:
             raise PrincipalNotFoundError("user not found in this organization")
-        orgusers_by_id = {principal.id: principal}
     else:
-        principal = UserGroup.objects.filter(id=payload.principal_id, org_id=grantor.org_id).first()
-        if principal is None:
-            raise PrincipalNotFoundError("group not found in this organization")
-        groups_by_id = {principal.id: principal}
-
-    # Re-share cap: a grantor may grant at most their own effective level.
-    grantor_level = effective_permission(grantor, rtype, resource)
-    if PERMISSION_RANK.get(payload.permission, 0) > PERMISSION_RANK.get(grantor_level or "", 0):
-        raise SharingValidationError(
-            "you cannot grant a higher level of access than you have yourself"
+        email = payload.email.strip().lower()
+        principal = (
+            OrgUser.objects.filter(org_id=grantor.org_id, user__email__iexact=email)
+            .select_related("user")
+            .first()
         )
+        if principal is None:
+            return _invite_and_create_pending_grant(
+                grantor, rtype, resource, email, payload.permission
+            )
 
     share, _ = ResourceShare.objects.update_or_create(
         org_id=grantor.org_id,
         resource_type=rtype,
         resource_id=str(resource.pk),
-        principal_type=payload.principal_type,
+        principal_type="user",
         principal_id=principal.id,
         defaults={
             "permission": payload.permission,
@@ -216,7 +322,7 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
             "created_by": grantor,
         },
     )
-    return _grant_out(share, orgusers_by_id, groups_by_id)
+    return _grant_out(share, {principal.id: principal}, {})
 
 
 def remove_grant(orguser: OrgUser, rtype: str, resource, grant_id: int) -> None:

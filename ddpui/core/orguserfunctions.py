@@ -27,10 +27,13 @@ from ddpui.models.org_user import (
     UserAttributes,
     VerifyEmailSchema,
     OrgUserRole,
+    default_invitation_expiry,
 )
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
+from ddpui.models.resource_share import ResourceShare
 from ddpui.models.role_based_access import Role
+from ddpui.models.user_group import UserGroupMember, UserGroupMemberStatus
 from ddpui.utils import helpers, awsses, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
@@ -242,6 +245,8 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     ).first()
     if invitation:
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
+        invitation.expires_at = default_invitation_expiry()
+        invitation.save(update_fields=["invited_on", "expires_at", "updated_at"])
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         awsses.send_invite_user_email(
@@ -278,11 +283,48 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     return payload, None
 
 
+def activate_pending_shares_and_memberships(email: str, org, orguser: OrgUser) -> None:
+    """Flip Resource Sharing's pending rows for ``email`` in ``org`` to
+    active, now that ``orguser`` exists for that email (Task 9 / plan Sec
+    4.6 invites — the share-flow invite's activation path).
+
+    ``Invitation`` has no org FK, so callers match pending rows by
+    ``invited_by__org`` (passed in as ``org``) + email — never globally by
+    email alone, or an email invited to two orgs would cross-activate.
+    """
+    ResourceShare.objects.filter(
+        org=org,
+        status="pending",
+        principal_type="user",
+        pending_email__iexact=email,
+    ).update(status="active", principal_id=orguser.id, pending_email=None)
+
+    pending_members = UserGroupMember.objects.filter(
+        group__org=org,
+        status=UserGroupMemberStatus.PENDING,
+        pending_email__iexact=email,
+    )
+    for member in pending_members:
+        if UserGroupMember.objects.filter(group_id=member.group_id, orguser=orguser).exists():
+            # an active (group, orguser) row already exists (e.g. `add_member`'s
+            # `get_or_create` ran separately) -- converting this row too would
+            # violate the unique constraint, so drop the now-redundant pending row.
+            member.delete()
+        else:
+            member.orguser = orguser
+            member.pending_email = None
+            member.status = UserGroupMemberStatus.ACTIVE
+            member.save(update_fields=["orguser", "pending_email", "status", "updated_at"])
+
+
 def accept_invitation_v1(payload: AcceptInvitationSchema):
     """accept an invitation"""
     invitation = Invitation.objects.filter(invite_code=payload.invite_code).first()
     if invitation is None:
         return None, "invalid invite code"
+
+    if invitation.expires_at < django_timezone.now():
+        return None, "this invitation has expired"
 
     # we can have one auth user mapped to multiple orguser and hence multiple orgs
     # but there can only be one orguser per one org
@@ -314,6 +356,10 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             new_role=invitation.invited_new_role,
             work_domain=payload.work_domain,
         )
+
+    activate_pending_shares_and_memberships(
+        invitation.invited_email, invitation.invited_by.org, orguser
+    )
     invitation.delete()
     return from_orguser(orguser), None
 
@@ -368,6 +414,7 @@ def resend_invitation(invitation_id: str):
 
     if invitation:
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
+        invitation.expires_at = default_invitation_expiry()
         invitation.save()
         # trigger an email to the user
         frontend_url = os.getenv("FRONTEND_URL")
@@ -377,6 +424,47 @@ def resend_invitation(invitation_id: str):
         )
 
     return None, None
+
+
+def cleanup_expired_invitations() -> dict:
+    """Daily cleanup (Celery beat, Task 9): delete `Invitation` rows whose
+    `expires_at` has passed, plus any pending `ResourceShare` / pending
+    `UserGroupMember` rows the share-flow invite (Part B) created for that
+    email in that org.
+
+    `Invitation` has no org FK, so pending rows are matched by
+    `invited_by__org` + email, never by email alone -- the same email
+    invited to two orgs must not cross-cancel the other org's pending grant.
+    """
+    now = django_timezone.now()
+    expired = list(Invitation.objects.filter(expires_at__lt=now).select_related("invited_by__org"))
+
+    counts = {"invitations": 0, "resource_shares": 0, "group_memberships": 0}
+    for invitation in expired:
+        org = invitation.invited_by.org
+        email = invitation.invited_email
+
+        shares_deleted, _ = ResourceShare.objects.filter(
+            org=org,
+            status="pending",
+            principal_type="user",
+            pending_email__iexact=email,
+        ).delete()
+        members_deleted, _ = UserGroupMember.objects.filter(
+            group__org=org,
+            status=UserGroupMemberStatus.PENDING,
+            pending_email__iexact=email,
+        ).delete()
+        invitation.delete()
+
+        counts["invitations"] += 1
+        counts["resource_shares"] += shares_deleted
+        counts["group_memberships"] += members_deleted
+
+    if counts["invitations"]:
+        logger.info(f"cleanup_expired_invitations: {counts}")
+
+    return counts
 
 
 def request_reset_password(email: str, is_v2: bool = False):

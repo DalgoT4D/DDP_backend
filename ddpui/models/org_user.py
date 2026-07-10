@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 from django.utils import timezone
 from enum import IntEnum
@@ -148,6 +148,12 @@ class OrgUserResponse(Schema):
     has_seen_rbac_notice: bool = False
 
 
+def default_invitation_expiry():
+    """30 days from now — the default (and resend-refreshed) `Invitation.expires_at`
+    (Task 9 / plan Sec 4.6 invites)."""
+    return timezone.now() + timedelta(days=30)
+
+
 class Invitation(models.Model):
     """Invitation to join an org"""
 
@@ -156,6 +162,7 @@ class Invitation(models.Model):
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
     invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)
+    expires_at = models.DateTimeField(default=default_invitation_expiry)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
