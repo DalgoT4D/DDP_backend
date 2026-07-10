@@ -20,6 +20,8 @@ from ddpui.core.reports.exceptions import (
 )
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
+from ddpui.core.reports.summary_generator import SummaryGenerationError, generate_report_summary
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
@@ -188,6 +190,34 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
         )
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+
+
+@report_router.post("/{snapshot_id}/generate-summary/", response=ApiResponse[dict])
+@has_permission(["can_edit_dashboards"])
+def generate_snapshot_summary(request, snapshot_id: int):
+    """AI-draft an executive summary from the snapshot's chart data. Returns the
+    draft only — the user reviews/edits and saves via the existing PUT. Requires
+    the org's AI consent (llm_optin), same gate as Chat with Data."""
+    orguser: OrgUser = request.orguser
+
+    preferences = OrgPreferences.objects.filter(org=orguser.org).first()
+    if preferences is None or not preferences.llm_optin:
+        raise HttpError(403, "Your organization has not enabled AI features")
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+
+    try:
+        summary = generate_report_summary(snapshot)
+    except SummaryGenerationError as err:
+        raise HttpError(400, str(err)) from err
+    except Exception as e:
+        logger.error(f"Error generating report summary: {e}", exc_info=True)
+        raise HttpError(500, "Failed to generate summary") from e
+
+    return api_response(success=True, data={"summary": summary})
 
 
 @report_router.delete("/{snapshot_id}/", response=ApiResponse[SnapshotDeleteResponse])
