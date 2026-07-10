@@ -1079,3 +1079,103 @@ def test_put_switch_git_repo_error_general_exception(seed_db, orguser: OrgUser):
 
     # Cleanup
     orgdbt.delete()
+
+
+# ================================================================================
+# Audit Log Tests for M3 (dbt Events)
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+@patch.multiple("os.path", exists=Mock(return_value=True))
+def test_post_dbt_git_pull_creates_audit_log(mock_audit_log, seed_db, orguser: OrgUser):
+    """Test that git pull creates an audit log entry"""
+    request = mock_request(orguser)
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo",
+        project_dir="/test/dir",
+        dbt_venv="/test/venv",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ), patch("ddpui.api.dbt_api.GitManager") as mock_git_manager:
+        mock_git_manager.return_value.pull_changes.return_value = None
+        post_dbt_git_pull(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    # Git pull is logged as EXECUTE (pulling latest changes is an execution action)
+    assert call_kwargs["action"] == AuditLogAction.EXECUTE
+
+    # Cleanup
+    orgdbt.delete()
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+@patch("ddpui.api.dbt_api.OrgCleanupService")
+def test_dbt_delete_creates_audit_log(mock_cleanup, mock_audit_log, seed_db, orguser: OrgUser):
+    """Test that deleting dbt workspace creates an audit log entry"""
+    request = mock_request(orguser)
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo",
+        project_dir="/test/dir",
+        dbt_venv="/test/venv",
+    )
+    orgdbt_id = orgdbt.id
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    mock_cleanup_instance = Mock()
+    mock_cleanup.return_value = mock_cleanup_instance
+
+    dbt_delete(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == str(orgdbt_id)
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_put_switch_git_repo_creates_audit_log(mock_audit_log, seed_db, orguser: OrgUser):
+    """Test that switching git repo creates an audit log entry"""
+    request = mock_request(orguser)
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo",
+        project_dir="/test/dir",
+        dbt_venv="/test/venv",
+        gitrepo_access_token_secret="existing-secret",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo",
+        gitrepoAccessToken="ghp_newtoken123",
+    )
+
+    with patch(
+        "ddpui.api.dbt_api.dbt_service.switch_git_repository_v1",
+        return_value={"success": True},
+    ):
+        put_switch_git_repo(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+
+    # Cleanup
+    orgdbt.delete()

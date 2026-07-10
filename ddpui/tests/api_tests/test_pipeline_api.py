@@ -1377,3 +1377,93 @@ def test_put_prefect_dataflow_v1_passes_continue_on_sync_failure(orguser_transfo
     # cleanup
     DataflowOrgTask.objects.filter(dataflow=dataflow).delete()
     dataflow.delete()
+
+
+# ================================================================================
+# Audit Log Tests for M3 (Pipeline Events)
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"id": "new-deploy-id", "name": "test-deploy"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_creates_audit_log(mock_audit_log, orguser_transform_tasks, seed_db):
+    """Test that creating a pipeline creates an audit log entry"""
+    request = mock_request(orguser_transform_tasks)
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="audit-test-flow",
+        connections=[],
+        transformTasks=[],
+        cron="",
+    )
+
+    post_prefect_dataflow_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_transform_tasks.org
+    assert call_kwargs["orguser"] == orguser_transform_tasks
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_deployment_by_id=Mock(return_value=True),
+)
+def test_delete_prefect_dataflow_v1_creates_audit_log(mock_audit_log, orguser_transform_tasks, seed_db):
+    """Test that deleting a pipeline creates an audit log entry"""
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="delete-audit-test",
+        deployment_name="prefect-delete-audit",
+        deployment_id="delete-audit-dep-id",
+        dataflow_type="orchestrate",
+    )
+
+    delete_prefect_dataflow_v1(request, "delete-audit-dep-id")
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_transform_tasks.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == "delete-audit-dep-id"
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    set_deployment_schedule=Mock(return_value=True),
+)
+def test_post_deployment_set_schedule_creates_audit_log(mock_audit_log, orguser_transform_tasks, seed_db):
+    """Test that toggling pipeline schedule creates an audit log entry"""
+    request = mock_request(orguser_transform_tasks)
+    org = orguser_transform_tasks.org
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org,
+        name="schedule-audit-test",
+        deployment_name="schedule-test-deploy",
+        deployment_id="schedule-audit-dep-id",
+    )
+
+    post_deployment_set_schedule(request, "schedule-audit-dep-id", "active")
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == "schedule-audit-dep-id"
+
+    dataflow.delete()

@@ -444,6 +444,17 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
     if error:
         raise HttpError(400, error)
 
+    # Get the created warehouse for audit log
+    warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=warehouse.airbyte_destination_id if warehouse else "",
+        resource_name=payload.wtype,
+        action=AuditLogAction.CREATE,
+    )
+
     return {"success": 1}
 
 
@@ -755,11 +766,25 @@ def delete_organization_warehouses_v1(request):
     if org.base_plan() == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
+    # Capture warehouse info before deletion for audit log
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    warehouse_type = warehouse.wtype if warehouse else ""
+    warehouse_destination_id = warehouse.airbyte_destination_id if warehouse else ""
+
     cleanup_src = OrgCleanupService(org, dry_run=False)
 
     cleanup_src.delete_orchestrate_pipelines()
     cleanup_src.delete_warehouse()
     cleanup_src.delete_transformation_layer()
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=warehouse_destination_id or str(org.id),
+        resource_name=warehouse_type,
+        action=AuditLogAction.DELETE,
+    )
 
     return {"success": 1}
 

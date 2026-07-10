@@ -6,6 +6,8 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
 )
@@ -77,6 +79,15 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
             logger.warning(
                 f"Failed to create git pull OrgTask for org {org.slug}: {str(e)}. Git operation was successful."
             )
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            resource_name=org.slug,
+            action=AuditLogAction.UPDATE,
+        )
 
         return result
     except Exception as e:
@@ -156,13 +167,24 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
                 "commit_result": commit_result,
             }
 
-    return {
+    result = {
         "success": True,
         "message": "Changes published successfully",
         "committed": committed,
         "pushed": pushed,
         "commit_result": commit_result,
     }
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        resource_name=org.slug,
+        action=AuditLogAction.UPDATE,
+    )
+
+    return result
 
 
 @dbt_router.get("/git_status/", response=GitStatusSummary)
@@ -209,7 +231,18 @@ def dbt_delete(request):
     if org is None:
         raise HttpError(400, "create an organization first")
 
+    orgdbt = org.dbt
     OrgCleanupService(org, dry_run=False).delete_transformation_layer()
+
+    if orgdbt:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            resource_name=org.slug,
+            action=AuditLogAction.DELETE,
+        )
 
     return from_orguser(orguser)
 
@@ -256,6 +289,15 @@ def post_dbt_git_pull(request):
     except Exception as error:
         raise HttpError(500, str(error)) from error
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        resource_name=orguser.org.slug,
+        action=AuditLogAction.EXECUTE,
+    )
+
     return {"success": True}
 
 
@@ -290,7 +332,18 @@ def post_dbt_makedocs(request):
     redis.set(redis_key, htmlfilename.encode("utf-8"))
     redis.expire(redis_key, 3600 * 24)
 
-    return {"token": token.hex}
+    result = {"token": token.hex}
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orguser.org.dbt.id) if orguser.org.dbt else str(orguser.org.id),
+        resource_name=orguser.org.slug,
+        action=AuditLogAction.EXECUTE,
+    )
+
+    return result
 
 
 @dbt_router.put("/v1/schema/")
@@ -308,6 +361,15 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org.dbt.default_schema = payload.target_configs_schema
     org.dbt.save()
     logger.info("updated orgdbt")
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(org.dbt.id),
+        resource_name=org.slug,
+        action=AuditLogAction.UPDATE,
+    )
 
     cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
 
@@ -359,6 +421,15 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.model_dump() if payload else None)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        resource_name=org.slug,
+        action=AuditLogAction.EXECUTE,
+    )
 
     return {"task_id": task_id}
 

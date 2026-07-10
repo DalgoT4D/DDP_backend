@@ -24,8 +24,10 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.auth import has_permission
 
+from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgType
+from ddpui.models.org import OrgType, ConnectionMeta
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
 from ddpui.utils.custom_logger import CustomLogger
@@ -114,6 +116,14 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.config,
     )
     logger.info("created source having id " + source["sourceId"])
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        resource_name=source.get("name", payload.name or ""),
+        action=AuditLogAction.CREATE,
+    )
     return {"sourceId": source["sourceId"]}
 
 
@@ -126,6 +136,15 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         raise HttpError(400, "create an organization first")
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
+
+    # Capture state before update for field_changes tracking
+    try:
+        old_source = airbyte_service.get_source(
+            orguser.org.airbyte_workspace_id, source_id
+        )
+        old_name = old_source.get("name", "")
+    except Exception:
+        old_name = ""
 
     if orguser.org.base_plan() == OrgType.DEMO:
         logger.info("Demo account user")
@@ -145,6 +164,21 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         source_id, payload.name, payload.config, payload.sourceDefId
     )
     logger.info("updated source having id " + source["sourceId"])
+
+    # Compute field changes (only track name, not config which may contain secrets)
+    field_changes = {}
+    if old_name and old_name != payload.name:
+        field_changes["name"] = {"old": old_name, "new": payload.name}
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        resource_name=source.get("name", payload.name or ""),
+        action=AuditLogAction.UPDATE,
+        field_changes=field_changes,
+    )
     return {"sourceId": source["sourceId"]}
 
 
@@ -299,6 +333,14 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         payload.config,
     )
     logger.info("created destination having id " + destination["destinationId"])
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=destination["destinationId"],
+        resource_name=destination.get("destinationName", payload.name or ""),
+        action=AuditLogAction.CREATE,
+    )
     return {"destinationId": destination["destinationId"]}
 
 
@@ -441,6 +483,14 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, error)
 
     logger.debug(res)
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=res.get("connectionId", ""),
+        resource_name=res.get("name", payload.name or ""),
+        action=AuditLogAction.CREATE,
+    )
     return res
 
 
@@ -492,9 +542,38 @@ def put_airbyte_connection_v1(
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture state before update for field_changes tracking
+    try:
+        old_connection = airbyte_service.get_connection(
+            org.airbyte_workspace_id, connection_id
+        )
+        old_state = {
+            "name": old_connection.get("name", ""),
+            "destinationSchema": old_connection.get("namespaceFormat", ""),
+        }
+    except Exception:
+        old_state = {}
+
     res, error = airbytehelpers.update_connection(org, connection_id, payload)
     if error:
         raise HttpError(400, error)
+
+    # Compute field changes
+    new_state = {
+        "name": payload.name,
+        "destinationSchema": payload.destinationSchema or "",
+    }
+    field_changes = compute_changes(old_state, new_state) if old_state else {}
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        resource_name=payload.name or res.get("name", ""),
+        action=AuditLogAction.UPDATE,
+        field_changes=field_changes,
+    )
 
     return res
 
@@ -510,9 +589,22 @@ def delete_airbyte_connection_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture connection name before deletion for audit log
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    connection_name = connection_meta.connection_name if connection_meta else connection_id
+
     _, error = deleteconnection.delete_org_connection(org, connection_id)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        resource_name=connection_name,
+        action=AuditLogAction.DELETE,
+    )
 
     return {"success": 1}
 
@@ -563,6 +655,15 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
     if error:
         raise HttpError(400, error)
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=destination["destinationId"],
+        resource_name=payload.name or destination.get("destinationName", ""),
+        action=AuditLogAction.UPDATE,
+    )
+
     return {"destinationId": destination["destinationId"]}
 
 
@@ -576,9 +677,25 @@ def delete_airbyte_source_v1(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture source name before deletion for audit log
+    try:
+        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
+        source_name = source.get("name", source_id)
+    except Exception:
+        source_name = source_id
+
     _, error = airbytehelpers.delete_source(orguser.org, source_id)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source_id,
+        resource_name=source_name,
+        action=AuditLogAction.DELETE,
+    )
 
     return {"success": 1}
 
@@ -626,6 +743,14 @@ def schedule_update_connection_schema(
         raise HttpError(400, "create an airbyte workspace first")
 
     airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        resource_name=connection_id,
+        action=AuditLogAction.UPDATE,
+    )
 
     return {"success": 1}
 

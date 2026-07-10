@@ -30,6 +30,8 @@ from ddpui.core.orchestrate.pipeline_service import (
     PipelineConfigurationError,
     PipelineServiceError,
 )
+from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.auth import has_permission
 
 pipeline_router = Router()
@@ -48,6 +50,14 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
 
     try:
         result = PipelineService.create_pipeline(org, payload)
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=result.get("deploymentId", ""),
+            resource_name=payload.name or "",
+            action=AuditLogAction.CREATE,
+        )
         return result
     except PipelineValidationError as error:
         raise HttpError(400, error.message) from error
@@ -111,6 +121,14 @@ def delete_prefect_dataflow_v1(request, deployment_id):
 
     try:
         result = PipelineService.delete_pipeline(orguser.org, deployment_id)
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            resource_name=deployment_id,
+            action=AuditLogAction.DELETE,
+        )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -130,8 +148,34 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    # Capture old state for field_changes tracking
+    old_pipeline = OrgDataFlowv1.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+    old_state = {
+        "name": old_pipeline.name if old_pipeline else "",
+        "cron": old_pipeline.cron if old_pipeline else "",
+    }
+
     try:
         result = PipelineService.update_pipeline(orguser.org, deployment_id, payload)
+
+        # Compute field changes
+        new_state = {
+            "name": payload.name or old_state["name"],
+            "cron": payload.cron or old_state["cron"],
+        }
+        field_changes = compute_changes(old_state, new_state)
+
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            resource_name=payload.name or old_state["name"],
+            action=AuditLogAction.UPDATE,
+            field_changes=field_changes,
+        )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -155,8 +199,27 @@ def post_deployment_set_schedule(request, deployment_id, status):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    # Get pipeline name for audit log
+    pipeline = OrgDataFlowv1.objects.filter(
+        org=orguser.org, deployment_id=deployment_id
+    ).first()
+    pipeline_name = pipeline.name if pipeline else deployment_id
+
+    # Track schedule status change
+    old_status = "active" if status == "inactive" else "inactive"
+    field_changes = {"schedule_active": {"old": old_status, "new": status}}
+
     try:
         result = PipelineService.set_pipeline_schedule(orguser.org, deployment_id, status)
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            resource_name=pipeline_name,
+            action=AuditLogAction.UPDATE,
+            field_changes=field_changes,
+        )
         return result
     except PipelineValidationError as error:
         raise HttpError(422, error.message) from error
@@ -187,6 +250,14 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
 
     try:
         result = PipelineService.run_pipeline(orguser.org, orguser, deployment_id, payload)
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            resource_name=deployment_id,
+            action=AuditLogAction.EXECUTE,
+        )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -211,6 +282,14 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
     try:
         result = PipelineService.post_clear_selected_streams_run(
             orguser.org, orguser, deployment_id, payload
+        )
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            resource_name=deployment_id,
+            action=AuditLogAction.EXECUTE,
         )
         return result
     except PipelineNotFoundError:
