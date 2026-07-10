@@ -14,9 +14,20 @@ class StatusResponse(Schema):
     reason: str
 
 
+class SessionCreate(Schema):
+    """Optional create payload. Omitted (legacy clients) means an org-wide chat;
+    scope_type="dashboard" + scope_id restricts the session to that dashboard's
+    tables."""
+
+    scope_type: str = "org"  # org | dashboard
+    scope_id: Optional[int] = None
+
+
 class SessionOut(Schema):
     id: int
     title: str
+    scope_type: str
+    scope_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -25,6 +36,8 @@ class SessionOut(Schema):
         return cls(
             id=session.id,
             title=session.title,
+            scope_type=session.scope_type,
+            scope_id=session.scope_id,
             created_at=session.created_at,
             updated_at=session.updated_at,
         )

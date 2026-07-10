@@ -14,12 +14,21 @@ from ddpui.models.org_user import OrgUser
 
 
 class ChatWithDataSession(models.Model):
-    """One chat conversation, owned by one user in one org."""
+    """One chat conversation, owned by one user in one org.
+
+    scope_type narrows what the agent may query: "org" (default) is every
+    allowed schema; "dashboard" restricts to the tables behind that dashboard's
+    charts (scope_id = Dashboard pk); "report" is reserved. scope_id is a plain
+    int, not an FK — scope is re-resolved every turn, and a deleted dashboard
+    should yield a friendly per-turn error, not cascade-delete chat history.
+    """
 
     id = models.BigAutoField(primary_key=True)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="chat_sessions")
     orguser = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="chat_sessions")
     title = models.CharField(max_length=255, default="New chat")
+    scope_type = models.CharField(max_length=20, default="org")  # org | dashboard | report
+    scope_id = models.IntegerField(null=True, blank=True)
     thread_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

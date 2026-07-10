@@ -20,7 +20,9 @@ from ddpui.api.chat_with_data_api import (
     rename_session,
 )
 from ddpui.models.chat_with_data import ChatWithDataSession
-from ddpui.schemas.chat_with_data_schemas import SessionRename
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.visualization import Chart
+from ddpui.schemas.chat_with_data_schemas import SessionCreate, SessionRename
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_preferences import OrgPreferences
@@ -119,6 +121,89 @@ def test_session_lifecycle_create_list_rename_delete(orguser, seed_db):
     assert list_sessions(mock_request(orguser))["data"] == []
     # soft delete: the row survives with deleted_at set
     assert ChatWithDataSession.objects.get(id=session_id).deleted_at is not None
+
+
+@pytest.fixture
+def dashboard_with_chart(org, orguser, seed_db):
+    chart = Chart.objects.create(
+        title="Surveys by district",
+        chart_type="bar",
+        computation_type="aggregated",
+        schema_name="prod",
+        table_name="surveys",
+        org=org,
+        created_by=orguser,
+    )
+    dashboard = Dashboard.objects.create(
+        title="Field Performance",
+        org=org,
+        created_by=orguser,
+        tabs=[
+            {
+                "id": "t1",
+                "title": "Main",
+                "layout_config": {},
+                "components": {"c1": {"type": "chart", "config": {"chartId": chart.id}}},
+            }
+        ],
+    )
+    yield dashboard
+    dashboard.delete()
+    chart.delete()
+
+
+def test_create_session_with_dashboard_scope(orguser, dashboard_with_chart, seed_db):
+    created = create_session(
+        mock_request(orguser),
+        SessionCreate(scope_type="dashboard", scope_id=dashboard_with_chart.id),
+    )
+    assert created["data"]["scope_type"] == "dashboard"
+    assert created["data"]["scope_id"] == dashboard_with_chart.id
+
+    session = ChatWithDataSession.objects.get(id=created["data"]["id"])
+    assert session.scope_type == "dashboard"
+    assert session.scope_id == dashboard_with_chart.id
+
+
+def test_create_session_empty_body_still_makes_org_session(orguser, seed_db):
+    # legacy clients POST with no payload — must keep working
+    created = create_session(mock_request(orguser))
+    assert created["data"]["scope_type"] == "org"
+    assert created["data"]["scope_id"] is None
+
+
+def test_create_session_dashboard_scope_requires_scope_id(orguser, seed_db):
+    with pytest.raises(HttpError, match="scope_id"):
+        create_session(mock_request(orguser), SessionCreate(scope_type="dashboard"))
+
+
+def test_create_session_rejects_missing_or_cross_org_dashboard(orguser, seed_db):
+    with pytest.raises(HttpError):
+        create_session(
+            mock_request(orguser), SessionCreate(scope_type="dashboard", scope_id=999999)
+        )
+
+
+def test_create_session_rejects_empty_dashboard(orguser, org, seed_db):
+    empty = Dashboard.objects.create(title="Empty", org=org, created_by=orguser, tabs=[])
+    with pytest.raises(HttpError, match="no charts"):
+        create_session(
+            mock_request(orguser), SessionCreate(scope_type="dashboard", scope_id=empty.id)
+        )
+
+
+def test_list_sessions_can_filter_by_scope_type(orguser, dashboard_with_chart, seed_db):
+    create_session(mock_request(orguser))  # org session
+    create_session(
+        mock_request(orguser),
+        SessionCreate(scope_type="dashboard", scope_id=dashboard_with_chart.id),
+    )
+
+    org_only = list_sessions(mock_request(orguser), scope_type="org")
+    assert [s["scope_type"] for s in org_only["data"]] == ["org"]
+
+    everything = list_sessions(mock_request(orguser))
+    assert len(everything["data"]) == 2
 
 
 def test_sessions_are_owner_scoped_within_the_org(orguser, other_orguser, seed_db):

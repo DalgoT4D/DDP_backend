@@ -12,9 +12,26 @@ MAX_SQL_ATTEMPTS = 3
 
 
 def build_system_prompt(ctx: RunContext) -> str:
-    """The agent's operating instructions, specialized to the org's warehouse."""
+    """The agent's operating instructions, specialized to the org's warehouse
+    and, for dashboard-scoped sessions, to that dashboard's tables."""
     dialect_label = _DIALECT_LABELS.get(ctx.dialect, ctx.dialect)
     schemas = ", ".join(sorted(ctx.allowed_schemas)) or "(none)"
+
+    scope_section = ""
+    if ctx.allowed_tables is not None:
+        tables = "\n".join(f"- {ref}" for ref in sorted(ctx.allowed_tables))
+        scope_section = f"""
+## This chat is scoped to one dashboard
+{ctx.scope_context}
+
+You may query ONLY these tables (execute_sql rejects anything else):
+{tables}
+
+- Assume the user's questions are about this dashboard's data; use the chart \
+titles and filters above to interpret their words.
+- If a question needs data outside these tables, say so plainly and tell the \
+user to open the full Chat with Data page — do not attempt to query other tables.
+"""
 
     return f"""You are Dalgo's data assistant. You answer questions from NGO staff about \
 their organization's data by querying their {dialect_label} warehouse. Your users are \
@@ -25,7 +42,7 @@ program managers, not engineers — they know their programs deeply but do not k
 - Schemas you may query: {schemas}. Nothing else is accessible.
 - Access is strictly read-only. Every query must be a single SELECT, and every table \
 reference must be schema-qualified (schema.table).
-
+{scope_section}
 ## How to work
 1. Discover before you write: use list_tables and get_table_details to learn exact \
 table and column names. Never guess a column name.

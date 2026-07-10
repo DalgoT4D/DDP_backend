@@ -110,6 +110,38 @@ def test_execute_sql_enforces_table_scope_without_touching_warehouse():
     assert warehouse.executed == []
 
 
+def test_scoped_list_tables_hides_off_scope_tables():
+    # advertising tables the guard would reject wastes the model's 3 SQL attempts
+    warehouse = FakeWarehouse()
+    warehouse.catalog_rows = [
+        {"table_name": "surveys", "approx_rows": 1284},
+        {"table_name": "donations", "approx_rows": 500},
+    ]
+    result = list_tables.func(
+        schema_name="prod",
+        runtime=make_runtime(warehouse, allowed_tables=["prod.surveys"]),
+    )
+    assert "surveys" in result
+    assert "donations" not in result
+
+
+def test_scoped_get_table_details_refuses_off_scope_table():
+    # get_table_details runs a sample SELECT — scope must cover it, not just execute_sql
+    warehouse = FakeWarehouse()
+    warehouse.catalog_rows = [
+        {"table_name": "surveys", "approx_rows": 1284},
+        {"table_name": "donations", "approx_rows": 500},
+    ]
+    result = get_table_details.func(
+        schema_name="prod",
+        table_name="donations",
+        runtime=make_runtime(warehouse, allowed_tables=["prod.surveys"]),
+    )
+    assert "not found" in result
+    # the sample SELECT must never have run
+    assert not any("donations" in sql for sql in warehouse.executed)
+
+
 def test_list_schemas_returns_allowlist():
     result = list_schemas.func(runtime=make_runtime())
     assert "prod" in result

@@ -7,6 +7,8 @@ tools never touch the database or trust an LLM-supplied org identifier.
 """
 
 from ddpui.core.chat_with_data.agent.state import RunContext
+from ddpui.core.chat_with_data.scope import ORG_SCOPE, resolve_scope
+from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import RolePermission
@@ -43,9 +45,14 @@ def derive_allowed_schemas(warehouse, dialect: str, dbt_default_schema: str | No
     return sorted(existing)
 
 
-def build_run_context(orguser: OrgUser) -> RunContext:
+def build_run_context(orguser: OrgUser, session: ChatWithDataSession | None = None) -> RunContext:
     """Resolve org warehouse + allowlist + limits into a RunContext. Sync (ORM +
-    Secrets Manager); call via database_sync_to_async from async code."""
+    Secrets Manager); call via database_sync_to_async from async code.
+
+    `session` carries the scope: a dashboard-scoped session narrows the context
+    to that dashboard's tables. Re-resolved on every call (i.e. every turn) so
+    dashboard edits are picked up and a deleted dashboard raises ScopeUnavailable
+    for the transport to relay. None (e.g. the REPL) means org-wide."""
     org = orguser.org
     org_warehouse = OrgWarehouse.objects.filter(org=org).first()
     if org_warehouse is None:
@@ -54,8 +61,17 @@ def build_run_context(orguser: OrgUser) -> RunContext:
     warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
     dialect = org_warehouse.wtype
 
-    org_dbt: OrgDbt | None = org.dbt
-    dbt_schema = org_dbt.default_schema if org_dbt else None
+    scope = ORG_SCOPE
+    if session is not None:
+        scope = resolve_scope(org, session.scope_type, session.scope_id)
+
+    if scope.allowed_tables is not None:
+        # scoped: schemas follow the scoped tables — no schemata discovery query
+        allowed_schemas = sorted({ref.split(".", 1)[0] for ref in scope.allowed_tables})
+    else:
+        org_dbt: OrgDbt | None = org.dbt
+        dbt_schema = org_dbt.default_schema if org_dbt else None
+        allowed_schemas = derive_allowed_schemas(warehouse, dialect, dbt_schema)
 
     granted = set(
         RolePermission.objects.filter(
@@ -68,11 +84,14 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         org_id=org.id,
         org_slug=org.slug,
         dialect=dialect,
-        allowed_schemas=derive_allowed_schemas(warehouse, dialect, dbt_schema),
+        allowed_schemas=allowed_schemas,
         max_result_rows=DEFAULT_MAX_RESULT_ROWS,
         query_timeout_s=DEFAULT_QUERY_TIMEOUT_S,
         warehouse=warehouse,
         orguser_id=orguser.id,
         can_create_charts="can_create_charts" in granted,
         can_create_dashboards="can_create_dashboards" in granted,
+        scope_type=scope.scope_type,
+        allowed_tables=scope.allowed_tables,
+        scope_context=scope.scope_context,
     )

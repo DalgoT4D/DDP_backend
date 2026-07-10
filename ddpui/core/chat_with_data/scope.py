@@ -1,0 +1,124 @@
+"""Session scope resolution for Chat with Data.
+
+A dashboard-scoped session may only query the tables behind that dashboard's
+charts. Scope is re-resolved on every turn (not frozen at session create), so
+charts added to the dashboard mid-conversation are picked up on the next
+question, and a deleted dashboard turns into a friendly per-turn error.
+
+The component walk mirrors ReportService._freeze_chart_configs — the reference
+implementation for reading Dashboard.tabs[].components.
+"""
+
+from dataclasses import dataclass
+
+from ddpui.models.dashboard import Dashboard, DashboardType
+from ddpui.models.metric import KPI
+from ddpui.models.org import Org
+from ddpui.models.visualization import Chart
+
+
+class ScopeUnavailable(Exception):
+    """The session's scope can't be resolved (dashboard deleted, empty, …).
+    The message is user-facing — the transport layer sends it as an error event."""
+
+
+@dataclass(frozen=True)
+class ResolvedScope:
+    """What a scoped session may see: the table allowlist for the SQL guard and
+    the prompt context block. allowed_tables=None means org-wide (no restriction)."""
+
+    scope_type: str
+    allowed_tables: list[str] | None = None
+    scope_context: str = ""
+
+
+ORG_SCOPE = ResolvedScope(scope_type="org")
+
+
+def resolve_scope(org: Org, scope_type: str, scope_id: int | None) -> ResolvedScope:
+    """Resolve a session's scope into tables + prompt context. Raises
+    ScopeUnavailable when the scope target is gone or has nothing to query."""
+    if scope_type == "org" or scope_type is None:
+        return ORG_SCOPE
+    if scope_type == "dashboard":
+        return _resolve_dashboard_scope(org, scope_id)
+    raise ScopeUnavailable(f"Unsupported chat scope '{scope_type}'.")
+
+
+def _resolve_dashboard_scope(org: Org, dashboard_id: int | None) -> ResolvedScope:
+    dashboard = Dashboard.objects.filter(
+        id=dashboard_id, org=org, dashboard_type=DashboardType.NATIVE.value
+    ).first()
+    if dashboard is None:
+        raise ScopeUnavailable(
+            "This dashboard no longer exists, so this chat can't answer questions "
+            "about it. Start a new chat from the Chat with Data page."
+        )
+
+    chart_ids = _component_ids(dashboard, "chart", "chartId")
+    charts = list(Chart.objects.filter(id__in=chart_ids, org=org))
+
+    kpi_ids = _component_ids(dashboard, "kpi", "kpiId")
+    kpis = list(KPI.objects.filter(id__in=kpi_ids, org=org).select_related("metric"))
+
+    filters = list(dashboard.filters.all().order_by("order"))
+
+    tables = {f"{chart.schema_name}.{chart.table_name}" for chart in charts}
+    # KPI rows carry no table fields — the table lives on the underlying Metric
+    tables |= {f"{kpi.metric.schema_name}.{kpi.metric.table_name}" for kpi in kpis}
+    # filters may point at lookup tables no chart uses (e.g. a districts table)
+    tables |= {f"{flt.schema_name}.{flt.table_name}" for flt in filters}
+
+    if not tables:
+        raise ScopeUnavailable(
+            "This dashboard has no charts yet, so there is no data to chat about. "
+            "Add a chart to the dashboard or use the full Chat with Data page."
+        )
+
+    return ResolvedScope(
+        scope_type="dashboard",
+        allowed_tables=sorted(tables),
+        scope_context=_dashboard_context(dashboard, charts, kpis, filters),
+    )
+
+
+def _component_ids(dashboard: Dashboard, comp_type: str, id_key: str) -> list[int]:
+    ids = []
+    for tab in dashboard.tabs or []:
+        for component in (tab.get("components") or {}).values():
+            if component.get("type") == comp_type:
+                ref = component.get("config", {}).get(id_key)
+                if ref:
+                    ids.append(ref)
+    return list(set(ids))
+
+
+def _dashboard_context(dashboard, charts, kpis, filters) -> str:
+    """Markdown block describing the dashboard, injected into the system prompt.
+    Chart titles and filter names carry the user's own vocabulary — they help the
+    model map a question like "how are the districts doing?" onto the right columns."""
+    lines = [f'This chat is about the dashboard "{dashboard.title}".']
+    if dashboard.description:
+        lines.append(f"Dashboard description: {dashboard.description}")
+    if charts:
+        lines.append("Charts on this dashboard:")
+        for chart in sorted(charts, key=lambda c: c.title):
+            lines.append(
+                f'- "{chart.title}" — {chart.chart_type} chart on '
+                f"{chart.schema_name}.{chart.table_name}"
+            )
+    if kpis:
+        lines.append("KPIs on this dashboard:")
+        for kpi in sorted(kpis, key=lambda k: k.name):
+            lines.append(
+                f'- "{kpi.name}" — measures {kpi.metric.name} on '
+                f"{kpi.metric.schema_name}.{kpi.metric.table_name}"
+            )
+    if filters:
+        lines.append("Dashboard filters (how users slice this data):")
+        for flt in filters:
+            lines.append(
+                f'- "{flt.name}" ({flt.filter_type}) on '
+                f"{flt.schema_name}.{flt.table_name}.{flt.column_name}"
+            )
+    return "\n".join(lines)

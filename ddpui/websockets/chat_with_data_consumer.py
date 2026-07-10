@@ -24,6 +24,7 @@ from ddpui.core.chat_with_data.agent.build import build_agent
 from ddpui.core.chat_with_data.agent.checkpointer import get_checkpointer
 from ddpui.core.chat_with_data.agent.context import ChatWithDataNotReady, build_run_context
 from ddpui.core.chat_with_data.runner import run_turn
+from ddpui.core.chat_with_data.scope import ScopeUnavailable
 from ddpui.core.chat_with_data.calls.titles import generate_session_title
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_user import OrgUser
@@ -115,8 +116,12 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
     async def _run_turn(self, question: str):
         try:
-            context = await database_sync_to_async(build_run_context)(self.orguser)
-        except ChatWithDataNotReady as err:
+            # session carries the scope; re-resolved every turn so dashboard
+            # edits are picked up and a deleted dashboard errors politely
+            context = await database_sync_to_async(build_run_context)(
+                self.orguser, session=self.session
+            )
+        except (ChatWithDataNotReady, ScopeUnavailable) as err:
             await self._send_event({"type": "error", "message": str(err)})
             return
 
