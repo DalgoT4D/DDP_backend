@@ -15,6 +15,7 @@ import os
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.chat_with_data.messages.content import extract_text
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.report import ReportSnapshot
 from ddpui.utils.custom_logger import CustomLogger
@@ -89,8 +90,8 @@ def generate_report_summary(snapshot: ReportSnapshot, model: BaseChatModel | Non
     )
     model = model or get_summary_model()
     response = model.invoke(prompt)
-    text = response.content if isinstance(response.content, str) else str(response.content)
-    return text.strip()
+    # thinking-enabled models return block lists; only the text block is the draft
+    return extract_text(response.content).strip()
 
 
 def _component_data(snapshot, component_id, config) -> str | None:

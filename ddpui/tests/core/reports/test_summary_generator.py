@@ -96,6 +96,24 @@ def test_all_components_failing_raises(mock_service):
         generate_report_summary(make_snapshot(), model=FakeModel())
 
 
+@patch("ddpui.core.reports.summary_generator.ReportService")
+def test_thinking_blocks_never_reach_the_draft(mock_service):
+    # claude-sonnet-5 with thinking enabled returns content as a block list —
+    # only the text block belongs in the draft (caught by browser smoke test)
+    mock_service.get_report_chart_data.return_value = {"data": {"seriesData": [1]}}
+    mock_service.get_report_kpi_data.return_value = {"current_value": 1}
+    model = FakeModel(
+        reply=[
+            {"type": "thinking", "thinking": "", "signature": "Ev4OC..."},
+            {"type": "text", "text": "**A strong quarter.**"},
+        ]
+    )
+
+    summary = generate_report_summary(make_snapshot(), model=model)
+
+    assert summary == "**A strong quarter.**"
+
+
 def test_report_with_no_components_raises():
     snapshot = make_snapshot()
     snapshot.frozen_chart_configs = {}
