@@ -17,7 +17,6 @@ import logging
 import pytest
 import requests
 from dotenv import load_dotenv
-from typing import List, Dict, Optional
 from ninja.errors import HttpError
 
 # Set up Django environment
@@ -58,6 +57,15 @@ AIRBYTE_TEST_SOURCES = os.getenv("AIRBYTE_TEST_SOURCES", "file").split(",")
 AIRBYTE_TEST_TIMEOUT = int(os.getenv("AIRBYTE_TEST_TIMEOUT", "300"))
 AIRBYTE_SYNC_WAIT_INTERVAL = int(os.getenv("AIRBYTE_SYNC_WAIT_INTERVAL", "10"))
 AIRBYTE_MAX_WAIT_CYCLES = int(os.getenv("AIRBYTE_MAX_WAIT_CYCLES", "30"))
+
+# Calculate max sync wait time and ensure it doesn't exceed AIRBYTE_TEST_TIMEOUT
+MAX_SYNC_WAIT_TIME = AIRBYTE_SYNC_WAIT_INTERVAL * AIRBYTE_MAX_WAIT_CYCLES
+if MAX_SYNC_WAIT_TIME > AIRBYTE_TEST_TIMEOUT:
+    # Adjust wait cycles to respect timeout
+    AIRBYTE_MAX_WAIT_CYCLES = AIRBYTE_TEST_TIMEOUT // AIRBYTE_SYNC_WAIT_INTERVAL
+    logger.warning(
+        f"Adjusted max wait cycles to {AIRBYTE_MAX_WAIT_CYCLES} to respect timeout of {AIRBYTE_TEST_TIMEOUT}s"
+    )
 
 # Airbyte server details
 AIRBYTE_SERVER_HOST = os.getenv("AIRBYTE_SERVER_HOST", "localhost")
@@ -139,21 +147,40 @@ DESTINATION_CONFIGS = {
 }
 
 def check_airbyte_available():
-    """Check if Airbyte server is available"""
+    """
+    Check if Airbyte server is available
+    
+    This function tries both the legacy /health endpoint and newer /health/ (with trailing slash)
+    to maintain compatibility with different Airbyte versions.
+    """
+    base_url = f"http://{AIRBYTE_SERVER_HOST}:{AIRBYTE_SERVER_PORT}/api/{AIRBYTE_SERVER_API_VERSION}"
+    
+    # Try with trailing slash (newer versions)
     try:
-        response = requests.get(
-            f"http://{AIRBYTE_SERVER_HOST}:{AIRBYTE_SERVER_PORT}/api/{AIRBYTE_SERVER_API_VERSION}/health",
-            timeout=5
-        )
+        response = requests.get(f"{base_url}/health/", timeout=5)
+        if response.status_code == 200:
+            # Check if it's JSON and has "available": true
+            try:
+                data = response.json()
+                if isinstance(data, dict) and data.get("available") is True:
+                    return True
+            except ValueError:
+                # Not JSON or wrong format, continue to next check
+                pass
+    except requests.exceptions.RequestException:
+        pass
+    
+    # Try without trailing slash (older versions)
+    try:
+        response = requests.get(f"{base_url}/health", timeout=5)
         return response.status_code == 200
     except requests.exceptions.RequestException:
         return False
 
-# Skip these tests by default unless AIRBYTE_TEST_ENABLED is true
-# and the Airbyte server is available
+# Skip tests if explicitly disabled
 pytestmark = pytest.mark.skipif(
-    not AIRBYTE_TEST_ENABLED or not check_airbyte_available(),
-    reason="Airbyte integration tests are disabled or Airbyte server is not available"
+    not AIRBYTE_TEST_ENABLED,
+    reason="Airbyte integration tests are disabled"
 )
 
 class TestAirbyteFullIntegration:
@@ -174,18 +201,34 @@ class TestAirbyteFullIntegration:
             pytest.skip("Airbyte server is not available")
             return
         
-        # Create a workspace
+        # Create a workspace with unique name and CI ID for cleanup
+        ci_id = os.getenv("CI_BUILD_ID", "local")
+        workspace_name = f"test-workspace-{ci_id}-{int(time.time())}"
+        
         try:
-            workspace_result = create_workspace(f"test-workspace-{int(time.time())}")
-            cls.workspace_id = workspace_result["workspaceId"]
-            logger.info(f"Created workspace with ID: {cls.workspace_id}")
-        except HttpError as e:
-            logger.error(f"Failed to create workspace: {str(e)}")
-            pytest.skip(f"Could not create workspace: {str(e)}")
-            return
+            # Use try/finally to ensure cleanup even if setup fails partially
+            try:
+                workspace_result = create_workspace(workspace_name)
+                cls.workspace_id = workspace_result["workspaceId"]
+                logger.info(f"Created workspace with ID: {cls.workspace_id}")
+            except HttpError as e:
+                logger.error(f"Failed to create workspace: {str(e)}")
+                pytest.skip(f"Could not create workspace: {str(e)}")
+                return
+            except Exception as e:
+                logger.error(f"Failed to create workspace: {str(e)}")
+                pytest.skip(f"Unexpected error: {str(e)}")
+                return
         except Exception as e:
-            logger.error(f"Failed to create workspace: {str(e)}")
-            pytest.skip(f"Unexpected error: {str(e)}")
+            # This catch-all ensures we don't leak workspaces even on unexpected errors
+            logger.error(f"Error during setup: {str(e)}")
+            # Try to clean up if we did create a workspace
+            if cls.workspace_id:
+                try:
+                    delete_workspace(cls.workspace_id)
+                except Exception:
+                    pass
+            raise
     
     @classmethod
     def teardown_class(cls):
@@ -232,7 +275,8 @@ class TestAirbyteFullIntegration:
         
         # Get available destination definitions
         try:
-            dest_definitions = get_destination_definitions(self.workspace_id)["destinationDefinitions"]
+            dest_definitions_response = get_destination_definitions(self.workspace_id)
+            dest_definitions = dest_definitions_response.get("destinationDefinitions", [])
             dest_def_map = {d["name"].lower(): d["destinationDefinitionId"] for d in dest_definitions}
             
             for dest_type in AIRBYTE_TEST_DESTINATIONS:
@@ -279,7 +323,8 @@ class TestAirbyteFullIntegration:
         
         # Get available source definitions
         try:
-            source_definitions = get_source_definitions(self.workspace_id)["sourceDefinitions"]
+            source_definitions_response = get_source_definitions(self.workspace_id)
+            source_definitions = source_definitions_response.get("sourceDefinitions", [])
             source_def_map = {s["name"].lower(): s["sourceDefinitionId"] for s in source_definitions}
             
             for source_type in AIRBYTE_TEST_SOURCES:
@@ -336,12 +381,18 @@ class TestAirbyteFullIntegration:
                     catalog = get_source_schema_catalog(self.workspace_id, source_id)
                     
                     # Select all streams with FULL_REFRESH sync mode and destination_sync_mode OVERWRITE
-                    streams = []
-                    for stream_entry in catalog["catalog"]["streams"]:
-                        stream = stream_entry["stream"]
-                        stream["syncMode"] = "full_refresh"
-                        stream["destinationSyncMode"] = "overwrite"
-                        streams.append(stream)
+                    # properly formatted for the Airbyte API
+                    streams = [
+                        {
+                            "stream": s["stream"],
+                            "config": {
+                                "selected": True,
+                                "syncMode": "full_refresh",
+                                "destinationSyncMode": "overwrite",
+                            },
+                        }
+                        for s in catalog["catalog"]["streams"]
+                    ]
                     
                     # Create the connection
                     connection_info = AirbyteConnectionCreate(
@@ -381,14 +432,21 @@ class TestAirbyteFullIntegration:
                 # Wait for the sync to complete
                 status = "pending"
                 wait_cycles = 0
+                start_time = time.time()
                 
-                while status not in ["succeeded", "failed", "cancelled"] and wait_cycles < AIRBYTE_MAX_WAIT_CYCLES:
+                while (status not in ["succeeded", "failed", "cancelled"] and 
+                       wait_cycles < AIRBYTE_MAX_WAIT_CYCLES and 
+                       (time.time() - start_time) < AIRBYTE_TEST_TIMEOUT):
                     time.sleep(AIRBYTE_SYNC_WAIT_INTERVAL)
                     job_info = get_job_info(job_id)
                     status = job_info.get("job", {}).get("status", "unknown")
                     logger.info(f"Sync job {job_id} status: {status}")
                     wait_cycles += 1
                 
+                # If we reached timeout
+                if (time.time() - start_time) >= AIRBYTE_TEST_TIMEOUT:
+                    logger.error(f"Sync job {job_id} timed out after {AIRBYTE_TEST_TIMEOUT}s")
+                    
                 assert status == "succeeded", f"Sync job {job_id} for connection {connection_name} failed with status: {status}"
                 logger.info(f"Sync job {job_id} for connection {connection_name} completed successfully")
             except Exception as e:
@@ -402,7 +460,8 @@ class TestAirbyteFullIntegration:
         for connection_name, connection_id in self.connections.items():
             try:
                 # Get jobs for the connection
-                jobs = get_jobs_for_connection(connection_id, limit=5)
+                resp = get_jobs_for_connection(connection_id, limit=5)
+                jobs = resp.get("jobs", [])
                 
                 assert jobs is not None, f"Failed to get jobs for connection {connection_name}"
                 logger.info(f"Retrieved {len(jobs)} jobs for connection {connection_name}")
@@ -417,14 +476,10 @@ class TestAirbyteFullIntegration:
                     assert job_info is not None, f"Failed to get job info for job {job_id}"
                     logger.info(f"Successfully retrieved job info for job {job_id}")
                     
-                    # Get logs
-                    attempt_id = job_info.get("attempts", [{}])[0].get("id", 0)
-                    logs = get_logs_for_job(job_id, attempt_id)
+                    # Get logs - use index 0 instead of attempt ID
+                    logs = get_logs_for_job(job_id, 0)
                     assert logs is not None, f"Failed to get logs for job {job_id}"
                     logger.info(f"Successfully retrieved logs for job {job_id}")
             except Exception as e:
                 logger.error(f"Error validating sync history for connection {connection_name}: {str(e)}")
-                pytest.fail(f"Sync history validation failed for connection {connection_name}: {str(e)}")
-
-if __name__ == "__main__":
-    pytest.main(["-xvs", __file__]) 
+                pytest.fail(f"Sync history validation failed for connection {connection_name}: {str(e)}") 
