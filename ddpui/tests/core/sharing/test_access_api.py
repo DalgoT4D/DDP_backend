@@ -28,6 +28,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.role_based_access import Role
+from ddpui.models.user_group import UserGroup, UserGroupMember
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -170,6 +171,32 @@ class TestGetAccess:
         assert by_id[pending.id]["email"] == "future@test.com"
         assert data["viewer"] == {"effective_permission": "view", "is_owner": False}
 
+    def test_overview_includes_group_grant_name_and_member_count(
+        self, org, analyst, analyst2, member
+    ):
+        from ddpui.api.access_api import get_access
+
+        dashboard = _dashboard(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Funders", created_by=analyst)
+        UserGroupMember.objects.create(group=group, orguser=member, status="active")
+        UserGroupMember.objects.create(group=group, orguser=analyst2, status="active")
+        group_grant = ResourceShare.objects.create(
+            org=org,
+            resource_type="dashboard",
+            resource_id=str(dashboard.pk),
+            principal_type="group",
+            principal_id=group.id,
+            permission="view",
+            status="active",
+        )
+
+        response = get_access(mock_request(analyst), "dashboard", str(dashboard.pk))
+        by_id = {g["id"]: g for g in response["data"]["grants"]}
+        assert by_id[group_grant.id]["principal_type"] == "group"
+        assert by_id[group_grant.id]["principal_id"] == group.id
+        assert by_id[group_grant.id]["name"] == "Funders"
+        assert by_id[group_grant.id]["member_count"] == 2
+
     def test_member_with_view_can_read_overview_without_share_slug(self, org, analyst, member):
         """The GET is gated by resolver view only — no can_share_* slug."""
         from ddpui.api.access_api import get_access
@@ -288,11 +315,49 @@ class TestCreateGrant:
             _post_grant(analyst, "dashboard", dashboard, member, "view", principal_type="audience")
         assert excinfo.value.status_code == 400
 
-    def test_group_principal_rejected_until_groups_task(self, org, analyst, member):
+    def test_group_principal_grant_now_accepted(self, org, analyst, member):
+        """Task 7 flips the group-principal 400 deferral: a same-org group id
+        is now a valid grant target."""
         dashboard = _dashboard(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Funders", created_by=analyst)
+
+        response = _post_grant(
+            analyst, "dashboard", dashboard, group, "view", principal_type="group"
+        )
+
+        assert response["success"] is True
+        assert response["data"]["principal_type"] == "group"
+        assert response["data"]["principal_id"] == group.id
+        assert response["data"]["name"] == "Funders"
+        assert response["data"]["permission"] == "view"
+        assert response["data"]["status"] == "active"
+
+    def test_group_principal_duplicate_grant_updates_in_place(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Funders", created_by=analyst)
+
+        _post_grant(analyst, "dashboard", dashboard, group, "view", principal_type="group")
+        _post_grant(analyst, "dashboard", dashboard, group, "edit", principal_type="group")
+
+        rows = ResourceShare.objects.filter(
+            resource_type="dashboard",
+            resource_id=str(dashboard.pk),
+            principal_type="group",
+            principal_id=group.id,
+        )
+        assert rows.count() == 1
+        assert rows.first().permission == "edit"
+
+    def test_cross_org_group_principal_rejected(self, org, analyst):
+        dashboard = _dashboard(org, analyst)
+        other_org = Org.objects.create(name="Other Org 4", slug="access-other-org-4")
+        outsider_group = UserGroup.objects.create(org=other_org, name="Outsiders", created_by=None)
+
         with pytest.raises(HttpError) as excinfo:
-            _post_grant(analyst, "dashboard", dashboard, member, "view", principal_type="group")
-        assert excinfo.value.status_code == 400
+            _post_grant(
+                analyst, "dashboard", dashboard, outsider_group, "view", principal_type="group"
+            )
+        assert excinfo.value.status_code == 404
 
     def test_grant_on_grantless_rtype_400_via_capability_flag(self, org, analyst, member):
         metric = Metric.objects.create(

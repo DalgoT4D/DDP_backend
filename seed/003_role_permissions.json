@@ -1862,5 +1862,53 @@
             "role": 4,
             "permission": 89
         }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 234,
+        "fields": {
+            "role": 1,
+            "permission": 90
+        }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 235,
+        "fields": {
+            "role": 1,
+            "permission": 91
+        }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 236,
+        "fields": {
+            "role": 2,
+            "permission": 90
+        }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 237,
+        "fields": {
+            "role": 2,
+            "permission": 91
+        }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 238,
+        "fields": {
+            "role": 4,
+            "permission": 90
+        }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 239,
+        "fields": {
+            "role": 4,
+            "permission": 91
+        }
     }
 ]

@@ -36,7 +36,12 @@ class GeneralAccessOut(Schema):
 
 
 class GrantOut(Schema):
-    """One ResourceShare row (active or pending)."""
+    """One ResourceShare row (active or pending).
+
+    ``member_count`` is only populated for ``principal_type="group"`` rows
+    (the count of that group's active members) — the sharing modal uses it
+    to render "Funders (3 members)" without a second round trip.
+    """
 
     id: int
     principal_type: str
@@ -45,6 +50,7 @@ class GrantOut(Schema):
     name: Optional[str] = None
     permission: str
     status: str
+    member_count: Optional[int] = None
 
 
 class ViewerOut(Schema):
@@ -69,8 +75,8 @@ class AccessOverviewResponse(Schema):
 class GrantCreate(Schema):
     """POST /api/access/{rtype}/{resource_id}/grants/ — create/update one grant.
 
-    v1 accepts principal_type="user" only; "group" arrives with the Groups
-    task and "audience" is deferred by design — both are rejected with 400.
+    Accepts principal_type "user" or "group" (a same-org id in both cases).
+    "audience" is deferred by design and always rejected with 400.
     """
 
     principal_type: str

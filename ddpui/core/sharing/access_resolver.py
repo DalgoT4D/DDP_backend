@@ -28,6 +28,7 @@ from django.db.models.functions import Cast
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.models.general_access import GeneralAudience
 from ddpui.models.resource_share import ResourceShare
+from ddpui.models.user_group import UserGroupMember, UserGroupMemberStatus
 
 GetGroupIds = Callable[[object], Set[int]]
 
@@ -51,9 +52,21 @@ AUDIENCE_MIN_RANK = {
 PERMISSION_RANK = {"view": 1, "edit": 2}
 
 
-def _default_get_group_ids(_viewer) -> Set[int]:
-    """No group membership lookup wired yet (lands in Task 7)."""
-    return set()
+def _default_get_group_ids(viewer):
+    """Active ``UserGroupMember`` group ids for ``viewer`` (Task 7).
+
+    Returns a lazy ``values_list`` queryset, NOT a materialized set — it is
+    passed straight through to ``principal_id__in=`` in ``principal_match_q``
+    and embeds as a SQL subquery, so wiring this in as the default adds no
+    extra round trip for any existing caller (lists, gates, access
+    endpoints all keep their query counts).
+    """
+    viewer_id = getattr(viewer, "id", None)
+    if viewer_id is None:
+        return UserGroupMember.objects.none().values_list("group_id", flat=True)
+    return UserGroupMember.objects.filter(
+        orguser_id=viewer_id, status=UserGroupMemberStatus.ACTIVE
+    ).values_list("group_id", flat=True)
 
 
 def _role_slug(viewer) -> Optional[str]:
@@ -74,14 +87,23 @@ def principal_match_q(viewer, get_group_ids: Optional[GetGroupIds] = None) -> Q:
     group id ``get_group_ids(viewer)`` returns.
 
     ``principal_type="audience"`` rows are never matched here (v1 deferral).
+
+    ``get_group_ids`` may return anything ``principal_id__in=`` accepts,
+    including a lazy queryset (the Task 7 default does, so it embeds as a
+    SQL subquery instead of forcing an extra round trip). Deliberately does
+    NOT materialize it with ``set(...)`` the way the seam's first cut did —
+    that would force-evaluate a lazy queryset default. ``None`` (a stub
+    explicitly opting out) is normalized to "no groups".
     """
     if get_group_ids is None:
         get_group_ids = _default_get_group_ids
-    group_ids = set(get_group_ids(viewer) or set())
+    group_ids = get_group_ids(viewer)
+    if group_ids is None:
+        group_ids = []
 
-    principal_q = Q(principal_type="user", principal_id=viewer.id)
-    if group_ids:
-        principal_q |= Q(principal_type="group", principal_id__in=group_ids)
+    principal_q = Q(principal_type="user", principal_id=viewer.id) | Q(
+        principal_type="group", principal_id__in=group_ids
+    )
 
     return Q(status="active") & principal_q
 

@@ -710,5 +710,21 @@
             "name": "Can Share KPIs",
             "slug": "can_share_kpis"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 90,
+        "fields": {
+            "name": "Can Manage User Groups",
+            "slug": "can_manage_user_groups"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 91,
+        "fields": {
+            "name": "Can View User Groups",
+            "slug": "can_view_user_groups"
+        }
     }
 ]

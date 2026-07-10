@@ -1,0 +1,226 @@
+"""Groups service: create/rename/delete ``UserGroup`` rows and manage their
+membership (Task 7 — Milestone 3). Groups live in the org app, NOT
+``core/sharing`` — Layers 2-3 import groups without the grant machinery;
+``ResourceShare`` only ever sees a group by id via its existing soft
+``principal_type="group"`` pointer.
+
+Rules of this module:
+- NO HTTP concerns: raise ``ddpui.core.user_groups.exceptions`` errors; the
+  API layer maps them to status codes.
+- "Creator or Admin" is the object-level check (mirrors
+  ``ddpui.core.ownership.is_admin_or_super_admin``) gating every mutation of
+  a specific group: rename, delete, add/remove member. Base
+  create/read access is Analyst+ (``can_manage_user_groups`` /
+  ``can_view_user_groups``, checked by the API layer's ``@has_permission``).
+"""
+
+from typing import List, Optional
+
+from django.db import transaction
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
+
+from ddpui.core.ownership import is_admin_or_super_admin
+from ddpui.core.user_groups.exceptions import (
+    GroupNameCollisionError,
+    GroupNotFoundError,
+    GroupPermissionError,
+    GroupValidationError,
+    MemberNotFoundError,
+)
+from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceShare
+from ddpui.models.user_group import UserGroup, UserGroupMember, UserGroupMemberStatus
+from ddpui.schemas.group_schema import (
+    GroupCreate,
+    GroupCreatorOut,
+    GroupDetailOut,
+    GroupMemberCreate,
+    GroupMemberOut,
+    GroupOut,
+    GroupUpdate,
+)
+
+
+def _display_name(user) -> str:
+    """Display name convention used across the codebase (dbt_api, alert_api,
+    sharing_actions)."""
+    return f"{user.first_name} {user.last_name}".strip() or user.email
+
+
+def _creator_out(orguser: Optional[OrgUser]) -> Optional[GroupCreatorOut]:
+    if orguser is None:
+        return None
+    return GroupCreatorOut(
+        orguser_id=orguser.id, email=orguser.user.email, name=_display_name(orguser.user)
+    )
+
+
+def _member_out(member: UserGroupMember) -> GroupMemberOut:
+    orguser = member.orguser
+    return GroupMemberOut(
+        id=member.id,
+        orguser_id=member.orguser_id,
+        email=orguser.user.email if orguser else None,
+        name=_display_name(orguser.user) if orguser else None,
+        pending_email=member.pending_email,
+        status=member.status,
+    )
+
+
+def _shared_resource_count_expr():
+    """Correlated count of active ``ResourceShare`` rows granted to a group
+    (``principal_type="group"``), as a queryset annotation expression. A
+    subquery, not a Python loop — one query for the whole list."""
+    counts = (
+        ResourceShare.objects.filter(
+            principal_type="group",
+            principal_id=OuterRef("pk"),
+            status="active",
+        )
+        .values("principal_id")
+        .annotate(c=Count("id"))
+        .values("c")
+    )
+    return Coalesce(Subquery(counts[:1], output_field=IntegerField()), 0)
+
+
+def _annotated_groups(org_id):
+    """Every group in this org, annotated with `member_count` and
+    `shared_resource_count` in the query itself (no N+1)."""
+    return (
+        UserGroup.objects.filter(org_id=org_id)
+        .select_related("created_by__user")
+        .annotate(
+            annotated_member_count=Count(
+                "members",
+                filter=Q(members__status=UserGroupMemberStatus.ACTIVE),
+                distinct=True,
+            ),
+            annotated_shared_resource_count=_shared_resource_count_expr(),
+        )
+    )
+
+
+def _group_out(group: UserGroup) -> GroupOut:
+    return GroupOut(
+        id=group.id,
+        name=group.name,
+        member_count=group.annotated_member_count,
+        shared_resource_count=group.annotated_shared_resource_count,
+        created_by=_creator_out(group.created_by),
+        created_at=group.created_at,
+    )
+
+
+def list_groups(orguser: OrgUser) -> List[GroupOut]:
+    """All of `orguser`'s org's groups, with member/shared-resource counts."""
+    return [_group_out(g) for g in _annotated_groups(orguser.org_id).order_by("name")]
+
+
+def _get_group_or_404(orguser: OrgUser, group_id: int) -> UserGroup:
+    """Cross-org must be indistinguishable from nonexistent -> 404 either way."""
+    group = _annotated_groups(orguser.org_id).filter(id=group_id).first()
+    if group is None:
+        raise GroupNotFoundError("group not found")
+    return group
+
+
+def get_group(orguser: OrgUser, group_id: int) -> GroupDetailOut:
+    """One group plus its members."""
+    group = _get_group_or_404(orguser, group_id)
+    members = list(group.members.select_related("orguser__user").order_by("id"))
+    return GroupDetailOut(
+        id=group.id,
+        name=group.name,
+        member_count=group.annotated_member_count,
+        shared_resource_count=group.annotated_shared_resource_count,
+        created_by=_creator_out(group.created_by),
+        created_at=group.created_at,
+        members=[_member_out(m) for m in members],
+    )
+
+
+def _require_creator_or_admin(orguser: OrgUser, group: UserGroup) -> None:
+    if group.created_by_id == orguser.id or is_admin_or_super_admin(orguser):
+        return
+    raise GroupPermissionError("only the group's creator or an Admin can do this")
+
+
+def _clean_name(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise GroupValidationError("group name cannot be blank")
+    return name
+
+
+def create_group(orguser: OrgUser, payload: GroupCreate) -> GroupOut:
+    """Create a group owned (as creator) by `orguser`. A name collision
+    within the org fails cleanly, not as a 500 IntegrityError."""
+    name = _clean_name(payload.name)
+    if UserGroup.objects.filter(org_id=orguser.org_id, name=name).exists():
+        raise GroupNameCollisionError(f"a group named '{name}' already exists in this org")
+
+    group = UserGroup.objects.create(org_id=orguser.org_id, name=name, created_by=orguser)
+    return _group_out(_annotated_groups(orguser.org_id).get(id=group.id))
+
+
+def update_group(orguser: OrgUser, group_id: int, payload: GroupUpdate) -> GroupOut:
+    """Rename a group. Creator or Admin only."""
+    group = _get_group_or_404(orguser, group_id)
+    _require_creator_or_admin(orguser, group)
+
+    name = _clean_name(payload.name)
+    if UserGroup.objects.filter(org_id=orguser.org_id, name=name).exclude(id=group.id).exists():
+        raise GroupNameCollisionError(f"a group named '{name}' already exists in this org")
+
+    group.name = name
+    group.save(update_fields=["name"])
+    return _group_out(_annotated_groups(orguser.org_id).get(id=group.id))
+
+
+def delete_group(orguser: OrgUser, group_id: int) -> None:
+    """Delete a group. Creator or Admin only. Also deletes its
+    `ResourceShare` grant rows — a dangling group grant must not keep
+    admitting people after the group is gone."""
+    group = _get_group_or_404(orguser, group_id)
+    _require_creator_or_admin(orguser, group)
+
+    with transaction.atomic():
+        ResourceShare.objects.filter(
+            org_id=orguser.org_id, principal_type="group", principal_id=group.id
+        ).delete()
+        group.delete()  # cascades UserGroupMember rows via FK
+
+
+def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> GroupMemberOut:
+    """Add an OrgUser (same org) as an active member. Creator or Admin only.
+    Adding an existing member is idempotent — returns the existing row."""
+    group = _get_group_or_404(orguser, group_id)
+    _require_creator_or_admin(orguser, group)
+
+    target = (
+        OrgUser.objects.filter(id=payload.orguser_id, org_id=orguser.org_id)
+        .select_related("user")
+        .first()
+    )
+    if target is None:
+        raise MemberNotFoundError("orguser not found in this organization")
+
+    member, _created = UserGroupMember.objects.get_or_create(
+        group=group,
+        orguser=target,
+        defaults={"status": UserGroupMemberStatus.ACTIVE},
+    )
+    return _member_out(member)
+
+
+def remove_member(orguser: OrgUser, group_id: int, member_id: int) -> None:
+    """Remove one membership row. Creator or Admin only. The row must
+    belong to this group."""
+    group = _get_group_or_404(orguser, group_id)
+    _require_creator_or_admin(orguser, group)
+
+    deleted, _ = UserGroupMember.objects.filter(id=member_id, group=group).delete()
+    if deleted == 0:
+        raise MemberNotFoundError("member not found for this group")

@@ -28,6 +28,7 @@ from ddpui.api.metric_api import metric_router
 from ddpui.api.kpi_api import kpi_router
 from ddpui.api.alert_api import alert_router
 from ddpui.api.access_api import access_router
+from ddpui.api.groups_api import groups_router
 
 src_api = NinjaAPI(
     urls_namespace="api",
@@ -93,6 +94,7 @@ metric_router.tags = ["Metrics"]
 kpi_router.tags = ["KPIs"]
 alert_router.tags = ["Alerts"]
 access_router.tags = ["Access"]
+groups_router.tags = ["Groups"]
 
 # mount all the module routes
 src_api.add_router("/api/airbyte/", airbyte_router)
@@ -118,6 +120,7 @@ src_api.add_router("/api/metrics/", metric_router)
 src_api.add_router("/api/kpis/", kpi_router)
 src_api.add_router("/api/alerts/", alert_router)
 src_api.add_router("/api/access/", access_router)
+src_api.add_router("/api/groups/", groups_router)
 
 # Public API without authentication
 public_api = NinjaAPI(
