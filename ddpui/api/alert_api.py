@@ -15,7 +15,7 @@ from ddpui.core.alerts.exceptions import (
     AlertValidationError,
 )
 from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.gates import require_view_access
+from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.alert_schema import (
@@ -279,6 +279,11 @@ def get_alert(request, alert_id: int):
 def update_alert(request, alert_id: int, payload: AlertUpdate):
     orguser: OrgUser = request.orguser
     try:
+        alert = AlertService.get_alert(alert_id, orguser.org)
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    require_edit_access(orguser, "alert", alert)
+    try:
         alert = AlertService.update_alert(alert_id, orguser.org, orguser, payload)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
@@ -292,6 +297,11 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
 def toggle_alert(request, alert_id: int, payload: AlertToggle):
     """Flip is_active without going through the full update flow."""
     orguser: OrgUser = request.orguser
+    try:
+        alert = AlertService.get_alert(alert_id, orguser.org)
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    require_edit_access(orguser, "alert", alert)
     try:
         alert = AlertService.toggle_alert(alert_id, orguser.org, orguser, payload.is_active)
     except AlertNotFoundError:

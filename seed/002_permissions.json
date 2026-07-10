@@ -678,5 +678,37 @@
             "name": "Can Delete Alerts",
             "slug": "can_delete_alerts"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 86,
+        "fields": {
+            "name": "Can Share Reports",
+            "slug": "can_share_reports"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 87,
+        "fields": {
+            "name": "Can Share Alerts",
+            "slug": "can_share_alerts"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 88,
+        "fields": {
+            "name": "Can Share Metrics",
+            "slug": "can_share_metrics"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 89,
+        "fields": {
+            "name": "Can Share KPIs",
+            "slug": "can_share_kpis"
+        }
     }
 ]

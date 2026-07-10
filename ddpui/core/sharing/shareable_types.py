@@ -30,6 +30,7 @@ class ShareableType:
     grants: bool  # supports Layer 2 per-principal ResourceShare grants
     public_link: bool  # supports a public share link
     requests: bool  # supports "request access" flow
+    share_permission_slug: str  # RBAC slug gating this rtype's sharing mutations
 
 
 RESOURCE_TYPES: dict[str, ShareableType] = {
@@ -40,6 +41,7 @@ RESOURCE_TYPES: dict[str, ShareableType] = {
         grants=True,
         public_link=True,
         requests=True,
+        share_permission_slug="can_share_dashboards",
     ),
     "report": ShareableType(
         rtype="report",
@@ -48,6 +50,7 @@ RESOURCE_TYPES: dict[str, ShareableType] = {
         grants=True,
         public_link=True,
         requests=True,
+        share_permission_slug="can_share_reports",
     ),
     "alert": ShareableType(
         rtype="alert",
@@ -56,6 +59,7 @@ RESOURCE_TYPES: dict[str, ShareableType] = {
         grants=True,
         public_link=False,
         requests=True,
+        share_permission_slug="can_share_alerts",
     ),
     "metric": ShareableType(
         rtype="metric",
@@ -64,6 +68,7 @@ RESOURCE_TYPES: dict[str, ShareableType] = {
         grants=False,
         public_link=False,
         requests=True,
+        share_permission_slug="can_share_metrics",
     ),
     "kpi": ShareableType(
         rtype="kpi",
@@ -72,6 +77,7 @@ RESOURCE_TYPES: dict[str, ShareableType] = {
         grants=False,
         public_link=False,
         requests=True,
+        share_permission_slug="can_share_kpis",
     ),
 }
 

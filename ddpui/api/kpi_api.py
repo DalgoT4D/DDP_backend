@@ -25,7 +25,7 @@ from ddpui.core.kpi.kpi_service import (
 )
 from ddpui.core.metric.metric_service import MetricNotFoundError
 from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.gates import require_view_access
+from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 import json
@@ -128,6 +128,12 @@ def get_kpi(request, kpi_id: int):
 def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     """Update a KPI"""
     orguser: OrgUser = request.orguser
+
+    try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_edit_access(orguser, "kpi", kpi)
 
     try:
         kpi = KPIService.update_kpi(kpi_id, orguser.org, orguser, payload)

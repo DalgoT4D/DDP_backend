@@ -24,7 +24,7 @@ from ddpui.core.metric.metric_service import (
     MetricPermissionError,
 )
 from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.gates import require_view_access
+from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 
@@ -180,6 +180,12 @@ def get_metric(request, metric_id: int):
 def update_metric(request, metric_id: int, payload: MetricPayload):
     """Update a metric"""
     orguser: OrgUser = request.orguser
+
+    try:
+        metric = MetricService.get_metric(metric_id, orguser.org)
+    except MetricNotFoundError:
+        raise HttpError(404, "Metric not found") from None
+    require_edit_access(orguser, "metric", metric)
 
     try:
         metric = MetricService.update_metric(

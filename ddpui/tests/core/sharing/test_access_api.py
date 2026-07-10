@@ -1,0 +1,455 @@
+"""Task 5: the sharing mutations — `/api/access/*` endpoints backed by
+`sharing_actions.py`.
+
+Route functions are called directly (as the rest of the API test suite does)
+via `mock_request(orguser)`, which exercises the real permission machinery:
+`request.permissions` is built from the seeded RolePermission rows, so the
+dynamic share-slug gate behaves exactly as it would behind the middleware.
+"""
+
+import os
+
+import django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
+os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
+django.setup()
+
+import pytest
+from django.contrib.auth.models import User
+from ninja.errors import HttpError
+
+from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE
+from ddpui.core.sharing.shareable_types import RESOURCE_TYPES
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.metric import KPI, Metric
+from ddpui.models.org import Org
+from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceShare
+from ddpui.models.role_based_access import Role
+from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+
+pytestmark = pytest.mark.django_db
+
+
+# ================================================================================
+# Fixtures
+# ================================================================================
+
+
+@pytest.fixture
+def org():
+    org = Org.objects.create(
+        name="Access Api Org", slug="access-api-org", airbyte_workspace_id="w1"
+    )
+    yield org
+    # KPI.metric is PROTECT — delete KPIs before the Metric/Org CASCADE runs.
+    KPI.objects.filter(org=org).delete()
+    org.delete()
+
+
+def _make_orguser(org_obj, role_slug, username):
+    user = User.objects.create(username=username, email=f"{username}@test.com")
+    role = Role.objects.filter(slug=role_slug).first() if role_slug else None
+    return OrgUser.objects.create(user=user, org=org_obj, new_role=role)
+
+
+@pytest.fixture
+def admin(org, seed_db):
+    ou = _make_orguser(org, ADMIN_ROLE, "accessapi-admin")
+    yield ou
+    ou.delete()
+
+
+@pytest.fixture
+def analyst(org, seed_db):
+    ou = _make_orguser(org, ANALYST_ROLE, "accessapi-analyst")
+    yield ou
+    ou.delete()
+
+
+@pytest.fixture
+def analyst2(org, seed_db):
+    ou = _make_orguser(org, ANALYST_ROLE, "accessapi-analyst2")
+    yield ou
+    ou.delete()
+
+
+@pytest.fixture
+def member(org, seed_db):
+    ou = _make_orguser(org, MEMBER_ROLE, "accessapi-member")
+    yield ou
+    ou.delete()
+
+
+def _dashboard(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+    return Dashboard.objects.create(
+        title="Access Api Dashboard",
+        org=org_obj,
+        owner=owner,
+        created_by=owner,
+        general_audience=audience,
+        general_level=level,
+    )
+
+
+def _grant(org_obj, rtype, resource, principal_orguser, permission="view", status="active"):
+    return ResourceShare.objects.create(
+        org=org_obj,
+        resource_type=rtype,
+        resource_id=str(resource.pk),
+        principal_type="user",
+        principal_id=principal_orguser.id,
+        permission=permission,
+        status=status,
+    )
+
+
+# ================================================================================
+# Registry: rtype -> share-permission-slug mapping is data, not if/else
+# ================================================================================
+
+
+def test_registry_maps_every_rtype_to_a_share_permission_slug():
+    expected = {
+        "dashboard": "can_share_dashboards",
+        "report": "can_share_reports",
+        "alert": "can_share_alerts",
+        "metric": "can_share_metrics",
+        "kpi": "can_share_kpis",
+    }
+    actual = {rtype: entry.share_permission_slug for rtype, entry in RESOURCE_TYPES.items()}
+    assert actual == expected
+
+
+# ================================================================================
+# GET /api/access/{rtype}/{resource_id}/
+# ================================================================================
+
+
+class TestGetAccess:
+    def test_overview_shows_owner_general_and_grants(self, org, analyst, analyst2, member):
+        from ddpui.api.access_api import get_access
+
+        dashboard = _dashboard(org, analyst, GeneralAudience.ANALYSTS_PLUS, GeneralLevel.VIEW)
+        active = _grant(org, "dashboard", dashboard, member, permission="view")
+        pending = ResourceShare.objects.create(
+            org=org,
+            resource_type="dashboard",
+            resource_id=str(dashboard.pk),
+            principal_type="user",
+            principal_id=None,
+            permission="view",
+            status="pending",
+            pending_email="future@test.com",
+        )
+
+        response = get_access(mock_request(analyst2), "dashboard", str(dashboard.pk))
+
+        assert response["success"] is True
+        data = response["data"]
+        assert data["resource_type"] == "dashboard"
+        assert data["resource_id"] == str(dashboard.pk)
+        assert data["capabilities"] == {
+            "general": True,
+            "grants": True,
+            "public_link": True,
+            "requests": True,
+        }
+        assert data["owner"]["orguser_id"] == analyst.id
+        assert data["owner"]["email"] == analyst.user.email
+        assert data["general_access"] == {"audience": "analysts_plus", "level": "view"}
+        by_id = {g["id"]: g for g in data["grants"]}
+        assert by_id[active.id]["principal_type"] == "user"
+        assert by_id[active.id]["principal_id"] == member.id
+        assert by_id[active.id]["email"] == member.user.email
+        assert by_id[active.id]["permission"] == "view"
+        assert by_id[active.id]["status"] == "active"
+        assert by_id[pending.id]["status"] == "pending"
+        assert by_id[pending.id]["email"] == "future@test.com"
+        assert data["viewer"] == {"effective_permission": "view", "is_owner": False}
+
+    def test_member_with_view_can_read_overview_without_share_slug(self, org, analyst, member):
+        """The GET is gated by resolver view only — no can_share_* slug."""
+        from ddpui.api.access_api import get_access
+
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS, GeneralLevel.VIEW)
+        response = get_access(mock_request(member), "dashboard", str(dashboard.pk))
+        assert response["success"] is True
+        assert response["data"]["viewer"] == {"effective_permission": "view", "is_owner": False}
+
+    def test_viewer_without_view_access_is_denied(self, org, analyst, member):
+        from ddpui.api.access_api import get_access
+
+        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        with pytest.raises(HttpError) as excinfo:
+            get_access(mock_request(member), "dashboard", str(dashboard.pk))
+        assert excinfo.value.status_code == 403
+
+    def test_capability_flags_echoed_for_metric(self, org, analyst):
+        from ddpui.api.access_api import get_access
+
+        metric = Metric.objects.create(
+            org=org,
+            name="m1",
+            schema_name="s",
+            table_name="t",
+            column="c",
+            aggregation="sum",
+            created_by=analyst,
+            owner=analyst,
+            general_audience=GeneralAudience.ANALYSTS_PLUS,
+            general_level=GeneralLevel.VIEW,
+        )
+        response = get_access(mock_request(analyst), "metric", str(metric.pk))
+        data = response["data"]
+        assert data["capabilities"]["grants"] is False
+        assert data["viewer"] == {"effective_permission": "edit", "is_owner": True}
+
+    def test_unknown_rtype_404(self, org, admin):
+        from ddpui.api.access_api import get_access
+
+        with pytest.raises(HttpError) as excinfo:
+            get_access(mock_request(admin), "chart", "1")
+        assert excinfo.value.status_code == 404
+
+    def test_cross_org_resource_404(self, org, admin, analyst):
+        from ddpui.api.access_api import get_access
+
+        other_org = Org.objects.create(name="Other Org", slug="access-other-org")
+        other_admin = _make_orguser(other_org, ADMIN_ROLE, "accessapi-other-admin")
+        dashboard = _dashboard(other_org, other_admin)
+        with pytest.raises(HttpError) as excinfo:
+            get_access(mock_request(admin), "dashboard", str(dashboard.pk))
+        assert excinfo.value.status_code == 404
+
+
+# ================================================================================
+# POST /api/access/{rtype}/{resource_id}/grants/
+# ================================================================================
+
+
+def _post_grant(caller, rtype, resource, principal, permission="view", principal_type="user"):
+    from ddpui.api.access_api import create_grant
+    from ddpui.schemas.access_schema import GrantCreate
+
+    payload = GrantCreate(
+        principal_type=principal_type,
+        principal_id=principal.id if hasattr(principal, "id") else principal,
+        permission=permission,
+    )
+    return create_grant(mock_request(caller), rtype, str(resource.pk), payload)
+
+
+class TestCreateGrant:
+    def test_owner_grants_view_then_edit_updates_in_place(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst)
+
+        response = _post_grant(analyst, "dashboard", dashboard, member, "view")
+        assert response["success"] is True
+        assert response["data"]["principal_id"] == member.id
+        assert response["data"]["permission"] == "view"
+        assert response["data"]["status"] == "active"
+
+        # duplicate grant for the same principal updates, doesn't stack
+        response = _post_grant(analyst, "dashboard", dashboard, member, "edit")
+        rows = ResourceShare.objects.filter(
+            resource_type="dashboard", resource_id=str(dashboard.pk), principal_id=member.id
+        )
+        assert rows.count() == 1
+        assert rows.first().permission == "edit"
+
+    def test_editor_via_grant_can_grant_up_to_edit(self, org, analyst, analyst2, member):
+        dashboard = _dashboard(org, analyst)
+        _grant(org, "dashboard", dashboard, analyst2, permission="edit")
+
+        response = _post_grant(analyst2, "dashboard", dashboard, member, "edit")
+        assert response["data"]["permission"] == "edit"
+
+    def test_viewer_level_sharer_is_blocked(self, org, analyst, analyst2, member):
+        dashboard = _dashboard(org, analyst)
+        _grant(org, "dashboard", dashboard, analyst2, permission="view")
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst2, "dashboard", dashboard, member, "view")
+        assert excinfo.value.status_code == 403
+
+    def test_member_blocked_by_slug(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS, GeneralLevel.EDIT)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(member, "dashboard", dashboard, analyst, "view")
+        assert excinfo.value.status_code == 404  # has_permission semantics: 404 unauthorized
+
+    def test_audience_principal_is_deferred_by_design(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst)
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst, "dashboard", dashboard, member, "view", principal_type="audience")
+        assert excinfo.value.status_code == 400
+
+    def test_group_principal_rejected_until_groups_task(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst)
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst, "dashboard", dashboard, member, "view", principal_type="group")
+        assert excinfo.value.status_code == 400
+
+    def test_grant_on_grantless_rtype_400_via_capability_flag(self, org, analyst, member):
+        metric = Metric.objects.create(
+            org=org,
+            name="m2",
+            schema_name="s",
+            table_name="t",
+            column="c",
+            aggregation="sum",
+            created_by=analyst,
+            owner=analyst,
+        )
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst, "metric", metric, member, "view")
+        assert excinfo.value.status_code == 400
+
+    def test_cross_org_principal_404(self, org, analyst):
+        dashboard = _dashboard(org, analyst)
+        other_org = Org.objects.create(name="Other Org 2", slug="access-other-org-2")
+        outsider = _make_orguser(other_org, ANALYST_ROLE, "accessapi-outsider")
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst, "dashboard", dashboard, outsider, "view")
+        assert excinfo.value.status_code == 404
+
+
+# ================================================================================
+# DELETE /api/access/{rtype}/{resource_id}/grants/{grant_id}/
+# ================================================================================
+
+
+class TestDeleteGrant:
+    def test_owner_revokes_grant(self, org, analyst, member):
+        from ddpui.api.access_api import delete_grant
+
+        dashboard = _dashboard(org, analyst)
+        share = _grant(org, "dashboard", dashboard, member)
+
+        response = delete_grant(mock_request(analyst), "dashboard", str(dashboard.pk), share.id)
+        assert response["success"] is True
+        assert not ResourceShare.objects.filter(id=share.id).exists()
+
+    def test_grant_of_another_resource_404(self, org, analyst, member):
+        from ddpui.api.access_api import delete_grant
+
+        dashboard = _dashboard(org, analyst)
+        other_dashboard = _dashboard(org, analyst)
+        share = _grant(org, "dashboard", other_dashboard, member)
+
+        with pytest.raises(HttpError) as excinfo:
+            delete_grant(mock_request(analyst), "dashboard", str(dashboard.pk), share.id)
+        assert excinfo.value.status_code == 404
+        assert ResourceShare.objects.filter(id=share.id).exists()
+
+    def test_wrong_org_grant_404(self, org, analyst, member):
+        from ddpui.api.access_api import delete_grant
+
+        other_org = Org.objects.create(name="Other Org 3", slug="access-other-org-3")
+        other_admin = _make_orguser(other_org, ADMIN_ROLE, "accessapi-other-admin3")
+        other_dashboard = _dashboard(other_org, other_admin)
+        other_member = _make_orguser(other_org, MEMBER_ROLE, "accessapi-other-member3")
+        share = _grant(other_org, "dashboard", other_dashboard, other_member)
+
+        with pytest.raises(HttpError) as excinfo:
+            delete_grant(mock_request(analyst), "dashboard", str(other_dashboard.pk), share.id)
+        # the resource itself is cross-org -> 404 before the grant is even looked at
+        assert excinfo.value.status_code == 404
+        assert ResourceShare.objects.filter(id=share.id).exists()
+
+
+# ================================================================================
+# PUT /api/access/{rtype}/{resource_id}/general/ — warn-and-offer protocol
+# ================================================================================
+
+
+def _put_general(caller, rtype, resource, audience, level="view", remove_grant_ids=None):
+    from ddpui.api.access_api import update_general_access
+    from ddpui.schemas.access_schema import GeneralAccessUpdate
+
+    payload = GeneralAccessUpdate(audience=audience, level=level, remove_grant_ids=remove_grant_ids)
+    return update_general_access(mock_request(caller), rtype, str(resource.pk), payload)
+
+
+class TestUpdateGeneralAccess:
+    def test_widening_applies_immediately(self, org, analyst):
+        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+
+        response = _put_general(analyst, "dashboard", dashboard, "all_users", "view")
+        assert response["data"]["requires_confirmation"] is False
+        assert response["data"]["general_access"] == {"audience": "all_users", "level": "view"}
+        dashboard.refresh_from_db()
+        assert dashboard.general_audience == GeneralAudience.ALL_USERS
+
+    def test_narrowing_with_active_grants_warns_and_changes_nothing(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        share = _grant(org, "dashboard", dashboard, member)
+
+        response = _put_general(analyst, "dashboard", dashboard, "private", "view")
+        assert response["data"]["requires_confirmation"] is True
+        assert [g["id"] for g in response["data"]["persisting_grants"]] == [share.id]
+        dashboard.refresh_from_db()
+        assert dashboard.general_audience == GeneralAudience.ALL_USERS  # unchanged
+        assert ResourceShare.objects.filter(id=share.id).exists()  # untouched
+
+    def test_resend_with_remove_grant_ids_commits_and_removes(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        share = _grant(org, "dashboard", dashboard, member)
+
+        response = _put_general(
+            analyst, "dashboard", dashboard, "private", "view", remove_grant_ids=[share.id]
+        )
+        assert response["data"]["requires_confirmation"] is False
+        dashboard.refresh_from_db()
+        assert dashboard.general_audience == GeneralAudience.PRIVATE
+        assert not ResourceShare.objects.filter(id=share.id).exists()
+
+    def test_resend_with_empty_remove_list_commits_keeping_grants(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        share = _grant(org, "dashboard", dashboard, member)
+
+        response = _put_general(
+            analyst, "dashboard", dashboard, "admins", "view", remove_grant_ids=[]
+        )
+        assert response["data"]["requires_confirmation"] is False
+        dashboard.refresh_from_db()
+        assert dashboard.general_audience == GeneralAudience.ADMINS
+        assert ResourceShare.objects.filter(id=share.id).exists()  # deliberately kept
+
+    def test_narrowing_with_no_grants_applies_immediately(self, org, analyst):
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+
+        response = _put_general(analyst, "dashboard", dashboard, "private", "view")
+        assert response["data"]["requires_confirmation"] is False
+        dashboard.refresh_from_db()
+        assert dashboard.general_audience == GeneralAudience.PRIVATE
+
+    def test_invalid_audience_400(self, org, analyst):
+        dashboard = _dashboard(org, analyst)
+        with pytest.raises(HttpError) as excinfo:
+            _put_general(analyst, "dashboard", dashboard, "everyone-on-earth", "view")
+        assert excinfo.value.status_code == 400
+
+    def test_remove_grant_ids_of_other_resource_404_and_rolls_back(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        other_dashboard = _dashboard(org, analyst)
+        foreign_share = _grant(org, "dashboard", other_dashboard, member)
+
+        with pytest.raises(HttpError) as excinfo:
+            _put_general(
+                analyst,
+                "dashboard",
+                dashboard,
+                "private",
+                "view",
+                remove_grant_ids=[foreign_share.id],
+            )
+        assert excinfo.value.status_code == 404
+        dashboard.refresh_from_db()
+        assert dashboard.general_audience == GeneralAudience.ALL_USERS  # nothing committed
+        assert ResourceShare.objects.filter(id=foreign_share.id).exists()

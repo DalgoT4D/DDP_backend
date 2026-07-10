@@ -21,7 +21,7 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.gates import require_view_access
+from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.services.dashboard_service import DashboardService, DashboardNotFoundError
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schemas import ChartDataResponse
@@ -200,6 +200,11 @@ def get_report_kpi_data(
 def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(404, str(err)) from err
+    require_edit_access(orguser, "report", snapshot)
     try:
         snapshot = ReportService.update_snapshot(snapshot_id, payload, orguser)
         return api_response(

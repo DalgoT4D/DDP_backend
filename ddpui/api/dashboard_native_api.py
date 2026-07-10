@@ -18,7 +18,7 @@ from ddpui.models.dashboard import (
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.gates import require_view_access
+from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -129,6 +129,12 @@ def create_dashboard(request, payload: DashboardCreate):
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support"""
     orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         dashboard = DashboardService.update_dashboard(
