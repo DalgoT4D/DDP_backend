@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from ninja import Schema
+from pydantic import model_validator
 
 
 class ChartMetric(Schema):
@@ -13,6 +14,18 @@ class ChartMetric(Schema):
     # Expression path: raw SQL expression (e.g. "SUM(col_a) / COUNT(DISTINCT id)")
     # Mutually exclusive with column + aggregation
     column_expression: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_column_for_aggregation(self):
+        # Normalize empty string to None
+        if self.column is not None and self.column.strip() == "":
+            self.column = None
+        # Non-count aggregations require a column
+        if self.aggregation and self.aggregation.lower() != "count" and self.column is None:
+            raise ValueError(
+                f"Column is required for {self.aggregation} aggregation"
+            )
+        return self
 
 
 class ChartCreate(Schema):
