@@ -275,6 +275,12 @@ def create_annotation(request, kpi_id: int, payload: AnnotationEntryCreate):
     """Create an annotation entry."""
     orguser: OrgUser = request.orguser
     try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_edit_access(orguser, "kpi", kpi)
+
+    try:
         return KPIService.create_annotation(kpi_id, orguser.org, orguser, payload)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
@@ -286,6 +292,12 @@ def update_annotation(request, kpi_id: int, entry_id: int, payload: AnnotationEn
     """Update an annotation entry."""
     orguser: OrgUser = request.orguser
     try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_edit_access(orguser, "kpi", kpi)
+
+    try:
         return KPIService.update_annotation(kpi_id, entry_id, orguser.org, orguser, payload)
     except KPINotFoundError:
         raise HttpError(404, "Not found") from None
@@ -296,6 +308,12 @@ def update_annotation(request, kpi_id: int, entry_id: int, payload: AnnotationEn
 def delete_annotation(request, kpi_id: int, entry_id: int):
     """Delete an annotation entry."""
     orguser: OrgUser = request.orguser
+    try:
+        kpi = KPIService.get_kpi(kpi_id, orguser.org)
+    except KPINotFoundError:
+        raise HttpError(404, "KPI not found") from None
+    require_edit_access(orguser, "kpi", kpi)
+
     try:
         KPIService.delete_annotation(kpi_id, entry_id, orguser.org, orguser)
     except KPINotFoundError:

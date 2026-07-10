@@ -237,6 +237,12 @@ def lock_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
+
+    try:
         lock_info = DashboardService.lock_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
@@ -255,6 +261,12 @@ def lock_dashboard(request, dashboard_id: int):
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
     orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         lock_info = DashboardService.refresh_lock(dashboard_id, orguser.org, orguser)
@@ -283,6 +295,12 @@ def unlock_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
 
     try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
+
+    try:
         DashboardService.unlock_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
@@ -298,6 +316,12 @@ def unlock_dashboard(request, dashboard_id: int):
 def create_filter(request, dashboard_id: int, payload: FilterCreate):
     """Add a filter to dashboard"""
     orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         filter_data = FilterData(
@@ -351,6 +375,12 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
     orguser: OrgUser = request.orguser
 
     try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
+
+    try:
         filter_obj = DashboardService.update_filter(
             dashboard_id=dashboard_id,
             filter_id=filter_id,
@@ -372,6 +402,12 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 def delete_filter(request, dashboard_id: int, filter_id: int):
     """Delete a dashboard filter"""
     orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         DashboardService.delete_filter(dashboard_id, filter_id, orguser.org)
