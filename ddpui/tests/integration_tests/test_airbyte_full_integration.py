@@ -16,6 +16,7 @@ import time
 import logging
 import pytest
 import requests
+import contextlib
 from dotenv import load_dotenv
 from ninja.errors import HttpError
 
@@ -52,8 +53,9 @@ load_dotenv()
 
 # Environment configuration - these would be set in .env for real tests
 AIRBYTE_TEST_ENABLED = os.getenv("AIRBYTE_TEST_ENABLED", "false").lower() == "true"
-AIRBYTE_TEST_DESTINATIONS = os.getenv("AIRBYTE_TEST_DESTINATIONS", "postgres").split(",")
-AIRBYTE_TEST_SOURCES = os.getenv("AIRBYTE_TEST_SOURCES", "file").split(",")
+# Strip whitespace when parsing environment-driven connector lists for robustness
+AIRBYTE_TEST_DESTINATIONS = [d.strip() for d in os.getenv("AIRBYTE_TEST_DESTINATIONS", "postgres").split(",") if d.strip()]
+AIRBYTE_TEST_SOURCES = [s.strip() for s in os.getenv("AIRBYTE_TEST_SOURCES", "file").split(",") if s.strip()]
 AIRBYTE_TEST_TIMEOUT = int(os.getenv("AIRBYTE_TEST_TIMEOUT", "300"))
 AIRBYTE_SYNC_WAIT_INTERVAL = int(os.getenv("AIRBYTE_SYNC_WAIT_INTERVAL", "10"))
 AIRBYTE_MAX_WAIT_CYCLES = int(os.getenv("AIRBYTE_MAX_WAIT_CYCLES", "30"))
@@ -63,8 +65,11 @@ MAX_SYNC_WAIT_TIME = AIRBYTE_SYNC_WAIT_INTERVAL * AIRBYTE_MAX_WAIT_CYCLES
 if MAX_SYNC_WAIT_TIME > AIRBYTE_TEST_TIMEOUT:
     # Adjust wait cycles to respect timeout
     AIRBYTE_MAX_WAIT_CYCLES = AIRBYTE_TEST_TIMEOUT // AIRBYTE_SYNC_WAIT_INTERVAL
+    MAX_SYNC_WAIT_TIME = AIRBYTE_SYNC_WAIT_INTERVAL * AIRBYTE_MAX_WAIT_CYCLES
     logger.warning(
-        f"Adjusted max wait cycles to {AIRBYTE_MAX_WAIT_CYCLES} to respect timeout of {AIRBYTE_TEST_TIMEOUT}s"
+        "Adjusted max wait cycles to %s to respect timeout of %ss",
+        AIRBYTE_MAX_WAIT_CYCLES,
+        AIRBYTE_TEST_TIMEOUT,
     )
 
 # Airbyte server details
@@ -206,28 +211,17 @@ class TestAirbyteFullIntegration:
         workspace_name = f"test-workspace-{ci_id}-{int(time.time())}"
         
         try:
-            # Use try/finally to ensure cleanup even if setup fails partially
-            try:
-                workspace_result = create_workspace(workspace_name)
-                cls.workspace_id = workspace_result["workspaceId"]
-                logger.info(f"Created workspace with ID: {cls.workspace_id}")
-            except HttpError as e:
-                logger.error(f"Failed to create workspace: {str(e)}")
-                pytest.skip(f"Could not create workspace: {str(e)}")
-                return
-            except Exception as e:
-                logger.error(f"Failed to create workspace: {str(e)}")
-                pytest.skip(f"Unexpected error: {str(e)}")
-                return
+            workspace_result = create_workspace(workspace_name)
+            cls.workspace_id = workspace_result["workspaceId"]
+            logger.info("Created workspace with ID: %s", cls.workspace_id)
+        except HttpError as e:
+            logger.error("Failed to create workspace: %s", e)
+            pytest.skip(f"Could not create workspace: {e}")
         except Exception as e:
-            # This catch-all ensures we don't leak workspaces even on unexpected errors
-            logger.error(f"Error during setup: {str(e)}")
-            # Try to clean up if we did create a workspace
-            if cls.workspace_id:
-                try:
+            logger.error("Unexpected error creating workspace: %s", e)
+            with contextlib.suppress(Exception):
+                if cls.workspace_id:
                     delete_workspace(cls.workspace_id)
-                except Exception:
-                    pass
             raise
     
     @classmethod
@@ -236,38 +230,38 @@ class TestAirbyteFullIntegration:
         if not cls.workspace_id:
             return
             
-        logger.info(f"Cleaning up workspace {cls.workspace_id} and all resources")
+        logger.info("Cleaning up workspace %s and all resources", cls.workspace_id)
         
         # Delete connections first
         for connection_id in cls.connections.values():
             try:
                 delete_connection(cls.workspace_id, connection_id)
-                logger.info(f"Deleted connection: {connection_id}")
+                logger.info("Deleted connection: %s", connection_id)
             except Exception as e:
-                logger.warning(f"Failed to delete connection {connection_id}: {str(e)}")
+                logger.warning("Failed to delete connection %s: %s", connection_id, e)
         
         # Delete sources
         for source_id in cls.sources.values():
             try:
                 delete_source(cls.workspace_id, source_id)
-                logger.info(f"Deleted source: {source_id}")
+                logger.info("Deleted source: %s", source_id)
             except Exception as e:
-                logger.warning(f"Failed to delete source {source_id}: {str(e)}")
+                logger.warning("Failed to delete source %s: %s", source_id, e)
         
         # Delete destinations
         for destination_id in cls.destinations.values():
             try:
                 delete_destination(cls.workspace_id, destination_id)
-                logger.info(f"Deleted destination: {destination_id}")
+                logger.info("Deleted destination: %s", destination_id)
             except Exception as e:
-                logger.warning(f"Failed to delete destination {destination_id}: {str(e)}")
+                logger.warning("Failed to delete destination %s: %s", destination_id, e)
         
         # Delete workspace
         try:
             delete_workspace(cls.workspace_id)
-            logger.info(f"Deleted workspace: {cls.workspace_id}")
+            logger.info("Deleted workspace: %s", cls.workspace_id)
         except Exception as e:
-            logger.warning(f"Failed to delete workspace {cls.workspace_id}: {str(e)}")
+            logger.warning("Failed to delete workspace %s: %s", cls.workspace_id, e)
     
     def test_01_create_destinations(self):
         """Create destinations for testing"""
@@ -280,24 +274,27 @@ class TestAirbyteFullIntegration:
             dest_def_map = {d["name"].lower(): d["destinationDefinitionId"] for d in dest_definitions}
             
             for dest_type in AIRBYTE_TEST_DESTINATIONS:
+                # Normalize dest_type for robust comparison
+                dest_type_norm = dest_type.lower().strip()
+                
                 # Skip if dest_type not in configs
-                if dest_type not in DESTINATION_CONFIGS:
-                    logger.warning(f"Skipping unknown destination type: {dest_type}")
+                if dest_type_norm not in DESTINATION_CONFIGS:
+                    logger.warning("Skipping unknown destination type: %s", dest_type)
                     continue
                     
                 # Find destination definition ID
                 dest_def_key = None
                 for key in dest_def_map:
-                    if dest_type.lower() in key:
+                    if dest_type_norm in key:
                         dest_def_key = key
                         break
                 
                 if not dest_def_key:
-                    logger.warning(f"Could not find destination definition for {dest_type}")
+                    logger.warning("Could not find destination definition for %s", dest_type)
                     continue
                     
                 dest_def_id = dest_def_map[dest_def_key]
-                dest_config = DESTINATION_CONFIGS[dest_type]
+                dest_config = DESTINATION_CONFIGS[dest_type_norm]
                 
                 try:
                     result = create_destination(
@@ -308,10 +305,10 @@ class TestAirbyteFullIntegration:
                     )
                     
                     destination_id = result["destinationId"]
-                    self.destinations[dest_type] = destination_id
-                    logger.info(f"Created {dest_type} destination with ID: {destination_id}")
+                    self.destinations[dest_type_norm] = destination_id
+                    logger.info("Created %s destination with ID: %s", dest_type, destination_id)
                 except Exception as e:
-                    logger.error(f"Failed to create {dest_type} destination: {str(e)}")
+                    logger.error("Failed to create %s destination: %s", dest_type, e)
             
             assert len(self.destinations) > 0, "At least one destination must be created"
         except Exception as e:
@@ -328,24 +325,27 @@ class TestAirbyteFullIntegration:
             source_def_map = {s["name"].lower(): s["sourceDefinitionId"] for s in source_definitions}
             
             for source_type in AIRBYTE_TEST_SOURCES:
+                # Normalize source_type for robust comparison
+                source_type_norm = source_type.lower().strip()
+                
                 # Skip if source_type not in configs
-                if source_type not in SOURCE_CONFIGS:
-                    logger.warning(f"Skipping unknown source type: {source_type}")
+                if source_type_norm not in SOURCE_CONFIGS:
+                    logger.warning("Skipping unknown source type: %s", source_type)
                     continue
                     
                 # Find source definition ID
                 source_def_key = None
                 for key in source_def_map:
-                    if source_type.lower() in key:
+                    if source_type_norm in key:
                         source_def_key = key
                         break
                 
                 if not source_def_key:
-                    logger.warning(f"Could not find source definition for {source_type}")
+                    logger.warning("Could not find source definition for %s", source_type)
                     continue
                     
                 source_def_id = source_def_map[source_def_key]
-                source_config = SOURCE_CONFIGS[source_type]
+                source_config = SOURCE_CONFIGS[source_type_norm]
                 
                 try:
                     result = create_source(
@@ -356,10 +356,10 @@ class TestAirbyteFullIntegration:
                     )
                     
                     source_id = result["sourceId"]
-                    self.sources[source_type] = source_id
-                    logger.info(f"Created {source_type} source with ID: {source_id}")
+                    self.sources[source_type_norm] = source_id
+                    logger.info("Created %s source with ID: %s", source_type, source_id)
                 except Exception as e:
-                    logger.error(f"Failed to create {source_type} source: {str(e)}")
+                    logger.error("Failed to create %s source: %s", source_type, e)
             
             assert len(self.sources) > 0, "At least one source must be created"
         except Exception as e:
@@ -407,9 +407,9 @@ class TestAirbyteFullIntegration:
                     
                     # Store the connection ID
                     self.connections[connection_name] = connection_id
-                    logger.info(f"Created connection {connection_name} with ID: {connection_id}")
+                    logger.info("Created connection %s with ID: %s", connection_name, connection_id)
                 except Exception as e:
-                    logger.error(f"Failed to create connection {connection_name}: {str(e)}")
+                    logger.error("Failed to create connection %s: %s", connection_name, e)
         
         assert len(self.connections) > 0, "At least one connection must be created"
     
@@ -424,10 +424,9 @@ class TestAirbyteFullIntegration:
                 job_id = sync_result.get("job", {}).get("id")
                 
                 if not job_id:
-                    logger.error(f"No job ID returned for connection {connection_name}")
-                    continue
+                    pytest.fail(f"No job ID returned when starting sync for {connection_name}")
                 
-                logger.info(f"Started sync for connection {connection_name}, job ID: {job_id}")
+                logger.info("Started sync for connection %s, job ID: %s", connection_name, job_id)
                 
                 # Wait for the sync to complete
                 status = "pending"
@@ -440,17 +439,17 @@ class TestAirbyteFullIntegration:
                     time.sleep(AIRBYTE_SYNC_WAIT_INTERVAL)
                     job_info = get_job_info(job_id)
                     status = job_info.get("job", {}).get("status", "unknown")
-                    logger.info(f"Sync job {job_id} status: {status}")
+                    logger.info("Sync job %s status: %s", job_id, status)
                     wait_cycles += 1
                 
                 # If we reached timeout
                 if (time.time() - start_time) >= AIRBYTE_TEST_TIMEOUT:
-                    logger.error(f"Sync job {job_id} timed out after {AIRBYTE_TEST_TIMEOUT}s")
+                    logger.error("Sync job %s timed out after %ss", job_id, AIRBYTE_TEST_TIMEOUT)
                     
                 assert status == "succeeded", f"Sync job {job_id} for connection {connection_name} failed with status: {status}"
-                logger.info(f"Sync job {job_id} for connection {connection_name} completed successfully")
+                logger.info("Sync job %s for connection %s completed successfully", job_id, connection_name)
             except Exception as e:
-                logger.error(f"Error running sync for connection {connection_name}: {str(e)}")
+                logger.error("Error running sync for connection %s: %s", connection_name, e)
                 pytest.fail(f"Sync failed for connection {connection_name}: {str(e)}")
     
     def test_05_validate_sync_history(self):
@@ -464,7 +463,7 @@ class TestAirbyteFullIntegration:
                 jobs = resp.get("jobs", [])
                 
                 assert jobs is not None, f"Failed to get jobs for connection {connection_name}"
-                logger.info(f"Retrieved {len(jobs)} jobs for connection {connection_name}")
+                logger.info("Retrieved %d jobs for connection %s", len(jobs), connection_name)
                 
                 # Check if we have at least one job
                 assert len(jobs) > 0, f"No jobs found for connection {connection_name}"
@@ -474,12 +473,12 @@ class TestAirbyteFullIntegration:
                 if job_id:
                     job_info = get_job_info(job_id)
                     assert job_info is not None, f"Failed to get job info for job {job_id}"
-                    logger.info(f"Successfully retrieved job info for job {job_id}")
+                    logger.info("Successfully retrieved job info for job %s", job_id)
                     
                     # Get logs - use index 0 instead of attempt ID
                     logs = get_logs_for_job(job_id, 0)
                     assert logs is not None, f"Failed to get logs for job {job_id}"
-                    logger.info(f"Successfully retrieved logs for job {job_id}")
+                    logger.info("Successfully retrieved logs for job %s", job_id)
             except Exception as e:
-                logger.error(f"Error validating sync history for connection {connection_name}: {str(e)}")
+                logger.error("Error validating sync history for connection %s: %s", connection_name, e)
                 pytest.fail(f"Sync history validation failed for connection {connection_name}: {str(e)}") 
