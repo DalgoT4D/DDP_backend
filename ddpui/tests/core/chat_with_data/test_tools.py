@@ -44,7 +44,7 @@ class FakeWarehouse:
         return column_name in {col["name"] for col in self.columns}
 
 
-def make_runtime(warehouse=None, dialect="postgres"):
+def make_runtime(warehouse=None, dialect="postgres", allowed_tables=None):
     ctx = RunContext(
         org_id=1,
         org_slug="ngo",
@@ -53,6 +53,7 @@ def make_runtime(warehouse=None, dialect="postgres"):
         max_result_rows=100,
         query_timeout_s=30,
         warehouse=warehouse or FakeWarehouse(),
+        allowed_tables=allowed_tables,
     )
     return SimpleNamespace(context=ctx)
 
@@ -94,6 +95,19 @@ def test_execute_sql_returns_warehouse_error_as_feedback():
     assert 'column "districtname" does not exist' in content
     assert "LINE 1" not in content  # only the first line goes back to the model
     assert artifact["status"] == "error"
+
+
+def test_execute_sql_enforces_table_scope_without_touching_warehouse():
+    # dashboard-scoped session: donations is off-dashboard, must never execute
+    warehouse = FakeWarehouse()
+    content, artifact = execute_sql.func(
+        sql="SELECT SUM(amount) FROM prod.donations",
+        runtime=make_runtime(warehouse, allowed_tables=["prod.surveys"]),
+    )
+    assert content.startswith("SQL rejected:")
+    assert "scoped to one dashboard" in content
+    assert artifact["status"] == "rejected"
+    assert warehouse.executed == []
 
 
 def test_list_schemas_returns_allowlist():

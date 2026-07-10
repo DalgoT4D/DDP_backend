@@ -27,6 +27,13 @@ class RunContext:
     # Resolved from RolePermission at context-build time; tools never query RBAC
     can_create_charts: bool = False
     can_create_dashboards: bool = False
+    # Session scope (dashboard-scoped chat). None = org-wide; a list restricts
+    # the guard and discovery tools to those 'schema.table' refs (fail-closed).
+    scope_type: str = "org"  # org | dashboard | report
+    allowed_tables: list[str] | None = None
+    # Markdown block describing the scope (dashboard title, charts, filters) —
+    # injected into the system prompt, never checkpointed
+    scope_context: str = ""
     # Set per turn by the runner (router output) — reflection gate + tool context
     question: str = ""
     complexity: str = "simple"

@@ -185,6 +185,91 @@ def test_unparseable_sql_fails_closed():
         )
 
 
+def test_allowed_table_passes_table_allowlist():
+    # dashboard-scoped sessions restrict to the tables behind the dashboard's charts
+    result = validate(
+        "SELECT district, COUNT(*) AS n FROM prod.surveys GROUP BY district",
+        dialect="postgres",
+        allowed_schemas=["prod"],
+        max_rows=100,
+        allowed_tables=["prod.surveys", "prod.field_visits"],
+    )
+    assert result.tables == ["prod.surveys"]
+
+
+def test_out_of_scope_table_is_blocked_with_scope_message():
+    # Priya's dashboard uses surveys + field_visits; donations is off-dashboard
+    with pytest.raises(GuardError, match="prod.donations.*scoped to one dashboard") as err:
+        validate(
+            "SELECT SUM(amount) FROM prod.donations",
+            dialect="postgres",
+            allowed_schemas=["prod"],
+            max_rows=100,
+            allowed_tables=["prod.surveys", "prod.field_visits"],
+        )
+    assert "prod.surveys" in str(err.value)  # names what IS available
+    assert "full Chat with Data" in str(err.value)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # JOIN
+        "SELECT s.district FROM prod.surveys s JOIN prod.donations d ON d.id = s.id",
+        # subquery
+        "SELECT * FROM prod.surveys WHERE id IN (SELECT id FROM prod.donations)",
+        # UNION branch
+        "SELECT district FROM prod.surveys UNION ALL SELECT district FROM prod.donations",
+        # inside a CTE body
+        "WITH d AS (SELECT id FROM prod.donations) SELECT * FROM d",
+    ],
+)
+def test_out_of_scope_table_blocked_anywhere_in_tree(sql):
+    with pytest.raises(GuardError, match="prod.donations"):
+        validate(
+            sql,
+            dialect="postgres",
+            allowed_schemas=["prod"],
+            max_rows=100,
+            allowed_tables=["prod.surveys"],
+        )
+
+
+def test_cte_alias_is_not_table_checked():
+    # 'monthly' is a CTE alias — must not be rejected as an off-scope table
+    result = validate(
+        "WITH monthly AS (SELECT district FROM prod.surveys) SELECT * FROM monthly",
+        dialect="postgres",
+        allowed_schemas=["prod"],
+        max_rows=100,
+        allowed_tables=["prod.surveys"],
+    )
+    assert result.tables == ["prod.surveys"]
+
+
+def test_empty_table_allowlist_blocks_everything():
+    # [] means "nothing allowed" (fail-closed), never "no restriction"
+    with pytest.raises(GuardError, match="not available in this chat"):
+        validate(
+            "SELECT * FROM prod.surveys",
+            dialect="postgres",
+            allowed_schemas=["prod"],
+            max_rows=100,
+            allowed_tables=[],
+        )
+
+
+def test_table_allowlist_is_case_insensitive():
+    result = validate(
+        'SELECT * FROM prod."Surveys"',
+        dialect="postgres",
+        allowed_schemas=["prod"],
+        max_rows=100,
+        allowed_tables=["prod.surveys"],
+    )
+    assert result.tables == ["prod.Surveys"]
+
+
 def test_insert_is_rejected():
     with pytest.raises(GuardError, match="SELECT"):
         validate(
