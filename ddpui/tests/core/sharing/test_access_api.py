@@ -522,6 +522,48 @@ class TestCreateGrantByEmail:
         # invited user's role is Member (Part C), so that's what they see
         assert effective_permission(new_orguser_obj, "dashboard", dashboard) == "view"
 
+        # and the list-scoping path (the sharing modal's "the new user sees
+        # the resource in their list" case) admits the dashboard too
+        from ddpui.core.sharing.access_resolver import accessible_filter
+
+        assert (
+            Dashboard.objects.filter(accessible_filter(new_orguser_obj, "dashboard"))
+            .filter(id=dashboard.id)
+            .exists()
+        )
+
+    def test_activation_drops_pending_membership_when_already_an_active_member(self, org, analyst):
+        """`add_member`'s `get_or_create` is keyed on `orguser`, not
+        `pending_email` -- if an active `(group, orguser)` row already
+        exists for this person by the time their pending row would be
+        activated (e.g. someone added them to the group directly, by
+        `orguser_id`, before they accepted their invite), converting the
+        pending row too would violate the `(group, orguser)` unique
+        constraint. It must be dropped instead, leaving exactly one active
+        membership."""
+        from ddpui.core.orguserfunctions import activate_pending_shares_and_memberships
+
+        member_orguser = _make_orguser(org, MEMBER_ROLE, "race-test-member")
+        group = UserGroup.objects.create(org=org, name="Race Test Group", created_by=analyst)
+        UserGroupMember.objects.create(
+            group=group, orguser=member_orguser, status=UserGroupMemberStatus.ACTIVE
+        )
+        pending_member = UserGroupMember.objects.create(
+            group=group,
+            pending_email=member_orguser.user.email,
+            status=UserGroupMemberStatus.PENDING,
+        )
+
+        activate_pending_shares_and_memberships(member_orguser.user.email, org, member_orguser)
+
+        assert not UserGroupMember.objects.filter(id=pending_member.id).exists()
+        assert (
+            UserGroupMember.objects.filter(
+                group=group, orguser=member_orguser, status=UserGroupMemberStatus.ACTIVE
+            ).count()
+            == 1
+        )
+
     @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
     def test_cross_org_accept_does_not_activate_other_orgs_pending_share(self, org, analyst, admin):
         """The same email invited to two orgs: accepting the invite in one
