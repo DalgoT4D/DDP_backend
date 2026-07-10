@@ -65,10 +65,11 @@ class AWSClient:
                     f"Timeout while acquiring lock for {service_name} session initialization"
                 )
 
-        if cls._clients[service_name] is None:
+        client = cls._clients.get(service_name)
+        if client is None:
             raise RuntimeError(f"Failed to initialize client for {service_name}")
 
-        return cls._clients[service_name]
+        return client
 
     @classmethod
     def _initialize_boto_session(cls, service_name: str) -> boto3.Session:
