@@ -24,6 +24,19 @@ from ddpui.schemas.chart_schemas import (
 logger = CustomLogger("ddpui.charts")
 
 
+def _ensure_unique_alias(alias: str, seen_aliases: set) -> str:
+    """Return a unique alias by appending _2, _3, etc. if the alias already exists."""
+    if alias not in seen_aliases:
+        seen_aliases.add(alias)
+        return alias
+    counter = 2
+    while f"{alias}_{counter}" in seen_aliases:
+        counter += 1
+    unique = f"{alias}_{counter}"
+    seen_aliases.add(unique)
+    return unique
+
+
 def apply_time_grain(column_expr, time_grain: str, warehouse_type: str = "postgres"):
     """
     Apply time grain to a datetime column using database-specific functions.
@@ -364,6 +377,7 @@ def build_multi_metric_query(
             query_builder.group_cols_by(dim_col_str)
 
     # Add all metrics as aggregate columns (if present)
+    seen_aliases = set()
     if payload.metrics:
         for metric in payload.metrics:
             # Expression path: inline raw SQL expression
@@ -388,6 +402,9 @@ def build_multi_metric_query(
                     raise ValueError(f"Column is required for {metric.aggregation} aggregation")
 
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+
+            # Ensure unique alias to prevent ambiguous column names in SQL results
+            alias = _ensure_unique_alias(alias, seen_aliases)
 
             # Note: We don't validate aliases because they can be human-readable display names
             # with spaces and special characters (e.g., "Total Count", "Average Price")
@@ -956,6 +973,7 @@ def execute_chart_query(
             col_index += 1
 
     # Handle metrics - metrics are required for all charts (except table charts without metrics)
+    seen_aliases = set()
     if payload.metrics:
         for metric in payload.metrics:
             if metric.column_expression:
@@ -969,6 +987,8 @@ def execute_chart_query(
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             else:
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+            # Ensure unique alias to match the deduplication in build_multi_metric_query
+            alias = _ensure_unique_alias(alias, seen_aliases)
             column_mapping.append((alias, col_index))
             col_index += 1
 
@@ -1516,6 +1536,7 @@ def get_chart_data_table_preview(
         col_index += 1
 
     # Handle multiple metrics (if present)
+    seen_aliases = set()
     if payload.metrics:
         for metric in payload.metrics:
             # Handle COUNT(*) case - SQL alias includes count_all_ prefix
@@ -1529,6 +1550,8 @@ def get_chart_data_table_preview(
             else:
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
                 display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            # Ensure unique alias to match the deduplication in build_multi_metric_query
+            alias = _ensure_unique_alias(alias, seen_aliases)
             # Use SQL alias for column_mapping to match query results
             # Use display_name for columns array to match transform_data_for_chart
             column_mapping.append((alias, col_index))
