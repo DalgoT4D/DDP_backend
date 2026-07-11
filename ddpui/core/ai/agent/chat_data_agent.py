@@ -23,8 +23,14 @@ from ddpui.core.ai.agent.pii import build_pii_middleware
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import get_tools
 
-# Upper bound on model⇄tool loop steps per turn — backstop against runaway loops
-RECURSION_LIMIT = 25
+# Upper bound on GRAPH STEPS per turn — backstop against runaway loops.
+# Every middleware hook is its own graph node, so one model⇄tool cycle costs
+# ~10 steps with the current stack (5 before_model hooks + model + 3 after_model
+# + tools). 120 ≈ headroom for ~11 tool calls; a legitimate heavy turn uses ~9
+# (schemas → tables → details ×2 → profile ×2 → sql ×2 → chart). The real
+# runaway guard is sql_retry_limiter (3 failed queries), not this ceiling.
+# If you add middleware, re-check test_realistic_discovery_turn_fits_in_the_recursion_limit.
+RECURSION_LIMIT = 120
 
 # Max tokens per model response; answers are short prose + small tables
 MODEL_MAX_TOKENS = 4096

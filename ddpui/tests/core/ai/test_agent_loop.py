@@ -63,6 +63,42 @@ def sql_call(sql: str, call_id: str) -> AIMessage:
     )
 
 
+def test_realistic_discovery_turn_fits_in_the_recursion_limit():
+    """Regression: a normal 7-tool-call discovery turn must complete under the
+    PRODUCTION recursion limit. Every middleware hook is its own graph node
+    (each PIIMiddleware adds two), so adding middleware silently shrinks how
+    many tool calls fit — this broke real turns at 3 tool calls when the PII
+    middleware landed while RECURSION_LIMIT was still 25."""
+    from ddpui.core.ai.agent.chat_data_agent import RECURSION_LIMIT
+
+    def tool_call(name, args, call_id):
+        return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])
+
+    model = ScriptedChatModel(
+        script=[
+            tool_call("list_schemas", {}, "c1"),
+            tool_call("list_tables", {"schema_name": "prod"}, "c2"),
+            tool_call("get_table_details", {"schema_name": "prod", "table_name": "t"}, "c3"),
+            tool_call("get_table_details", {"schema_name": "prod", "table_name": "t"}, "c4"),
+            tool_call(
+                "profile_column",
+                {"schema_name": "prod", "table_name": "t", "column_name": "c"},
+                "c5",
+            ),
+            sql_call("SELECT COUNT(*) AS n FROM prod.t", "c6"),
+            sql_call("SELECT district, COUNT(*) AS n FROM prod.t GROUP BY 1", "c7"),
+            AIMessage(content="Here is your answer."),
+        ]
+    )
+    agent = build_agent(model=model)
+    result = agent.invoke(
+        {"messages": [HumanMessage("tell me about the work order data")]},
+        context=make_context(FakeWarehouse(rows=[{"n": 5}])),
+        config={"recursion_limit": RECURSION_LIMIT},
+    )
+    assert result["messages"][-1].content == "Here is your answer."
+
+
 def test_sql_error_recovery_second_attempt_succeeds():
     class FlakyWarehouse(FakeWarehouse):
         def execute(self, sql):

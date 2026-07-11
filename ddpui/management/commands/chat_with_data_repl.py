@@ -22,6 +22,7 @@ from langchain.chat_models import init_chat_model
 
 from ddpui.core.ai.agent.chat_data_agent import MODEL_MAX_TOKENS, RECURSION_LIMIT, build_agent
 from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
+from ddpui.core.ai.messages.content import extract_text
 from ddpui.models.org_user import OrgUser
 
 
@@ -87,8 +88,11 @@ class Command(BaseCommand):
             if mode == "messages":
                 message_chunk, _meta = chunk
                 if isinstance(message_chunk, AIMessage) and message_chunk.content:
-                    self.stdout.write(message_chunk.content, ending="")
-                    self.stdout.flush()
+                    # thinking-enabled models stream block lists; print text only
+                    text = extract_text(message_chunk.content)
+                    if text:
+                        self.stdout.write(text, ending="")
+                        self.stdout.flush()
             elif mode == "updates":
                 for update in chunk.values():
                     for message in (update or {}).get("messages", []):
