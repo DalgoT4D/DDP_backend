@@ -7,14 +7,13 @@ gets a module like this one under agent/ — the loop infrastructure it shares
 lives in middleware.py / run_context.py / checkpointer.py.
 """
 
-import os
-
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from ddpui.core.ai.agent.base import build_model
 from ddpui.core.ai.agent.middleware import (
     MAX_SQL_ATTEMPTS,
     clear_old_tool_results,
@@ -30,18 +29,15 @@ RECURSION_LIMIT = 25
 # Max tokens per model response; answers are short prose + small tables
 MODEL_MAX_TOKENS = 4096
 
+MODEL_ENV_VAR = "CHAT_WITH_DATA_MODEL"
 DEFAULT_MODEL = "claude-sonnet-5"
 
 _DIALECT_LABELS = {"postgres": "PostgreSQL", "bigquery": "BigQuery"}
 
 
 def get_chat_model() -> ChatAnthropic:
-    """The production model. Deployment-level key; no temperature (rejected by
-    Claude Sonnet 5 / Opus 4.7+)."""
-    return ChatAnthropic(
-        model=os.getenv("CHAT_WITH_DATA_MODEL", DEFAULT_MODEL),
-        max_tokens=MODEL_MAX_TOKENS,
-    )
+    """The production chat model."""
+    return build_model(MODEL_ENV_VAR, DEFAULT_MODEL, MODEL_MAX_TOKENS)
 
 
 def build_system_prompt(ctx: RunContext) -> str:

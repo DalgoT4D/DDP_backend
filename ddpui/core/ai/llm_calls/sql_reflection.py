@@ -9,12 +9,10 @@ Sync on purpose: it runs inside the execute_sql tool, which LangGraph executes
 in a worker thread. FAIL-OPEN: any error means "no issue found".
 """
 
-import json
-import os
-
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.ai.agent.base import build_model
+from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -40,9 +38,8 @@ Return ONLY JSON: {{"ok": true}} if the SQL is sound, or
 
 
 def get_reflection_model() -> BaseChatModel:
-    return ChatAnthropic(
-        model=os.getenv("CHAT_WITH_DATA_REFLECTION_MODEL", DEFAULT_REFLECTION_MODEL),
-        max_tokens=REFLECTION_MAX_TOKENS,
+    return build_model(
+        "CHAT_WITH_DATA_REFLECTION_MODEL", DEFAULT_REFLECTION_MODEL, REFLECTION_MAX_TOKENS
     )
 
 
@@ -55,10 +52,7 @@ def check_sql(
         response = model.invoke(
             _PROMPT.format(question=question[:1000], sql=sql[:4000], dialect=dialect)
         )
-        raw = extract_text(response.content).strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`").lstrip("json").strip()
-        data = json.loads(raw)
+        data = parse_json_reply(extract_text(response.content))
         if data.get("ok") is False and data.get("issue"):
             return str(data["issue"])
         return None

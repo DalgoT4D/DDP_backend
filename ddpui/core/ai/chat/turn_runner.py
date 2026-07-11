@@ -17,7 +17,6 @@ forwards these events verbatim. Event shapes are the WS protocol from plan §4.4
 After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
 """
 
-import os
 import time
 import uuid
 from typing import AsyncIterator
@@ -25,7 +24,8 @@ from typing import AsyncIterator
 from asgiref.sync import sync_to_async
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
-from ddpui.core.ai.agent.chat_data_agent import DEFAULT_MODEL, RECURSION_LIMIT
+from ddpui.core.ai.agent.base import resolve_model_name
+from ddpui.core.ai.agent.chat_data_agent import DEFAULT_MODEL, MODEL_ENV_VAR, RECURSION_LIMIT
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
 from ddpui.core.ai.llm_calls.turn_audit import validate_turn
@@ -98,7 +98,7 @@ async def run_turn(
         context=context,
         question=question,
         request_uuid=request_uuid,
-        model_name=os.getenv("CHAT_WITH_DATA_MODEL", DEFAULT_MODEL),
+        model_name=resolve_model_name(MODEL_ENV_VAR, DEFAULT_MODEL),
     )
     config = {
         "configurable": {"thread_id": str(session.thread_id)},

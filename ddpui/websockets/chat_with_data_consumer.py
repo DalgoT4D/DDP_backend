@@ -26,9 +26,9 @@ from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_
 from ddpui.core.ai.chat.turn_runner import run_turn
 from ddpui.core.ai.scopes.base import ScopeUnavailable
 from ddpui.core.ai.llm_calls.session_title import generate_session_title
+from ddpui.auth import orguser_has_permission
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import RolePermission
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.websockets.schemas import WebsocketCloseCodes
@@ -178,10 +178,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _authorize(self) -> bool:
         """Permission + feature flag + AI consent + warehouse, in one DB hop."""
-        has_perm = RolePermission.objects.filter(
-            role=self.orguser.new_role, permission__slug=REQUIRED_PERMISSION
-        ).exists()
-        if not has_perm:
+        if not orguser_has_permission(self.orguser, REQUIRED_PERMISSION):
             logger.info("chat_with_data ws: missing permission")
             return False
         status = service.get_status(self.orguser)

@@ -3,7 +3,7 @@
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
-from ddpui.core.ai.tools import common
+from ddpui.core.ai.tools import catalog, rendering
 from ddpui.core.ai.tools.registry import register_tool
 
 # Sample rows shown per table in get_table_details — enough to convey shape, not data
@@ -27,8 +27,8 @@ def list_tables(schema_name: str, runtime: ToolRuntime[RunContext]) -> str:
     """List tables (with approximate row counts) in one schema."""
     ctx = runtime.context
     try:
-        tables = common.list_table_names(ctx, schema_name)
-    except common.ToolInputError as err:
+        tables = catalog.list_table_names(ctx, schema_name)
+    except catalog.ToolInputError as err:
         return str(err)
     if not tables:
         return f"Schema '{schema_name}' has no tables."
@@ -46,17 +46,17 @@ def get_table_details(schema_name: str, table_name: str, runtime: ToolRuntime[Ru
     writing SQL against the table — column names must match exactly."""
     ctx = runtime.context
     try:
-        common.check_table(ctx, schema_name, table_name)
-    except common.ToolInputError as err:
+        catalog.check_table(ctx, schema_name, table_name)
+    except catalog.ToolInputError as err:
         return str(err)
 
     columns = ctx.warehouse.get_table_columns(schema_name, table_name)
     col_lines = [f"{col['name']}: {col['data_type']}" for col in columns]
 
-    qualified = common.qualified(ctx.dialect, schema_name, table_name)
+    qualified = catalog.qualified(ctx.dialect, schema_name, table_name)
     try:
         sample_rows = ctx.warehouse.execute(f"SELECT * FROM {qualified} LIMIT {SAMPLE_ROW_COUNT}")
-        sample = common.render_rows(sample_rows, SAMPLE_ROW_COUNT)
+        sample = rendering.render_rows(sample_rows, SAMPLE_ROW_COUNT)
     except Exception:  # pylint: disable=broad-except
         sample = "(samples unavailable)"
 

@@ -9,13 +9,12 @@ data_question/simple — the v1 behavior. The router may only ever divert
 obviously-non-data turns; it must never block a real question.
 """
 
-import json
-import os
 from dataclasses import dataclass, field
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.ai.agent.base import build_model
+from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -65,10 +64,7 @@ FAIL_OPEN = RouteResult()
 
 
 def get_router_model() -> BaseChatModel:
-    return ChatAnthropic(
-        model=os.getenv("CHAT_WITH_DATA_ROUTER_MODEL", DEFAULT_ROUTER_MODEL),
-        max_tokens=ROUTER_MAX_TOKENS,
-    )
+    return build_model("CHAT_WITH_DATA_ROUTER_MODEL", DEFAULT_ROUTER_MODEL, ROUTER_MAX_TOKENS)
 
 
 _SMALL_TALK_PROMPT = """You are Dalgo's data assistant. The user sent a casual \
@@ -111,11 +107,7 @@ async def route_question(
         response = await model.ainvoke(
             _PROMPT.format(question=question[:1000], history_block=history_block)
         )
-        raw = extract_text(response.content).strip()
-        # tolerate models that wrap JSON in a code fence
-        if raw.startswith("```"):
-            raw = raw.strip("`").lstrip("json").strip()
-        data = json.loads(raw)
+        data = parse_json_reply(extract_text(response.content))
 
         intent = data.get("intent")
         if intent not in INTENTS:

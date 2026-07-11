@@ -6,13 +6,13 @@ database_sync_to_async in async consumers), then pass the context into the run â
 tools never touch the database or trust an LLM-supplied org identifier.
 """
 
+from ddpui.auth import granted_permission_slugs
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.scopes.base import ORG_SCOPE
 from ddpui.core.ai.scopes.resolver import resolve_scope
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import RolePermission
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 # Never offered to the agent, regardless of what the warehouse contains
@@ -74,12 +74,7 @@ def build_run_context(orguser: OrgUser, session: ChatWithDataSession | None = No
         dbt_schema = org_dbt.default_schema if org_dbt else None
         allowed_schemas = derive_allowed_schemas(warehouse, dialect, dbt_schema)
 
-    granted = set(
-        RolePermission.objects.filter(
-            role=orguser.new_role,
-            permission__slug__in=["can_create_charts", "can_create_dashboards"],
-        ).values_list("permission__slug", flat=True)
-    )
+    granted = granted_permission_slugs(orguser, ["can_create_charts", "can_create_dashboards"])
 
     return RunContext(
         org_id=org.id,

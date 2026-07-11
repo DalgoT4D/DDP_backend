@@ -9,12 +9,10 @@ column, and a Langfuse score; it never blocks or changes the answer.
 Non-fatal everywhere: any failure returns None and the turn proceeds unmarked.
 """
 
-import json
-import os
-
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.ai.agent.base import build_model
+from ddpui.core.ai.llm_calls.parsing import parse_json_reply
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -59,9 +57,8 @@ Return ONLY JSON:
 
 
 def get_validator_model() -> BaseChatModel:
-    return ChatAnthropic(
-        model=os.getenv("CHAT_WITH_DATA_VALIDATOR_MODEL", DEFAULT_VALIDATOR_MODEL),
-        max_tokens=VALIDATOR_MAX_TOKENS,
+    return build_model(
+        "CHAT_WITH_DATA_VALIDATOR_MODEL", DEFAULT_VALIDATOR_MODEL, VALIDATOR_MAX_TOKENS
     )
 
 
@@ -105,10 +102,7 @@ async def validate_turn(
             answer=answer[:MAX_ANSWER_CHARS],
         )
         response = await model.ainvoke(prompt)
-        raw = extract_text(response.content).strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`").lstrip("json").strip()
-        data = json.loads(raw)
+        data = parse_json_reply(extract_text(response.content))
 
         verdict = data.get("verdict")
         if verdict not in VERDICTS:

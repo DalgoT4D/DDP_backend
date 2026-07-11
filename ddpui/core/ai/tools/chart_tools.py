@@ -13,6 +13,12 @@ from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
+from ddpui.core.ai.tools.rendering import rejection
+
+
+def _rejected(reason: str) -> tuple[str, dict]:
+    return rejection("chart", "Chart not created", reason)
+
 
 CHART_TYPES = {"bar", "line", "pie", "number"}
 AGGREGATIONS = {"sum", "avg", "count", "min", "max", "count_distinct"}
@@ -27,10 +33,6 @@ def _save_chart(ctx: RunContext, chart_data) -> "Chart":  # noqa: F821
 
     orguser = OrgUser.objects.select_related("org").get(id=ctx.orguser_id)
     return ChartService.create_chart(chart_data, orguser)
-
-
-def _rejected(reason: str) -> tuple[str, dict]:
-    return f"Chart not created: {reason}", {"type": "chart", "status": "rejected", "error": reason}
 
 
 @register_tool

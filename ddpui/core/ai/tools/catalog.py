@@ -1,15 +1,12 @@
-"""Shared helpers for Chat with Data tools.
+"""Identifier safety for warehouse tools.
 
-Identifier safety model: schema names are validated against the server-derived
-allowlist, and table names against the live catalog, BEFORE they are ever
-interpolated into introspection SQL. A name the warehouse doesn't already know
-never reaches a query string.
+Schema names are validated against the server-derived allowlist, and table
+names against the live catalog, BEFORE they are ever interpolated into
+introspection SQL. A name the warehouse doesn't already know never reaches a
+query string.
 """
 
 from ddpui.core.ai.agent.run_context import RunContext
-
-# Cap on characters per cell when rendering results/samples for the LLM
-MAX_CELL_CHARS = 120
 
 
 class ToolInputError(Exception):
@@ -65,24 +62,3 @@ def qualified(dialect: str, schema: str, table: str) -> str:
     if dialect == "bigquery":
         return f"`{schema}.{table}`"
     return f'"{schema}"."{table}"'
-
-
-def truncate_cell(value) -> str:
-    text = "" if value is None else str(value)
-    if len(text) > MAX_CELL_CHARS:
-        return text[: MAX_CELL_CHARS - 1] + "…"
-    return text
-
-
-def render_rows(rows: list[dict], max_rows: int) -> str:
-    """Compact pipe-separated rendering of query rows for the LLM."""
-    if not rows:
-        return "(no rows)"
-    shown = rows[:max_rows]
-    columns = list(shown[0].keys())
-    lines = [" | ".join(columns)]
-    for row in shown:
-        lines.append(" | ".join(truncate_cell(row.get(col)) for col in columns))
-    if len(rows) > max_rows:
-        lines.append(f"... ({len(rows) - max_rows} more rows not shown)")
-    return "\n".join(lines)

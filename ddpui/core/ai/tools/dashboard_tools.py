@@ -15,6 +15,7 @@ from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
+from ddpui.core.ai.tools.rendering import rejection
 
 # Grid placement: 12-column grid, three 4-wide × 3-tall charts per row —
 # the same footprint the dashboard builder uses for chart components
@@ -22,6 +23,10 @@ CHART_W = 4
 CHART_H = 3
 GRID_COLUMNS = 12
 _PER_ROW = GRID_COLUMNS // CHART_W
+
+
+def _rejected(reason: str) -> tuple[str, dict]:
+    return rejection("dashboard", "Dashboard action not done", reason)
 
 
 class DashboardNotFound(Exception):
@@ -107,13 +112,6 @@ def _add_charts(ctx: RunContext, dashboard_id: int, chart_ids: list[int]):
     dashboard.tabs = [tab] + tabs[1:]
     dashboard.save(update_fields=["tabs"])
     return dashboard
-
-
-def _rejected(reason: str) -> tuple[str, dict]:
-    return (
-        f"Dashboard action not done: {reason}",
-        {"type": "dashboard", "status": "rejected", "error": reason},
-    )
 
 
 def _dashboard_artifact(dashboard) -> tuple[str, dict]:

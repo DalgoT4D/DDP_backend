@@ -4,11 +4,9 @@ Failure is always non-fatal: a session keeps its default title rather than
 blocking or erroring the chat.
 """
 
-import os
-
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.ai.agent.base import build_model
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -25,10 +23,7 @@ _PROMPT = (
 
 
 def get_title_model() -> BaseChatModel:
-    return ChatAnthropic(
-        model=os.getenv("CHAT_WITH_DATA_TITLE_MODEL", DEFAULT_TITLE_MODEL),
-        max_tokens=TITLE_MAX_TOKENS,
-    )
+    return build_model("CHAT_WITH_DATA_TITLE_MODEL", DEFAULT_TITLE_MODEL, TITLE_MAX_TOKENS)
 
 
 async def generate_session_title(

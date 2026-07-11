@@ -14,7 +14,7 @@ from langchain.tools import ToolRuntime, tool
 from ddpui.core.ai.guards import sql_guard
 from ddpui.core.ai.llm_calls.sql_reflection import check_sql
 from ddpui.core.ai.agent.run_context import RunContext
-from ddpui.core.ai.tools import common
+from ddpui.core.ai.tools import catalog, rendering
 from ddpui.core.ai.tools.registry import register_tool
 
 
@@ -65,11 +65,13 @@ def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
         "row_count": len(rows),
         "columns": list(rows[0].keys()) if rows else [],
         "rows": [
-            [common.truncate_cell(value) for value in row.values()]
+            [rendering.truncate_cell(value) for value in row.values()]
             for row in rows[: ctx.max_result_rows]
         ],
     }
-    content = f"Query returned {len(rows)} rows.\n" + common.render_rows(rows, ctx.max_result_rows)
+    content = f"Query returned {len(rows)} rows.\n" + rendering.render_rows(
+        rows, ctx.max_result_rows
+    )
     return content, artifact
 
 

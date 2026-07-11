@@ -10,11 +10,10 @@ real error.
 """
 
 import json
-import os
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.ai.agent.base import build_model
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.report import ReportSnapshot
@@ -33,10 +32,7 @@ class SummaryGenerationError(Exception):
 
 
 def get_summary_model() -> BaseChatModel:
-    return ChatAnthropic(
-        model=os.getenv("REPORT_SUMMARY_MODEL", DEFAULT_SUMMARY_MODEL),
-        max_tokens=SUMMARY_MAX_TOKENS,
-    )
+    return build_model("REPORT_SUMMARY_MODEL", DEFAULT_SUMMARY_MODEL, SUMMARY_MAX_TOKENS)
 
 
 _PROMPT = """You are writing the executive summary for an NGO's data report. \

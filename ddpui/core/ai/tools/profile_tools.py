@@ -3,7 +3,7 @@
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
-from ddpui.core.ai.tools import common
+from ddpui.core.ai.tools import catalog, rendering
 from ddpui.core.ai.tools.registry import register_tool
 
 # Distinct values returned — enough to catch 'MH' vs 'Maharashtra', small enough for context
@@ -20,14 +20,14 @@ def profile_column(
     (e.g. the user says 'Maharashtra' but the column stores 'MH')."""
     ctx = runtime.context
     try:
-        common.check_table(ctx, schema_name, table_name)
-    except common.ToolInputError as err:
+        catalog.check_table(ctx, schema_name, table_name)
+    except catalog.ToolInputError as err:
         return str(err)
 
     if not ctx.warehouse.column_exists(schema_name, table_name, column_name):
         return f"Column '{column_name}' does not exist on {schema_name}.{table_name}. Use get_table_details to see columns."
 
-    qualified = common.qualified(ctx.dialect, schema_name, table_name)
+    qualified = catalog.qualified(ctx.dialect, schema_name, table_name)
     quoted_col = f"`{column_name}`" if ctx.dialect == "bigquery" else f'"{column_name}"'
     sql = (
         f"SELECT {quoted_col} AS value, COUNT(*) AS occurrences FROM {qualified} "
@@ -36,6 +36,6 @@ def profile_column(
     rows = ctx.warehouse.execute(sql)
     if not rows:
         return f"Column {schema_name}.{table_name}.{column_name} has no values (empty table)."
-    return f"Top values in {schema_name}.{table_name}.{column_name}:\n" + common.render_rows(
+    return f"Top values in {schema_name}.{table_name}.{column_name}:\n" + rendering.render_rows(
         rows, TOP_VALUES_COUNT
     )

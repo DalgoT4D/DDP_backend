@@ -1,12 +1,12 @@
 """Service layer for Chat with Data sessions and status."""
 
+from ddpui.auth import orguser_has_permission
 from ddpui.core.ai.scopes.base import ScopeUnavailable
 from ddpui.core.ai.scopes.resolver import resolve_scope
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import RolePermission
 from ddpui.schemas.chat_with_data_schemas import SessionCreate, StatusResponse
 from ddpui.utils.feature_flags import is_feature_flag_enabled
 
@@ -53,7 +53,7 @@ def create_session(orguser: OrgUser, payload: SessionCreate | None = None) -> Ch
     if scope_type == "dashboard":
         if scope_id is None:
             raise InvalidScope("scope_id is required for a dashboard-scoped chat")
-        if not _can_view_dashboards(orguser):
+        if not orguser_has_permission(orguser, "can_view_dashboards"):
             raise InvalidScope("You don't have permission to view dashboards")
         try:
             resolve_scope(orguser.org, scope_type, scope_id)
@@ -65,30 +65,28 @@ def create_session(orguser: OrgUser, payload: SessionCreate | None = None) -> Ch
     )
 
 
-def _can_view_dashboards(orguser: OrgUser) -> bool:
-    return RolePermission.objects.filter(
-        role=orguser.new_role, permission__slug="can_view_dashboards"
-    ).exists()
+def _owned_live_sessions(orguser: OrgUser):
+    """The one queryset every lookup builds on: the requesting user's own
+    non-deleted sessions. Someone else's session id is indistinguishable from
+    a missing one."""
+    return ChatWithDataSession.objects.filter(
+        org=orguser.org, orguser=orguser, deleted_at__isnull=True
+    )
 
 
 def list_sessions(orguser: OrgUser, scope_type: str | None = None) -> list[ChatWithDataSession]:
     """The requesting user's own live sessions, most recent activity first.
     scope_type filters (the main chat page passes "org" so dashboard-drawer
     sessions don't clutter its sidebar); None returns everything."""
-    queryset = ChatWithDataSession.objects.filter(
-        org=orguser.org, orguser=orguser, deleted_at__isnull=True
-    )
+    queryset = _owned_live_sessions(orguser)
     if scope_type is not None:
         queryset = queryset.filter(scope_type=scope_type)
     return list(queryset.order_by("-updated_at"))
 
 
 def get_session(orguser: OrgUser, session_id: int) -> ChatWithDataSession:
-    """Owner-scoped lookup — someone else's session id is indistinguishable
-    from a missing one."""
-    session = ChatWithDataSession.objects.filter(
-        id=session_id, org=orguser.org, orguser=orguser, deleted_at__isnull=True
-    ).first()
+    """Owner-scoped lookup."""
+    session = _owned_live_sessions(orguser).filter(id=session_id).first()
     if session is None:
         raise SessionNotFound(f"session {session_id} not found")
     return session
@@ -96,9 +94,7 @@ def get_session(orguser: OrgUser, session_id: int) -> ChatWithDataSession:
 
 async def aget_session(orguser: OrgUser, session_id: int) -> ChatWithDataSession:
     """Async variant of get_session for async endpoints/consumers."""
-    session = await ChatWithDataSession.objects.filter(
-        id=session_id, org=orguser.org, orguser=orguser, deleted_at__isnull=True
-    ).afirst()
+    session = await _owned_live_sessions(orguser).filter(id=session_id).afirst()
     if session is None:
         raise SessionNotFound(f"session {session_id} not found")
     return session

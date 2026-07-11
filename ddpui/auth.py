@@ -66,6 +66,23 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
+def orguser_has_permission(orguser, permission_slug: str) -> bool:
+    """Direct DB check of one permission for an orguser's role — for non-HTTP
+    contexts (WebSocket consumers, service functions) with no request.permissions."""
+    return RolePermission.objects.filter(
+        role=orguser.new_role, permission__slug=permission_slug
+    ).exists()
+
+
+def granted_permission_slugs(orguser, permission_slugs: list) -> set:
+    """The subset of permission_slugs the orguser's role grants, in one query."""
+    return set(
+        RolePermission.objects.filter(
+            role=orguser.new_role, permission__slug__in=permission_slugs
+        ).values_list("permission__slug", flat=True)
+    )
+
+
 def set_roles_and_permissions_in_redis(
     redis_client: RedisClient, role_permissions_key: str
 ) -> dict:
