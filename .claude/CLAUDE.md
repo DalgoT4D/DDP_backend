@@ -17,7 +17,7 @@ ddpui/
 ```
 
 AI features (Chat with Data, report summaries) live in `ddpui/core/ai/` — its
-`README.md` maps the package and how to extend it (new tools, agents, scopes).
+`CLAUDE.md` maps the package and how to extend it (new tools, agents, scopes).
 
 | Layer         | Responsible for                                                                       | Should not                                          |
 |---------------|---------------------------------------------------------------------------------------|-----------------------------------------------------|
