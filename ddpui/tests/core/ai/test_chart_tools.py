@@ -56,8 +56,6 @@ def test_creates_bar_chart_with_metric(saved):
         schema_name="prod",
         table_name="surveys",
         dimension_column="district",
-        metric_column=None,
-        metric_aggregation="count",
     )
 
     assert "Surveys by district" in content
@@ -78,6 +76,45 @@ def test_creates_bar_chart_with_metric(saved):
     ]
 
 
+def test_bar_chart_accepts_multiple_metrics(saved):
+    """The chart builder supports several metrics per bar/line chart (grouped
+    bars); the tool must not flatten that to one."""
+    _, artifact = run_tool(
+        make_chart_context(),
+        title="Silt target vs achieved by state",
+        chart_type="bar",
+        schema_name="prod",
+        table_name="work_orders",
+        dimension_column="state",
+        metrics=[
+            {"column": "silt_target", "aggregation": "sum", "alias": "Silt target"},
+            {"column": "silt_achieved", "aggregation": "sum"},
+        ],
+    )
+    assert artifact["type"] == "chart"
+    assert saved["data"].extra_config["metrics"] == [
+        {"column": "silt_target", "aggregation": "sum", "alias": "Silt target"},
+        {"column": "silt_achieved", "aggregation": "sum", "alias": "sum_silt_achieved"},
+    ]
+
+
+def test_pie_and_number_take_exactly_one_metric(saved):
+    _, artifact = run_tool(
+        make_chart_context(),
+        title="Share by district",
+        chart_type="pie",
+        schema_name="prod",
+        table_name="surveys",
+        dimension_column="district",
+        metrics=[
+            {"column": "amount", "aggregation": "sum"},
+            {"column": "amount", "aggregation": "avg"},
+        ],
+    )
+    assert artifact["status"] == "rejected"
+    assert "data" not in saved
+
+
 def test_pie_uses_dimension_column_key(saved):
     _, artifact = run_tool(
         make_chart_context(),
@@ -86,8 +123,7 @@ def test_pie_uses_dimension_column_key(saved):
         schema_name="prod",
         table_name="surveys",
         dimension_column="district",
-        metric_column="amount",
-        metric_aggregation="sum",
+        metrics=[{"column": "amount", "aggregation": "sum"}],
     )
     assert artifact["type"] == "chart"
     assert saved["data"].extra_config["dimension_column"] == "district"

@@ -10,10 +10,25 @@ untouched.
 """
 
 from langchain.tools import ToolRuntime, tool
+from pydantic import BaseModel, Field
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import register_tool
 from ddpui.core.ai.tools.rendering import rejection
+
+
+class MetricInput(BaseModel):
+    """One measured value on the chart."""
+
+    column: str | None = Field(
+        default=None, description="Column to aggregate; omit for a row count"
+    )
+    aggregation: str = Field(
+        default="count", description="sum | avg | count | min | max | count_distinct"
+    )
+    alias: str | None = Field(
+        default=None, description="Display name shown on the chart, e.g. 'Silt target'"
+    )
 
 
 def _rejected(reason: str) -> tuple[str, dict]:
@@ -44,8 +59,7 @@ def create_chart(
     table_name: str,
     runtime: ToolRuntime[RunContext],
     dimension_column: str | None = None,
-    metric_column: str | None = None,
-    metric_aggregation: str | None = None,
+    metrics: list[MetricInput] | None = None,
     description: str | None = None,
 ) -> tuple[str, dict]:
     """Create a saved chart in the organization's chart library from ONE table.
@@ -53,8 +67,11 @@ def create_chart(
     chart_type: bar | line | pie | number.
     dimension_column: the column to group by — REQUIRED for bar/line (x-axis)
     and pie (slices); omit for number.
-    metric_column + metric_aggregation (sum|avg|count|min|max|count_distinct):
-    the measured value. Omit metric_column for a row count.
+    metrics: the measured values, each {column, aggregation, alias}.
+    aggregation: sum|avg|count|min|max|count_distinct; omit column for a row
+    count. Bar and line charts can plot SEVERAL metrics at once (grouped bars /
+    multiple lines — e.g. silt target vs silt achieved per state); pie and
+    number take exactly one. Omit metrics entirely for a simple row count.
     Verify column names with get_table_details first. Use a short, descriptive
     title the user will recognize later."""
     ctx = runtime.context
@@ -68,18 +85,28 @@ def create_chart(
     if chart_type != "number" and not dimension_column:
         return _rejected(f"a {chart_type} chart needs a dimension_column to group by")
 
-    aggregation = (metric_aggregation or "count").lower()
-    if aggregation not in AGGREGATIONS:
-        return _rejected(f"metric_aggregation must be one of {sorted(AGGREGATIONS)}")
+    metric_inputs = [
+        MetricInput(**m) if isinstance(m, dict) else m for m in (metrics or [MetricInput()])
+    ]
+    if chart_type in ("pie", "number") and len(metric_inputs) > 1:
+        return _rejected(f"a {chart_type} chart takes exactly one metric")
 
-    metric = {
-        "column": metric_column,
-        "aggregation": aggregation,
-        "alias": f"{aggregation}_{metric_column}" if metric_column else aggregation,
-    }
+    metric_dicts = []
+    for m in metric_inputs:
+        aggregation = (m.aggregation or "count").lower()
+        if aggregation not in AGGREGATIONS:
+            return _rejected(f"aggregation must be one of {sorted(AGGREGATIONS)}")
+        metric_dicts.append(
+            {
+                "column": m.column,
+                "aggregation": aggregation,
+                "alias": m.alias or (f"{aggregation}_{m.column}" if m.column else aggregation),
+            }
+        )
+
     # dimension_column is the grouping key the render path GROUPs BY for every
-    # chart type — the chart builder UI stores bar charts the same way
-    extra_config: dict = {"metrics": [metric]}
+    # chart type — the chart builder UI stores multi-metric bar charts the same way
+    extra_config: dict = {"metrics": metric_dicts}
     if chart_type != "number":
         extra_config["dimension_column"] = dimension_column
 
