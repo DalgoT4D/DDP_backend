@@ -8,9 +8,9 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
-from ddpui.core.chat_with_data import service
-from ddpui.core.chat_with_data.messages import history
-from ddpui.core.chat_with_data.service import InvalidScope, SessionNotFound
+from ddpui.core.ai.chat import sessions as service
+from ddpui.core.ai.chat import history
+from ddpui.core.ai.chat.sessions import InvalidScope, SessionNotFound
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chat_with_data_schemas import SessionCreate, SessionOut, SessionRename
 from ddpui.utils.custom_logger import CustomLogger

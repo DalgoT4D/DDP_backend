@@ -13,7 +13,7 @@ import asyncio
 
 from django.core.management.base import BaseCommand
 
-from ddpui.core.chat_with_data.agent.checkpointer import setup_tables
+from ddpui.core.ai.agent.checkpointer import setup_tables
 
 
 class Command(BaseCommand):

@@ -19,13 +19,13 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import User
 from rest_framework_simplejwt.tokens import AccessToken
 
-from ddpui.core.chat_with_data import service
-from ddpui.core.chat_with_data.agent.build import build_agent
-from ddpui.core.chat_with_data.agent.checkpointer import get_checkpointer
-from ddpui.core.chat_with_data.agent.context import ChatWithDataNotReady, build_run_context
-from ddpui.core.chat_with_data.runner import run_turn
-from ddpui.core.chat_with_data.scope import ScopeUnavailable
-from ddpui.core.chat_with_data.calls.titles import generate_session_title
+from ddpui.core.ai.chat import sessions as service
+from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.agent.checkpointer import get_checkpointer
+from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
+from ddpui.core.ai.chat.turn_runner import run_turn
+from ddpui.core.ai.scopes.base import ScopeUnavailable
+from ddpui.core.ai.llm_calls.session_title import generate_session_title
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import RolePermission

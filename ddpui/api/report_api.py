@@ -20,7 +20,7 @@ from ddpui.core.reports.exceptions import (
 )
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
-from ddpui.core.reports.summary_generator import SummaryGenerationError, generate_report_summary
+from ddpui.core.ai.agent.report_summary_agent import SummaryGenerationError, generate_report_summary
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schemas import ChartDataResponse

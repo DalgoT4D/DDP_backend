@@ -180,10 +180,10 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     from langchain_core.messages import AIMessage
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from ddpui.core.chat_with_data.agent.build import build_agent as real_build_agent
-    from ddpui.core.chat_with_data.agent.state import RunContext
-    from ddpui.tests.core.chat_with_data.test_agent_loop import ScriptedChatModel, sql_call
-    from ddpui.tests.core.chat_with_data.test_tools import FakeWarehouse
+    from ddpui.core.ai.agent.chat_data_agent import build_agent as real_build_agent
+    from ddpui.core.ai.agent.run_context import RunContext
+    from ddpui.tests.core.ai.test_agent_loop import ScriptedChatModel, sql_call
+    from ddpui.tests.core.ai.test_tools import FakeWarehouse
     from ddpui.websockets import chat_with_data_consumer as consumer_module
 
     session = ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
@@ -213,8 +213,8 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     async def fake_title(question, answer, model=None):
         return "Survey counts"
 
-    from ddpui.core.chat_with_data import runner as runner_module
-    from ddpui.core.chat_with_data.calls.router import FAIL_OPEN
+    from ddpui.core.ai.chat import turn_runner as runner_module
+    from ddpui.core.ai.llm_calls.router import FAIL_OPEN
 
     async def fail_open_route(question, model=None, history=None):
         return FAIL_OPEN
