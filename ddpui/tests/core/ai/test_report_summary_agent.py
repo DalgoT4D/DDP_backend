@@ -119,3 +119,52 @@ def test_report_with_no_components_raises():
     snapshot.frozen_chart_configs = {}
     with pytest.raises(SummaryGenerationError, match="no charts"):
         generate_report_summary(snapshot, model=FakeModel())
+
+
+def make_orguser():
+    return SimpleNamespace(id=3, org=SimpleNamespace(slug="ngo"))
+
+
+@patch("ddpui.core.ai.agent.report_summary_agent.record_generation")
+@patch("ddpui.core.ai.agent.report_summary_agent.ReportService")
+def test_successful_summary_is_traced(mock_service, mock_record):
+    mock_service.get_report_chart_data.return_value = {"data": {"seriesData": [1]}}
+    mock_service.get_report_kpi_data.return_value = {"current_value": 1}
+
+    generate_report_summary(make_snapshot(), model=FakeModel(), orguser=make_orguser())
+
+    kwargs = mock_record.call_args.kwargs
+    assert kwargs["name"] == "report_summary"
+    assert kwargs["status"] == "completed"
+    assert kwargs["output_text"] == "**Great quarter.**"
+    assert "Q1 Field Report" in kwargs["input_text"]
+    assert kwargs["metadata"] == {"snapshot_id": 11}
+
+
+@patch("ddpui.core.ai.agent.report_summary_agent.record_generation")
+@patch("ddpui.core.ai.agent.report_summary_agent.ReportService")
+def test_failed_model_call_is_traced_then_reraised(mock_service, mock_record):
+    mock_service.get_report_chart_data.return_value = {"data": {"seriesData": [1]}}
+    mock_service.get_report_kpi_data.return_value = {"current_value": 1}
+
+    class ExplodingModel:
+        def invoke(self, prompt):
+            raise RuntimeError("model overloaded")
+
+    with pytest.raises(RuntimeError, match="model overloaded"):
+        generate_report_summary(make_snapshot(), model=ExplodingModel(), orguser=make_orguser())
+
+    kwargs = mock_record.call_args.kwargs
+    assert kwargs["status"] == "failed"
+    assert kwargs["error"] == "model overloaded"
+
+
+@patch("ddpui.core.ai.agent.report_summary_agent.record_generation")
+@patch("ddpui.core.ai.agent.report_summary_agent.ReportService")
+def test_no_orguser_means_no_trace(mock_service, mock_record):
+    mock_service.get_report_chart_data.return_value = {"data": {"seriesData": [1]}}
+    mock_service.get_report_kpi_data.return_value = {"current_value": 1}
+
+    generate_report_summary(make_snapshot(), model=FakeModel())
+
+    mock_record.assert_not_called()

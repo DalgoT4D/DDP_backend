@@ -109,7 +109,7 @@ def test_trace_id_is_the_request_uuid(monkeypatch):
 
     request_uuid = uuid.uuid4()
     handler = observability.start_turn_trace(
-        session=SimpleNamespace(id=7),
+        session=SimpleNamespace(id=7, scope_type="dashboard", scope_id=42),
         orguser=SimpleNamespace(id=3),
         context=SimpleNamespace(org_slug="ngo", dialect="postgres"),
         question="how many surveys?",
@@ -119,3 +119,75 @@ def test_trace_id_is_the_request_uuid(monkeypatch):
 
     assert handler is not None
     assert captured["id"] == str(request_uuid)
+    # dashboard-scoped chats must be separable from org-wide chats in Langfuse
+    assert "scope:dashboard" in captured["tags"]
+    assert captured["metadata"]["scope_type"] == "dashboard"
+    assert captured["metadata"]["scope_id"] == 42
+
+
+def test_record_generation_maps_one_shot_call_to_trace(monkeypatch):
+    """Single-call features (report summary) record a trace + one generation."""
+    from types import SimpleNamespace
+
+    captured = {}
+
+    class StubClient:
+        def trace(self, **kwargs):
+            captured.update(kwargs)
+            captured["_trace"] = StubTrace()
+            return captured["_trace"]
+
+    monkeypatch.setattr(observability, "_client", StubClient())
+    monkeypatch.setattr(observability, "_client_initialized", True)
+
+    orguser = SimpleNamespace(id=3, org=SimpleNamespace(slug="ngo"))
+    observability.record_generation(
+        name="report_summary",
+        orguser=orguser,
+        model_name="claude-sonnet-5",
+        input_text='Report "Q1 Field Report" (2026-01-01 to 2026-03-31)',
+        output_text="**Great quarter.**",
+        latency_ms=1234,
+        status="completed",
+        usage={"input": 900, "output": 40},
+        metadata={"snapshot_id": 11},
+    )
+
+    assert captured["name"] == "report_summary"
+    assert captured["user_id"] == "3"
+    assert captured["tags"] == ["ngo"]
+    assert captured["metadata"]["status"] == "completed"
+    assert captured["metadata"]["snapshot_id"] == 11
+    (generation,) = captured["_trace"].observations
+    assert generation.kwargs["model"] == "claude-sonnet-5"
+    assert generation.ended_with["output"] == "**Great quarter.**"
+    assert generation.ended_with["usage"] == {"input": 900, "output": 40}
+
+
+def test_record_generation_marks_failures_as_errors(monkeypatch):
+    from types import SimpleNamespace
+
+    captured = {}
+
+    class StubClient:
+        def trace(self, **kwargs):
+            captured["_trace"] = StubTrace()
+            return captured["_trace"]
+
+    monkeypatch.setattr(observability, "_client", StubClient())
+    monkeypatch.setattr(observability, "_client_initialized", True)
+
+    observability.record_generation(
+        name="report_summary",
+        orguser=SimpleNamespace(id=3, org=SimpleNamespace(slug="ngo")),
+        model_name="claude-sonnet-5",
+        input_text="Report ...",
+        output_text=None,
+        latency_ms=88,
+        status="failed",
+        error="model overloaded",
+    )
+
+    (generation,) = captured["_trace"].observations
+    assert generation.ended_with["level"] == "ERROR"
+    assert generation.ended_with["status_message"] == "model overloaded"

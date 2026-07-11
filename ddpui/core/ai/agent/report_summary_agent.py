@@ -10,12 +10,15 @@ real error.
 """
 
 import json
+import time
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from ddpui.core.ai.agent.base import build_model
+from ddpui.core.ai.agent.base import build_model, resolve_model_name
 from ddpui.core.ai.messages.content import extract_text
+from ddpui.core.ai.tracing import record_generation
 from ddpui.core.reports.report_service import ReportService
+from ddpui.models.org_user import OrgUser
 from ddpui.models.report import ReportSnapshot
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -56,8 +59,15 @@ no code, no links, no tables.
 Executive summary:"""
 
 
-def generate_report_summary(snapshot: ReportSnapshot, model: BaseChatModel | None = None) -> str:
-    """Draft an executive summary from the snapshot's frozen components."""
+def generate_report_summary(
+    snapshot: ReportSnapshot,
+    model: BaseChatModel | None = None,
+    orguser: OrgUser | None = None,
+) -> str:
+    """Draft an executive summary from the snapshot's frozen components.
+
+    `orguser` is who clicked "Generate summary" — it keys the Langfuse trace.
+    None (tests, scripts) skips tracing."""
     components = snapshot.frozen_chart_configs or {}
     if not components:
         raise SummaryGenerationError("This report has no charts to summarize yet.")
@@ -85,9 +95,57 @@ def generate_report_summary(snapshot: ReportSnapshot, model: BaseChatModel | Non
         component_blocks="\n\n".join(blocks),
     )
     model = model or get_summary_model()
-    response = model.invoke(prompt)
+    started = time.monotonic()
+    try:
+        response = model.invoke(prompt)
+    except Exception as err:
+        _trace_summary(snapshot, orguser, started=started, status="failed", error=str(err))
+        raise
+
     # thinking-enabled models return block lists; only the text block is the draft
-    return extract_text(response.content).strip()
+    summary = extract_text(response.content).strip()
+    _trace_summary(
+        snapshot,
+        orguser,
+        started=started,
+        status="completed",
+        output=summary,
+        usage=getattr(response, "usage_metadata", None),
+    )
+    return summary
+
+
+def _trace_summary(
+    snapshot,
+    orguser,
+    *,
+    started: float,
+    status: str,
+    output: str | None = None,
+    usage: dict | None = None,
+    error: str | None = None,
+) -> None:
+    """Record the summary call in Langfuse. No orguser (tests, scripts) = no trace."""
+    if orguser is None:
+        return
+    langfuse_usage = None
+    if usage:
+        langfuse_usage = {
+            "input": usage.get("input_tokens", 0),
+            "output": usage.get("output_tokens", 0),
+        }
+    record_generation(
+        name="report_summary",
+        orguser=orguser,
+        model_name=resolve_model_name("REPORT_SUMMARY_MODEL", DEFAULT_SUMMARY_MODEL),
+        input_text=f'Report "{snapshot.title}" ({snapshot.period_start} to {snapshot.period_end})',
+        output_text=output,
+        latency_ms=int((time.monotonic() - started) * 1000),
+        status=status,
+        usage=langfuse_usage,
+        error=error,
+        metadata={"snapshot_id": snapshot.id},
+    )
 
 
 def _component_data(snapshot, component_id, config) -> str | None:

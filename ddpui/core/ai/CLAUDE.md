@@ -117,6 +117,10 @@ Every job picks its model with an env var and a default, through
 
 Tracing needs `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`; without them it is
 silently off and a tracing failure can never break a turn (`tracing.py`).
+Every chat turn is one trace, tagged `scope:org` or `scope:dashboard` so
+dashboard-drawer chats can be sliced separately. Single-call features trace
+through `tracing.record_generation` — the report summary records one trace per
+"Generate summary" click, success or failure.
 
 ## Running and testing
 

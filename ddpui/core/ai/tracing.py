@@ -180,11 +180,54 @@ def start_turn_trace(
             name="chat_with_data_turn",
             session_id=str(session.id),
             user_id=str(orguser.id),
-            tags=[context.org_slug, context.dialect],
+            # scope tag separates dashboard-drawer chats from org-wide chats
+            # in Langfuse dashboards and eval slices
+            tags=[context.org_slug, context.dialect, f"scope:{session.scope_type}"],
             input=_clip(question),
-            metadata={"request_uuid": str(request_uuid)},
+            metadata={
+                "request_uuid": str(request_uuid),
+                "scope_type": session.scope_type,
+                "scope_id": session.scope_id,
+            },
         )
         return LangfuseTurnHandler(trace, model_name=model_name)
     except Exception:  # pylint: disable=broad-except
         logger.exception("langfuse trace start failed")
         return None
+
+
+def record_generation(
+    *,
+    name: str,
+    orguser,
+    model_name: str,
+    input_text: str,
+    output_text: str | None,
+    latency_ms: int,
+    status: str,
+    usage: dict | None = None,
+    error: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """One trace + one generation for single-call AI features (e.g. the report
+    summary), recorded after the call finished. Fire-and-forget: never raises,
+    no-op when tracing is off. `usage` is Langfuse-shaped: {"input": n, "output": n}."""
+    client = get_langfuse()
+    if client is None:
+        return
+    try:
+        trace = client.trace(
+            name=name,
+            user_id=str(orguser.id),
+            tags=[orguser.org.slug],
+            input=_clip(input_text),
+            output=_clip(output_text) if output_text else None,
+            metadata={"status": status, "latency_ms": latency_ms, **(metadata or {})},
+        )
+        generation = trace.generation(name="model_call", model=model_name, input=_clip(input_text))
+        if status == "failed":
+            generation.end(level="ERROR", status_message=(error or "failed")[:500])
+        else:
+            generation.end(output=_clip(output_text) if output_text else None, usage=usage)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("langfuse record_generation failed")

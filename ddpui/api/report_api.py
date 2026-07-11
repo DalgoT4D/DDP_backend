@@ -210,7 +210,7 @@ def generate_snapshot_summary(request, snapshot_id: int):
         raise HttpError(404, str(err)) from err
 
     try:
-        summary = generate_report_summary(snapshot)
+        summary = generate_report_summary(snapshot, orguser=orguser)
     except SummaryGenerationError as err:
         raise HttpError(400, str(err)) from err
     except Exception as e:
