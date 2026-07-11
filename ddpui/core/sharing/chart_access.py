@@ -11,6 +11,12 @@ the two pieces of that contract:
   builder / Charts page) it keeps today's Analyst+ behavior, admits the
   chart's owner, and denies plain Members.
 
+- ``require_analyst_plus`` — the same standalone role-rank rule, exposed
+  for the two table/map POST endpoints' config-only path (a raw,
+  not-yet-saved chart config with no ``chart_id``, so there's no ``Chart``
+  row to check ownership against — the chart builder's live preview).
+  Task 6b.
+
 - ``run_chart_query`` — the single choke-point every warehouse-bound chart
   execution on the gated paths routes through. A pass-through today; it
   exists so Layer 2/3 (row-level policies, public-link constraints) has
@@ -82,6 +88,12 @@ def _is_chart_owner(orguser: OrgUser, chart: Chart) -> bool:
     return created_by_id is not None and created_by_id == orguser.id
 
 
+def _is_analyst_plus(orguser: OrgUser) -> bool:
+    role = getattr(orguser, "new_role", None)
+    rank = ROLE_RANK.get(getattr(role, "slug", None) if role is not None else None)
+    return rank is not None and rank >= ROLE_RANK[ANALYST_ROLE]
+
+
 def require_chart_view_access(
     orguser: OrgUser, chart: Chart, dashboard_id: Optional[int] = None
 ) -> None:
@@ -106,13 +118,27 @@ def require_chart_view_access(
             raise HttpError(403, "You do not have access to this chart")
         return
 
-    role = getattr(orguser, "new_role", None)
-    rank = ROLE_RANK.get(getattr(role, "slug", None) if role is not None else None)
-    if rank is not None and rank >= ROLE_RANK[ANALYST_ROLE]:
+    if _is_analyst_plus(orguser):
         return
     if _is_chart_owner(orguser, chart):
         return
     raise HttpError(403, "You do not have access to this chart")
+
+
+def require_analyst_plus(orguser: OrgUser) -> None:
+    """Raise 403 unless ``orguser``'s role ranks Analyst or above.
+
+    For contexts that have no ``Chart`` row to check ownership against --
+    the chart-builder's live/unsaved-config preview on the table/map POST
+    endpoints (``chart-data-preview``, ``map-data-overlay``): a raw
+    schema/table/metrics payload with no ``chart_id`` yet, so there's no
+    owner to fall back to and no dashboard to frame it. Members can't reach
+    the builder, so this keeps them out; Analyst+ keeps today's behavior.
+    Shares ``_is_analyst_plus`` with ``require_chart_view_access``'s
+    standalone branch so the role-rank rule lives in exactly one place.
+    """
+    if not _is_analyst_plus(orguser):
+        raise HttpError(403, "You do not have access to this data")
 
 
 def run_chart_query(

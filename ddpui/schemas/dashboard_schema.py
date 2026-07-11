@@ -84,6 +84,13 @@ class DashboardResponse(Schema):
     created_at: datetime
     updated_at: datetime
     filters: List[DashboardFilterResponse] = []
+    # Resource Sharing (Task 6b Part A) -- general access + viewer-relative
+    # ownership, for the ShareModal's badges. Optional so the public
+    # dashboard response (no authenticated viewer) can omit them.
+    general_audience: Optional[str] = None
+    general_level: Optional[str] = None
+    is_owner: bool = False
+    is_creator: bool = False
 
 
 # =============================================================================

@@ -125,6 +125,7 @@ def get_current_user_v2(request, org_slug: str = None):
         res.append(
             OrgUserResponse(
                 user_id=user.id,
+                orguser_id=curr_orguser.id,
                 email=user.email,
                 org=curr_orguser.org,
                 active=user.is_active,
@@ -243,6 +244,7 @@ def get_organization_users(request):
         res.append(
             OrgUserResponse(
                 user_id=curr_orguser.user.id,
+                orguser_id=curr_orguser.id,
                 email=curr_orguser.user.email,
                 org=curr_orguser.org,
                 active=curr_orguser.user.is_active,

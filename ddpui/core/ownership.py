@@ -15,6 +15,28 @@ def is_admin_or_super_admin(orguser: OrgUser) -> bool:
     )
 
 
+def is_owner(orguser: OrgUser, resource) -> bool:
+    """Return True if orguser is literally the resource's owner.
+
+    Allowed when:
+    - orguser is the resource's owner (``owner_id``), OR
+    - ``owner_id`` is null and orguser created the resource (``created_by_id``) --
+      a fallback for rows that predate the ``owner`` column or whose owner was
+      cleared by a SET_NULL on user deletion.
+
+    Unlike ``can_delete_resource``, this has NO admin override -- it answers
+    "does this viewer own this resource", not "may this viewer delete it".
+    Mirrors ``ddpui.core.sharing.access_resolver._is_owner``. Uses
+    getattr-safe access since some resources passed in (e.g. legacy mocks
+    in tests) may not define ``owner``.
+    """
+    owner_id = getattr(resource, "owner_id", None)
+    if owner_id is not None:
+        return owner_id == orguser.id
+    created_by_id = getattr(resource, "created_by_id", None)
+    return created_by_id is not None and created_by_id == orguser.id
+
+
 def can_delete_resource(orguser: OrgUser, resource) -> bool:
     """Return True if orguser may delete resource.
 

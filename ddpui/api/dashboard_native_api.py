@@ -74,7 +74,10 @@ def list_dashboards(
         is_published=is_published,
     )
 
-    return [DashboardResponse(**DashboardService.get_dashboard_response(d)) for d in dashboards]
+    return [
+        DashboardResponse(**DashboardService.get_dashboard_response(d, orguser=orguser))
+        for d in dashboards
+    ]
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
@@ -91,7 +94,7 @@ def get_dashboard(request, dashboard_id: int):
     if effective_permission(orguser, "dashboard", dashboard) is None:
         raise HttpError(403, "You do not have access to this dashboard")
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -121,7 +124,7 @@ def create_dashboard(request, payload: DashboardCreate):
                 orguser.landing_dashboard = dashboard
                 orguser.save(update_fields=["landing_dashboard"])
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
 
 
 @dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
@@ -148,7 +151,7 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")
@@ -226,7 +229,9 @@ def duplicate_dashboard(request, dashboard_id: int):
             f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {orguser.org.id}"
         )
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(new_dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(new_dashboard, orguser=orguser)
+    )
 
 
 # Dashboard Lock endpoints

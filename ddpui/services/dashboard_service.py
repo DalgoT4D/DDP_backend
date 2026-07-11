@@ -17,7 +17,7 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
-from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
+from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin, is_owner
 from ddpui.core.sharing.access_resolver import accessible_filter
 from ddpui.models.dashboard import (
     Dashboard,
@@ -239,11 +239,19 @@ class DashboardService:
             raise DashboardNotFoundError(dashboard_id)
 
     @staticmethod
-    def get_dashboard_response(dashboard: Dashboard) -> Dict[str, Any]:
+    def get_dashboard_response(
+        dashboard: Dashboard, orguser: Optional[OrgUser] = None
+    ) -> Dict[str, Any]:
         """Convert dashboard model to response dict.
 
         Args:
             dashboard: The dashboard instance
+            orguser: The viewer, used to compute the viewer-relative
+                `is_owner`/`is_creator` flags (Task 6b Part A). None for the
+                public/unauthenticated dashboard response, which leaves
+                those flags at their default (False) and omits general
+                access so anonymous viewers don't see the sharing
+                configuration.
 
         Returns:
             Dictionary containing dashboard response data
@@ -267,6 +275,15 @@ class DashboardService:
             filters_data.append(filter_json)
 
         response_data["filters"] = filters_data
+
+        # Resource Sharing (Task 6b Part A). No extra query: general_audience/
+        # general_level/owner_id/created_by_id are already columns on
+        # `dashboard`, compared directly against orguser.id -- never against
+        # the .owner/.created_by FK objects, which would trigger a query.
+        response_data["general_audience"] = dashboard.general_audience
+        response_data["general_level"] = dashboard.general_level
+        response_data["is_owner"] = orguser is not None and is_owner(orguser, dashboard)
+        response_data["is_creator"] = orguser is not None and dashboard.created_by_id == orguser.id
 
         return response_data
 

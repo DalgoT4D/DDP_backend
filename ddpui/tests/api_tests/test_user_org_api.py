@@ -353,6 +353,28 @@ def test_get_organization_users(orguser):
     assert response[0].email == orguser.user.email
 
 
+def test_get_organization_users_has_orguser_id(orguser):
+    """Task 6b Part B: the ShareModal picker resolves principals by the
+    OrgUser PK (what POST /api/access/.../grants/ principal_id wants), not
+    the Django User FK -- `orguser_id` must be the OrgUser's own id, not
+    the user's."""
+    request = mock_request(orguser)
+
+    response = get_organization_users(request)
+
+    assert response[0].orguser_id == orguser.id
+    assert response[0].user_id == orguser.user.id
+
+
+def test_get_current_userv2_has_orguser_id(orguser):
+    """Same DTO, exposed on /currentuserv2 too."""
+    request = mock_request(orguser)
+
+    response = get_current_user_v2(request)
+
+    assert response[0].orguser_id == orguser.id
+
+
 # ================================================================================
 
 

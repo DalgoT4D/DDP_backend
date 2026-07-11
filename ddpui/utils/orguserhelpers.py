@@ -24,6 +24,7 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
 
     response = OrgUserResponse(
         user_id=orguser.user.id,
+        orguser_id=orguser.id,
         email=orguser.user.email,
         org=orguser.org,
         active=orguser.user.is_active,

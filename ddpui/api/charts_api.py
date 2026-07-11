@@ -21,6 +21,7 @@ from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.core.sharing.chart_access import (
     ChartRenderContext,
+    require_analyst_plus,
     require_chart_view_access,
     run_chart_query,
 )
@@ -376,15 +377,45 @@ class MapDataOverlayPayload(Schema):
     extra_config: Optional[Dict[str, Any]] = Field(
         default_factory=dict
     )  # Additional configuration including chart-level filters, pagination, sorting, etc.
+    # Access context (Task 6b Part C), as body fields -- this endpoint takes
+    # a single Payload argument and already carries dashboard_filters
+    # in-body, so chart_id/dashboard_id follow that convention rather than
+    # becoming query params. See get_chart_data_preview's docstring for the
+    # full contract; identical semantics here.
+    chart_id: Optional[int] = None
+    dashboard_id: Optional[int] = None
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_charts"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
-    """Get map data overlay (separate from GeoJSON) for data visualization"""
+    """Get map data overlay (separate from GeoJSON) for data visualization.
+
+    Decorator moved from `can_view_warehouse_data` (Analyst+ only, and this
+    endpoint's ONLY access control -- it never calls `has_schema_access`)
+    to `can_view_charts` (Members included) so Members can reach the new
+    `chart_id`+`dashboard_id` dashboard-tile path below. The config-only
+    branch (`chart_id` absent) calls `require_analyst_plus` explicitly to
+    restore the pre-task restriction on that path -- a raw schema/table
+    query is exactly the arbitrary-warehouse-read case
+    `can_view_warehouse_data` existed to stop, and there's no saved chart
+    there to scope it to.
+    """
     orguser = request.orguser
 
     logger.info(f"Map data overlay request: {payload}")
+
+    chart = None
+    if payload.chart_id is not None:
+        try:
+            chart = Chart.objects.get(id=payload.chart_id, org=orguser.org)
+        except Chart.DoesNotExist:
+            raise HttpError(404, "Chart not found") from None
+        if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
+            raise HttpError(403, "Payload does not match the referenced chart")
+        require_chart_view_access(orguser, chart, payload.dashboard_id)
+    else:
+        require_analyst_plus(orguser)
 
     try:
         # Get org warehouse
@@ -465,9 +496,18 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             metrics=metrics,
         )
 
-        dict_results = charts_service.execute_chart_query(
+        # Routed through the run_chart_query choke-point (Layer 2/3 hook)
+        # when a saved chart is in play; the config-only path has no Chart
+        # row to hand the seam, so it executes straight through.
+        execute = lambda: charts_service.execute_chart_query(
             warehouse_client, query_builder, execute_payload
         )
+        if chart is not None:
+            dict_results = run_chart_query(
+                orguser, chart, ChartRenderContext(dashboard_id=payload.dashboard_id), execute
+            )
+        else:
+            dict_results = execute()
 
         logger.info(f"Map data overlay query returned {len(dict_results)} rows")
 
@@ -489,6 +529,10 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
         return {"success": True, "data": map_data, "count": len(map_data)}
 
+    except HttpError:
+        # a future access check inside run_chart_query must surface as-is,
+        # not be swallowed into the generic 500 below
+        raise
     except Exception as e:
         logger.error(f"Error generating map data overlay: {str(e)}")
         raise HttpError(500, f"Error generating map data overlay: {str(e)}")
@@ -547,11 +591,41 @@ def get_chart_data_preview(
     page: int = 0,
     limit: int = 100,
     dashboard_filters: Optional[str] = None,
+    dashboard_id: Optional[int] = None,
+    chart_id: Optional[int] = None,
 ):
-    """Get paginated data preview for chart using the same query as chart data"""
+    """Get paginated data preview for chart using the same query as chart data.
+
+    `chart_id`/`dashboard_id` are query params (matching this endpoint's
+    existing `dashboard_filters` convention -- unlike `map-data-overlay`,
+    this payload is shared with other chart-data endpoints, so
+    access-context params stay outside it). They are the ACCESS CONTEXT for
+    a saved chart rendered as a dashboard table tile: with `chart_id`, view
+    access rides on `require_chart_view_access` (dashboard membership +
+    resolver view when `dashboard_id` is also given; standalone Analyst+/
+    owner otherwise) -- see `ddpui.core.sharing.chart_access`. Without
+    `chart_id` (the chart-builder's unsaved-config live preview -- there's
+    no chart to own), the request stays Analyst+ role-gated; Members can't
+    reach the builder.
+    """
     import json
 
     orguser = request.orguser
+
+    chart = None
+    if chart_id is not None:
+        try:
+            chart = Chart.objects.get(id=chart_id, org=orguser.org)
+        except Chart.DoesNotExist:
+            raise HttpError(404, "Chart not found") from None
+        if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
+            # require_chart_view_access only proves the viewer may see THIS
+            # chart -- not an oracle for querying whatever table the
+            # payload names.
+            raise HttpError(403, "Payload does not match the referenced chart")
+        require_chart_view_access(orguser, chart, dashboard_id)
+    else:
+        require_analyst_plus(orguser)
 
     # Validate user has access to schema/table
     if not has_schema_access(request, payload.schema_name):
@@ -612,10 +686,19 @@ def get_chart_data_preview(
 
     try:
         # Get table preview using the same query builder as chart data
-        # This ensures preview shows exactly what will be used for the chart
-        preview_data = charts_service.get_chart_data_table_preview(
+        # This ensures preview shows exactly what will be used for the chart.
+        # Routed through the run_chart_query choke-point (Layer 2/3 hook)
+        # when a saved chart is in play; the config-only builder preview
+        # has no Chart row to hand the seam, so it calls straight through.
+        execute = lambda: charts_service.get_chart_data_table_preview(
             org_warehouse, modified_payload, page, limit
         )
+        if chart is not None:
+            preview_data = run_chart_query(
+                orguser, chart, ChartRenderContext(dashboard_id=dashboard_id), execute
+            )
+        else:
+            preview_data = execute()
 
         logger.info(f"Preview data keys: {list(preview_data.keys())}")
         logger.info(
@@ -638,6 +721,10 @@ def get_chart_data_preview(
         )
 
         return DataPreviewResponse(**response_data)
+    except HttpError:
+        # a future access check inside run_chart_query must surface as-is,
+        # not be swallowed into the generic 500 below
+        raise
     except Exception as e:
         logger.error(f"Error in chart data preview: {str(e)}")
         import traceback
@@ -649,12 +736,34 @@ def get_chart_data_preview(
 @charts_router.post("/chart-data-preview/total-rows/", response=int)
 @has_permission(["can_view_charts"])
 def get_chart_data_preview_total_rows(
-    request, payload: ChartDataPayload, dashboard_filters: Optional[str] = None
+    request,
+    payload: ChartDataPayload,
+    dashboard_filters: Optional[str] = None,
+    dashboard_id: Optional[int] = None,
+    chart_id: Optional[int] = None,
 ):
-    """Get total rows for chart data preview"""
+    """Get total rows for chart data preview.
+
+    `chart_id`/`dashboard_id` are the same access-context query params as
+    the sibling `/chart-data-preview/` endpoint (same decorator, same
+    frontend hook pair, same pre-task gap) -- see get_chart_data_preview's
+    docstring for the contract.
+    """
     import json
 
     orguser = request.orguser
+
+    chart = None
+    if chart_id is not None:
+        try:
+            chart = Chart.objects.get(id=chart_id, org=orguser.org)
+        except Chart.DoesNotExist:
+            raise HttpError(404, "Chart not found") from None
+        if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
+            raise HttpError(403, "Payload does not match the referenced chart")
+        require_chart_view_access(orguser, chart, dashboard_id)
+    else:
+        require_analyst_plus(orguser)
 
     # Validate user has access to schema/table
     if not has_schema_access(request, payload.schema_name):
@@ -708,8 +817,18 @@ def get_chart_data_preview_total_rows(
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
     )
 
-    # Get total rows using the same query builder as chart data
-    total_rows = charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
+    # Get total rows using the same query builder as chart data. Routed
+    # through the run_chart_query choke-point (Layer 2/3 hook -- a row
+    # count is warehouse-bound and leaks row-level information too) when a
+    # saved chart is in play; the config-only path has no Chart row to
+    # hand the seam.
+    execute = lambda: charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
+    if chart is not None:
+        total_rows = run_chart_query(
+            orguser, chart, ChartRenderContext(dashboard_id=dashboard_id), execute
+        )
+    else:
+        total_rows = execute()
 
     return total_rows
 

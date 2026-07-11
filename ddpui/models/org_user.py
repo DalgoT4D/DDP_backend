@@ -133,6 +133,12 @@ class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
     user_id: int
+    # Task 6b Part B: the OrgUser PK -- distinct from `user_id` (the Django
+    # User FK). Resource Sharing's grant endpoints (`POST
+    # /api/access/.../grants/` `principal_id`, `POST
+    # /api/groups/{id}/members/` `orguser_id`) key principals by this, not
+    # by `user_id`. Purely additive.
+    orguser_id: int
     email: str
     org: Optional[OrgSchema] = None
     active: bool
