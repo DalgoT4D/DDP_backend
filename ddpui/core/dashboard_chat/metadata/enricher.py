@@ -79,12 +79,24 @@ RULES
 13. Output valid JSON only.
 
 ANSWERABILITY FIELD MEANINGS
+- output_grain: the answer/result grain this table naturally supports, for example "one row per city and grade" or "one result per student".
 - retained_dimensions: dimensions physically present as columns in this table that can be filtered, grouped, or compared directly.
 - rolled_up_over: dimensions or lower-grain entities that are not physically available because this table has already aggregated across them. Do not list columns that exist in this table here. Leave empty if the missing lower grain is not clear.
 - comparison_axes_available: columns physically present in this table that can support comparisons.
+- answerable_question_shapes: reusable natural-language shapes this table can answer directly, for example "rank entities by metric", "list entity names below threshold", or "compare before and after score by geography".
+- table_limitations: compact limitations of this table, especially lower-grain outputs or dimensions it cannot produce directly.
 - direct_answer_capabilities: question types this table can answer without joins or lower-grain tables.
 - answerability_limitations: question needs this table cannot answer directly, with the required join or lower-grain table resolution when known.
 - action_filter_rules: only domain action phrases that imply a required metric/status condition, for example "carted silt" requires a positive carted-silt metric. Do not create generic non-null rules for ordinary dimensions, dates, or dashboard filters.
+
+COMPARISON FIELD MEANINGS
+- comparison_semantics describes generic comparison roles physically represented in this table. Use it for before/after, baseline/endline, pre/post, planned/actual, target/achieved, start/end, or similar pairs.
+- role should be a generic semantic role such as "baseline", "endline", "before", "after", "planned", "actual", "target", "achieved", "start", or "end".
+- dimension_columns are columns whose values identify the role-specific cohort or dimension.
+- measure_columns are columns containing role-specific numeric metrics.
+- filter_columns are columns that should be used when a user filters that comparison role.
+- preferred_filter_role should be populated only when the table evidence shows that user filters should normally bind to one role for comparison questions. Leave empty if unclear.
+- Do not create comparison roles from table or column names alone. Use observed columns, docs, chart usage, and sample values.
 
 GRAIN FIELD MEANINGS
 - row_definition: one concise sentence describing the physical row grain.
@@ -95,6 +107,7 @@ GRAIN FIELD MEANINGS
 Return JSON in this exact shape:
 {
   "description": "string",
+  "aliases": ["..."],
   "table_type": "fact | dim | aggregate | bridge | row_grain",
   "primary_entities": ["..."],
   "grain": {
@@ -116,9 +129,12 @@ Return JSON in this exact shape:
     }
   },
   "answerability": {
+    "output_grain": "string",
     "retained_dimensions": ["..."],
     "rolled_up_over": ["..."],
     "comparison_axes_available": ["..."],
+    "answerable_question_shapes": ["..."],
+    "table_limitations": ["..."],
     "direct_answer_capabilities": ["..."],
     "answerability_limitations": [
       {
@@ -135,9 +151,25 @@ Return JSON in this exact shape:
       }
     ]
   },
+  "comparison_semantics": {
+    "comparison_type": "string",
+    "roles": [
+      {
+        "role": "string",
+        "label": "string",
+        "aliases": ["..."],
+        "dimension_columns": ["..."],
+        "measure_columns": ["..."],
+        "filter_columns": ["..."]
+      }
+    ],
+    "preferred_filter_role": "string",
+    "notes": ["..."]
+  },
   "column_overrides": [
     {
       "column_name": "column_name",
+      "aliases": ["..."],
       "description": "string",
       "semantic_role": "identifier | dimension | metric | time | status | label",
       "value_semantics": "entity_identifier | entity_label | geography_label | additive_numeric_metric | non_additive_numeric_metric | percentage | ordinal_band | reporting_date | event_date | status_label | free_text | other",
@@ -409,6 +441,7 @@ class DashboardChatMetadataEnricher:
             "layer": table.layer,
             "schema_name": table.schema_name,
             "model_name": table.model_name,
+            "aliases": table.aliases,
             "existing_description": table.description,
             "upstream_models": table.upstream_models,
             "chart_usage": [usage.model_dump(mode="json") for usage in table.chart_usage],
@@ -418,6 +451,7 @@ class DashboardChatMetadataEnricher:
             "current_temporal": table.temporal.model_dump(mode="json"),
             "current_counting": table.counting.model_dump(mode="json"),
             "current_answerability": table.answerability.model_dump(mode="json"),
+            "current_comparison_semantics": table.comparison_semantics.model_dump(mode="json"),
         }
 
     def _serialize_column_for_enrichment(
@@ -427,6 +461,7 @@ class DashboardChatMetadataEnricher:
     ) -> dict[str, Any]:
         return {
             "column_name": column.column_name,
+            "aliases": column.aliases,
             "data_type": column.data_type,
             "existing_description": column.description,
             "semantic_role": column.semantic_role,
@@ -452,6 +487,8 @@ class DashboardChatMetadataEnricher:
 
         if enrichment.get("description"):
             table_copy.description = str(enrichment.get("description") or "").strip()
+        if "aliases" in enrichment:
+            table_copy.aliases = self._normalize_string_list(enrichment.get("aliases"))
         if enrichment.get("table_type"):
             table_copy.table_type = str(enrichment.get("table_type") or "").strip()
         if "primary_entities" in enrichment:
@@ -472,6 +509,10 @@ class DashboardChatMetadataEnricher:
             table_copy.answerability = type(table_copy.answerability).model_validate(
                 enrichment.get("answerability") or {}
             )
+        if enrichment.get("comparison_semantics"):
+            table_copy.comparison_semantics = type(
+                table_copy.comparison_semantics
+            ).model_validate(enrichment.get("comparison_semantics") or {})
 
         overrides_by_name = {
             str(item.get("column_name") or item.get("name") or ""): item
@@ -485,6 +526,8 @@ class DashboardChatMetadataEnricher:
                 enriched_columns.append(column)
                 continue
             column_copy = column.model_copy(deep=True)
+            if "aliases" in override:
+                column_copy.aliases = self._normalize_string_list(override.get("aliases"))
             if override.get("description"):
                 column_copy.description = str(override.get("description") or "").strip()
             if override.get("semantic_role"):

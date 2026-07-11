@@ -48,6 +48,7 @@ from ddpui.core.dashboard_chat.orchestration.runtime_signals import (
     publish_runtime_progress,
     raise_if_runtime_cancelled,
 )
+from ddpui.core.dashboard_chat.orchestration.timing_breakdown import build_latency_summary
 
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.tool_specifications import (
     DASHBOARD_CHAT_TOOL_SPECIFICATIONS,
@@ -392,6 +393,10 @@ class DashboardChatRuntime:
         timing_breakdown["runtime_total_ms"] = runtime_total_ms
         response_metadata = dict(response.metadata)
         response_metadata["timing_breakdown"] = timing_breakdown
+        response_metadata["latency_summary"] = build_latency_summary(
+            timing_breakdown=timing_breakdown,
+            usage=response.usage,
+        )
         return DashboardChatResponse(
             answer_text=response.answer_text,
             intent=response.intent,

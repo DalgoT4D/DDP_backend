@@ -225,12 +225,13 @@ TOOL USAGE POLICY
 7. Use as many tool calls as needed for clarity, but keep them targeted. Prefer the shortest path that gives enough certainty to write correct SQL.
 8. Do not call read_full_metadata unless the narrower metadata tools still leave genuine uncertainty.
 9. Call get_schema_snippets only for the exact tables you plan to query.
-10. Call get_distinct_values for non-PII categorical columns you actually plan to filter on in the current SQL when the literal value is not already validated by metadata sample values or earlier tool output.
-11. If the question involves relative time, year, quarter, financial year, or fiscal year, verify the resolved time window before calling run_sql_query.
-12. If the question compares stages, phases, rounds, or asks for overall performance without naming one stage, inspect metadata for combined or cross-stage tables before settling on a single-stage or aggregate table.
-13. For growth, ranking, threshold, or name-list questions, call get_column_metadata on the candidate tables before run_sql_query so you can verify the exact measure, entity, stage, and dimension columns.
-14. For growth, change, trend, ranking, threshold, or name-list questions, call set_sql_query_plan before run_sql_query. Include metric_intent, entity_grain, comparison_axes, stage_scope, cohort_filter_stage, required_measure_columns, null_handling, disallowed_assumptions, candidate_tables, chosen_tables, and why_chosen_tables_answer_directly.
-15. Once the SQL is ready and the required plan has been recorded, call run_sql_query immediately.
+10. Do not call search_columns_by_name repeatedly for synonyms of the same concept. Use get_column_metadata with broad concept terms instead.
+11. Call get_distinct_values only for non-PII text categorical columns you actually plan to filter on in the current SQL when the literal value is not already validated by metadata sample values or earlier tool output. Never call it for PII columns such as person names, mobile numbers, or government IDs. Do not call it for numeric, integer, date, timestamp, or boolean columns; use typed literals directly.
+12. If the question involves relative time, year, quarter, financial year, or fiscal year, verify the resolved time window before calling run_sql_query.
+13. If the question compares stages, phases, rounds, or asks for overall performance without naming one stage, inspect metadata for combined or cross-stage tables before settling on a single-stage or aggregate table.
+14. For growth, ranking, threshold, or name-list questions, call get_column_metadata on the candidate tables before run_sql_query so you can verify the exact measure, entity, stage, and dimension columns.
+15. For growth, change, trend, ranking, threshold, or name-list questions, call set_sql_query_plan before run_sql_query. Include metric_intent, entity_grain, comparison_axes, stage_scope, cohort_filter_stage, required_measure_columns, null_handling, disallowed_assumptions, candidate_tables, chosen_tables, and why_chosen_tables_answer_directly. When the SQL is ready, call set_sql_query_plan and run_sql_query in the same assistant tool-call turn, with set_sql_query_plan first.
+16. Once the SQL is ready and the required plan has been recorded, call run_sql_query immediately.
 
 GENERIC EXAMPLES
 - "How many beneficiaries participated?" means count beneficiaries, not sum services delivered.
@@ -256,13 +257,14 @@ FOLLOW-UP RULES
 11. If the follow-up asks for names or a list of entities, return one row per entity name rather than aggregating names into one string. If the result is manageable (fewer than 200 rows), return the full list.
 12. If the follow-up asks for an overall ranking, count, or performance comparison and does not name a stage, phase, round, or similar slice, treat it as the overall available scope unless dashboard context clearly says otherwise.
 13. Choose the table set that fully preserves the requested grain, dimensions, filters, and comparison logic. If a surfaced chart table or aggregate table has already rolled up over something the follow-up now needs, inspect the underlying lineage tables in metadata and use a lower-grain table set instead.
-14. Call get_distinct_values before filtering on new text columns.
-15. Call get_schema_snippets only for the exact tables you intend to query.
-16. For growth, change, trend, ranking, threshold, or name-list follow-ups, call set_sql_query_plan before run_sql_query.
-17. If the SQL fails, inspect the failure, revise it, and retry.
-18. Use as many tool calls as needed for clarity, but keep them targeted. Prefer the shortest path that gives enough certainty to write correct SQL.
-19. Do not use read_full_metadata unless narrower metadata tools still leave genuine uncertainty.
-20. Stay within the current dashboard only."""
+14. Do not call search_columns_by_name repeatedly for synonyms of the same concept. Use get_column_metadata with broad concept terms instead.
+15. Call get_distinct_values only for non-PII text categorical columns you actually plan to filter on when the literal value is not already validated by metadata sample values or earlier tool output. Never call it for PII columns such as person names, mobile numbers, or government IDs. Do not call it for numeric, integer, date, timestamp, or boolean columns; use typed literals directly.
+16. Call get_schema_snippets only for the exact tables you intend to query.
+17. For growth, change, trend, ranking, threshold, or name-list follow-ups, call set_sql_query_plan before run_sql_query. When the SQL is ready, call set_sql_query_plan and run_sql_query in the same assistant tool-call turn, with set_sql_query_plan first.
+18. If the SQL fails, inspect the failure, revise it, and retry.
+19. Use as many tool calls as needed for clarity, but keep them targeted. Prefer the shortest path that gives enough certainty to write correct SQL.
+20. Do not use read_full_metadata unless narrower metadata tools still leave genuine uncertainty.
+21. Stay within the current dashboard only."""
 
 PROTOTYPE_SQL_VERIFICATION_PROMPT = """You are verifying whether a generated SQL query actually answers the user's question.
 

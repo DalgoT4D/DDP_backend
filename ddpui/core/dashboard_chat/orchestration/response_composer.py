@@ -70,8 +70,159 @@ def _query_looks_referential(user_query: str) -> bool:
     return any(marker in normalized_query for marker in referential_markers)
 
 
-def serialize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+def _compact_metadata_column(column: dict[str, Any]) -> dict[str, Any]:
+    """Keep only query-planning fields from a metadata column."""
+    statistics = column.get("statistics") if isinstance(column.get("statistics"), dict) else {}
+    compact: dict[str, Any] = {
+        "column_name": column.get("column_name") or column.get("name") or "",
+        "data_type": column.get("data_type") or "",
+        "description": column.get("description") or "",
+        "semantic_role": column.get("semantic_role") or "",
+        "value_semantics": column.get("value_semantics") or "",
+        "pii": bool(column.get("pii")),
+    }
+    if statistics:
+        compact_statistics = {
+            "nullable": statistics.get("nullable"),
+            "null_percentage": statistics.get("null_percentage"),
+            "sample_values": (statistics.get("sample_values") or [])[:10],
+            "range_profile": statistics.get("range_profile"),
+        }
+        compact["statistics"] = {
+            key: value
+            for key, value in compact_statistics.items()
+            if value not in (None, [], {})
+        }
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
+
+
+def _compact_metadata_table(
+    table: dict[str, Any],
+    *,
+    include_column_details: bool = False,
+) -> dict[str, Any]:
+    """Keep table semantics useful for SQL generation without the full artifact payload."""
+    column_names = [
+        column.get("column_name") or column.get("name")
+        for column in table.get("columns") or []
+        if isinstance(column, dict) and (column.get("column_name") or column.get("name"))
+    ]
+    pii_columns = [
+        column.get("column_name") or column.get("name")
+        for column in table.get("columns") or []
+        if isinstance(column, dict)
+        and bool(column.get("pii"))
+        and (column.get("column_name") or column.get("name"))
+    ]
+    compact: dict[str, Any] = {
+        "table_name": table.get("table_name"),
+        "model_name": table.get("model_name"),
+        "layer": table.get("layer"),
+        "table_type": table.get("table_type"),
+        "description": table.get("description"),
+        "upstream_models": table.get("upstream_models") or [],
+        "statistics": table.get("statistics") or {},
+        "primary_entities": table.get("primary_entities") or [],
+        "grain": table.get("grain") or {},
+        "temporal": table.get("temporal") or {},
+        "counting": table.get("counting") or {},
+        "answerability": table.get("answerability") or {},
+        "chart_usage": (table.get("chart_usage") or [])[:8],
+        "column_names": column_names[:100],
+        "pii_columns": pii_columns[:40],
+    }
+    if include_column_details:
+        compact["columns"] = [
+            _compact_metadata_column(column)
+            for column in (table.get("columns") or [])[:30]
+            if isinstance(column, dict)
+        ]
+    return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+
+def _compact_column_metadata_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Compact get_column_metadata results for the model-facing tool transcript."""
+    columns = []
+    for item in result.get("columns") or []:
+        if not isinstance(item, dict):
+            continue
+        column = item.get("column") if isinstance(item.get("column"), dict) else {}
+        columns.append(
+            {
+                "table_name": item.get("table_name"),
+                "column": _compact_metadata_column(column),
+                "matched_terms": item.get("matched_terms") or [],
+                "table_row_grain": item.get("table_row_grain"),
+                "table_type": item.get("table_type"),
+            }
+        )
+    return {"count": result.get("count", len(columns)), "columns": columns}
+
+
+def _compact_schema_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Compact schema snippets while preserving exact column names and types."""
+    tables = []
+    for table in result.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        columns = []
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict):
+                continue
+            columns.append(
+                {
+                    "name": column.get("name"),
+                    "type": column.get("type") or column.get("data_type"),
+                }
+            )
+        table_payload = {
+            "table": table.get("table"),
+            "columns": columns,
+            "profile": table.get("profile") or {},
+            "hint": table.get("hint"),
+        }
+        tables.append(
+            {
+                key: value
+                for key, value in table_payload.items()
+                if value not in (None, "", [], {})
+            }
+        )
+    compact: dict[str, Any] = {"tables": tables}
+    if result.get("filtered_tables"):
+        compact["filtered_tables"] = result.get("filtered_tables")
+        compact["filter_note"] = result.get("filter_note")
+    return compact
+
+
+def serialize_tool_result(result: dict[str, Any], *, tool_name: str | None = None) -> dict[str, Any]:
     """Trim large tool payloads before feeding them back into the model."""
+    if tool_name in {"get_chart_table_metadata", "get_table_metadata"}:
+        serialized = {
+            "count": result.get("count", len(result.get("tables") or [])),
+            "tables": [
+                _compact_metadata_table(table)
+                for table in (result.get("tables") or [])
+                if isinstance(table, dict)
+            ],
+        }
+        if tool_name == "get_chart_table_metadata":
+            serialized["charts"] = (result.get("charts") or [])[:12]
+        return serialized
+    if tool_name == "get_column_metadata":
+        return _compact_column_metadata_result(result)
+    if tool_name == "search_metadata":
+        return {
+            "count": result.get("count", len(result.get("tables") or [])),
+            "tables": [
+                _compact_metadata_table(table)
+                for table in (result.get("tables") or [])
+                if isinstance(table, dict)
+            ],
+        }
+    if tool_name == "get_schema_snippets":
+        return _compact_schema_result(result)
+
     serialized = dict(result)
     docs = serialized.get("docs")
     if isinstance(docs, list) and len(docs) > 6:
@@ -109,7 +260,10 @@ def summarize_tool_call(
     elif tool_name == "get_column_metadata":
         entry["count"] = result.get("count", 0)
         entry["columns"] = [
-            f"{item.get('table_name')}.{(item.get('column') or {}).get('name')}"
+            (
+                f"{item.get('table_name')}."
+                f"{(item.get('column') or {}).get('column_name') or (item.get('column') or {}).get('name')}"
+            )
             for item in result.get("columns", [])[:12]
         ]
     elif tool_name == "search_columns_by_name":
@@ -187,6 +341,12 @@ def compose_final_answer_text(
     normalized_sql_results = normalize_sql_results_for_answer(execution_result.get("sql_results"))
     draft_answer = (execution_result.get("answer_text") or "").strip() or None
     pii_value_map = dict(execution_result.get("pii_value_map") or {})
+    deterministic_answer = _deterministic_name_list_answer(
+        user_query=state["user_query"],
+        sql_results=normalized_sql_results,
+    )
+    if deterministic_answer:
+        return unmask_pii_text(deterministic_answer, pii_value_map)
     if execution_result.get("sql_rejection") and not normalized_sql_results:
         return (
             draft_answer
@@ -221,6 +381,59 @@ def compose_final_answer_text(
         ),
         pii_value_map,
     )
+
+
+def _deterministic_name_list_answer(
+    *,
+    user_query: str,
+    sql_results: list[dict[str, Any]] | None,
+) -> str | None:
+    """Render simple name-list answers without a final LLM call."""
+    if not sql_results or not query_requests_name_list(user_query):
+        return None
+    name_column = _select_name_list_column(user_query, sql_results[0])
+    if not name_column:
+        return None
+    names: list[str] = []
+    seen: set[str] = set()
+    for row in sql_results:
+        value = row.get(name_column)
+        if value in (None, ""):
+            continue
+        name = str(value)
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    if not names:
+        return "No matching names were found."
+    return "\n".join(f"- {name}" for name in names)
+
+
+def _select_name_list_column(user_query: str, first_row: dict[str, Any]) -> str | None:
+    """Pick the entity-name column that best matches the user's requested list."""
+    columns = [str(column) for column in first_row.keys()]
+    normalized_query = user_query.lower()
+    preference_groups: list[list[str]] = []
+    if any(term in normalized_query for term in ["student", "learner", "child", "pupil"]):
+        preference_groups.append(["student_name", "learner_name", "child_name", "pupil_name"])
+    if "fellow" in normalized_query:
+        preference_groups.append(["fellow_name"])
+    if "pm" in normalized_query or "program manager" in normalized_query:
+        preference_groups.append(["pm_name", "program_manager_name"])
+    if "school" in normalized_query:
+        preference_groups.append(["school_name"])
+    preference_groups.append(["name"])
+    for preferences in preference_groups:
+        for preferred in preferences:
+            for column in columns:
+                normalized_column = column.lower()
+                if normalized_column == preferred or normalized_column.endswith(f"_{preferred}"):
+                    return column
+    for column in columns:
+        if "name" in column.lower():
+            return column
+    return None
 
 
 def determine_response_format(

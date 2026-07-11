@@ -11,6 +11,9 @@ from ddpui.core.dashboard_chat.orchestration.nodes.metadata_gate import (
 )
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.tool_loop import execute_tool_loop
+from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_plan_validation import (
+    query_requires_sql_plan,
+)
 from ddpui.core.dashboard_chat.orchestration.timing_breakdown import merge_tool_loop_timing
 
 
@@ -34,7 +37,7 @@ def handle_follow_up_sql_node(
         tool_specifications,
         state=state,
         messages=messages,
-        max_turns=6,
+        max_turns=8 if query_requires_sql_plan(state["user_query"]) else 5,
     )
 
     sql_validation = execution_result["sql_validation"]

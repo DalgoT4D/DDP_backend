@@ -69,6 +69,7 @@ def search_metadata_tables(
         haystack = " ".join(
             [
                 table.table_name,
+                " ".join(table.aliases),
                 table.model_name,
                 table.description,
                 table.row_grain,
@@ -79,6 +80,9 @@ def search_metadata_tables(
                 " ".join(table.answerability.retained_dimensions),
                 " ".join(table.answerability.rolled_up_over),
                 " ".join(table.answerability.comparison_axes_available),
+                table.answerability.output_grain,
+                " ".join(table.answerability.answerable_question_shapes),
+                " ".join(table.answerability.table_limitations),
                 " ".join(table.answerability.direct_answer_capabilities),
                 " ".join(
                     limitation.question_need
@@ -88,7 +92,24 @@ def search_metadata_tables(
                     + limitation.details
                     for limitation in table.answerability.answerability_limitations
                 ),
+                table.comparison_semantics.comparison_type,
+                table.comparison_semantics.preferred_filter_role,
+                " ".join(table.comparison_semantics.notes),
+                " ".join(
+                    " ".join(
+                        [
+                            role.role,
+                            role.label,
+                            " ".join(role.aliases),
+                            " ".join(role.dimension_columns),
+                            " ".join(role.measure_columns),
+                            " ".join(role.filter_columns),
+                        ]
+                    )
+                    for role in table.comparison_semantics.roles
+                ),
                 " ".join(col.name for col in table.columns),
+                " ".join(" ".join(col.aliases) for col in table.columns),
                 " ".join(col.description for col in table.columns),
                 " ".join(col.semantic_role for col in table.columns),
                 " ".join(col.value_semantics for col in table.columns),
@@ -168,19 +189,21 @@ def search_columns_by_name(
     matches: list[tuple[int, dict[str, Any]]] = []
     for table in artifact.tables:
         for column in table.columns:
-            name_tokens = tokenize(column.name)
+            name_tokens = tokenize(" ".join([column.name, *column.aliases]))
             overlap = wanted_tokens & name_tokens
             exact_name_match = column.name.lower() == column_name.lower()
+            exact_alias_match = any(alias.lower() == column_name.lower() for alias in column.aliases)
             token_subset_match = bool(wanted_tokens) and wanted_tokens.issubset(name_tokens)
-            if not exact_name_match and not token_subset_match:
+            if not exact_name_match and not exact_alias_match and not token_subset_match:
                 continue
-            score = len(overlap) + (5 if exact_name_match else 0)
+            score = len(overlap) + (5 if exact_name_match or exact_alias_match else 0)
             matches.append(
                 (
                     score,
                     {
                         "table_name": table.table_name,
                         "column_name": column.name,
+                        "aliases": column.aliases,
                         "data_type": column.data_type,
                         "description": column.description,
                         "semantic_role": column.semantic_role,
@@ -224,9 +247,13 @@ def get_related_tables(
             " ".join(
                 [
                     table.table_name,
+                    " ".join(table.aliases),
                     table.description,
                     " ".join(table.primary_entities),
+                    " ".join(table.answerability.answerable_question_shapes),
+                    " ".join(table.answerability.table_limitations),
                     " ".join(col.name for col in table.columns),
+                    " ".join(" ".join(col.aliases) for col in table.columns),
                     " ".join(col.description for col in table.columns),
                     " ".join(col.value_semantics for col in table.columns),
                 ]

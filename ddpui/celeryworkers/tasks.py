@@ -111,6 +111,16 @@ UTC = timezone.UTC
 
 
 @app.task(bind=False)
+def run_dashboard_chat_turn(turn_id: int):
+    """Run one dashboard-chat turn in the Celery worker."""
+    from ddpui.core.dashboard_chat.sessions.session_service import (
+        _run_dashboard_chat_turn_in_background,
+    )
+
+    _run_dashboard_chat_turn_in_background(turn_id)
+
+
+@app.task(bind=False)
 def build_dashboard_chat_metadata_artifacts(
     org_id: int,
     dashboard_ids: list[int],

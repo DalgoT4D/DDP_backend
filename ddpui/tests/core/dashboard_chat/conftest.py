@@ -1,9 +1,8 @@
 """Shared pytest fixtures for dashboard-chat backend tests."""
 
-import pytest
+import sys
 
-from ddpui.core.dashboard_chat.orchestration.checkpoints import reset_dashboard_chat_checkpointer
-from ddpui.core.dashboard_chat.orchestration.orchestrator import reset_dashboard_chat_runtime
+import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -15,5 +14,15 @@ def reset_dashboard_chat_runtime_state():
     without imposing that cleanup on the rest of the backend test suite.
     """
     yield
-    reset_dashboard_chat_runtime()
-    reset_dashboard_chat_checkpointer()
+    if "ddpui.core.dashboard_chat.orchestration.orchestrator" in sys.modules:
+        from ddpui.core.dashboard_chat.orchestration.orchestrator import (
+            reset_dashboard_chat_runtime,
+        )
+
+        reset_dashboard_chat_runtime()
+    if "ddpui.core.dashboard_chat.orchestration.checkpoints" in sys.modules:
+        from ddpui.core.dashboard_chat.orchestration.checkpoints import (
+            reset_dashboard_chat_checkpointer,
+        )
+
+        reset_dashboard_chat_checkpointer()

@@ -92,7 +92,13 @@ def validate_sql_against_query_plan(
             ],
         )
 
-    stage_result = _validate_stage_to_stage_growth_sql(sql=sql, user_query=user_query, plan=plan)
+    stage_result = _validate_stage_to_stage_growth_sql(
+        sql=sql,
+        user_query=user_query,
+        plan=plan,
+        state=state,
+        referenced_tables=referenced_tables,
+    )
     if stage_result is not None:
         return stage_result
 
@@ -113,9 +119,22 @@ def _validate_stage_to_stage_growth_sql(
     sql: str,
     user_query: str,
     plan: dict[str, Any] | None,
+    state: DashboardChatGraphState,
+    referenced_tables: list[str],
 ) -> DashboardChatSqlVerificationResult | None:
     if not (STAGE_TO_STAGE_PATTERN.search(user_query) and GROWTH_OR_CHANGE_PATTERN.search(user_query)):
         return None
+    metadata_result = _validate_comparison_filter_columns_from_metadata(
+        sql=sql,
+        plan=plan,
+        state=state,
+        referenced_tables=referenced_tables,
+    )
+    if metadata_result is not None:
+        return metadata_result
+    if _referenced_tables_have_comparison_semantics(state, referenced_tables):
+        return None
+
     sql_lower = sql.lower()
     query_lower = user_query.lower()
     explicit_starting_stage = bool(re.search(r"\b(starting|baseline|base|pre)\s+(?:cohort|grade|class|group)\b", query_lower))
@@ -180,6 +199,124 @@ def _validate_stage_to_stage_growth_sql(
             repair_instructions=_deduplicate_strings(repair_instructions),
         )
     return None
+
+
+def _validate_comparison_filter_columns_from_metadata(
+    *,
+    sql: str,
+    plan: dict[str, Any] | None,
+    state: DashboardChatGraphState,
+    referenced_tables: list[str],
+) -> DashboardChatSqlVerificationResult | None:
+    desired_role_name = str((plan or {}).get("cohort_filter_stage") or "").strip().lower()
+    if not desired_role_name:
+        desired_role_name = _preferred_comparison_filter_role(state, referenced_tables)
+    if not desired_role_name:
+        return None
+
+    tables = _metadata_tables_for_references(state, referenced_tables)
+    sql_lower = sql.lower()
+    for table in tables:
+        roles = list(table.comparison_semantics.roles)
+        desired_role = _match_comparison_role(roles, desired_role_name)
+        if desired_role is None:
+            continue
+        desired_columns = set(desired_role.filter_columns + desired_role.dimension_columns)
+        other_columns: set[str] = set()
+        for role in roles:
+            if role is desired_role:
+                continue
+            other_columns.update(role.filter_columns)
+            other_columns.update(role.dimension_columns)
+        if not desired_columns or not other_columns:
+            continue
+        uses_desired_filter = any(_sql_has_column_filter(sql_lower, column) for column in desired_columns)
+        bad_columns = [
+            column
+            for column in sorted(other_columns)
+            if _sql_has_column_filter(sql_lower, column)
+        ]
+        if bad_columns and not uses_desired_filter:
+            return DashboardChatSqlVerificationResult(
+                is_valid=False,
+                severity="repair_once",
+                reason_code="comparison_filter_uses_wrong_role",
+                reasoning=(
+                    "Metadata says this comparison table has role-specific filter columns. "
+                    f"The query plan requested filters on role '{desired_role.role or desired_role_name}', "
+                    f"but SQL filters role columns from another side: {', '.join(bad_columns)}."
+                ),
+                issues=[
+                    "SQL applies the user filter to the wrong comparison role column.",
+                ],
+                repair_instructions=[
+                    "Use the role-specific filter column from metadata for the requested comparison role.",
+                    "Do not bind cohort/dimension filters to another comparison role unless the user explicitly asks for that role.",
+                ],
+            )
+    return None
+
+
+def _referenced_tables_have_comparison_semantics(
+    state: DashboardChatGraphState,
+    referenced_tables: list[str],
+) -> bool:
+    return any(table.comparison_semantics.roles for table in _metadata_tables_for_references(state, referenced_tables))
+
+
+def _preferred_comparison_filter_role(
+    state: DashboardChatGraphState,
+    referenced_tables: list[str],
+) -> str:
+    for table in _metadata_tables_for_references(state, referenced_tables):
+        preferred_role = table.comparison_semantics.preferred_filter_role.strip().lower()
+        if preferred_role:
+            return preferred_role
+    return ""
+
+
+def _metadata_tables_for_references(
+    state: DashboardChatGraphState,
+    referenced_tables: list[str],
+) -> list[Any]:
+    payload = state.get("metadata_artifact_payload") or {}
+    try:
+        artifact = DashboardChatMetadataArtifactPayload.model_validate(payload)
+    except Exception:
+        return []
+    lookup = table_lookup(artifact)
+    normalized_lookup = {name.lower(): table for name, table in lookup.items()}
+    tables = []
+    for table_name in referenced_tables:
+        table = lookup.get(table_name) or normalized_lookup.get(table_name.lower())
+        if table is not None:
+            tables.append(table)
+    return tables
+
+
+def _match_comparison_role(roles: list[Any], desired_role_name: str) -> Any | None:
+    desired_tokens = set(re.findall(r"[a-z0-9]+", desired_role_name.lower()))
+    for role in roles:
+        role_text = " ".join([role.role, role.label, *role.aliases]).lower()
+        role_tokens = set(re.findall(r"[a-z0-9]+", role_text))
+        if desired_role_name and desired_role_name in role_text:
+            return role
+        if desired_tokens and desired_tokens & role_tokens:
+            return role
+    return None
+
+
+def _sql_has_column_filter(sql_lower: str, column: str) -> bool:
+    column_name = str(column or "").strip().lower()
+    if not column_name:
+        return False
+    escaped_column = re.escape(column_name)
+    return bool(
+        re.search(
+            rf"(?:^|[^a-z0-9_]){escaped_column}(?:\"|`)?\s*(?:=|in\s*\(|like|ilike|is\s+not\s+null|is\s+null)",
+            sql_lower,
+        )
+    )
 
 
 def _validate_aggregate_distribution_proxy(

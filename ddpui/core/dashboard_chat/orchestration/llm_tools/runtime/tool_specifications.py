@@ -96,7 +96,8 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
                 "Inspect ranked relevant columns within specific tables when you already know the "
                 "likely table set. Pass broad concept terms such as entity, name, grade, stage, "
                 "measure, threshold, score, percentage, or topic; the tool returns the best "
-                "matching columns rather than requiring one column to match every term."
+                "matching columns rather than requiring one column to match every term. Prefer this "
+                "over repeated search_columns_by_name calls for synonyms."
             ),
             "parameters": {
                 "type": "object",
@@ -109,7 +110,7 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
                         "type": "array",
                         "items": {"type": "string"},
                     },
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 120, "default": 80},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
                 },
                 "required": ["tables"],
             },
@@ -120,13 +121,15 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
         "function": {
             "name": "search_columns_by_name",
             "description": (
-                "Find every allowlisted table that contains a specific column name or close column-name match."
+                "Find allowlisted tables containing one specific column-name match. Use sparingly; "
+                "do not call repeatedly for synonyms of the same concept. Use get_column_metadata "
+                "for broad semantic discovery."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "column_name": {"type": "string"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 12},
                 },
                 "required": ["column_name"],
             },
@@ -254,7 +257,12 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
         "type": "function",
         "function": {
             "name": "get_distinct_values",
-            "description": "Get distinct values for a column before filtering on text columns.",
+            "description": (
+                "Get distinct values for a non-PII text column before filtering on text columns. "
+                "Do not call this for columns marked as PII or when metadata sample values already "
+                "validate the filter value. Do not call this for numeric, integer, date, timestamp, "
+                "or boolean columns."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -272,7 +280,9 @@ DASHBOARD_CHAT_TOOL_SPECIFICATIONS = [
             "name": "set_sql_query_plan",
             "description": (
                 "Record the intended SQL metric, grain, stage scope, cohort filters, null handling, "
-                "and chosen tables before executing complex growth, ranking, threshold, or name-list SQL."
+                "and chosen tables before executing complex growth, ranking, threshold, or name-list SQL. "
+                "When SQL is ready, call this and run_sql_query in the same tool-call turn, with this "
+                "tool first."
             ),
             "parameters": {
                 "type": "object",

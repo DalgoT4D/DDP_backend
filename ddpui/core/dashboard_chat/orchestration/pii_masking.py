@@ -5,19 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ddpui.core.dashboard_chat.metadata.pii_overrides import (
-    apply_pii_overrides_to_payload,
-    load_pii_overrides_for_org,
-)
 from ddpui.core.dashboard_chat.metadata.schemas import DashboardChatMetadataArtifactPayload
-from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
-    extract_identifier_refs_from_sql_segment,
-    resolve_table_qualifier,
-    table_references,
-)
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
-from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
-from ddpui.models.org_preferences import OrgPreferences
 
 PII_TOKEN_PATTERN = re.compile(r"\[\[PII_[A-Z0-9_]+\]\]")
 NUMERIC_AGGREGATE_PATTERN = re.compile(r"\b(?:COUNT|SUM|AVG)\s*\(", re.IGNORECASE)
@@ -25,6 +14,8 @@ NUMERIC_AGGREGATE_PATTERN = re.compile(r"\b(?:COUNT|SUM|AVG)\s*\(", re.IGNORECAS
 
 def share_pii_with_llms_enabled(state: DashboardChatGraphState) -> bool:
     """Return whether raw PII values may be sent to LLMs for the current org."""
+    from ddpui.models.org_preferences import OrgPreferences
+
     org_id = int(state["org_id"])
     setting = (
         OrgPreferences.objects.filter(org_id=org_id)
@@ -45,6 +36,11 @@ def load_effective_metadata_payload(
         payload = DashboardChatMetadataArtifactPayload.model_validate(raw_payload)
     except Exception:
         return None
+    from ddpui.core.dashboard_chat.metadata.pii_overrides import (
+        apply_pii_overrides_to_payload,
+        load_pii_overrides_for_org,
+    )
+
     overrides = load_pii_overrides_for_org(int(state["org_id"]))
     return apply_pii_overrides_to_payload(payload, overrides)
 
@@ -160,6 +156,11 @@ def result_columns_that_contain_pii(
     payload = load_effective_metadata_payload(state)
     if payload is None or not rows:
         return set()
+    from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
+        table_references,
+    )
+    from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
+
     result_columns = set(rows[0].keys())
     referenced_tables = table_references(sql)
     referenced_table_names = [
@@ -314,6 +315,11 @@ def _expression_projects_pii_value(
     referenced_tables: list[dict[str, str | None]],
     pii_columns_by_table: dict[str, set[str]],
 ) -> bool:
+    from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
+        extract_identifier_refs_from_sql_segment,
+        resolve_table_qualifier,
+    )
+
     if NUMERIC_AGGREGATE_PATTERN.search(expression):
         return False
     identifier_refs = extract_identifier_refs_from_sql_segment(

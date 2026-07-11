@@ -67,6 +67,58 @@ def test_stage_growth_rejects_start_stage_filter_and_unrequested_attendance_filt
     assert "Unrequested attendance/completion filters can change the growth cohort." in result.issues
 
 
+def test_comparison_metadata_rejects_wrong_role_filter():
+    artifact = DashboardChatMetadataArtifactPayload(
+        org_id=1,
+        dashboard_id=1,
+        tables=[
+            DashboardChatMetadataTable(
+                table_name="dev_intermediate.student_growth",
+                comparison_semantics={
+                    "comparison_type": "baseline_to_endline",
+                    "roles": [
+                        {
+                            "role": "baseline",
+                            "aliases": ["base", "starting"],
+                            "dimension_columns": ["grade_taught_base"],
+                            "filter_columns": ["grade_taught_base"],
+                        },
+                        {
+                            "role": "endline",
+                            "aliases": ["end", "terminal", "output"],
+                            "dimension_columns": ["grade_taught_end"],
+                            "filter_columns": ["grade_taught_end"],
+                        },
+                    ],
+                    "preferred_filter_role": "endline",
+                },
+            )
+        ],
+    )
+
+    result = validate_sql_against_query_plan(
+        sql=(
+            "SELECT AVG(score_end) - AVG(score_base) "
+            "FROM dev_intermediate.student_growth "
+            "WHERE grade_taught_base = 2"
+        ),
+        state={
+            "user_query": "For grade 2, which topic improved most from baseline to endline?",
+            "metadata_artifact_payload": artifact.model_dump(mode="json"),
+        },
+        turn_context=SimpleNamespace(
+            sql_query_plan={
+                "cohort_filter_stage": "endline",
+                "null_handling": "coalesce_missing_to_zero",
+            }
+        ),
+        referenced_tables=["dev_intermediate.student_growth"],
+    )
+
+    assert result is not None
+    assert result.reason_code == "comparison_filter_uses_wrong_role"
+
+
 def test_stage_growth_rejects_silent_null_dropping():
     result = validate_sql_against_query_plan(
         sql=(

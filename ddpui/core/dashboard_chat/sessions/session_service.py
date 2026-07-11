@@ -1,7 +1,6 @@
 """Session and message persistence helpers for dashboard chat."""
 
 from dataclasses import dataclass
-from threading import Thread
 from uuid import UUID
 
 from asgiref.sync import async_to_sync
@@ -299,14 +298,11 @@ def publish_dashboard_chat_error(
 
 
 def start_dashboard_chat_turn_background(turn_id: int) -> None:
-    """Run one dashboard-chat turn in a background thread without blocking the websocket."""
+    """Queue one dashboard-chat turn without blocking the websocket."""
 
-    Thread(
-        target=_run_dashboard_chat_turn_in_background,
-        kwargs={"turn_id": turn_id},
-        daemon=True,
-        name=f"dashboard-chat-turn-{turn_id}",
-    ).start()
+    from ddpui.celeryworkers.tasks import run_dashboard_chat_turn
+
+    run_dashboard_chat_turn.delay(turn_id)
 
 
 def _run_dashboard_chat_turn_in_background(turn_id: int) -> None:

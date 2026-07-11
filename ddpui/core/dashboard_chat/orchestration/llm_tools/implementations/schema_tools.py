@@ -4,7 +4,10 @@ from typing import Any
 
 from ddpui.core.dashboard_chat.warehouse.sql_guard import DashboardChatSqlGuard
 
-from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import DashboardChatAllowlist
+from ddpui.core.dashboard_chat.context.dashboard_table_allowlist import (
+    DashboardChatAllowlist,
+    normalize_dashboard_chat_table_name,
+)
 from ddpui.core.dashboard_chat.orchestration.state import DashboardChatGraphState
 from ddpui.core.dashboard_chat.orchestration.llm_tools.implementations.sql_parsing import (
     find_tables_with_column,
@@ -13,6 +16,7 @@ from ddpui.core.dashboard_chat.orchestration.llm_tools.runtime.turn_context impo
     DashboardChatTurnContext,
     get_or_load_schema_snippets,
     get_turn_warehouse_tools,
+    is_text_type,
     metadata_column_is_pii,
     record_validated_distinct_values,
 )
@@ -95,6 +99,39 @@ def _build_table_hint(table_name: str, profile: dict[str, Any]) -> str | None:
             "percentage thresholds, averages, and best-performing comparisons."
         )
     return None
+
+
+def _metadata_sample_values_for_column(
+    state: DashboardChatGraphState,
+    *,
+    table_name: str,
+    column_name: str,
+) -> list[str]:
+    """Return non-exhaustive metadata sample values for one column, if available."""
+    payload = state.get("metadata_artifact_payload") or {}
+    normalized_table_name = normalize_dashboard_chat_table_name(table_name)
+    normalized_column_name = str(column_name or "").strip().lower()
+    if not normalized_table_name or not normalized_column_name:
+        return []
+    for table in payload.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        candidate_table_name = normalize_dashboard_chat_table_name(
+            str(table.get("table_name") or "")
+        )
+        if candidate_table_name != normalized_table_name:
+            continue
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict):
+                continue
+            candidate_column_name = str(
+                column.get("column_name") or column.get("name") or ""
+            ).strip().lower()
+            if candidate_column_name != normalized_column_name:
+                continue
+            statistics = column.get("statistics") if isinstance(column.get("statistics"), dict) else {}
+            return [str(value) for value in (statistics.get("sample_values") or []) if value]
+    return []
 
 
 def handle_get_schema_snippets_tool(
@@ -185,6 +222,23 @@ def handle_get_distinct_values_tool(
                 "Use a table that contains it, inspect that schema, and retry the lookup."
             ),
         }
+    if snippet is not None:
+        column_type = ""
+        for column in snippet.columns:
+            if str(column.get("name") or "").lower() == normalized_column_name:
+                column_type = str(column.get("type") or column.get("data_type") or "").lower()
+                break
+        if column_type and not is_text_type(column_type):
+            return {
+                "error": "distinct_values_not_required_for_non_text_column",
+                "table": table_name,
+                "column": column_name,
+                "data_type": column_type,
+                "message": (
+                    "Distinct-value lookup is only required before filtering text columns. "
+                    "Use numeric/date/boolean literals directly when the column type matches."
+                ),
+            }
 
     if metadata_column_is_pii(
         state,
@@ -199,6 +253,29 @@ def handle_get_distinct_values_tool(
                 "Distinct values are not available for columns marked as PII. "
                 "Write the SQL without fetching or exposing the distinct values."
             ),
+        }
+
+    sample_values = _metadata_sample_values_for_column(
+        state,
+        table_name=table_name,
+        column_name=column_name,
+    )
+    if sample_values:
+        sample_values = sample_values[:limit]
+        record_validated_distinct_values(
+            turn_context=turn_context,
+            table_name=table_name,
+            column_name=column_name,
+            values=sample_values,
+            column_values_exhaustive=False,
+        )
+        return {
+            "table": table_name,
+            "column": column_name,
+            "values": sample_values,
+            "count": len(sample_values),
+            "source": "metadata_sample_values",
+            "exhaustive": False,
         }
 
     values = get_turn_warehouse_tools(

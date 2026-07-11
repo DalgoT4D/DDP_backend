@@ -209,7 +209,8 @@ def handle_get_column_metadata_tool(
                 )
             )
     ranked_matches.sort(key=lambda item: (-item[0], item[1], item[2]))
-    matches = [payload for _, _, _, payload in ranked_matches[: int(args.get("limit") or 80)]]
+    result_limit = max(1, min(int(args.get("limit") or 25), 25))
+    matches = [payload for _, _, _, payload in ranked_matches[:result_limit]]
     return {"count": len(matches), "columns": matches}
 
 
@@ -271,7 +272,7 @@ def handle_search_columns_by_name_tool(
     matches = search_columns_by_name(
         artifact,
         column_name=column_name,
-        limit=int(args.get("limit") or 20),
+        limit=max(1, min(int(args.get("limit") or 12), 20)),
     )
     return {"count": len(matches), "columns": matches}
 

@@ -1,7 +1,17 @@
 from unittest.mock import Mock, patch
 
-from ddpui.core.dashboard_chat.sessions.session_service import _run_dashboard_chat_turn_in_background
+from ddpui.core.dashboard_chat.sessions.session_service import (
+    _run_dashboard_chat_turn_in_background,
+    start_dashboard_chat_turn_background,
+)
 from ddpui.models.dashboard_chat import DashboardChatTurnStatus
+
+
+@patch("ddpui.celeryworkers.tasks.run_dashboard_chat_turn.delay")
+def test_start_dashboard_chat_turn_background_queues_celery_task(mock_delay):
+    start_dashboard_chat_turn_background(23)
+
+    mock_delay.assert_called_once_with(23)
 
 
 @patch("ddpui.core.dashboard_chat.sessions.session_service.close_old_connections")

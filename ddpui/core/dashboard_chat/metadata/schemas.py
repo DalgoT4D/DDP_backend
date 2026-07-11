@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-DASHBOARD_CHAT_METADATA_SCHEMA_VERSION = 5
+DASHBOARD_CHAT_METADATA_SCHEMA_VERSION = 6
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -61,6 +61,7 @@ class DashboardChatMetadataColumn(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     column_name: str = ""
+    aliases: list[str] = Field(default_factory=list)
     data_type: str = ""
     description: str = ""
     semantic_role: str = ""
@@ -86,6 +87,7 @@ class DashboardChatMetadataColumn(BaseModel):
         )
         return {
             "column_name": value.get("column_name") or observed.get("name") or value.get("name") or "",
+            "aliases": value.get("aliases") or inferred.get("aliases") or [],
             "data_type": value.get("data_type") or observed.get("data_type") or observed.get("type") or "",
             "description": value.get("description") or observed.get("description") or "",
             "semantic_role": value.get("semantic_role") or inferred.get("semantic_role") or "",
@@ -108,6 +110,11 @@ class DashboardChatMetadataColumn(BaseModel):
                 else None,
             },
         }
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: Any) -> list[str]:
+        return _normalize_string_list(value)
 
     @property
     def name(self) -> str:
@@ -248,9 +255,12 @@ class DashboardChatTableAnswerability(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    output_grain: str = ""
     retained_dimensions: list[str] = Field(default_factory=list)
     rolled_up_over: list[str] = Field(default_factory=list)
     comparison_axes_available: list[str] = Field(default_factory=list)
+    answerable_question_shapes: list[str] = Field(default_factory=list)
+    table_limitations: list[str] = Field(default_factory=list)
     direct_answer_capabilities: list[str] = Field(default_factory=list)
     answerability_limitations: list[DashboardChatAnswerabilityLimitation] = Field(
         default_factory=list
@@ -261,11 +271,53 @@ class DashboardChatTableAnswerability(BaseModel):
         "retained_dimensions",
         "rolled_up_over",
         "comparison_axes_available",
+        "answerable_question_shapes",
+        "table_limitations",
         "direct_answer_capabilities",
         mode="before",
     )
     @classmethod
     def _normalize_string_lists(cls, value: Any) -> list[str]:
+        return _normalize_string_list(value)
+
+
+class DashboardChatComparisonRole(BaseModel):
+    """One semantic comparison role represented by columns in a table."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    role: str = ""
+    label: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    dimension_columns: list[str] = Field(default_factory=list)
+    measure_columns: list[str] = Field(default_factory=list)
+    filter_columns: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "aliases",
+        "dimension_columns",
+        "measure_columns",
+        "filter_columns",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: Any) -> list[str]:
+        return _normalize_string_list(value)
+
+
+class DashboardChatTableComparisonSemantics(BaseModel):
+    """Generic before/after, target/actual, planned/achieved, or similar semantics."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    comparison_type: str = ""
+    roles: list[DashboardChatComparisonRole] = Field(default_factory=list)
+    preferred_filter_role: str = ""
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def _normalize_notes(cls, value: Any) -> list[str]:
         return _normalize_string_list(value)
 
 
@@ -275,6 +327,7 @@ class DashboardChatMetadataTable(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     table_name: str
+    aliases: list[str] = Field(default_factory=list)
     dbt_unique_id: str = ""
     schema_name: str = ""
     model_name: str = ""
@@ -290,6 +343,9 @@ class DashboardChatMetadataTable(BaseModel):
     counting: DashboardChatTableCounting = Field(default_factory=DashboardChatTableCounting)
     answerability: DashboardChatTableAnswerability = Field(
         default_factory=DashboardChatTableAnswerability
+    )
+    comparison_semantics: DashboardChatTableComparisonSemantics = Field(
+        default_factory=DashboardChatTableComparisonSemantics
     )
     columns: list[DashboardChatMetadataColumn] = Field(default_factory=list)
 
@@ -308,6 +364,7 @@ class DashboardChatMetadataTable(BaseModel):
         distinct_counts = dict(raw_statistics.get("distinct_counts") or {})
         return {
             "table_name": value.get("table_name") or "",
+            "aliases": value.get("aliases") or inferred.get("aliases") or [],
             "dbt_unique_id": value.get("dbt_unique_id") or (unique_ids[0] if unique_ids else ""),
             "schema_name": value.get("schema_name") or observed.get("schema_name") or "",
             "model_name": value.get("model_name") or observed.get("model_name") or "",
@@ -359,10 +416,11 @@ class DashboardChatMetadataTable(BaseModel):
                 "entity_counting_guidance": inferred.get("entity_counting_guidance") or {},
             },
             "answerability": value.get("answerability") or {},
+            "comparison_semantics": value.get("comparison_semantics") or {},
             "columns": value.get("columns") or [],
         }
 
-    @field_validator("upstream_models", "primary_entities", mode="before")
+    @field_validator("aliases", "upstream_models", "primary_entities", mode="before")
     @classmethod
     def _normalize_lists(cls, value: Any) -> list[str]:
         return _normalize_string_list(value)

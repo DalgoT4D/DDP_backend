@@ -296,6 +296,7 @@ class OpenAIDashboardChatLlmClient:
                 tools=tools,
                 tool_choice=tool_choice,
                 temperature=0,
+                reasoning_effort="low" if self.model.startswith("gpt-5") else None,
             )
         except Exception:
             logger.exception("Dashboard chat tool-loop turn failed")

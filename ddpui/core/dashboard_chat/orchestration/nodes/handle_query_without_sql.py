@@ -34,7 +34,7 @@ def handle_query_without_sql_node(
         tool_specifications,
         state=state,
         messages=messages,
-        max_turns=15,
+        max_turns=5,
     )
 
     sql_validation = execution_result["sql_validation"]

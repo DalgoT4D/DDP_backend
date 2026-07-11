@@ -34,7 +34,7 @@ def handle_follow_up_context_node(
         tool_specifications,
         state=state,
         messages=messages,
-        max_turns=6,
+        max_turns=4,
     )
 
     sql_validation = execution_result["sql_validation"]

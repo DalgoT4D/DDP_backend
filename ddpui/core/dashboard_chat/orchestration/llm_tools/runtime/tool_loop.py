@@ -246,7 +246,7 @@ def execute_tool_loop(
                     "role": "tool",
                     "tool_call_id": tool_call.get("id"),
                     "content": json.dumps(
-                        serialize_tool_result(result),
+                        serialize_tool_result(result, tool_name=tool_name),
                         cls=DjangoJSONEncoder,
                     ),
                 }
@@ -291,6 +291,21 @@ def execute_tool_call(
 ) -> dict[str, Any]:
     """Execute one dashboard-chat tool against the runtime primitives."""
     try:
+        if tool_name == "search_columns_by_name":
+            previous_column_searches = sum(
+                1
+                for tool_call in turn_context.tool_calls
+                if tool_call.get("name") == "search_columns_by_name"
+            )
+            if previous_column_searches >= 3:
+                return {
+                    "error": "search_columns_by_name_limit_reached",
+                    "message": (
+                        "Too many column-name searches have already been used in this turn. "
+                        "Use get_column_metadata with broad concept terms or proceed with the "
+                        "best metadata and schema evidence already available."
+                    ),
+                }
         progress = TOOL_PROGRESS.get(tool_name)
         if progress is not None:
             publish_runtime_progress(progress[1], progress[0])
