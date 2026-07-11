@@ -19,6 +19,7 @@ from ddpui.core.ai.agent.middleware import (
     sql_retry_limiter,
     trim_history,
 )
+from ddpui.core.ai.agent.pii import build_pii_middleware
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools.registry import get_tools
 
@@ -134,6 +135,7 @@ def build_agent(
         tools=get_tools(),
         middleware=[
             sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
+            *build_pii_middleware(),  # mask PII before anything downstream sees it
             org_system_prompt,
             trim_history,
             clear_old_tool_results(),

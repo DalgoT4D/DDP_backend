@@ -85,6 +85,11 @@ the UI shows that as a caveat.
 - **One artifact contract.** Tools attach structured results to their messages;
   `messages/artifacts.py` is the only interpreter. The live stream, the audit,
   and history replay all read through it so they can never disagree.
+- **PII is masked before the model sees it.** `agent/pii.py` declares the rules
+  (emails, credit cards, Indian phone numbers today); masking covers the user's
+  message AND query results, and rewrites the checkpointed state — PII never
+  reaches a model provider, the checkpoint DB, or traces. The UI's result table
+  (from the tool artifact) is not masked.
 
 ## How to extend
 
