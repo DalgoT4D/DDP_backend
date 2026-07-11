@@ -385,22 +385,11 @@ def build_multi_metric_query(
             if not metric.aggregation:
                 raise ValueError(f"Aggregation function is required for metric")
 
-            # Handle count with None column case
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-            # Note: We don't validate aliases because they can be human-readable display names
-            # with spaces and special characters (e.g., "Total Count", "Average Price")
-            # The aliases are only used as dictionary keys in the result set, not in SQL
+            # Shared alias rule (count-all prefix, uniqueness) — same func pivot uses,
+            # so every chart type builds SQL aliases identically. Aliases are only dict
+            # keys in the result set, not validated as SQL identifiers, so human-readable
+            # display names with spaces/special chars (e.g. "Total Count") are fine.
+            alias = metric_sql_alias(metric)
 
             query_builder.add_aggregate_column(
                 metric.column,
