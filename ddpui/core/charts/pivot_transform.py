@@ -109,68 +109,81 @@ def _is_leaf_column_row(row: dict, num_col_dims: int) -> bool:
     return all(row.get(f"_grp_pivot_col_{i}", 0) == 0 for i in range(num_col_dims))
 
 
-def rotate_to_pivot(
+def _collect_column_keys(
     flat_rows: list[dict],
-    row_dim_cols: list[str],
     num_col_dims: int,
-    col_dim_names: list[str],
-    metric_aliases: list[str],
-    metric_display_names: list[str] | None = None,
-    show_column_subtotals: bool = False,
-    show_row_subtotals: bool = True,
-) -> dict:
+    show_column_subtotals: bool,
+) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
+    """Collect the unique leaf column keys (and subtotal keys) that form the pivot's headers.
+
+    Keys are ordered by their RAW values so time-grained headers sort
+    chronologically instead of lexicographically. `formatted_by_raw` maps
+    raw tuple → display tuple; we sort on raw, emit formatted.
+
+    Returns (column_keys, column_subtotal_keys).
     """
-    Transform flat ROLLUP rows into pivoted JSON response.
+    if num_col_dims == 0:
+        return [], []
 
-    Supports multiple column dimensions via composite column keys (tuples).
+    formatted_by_raw: dict[tuple, tuple[str, ...]] = {}
+    formatted_by_raw_subtotal: dict[tuple, tuple[str, ...]] = {}
+    for row in flat_rows:
+        if _is_leaf_column_row(row, num_col_dims) and not is_column_total(row, num_col_dims):
+            key = _get_column_key(row, num_col_dims)
+            # Skip keys with None values (shouldn't happen for leaf rows but be safe)
+            if NULL_DISPLAY_LABEL not in key or all(
+                row.get(f"_grp_pivot_col_{i}", 0) == 0 for i in range(num_col_dims)
+            ):
+                formatted_by_raw[_get_raw_column_key(row, num_col_dims)] = key
+        elif show_column_subtotals and is_column_subtotal(row, num_col_dims):
+            sub_key = _get_column_subtotal_key(row, num_col_dims)
+            formatted_by_raw_subtotal[_get_raw_column_subtotal_key(row, num_col_dims)] = sub_key
 
-    Returns:
-        {
-            "column_keys": [["Maharashtra", "Education"], ...],
-            "column_dimension_names": ["state_name", "program"],
-            "metric_headers": ["Count", "Spend"],
-            "rows": [...],
-            "grand_total": {...} | None,
-        }
+    column_keys = [formatted_by_raw[r] for r in sorted(formatted_by_raw, key=_raw_sort_key)]
+    column_subtotal_keys = [
+        formatted_by_raw_subtotal[r] for r in sorted(formatted_by_raw_subtotal, key=_raw_sort_key)
+    ]
+    return column_keys, column_subtotal_keys
+
+
+def _compute_subtotal_insert_positions(
+    column_keys: list[tuple[str, ...]],
+    column_subtotal_keys: list[tuple[str, ...]],
+) -> list[int]:
+    """Map each column subtotal key to the leaf column index it should appear after.
+
+    A subtotal key like ("CA",) should appear after the last leaf key starting with "CA".
     """
-    has_col_dims = num_col_dims > 0
-
-    # Collect unique leaf-level column keys, ordered by their RAW values so
-    # time-grained headers sort chronologically instead of lexicographically.
-    # formatted_by_raw maps raw tuple → display tuple; we sort on raw, emit formatted.
-    column_keys: list[tuple[str, ...]] = []
-    column_subtotal_keys: list[tuple[str, ...]] = []
-    if has_col_dims:
-        formatted_by_raw: dict[tuple, tuple[str, ...]] = {}
-        formatted_by_raw_subtotal: dict[tuple, tuple[str, ...]] = {}
-        for row in flat_rows:
-            if _is_leaf_column_row(row, num_col_dims) and not is_column_total(row, num_col_dims):
-                key = _get_column_key(row, num_col_dims)
-                # Skip keys with None values (shouldn't happen for leaf rows but be safe)
-                if NULL_DISPLAY_LABEL not in key or all(
-                    row.get(f"_grp_pivot_col_{i}", 0) == 0 for i in range(num_col_dims)
-                ):
-                    formatted_by_raw[_get_raw_column_key(row, num_col_dims)] = key
-            elif show_column_subtotals and is_column_subtotal(row, num_col_dims):
-                sub_key = _get_column_subtotal_key(row, num_col_dims)
-                formatted_by_raw_subtotal[_get_raw_column_subtotal_key(row, num_col_dims)] = sub_key
-        column_keys = [formatted_by_raw[r] for r in sorted(formatted_by_raw, key=_raw_sort_key)]
-        column_subtotal_keys = [
-            formatted_by_raw_subtotal[r]
-            for r in sorted(formatted_by_raw_subtotal, key=_raw_sort_key)
-        ]
-
-    # Map each column subtotal key to the leaf column index it should appear after.
-    # A subtotal key like ("CA",) should appear after the last leaf key starting with "CA".
-    column_subtotal_insert_after: list[int] = []
+    insert_after: list[int] = []
     for sub_key in column_subtotal_keys:
         last_idx = -1
         for idx, leaf_key in enumerate(column_keys):
             if leaf_key[: len(sub_key)] == sub_key:
                 last_idx = idx
-        column_subtotal_insert_after.append(last_idx)
+        insert_after.append(last_idx)
+    return insert_after
 
-    # Build pivoted rows keyed by (row_labels_tuple, row_type)
+
+def _build_pivoted_rows(
+    flat_rows: list[dict],
+    row_dim_cols: list[str],
+    num_col_dims: int,
+    column_keys: list[tuple[str, ...]],
+    column_subtotal_keys: list[tuple[str, ...]],
+    metric_aliases: list[str],
+    show_column_subtotals: bool,
+    show_row_subtotals: bool,
+) -> tuple[dict[tuple, dict], list[tuple]]:
+    """Scatter each flat row's metric values into pivoted cells.
+
+    Rows are keyed by (row_labels_tuple, row_type). Each flat row lands in one
+    of three slots: the overall row_total column, a leaf column cell, or a
+    column subtotal cell.
+
+    Returns (pivoted, row_order) — the entry dict keyed by row key, and the
+    insertion order of those keys.
+    """
+    has_col_dims = num_col_dims > 0
     pivoted: dict[tuple, dict] = {}
     row_order: list[tuple] = []
 
@@ -215,7 +228,18 @@ def rotate_to_pivot(
                 sub_idx = column_subtotal_keys.index(sub_key)
                 pivoted[key]["column_subtotal_values"][sub_idx] = metric_values
 
-    # Separate grand total from data/subtotal rows
+    return pivoted, row_order
+
+
+def _split_grand_total(
+    pivoted: dict[tuple, dict],
+    row_order: list[tuple],
+    show_column_subtotals: bool,
+) -> tuple[list[dict], dict | None]:
+    """Separate the grand-total entry from the data/subtotal rows.
+
+    Returns (data_rows, grand_total_entry).
+    """
     grand_total_entry = None
     data_rows = []
     for key in row_order:
@@ -231,6 +255,56 @@ def rotate_to_pivot(
             grand_total_entry = gt
         else:
             data_rows.append(entry)
+    return data_rows, grand_total_entry
+
+
+def rotate_to_pivot(
+    flat_rows: list[dict],
+    row_dim_cols: list[str],
+    num_col_dims: int,
+    col_dim_names: list[str],
+    metric_aliases: list[str],
+    metric_display_names: list[str] | None = None,
+    show_column_subtotals: bool = False,
+    show_row_subtotals: bool = True,
+) -> dict:
+    """
+    Transform flat ROLLUP rows into pivoted JSON response.
+
+    Supports multiple column dimensions via composite column keys (tuples).
+
+    Pipeline:
+      1. _collect_column_keys — derive the pivot's column headers
+      2. _compute_subtotal_insert_positions — where column subtotals slot in
+      3. _build_pivoted_rows — scatter metric values into cells
+      4. _split_grand_total — peel the grand-total row off the data rows
+
+    Returns:
+        {
+            "column_keys": [["Maharashtra", "Education"], ...],
+            "column_dimension_names": ["state_name", "program"],
+            "metric_headers": ["Count", "Spend"],
+            "rows": [...],
+            "grand_total": {...} | None,
+        }
+    """
+    column_keys, column_subtotal_keys = _collect_column_keys(
+        flat_rows, num_col_dims, show_column_subtotals
+    )
+    column_subtotal_insert_after = _compute_subtotal_insert_positions(
+        column_keys, column_subtotal_keys
+    )
+    pivoted, row_order = _build_pivoted_rows(
+        flat_rows,
+        row_dim_cols,
+        num_col_dims,
+        column_keys,
+        column_subtotal_keys,
+        metric_aliases,
+        show_column_subtotals,
+        show_row_subtotals,
+    )
+    data_rows, grand_total_entry = _split_grand_total(pivoted, row_order, show_column_subtotals)
 
     result = {
         "column_keys": [list(k) for k in column_keys],
