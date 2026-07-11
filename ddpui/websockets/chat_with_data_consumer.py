@@ -6,7 +6,7 @@ which cannot stream). Auth mirrors BaseConsumer's cookie-JWT flow, with ORM
 touches wrapped for async.
 
 Per-message protocol (in):  {"action": "send_message", "message": "<question>"}
-Events (out): see ddpui/core/chat_with_data/runner.py, plus
+Events (out): see ddpui/core/ai/chat/turn_runner.py, plus
               {"type": "title_updated", "title": str}.
 """
 

@@ -1,6 +1,6 @@
 # Chat with Data — developer guide
 
-Chat with Data is a LangGraph agent (`ddpui/core/chat_with_data/`) that answers
+Chat with Data is a LangGraph agent (`ddpui/core/ai/`) that answers
 natural-language questions by running guarded, read-only SQL against an org's
 warehouse.
 
@@ -71,7 +71,7 @@ You ran 1,284 surveys in Pune in June. ...
    trace (grouped by chat session): every model call with token usage, every
    tool call with its input/output (including the generated SQL), and latency.
 
-Implementation notes (`ddpui/core/chat_with_data/observability.py`): tracing is
+Implementation notes (`ddpui/core/ai/tracing.py`): tracing is
 disabled unless both keys are set, and every hook is fail-safe — a Langfuse
 outage can never break a chat turn. Traces are tagged with `org_slug` and
 `dialect`, keyed by opaque session/orguser ids (never emails), and carry the
@@ -87,7 +87,7 @@ cloud instance the org hasn't consented to.
 ## Tests
 
 ```bash
-uv run pytest ddpui/tests/core/chat_with_data -v
+uv run pytest ddpui/tests/core/ai -v
 ```
 
 The agent loop is tested with a scripted fake model (no API key needed); the
