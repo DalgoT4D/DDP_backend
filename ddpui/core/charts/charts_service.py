@@ -449,9 +449,9 @@ def build_pivot_table_query(
     needs_row_rollup = payload.show_row_subtotals or payload.show_column_grand_total
     col_dims = payload.column_dimensions or []
 
-    # Add row dimension columns to SELECT (labelled so get_row_labels can read row[dim_col])
-    for dim_col in payload.row_dimensions:
-        query_builder.add_column(column(dim_col).label(dim_col))
+    # Add row dimension columns to SELECT (labelled so get_row_labels can read row[row_dim])
+    for row_dim in payload.row_dimensions:
+        query_builder.add_column(column(row_dim).label(row_dim))
 
     # Add column dimension columns to SELECT
     for idx, col_dim in enumerate(col_dims):
@@ -464,15 +464,15 @@ def build_pivot_table_query(
         )
 
     # Add GROUPING() markers for each row dimension
-    for dim_col in payload.row_dimensions:
-        query_builder.add_grouping_column(column(dim_col), f"_grp_{dim_col}")
+    for row_dim in payload.row_dimensions:
+        query_builder.add_grouping_column(column(row_dim), f"_grp_{row_dim}")
 
     # Add GROUPING() markers for each column dimension
     for idx, col_dim in enumerate(col_dims):
         query_builder.add_grouping_column(column(col_dim), f"_grp_pivot_col_{idx}")
 
     # GROUP BY row dimensions — use ROLLUP when subtotals/grand total are requested
-    row_group_exprs = [column(dim_col) for dim_col in payload.row_dimensions]
+    row_group_exprs = [column(row_dim) for row_dim in payload.row_dimensions]
     if needs_row_rollup:
         query_builder.group_cols_by_rollup(*row_group_exprs)
     else:
