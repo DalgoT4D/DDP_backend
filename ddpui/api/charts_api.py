@@ -23,6 +23,7 @@ from ddpui.core.sharing.chart_access import (
     ChartRenderContext,
     require_analyst_plus,
     require_chart_view_access,
+    require_payload_within_chart_config,
     run_chart_query,
 )
 from ddpui.utils.custom_logger import CustomLogger
@@ -414,6 +415,13 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
             raise HttpError(403, "Payload does not match the referenced chart")
         require_chart_view_access(orguser, chart, payload.dashboard_id)
+        if payload.dashboard_id is not None:
+            # Context-admitted (Task 6d): the dashboard framed this render, so
+            # the payload may only reference the saved chart's own columns
+            # (plus the dashboard's filter columns for filter clauses).
+            require_payload_within_chart_config(
+                chart, payload.dashboard_id, payload, payload.dashboard_filters
+            )
     else:
         require_analyst_plus(orguser)
 
@@ -624,6 +632,11 @@ def get_chart_data_preview(
             # payload names.
             raise HttpError(403, "Payload does not match the referenced chart")
         require_chart_view_access(orguser, chart, dashboard_id)
+        if dashboard_id is not None:
+            # Context-admitted (Task 6d): the payload may only reference the
+            # saved chart's own columns (plus the framing dashboard's filter
+            # columns for filter clauses).
+            require_payload_within_chart_config(chart, dashboard_id, payload, dashboard_filters)
     else:
         require_analyst_plus(orguser)
 
@@ -762,6 +775,11 @@ def get_chart_data_preview_total_rows(
         if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
             raise HttpError(403, "Payload does not match the referenced chart")
         require_chart_view_access(orguser, chart, dashboard_id)
+        if dashboard_id is not None:
+            # Context-admitted (Task 6d): same column-set guard as the
+            # sibling /chart-data-preview/ -- a row COUNT under attacker
+            # filters is a probe primitive too.
+            require_payload_within_chart_config(chart, dashboard_id, payload, dashboard_filters)
     else:
         require_analyst_plus(orguser)
 
