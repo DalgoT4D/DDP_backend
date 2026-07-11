@@ -18,7 +18,9 @@ from django.core.management.base import BaseCommand, CommandError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ddpui.core.ai.agent.chat_data_agent import RECURSION_LIMIT, build_agent, get_chat_model
+from langchain.chat_models import init_chat_model
+
+from ddpui.core.ai.agent.chat_data_agent import MODEL_MAX_TOKENS, RECURSION_LIMIT, build_agent
 from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
 from ddpui.models.org_user import OrgUser
 
@@ -49,7 +51,8 @@ class Command(BaseCommand):
 
         model = None
         if options["model"]:
-            model = get_chat_model().__class__(model=options["model"], max_tokens=4096)
+            # provider inferred from the id: claude-* → Anthropic, gpt-* → OpenAI
+            model = init_chat_model(options["model"], max_tokens=MODEL_MAX_TOKENS)
 
         asyncio.run(self._chat_loop(context, model))
 

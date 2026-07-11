@@ -104,7 +104,11 @@ returns a `ResolvedScope` (`scopes/base.py`), plus a dispatch line in
 ## Models and configuration
 
 Every job picks its model with an env var and a default, through
-`agent/base.py::build_model`:
+`agent/base.py::build_model`. The model id also picks the **provider**:
+`claude-*` builds an Anthropic client (needs `ANTHROPIC_API_KEY`), `gpt-*`
+builds an OpenAI client (needs `OPENAI_API_KEY`), and `openai:gpt-5.5` style
+prefixes work for anything ambiguous. **Example:** to A/B test the report
+summary on OpenAI, set `REPORT_SUMMARY_MODEL=gpt-5.5` — no code change.
 
 | Env var | Used by | Default |
 |---|---|---|

@@ -9,7 +9,6 @@ lives in middleware.py / run_context.py / checkpointer.py.
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -35,7 +34,7 @@ DEFAULT_MODEL = "claude-sonnet-5"
 _DIALECT_LABELS = {"postgres": "PostgreSQL", "bigquery": "BigQuery"}
 
 
-def get_chat_model() -> ChatAnthropic:
+def get_chat_model() -> BaseChatModel:
     """The production chat model."""
     return build_model(MODEL_ENV_VAR, DEFAULT_MODEL, MODEL_MAX_TOKENS)
 
