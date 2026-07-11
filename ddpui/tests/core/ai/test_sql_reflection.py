@@ -24,17 +24,20 @@ class FakeModel:
         return AIMessage(content=self._content)
 
 
-def test_check_sql_flags_an_issue():
+def test_find_sql_issue_flags_an_issue():
     model = FakeModel(json.dumps({"ok": False, "issue": "the join duplicates farmers"}))
-    issue = reflection.check_sql("q", "SELECT ...", "postgres", model=model)
+    issue = reflection.find_sql_issue("q", "SELECT ...", "postgres", model=model)
     assert issue == "the join duplicates farmers"
 
 
-def test_check_sql_passes_clean_sql_and_fails_open():
+def test_find_sql_issue_passes_clean_sql_and_fails_open():
     assert (
-        reflection.check_sql("q", "SELECT 1", "postgres", model=FakeModel('{"ok": true}')) is None
+        reflection.find_sql_issue("q", "SELECT 1", "postgres", model=FakeModel('{"ok": true}'))
+        is None
     )
-    assert reflection.check_sql("q", "SELECT 1", "postgres", model=FakeModel("garbage")) is None
+    assert (
+        reflection.find_sql_issue("q", "SELECT 1", "postgres", model=FakeModel("garbage")) is None
+    )
 
 
 def run_execute_sql(ctx, sql):
@@ -48,7 +51,7 @@ def test_reflection_gates_complex_lane_only(monkeypatch):
         calls.append(sql)
         return "the join duplicates farmers"
 
-    monkeypatch.setattr(sql_tools, "check_sql", fake_check)
+    monkeypatch.setattr(sql_tools, "find_sql_issue", fake_check)
 
     # simple lane: reflection never runs, query executes
     ctx = make_context(FakeWarehouse(rows=[{"n": 1}]))

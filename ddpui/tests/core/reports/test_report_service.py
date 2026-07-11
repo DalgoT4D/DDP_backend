@@ -1111,17 +1111,42 @@ def tab_dashboard(orguser, org, tab_chart):
 
 
 class TestExtractChartIds:
-    """Tests for ReportService._extract_chart_ids"""
+    """Tests for Dashboard.component_ids — the single tabs[].components walk
+    shared by reports, KPIs, and chat scope."""
 
     def test_extracts_ids_from_tabs(self, tab_dashboard, tab_chart):
         """Charts inside tabs are discovered"""
-        chart_ids = ReportService._extract_chart_ids(tab_dashboard)
+        chart_ids = tab_dashboard.component_ids("chart")
         assert tab_chart.id in chart_ids
 
     def test_extracts_ids_from_tabs_sample(self, sample_dashboard, sample_chart):
         """Charts inside tabs are discovered (sample_dashboard fixture)"""
-        chart_ids = ReportService._extract_chart_ids(sample_dashboard)
+        chart_ids = sample_dashboard.component_ids("chart")
         assert sample_chart.id in chart_ids
+
+    def test_kpi_components_use_their_own_id_key(self, orguser, org):
+        """kpi components carry kpiId, not chartId — and don't leak into charts"""
+        dashboard = Dashboard.objects.create(
+            title="KPI walk",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "T1",
+                    "layout_config": [],
+                    "components": {
+                        "kpi-1": {"type": "kpi", "config": {"kpiId": 7}},
+                        "chart-1": {"type": "chart", "config": {"chartId": 3}},
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        assert dashboard.component_ids("kpi") == [7]
+        assert dashboard.component_ids("chart") == [3]
+        dashboard.delete()
 
     def test_deduplicates_when_chart_in_multiple_tabs(self, orguser, org):
         """Same chartId in multiple tabs appears only once"""
@@ -1146,7 +1171,7 @@ class TestExtractChartIds:
             created_by=orguser,
             org=org,
         )
-        chart_ids = ReportService._extract_chart_ids(dashboard)
+        chart_ids = dashboard.component_ids("chart")
         assert chart_ids.count(99) == 1
         dashboard.delete()
 

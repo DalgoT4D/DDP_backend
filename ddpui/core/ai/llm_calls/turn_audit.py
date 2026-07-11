@@ -81,7 +81,7 @@ def _render_result(result_table: dict | None) -> str:
     return "\n".join(lines)
 
 
-async def validate_turn(
+async def audit_turn(
     *,
     question: str,
     sql_queries: list[dict],

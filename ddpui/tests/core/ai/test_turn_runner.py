@@ -50,7 +50,7 @@ def hermetic_router(monkeypatch):
         return None
 
     monkeypatch.setattr(runner_module, "route_question", fail_open_route)
-    monkeypatch.setattr(runner_module, "validate_turn", no_validation)
+    monkeypatch.setattr(runner_module, "audit_turn", no_validation)
 
 
 @pytest.fixture
@@ -208,7 +208,7 @@ def test_validation_event_follows_message_complete(orguser, session, monkeypatch
             "caveat": "This counts visit records, not unique farmers.",
         }
 
-    monkeypatch.setattr(runner_module, "validate_turn", fake_validate)
+    monkeypatch.setattr(runner_module, "audit_turn", fake_validate)
 
     warehouse = FakeWarehouse(rows=[{"n": 1284}])
     model = ScriptedChatModel(

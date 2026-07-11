@@ -20,7 +20,7 @@ circular import with turn_runner.py.
 import dataclasses
 from typing import Annotated, Any, Optional, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.messages import AIMessage, AnyMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -28,11 +28,7 @@ from langgraph.runtime import Runtime
 
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.messages.artifacts import extract_turn_results
-from ddpui.core.ai.messages.content import extract_text
-
-# History lines shown to the router; each clipped so the prompt stays small
-TAIL_MESSAGES = 6
-TAIL_LINE_CHARS = 300
+from ddpui.core.ai.messages.conversation import history_lines, turn_segment
 
 
 class TurnState(TypedDict):
@@ -44,32 +40,6 @@ class TurnState(TypedDict):
     route: dict
     has_history: bool
     validation: Optional[dict]
-
-
-def history_lines(messages: list[AnyMessage]) -> list[str]:
-    """Compact "User:/Assistant:" tail of the conversation for the router.
-    Excludes the current (last) user message; tool chatter is noise for routing."""
-    lines: list[str] = []
-    for message in messages[:-1]:
-        if isinstance(message, HumanMessage):
-            role = "User"
-        elif isinstance(message, AIMessage) and not message.tool_calls:
-            role = "Assistant"
-        else:
-            continue
-        text = extract_text(message.content).strip()
-        if text:
-            lines.append(f"{role}: {text[:TAIL_LINE_CHARS]}")
-    return lines[-TAIL_MESSAGES:]
-
-
-def turn_segment(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """The messages of the CURRENT turn — everything after the last HumanMessage.
-    Validation must never see a previous turn's SQL."""
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], HumanMessage):
-            return messages[i + 1 :]
-    return messages
 
 
 def build_turn_graph(

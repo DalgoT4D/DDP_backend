@@ -28,7 +28,7 @@ from ddpui.core.ai.agent.base import resolve_model_name
 from ddpui.core.ai.agent.chat_data_agent import DEFAULT_MODEL, MODEL_ENV_VAR, RECURSION_LIMIT
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
-from ddpui.core.ai.llm_calls.turn_audit import validate_turn
+from ddpui.core.ai.llm_calls.turn_audit import audit_turn
 from ddpui.core.ai.chat.turn_graph import build_turn_graph
 from ddpui.core.ai.messages.artifacts import (
     creation_chip,
@@ -79,7 +79,7 @@ async def run_turn(
     error, and always writes the audit row.
 
     The brains are passed as this module's globals (route_question, casual_reply,
-    validate_turn) at call time, so tests can patch them per turn. The parent
+    audit_turn) at call time, so tests can patch them per turn. The parent
     graph reuses the agent's checkpointer — one saver, one thread namespace."""
     request_uuid = uuid.uuid4()
     started = time.monotonic()
@@ -88,7 +88,7 @@ async def run_turn(
         agent,
         route_fn=route_question,
         casual_reply_fn=casual_reply,
-        validate_fn=validate_turn,
+        validate_fn=audit_turn,
         checkpointer=agent.checkpointer,
     )
 

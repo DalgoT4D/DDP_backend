@@ -11,7 +11,7 @@ django.setup()
 
 from langchain_core.messages import AIMessage
 
-from ddpui.core.ai.llm_calls.turn_audit import validate_turn
+from ddpui.core.ai.llm_calls.turn_audit import audit_turn
 
 
 class FakeModel:
@@ -39,7 +39,7 @@ def test_returns_verdict_with_caveat():
         )
     )
     result = run(
-        validate_turn(
+        audit_turn(
             question="how many farmers enrolled?",
             sql_queries=[{"sql": "SELECT COUNT(*) FROM prod.visits", "status": "success"}],
             result_table={"columns": ["count"], "rows": [["1284"]], "row_count": 1},
@@ -57,7 +57,7 @@ def test_returns_verdict_with_caveat():
 def test_ok_verdict_passes_through():
     model = FakeModel(json.dumps({"verdict": "ok", "assumptions": [], "caveat": None}))
     result = run(
-        validate_turn(
+        audit_turn(
             question="q",
             sql_queries=[{"sql": "SELECT 1", "status": "success"}],
             result_table=None,
@@ -69,13 +69,13 @@ def test_ok_verdict_passes_through():
 
 
 def test_skips_when_no_sql_ran():
-    assert run(validate_turn(question="q", sql_queries=[], result_table=None, answer="a")) is None
+    assert run(audit_turn(question="q", sql_queries=[], result_table=None, answer="a")) is None
 
 
 def test_never_raises_on_garbage_or_errors():
     assert (
         run(
-            validate_turn(
+            audit_turn(
                 question="q",
                 sql_queries=[{"sql": "SELECT 1", "status": "success"}],
                 result_table=None,
@@ -92,7 +92,7 @@ def test_never_raises_on_garbage_or_errors():
 
     assert (
         run(
-            validate_turn(
+            audit_turn(
                 question="q",
                 sql_queries=[{"sql": "SELECT 1", "status": "success"}],
                 result_table=None,

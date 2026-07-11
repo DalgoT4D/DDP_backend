@@ -43,7 +43,7 @@ def get_reflection_model() -> BaseChatModel:
     )
 
 
-def check_sql(
+def find_sql_issue(
     question: str, sql: str, dialect: str, model: BaseChatModel | None = None
 ) -> str | None:
     """The problem found, or None (clean SQL / reflection unavailable)."""

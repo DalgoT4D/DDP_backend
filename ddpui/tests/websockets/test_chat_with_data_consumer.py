@@ -224,7 +224,7 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
 
     monkeypatch.setattr(runner_module, "route_question", fail_open_route)
     # real seams would hit the network on machines with ANTHROPIC/LANGFUSE keys set
-    monkeypatch.setattr(runner_module, "validate_turn", no_validation)
+    monkeypatch.setattr(runner_module, "audit_turn", no_validation)
     monkeypatch.setattr(runner_module, "start_turn_trace", lambda **kwargs: None)
 
     fake_redis = FakeRedis()

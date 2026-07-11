@@ -12,7 +12,7 @@ carried on the ToolMessage without ever entering the model's context.
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.guards import sql_guard
-from ddpui.core.ai.llm_calls.sql_reflection import check_sql
+from ddpui.core.ai.llm_calls.sql_reflection import find_sql_issue
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.tools import catalog, rendering
 from ddpui.core.ai.tools.registry import register_tool
@@ -41,7 +41,7 @@ def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
     # safety everywhere. A flagged issue goes back to the model as feedback
     # (and counts toward its 3-attempt limit) instead of executing.
     if ctx.complexity == "complex":
-        issue = check_sql(ctx.question, guarded.sql, ctx.dialect)
+        issue = find_sql_issue(ctx.question, guarded.sql, ctx.dialect)
         if issue:
             message = f"reflection found a problem: {issue}. Revise the SQL."
             return (
