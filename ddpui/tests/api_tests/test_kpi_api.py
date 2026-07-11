@@ -144,6 +144,54 @@ class TestCreateKPI:
         assert response.created_by == "kpiapiuser@test.com"
         KPI.objects.filter(id=response.id).delete()
 
+    def test_create_uses_org_general_defaults(self, orguser, sample_metric, seed_db):
+        """Task 11 Part C: a new KPI adopts the org's default General
+        access when set, else the model defaults (all_users/view)."""
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        OrgPreferences.objects.create(
+            org=orguser.org,
+            default_general_audience=GeneralAudience.ADMINS,
+            default_general_level=GeneralLevel.VIEW,
+        )
+        request = mock_request(orguser)
+        payload = KPICreate(
+            metric_id=sample_metric.id,
+            direction="increase",
+            time_grain="monthly",
+            target_value=500.0,
+            extra_config=KPIExtraConfig(),
+        )
+        response = create_kpi(request, payload)
+
+        kpi = KPI.objects.get(id=response.id)
+        assert kpi.general_audience == GeneralAudience.ADMINS
+        assert kpi.general_level == GeneralLevel.VIEW
+        kpi.delete()
+
+    def test_create_falls_back_to_model_defaults_when_no_preferences_row(
+        self, orguser, sample_metric, seed_db
+    ):
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+        request = mock_request(orguser)
+        payload = KPICreate(
+            metric_id=sample_metric.id,
+            direction="increase",
+            time_grain="monthly",
+            target_value=500.0,
+            extra_config=KPIExtraConfig(),
+        )
+        response = create_kpi(request, payload)
+
+        kpi = KPI.objects.get(id=response.id)
+        assert kpi.general_audience == GeneralAudience.ALL_USERS
+        assert kpi.general_level == GeneralLevel.VIEW
+        kpi.delete()
+
     def test_create_invalid_metric(self, orguser, seed_db):
         request = mock_request(orguser)
         payload = KPICreate(

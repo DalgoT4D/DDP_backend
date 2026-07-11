@@ -38,13 +38,16 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
+    toggle_dashboard_sharing,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     FilterCreate,
     FilterUpdate,
+    DashboardShareToggle,
 )
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -604,6 +607,35 @@ class TestDeleteFilter:
 # ================================================================================
 
 
+class TestDuplicateDashboardOrgGeneralDefaults:
+    """Task 11 Part C: a duplicated dashboard is a NEW resource -- it adopts
+    the org's default General access, not the source dashboard's (copying
+    the source's audience could silently widen access)."""
+
+    def test_duplicate_uses_org_defaults_not_source_values(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        sample_dashboard.general_audience = GeneralAudience.ALL_USERS
+        sample_dashboard.general_level = GeneralLevel.EDIT
+        sample_dashboard.save()
+
+        OrgPreferences.objects.create(
+            org=orguser.org,
+            default_general_audience=GeneralAudience.ADMINS,
+            default_general_level=GeneralLevel.VIEW,
+        )
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_dashboard = Dashboard.objects.get(id=response.id)
+        assert new_dashboard.general_audience == GeneralAudience.ADMINS
+        assert new_dashboard.general_level == GeneralLevel.VIEW
+        new_dashboard.delete()
+
+
 class TestDuplicateDashboardTabs:
     """Tests for duplicate_dashboard() tabs copying with filter ID remapping"""
 
@@ -684,6 +716,56 @@ class TestDuplicateDashboardTabs:
 
         # Cleanup
         original_filter.delete()
+
+
+# ================================================================================
+# Test toggle_dashboard_sharing endpoint -- Task 11 public-sharing kill switch
+# ================================================================================
+
+
+class TestToggleDashboardSharingKillSwitch:
+    """Org-level `allow_public_sharing` gates the enable/re-enable direction
+    of the dashboard share toggle; disabling a link always stays allowed."""
+
+    def test_enable_allowed_when_no_preferences_row(self, orguser, sample_dashboard, seed_db):
+        assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+        request = mock_request(orguser)
+        response = toggle_dashboard_sharing(
+            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+        )
+        assert response.is_public is True
+
+    def test_enable_blocked_when_switch_off(self, orguser, sample_dashboard, seed_db):
+        OrgPreferences.objects.create(org=orguser.org, allow_public_sharing=False)
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_dashboard_sharing(
+                request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+            )
+        assert exc_info.value.status_code == 403
+
+        sample_dashboard.refresh_from_db()
+        assert sample_dashboard.is_public is False
+
+    def test_enable_allowed_when_switch_on(self, orguser, sample_dashboard, seed_db):
+        OrgPreferences.objects.create(org=orguser.org, allow_public_sharing=True)
+        request = mock_request(orguser)
+        response = toggle_dashboard_sharing(
+            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+        )
+        assert response.is_public is True
+
+    def test_disable_allowed_even_when_switch_off(self, orguser, sample_dashboard, seed_db):
+        # First publish while the switch is on...
+        request = mock_request(orguser)
+        toggle_dashboard_sharing(request, sample_dashboard.id, DashboardShareToggle(is_public=True))
+
+        # ...then flip the org switch off. Turning the link OFF must still work.
+        OrgPreferences.objects.filter(org=orguser.org).update(allow_public_sharing=False)
+        response = toggle_dashboard_sharing(
+            request, sample_dashboard.id, DashboardShareToggle(is_public=False)
+        )
+        assert response.is_public is False
 
 
 # ================================================================================

@@ -41,6 +41,16 @@ class UpdateDiscordNotificationsSchema(Schema):
     discord_webhook: Optional[str] = None
 
 
+class UpdateSharingPreferencesSchema(Schema):
+    """Schema for updating org-level Resource Sharing preferences
+    (Task 11 Part B). Admin-gated -- see `update_sharing_preferences`.
+    """
+
+    allow_public_sharing: Optional[bool] = None
+    default_general_audience: Optional[str] = None
+    default_general_level: Optional[str] = None
+
+
 class CreateOrgSupersetDetailsSchema(Schema):
     """Schema for creating organization superset details."""
 

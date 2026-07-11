@@ -13,6 +13,7 @@ from sqlparse.tokens import Keyword, DML, DDL
 from django.db.models import Q
 from sqlalchemy import literal_column
 
+from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
 from ddpui.models.metric import Metric, KPI, AGGREGATION_CHOICES
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -199,6 +200,8 @@ class MetricService:
         if Metric.objects.filter(org=orguser.org, name=name).exists():
             raise MetricValidationError(f"A metric named '{name}' already exists")
 
+        general_audience, general_level = get_org_general_defaults(orguser.org_id)
+
         metric = Metric(
             name=name,
             description=description,
@@ -210,6 +213,8 @@ class MetricService:
             org=orguser.org,
             created_by=orguser,
             last_modified_by=orguser,
+            general_audience=general_audience,
+            general_level=general_level,
         )
 
         # Validate against warehouse before saving

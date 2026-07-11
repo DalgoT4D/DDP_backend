@@ -19,6 +19,8 @@ from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
+from ddpui.core.sharing.public_sharing_gate import require_public_sharing_enabled
+from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -191,7 +193,11 @@ def duplicate_dashboard(request, dashboard_id: int):
     # the original's view permission, same as reading it directly would be.
     require_view_access(orguser, "dashboard", original_dashboard)
 
-    # Create a copy of the dashboard
+    # Create a copy of the dashboard. The copy is a NEW resource: it adopts
+    # the org's default General access, NOT the original's (copying the
+    # source's audience could silently widen access).
+    general_audience, general_level = get_org_general_defaults(orguser.org_id)
+
     with transaction.atomic():
         new_dashboard = Dashboard.objects.create(
             title=f"Copy of {original_dashboard.title}",
@@ -202,6 +208,8 @@ def duplicate_dashboard(request, dashboard_id: int):
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
+            general_audience=general_audience,
+            general_level=general_level,
         )
 
         # Copy all filters and create ID mapping
@@ -474,6 +482,11 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     is_public = payload.is_public
 
     if is_public:
+        # Org-level kill switch: newly publishing or re-enabling is blocked
+        # while off. Turning a link OFF (the `else` branch) always stays
+        # allowed -- people must be able to clean up regardless.
+        require_public_sharing_enabled(orguser.org)
+
         # Generate token if making public
         if not dashboard.public_share_token:
             import secrets

@@ -47,4 +47,7 @@ class OrgPreferences(models.Model):
             "llm_optin_date": self.llm_optin_date.isoformat() if self.llm_optin_date else None,
             "enable_discord_notifications": bool(self.enable_discord_notifications),
             "discord_webhook": self.discord_webhook,
+            "allow_public_sharing": bool(self.allow_public_sharing),
+            "default_general_audience": self.default_general_audience,
+            "default_general_level": self.default_general_level,
         }

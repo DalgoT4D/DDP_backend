@@ -11,6 +11,8 @@ from django.utils import timezone
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
 from ddpui.core.sharing.access_resolver import accessible_filter
+from ddpui.core.sharing.public_sharing_gate import org_allows_public_sharing
+from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI
@@ -580,6 +582,8 @@ class ReportService:
             else:
                 frozen_chart_configs[k] = FrozenChartConfig(**v).model_dump()
 
+        general_audience, general_level = get_org_general_defaults(orguser.org_id)
+
         snapshot = ReportSnapshot.objects.create(
             title=title,
             date_column=date_column,
@@ -589,6 +593,8 @@ class ReportService:
             frozen_chart_configs=frozen_chart_configs,
             created_by=orguser,
             org=orguser.org,
+            general_audience=general_audience,
+            general_level=general_level,
         )
 
         logger.info(f"Created snapshot {snapshot.id} from dashboard {dashboard_id}")
@@ -923,6 +929,15 @@ class ReportService:
             raise SnapshotPermissionError("Only report creators can modify sharing settings")
 
         if is_public:
+            # Org-level kill switch: newly publishing or re-enabling is
+            # blocked while off. Turning a link OFF (the `else` branch)
+            # always stays allowed -- people must be able to clean up.
+            if not org_allows_public_sharing(org.id):
+                raise SnapshotPermissionError(
+                    "Public sharing is disabled for this organization. "
+                    "Ask an org admin to re-enable it."
+                )
+
             if not snapshot.public_share_token:
                 snapshot.public_share_token = secrets.token_urlsafe(48)
             snapshot.public_shared_at = timezone.now()

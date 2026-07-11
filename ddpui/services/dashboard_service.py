@@ -19,6 +19,7 @@ from sqlalchemy.dialects import postgresql
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin, is_owner
 from ddpui.core.sharing.access_resolver import accessible_filter
+from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
@@ -344,6 +345,8 @@ class DashboardService:
             components={},
         ).model_dump()
 
+        general_audience, general_level = get_org_general_defaults(orguser.org_id)
+
         dashboard = Dashboard.objects.create(
             title=data.title,
             description=data.description,
@@ -352,6 +355,8 @@ class DashboardService:
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
+            general_audience=general_audience,
+            general_level=general_level,
         )
 
         logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")

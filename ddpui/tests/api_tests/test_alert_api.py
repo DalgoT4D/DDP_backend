@@ -170,6 +170,44 @@ def test_create_metric_threshold_alert(seed_db, orguser, sample_metric):
     assert response.recipients[0].orguser_id == orguser.id
 
 
+def test_create_alert_uses_org_general_defaults(seed_db, orguser, sample_metric):
+    """Task 11 Part C: a new alert adopts the org's default General access
+    when set, else the model defaults (all_users/view)."""
+    from ddpui.models.org_preferences import OrgPreferences
+    from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+    OrgPreferences.objects.create(
+        org=orguser.org,
+        default_general_audience=GeneralAudience.ADMINS,
+        default_general_level=GeneralLevel.VIEW,
+    )
+    request = mock_request(orguser)
+    payload = _base_payload(orguser, metric_id=sample_metric.id)
+
+    response = create_alert(request, payload)
+
+    alert = Alert.objects.get(id=response.id)
+    assert alert.general_audience == GeneralAudience.ADMINS
+    assert alert.general_level == GeneralLevel.VIEW
+
+
+def test_create_alert_falls_back_to_model_defaults_when_no_preferences_row(
+    seed_db, orguser, sample_metric
+):
+    from ddpui.models.org_preferences import OrgPreferences
+    from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+    assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+    request = mock_request(orguser)
+    payload = _base_payload(orguser, metric_id=sample_metric.id)
+
+    response = create_alert(request, payload)
+
+    alert = Alert.objects.get(id=response.id)
+    assert alert.general_audience == GeneralAudience.ALL_USERS
+    assert alert.general_level == GeneralLevel.VIEW
+
+
 def test_create_kpi_rag_alert(seed_db, orguser, sample_kpi):
     request = mock_request(orguser)
     payload = _base_payload(

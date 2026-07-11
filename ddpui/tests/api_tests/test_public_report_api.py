@@ -28,6 +28,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.api.public_api import (
@@ -283,6 +284,58 @@ class TestGetPublicReport:
 
         public_snapshot.refresh_from_db()
         assert public_snapshot.public_access_count == initial_count + 2
+
+
+# ================================================================================
+# Test get_public_report -- Task 11 org-level public-sharing kill switch
+# ================================================================================
+
+
+class TestGetPublicReportKillSwitch:
+    """`OrgPreferences.allow_public_sharing` gates public report rendering:
+    off treats the link as dead (404); flipping back on revives it
+    immediately (no data touched). No OrgPreferences row -> default True."""
+
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_renders_when_no_preferences_row(self, mock_inject, public_snapshot, seed_db):
+        assert not OrgPreferences.objects.filter(org=public_snapshot.org).exists()
+        request = _make_public_request()
+        response = get_public_report(request, public_snapshot.public_share_token)
+        assert response["is_valid"] is True
+
+    def test_dead_when_switch_off(self, public_snapshot, seed_db):
+        OrgPreferences.objects.create(org=public_snapshot.org, allow_public_sharing=False)
+        request = _make_public_request()
+        status, response = get_public_report(request, public_snapshot.public_share_token)
+        assert status == 404
+        assert response.is_valid is False
+
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_revives_when_switch_flipped_back_on(self, mock_inject, public_snapshot, seed_db):
+        prefs = OrgPreferences.objects.create(org=public_snapshot.org, allow_public_sharing=False)
+        request = _make_public_request()
+        status, _ = get_public_report(request, public_snapshot.public_share_token)
+        assert status == 404
+
+        prefs.allow_public_sharing = True
+        prefs.save()
+
+        response = get_public_report(request, public_snapshot.public_share_token)
+        assert response["is_valid"] is True
+
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_render_secret_bypass_ignores_kill_switch(self, mock_inject, public_snapshot, seed_db):
+        """The X-Render-Secret path (internal Playwright PDF export) is not
+        public viewing -- it must keep working even with the switch off."""
+        OrgPreferences.objects.create(org=public_snapshot.org, allow_public_sharing=False)
+
+        request = _make_public_request()
+        request.META["HTTP_X_RENDER_SECRET"] = "test-render-secret"
+
+        with patch("ddpui.api.public_api.settings.RENDER_SECRET", "test-render-secret"):
+            response = get_public_report(request, public_snapshot.public_share_token)
+
+        assert response["is_valid"] is True
 
 
 # ================================================================================
@@ -700,3 +753,22 @@ class TestGetPublicFilterPreview:
 
             assert status == 404
             assert response.is_valid is False
+
+    def test_report_token_dead_when_switch_off(self, public_snapshot, seed_db):
+        """The report-token branch has its own inline ReportSnapshot lookup
+        (not routed through `_get_public_report_snapshot`) -- pin it
+        separately against the org-level kill switch."""
+        OrgPreferences.objects.create(org=public_snapshot.org, allow_public_sharing=False)
+
+        request = _make_public_request()
+        status, response = get_public_report_filter_preview(
+            request,
+            token=public_snapshot.public_share_token,
+            schema_name="public",
+            table_name="orders",
+            column_name="status",
+            filter_type="value",
+        )
+
+        assert status == 404
+        assert response.is_valid is False

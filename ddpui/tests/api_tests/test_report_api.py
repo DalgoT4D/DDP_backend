@@ -30,6 +30,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.api.report_api import (
     list_snapshots,
@@ -443,6 +444,59 @@ class TestCreateSnapshot:
 # ================================================================================
 
 
+class TestCreateSnapshotOrgGeneralDefaults:
+    """Task 11 Part C: a new snapshot adopts the org's default General
+    access when set, else the model defaults (all_users/view)."""
+
+    def test_uses_org_defaults_when_set(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        OrgPreferences.objects.create(
+            org=orguser.org,
+            default_general_audience=GeneralAudience.ADMINS,
+            default_general_level=GeneralLevel.VIEW,
+        )
+        request = mock_request(orguser)
+        payload = SnapshotCreate(
+            title="Org Default Snapshot",
+            dashboard_id=sample_dashboard.id,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+        )
+        response = create_snapshot(request, payload)
+        snapshot = ReportSnapshot.objects.get(id=response["data"]["id"])
+        assert snapshot.general_audience == GeneralAudience.ADMINS
+        assert snapshot.general_level == GeneralLevel.VIEW
+        snapshot.delete()
+
+    def test_falls_back_to_model_defaults_when_no_preferences_row(
+        self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
+    ):
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+        request = mock_request(orguser)
+        payload = SnapshotCreate(
+            title="No Prefs Snapshot",
+            dashboard_id=sample_dashboard.id,
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+        )
+        response = create_snapshot(request, payload)
+        snapshot = ReportSnapshot.objects.get(id=response["data"]["id"])
+        assert snapshot.general_audience == GeneralAudience.ALL_USERS
+        assert snapshot.general_level == GeneralLevel.VIEW
+        snapshot.delete()
+
+
 class TestGetSnapshotView:
     """Tests for get_snapshot_view endpoint"""
 
@@ -626,6 +680,41 @@ class TestToggleReportSharing:
         with pytest.raises(HttpError) as exc_info:
             toggle_report_sharing(request, sample_snapshot.id, payload)
         assert exc_info.value.status_code == 403
+
+
+class TestToggleReportSharingKillSwitch:
+    """Org-level `allow_public_sharing` gates enable/re-enable; disabling a
+    link always stays allowed (Task 11 public-sharing kill switch)."""
+
+    def test_enable_allowed_when_no_preferences_row(self, orguser, sample_snapshot, seed_db):
+        assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+        request = mock_request(orguser)
+        response = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+        assert response["data"]["is_public"] is True
+
+    def test_enable_blocked_when_switch_off(self, orguser, sample_snapshot, seed_db):
+        OrgPreferences.objects.create(org=orguser.org, allow_public_sharing=False)
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+        assert exc_info.value.status_code == 403
+
+        sample_snapshot.refresh_from_db()
+        assert sample_snapshot.is_public is False
+
+    def test_enable_allowed_when_switch_on(self, orguser, sample_snapshot, seed_db):
+        OrgPreferences.objects.create(org=orguser.org, allow_public_sharing=True)
+        request = mock_request(orguser)
+        response = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+        assert response["data"]["is_public"] is True
+
+    def test_disable_allowed_even_when_switch_off(self, orguser, sample_snapshot, seed_db):
+        request = mock_request(orguser)
+        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+
+        OrgPreferences.objects.filter(org=orguser.org).update(allow_public_sharing=False)
+        response = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
+        assert response["data"]["is_public"] is False
 
 
 # ================================================================================

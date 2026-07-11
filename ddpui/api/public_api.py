@@ -16,6 +16,7 @@ from ninja.errors import HttpError
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.report import ReportSnapshot
+from ddpui.core.sharing.public_sharing_gate import org_allows_public_sharing
 from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
@@ -41,6 +42,21 @@ from sqlalchemy import func, column, distinct, cast, Float, Date
 logger = CustomLogger("ddpui")
 
 public_router = Router()
+
+
+def _require_dashboard_alive(dashboard: Dashboard) -> None:
+    """Raise ``Dashboard.DoesNotExist`` if the org's public-sharing kill
+    switch (``OrgPreferences.allow_public_sharing``) is off, treating the
+    token as dead without touching `is_public`/`public_share_token` -- so
+    flipping the switch back on revives the link with no extra code."""
+    if not org_allows_public_sharing(dashboard.org_id):
+        raise Dashboard.DoesNotExist()
+
+
+def _require_report_alive(snapshot: ReportSnapshot) -> None:
+    """Report-snapshot counterpart of ``_require_dashboard_alive``."""
+    if not org_allows_public_sharing(snapshot.org_id):
+        raise ReportSnapshot.DoesNotExist()
 
 
 # Enhanced public schemas that extend existing ones with public-specific fields
@@ -99,6 +115,7 @@ def get_public_dashboard(request, token: str):
         dashboard = Dashboard.objects.select_related("org", "created_by__user").get(
             public_share_token=token, is_public=True
         )
+        _require_dashboard_alive(dashboard)
 
         # Update access analytics
         Dashboard.objects.filter(id=dashboard.id).update(
@@ -165,6 +182,7 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Import required modules
         from ddpui.models.visualization import Chart
@@ -216,6 +234,7 @@ def get_public_chart_data(request, token: str, chart_id: int):
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Get dashboard filters from query params
         filters = {}
@@ -399,6 +418,7 @@ def get_public_filter_preview(
         # Verify token belongs to a public dashboard
         try:
             dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+            _require_dashboard_alive(dashboard)
             org = dashboard.org
         except Dashboard.DoesNotExist:
             logger.warning(
@@ -440,6 +460,7 @@ def get_public_report_filter_preview(
     try:
         try:
             snapshot = ReportSnapshot.objects.get(public_share_token=token, is_public=True)
+            _require_report_alive(snapshot)
         except ReportSnapshot.DoesNotExist:
             logger.warning(
                 f"Public report filter preview failed - no public report found for token: {token}"
@@ -470,7 +491,10 @@ def get_public_report_filter_preview(
 def validate_public_dashboard(request, token: str):
     """Lightweight validation - check if token is valid"""
     try:
-        dashboard = Dashboard.objects.only("title").get(public_share_token=token, is_public=True)
+        dashboard = Dashboard.objects.only("title", "org_id").get(
+            public_share_token=token, is_public=True
+        )
+        _require_dashboard_alive(dashboard)
         return PublicValidationResponse(is_valid=True, title=dashboard.title)
     except Dashboard.DoesNotExist:
         return 404, PublicValidationResponse(is_valid=False, title=None)
@@ -507,6 +531,7 @@ def get_public_chart_data_preview(
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
@@ -590,6 +615,7 @@ def get_public_geojson_data(request, token: str, geojson_id: int):
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Import required modules
         from ddpui.models.geojson import GeoJSON
@@ -648,6 +674,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
@@ -923,6 +950,7 @@ def download_public_chart_data_csv(
     try:
         # Verify dashboard is public and get organization
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Get the chart and verify it belongs to the dashboard's organization
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
@@ -999,6 +1027,7 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
     try:
         # Verify dashboard is public
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+        _require_dashboard_alive(dashboard)
 
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
@@ -1084,9 +1113,11 @@ def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
     """Helper to lookup a report snapshot by token.
 
     If the request carries a valid X-Render-Secret header (matching
-    settings.RENDER_SECRET), the is_public check is skipped. This
-    allows server-side Playwright PDF rendering without toggling
-    the snapshot's public state.
+    settings.RENDER_SECRET), the is_public check is skipped -- AND so is the
+    org-level public-sharing kill switch. This branch is internal
+    server-side Playwright PDF rendering (already view-access-checked at
+    the authenticated `/export/pdf/` endpoint), not public viewing, so the
+    kill switch must not break it.
 
     Raises ReportSnapshot.DoesNotExist if not found.
     """
@@ -1098,9 +1129,11 @@ def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
                 public_share_token=token,
             )
 
-    return ReportSnapshot.objects.select_related("org", "created_by__user").get(
+    snapshot = ReportSnapshot.objects.select_related("org", "created_by__user").get(
         public_share_token=token, is_public=True
     )
+    _require_report_alive(snapshot)
+    return snapshot
 
 
 @public_router.get(

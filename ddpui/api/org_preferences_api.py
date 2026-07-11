@@ -12,7 +12,10 @@ from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
+    UpdateSharingPreferencesSchema,
 )
+from ddpui.core.ownership import is_admin_or_super_admin
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
@@ -121,6 +124,49 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
         org_preferences.discord_webhook = None
         org_preferences.enable_discord_notifications = False
 
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.put("/sharing/")
+def update_sharing_preferences(request, payload: UpdateSharingPreferencesSchema):
+    """Update org-level Resource Sharing preferences (Task 11 Part B):
+    the public-sharing kill switch and the default General access newly
+    created resources adopt. Admin-gated -- unlike the general-purpose
+    `/` GET/POST above, sharing is an org-wide policy lever, so only an
+    org admin (or super-admin) may change it, mirroring the admin-only
+    gating already used for LLM/Discord settings in this router (there
+    via `@has_permission`; here via a direct role check since minting a
+    new RBAC permission slug would require a data migration seeding it
+    into existing databases, out of scope for this task).
+    """
+    orguser: OrgUser = request.orguser
+    if not is_admin_or_super_admin(orguser):
+        raise HttpError(403, "Only org admins can edit sharing settings")
+    org = orguser.org
+
+    if (
+        payload.default_general_audience is not None
+        and payload.default_general_audience not in GeneralAudience.values
+    ):
+        raise HttpError(400, f"invalid audience '{payload.default_general_audience}'")
+    if (
+        payload.default_general_level is not None
+        and payload.default_general_level not in GeneralLevel.values
+    ):
+        raise HttpError(400, f"invalid level '{payload.default_general_level}'")
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    if payload.allow_public_sharing is not None:
+        org_preferences.allow_public_sharing = payload.allow_public_sharing
+    if payload.default_general_audience is not None:
+        org_preferences.default_general_audience = payload.default_general_audience
+    if payload.default_general_level is not None:
+        org_preferences.default_general_level = payload.default_general_level
     org_preferences.save()
 
     return {"success": True, "res": org_preferences.to_json()}

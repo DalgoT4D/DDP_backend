@@ -644,6 +644,48 @@ class TestCreateDashboardDefaultTab:
         dashboard.delete()
 
 
+class TestCreateDashboardOrgGeneralDefaults:
+    """Task 11 Part C: a new dashboard adopts the org's default General
+    access (OrgPreferences.default_general_audience/level) when set, else
+    the model defaults (all_users/view)."""
+
+    def test_uses_org_defaults_when_set(self, orguser, seed_db):
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        OrgPreferences.objects.create(
+            org=orguser.org,
+            default_general_audience=GeneralAudience.ADMINS,
+            default_general_level=GeneralLevel.VIEW,
+        )
+
+        dashboard = DashboardService.create_dashboard(
+            DashboardCreate(title="Org Default Dashboard"),
+            orguser,
+        )
+
+        assert dashboard.general_audience == GeneralAudience.ADMINS
+        assert dashboard.general_level == GeneralLevel.VIEW
+
+        dashboard.delete()
+
+    def test_falls_back_to_model_defaults_when_no_preferences_row(self, orguser, seed_db):
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+
+        assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+
+        dashboard = DashboardService.create_dashboard(
+            DashboardCreate(title="No Prefs Dashboard"),
+            orguser,
+        )
+
+        assert dashboard.general_audience == GeneralAudience.ALL_USERS
+        assert dashboard.general_level == GeneralLevel.VIEW
+
+        dashboard.delete()
+
+
 # ================================================================================
 # Test update_dashboard tabs (NEW in feature/dashboard_tabs)
 # ================================================================================
