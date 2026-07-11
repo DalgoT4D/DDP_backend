@@ -66,6 +66,45 @@ def test_block_list_content_renders_only_text():
     ]
 
 
+def test_created_dashboards_replay_on_the_answer():
+    """Dashboards created in chat must reappear as chips on reload, exactly
+    like the live turn showed them (same chip shape, url_path picks the icon)."""
+    messages = [
+        HumanMessage("put it on a new dashboard"),
+        AIMessage("", tool_calls=[{"name": "create_dashboard", "args": {}, "id": "d1"}]),
+        ToolMessage(
+            content="Done — dashboard 'Field Ops' (id 7).",
+            name="create_dashboard",
+            tool_call_id="d1",
+            artifact={
+                "type": "dashboard",
+                "dashboard_id": 7,
+                "title": "Field Ops",
+                "url_path": "/dashboards/7",
+            },
+        ),
+        AIMessage("Created the Field Ops dashboard."),
+    ]
+    out = map_messages(messages)
+    assert out[1].charts == [{"chart_id": 7, "title": "Field Ops", "url_path": "/dashboards/7"}]
+
+
+def test_rejected_creations_do_not_replay_as_chips():
+    messages = [
+        HumanMessage("chart it"),
+        AIMessage("", tool_calls=[{"name": "create_chart", "args": {}, "id": "c1"}]),
+        ToolMessage(
+            content="Chart not created: no permission",
+            name="create_chart",
+            tool_call_id="c1",
+            artifact={"type": "chart", "status": "rejected", "error": "no permission"},
+        ),
+        AIMessage("I couldn't create the chart."),
+    ]
+    out = map_messages(messages)
+    assert out[1].charts == []
+
+
 def test_created_charts_replay_on_the_answer():
     messages = [
         HumanMessage("chart surveys by district"),

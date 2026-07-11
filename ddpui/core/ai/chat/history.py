@@ -2,19 +2,26 @@
 
 The checkpointer stores the raw LangChain message list (including tool calls
 and tool results). The UI wants bubbles: user question, assistant answer, with
-any executed SQL (and its result table) attached to the answer.
+any executed SQL (and its result table) and created charts/dashboards attached
+to the answer.
 """
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from ddpui.core.ai.agent.checkpointer import get_checkpointer
+from ddpui.core.ai.messages.artifacts import (
+    creation_chip,
+    is_creation_artifact,
+    tool_artifact,
+)
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.schemas.chat_with_data_schemas import MessageOut, SqlAttachment
 
 
 def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
     """Collapse the raw message list into user/assistant bubbles. execute_sql
-    results attach to the next assistant answer; other tool chatter is hidden."""
+    results and created charts/dashboards attach to the next assistant answer;
+    other tool chatter is hidden."""
     out: list[MessageOut] = []
     pending_sql: list[SqlAttachment] = []
     pending_charts: list[dict] = []
@@ -22,19 +29,15 @@ def map_messages(messages: list[BaseMessage]) -> list[MessageOut]:
     for message in messages:
         if isinstance(message, HumanMessage):
             out.append(MessageOut(role="user", content=extract_text(message.content)))
-        elif isinstance(message, ToolMessage) and message.name == "create_chart":
-            artifact = getattr(message, "artifact", None)
-            if isinstance(artifact, dict) and artifact.get("chart_id"):
-                pending_charts.append(
-                    {
-                        "chart_id": artifact["chart_id"],
-                        "title": artifact.get("title", ""),
-                        "url_path": artifact.get("url_path", ""),
-                    }
-                )
-        elif isinstance(message, ToolMessage) and message.name == "execute_sql":
-            artifact = getattr(message, "artifact", None)
-            if isinstance(artifact, dict) and artifact.get("sql"):
+        elif isinstance(message, ToolMessage):
+            artifact = tool_artifact(message)
+            if artifact is None:
+                continue
+            if is_creation_artifact(artifact):
+                chip = creation_chip(artifact)
+                if chip:
+                    pending_charts.append(chip)
+            elif artifact.get("sql"):
                 pending_sql.append(
                     SqlAttachment(
                         sql=artifact["sql"],

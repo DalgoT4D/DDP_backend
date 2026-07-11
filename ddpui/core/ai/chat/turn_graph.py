@@ -1,6 +1,6 @@
 """The TurnGraph — the turn pipeline as a hand-built LangGraph (approach 2).
 
-Stages that were Python control flow in runner.py become named nodes and
+Stages that were Python control flow in the runner become named nodes and
 edges, so they show up in traces, checkpoints, and get_graph() diagrams:
 
     START → route_node ──┬─ small talk        → casual_reply_node → END
@@ -11,22 +11,23 @@ edges, so they show up in traces, checkpoints, and get_graph() diagrams:
                                                                      ↓
                                                 validate_node → END
 
-The stage brains stay in calls/ — nodes are thin adapters. They are INJECTED
-(route_fn, casual_reply_fn) rather than imported so the runner can pass its
-own module globals, keeping them patchable per-turn and avoiding a circular
-import with runner.py.
+The stage brains stay in llm_calls/ — nodes are thin adapters. They are
+INJECTED (route_fn, casual_reply_fn) rather than imported so the runner can
+pass its own module globals, keeping them patchable per-turn and avoiding a
+circular import with turn_runner.py.
 """
 
 import dataclasses
 from typing import Annotated, Any, Optional, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 
 from ddpui.core.ai.agent.run_context import RunContext
+from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.content import extract_text
 
 # History lines shown to the router; each clipped so the prompt stays small
@@ -69,38 +70,6 @@ def turn_segment(messages: list[AnyMessage]) -> list[AnyMessage]:
         if isinstance(messages[i], HumanMessage):
             return messages[i + 1 :]
     return messages
-
-
-def extract_turn_results(messages: list[AnyMessage]) -> tuple[list[dict], Optional[dict], str]:
-    """(sql_queries, last successful result_table, final answer text) for one
-    turn's messages. Chart/dashboard artifacts carry a "type" key; any other
-    dict artifact is an execute_sql result — the runner uses the same rule."""
-    sql_queries: list[dict] = []
-    result_table: Optional[dict] = None
-    answer = ""
-    for message in messages:
-        if isinstance(message, ToolMessage):
-            artifact = getattr(message, "artifact", None)
-            if isinstance(artifact, dict) and artifact.get("type") not in ("chart", "dashboard"):
-                sql_queries.append(
-                    {
-                        "sql": artifact.get("sql"),
-                        "status": artifact.get("status"),
-                        "row_count": artifact.get("row_count"),
-                        "error": artifact.get("error"),
-                    }
-                )
-                if artifact.get("status") == "success":
-                    result_table = {
-                        "columns": artifact.get("columns", []),
-                        "rows": artifact.get("rows", []),
-                        "row_count": artifact.get("row_count", 0),
-                    }
-        elif isinstance(message, AIMessage) and not message.tool_calls:
-            text = extract_text(message.content)
-            if text:
-                answer = text
-    return sql_queries, result_table, answer
 
 
 def build_turn_graph(

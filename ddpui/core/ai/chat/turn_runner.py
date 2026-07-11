@@ -30,6 +30,13 @@ from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
 from ddpui.core.ai.llm_calls.turn_audit import validate_turn
 from ddpui.core.ai.chat.turn_graph import build_turn_graph
+from ddpui.core.ai.messages.artifacts import (
+    creation_chip,
+    is_creation_artifact,
+    sql_query_entry,
+    sql_result_table,
+    tool_artifact,
+)
 from ddpui.core.ai.messages.content import extract_text
 from ddpui.core.ai.tracing import start_turn_trace
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
@@ -107,7 +114,8 @@ async def run_turn(
     sql_queries: list[dict] = []
     tools_called: list[str] = []
     last_result_table: dict | None = None
-    created_charts: list[dict] = []
+    # created charts AND dashboards — "charts" is the wire-protocol key
+    created_artifacts: list[dict] = []
     status = "completed"
 
     def _message_complete() -> dict:
@@ -115,7 +123,7 @@ async def run_turn(
             "type": "message_complete",
             "message": final_message,
             "result_table": last_result_table,
-            "charts": created_charts,
+            "charts": created_artifacts,
             "usage": usage,
         }
 
@@ -154,45 +162,22 @@ async def run_turn(
                                     "sql": tool_call["args"].get("sql"),
                                 }
                         elif isinstance(message, ToolMessage):
-                            artifact = getattr(message, "artifact", None)
+                            artifact = tool_artifact(message)
                             tool_status = "success"
-                            if isinstance(artifact, dict) and artifact.get("type") in (
-                                "chart",
-                                "dashboard",
-                            ):
+                            if artifact is not None and is_creation_artifact(artifact):
                                 # created-artifact chip (saved chart or dashboard), or a rejection
-                                artifact_id = artifact.get("chart_id") or artifact.get(
-                                    "dashboard_id"
-                                )
-                                if artifact_id:
-                                    created_charts.append(
-                                        {
-                                            "chart_id": artifact_id,
-                                            "title": artifact.get("title", ""),
-                                            "url_path": artifact.get("url_path", ""),
-                                        }
-                                    )
+                                chip = creation_chip(artifact)
+                                if chip:
+                                    created_artifacts.append(chip)
                                 else:
                                     tool_status = "error"
-                            elif isinstance(artifact, dict):
+                            elif artifact is not None:
                                 # execute_sql artifact — query + result table
                                 tool_status = (
                                     "success" if artifact.get("status") == "success" else "error"
                                 )
-                                sql_queries.append(
-                                    {
-                                        "sql": artifact.get("sql"),
-                                        "status": artifact.get("status"),
-                                        "row_count": artifact.get("row_count"),
-                                        "error": artifact.get("error"),
-                                    }
-                                )
-                                if artifact.get("status") == "success":
-                                    last_result_table = {
-                                        "columns": artifact.get("columns", []),
-                                        "rows": artifact.get("rows", []),
-                                        "row_count": artifact.get("row_count", 0),
-                                    }
+                                sql_queries.append(sql_query_entry(artifact))
+                                last_result_table = sql_result_table(artifact) or last_result_table
                             yield {"type": "tool_end", "tool": message.name, "status": tool_status}
                         if isinstance(message, AIMessage) and message.content:
                             text = extract_text(message.content)
