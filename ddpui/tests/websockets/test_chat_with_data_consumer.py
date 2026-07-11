@@ -219,7 +219,13 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     async def fail_open_route(question, model=None, history=None):
         return FAIL_OPEN
 
+    async def no_validation(**kwargs):
+        return None
+
     monkeypatch.setattr(runner_module, "route_question", fail_open_route)
+    # real seams would hit the network on machines with ANTHROPIC/LANGFUSE keys set
+    monkeypatch.setattr(runner_module, "validate_turn", no_validation)
+    monkeypatch.setattr(runner_module, "start_turn_trace", lambda **kwargs: None)
 
     fake_redis = FakeRedis()
     monkeypatch.setattr(consumer_module, "build_agent", fake_build_agent)
@@ -248,7 +254,8 @@ def test_full_turn_streams_events_and_updates_title(orguser, scripted_turn):
         while True:
             event = await communicator.receive_json_from(timeout=10)
             events.append(event)
-            if event["type"] == "title_updated":
+            # error also ends the loop so a failed turn fails fast, not by timeout
+            if event["type"] in ("title_updated", "error"):
                 break
 
         types = [e["type"] for e in events]
