@@ -18,6 +18,7 @@ from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.org_user import OrgUser
+from ddpui.models.user_group import UserGroup
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertListItem,
@@ -49,7 +50,7 @@ alert_router = Router()
 
 
 def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
-    """Render stored JSON recipients with OrgUser names resolved."""
+    """Render stored JSON recipients with OrgUser/UserGroup names resolved."""
     out: list[RecipientOut] = []
     orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
     name_by_id: dict[int, str] = {}
@@ -58,6 +59,12 @@ def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
             full = (ou.user.first_name + " " + ou.user.last_name).strip()
             name_by_id[ou.id] = full or ou.user.email
 
+    group_ids = [r["group_id"] for r in recipients if r.get("type") == "group"]
+    group_name_by_id: dict[int, str] = {}
+    if group_ids:
+        for g in UserGroup.objects.filter(id__in=group_ids, org_id=org_id):
+            group_name_by_id[g.id] = g.name
+
     for r in recipients:
         if r.get("type") == "orguser":
             out.append(
@@ -65,6 +72,14 @@ def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
                     type="orguser",
                     orguser_id=r.get("orguser_id"),
                     orguser_name=name_by_id.get(r.get("orguser_id")),
+                )
+            )
+        elif r.get("type") == "group":
+            out.append(
+                RecipientOut(
+                    type="group",
+                    group_id=r.get("group_id"),
+                    group_name=group_name_by_id.get(r.get("group_id")),
                 )
             )
         else:

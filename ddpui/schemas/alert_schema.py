@@ -10,9 +10,13 @@ from ninja import Schema
 
 
 class RecipientIn(Schema):
-    type: Literal["orguser", "external"]
+    type: Literal["orguser", "external", "group"]
     orguser_id: Optional[int] = None
     email: Optional[str] = None
+    # UserGroup id — expanded to the group's active members' delivery targets
+    # at fire time (see ddpui.core.alerts.delivery._expand_recipients). Being
+    # a recipient here never grants resource access to the alert itself.
+    group_id: Optional[int] = None
 
 
 class RecipientOut(Schema):
@@ -20,6 +24,8 @@ class RecipientOut(Schema):
     orguser_id: Optional[int] = None
     orguser_name: Optional[str] = None
     email: Optional[str] = None
+    group_id: Optional[int] = None
+    group_name: Optional[str] = None
 
 
 # ── Standalone source ──────────────────────────────────────────────────────

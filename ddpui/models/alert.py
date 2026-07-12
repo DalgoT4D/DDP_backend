@@ -80,6 +80,12 @@ class Alert(models.Model):
     # Recipients — JSON list. Each entry:
     #   {"type": "orguser", "orguser_id": int}
     #   {"type": "external", "email": str}
+    #   {"type": "group", "group_id": int}   -- expanded to the group's ACTIVE
+    #       members' delivery targets at fire time (dedupe against any
+    #       directly-listed recipient); a deleted/empty group at fire time is
+    #       skipped gracefully. Being a recipient here is delivery-only — it
+    #       grants NO resource access to the alert (ResourceShare governs that
+    #       separately; see plan Sec 4 "Alerts").
     # Replaced wholesale on edit.
     recipients = models.JSONField(default=list)
 

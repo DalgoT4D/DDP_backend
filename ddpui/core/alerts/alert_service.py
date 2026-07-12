@@ -25,6 +25,7 @@ from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.user_group import UserGroup
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertTestRequest,
@@ -38,7 +39,7 @@ logger = CustomLogger("ddpui.alert_service")
 
 
 VALID_CHANNELS = {"email", "slack"}
-VALID_RECIPIENT_TYPES = {"orguser", "external"}
+VALID_RECIPIENT_TYPES = {"orguser", "external", "group"}
 
 
 # ── Validation helpers ─────────────────────────────────────────────────────
@@ -51,9 +52,12 @@ def _validate_recipients(recipients: list, org: Org) -> None:
         rtype = r.get("type") if isinstance(r, dict) else r.type
         orguser_id = r.get("orguser_id") if isinstance(r, dict) else r.orguser_id
         email = r.get("email") if isinstance(r, dict) else r.email
+        group_id = r.get("group_id") if isinstance(r, dict) else r.group_id
 
         if rtype not in VALID_RECIPIENT_TYPES:
-            raise AlertValidationError(f"Recipient[{idx}]: type must be 'orguser' or 'external'")
+            raise AlertValidationError(
+                f"Recipient[{idx}]: type must be 'orguser', 'external', or 'group'"
+            )
         if rtype == "orguser":
             if not orguser_id:
                 raise AlertValidationError(
@@ -63,6 +67,13 @@ def _validate_recipients(recipients: list, org: Org) -> None:
                 raise AlertValidationError(
                     f"Recipient[{idx}]: OrgUser {orguser_id} not in this org"
                 )
+        elif rtype == "group":
+            if not group_id:
+                raise AlertValidationError(
+                    f"Recipient[{idx}]: group_id is required for type='group'"
+                )
+            if not UserGroup.objects.filter(id=group_id, org=org).exists():
+                raise AlertValidationError(f"Recipient[{idx}]: group {group_id} not in this org")
         else:  # external
             if not email:
                 raise AlertValidationError(

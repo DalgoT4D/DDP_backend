@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Optional
 
+from django.conf import settings
+
 from ddpui.core.charts.number_formatting import format_number_v2
 from ddpui.models.alert import Alert, AlertType
 from ddpui.schemas.alert_schema import StandaloneConfig
@@ -53,6 +55,34 @@ def render(template: str, values: Mapping[str, Any]) -> str:
         return str(v)
 
     return _TOKEN_RE.sub(replace, template or "")
+
+
+def build_alert_url(alert_id: int) -> str:
+    """Deep link back to the alert in the frontend.
+
+    Appended to every fired notification (see `append_alert_link`) so a
+    recipient without resource access to the alert has somewhere to click
+    that lands them on the request-access flow — Resource Sharing plan Sec 4
+    "Alerts": "the notification carries trigger context."
+    """
+    frontend_url = (
+        getattr(settings, "FRONTEND_URL_V2", None)
+        or getattr(settings, "FRONTEND_URL", None)
+        or "http://localhost:3001"
+    )
+    return f"{frontend_url}/alerts?alertId={alert_id}"
+
+
+def append_alert_link(body: str, alert_id: int) -> str:
+    """Append a fixed footer line carrying the alert id + a deep link.
+
+    Always appended regardless of the author's message_template — the
+    triggering metric/kpi/value context already flows through the
+    template's tokens (and the alert name is in the subject); this
+    guarantees the alert's identity, and a way back to it, survive even for
+    templates that don't reference any tokens at all.
+    """
+    return f"{body}\n\nView this alert (#{alert_id}): {build_alert_url(alert_id)}"
 
 
 def resolve_tokens(

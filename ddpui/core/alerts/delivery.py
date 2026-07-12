@@ -24,6 +24,7 @@ import requests
 
 from ddpui.models.alert import Alert
 from ddpui.models.org_user import OrgUser
+from ddpui.models.user_group import UserGroup, UserGroupMember, UserGroupMemberStatus
 from ddpui.utils import awsses
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -107,18 +108,70 @@ def deliver_slack(*, webhook_url: str, body: str) -> dict:
         }
 
 
+def _expand_recipients(recipients: list, org_id: int) -> list[dict]:
+    """Expand ``{"type": "group"}`` recipient entries at fire time.
+
+    Each group entry is replaced by one ``{"type": "orguser", ...}`` entry
+    per ACTIVE member, deduped against any recipient (direct or from another
+    group) already resolved to that same OrgUser — someone listed directly
+    AND in a group gets exactly one delivery.
+
+    A deleted/empty group is skipped gracefully (logged, never raised) so
+    one bad group reference can't take down delivery to the rest of the
+    alert's recipients. Pending (email-only, not-yet-accepted) group members
+    have no OrgUser row and are never delivery targets.
+
+    Being a recipient here is delivery-only — it does not grant resource
+    access to the alert (that's `ResourceShare`'s job, enforced separately).
+    """
+    expanded: list[dict] = []
+    seen_orguser_ids: set[int] = set()
+
+    for r in recipients:
+        if r.get("type") == "orguser" and r.get("orguser_id") is not None:
+            seen_orguser_ids.add(r["orguser_id"])
+        if r.get("type") != "group":
+            expanded.append(r)
+
+    for r in recipients:
+        if r.get("type") != "group":
+            continue
+        group_id = r.get("group_id")
+        group = UserGroup.objects.filter(id=group_id, org_id=org_id).first()
+        if group is None:
+            logger.info(f"alert delivery: group {group_id} not found (deleted?) — skipping")
+            continue
+        member_orguser_ids = list(
+            UserGroupMember.objects.filter(
+                group=group, status=UserGroupMemberStatus.ACTIVE, orguser__isnull=False
+            ).values_list("orguser_id", flat=True)
+        )
+        if not member_orguser_ids:
+            logger.info(f"alert delivery: group {group_id} has no active members — skipping")
+            continue
+        for orguser_id in member_orguser_ids:
+            if orguser_id in seen_orguser_ids:
+                continue
+            seen_orguser_ids.add(orguser_id)
+            expanded.append({"type": "orguser", "orguser_id": orguser_id})
+
+    return expanded
+
+
 def deliver_all(alert: Alert, *, subject: str, body: str) -> list[dict]:
     """Run the full delivery loop for a fired alert.
 
     Looks at `alert.delivery_channels` and `alert.recipients` to decide what
-    to send. Returns the list of delivery dicts in the order they were
-    attempted (email recipients in stored order, then Slack if enabled).
+    to send. `{"type": "group"}` recipients are expanded to their active
+    members (deduped against direct recipients) before the email loop runs.
+    Returns the list of delivery dicts in the order they were attempted
+    (email recipients in stored/expanded order, then Slack if enabled).
     """
     deliveries: list[dict] = []
     channels = alert.delivery_channels or []
 
     if "email" in channels:
-        recipients = alert.recipients or []
+        recipients = _expand_recipients(alert.recipients or [], alert.org_id)
         orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
         orguser_email_by_id: dict[int, str] = {}
         if orguser_ids:

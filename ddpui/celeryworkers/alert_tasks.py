@@ -119,9 +119,15 @@ def _run_evaluation(alert: Alert, *, scheduled_for: datetime, evaluated_at: date
         eval_input = rag_status if alert.alert_type == AlertType.KPI_RAG else value
         fired = condition_helpers.evaluate(alert.alert_type, cond, eval_input)
 
-    # Render message (rendered on every evaluation — also useful for non-fire audit)
+    # Render message (rendered on every evaluation — also useful for non-fire audit).
+    # A fixed footer with the alert id + a deep link is always appended, so the
+    # notification (and the audit copy in AlertLog.message) carries enough
+    # trigger context for an under-privileged recipient's click-through to land
+    # on the request-access flow, regardless of what tokens the author's
+    # template happens to reference.
     tokens = rendering.tokens_for_alert(alert, current_value=value, rag_status=rag_status)
     body = rendering.render(alert.message_template, tokens)
+    body = rendering.append_alert_link(body, alert.id)
     subject = f"[Dalgo alert] {alert.name}"
 
     # Deliver if fired and not errored

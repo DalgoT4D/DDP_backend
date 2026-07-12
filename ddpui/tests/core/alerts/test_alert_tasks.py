@@ -20,15 +20,18 @@ from ddpui.api.alert_api import create_alert
 from ddpui.celeryworkers import alert_tasks
 from ddpui.models.alert import Alert, AlertLog
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.user_group import UserGroupMember, UserGroupMemberStatus
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     RecipientIn,
     ThresholdCondition,
 )
 from ddpui.tests.api_tests.test_alert_api import (  # reuse fixtures
+    analyst_orguser,
     authuser,
     org,
     orguser,
+    sample_group,
     sample_metric,
     sample_kpi,
     seed_db,
@@ -174,6 +177,193 @@ def test_evaluate_alert_records_warehouse_error_without_crashing(
     log = AlertLog.objects.filter(alert_id=created.id).first()
     assert log.fired is False
     assert "warehouse down" in log.alert_snapshot.get("error", "")
+
+
+# ── group recipient expansion at fire time ──────────────────────────────────
+#
+# These tests exercise the REAL delivery.deliver_all/_expand_recipients path
+# (only the SES send call is stubbed) so the expansion + dedupe logic itself
+# is pinned, not just the evaluator's plumbing around a stubbed delivery.
+
+
+def _stub_ses(monkeypatch):
+    """Stub only the outbound SES call — deliver_all's expansion/dedupe/loop
+    logic still runs for real."""
+    monkeypatch.setattr(
+        alert_tasks.delivery_helpers.awsses,
+        "send_text_message",
+        lambda to, subject, body: {"MessageId": "stub"},
+    )
+
+
+def _alert_with_recipients(orguser, metric_id, recipients):
+    return AlertCreate(
+        name=f"alert {timezone.now().timestamp()}",
+        alert_type="metric_threshold",
+        metric_id=metric_id,
+        condition=ThresholdCondition(operator="lt", value=100),
+        schedule_cron="* * * * *",
+        delivery_channels=["email"],
+        message_template="{{alert_name}} fired with {{current_value}}",
+        recipients=recipients,
+    )
+
+
+def test_fire_dedupes_direct_recipient_also_in_group(
+    monkeypatch, seed_db, orguser, analyst_orguser, sample_metric, sample_group
+):
+    """Group has 2 active members (orguser, analyst_orguser); orguser is ALSO
+    listed as a direct recipient. Expect exactly 2 unique deliveries, not 3."""
+    _stub_warehouse(orguser)
+    _patch_query(monkeypatch, value=42.0)
+    _stub_ses(monkeypatch)
+
+    UserGroupMember.objects.create(
+        group=sample_group, orguser=orguser, status=UserGroupMemberStatus.ACTIVE
+    )
+    UserGroupMember.objects.create(
+        group=sample_group, orguser=analyst_orguser, status=UserGroupMemberStatus.ACTIVE
+    )
+
+    payload = _alert_with_recipients(
+        orguser,
+        sample_metric.id,
+        [
+            RecipientIn(type="orguser", orguser_id=orguser.id),
+            RecipientIn(type="group", group_id=sample_group.id),
+        ],
+    )
+    created = create_alert(mock_request(orguser), payload)
+
+    alert_tasks.evaluate_alert(created.id)
+
+    log = AlertLog.objects.filter(alert_id=created.id).first()
+    assert log.fired is True
+    assert len(log.deliveries) == 2
+    targets = {d["target"] for d in log.deliveries}
+    assert targets == {orguser.user.email, analyst_orguser.user.email}
+    assert all(d["status"] == "sent" for d in log.deliveries)
+
+
+def test_fire_skips_pending_group_member(
+    monkeypatch, seed_db, orguser, sample_metric, sample_group
+):
+    """A pending (email-only, no OrgUser) group member is never a delivery
+    target — only the active OrgUser member resolves."""
+    _stub_warehouse(orguser)
+    _patch_query(monkeypatch, value=42.0)
+    _stub_ses(monkeypatch)
+
+    UserGroupMember.objects.create(
+        group=sample_group, orguser=orguser, status=UserGroupMemberStatus.ACTIVE
+    )
+    UserGroupMember.objects.create(
+        group=sample_group, pending_email="invited@example.com", status="pending"
+    )
+
+    payload = _alert_with_recipients(
+        orguser, sample_metric.id, [RecipientIn(type="group", group_id=sample_group.id)]
+    )
+    created = create_alert(mock_request(orguser), payload)
+
+    alert_tasks.evaluate_alert(created.id)
+
+    log = AlertLog.objects.filter(alert_id=created.id).first()
+    assert log.fired is True
+    assert len(log.deliveries) == 1
+    assert log.deliveries[0]["target"] == orguser.user.email
+
+
+def test_fire_skips_all_pending_group_with_no_active_members(
+    monkeypatch, seed_db, orguser, sample_metric, sample_group
+):
+    """A group whose only member(s) are pending (email-only, no OrgUser) has
+    zero active members at fire time — treated the same as an empty group:
+    skipped gracefully, contributing zero deliveries, while a direct
+    recipient still gets theirs."""
+    _stub_warehouse(orguser)
+    _patch_query(monkeypatch, value=42.0)
+    _stub_ses(monkeypatch)
+
+    UserGroupMember.objects.create(
+        group=sample_group, pending_email="invited@example.com", status="pending"
+    )
+
+    payload = _alert_with_recipients(
+        orguser,
+        sample_metric.id,
+        [
+            RecipientIn(type="external", email="ops@example.com"),
+            RecipientIn(type="group", group_id=sample_group.id),
+        ],
+    )
+    created = create_alert(mock_request(orguser), payload)
+
+    did_work = alert_tasks.evaluate_alert(created.id)
+    assert did_work is True
+
+    log = AlertLog.objects.filter(alert_id=created.id).first()
+    assert log.fired is True
+    assert len(log.deliveries) == 1
+    assert log.deliveries[0]["target"] == "ops@example.com"
+
+
+def test_fire_gracefully_skips_deleted_group(
+    monkeypatch, seed_db, orguser, sample_metric, sample_group
+):
+    """A group referenced by an alert can be deleted after the alert is
+    created (recipients are only validated at create/update time). At fire
+    time the now-dangling group_id must not crash the run — it's skipped,
+    and delivery still proceeds to direct recipients."""
+    _stub_warehouse(orguser)
+    _patch_query(monkeypatch, value=42.0)
+    _stub_ses(monkeypatch)
+
+    payload = _alert_with_recipients(
+        orguser,
+        sample_metric.id,
+        [
+            RecipientIn(type="external", email="ops@example.com"),
+            RecipientIn(type="group", group_id=sample_group.id),
+        ],
+    )
+    created = create_alert(mock_request(orguser), payload)
+    # Queryset delete (not the instance's .delete()) so `sample_group`'s pk
+    # attribute survives for the fixture's own teardown to no-op cleanly.
+    UserGroupMember.objects.filter(group=sample_group).delete()
+    type(sample_group).objects.filter(id=sample_group.id).delete()
+
+    did_work = alert_tasks.evaluate_alert(created.id)
+    assert did_work is True
+
+    log = AlertLog.objects.filter(alert_id=created.id).first()
+    assert log.fired is True
+    assert len(log.deliveries) == 1
+    assert log.deliveries[0]["target"] == "ops@example.com"
+    assert log.deliveries[0]["status"] == "sent"
+
+
+# ── trigger context in the notification ──────────────────────────────────────
+
+
+def test_fired_message_carries_alert_id_and_link(monkeypatch, seed_db, orguser, sample_metric):
+    """The rendered message (what's actually delivered, and what lands in the
+    audit log) always carries the alert id + a deep link back to it, on top
+    of whatever metric/value tokens the author's template references."""
+    _stub_warehouse(orguser)
+    _patch_query(monkeypatch, value=42.0)
+    _stub_ses(monkeypatch)
+
+    created = create_alert(mock_request(orguser), _base_alert(orguser, metric_id=sample_metric.id))
+    alert_tasks.evaluate_alert(created.id)
+
+    log = AlertLog.objects.filter(alert_id=created.id).first()
+    # Trigger context tokens (name via subject/snapshot, current value via template)
+    assert "42" in log.message
+    assert log.alert_snapshot["name"] == created.name
+    # Alert identity + click-through link for the request-access flow
+    assert f"#{created.id}" in log.message
+    assert f"alertId={created.id}" in log.message
 
 
 # ── dispatch_due_alerts ─────────────────────────────────────────────────────

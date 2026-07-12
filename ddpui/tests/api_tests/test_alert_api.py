@@ -23,11 +23,14 @@ from ddpui.api.alert_api import (
 from ddpui.api.alert_api import test_alert as run_dry_run
 from ddpui.api.alert_api import test_slack_webhook as run_slack_webhook_test
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.models.alert import Alert
+from ddpui.models.general_access import GeneralAudience
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
+from ddpui.models.user_group import UserGroup, UserGroupMember
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertTestRequest,
@@ -131,6 +134,13 @@ def sample_kpi(orguser, org, sample_metric):
         kpi.delete()
     except KPI.DoesNotExist:
         pass
+
+
+@pytest.fixture
+def sample_group(org, orguser):
+    group = UserGroup.objects.create(org=org, name="Alert API Group", created_by=orguser)
+    yield group
+    group.delete()
 
 
 def _base_payload(orguser, **overrides):
@@ -265,6 +275,117 @@ def test_create_alert_with_external_recipient(seed_db, orguser, sample_metric):
     external = [r for r in response.recipients if r.type == "external"]
     assert len(external) == 1
     assert external[0].email == "funder@example.org"
+
+
+def test_create_alert_with_group_recipient(seed_db, orguser, sample_metric, sample_group):
+    """A `{"type": "group"}` recipient is stored, and the response round-trips
+    the group's name for display."""
+    request = mock_request(orguser)
+    payload = _base_payload(
+        orguser,
+        metric_id=sample_metric.id,
+        recipients=[RecipientIn(type="group", group_id=sample_group.id)],
+    )
+
+    response = create_alert(request, payload)
+
+    assert len(response.recipients) == 1
+    assert response.recipients[0].type == "group"
+    assert response.recipients[0].group_id == sample_group.id
+    assert response.recipients[0].group_name == sample_group.name
+
+    alert = Alert.objects.get(id=response.id)
+    assert alert.recipients == [{"type": "group", "group_id": sample_group.id}]
+
+
+def test_create_alert_rejects_cross_org_group_recipient(seed_db, orguser, sample_metric):
+    """A group belonging to a different org must 400, not silently pass through."""
+    other_org = Org.objects.create(name="Other Alert Org", slug="other-alert-org")
+    other_group = UserGroup.objects.create(org=other_org, name="Other Org Group", created_by=None)
+    try:
+        request = mock_request(orguser)
+        payload = _base_payload(
+            orguser,
+            metric_id=sample_metric.id,
+            recipients=[RecipientIn(type="group", group_id=other_group.id)],
+        )
+        with pytest.raises(HttpError) as exc:
+            create_alert(request, payload)
+        assert exc.value.status_code == 400
+    finally:
+        other_group.delete()
+        other_org.delete()
+
+
+def test_create_alert_rejects_unknown_group_recipient(seed_db, orguser, sample_metric):
+    request = mock_request(orguser)
+    payload = _base_payload(
+        orguser,
+        metric_id=sample_metric.id,
+        recipients=[RecipientIn(type="group", group_id=999999)],
+    )
+    with pytest.raises(HttpError) as exc:
+        create_alert(request, payload)
+    assert exc.value.status_code == 400
+
+
+def test_update_alert_with_group_recipient(seed_db, orguser, sample_metric, sample_group):
+    """Recipients are replaced wholesale on update, same as the existing shapes."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    updated = update_alert(
+        request,
+        created.id,
+        AlertUpdate(recipients=[RecipientIn(type="group", group_id=sample_group.id)]),
+    )
+
+    assert len(updated.recipients) == 1
+    assert updated.recipients[0].type == "group"
+    assert updated.recipients[0].group_id == sample_group.id
+
+
+def test_update_alert_rejects_cross_org_group_recipient(seed_db, orguser, sample_metric):
+    other_org = Org.objects.create(name="Other Alert Org 2", slug="other-alert-org-2")
+    other_group = UserGroup.objects.create(org=other_org, name="Other Org Group 2", created_by=None)
+    try:
+        request = mock_request(orguser)
+        created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+        with pytest.raises(HttpError) as exc:
+            update_alert(
+                request,
+                created.id,
+                AlertUpdate(recipients=[RecipientIn(type="group", group_id=other_group.id)]),
+            )
+        assert exc.value.status_code == 400
+    finally:
+        other_group.delete()
+        other_org.delete()
+
+
+def test_group_recipient_grants_no_resource_access(
+    seed_db, orguser, analyst_orguser, sample_metric, sample_group
+):
+    """ResourceShare governs alert *config* access; being a recipient (direct
+    or via a group) is delivery-only. An org member who is ONLY a group
+    recipient — no owner/admin/general-access/grant path — must still
+    resolve to no access on the alert."""
+    request = mock_request(orguser)
+    created = create_alert(
+        request,
+        _base_payload(
+            orguser,
+            metric_id=sample_metric.id,
+            recipients=[RecipientIn(type="group", group_id=sample_group.id)],
+        ),
+    )
+    # Isolate the recipients-grant-nothing rule from general access: force
+    # private so only owner/admin/grant paths could possibly admit anyone.
+    Alert.objects.filter(id=created.id).update(general_audience=GeneralAudience.PRIVATE)
+    UserGroupMember.objects.create(group=sample_group, orguser=analyst_orguser, status="active")
+
+    alert = Alert.objects.get(id=created.id)
+    assert effective_permission(analyst_orguser, "alert", alert) is None
 
 
 def test_create_alert_with_slack_requires_webhook_url(seed_db, orguser, sample_metric):
