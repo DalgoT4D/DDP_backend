@@ -8,14 +8,26 @@ Milestone 1 acceptance (features/admin-portal/v1/plan.md §6, §7):
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from django.core.management import call_command
 from django.contrib.auth.models import User
 from ninja.errors import HttpError
 
-from ddpui.api.admin_api import get_admin_ping, get_admin_stats
+from ddpui.api.admin_api import (
+    get_admin_ping,
+    get_admin_stats,
+    get_admin_orgs,
+    post_admin_org,
+    get_admin_org,
+    put_admin_org,
+    post_admin_org_deactivate,
+    post_admin_org_reactivate,
+    AdminCreateOrgSchema,
+    AdminUpdateOrgSchema,
+)
 from ddpui.api.user_org_api import get_current_user_v2
 from ddpui.models.org import Org
+from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -155,3 +167,113 @@ def test_admin_stats_returns_counts_for_platform_admin(orguser):
     response = get_admin_stats(request)
     assert response.total_orgs == 2
     assert response.total_users == 1  # one distinct user across both orgs
+
+
+# ---- org lifecycle: list / create / detail / edit / deactivate / reactivate ----
+
+
+@pytest.fixture
+def platform_admin_request(orguser):
+    """a mock request from a platform admin"""
+    UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
+    return mock_request(orguser)
+
+
+def test_admin_orgs_forbidden_for_non_platform_admin(orguser):
+    """the org list route is gated too — non-admin gets 403"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_orgs(request)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_list_orgs(platform_admin_request):
+    """lists every org (active + inactive) with user counts"""
+    Org.objects.create(name="Alpha Org", slug="alpha-org")
+    Org.objects.create(name="Beta Org", slug="beta-org", is_active=False)
+    response = get_admin_orgs(platform_admin_request)
+    by_name = {o.name: o for o in response}
+    assert "Alpha Org" in by_name
+    assert by_name["Alpha Org"].is_active is True
+    assert by_name["Beta Org"].is_active is False
+
+
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_happy_path(mock_setup_airbyte, mock_connectors, platform_admin_request):
+    """create org: Org + OrgPlans created; Airbyte workspace provisioned once"""
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+    payload = AdminCreateOrgSchema(name="Bhumi")
+
+    response = post_admin_org(platform_admin_request, payload)
+
+    assert response.name == "Bhumi"
+    assert response.slug == "bhumi"
+    assert response.is_active is True
+    org = Org.objects.filter(name="Bhumi").first()
+    assert org is not None
+    assert OrgPlans.objects.filter(org=org).count() == 1
+    mock_setup_airbyte.assert_called_once()
+
+
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_rolls_back_on_airbyte_failure(mock_setup_airbyte, platform_admin_request):
+    """a failed Airbyte call leaves ZERO trace — no orphaned Org or OrgPlans row"""
+    mock_setup_airbyte.side_effect = Exception("airbyte is down")
+    payload = AdminCreateOrgSchema(name="Bhumi")
+
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_org(platform_admin_request, payload)
+
+    assert excinfo.value.status_code == 400
+    assert Org.objects.filter(name="Bhumi").count() == 0
+    assert OrgPlans.objects.filter(org__name="Bhumi").count() == 0
+
+
+def test_admin_org_detail_404(platform_admin_request):
+    """detail of a missing org is 404"""
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_org(platform_admin_request, 999999)
+    assert excinfo.value.status_code == 404
+
+
+def test_admin_edit_org_locks_slug(platform_admin_request):
+    """edit updates name + viz_url but never the slug (locked post-create)"""
+    org = Org.objects.create(name="Old Name", slug="old-name", is_active=True)
+    payload = AdminUpdateOrgSchema(name="New Name", viz_url="https://viz.example.com")
+
+    response = put_admin_org(platform_admin_request, org.id, payload)
+
+    org.refresh_from_db()
+    assert org.name == "New Name"
+    assert org.viz_url == "https://viz.example.com/"  # HttpUrl str normalizes trailing slash
+    assert org.slug == "old-name"  # LOCKED — unchanged
+    assert response.slug == "old-name"
+    assert response.viz_url == "https://viz.example.com/"
+
+
+def test_admin_edit_org_updates_base_plan(platform_admin_request):
+    """edit can change the plan (lives on OrgPlans)"""
+    org = Org.objects.create(name="Plan Org", slug="plan-org")
+    OrgPlans.objects.create(org=org, base_plan="Free Trial")
+    payload = AdminUpdateOrgSchema(base_plan="Dalgo")
+
+    response = put_admin_org(platform_admin_request, org.id, payload)
+
+    assert OrgPlans.objects.get(org=org).base_plan == "Dalgo"
+    assert response.base_plan == "Dalgo"
+
+
+def test_admin_deactivate_and_reactivate_org(platform_admin_request):
+    """deactivate flips is_active False; reactivate flips it back True"""
+    org = Org.objects.create(name="Toggle Org", slug="toggle-org", is_active=True)
+
+    deactivated = post_admin_org_deactivate(platform_admin_request, org.id)
+    org.refresh_from_db()
+    assert org.is_active is False
+    assert deactivated.is_active is False
+
+    reactivated = post_admin_org_reactivate(platform_admin_request, org.id)
+    org.refresh_from_db()
+    assert org.is_active is True
+    assert reactivated.is_active is True
