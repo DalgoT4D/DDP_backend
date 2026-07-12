@@ -13,12 +13,23 @@ Gating (plan Sec 4.5 / Task 5 brief):
   — the dynamic mirror of ``@has_permission`` reading the rtype's
   ``share_permission_slug`` from the registry — PLUS resolver **edit** on
   the object.
+- Access requests (Milestone 9): creating a request has NO gate beyond
+  "authenticated org member" — a Member without access must be able to ask.
+  Approve/decline gate on ``require_owner_access`` ONLY (owner-or-admin) —
+  deliberately WITHOUT ``require_share_permission``, unlike every other
+  mutation here (including ownership transfer). Deciding a request is owner
+  business, not a sharing-permission-gated action: a Member who owns a
+  resource (e.g. via ownership transfer, Task 12) holds no ``can_share_*``
+  slug but must still be able to approve/decline requests on their own
+  resource — the task brief spells out the slug interaction for create
+  ("no share slug") and pointedly omits one for approve/decline, read here
+  as intentional.
 """
 
 from ninja import Router
 from ninja.errors import HttpError
 
-from ddpui.core.sharing import sharing_actions
+from ddpui.core.sharing import access_requests, sharing_actions
 from ddpui.core.sharing.exceptions import (
     GrantNotFoundError,
     PrincipalNotFoundError,
@@ -34,6 +45,10 @@ from ddpui.core.sharing.shareable_types import get_resource_type
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.access_schema import (
     AccessOverviewResponse,
+    AccessRequestCreate,
+    AccessRequestDecision,
+    AccessRequestListResponse,
+    AccessRequestOut,
     GeneralAccessUpdate,
     GeneralAccessUpdateResponse,
     GrantCreate,
@@ -157,3 +172,82 @@ def transfer_owner(request, rtype: str, resource_id: str, payload: OwnerTransfer
         raise HttpError(404, err.message) from err
 
     return api_response(success=True, data=new_owner, message="Ownership transferred")
+
+
+def _get_access_request_or_404(orguser: OrgUser, request_id: int):
+    """Fetch an ``AccessRequest`` scoped to the caller's org -- a cross-org
+    id is indistinguishable from a nonexistent one, same rule as
+    ``_get_resource_or_404``."""
+    access_request = access_requests.get_access_request_or_none(orguser.org_id, request_id)
+    if access_request is None:
+        raise HttpError(404, "Access request not found")
+    return access_request
+
+
+@access_router.post("/{rtype}/{resource_id}/requests/", response=ApiResponse[AccessRequestOut])
+def create_access_request(request, rtype: str, resource_id: str, payload: AccessRequestCreate):
+    """Ask for access to this resource. Gate: any authenticated org member
+    -- no share-permission slug (Members must be able to ask). 400s if the
+    caller already has effective access, or the rtype doesn't support
+    requests."""
+    orguser: OrgUser = request.orguser
+    resource = _get_resource_or_404(orguser, rtype, resource_id)
+
+    try:
+        access_request = access_requests.create_access_request(orguser, rtype, resource, payload)
+    except SharingValidationError as err:
+        raise HttpError(400, err.message) from err
+
+    return api_response(success=True, data=access_request, message="Access requested")
+
+
+@access_router.get("/requests/", response=ApiResponse[AccessRequestListResponse])
+def list_access_requests(request):
+    """The caller's access-request inbox: `incoming` (pending requests on
+    resources they can decide) + `outgoing` (their own requests, any
+    status). Gate: any authenticated org member."""
+    orguser: OrgUser = request.orguser
+    result = access_requests.list_access_requests(orguser)
+    return api_response(success=True, data=result)
+
+
+@access_router.post("/requests/{request_id}/approve/", response=ApiResponse[AccessRequestOut])
+def approve_access_request(request, request_id: int, payload: AccessRequestDecision):
+    """Approve a request: inserts a grant (works for every registered
+    rtype, including grants=False metric/kpi -- an internal write, same
+    pattern as ownership transfer). Gate: owner-or-admin on the requested
+    resource ONLY -- NOT mere editors, deciding access is owner business;
+    deliberately no share-permission slug (see module docstring)."""
+    orguser: OrgUser = request.orguser
+    access_request = _get_access_request_or_404(orguser, request_id)
+    resource = _get_resource_or_404(
+        orguser, access_request.resource_type, access_request.resource_id
+    )
+    require_owner_access(orguser, access_request.resource_type, resource)
+
+    try:
+        result = access_requests.approve_access_request(orguser, access_request, resource, payload)
+    except SharingValidationError as err:
+        raise HttpError(400, err.message) from err
+
+    return api_response(success=True, data=result, message="Access request approved")
+
+
+@access_router.post("/requests/{request_id}/decline/", response=ApiResponse[AccessRequestOut])
+def decline_access_request(request, request_id: int):
+    """Decline a request: no grant, notifies the requester. Gate:
+    owner-or-admin on the requested resource ONLY (no share-permission
+    slug -- see module docstring)."""
+    orguser: OrgUser = request.orguser
+    access_request = _get_access_request_or_404(orguser, request_id)
+    resource = _get_resource_or_404(
+        orguser, access_request.resource_type, access_request.resource_id
+    )
+    require_owner_access(orguser, access_request.resource_type, resource)
+
+    try:
+        result = access_requests.decline_access_request(orguser, access_request, resource)
+    except SharingValidationError as err:
+        raise HttpError(400, err.message) from err
+
+    return api_response(success=True, data=result, message="Access request declined")

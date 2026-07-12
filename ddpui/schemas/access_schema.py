@@ -5,9 +5,10 @@ renders its sections off `capabilities`, not entity-type conditionals) —
 keep it stable.
 """
 
+from datetime import datetime
 from typing import List, Optional
 
-from ninja import Schema
+from ninja import Field, Schema
 
 
 class CapabilityFlags(Schema):
@@ -122,3 +123,73 @@ class OwnerTransferRequest(Schema):
     reclaim/undo."""
 
     new_owner_orguser_id: int
+
+
+class RequesterOut(Schema):
+    """An OrgUser reference on an ``AccessRequest`` (the requester, or the
+    decider once decided)."""
+
+    orguser_id: int
+    email: str
+    name: str
+
+
+class AccessRequestOut(Schema):
+    """One ``AccessRequest`` row (Milestone 9 — request-access).
+
+    ``requested_permission`` is always the ORIGINAL ask; an owner's
+    downgrade-on-approve (Edit -> View) is reflected in the resulting
+    grant (see GET /api/access/{rtype}/{resource_id}/), not here.
+    """
+
+    id: int
+    resource_type: str
+    resource_id: str
+    requester: RequesterOut
+    requested_permission: str
+    note: Optional[str] = None
+    status: str
+    decided_by: Optional[RequesterOut] = None
+    expires_at: datetime
+    created_at: datetime
+
+
+class AccessRequestCreate(Schema):
+    """POST /api/access/{rtype}/{resource_id}/requests/ — ask for access.
+
+    Any authenticated org member may call this (no share-permission slug —
+    Members must be able to ask). 400s if the caller already has effective
+    access, or if the rtype doesn't support requests
+    (``capabilities.requests``). A duplicate pending request from the same
+    requester for the same resource refreshes the existing row instead of
+    stacking a second one.
+    """
+
+    requested_permission: str
+    note: Optional[str] = Field(None, max_length=500)
+
+
+class AccessRequestDecision(Schema):
+    """POST /api/access/requests/{request_id}/approve/ — decide a request.
+
+    ``permission`` is an optional owner override, capped at the originally
+    requested permission (an owner may downgrade Edit -> View, never
+    escalate beyond what was asked). Omitted = grant exactly what was
+    requested. Ignored by the decline endpoint (no body).
+    """
+
+    permission: Optional[str] = None
+
+
+class AccessRequestListResponse(Schema):
+    """GET /api/access/requests/ — the caller's access-request inbox.
+
+    ``incoming``: pending requests on resources the caller can decide (they
+    are the owner, owner-fallback `created_by`, or an admin/super-admin) —
+    an actionable inbox, so only ``status="pending"`` rows appear here.
+    ``outgoing``: the caller's own requests, any status, most recent first
+    — so they can see the outcome of a past ask.
+    """
+
+    incoming: List[AccessRequestOut]
+    outgoing: List[AccessRequestOut]

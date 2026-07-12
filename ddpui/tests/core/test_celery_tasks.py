@@ -30,6 +30,7 @@ from ddpui.celeryworkers.tasks import (
     cleanup_expired_invitations,
 )
 from ddpui.models.org_user import Invitation
+from ddpui.models.access_request import AccessRequest
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.user_group import UserGroup, UserGroupMember, UserGroupMemberStatus
 from ddpui.models.role_based_access import Role
@@ -890,3 +891,31 @@ def test_cleanup_expired_invitations(orguser, seed_db):
     assert Invitation.objects.filter(id=fresh_invite.id).exists()
     assert ResourceShare.objects.filter(id=fresh_share.id).exists()
     assert UserGroupMember.objects.filter(id=fresh_member.id).exists()
+
+
+def test_cleanup_expired_invitations_also_expires_stale_access_requests(orguser, seed_db):
+    """Task 15 / Milestone 9: the same daily beat tick that deletes expired
+    Invitations also sweeps stale pending AccessRequest rows to `expired` —
+    a stale one flips, a fresh one is untouched."""
+    stale_request = AccessRequest.objects.create(
+        org=orguser.org,
+        resource_type="dashboard",
+        resource_id="1",
+        requester=orguser,
+        requested_permission="view",
+        expires_at=django_timezone.now() - timedelta(days=1),
+    )
+    fresh_request = AccessRequest.objects.create(
+        org=orguser.org,
+        resource_type="dashboard",
+        resource_id="2",
+        requester=orguser,
+        requested_permission="view",
+    )
+
+    cleanup_expired_invitations()
+
+    stale_request.refresh_from_db()
+    fresh_request.refresh_from_db()
+    assert stale_request.status == AccessRequest.STATUS_EXPIRED
+    assert fresh_request.status == AccessRequest.STATUS_PENDING
