@@ -9,14 +9,17 @@ Rules of this module:
 - ``access_resolver`` stays read-only — this module is the ONLY place
   Resource Sharing writes happen.
 
-Public links and access requests are later tasks. Grants, general access,
-and ownership transfer mutate here.
+Grants, general access, ownership transfer, the bulk fan-out (Task 17 — a
+loop over the single-item functions, per the plan's "bulk is a loop" call),
+and the generic public toggle mutate here.
 """
 
-from typing import List, Optional
+import secrets
+from typing import List, Optional, Tuple
 
 from django.db import transaction
 from django.db.models import Count, Q
+from django.utils import timezone
 
 from ddpui.auth import MEMBER_ROLE
 from ddpui.core import orguserfunctions
@@ -26,6 +29,7 @@ from ddpui.core.sharing.exceptions import (
     PrincipalNotFoundError,
     SharingValidationError,
 )
+from ddpui.core.sharing.public_sharing_gate import org_allows_public_sharing
 from ddpui.core.sharing.shareable_types import ShareableType, get_resource_type
 from ddpui.models.general_access import GeneralAudience, GeneralLevel
 from ddpui.models.org_user import NewInvitationSchema, OrgUser
@@ -34,6 +38,11 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.user_group import UserGroup, UserGroupMemberStatus
 from ddpui.schemas.access_schema import (
     AccessOverviewResponse,
+    BulkAccessRequest,
+    BulkAccessResponse,
+    BulkConfirmationItem,
+    BulkItemRef,
+    BulkSkippedItem,
     CapabilityFlags,
     GeneralAccessOut,
     GeneralAccessUpdate,
@@ -51,6 +60,10 @@ AUDIENCE_ORDER = {
     GeneralAudience.ANALYSTS_PLUS: 2,
     GeneralAudience.ALL_USERS: 3,
 }
+
+# Hard cap on a bulk selection (Task 17) — a plain constant, enforced at
+# the API layer before any per-item work happens.
+BULK_MAX_ITEMS = 100
 
 
 def _entry_for(rtype: str) -> ShareableType:
@@ -166,23 +179,18 @@ def get_access_overview(viewer: OrgUser, rtype: str, resource) -> AccessOverview
     )
 
 
-def _invite_and_create_pending_grant(
-    grantor: OrgUser, rtype: str, resource, email: str, permission: str
-) -> GrantOut:
-    """The share-flow invite (Task 9 / Part B): `email` isn't an OrgUser of
-    this org yet. Invite them through the same `invite_user_v1` machinery
-    the standalone invite endpoint uses (so email sending etc. stays
-    consistent), always as a **Member** -- Part C's explicit "non-Admin
-    invites Member only" cap, applied uniformly here (this path never
-    exposes a role choice, so it never re-opens the `inviter.level >=
-    invitee.level` loophole `invite_user_v1` itself still has).
+def _invite_email_once(grantor: OrgUser, email: str) -> Optional[OrgUser]:
+    """Send ONE share-flow invite for `email` (Task 9 / Part B), always as a
+    **Member** -- Part C's explicit "non-Admin invites Member only" cap,
+    applied uniformly (this path never exposes a role choice, so it never
+    re-opens the `inviter.level >= invitee.level` loophole `invite_user_v1`
+    itself still has).
 
     `invite_user_v1` short-circuits to an *instant* OrgUser when `email`
     already has a platform account (even one outside this org) -- no
-    `Invitation` is created on that path, so a pending grant would never
-    activate. Match that case and grant instantly instead; otherwise the
-    grant is `status="pending"`, matched later by
-    `orguserfunctions.activate_pending_shares_and_memberships` on accept.
+    `Invitation` is created on that path. Returns that instant OrgUser when
+    it happens, else None (a real Invitation was created/refreshed and the
+    caller should write pending grant rows).
     """
     member_role = Role.objects.filter(slug=MEMBER_ROLE).first()
     if member_role is None:
@@ -194,11 +202,25 @@ def _invite_and_create_pending_grant(
     if error:
         raise SharingValidationError(error)
 
-    instant_principal = (
+    return (
         OrgUser.objects.filter(org_id=grantor.org_id, user__email__iexact=email)
         .select_related("user")
         .first()
     )
+
+
+def _email_grant_row(
+    grantor: OrgUser,
+    rtype: str,
+    resource,
+    email: str,
+    permission: str,
+    instant_principal: Optional[OrgUser],
+) -> GrantOut:
+    """One grant row for an invited email: active for an instant OrgUser
+    (platform account already existed), else `status="pending"`, matched
+    later by `orguserfunctions.activate_pending_shares_and_memberships` on
+    invitation accept."""
     if instant_principal is not None:
         share, _ = ResourceShare.objects.update_or_create(
             org_id=grantor.org_id,
@@ -225,6 +247,17 @@ def _invite_and_create_pending_grant(
         defaults={"permission": permission, "status": "pending", "created_by": grantor},
     )
     return _grant_out(share, {}, {})
+
+
+def _invite_and_create_pending_grant(
+    grantor: OrgUser, rtype: str, resource, email: str, permission: str
+) -> GrantOut:
+    """The single-resource share-flow invite: `email` isn't an OrgUser of
+    this org yet -- invite once, then write the (pending or instant) grant
+    row. Bulk (Task 17) uses the same two halves directly so a selection of
+    N resources still sends exactly ONE invitation."""
+    instant_principal = _invite_email_once(grantor, email)
+    return _email_grant_row(grantor, rtype, resource, email, permission, instant_principal)
 
 
 def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -> GrantOut:
@@ -444,4 +477,271 @@ def set_general_access(
 
     return GeneralAccessUpdateResponse(
         general_access=GeneralAccessOut(audience=payload.audience, level=payload.level)
+    )
+
+
+def set_public(
+    actor: OrgUser,  # pylint: disable=unused-argument -- kept as actor context / audit hook
+    rtype: str,
+    resource,
+    is_public: bool,
+) -> None:
+    """Set the resource's public-link state — generic over the public-link
+    contract every ``public_link=True`` rtype's model satisfies
+    (``is_public``, ``public_share_token``, ``public_shared_at``,
+    ``public_disabled_at`` — Dashboard and ReportSnapshot share these field
+    names), so no per-rtype branching. Mirrors the two existing single-item
+    toggles (`dashboard_native_api.toggle_dashboard_sharing`,
+    `ReportService.toggle_sharing`): enabling mints a token if missing and
+    is blocked while the org kill switch is off; disabling always works and
+    keeps the token for audit.
+    """
+    entry = _entry_for(rtype)
+    if not entry.public_link:
+        raise SharingValidationError(f"{rtype} does not support public links")
+
+    if is_public:
+        if not org_allows_public_sharing(resource.org_id):
+            raise SharingValidationError(
+                "Public sharing is disabled for this organization. "
+                "Ask an org admin to re-enable it."
+            )
+        if not resource.public_share_token:
+            resource.public_share_token = secrets.token_urlsafe(48)
+        resource.public_shared_at = timezone.now()
+        resource.public_disabled_at = None
+    else:
+        resource.public_disabled_at = timezone.now()
+
+    resource.is_public = is_public
+    resource.save(
+        update_fields=["is_public", "public_share_token", "public_shared_at", "public_disabled_at"]
+    )
+
+
+# ================================================================================
+# Bulk (Task 17): one action fanned out over a resolved selection.
+# Apply-where-possible: per-item failures become `skipped` rows with a
+# reason code; there is deliberately NO selection-wide transaction — one
+# item's failure never rolls back another's applied change.
+# ================================================================================
+
+ResolvedItems = List[Tuple[str, object]]  # [(rtype, resource), ...] already org+edit gated
+
+
+def _skip(skipped: List[BulkSkippedItem], rtype: str, resource, reason: str) -> None:
+    skipped.append(BulkSkippedItem(rtype=rtype, id=str(resource.pk), reason=reason))
+
+
+def _validate_bulk_grant_payload(payload: GrantCreate) -> None:
+    """The payload-shape half of `upsert_grant`'s validation, run ONCE for
+    the whole selection: a malformed action payload is a client bug and
+    fails the request (400), not N per-item skips. Resource-dependent
+    failures (re-share cap, capability flag, cross-org principal) stay
+    per-item."""
+    if payload.principal_type not in ("user", "group"):
+        raise SharingValidationError(f"invalid principal_type '{payload.principal_type}'")
+    if payload.permission not in GeneralLevel.values:
+        raise SharingValidationError(f"invalid permission '{payload.permission}'")
+    if payload.principal_type == "group":
+        if payload.email:
+            raise SharingValidationError("email is only valid for principal_type='user'")
+        if payload.principal_id is None:
+            raise SharingValidationError("principal_id is required for group grants")
+    else:
+        if payload.principal_id is not None and payload.email:
+            raise SharingValidationError("provide only one of principal_id or email")
+        if payload.principal_id is None and not payload.email:
+            raise SharingValidationError("principal_id or email is required")
+
+
+def _bulk_add_grant(
+    actor: OrgUser,
+    payload: GrantCreate,
+    resolved: ResolvedItems,
+    applied: List[BulkItemRef],
+    skipped: List[BulkSkippedItem],
+) -> None:
+    """`upsert_grant` per resource — except the unknown-email case, where
+    the invite half runs ONCE for the whole selection (one Invitation, one
+    email) and only the per-resource grant rows are fanned out."""
+    _validate_bulk_grant_payload(payload)
+
+    unknown_email = None
+    if payload.principal_type == "user" and payload.email and payload.principal_id is None:
+        email = payload.email.strip().lower()
+        in_org = OrgUser.objects.filter(org_id=actor.org_id, user__email__iexact=email).exists()
+        if not in_org:
+            unknown_email = email
+
+    if unknown_email is None:
+        for rtype, resource in resolved:
+            if not get_resource_type(rtype).grants:
+                _skip(skipped, rtype, resource, "grants_not_supported")
+                continue
+            try:
+                upsert_grant(actor, rtype, resource, payload)
+            except PrincipalNotFoundError:
+                _skip(skipped, rtype, resource, "principal_not_found")
+            except SharingValidationError:
+                _skip(skipped, rtype, resource, "validation_error")
+            else:
+                applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+        return
+
+    # Unknown email: decide eligibility per resource FIRST (an over-cap or
+    # capability-blocked selection must not send an email), then invite
+    # once, then write one grant row per eligible resource.
+    eligible: ResolvedItems = []
+    for rtype, resource in resolved:
+        if not get_resource_type(rtype).grants:
+            _skip(skipped, rtype, resource, "grants_not_supported")
+            continue
+        grantor_level = effective_permission(actor, rtype, resource)
+        if PERMISSION_RANK.get(payload.permission, 0) > PERMISSION_RANK.get(grantor_level or "", 0):
+            _skip(skipped, rtype, resource, "validation_error")
+            continue
+        eligible.append((rtype, resource))
+
+    if not eligible:
+        return
+
+    instant_principal = _invite_email_once(actor, unknown_email)
+    for rtype, resource in eligible:
+        _email_grant_row(
+            actor, rtype, resource, unknown_email, payload.permission, instant_principal
+        )
+        applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+
+
+def _partition_remove_grant_ids(
+    actor: OrgUser, remove_grant_ids: List[int], resolved: ResolvedItems
+) -> dict:
+    """Split the request's flat `remove_grant_ids` per (rtype, resource_id).
+    Every id must be a grant of one of the RESOLVED selection items in the
+    caller's org — an unknown id, a cross-org id, or an id belonging to a
+    resource outside the (gate-surviving) selection is a client bug and
+    fails the whole request, mirroring the single-item endpoint's 404."""
+    requested = set(remove_grant_ids)
+    resolved_keys = {(rtype, str(resource.pk)) for rtype, resource in resolved}
+    ids_by_resource: dict = {}
+    found = set()
+    for gid, g_rtype, g_rid in ResourceShare.objects.filter(
+        id__in=requested, org_id=actor.org_id
+    ).values_list("id", "resource_type", "resource_id"):
+        if (g_rtype, g_rid) not in resolved_keys:
+            raise GrantNotFoundError("one or more grant ids not found for the selected resources")
+        ids_by_resource.setdefault((g_rtype, g_rid), []).append(gid)
+        found.add(gid)
+    if found != requested:
+        raise GrantNotFoundError("one or more grant ids not found for the selected resources")
+    return ids_by_resource
+
+
+def _bulk_set_general(
+    actor: OrgUser,
+    payload: GeneralAccessUpdate,
+    resolved: ResolvedItems,
+    applied: List[BulkItemRef],
+    skipped: List[BulkSkippedItem],
+    confirmations: List[BulkConfirmationItem],
+) -> None:
+    """`set_general_access` per resource, with the AGGREGATED narrow prompt:
+    on the first call (no `remove_grant_ids`), resources that need
+    confirmation are collected into `confirmations` (nothing changed for
+    them) while every other resource applies immediately. The re-send
+    (field present, possibly []) commits per resource with that resource's
+    slice of the flat id list."""
+    if payload.audience not in GeneralAudience.values:
+        raise SharingValidationError(f"invalid audience '{payload.audience}'")
+    if payload.level not in GeneralLevel.values:
+        raise SharingValidationError(f"invalid level '{payload.level}'")
+
+    ids_by_resource = None
+    if payload.remove_grant_ids is not None:
+        ids_by_resource = _partition_remove_grant_ids(actor, payload.remove_grant_ids, resolved)
+
+    for rtype, resource in resolved:
+        if not get_resource_type(rtype).general:
+            _skip(skipped, rtype, resource, "general_access_not_supported")
+            continue
+        item_ids = None
+        if ids_by_resource is not None:
+            item_ids = ids_by_resource.get((rtype, str(resource.pk)), [])
+        item_payload = GeneralAccessUpdate(
+            audience=payload.audience, level=payload.level, remove_grant_ids=item_ids
+        )
+        try:
+            result = set_general_access(actor, rtype, resource, item_payload)
+        except SharingValidationError:
+            _skip(skipped, rtype, resource, "validation_error")
+            continue
+        if result.requires_confirmation:
+            confirmations.append(
+                BulkConfirmationItem(
+                    rtype=rtype,
+                    id=str(resource.pk),
+                    persisting_grants=result.persisting_grants,
+                )
+            )
+        else:
+            applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+
+
+def _bulk_toggle_public(
+    actor: OrgUser,
+    is_public: bool,
+    resolved: ResolvedItems,
+    applied: List[BulkItemRef],
+    skipped: List[BulkSkippedItem],
+) -> None:
+    """`set_public` per resource. The kill switch is read once for the
+    request: enabling while it's off skips every public-linkable item
+    (reason `public_sharing_disabled`); disabling is always allowed."""
+    enable_allowed = org_allows_public_sharing(actor.org_id) if is_public else True
+    for rtype, resource in resolved:
+        if not get_resource_type(rtype).public_link:
+            _skip(skipped, rtype, resource, "public_link_not_supported")
+            continue
+        if is_public and not enable_allowed:
+            _skip(skipped, rtype, resource, "public_sharing_disabled")
+            continue
+        try:
+            set_public(actor, rtype, resource, is_public)
+        except SharingValidationError:
+            _skip(skipped, rtype, resource, "validation_error")
+        else:
+            applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+
+
+def bulk_apply(
+    actor: OrgUser,
+    payload: BulkAccessRequest,
+    resolved: ResolvedItems,
+    skipped: List[BulkSkippedItem],
+) -> BulkAccessResponse:
+    """Fan `payload.action` out over `resolved` — the selection items that
+    survived the API layer's per-item gates (registry, share slug,
+    org-scoped fetch, resolver edit). `skipped` arrives holding the gate
+    skips and is extended with per-item action skips. NO selection-wide
+    transaction, by design: each single-item function manages its own
+    atomicity, and one item's failure never rolls back another."""
+    applied: List[BulkItemRef] = []
+    confirmations: List[BulkConfirmationItem] = []
+
+    if payload.action == "add_grant":
+        _bulk_add_grant(actor, payload.add_grant, resolved, applied, skipped)
+    elif payload.action == "set_general":
+        _bulk_set_general(actor, payload.set_general, resolved, applied, skipped, confirmations)
+    elif payload.action == "toggle_public":
+        _bulk_toggle_public(actor, payload.toggle_public.is_public, resolved, applied, skipped)
+    else:  # the API layer validates first; this is defense in depth
+        raise SharingValidationError(f"invalid action '{payload.action}'")
+
+    return BulkAccessResponse(
+        applied=applied,
+        skipped=skipped,
+        requires_confirmation=confirmations,
+        applied_count=len(applied),
+        skipped_count=len(skipped),
     )

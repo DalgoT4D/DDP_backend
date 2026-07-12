@@ -35,6 +35,7 @@ from ddpui.core.sharing.exceptions import (
     PrincipalNotFoundError,
     SharingValidationError,
 )
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.gates import (
     require_edit_access,
     require_owner_access,
@@ -49,6 +50,9 @@ from ddpui.schemas.access_schema import (
     AccessRequestDecision,
     AccessRequestListResponse,
     AccessRequestOut,
+    BulkAccessRequest,
+    BulkAccessResponse,
+    BulkSkippedItem,
     GeneralAccessUpdate,
     GeneralAccessUpdateResponse,
     GrantCreate,
@@ -172,6 +176,82 @@ def transfer_owner(request, rtype: str, resource_id: str, payload: OwnerTransfer
         raise HttpError(404, err.message) from err
 
     return api_response(success=True, data=new_owner, message="Ownership transferred")
+
+
+@access_router.post("/bulk/", response=ApiResponse[BulkAccessResponse])
+def bulk_access(request, payload: BulkAccessRequest):
+    """Apply ONE action (add_grant / set_general / toggle_public) across a
+    selection of resources, mixed rtypes allowed. Apply-where-possible:
+    every item is independently gated — registry rtype, the rtype's share
+    slug (a Member with no slugs gets every item skipped, not a 403),
+    org-scoped fetch (cross-org ids are `not_found`, indistinguishable from
+    nonexistent), resolver edit — and per-item failures become `skipped`
+    entries with a reason code. Only request-shape problems 4xx the whole
+    request: empty selection, selection over BULK_MAX_ITEMS, unknown
+    action, missing/malformed action payload, and (for set_general
+    re-sends) `remove_grant_ids` that don't belong to the selection."""
+    orguser: OrgUser = request.orguser
+
+    if not payload.items:
+        raise HttpError(400, "items must not be empty")
+    if len(payload.items) > sharing_actions.BULK_MAX_ITEMS:
+        raise HttpError(
+            400, f"a bulk selection is capped at {sharing_actions.BULK_MAX_ITEMS} items"
+        )
+    action_payloads = {
+        "add_grant": payload.add_grant,
+        "set_general": payload.set_general,
+        "toggle_public": payload.toggle_public,
+    }
+    if payload.action not in action_payloads:
+        raise HttpError(400, f"invalid action '{payload.action}'")
+    if action_payloads[payload.action] is None:
+        raise HttpError(400, f"the '{payload.action}' payload is required for this action")
+
+    permissions = set(request.permissions or [])
+    resolved = []
+    skipped: list[BulkSkippedItem] = []
+    seen = set()
+    for item in payload.items:
+        if (item.rtype, item.id) in seen:
+            continue
+        seen.add((item.rtype, item.id))
+        entry = get_resource_type(item.rtype)
+        if entry is None:
+            skipped.append(BulkSkippedItem(rtype=item.rtype, id=item.id, reason="not_found"))
+            continue
+        if entry.share_permission_slug not in permissions:
+            skipped.append(
+                BulkSkippedItem(rtype=item.rtype, id=item.id, reason="share_permission_denied")
+            )
+            continue
+        try:
+            resource = entry.model.objects.filter(pk=item.id, org=orguser.org).first()
+        except (ValueError, TypeError):
+            resource = None
+        if resource is None:
+            skipped.append(BulkSkippedItem(rtype=item.rtype, id=item.id, reason="not_found"))
+            continue
+        if effective_permission(orguser, item.rtype, resource) != "edit":
+            skipped.append(
+                BulkSkippedItem(rtype=item.rtype, id=item.id, reason="edit_access_denied")
+            )
+            continue
+        resolved.append((item.rtype, resource))
+
+    try:
+        result = sharing_actions.bulk_apply(orguser, payload, resolved, skipped)
+    except SharingValidationError as err:
+        raise HttpError(400, err.message) from err
+    except GrantNotFoundError as err:
+        raise HttpError(404, err.message) from err
+    except PrincipalNotFoundError as err:
+        raise HttpError(404, err.message) from err
+
+    message = f"Applied to {result.applied_count} of {len(seen)} resources"
+    if result.requires_confirmation:
+        message = "Confirmation required for some resources"
+    return api_response(success=True, data=result, message=message)
 
 
 def _get_access_request_or_404(orguser: OrgUser, request_id: int):

@@ -125,6 +125,95 @@ class OwnerTransferRequest(Schema):
     new_owner_orguser_id: int
 
 
+class BulkItemRef(Schema):
+    """One resource in a bulk selection: the rtype + stringified pk pair.
+    Also the shape of each entry in ``BulkAccessResponse.applied``."""
+
+    rtype: str
+    id: str
+
+
+class BulkPublicToggle(Schema):
+    """The ``toggle_public`` action payload: the desired public state."""
+
+    is_public: bool
+
+
+class BulkAccessRequest(Schema):
+    """POST /api/access/bulk/ — apply ONE action across a selection.
+
+    ``items`` may mix rtypes (1..BULK_MAX_ITEMS entries; duplicates are
+    deduplicated). ``action`` picks exactly one of the three payload
+    fields, which must be present:
+
+    - ``add_grant``: the same ``GrantCreate`` shape as the single-item
+      grants endpoint, applied per resource. An unknown ``email`` sends
+      ONE invitation and creates one pending grant per eligible resource.
+    - ``set_general``: the same ``GeneralAccessUpdate`` shape.
+      ``remove_grant_ids`` is a flat, global list (grant ids are unique
+      PKs, so they need no per-resource nesting); the server partitions
+      them per resource. Absent (None) = first call: resources narrowing
+      onto active grants come back in ``requires_confirmation`` (nothing
+      changed for them), everything else applies immediately. Present
+      (possibly []) = commit: narrowing applies and the listed grants are
+      deleted.
+    - ``toggle_public``: only rtypes with the ``public_link`` capability
+      (dashboard, report) can apply; enabling is blocked per-resource
+      while the org kill switch is off; disabling is always allowed.
+    """
+
+    items: List[BulkItemRef]
+    action: str  # add_grant | set_general | toggle_public
+    add_grant: Optional[GrantCreate] = None
+    set_general: Optional[GeneralAccessUpdate] = None
+    toggle_public: Optional[BulkPublicToggle] = None
+
+
+class BulkSkippedItem(Schema):
+    """One selection item the bulk action did not apply to, and why.
+
+    ``reason`` codes: ``not_found`` (unknown rtype, nonexistent or
+    cross-org id — indistinguishable by design), ``share_permission_denied``
+    (caller lacks the rtype's can_share_* slug), ``edit_access_denied``
+    (resolver says the caller can't edit this resource),
+    ``grants_not_supported`` / ``general_access_not_supported`` /
+    ``public_link_not_supported`` (registry capability flags),
+    ``public_sharing_disabled`` (org kill switch is off, enable refused),
+    ``principal_not_found`` / ``validation_error`` (per-item action
+    failures, e.g. granting above the caller's own level on that resource).
+    """
+
+    rtype: str
+    id: str
+    reason: str
+
+
+class BulkConfirmationItem(Schema):
+    """One resource whose ``set_general`` narrowing needs confirmation:
+    these active grants would keep people in. Re-send the SAME bulk request
+    with ``remove_grant_ids`` present (any subset of these ids, possibly
+    []) to commit."""
+
+    rtype: str
+    id: str
+    persisting_grants: List[GrantOut]
+
+
+class BulkAccessResponse(Schema):
+    """POST /api/access/bulk/ — the per-item outcome of a bulk action.
+
+    Every deduplicated selection item lands in exactly one of ``applied``,
+    ``skipped``, or ``requires_confirmation`` (each list individually
+    preserves selection order). Counts cover the first two only —
+    confirmation items are still undecided."""
+
+    applied: List[BulkItemRef]
+    skipped: List[BulkSkippedItem]
+    requires_confirmation: List[BulkConfirmationItem]
+    applied_count: int
+    skipped_count: int
+
+
 class RequesterOut(Schema):
     """An OrgUser reference on an ``AccessRequest`` (the requester, or the
     decider once decided)."""
