@@ -13,7 +13,7 @@ from django.core.management import call_command
 from django.contrib.auth.models import User
 from ninja.errors import HttpError
 
-from ddpui.api.admin_api import get_admin_ping
+from ddpui.api.admin_api import get_admin_ping, get_admin_stats
 from ddpui.api.user_org_api import get_current_user_v2
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, UserAttributes
@@ -123,3 +123,35 @@ def test_currentuserv2_reports_platform_admin_false(orguser):
     response = get_current_user_v2(request)
     assert len(response) == 1
     assert response[0].is_platform_admin is False
+
+
+# ---- /admin/stats: guarded + correct counts -----------------------------------
+
+
+def test_admin_stats_forbidden_for_non_platform_admin(orguser):
+    """a non-platform-admin is refused with 403 on /admin/stats"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_stats(request)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_stats_returns_counts_for_platform_admin(orguser):
+    """
+    /admin/stats returns real total_orgs and distinct-user total_users for an admin.
+
+    total_users counts distinct users across orgs: the same user belonging to two
+    orgs still counts once.
+    """
+    UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
+    # a second org that the same user also belongs to -> proves distinct-user count
+    org2 = Org.objects.create(name="admin-test-org-2", slug="admin-test-org-2")
+    OrgUser.objects.create(
+        user=orguser.user,
+        org=org2,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    request = mock_request(orguser)
+    response = get_admin_stats(request)
+    assert response.total_orgs == 2
+    assert response.total_users == 1  # one distinct user across both orgs
