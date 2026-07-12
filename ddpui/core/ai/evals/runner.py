@@ -84,16 +84,22 @@ class RunSummary:
 
 def judge_faithfulness(question: str, answer: str, result_table: dict | None) -> float | None:
     """autoevals ClosedQA judge (OpenAI family — deliberately not the agent's
-    family, plan §9 blind-spot risk). Fail-open: any error returns None."""
+    family, plan §9 blind-spot risk). Fail-open: any error returns None.
+
+    An explicit OpenAI client bypasses autoevals' default Braintrust gateway —
+    judge traffic goes straight to OpenAI with our own key, nowhere else."""
     if not answer or not result_table:
         return None
     try:
+        import openai
         from autoevals import ClosedQA
 
         rows = [result_table.get("columns", [])] + list(result_table.get("rows", []))
         table = "\n".join(" | ".join(str(c) for c in row) for row in rows)
-        result = ClosedQA(criteria=FAITHFULNESS_CRITERIA.format(table=table[:4000]))(
-            input=question, output=answer
+        result = ClosedQA(client=openai.OpenAI())(
+            input=question,
+            output=answer,
+            criteria=FAITHFULNESS_CRITERIA.format(table=table[:4000]),
         )
         return result.score
     except Exception:  # pylint: disable=broad-except
