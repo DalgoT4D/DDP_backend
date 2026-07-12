@@ -118,6 +118,22 @@ def gold_satisfied(gold_rows: list, agent_rows: list, answer: str) -> bool:
         projected = [tuple(row[i] for i in col_pick) for row in agent]
         if result_sets_match(gold, projected):
             return True
+
+    # Label-tolerant fallback: the agent invented its own category labels
+    # ("Oct-Dec 2025" for gold "Q3"). Numbers carry row identity — but only
+    # when every gold row's numeric part is distinct (else labels matter and
+    # we stay strict) — and every gold label must appear in the narrated
+    # answer. Pairing of label↔number is not re-verified here; the
+    # faithfulness/expectations judges cover a swapped narration.
+    numeric_gold = [tuple(c for c in row if isinstance(c, float)) for row in gold]
+    labels = [c for row in gold for c in row if isinstance(c, str)]
+    if (
+        labels
+        and all(numeric_gold)
+        and len(set(numeric_gold)) == len(numeric_gold)
+        and all(answer_contains_value(answer, _render(label)) for label in labels)
+    ):
+        return gold_satisfied(numeric_gold, agent_rows, answer)
     return False
 
 

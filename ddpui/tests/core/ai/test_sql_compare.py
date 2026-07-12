@@ -100,6 +100,20 @@ def test_label_formatting_tolerated_in_projection():
     assert gold_satisfied(gold, agent, "Q3 saw 155,718.6 vs Q4's 4,012.5.")
 
 
+def test_agent_invented_labels_pass_when_numbers_and_answer_carry_the_gold():
+    """Gold says Q3/Q4; agent labeled 'Oct-Dec 2025' — numbers identify the
+    rows, and the answer names Q3 and Q4. The real baseline-2 failure."""
+    from ddpui.core.ai.evals.sql_compare import gold_satisfied
+
+    gold = [{"period": "Q3", "total": 155718.60}, {"period": "Q4", "total": 4012.50}]
+    agent = [["Jan-Mar 2026", "4012.5"], ["Oct-Dec 2025", "155718.59999999998"]]
+    assert gold_satisfied(gold, agent, "Q3 saw **155,718.6** vs Q4's **4,012.5**.")
+    # wrong numbers still fail
+    assert not gold_satisfied(gold, agent, "Q1 and Q2 were similar.")  # labels absent
+    wrong = [["Jan-Mar 2026", "9999.9"], ["Oct-Dec 2025", "155718.6"]]
+    assert not gold_satisfied(gold, wrong, "Q3 saw 155,718.6 vs Q4's 9,999.9.")
+
+
 def test_answer_contains_value_ignores_thousands_separators_and_case():
     assert answer_contains_value("You received **₹1,49,09,222** in total.", "14909222")
     assert answer_contains_value("Most are in PUNE district.", "Pune")
