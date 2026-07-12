@@ -40,6 +40,11 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--org", required=True, help="org slug whose warehouse to eval against")
         parser.add_argument("--file", default=str(DEFAULT_DATASET_FILE), help="golden JSONL file")
+        parser.add_argument(
+            "--dataset-name",
+            default=DATASET_NAME,
+            help="Langfuse dataset to seed/link (one per golden file, e.g. golden-work-orders)",
+        )
         parser.add_argument("--seed", action="store_true", help="mirror items into Langfuse")
         parser.add_argument("--run-name", default=None, help="dataset run name")
         parser.add_argument(
@@ -64,7 +69,7 @@ class Command(BaseCommand):
         client = get_langfuse()
 
         if options["seed"]:
-            self._seed(client, items)
+            self._seed(client, items, options["dataset_name"])
             return
 
         orguser = OrgUser.objects.filter(org__slug=options["org"]).first()
@@ -81,7 +86,7 @@ class Command(BaseCommand):
         dataset = None
         if client is not None:
             try:
-                dataset = client.get_dataset(DATASET_NAME)
+                dataset = client.get_dataset(options["dataset_name"])
             except Exception:  # pylint: disable=broad-except
                 self.stdout.write("Langfuse dataset not found — run --seed first to link runs")
 
@@ -101,13 +106,13 @@ class Command(BaseCommand):
         else:
             self.stdout.write(self.style.SUCCESS("all hard metrics passed"))
 
-    def _seed(self, client, items):
+    def _seed(self, client, items, dataset_name):
         if client is None:
             raise CommandError("Langfuse is not configured (LANGFUSE_* keys) — cannot seed")
-        client.create_dataset(name=DATASET_NAME)
+        client.create_dataset(name=dataset_name)
         for item in items:
             client.create_dataset_item(
-                dataset_name=DATASET_NAME,
+                dataset_name=dataset_name,
                 # deterministic id → re-seeding upserts instead of duplicating
                 id=hashlib.sha256(item["question"].encode()).hexdigest()[:24],
                 input={"question": item["question"]},
@@ -115,7 +120,11 @@ class Command(BaseCommand):
                     "expected_intent": item.get("expected_intent"),
                     "gold_sql": item.get("gold_sql"),
                     "expected_value": item.get("expected_value"),
+                    "answer_expectations": item.get("answer_expectations"),
                 },
-                metadata={"tags": item.get("tags", [])},
+                metadata={
+                    "tags": item.get("tags", []),
+                    "expected_tables": item.get("expected_tables", []),
+                },
             )
-        self.stdout.write(self.style.SUCCESS(f"seeded {len(items)} items into '{DATASET_NAME}'"))
+        self.stdout.write(self.style.SUCCESS(f"seeded {len(items)} items into '{dataset_name}'"))
