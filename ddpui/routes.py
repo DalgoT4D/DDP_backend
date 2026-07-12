@@ -27,6 +27,7 @@ from ddpui.api.report_api import report_router
 from ddpui.api.metric_api import metric_router
 from ddpui.api.kpi_api import kpi_router
 from ddpui.api.alert_api import alert_router
+from ddpui.api.admin_api import admin_router
 
 src_api = NinjaAPI(
     urls_namespace="api",
@@ -115,6 +116,7 @@ src_api.add_router("/api/reports/", report_router)
 src_api.add_router("/api/metrics/", metric_router)
 src_api.add_router("/api/kpis/", kpi_router)
 src_api.add_router("/api/alerts/", alert_router)
+src_api.add_router("/api/v1/admin/", admin_router)
 
 # Public API without authentication
 public_api = NinjaAPI(

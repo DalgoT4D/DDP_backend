@@ -146,6 +146,7 @@ class OrgUserResponse(Schema):
     subscription_plan: str | None = None
     work_domain: str | None = None
     has_seen_rbac_notice: bool = False
+    is_platform_admin: bool = False
 
 
 class Invitation(models.Model):

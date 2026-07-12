@@ -91,6 +91,10 @@ def get_current_user_v2(request, org_slug: str = None):
     if org_preferences is None:
         org_preferences = OrgPreferences.objects.create(org=org)
 
+    # is_platform_admin is a global (per-User) flag, so it's the same for every OrgUser row
+    user_attributes = UserAttributes.objects.filter(user=user).first()
+    is_platform_admin = bool(user_attributes and user_attributes.is_platform_admin)
+
     # Get org default dashboard
     org_default_dashboard = None
     from ddpui.models.dashboard import Dashboard
@@ -143,6 +147,7 @@ def get_current_user_v2(request, org_slug: str = None):
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
                 work_domain=curr_orguser.work_domain,
                 has_seen_rbac_notice=curr_orguser.has_seen_rbac_notice,
+                is_platform_admin=is_platform_admin,
             )
         )
 
