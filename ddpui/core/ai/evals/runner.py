@@ -48,6 +48,7 @@ class ItemResult:
     sql_ok: bool | None = None
     faithful: float | None = None
     expectations: float | None = None
+    sql_judge: float | None = None
     answer: str = ""
     error: str | None = None
     # failure diagnostics — what ran vs what gold expected
@@ -72,6 +73,7 @@ class RunSummary:
 
     def render(self) -> str:
         lines = [f"run {self.run_name}: {self.passed}/{len(self.results)} hard-metric pass"]
+        lines.extend(self._judge_agreement_lines())
         for r in self.results:
             flags = []
             if r.error:
@@ -84,12 +86,30 @@ class RunSummary:
             judge = f"  faithful={r.faithful:.2f}" if r.faithful is not None else ""
             if r.expectations is not None:
                 judge += f"  expectations={r.expectations:.2f}"
+            if r.sql_judge is not None:
+                judge += f"  sql_judge={r.sql_judge:.2f}"
             lines.append(f"  [{status}]{judge} {r.question[:70]}")
             if r.sql_ok is False:
                 lines.append(f"      agent sql : {r.agent_sql[:160]}")
                 lines.append(f"      agent rows: {str(r.agent_rows)[:160]}")
                 lines.append(f"      gold rows : {str(r.gold_rows)[:160]}")
         return "\n".join(lines)
+
+    def _judge_agreement_lines(self) -> list[str]:
+        """Where the execution-based hard metric and the SQL judge disagree —
+        the calibration signal for how far to trust LLM judges."""
+        compared = [r for r in self.results if r.sql_ok is not None and r.sql_judge is not None]
+        if not compared:
+            return []
+        disagreements = [r for r in compared if r.sql_ok != (r.sql_judge >= 0.5)]
+        lines = [
+            f"  sql hard-metric vs judge agreement: "
+            f"{len(compared) - len(disagreements)}/{len(compared)}"
+        ]
+        for r in disagreements:
+            verdicts = f"hard={'pass' if r.sql_ok else 'fail'} judge={r.sql_judge:.2f}"
+            lines.append(f"    disagree ({verdicts}): {r.question[:60]}")
+        return lines
 
 
 def judge_faithfulness(question: str, answer: str, result_table: dict | None) -> float | None:
@@ -168,7 +188,26 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
             result.expectations = judge_expectations(
                 item["question"], answer, item["answer_expectations"]
             )
+        if item.get("gold_sql") and result.agent_sql:
+            result.sql_judge = judge_sql_equivalence(
+                item["question"], result.agent_sql, item["gold_sql"]
+            )
     return result
+
+
+def judge_sql_equivalence(question: str, agent_sql: str, gold_sql: str) -> float | None:
+    """autoevals Sql judge: are the agent's SQL and the gold SQL semantically
+    the same query? The LLM twin of eval_sql_correct — never gates; its value
+    is the AGREEMENT rate with the execution-based metric. Fail-open."""
+    try:
+        import openai
+        from autoevals import Sql
+
+        result = Sql(client=openai.OpenAI())(input=question, output=agent_sql, expected=gold_sql)
+        return result.score
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("eval sql judge failed (fail-open)")
+        return None
 
 
 def judge_expectations(question: str, answer: str, expectations: str) -> float | None:
@@ -243,6 +282,8 @@ def _record(client, dataset_items, item, result: ItemResult, run_name: str) -> N
             trace.score(name="eval_faithful", value=result.faithful)
         if result.expectations is not None:
             trace.score(name="eval_expectations", value=result.expectations)
+        if result.sql_judge is not None:
+            trace.score(name="eval_sql_judge", value=result.sql_judge)
         dataset_item = dataset_items.get(item["question"])
         if dataset_item is not None:
             dataset_item.link(trace, run_name)

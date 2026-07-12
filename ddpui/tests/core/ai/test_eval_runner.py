@@ -114,6 +114,23 @@ def test_small_talk_routes_and_passes(routed_as):
     assert result.hard_pass
 
 
+def test_summary_reports_hard_vs_judge_disagreement():
+    from ddpui.core.ai.evals.runner import ItemResult, RunSummary
+
+    summary = RunSummary(
+        run_name="r",
+        results=[
+            ItemResult(question="agree pass", sql_ok=True, sql_judge=1.0),
+            ItemResult(question="agree fail", sql_ok=False, sql_judge=0.0),
+            ItemResult(question="judge too lenient", sql_ok=False, sql_judge=1.0),
+            ItemResult(question="no judge ran", sql_ok=True, sql_judge=None),
+        ],
+    )
+    rendered = summary.render()
+    assert "sql hard-metric vs judge agreement: 2/3" in rendered
+    assert "disagree (hard=fail judge=1.00): judge too lenient" in rendered
+
+
 def test_run_items_pushes_scores_and_links(routed_as):
     class FakeDatasetItem:
         def __init__(self, question):
