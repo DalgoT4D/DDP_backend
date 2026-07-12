@@ -372,3 +372,82 @@ class TestQueryColumnOrdering:
 
         if key_index != -1 and count_index != -1:
             assert key_index < count_index, "Dimensions should appear before metrics in SELECT"
+
+
+class TestCalculatedMetricAllChartTypes:
+    """Calculated (column_expression) metrics must work on every aggregated chart type.
+
+    Regression: pie and number charts used a legacy single-metric path that ignored
+    `column_expression`, raising 'Column is required for None aggregation'. bar/line/table/map
+    already went through build_multi_metric_query which handles expressions.
+    """
+
+    @staticmethod
+    def _warehouse():
+        wh = MagicMock(spec=OrgWarehouse)
+        wh.wtype = "postgres"
+        return wh
+
+    def test_pie_chart_with_calculated_expression_metric(self):
+        payload = ChartDataPayload(
+            chart_type="pie",
+            schema_name="public",
+            table_name="district_population",
+            dimension_col="state_name",
+            metrics=[
+                ChartMetric(
+                    column=None,
+                    aggregation=None,
+                    column_expression="sum(district_population)",
+                    alias="sum(district_population)",
+                )
+            ],
+        )
+
+        query_builder = charts_service.build_chart_query(payload, self._warehouse())
+        compiled = str(
+            query_builder.build().compile(compile_kwargs={"literal_binds": True})
+        ).lower()
+
+        assert "sum(district_population)" in compiled
+        assert "state_name" in compiled
+
+    def test_number_chart_with_calculated_expression_metric(self):
+        payload = ChartDataPayload(
+            chart_type="number",
+            schema_name="public",
+            table_name="sales",
+            metrics=[
+                ChartMetric(
+                    column=None,
+                    aggregation=None,
+                    column_expression="sum(revenue) / sum(cost)",
+                    alias="margin",
+                )
+            ],
+        )
+
+        query_builder = charts_service.build_chart_query(payload, self._warehouse())
+        compiled = str(
+            query_builder.build().compile(compile_kwargs={"literal_binds": True})
+        ).lower()
+
+        assert "sum(revenue)" in compiled and "sum(cost)" in compiled
+
+    def test_pie_simple_count_still_works(self):
+        """Guard: the non-expression path is unchanged."""
+        payload = ChartDataPayload(
+            chart_type="pie",
+            schema_name="public",
+            table_name="district_population",
+            dimension_col="state_name",
+            metrics=[ChartMetric(column=None, aggregation="count", alias="Total Count")],
+        )
+
+        query_builder = charts_service.build_chart_query(payload, self._warehouse())
+        compiled = str(
+            query_builder.build().compile(compile_kwargs={"literal_binds": True})
+        ).lower()
+
+        assert "count" in compiled
+        assert "state_name" in compiled

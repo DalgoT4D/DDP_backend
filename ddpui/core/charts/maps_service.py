@@ -177,6 +177,11 @@ def transform_data_for_map(
 
     customizations = customizations or {}
 
+    # Metrics may arrive as ChartMetric objects (payload.metrics) or dicts (resolved saved metrics).
+    # Normalize to dicts so the .get()-based access below works for both.
+    if metrics:
+        metrics = [m if isinstance(m, dict) else m.dict() for m in metrics]
+
     # Handle multiple metrics system vs legacy single metric
     if metrics and len(metrics) > 0:
         # Use new multiple metrics system
@@ -185,10 +190,12 @@ def transform_data_for_map(
         )
 
         # Generate the column alias for the selected metric
-        if (
-            selected_metric.get("aggregation", "").lower() == "count"
-            and selected_metric.get("column") is None
-        ):
+        if selected_metric.get("column_expression"):
+            # Expression metric: alias matches the query's label (metric.alias or fallback).
+            agg_col_name = selected_metric.get("alias") or "expression_metric"
+        elif (selected_metric.get("aggregation") or "").lower() == "count" and selected_metric.get(
+            "column"
+        ) is None:
             if selected_metric.get("alias"):
                 agg_col_name = f"count_all_{selected_metric['alias']}"
             else:
@@ -250,7 +257,11 @@ def transform_data_for_map(
     available_metrics = []
     if metrics and len(metrics) > 0:
         for i, metric in enumerate(metrics):
-            if metric.get("aggregation", "").lower() == "count" and metric.get("column") is None:
+            if metric.get("column_expression"):
+                display_name = metric.get("alias") or "Expression"
+            elif (metric.get("aggregation") or "").lower() == "count" and metric.get(
+                "column"
+            ) is None:
                 display_name = metric.get("alias") or "Total Count"
             else:
                 display_name = metric.get("alias") or f"{metric['aggregation']}({metric['column']})"
