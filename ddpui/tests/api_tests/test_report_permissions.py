@@ -15,9 +15,9 @@ Actual permission matrix (from seed data):
 │ toggle_sharing (share)      │     ✓     │    ✓    │    ✓     │    ✓    │   ✗   │
 │ get_sharing_status (view)   │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
 │ list_comments (view)        │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
-│ create_comment (edit)       │     ✓     │    ✓    │    ✓     │    ✓    │   ✗   │
-│ update_comment (edit)       │     ✓     │    ✓    │    ✓     │    ✓    │   ✗   │
-│ delete_comment (edit)       │     ✓     │    ✓    │    ✓     │    ✓    │   ✗   │
+│ create_comment (view+rslvr) │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
+│ update_comment (view+authr) │     ✓     │    ✓    │    ✓     │    ✓    │   ✓*  │
+│ delete_comment (view+authr) │     ✓     │    ✓    │    ✓     │    ✓    │   ✓*  │
 │ get_comment_states (view)   │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
 │ mark_as_read (view)         │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
 │ get_mentionable_users (view)│     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
@@ -26,6 +26,13 @@ Actual permission matrix (from seed data):
 └─────────────────────────────┴───────────┴─────────┴──────────┴─────────┴───────┘
 
 Note: Only Guest lacks create/edit/delete/share permissions for dashboards.
+
+Task 14 (comments re-gate): create/update/delete comment endpoints moved
+from the `can_edit_dashboards` slug to `can_view_dashboards`. Create also
+requires resolver **view** on the report; update/delete stay author-only
+at the service layer unless the caller has resolver **edit** on the report
+(moderation). ✓* = own comments only — Guests (Members) can never touch
+someone else's comment (resolver caps Members at "view").
 """
 
 import os
@@ -399,19 +406,25 @@ class TestNonGuestReportAccess:
 
 
 class TestGuestCommentRestrictions:
-    """Test that Guest cannot create, update, or delete comments."""
+    """Task 14 re-gate: a Guest (Member) who can VIEW a report may comment
+    on it, but can never touch someone else's comment — the resolver caps
+    Members at "view", so the service's moderation check (resolver-edit)
+    always falls back to author-only for them."""
 
-    def test_guest_cannot_create_comment(self, guest_user, snapshot):
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_guest_can_create_comment_on_viewable_report(self, mock_mentions, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = CommentCreate(target_type="summary", content="Guest comment")
-        assert_permission_denied(create_comment, request, snapshot.id, payload)
+        response = create_comment(request, snapshot.id, payload)
+        assert response["success"] is True
+        Comment.objects.filter(id=response["data"]["id"]).delete()
 
-    def test_guest_cannot_update_comment(self, guest_user, snapshot, comment):
+    def test_guest_cannot_update_others_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
         payload = CommentUpdate(content="Guest edit")
         assert_permission_denied(update_comment, request, snapshot.id, comment.id, payload)
 
-    def test_guest_cannot_delete_comment(self, guest_user, snapshot, comment):
+    def test_guest_cannot_delete_others_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
         assert_permission_denied(delete_comment, request, snapshot.id, comment.id)
 

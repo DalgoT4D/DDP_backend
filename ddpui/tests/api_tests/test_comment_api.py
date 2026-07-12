@@ -26,12 +26,15 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
+from django.test import Client
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentTargetType, CommentReadStatus
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.resource_share import ResourceShare
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.report_api import (
     get_mentionable_users,
     get_comment_states,
@@ -94,10 +97,58 @@ def other_authuser():
 
 @pytest.fixture
 def other_orguser(other_authuser, org, seed_db):
+    """A same-org peer with NO special access to `snapshot` — Analyst role,
+    no grant, so the snapshot's default general access (all_users/view)
+    resolves them to "view" only. Used to pin that a non-privileged peer
+    cannot moderate someone else's comment."""
     orguser = OrgUser.objects.create(
         user=other_authuser,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+@pytest.fixture
+def member_authuser():
+    user = User.objects.create(
+        username="cmtmemberapiuser", email="cmtmemberapiuser@test.com", password="testpassword"
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def member_orguser(member_authuser, org, seed_db):
+    """A view-only Member — capped at "view" by the resolver regardless of
+    general access or grants."""
+    orguser = OrgUser.objects.create(
+        user=member_authuser,
+        org=org,
+        new_role=Role.objects.filter(slug=MEMBER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+@pytest.fixture
+def editor_authuser():
+    user = User.objects.create(
+        username="cmteditorapiuser", email="cmteditorapiuser@test.com", password="testpassword"
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def editor_orguser(editor_authuser, org, seed_db):
+    """An Analyst granted explicit resolver-edit access on `snapshot` — the
+    "report editor" who should be able to moderate others' comments."""
+    orguser = OrgUser.objects.create(
+        user=editor_authuser,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -114,6 +165,26 @@ def snapshot(org, orguser):
         frozen_chart_configs={"10": {"title": "Chart A"}, "20": {"title": "Chart B"}},
         created_by=orguser,
         org=org,
+    )
+    yield snapshot
+    snapshot.delete()
+
+
+@pytest.fixture
+def private_snapshot(org, orguser):
+    """A report with general access locked to `private` — nobody but the
+    owner/admin should be able to see (or comment on) it."""
+    snapshot = ReportSnapshot.objects.create(
+        title="Private Comment API Report",
+        date_column={},
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        frozen_dashboard={},
+        frozen_chart_configs={"10": {"title": "Chart A"}},
+        created_by=orguser,
+        org=org,
+        general_audience=GeneralAudience.PRIVATE,
+        general_level=GeneralLevel.VIEW,
     )
     yield snapshot
     snapshot.delete()
@@ -428,6 +499,24 @@ class TestCreateComment:
         assert other_orguser.user.email in comment.mentioned_emails
         comment.delete()
 
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_view_only_member_can_create(self, mock_mentions, member_orguser, snapshot):
+        """A view-only Member (via general access all_users/view) can comment."""
+        request = mock_request(member_orguser)
+        payload = CommentCreate(target_type="summary", content="Member comment")
+        response = create_comment(request, snapshot.id, payload)
+        assert response["success"] is True
+        assert response["data"]["author_email"] == member_orguser.user.email
+        Comment.objects.filter(id=response["data"]["id"]).delete()
+
+    def test_member_on_private_report_forbidden(self, member_orguser, private_snapshot):
+        """A Member has no access to a `private` report — create is denied."""
+        request = mock_request(member_orguser)
+        payload = CommentCreate(target_type="summary", content="Sneaking in")
+        with pytest.raises(HttpError) as exc:
+            create_comment(request, private_snapshot.id, payload)
+        assert exc.value.status_code == 403
+
 
 # ================================================================================
 # Test update_comment
@@ -455,6 +544,7 @@ class TestUpdateComment:
 
     @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
     def test_update_other_forbidden(self, mock_mentions, orguser, other_orguser, snapshot, org):
+        """other_orguser is a view-only Analyst peer with no grant — moderation denied."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -467,6 +557,103 @@ class TestUpdateComment:
         with pytest.raises(HttpError) as exc:
             update_comment(request, snapshot.id, comment.id, payload)
         assert exc.value.status_code == 403
+        comment.delete()
+
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_update_other_by_member_forbidden(
+        self, mock_mentions, orguser, member_orguser, snapshot, org
+    ):
+        """A view-only Member can never moderate someone else's comment,
+        even though the snapshot is shared all_users/view (Members are
+        capped at "view" by the resolver regardless of source)."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not yours",
+            author=orguser,
+            org=org,
+        )
+        request = mock_request(member_orguser)
+        payload = CommentUpdate(content="Trying to edit")
+        with pytest.raises(HttpError) as exc:
+            update_comment(request, snapshot.id, comment.id, payload)
+        assert exc.value.status_code == 403
+        comment.delete()
+
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_update_other_by_editor_allowed(
+        self, mock_mentions, orguser, editor_orguser, snapshot, org
+    ):
+        """A report editor (explicit resolver-edit grant) can moderate
+        someone else's comment."""
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="report",
+            resource_id=str(snapshot.pk),
+            principal_type="user",
+            principal_id=editor_orguser.id,
+            permission="edit",
+            status="active",
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not yours",
+            author=orguser,
+            org=org,
+        )
+        request = mock_request(editor_orguser)
+        payload = CommentUpdate(content="Moderated text")
+        response = update_comment(request, snapshot.id, comment.id, payload)
+        assert response["success"] is True
+        assert response["data"]["content"] == "Moderated text"
+        comment.delete()
+
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_update_other_by_admin_allowed(self, mock_mentions, other_orguser, snapshot, org):
+        """A non-owner org admin can moderate anyone's comment — the
+        resolver's org-wide admin override resolves them to edit."""
+        admin_user = User.objects.create(
+            username="cmtadminapiuser", email="cmtadminapiuser@test.com", password="testpassword"
+        )
+        admin_orguser = OrgUser.objects.create(
+            user=admin_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Someone else's",
+            author=other_orguser,
+            org=org,
+        )
+        request = mock_request(admin_orguser)
+        payload = CommentUpdate(content="Admin moderated")
+        response = update_comment(request, snapshot.id, comment.id, payload)
+        assert response["success"] is True
+        assert response["data"]["content"] == "Admin moderated"
+        comment.delete()
+        admin_orguser.delete()
+        admin_user.delete()
+
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_update_other_by_owner_allowed(
+        self, mock_mentions, orguser, other_orguser, snapshot, org
+    ):
+        """The report owner can moderate someone else's comment."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not the owner's",
+            author=other_orguser,
+            org=org,
+        )
+        request = mock_request(orguser)  # orguser is the snapshot owner
+        payload = CommentUpdate(content="Owner moderated")
+        response = update_comment(request, snapshot.id, comment.id, payload)
+        assert response["success"] is True
+        assert response["data"]["content"] == "Owner moderated"
         comment.delete()
 
     def test_comment_not_found(self, orguser, snapshot):
@@ -502,6 +689,7 @@ class TestDeleteComment:
         assert not Comment.objects.filter(id=comment_id).exists()
 
     def test_delete_other_forbidden(self, orguser, other_orguser, snapshot, org):
+        """other_orguser is a view-only Analyst peer with no grant — moderation denied."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -515,8 +703,106 @@ class TestDeleteComment:
         assert exc.value.status_code == 403
         comment.delete()
 
+    def test_delete_other_by_member_forbidden(self, orguser, member_orguser, snapshot, org):
+        """A view-only Member can never moderate (hide/delete) someone else's comment."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not yours to delete",
+            author=orguser,
+            org=org,
+        )
+        request = mock_request(member_orguser)
+        with pytest.raises(HttpError) as exc:
+            delete_comment(request, snapshot.id, comment.id)
+        assert exc.value.status_code == 403
+        comment.delete()
+
+    def test_delete_other_by_editor_allowed(self, orguser, editor_orguser, snapshot, org):
+        """A report editor (explicit resolver-edit grant) can moderate
+        (delete) someone else's comment."""
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="report",
+            resource_id=str(snapshot.pk),
+            principal_type="user",
+            principal_id=editor_orguser.id,
+            permission="edit",
+            status="active",
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not yours to delete",
+            author=orguser,
+            org=org,
+        )
+        comment_id = comment.id
+        request = mock_request(editor_orguser)
+        response = delete_comment(request, snapshot.id, comment_id)
+        assert response["success"] is True
+        # sole comment in thread, but authored by someone other than the
+        # moderator — soft-deleted, not hard-deleted.
+        comment.refresh_from_db()
+        assert comment.is_deleted is True
+
+    def test_delete_other_by_owner_allowed(self, orguser, other_orguser, snapshot, org):
+        """The report owner can moderate (delete) someone else's comment."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not the owner's",
+            author=other_orguser,
+            org=org,
+        )
+        comment_id = comment.id
+        request = mock_request(orguser)  # orguser is the snapshot owner
+        response = delete_comment(request, snapshot.id, comment_id)
+        assert response["success"] is True
+        comment.refresh_from_db()
+        assert comment.is_deleted is True
+
     def test_comment_not_found(self, orguser, snapshot):
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc:
             delete_comment(request, snapshot.id, 99999)
         assert exc.value.status_code == 404
+
+
+# ================================================================================
+# Test: anonymous/public viewers stay blocked (comments live behind the
+# authenticated router — Task 14)
+# ================================================================================
+
+
+class TestAnonymousCommentAccess:
+    """Comment endpoints live only on `report_router`, mounted under
+    `src_api` (global JWT auth). The no-auth `public_api` (which serves
+    public report rendering via share tokens) never registers a comment
+    route — so an anonymous request has no way to create, read, or
+    moderate a comment."""
+
+    def test_anonymous_cannot_create_comment(self, snapshot):
+        client = Client()
+        response = client.post(
+            f"/api/reports/{snapshot.id}/comments/",
+            data={"target_type": "summary", "content": "anon comment"},
+            content_type="application/json",
+        )
+        assert response.status_code == 401
+
+    def test_anonymous_cannot_list_comments(self, snapshot):
+        client = Client()
+        response = client.get(f"/api/reports/{snapshot.id}/comments/?target_type=summary")
+        assert response.status_code == 401
+
+    def test_public_router_exposes_no_comment_route(self):
+        """The public (no-auth) report-rendering router must never gain a
+        comment mutation route — public/anonymous viewers of a shared
+        report link must not be able to comment."""
+        from ddpui.api.public_api import public_router
+
+        comment_paths = [
+            path for path in public_router.path_operations if "comment" in path.lower()
+        ]
+        assert comment_paths == []

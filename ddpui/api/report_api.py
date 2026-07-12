@@ -447,10 +447,20 @@ def list_comments(
 
 
 @report_router.post("/{snapshot_id}/comments/", response=ApiResponse[CommentResponse])
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
 def create_comment(request, snapshot_id: int, payload: CommentCreate):
-    """Create a comment on a report snapshot"""
+    """Create a comment on a report snapshot.
+
+    Gated on **view** access (not edit): any user who can see the report —
+    including a view-only Member via general access — can comment on it.
+    """
     orguser: OrgUser = request.orguser
+
+    try:
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
+    except SnapshotNotFoundError as err:
+        raise HttpError(400, str(err)) from err
+    require_view_access(orguser, "report", snapshot)
 
     try:
         comment = CommentService.create_comment(
@@ -475,9 +485,13 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
 
 
 @report_router.put("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse[CommentResponse])
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
 def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentUpdate):
-    """Update a comment (author-only)"""
+    """Update a comment.
+
+    Author-only, unless the caller has resolver edit access to the report
+    (moderation) — enforced in ``CommentService.update_comment``.
+    """
     orguser: OrgUser = request.orguser
 
     try:
@@ -500,9 +514,13 @@ def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentU
 
 
 @report_router.delete("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
 def delete_comment(request, snapshot_id: int, comment_id: int):
-    """Delete a comment (author-only)"""
+    """Delete a comment.
+
+    Author-only, unless the caller has resolver edit access to the report
+    (moderation) — enforced in ``CommentService.delete_comment``.
+    """
     orguser: OrgUser = request.orguser
 
     try:

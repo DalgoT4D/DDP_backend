@@ -6,6 +6,7 @@ from django.db import connection
 from django.db.models import Q
 from django.utils import timezone
 
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.models.comment import Comment, CommentReadStatus, CommentTargetType
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org import Org
@@ -138,13 +139,14 @@ class CommentService:
         content: str,
         mentioned_emails: Optional[List[str]] = None,
     ) -> Comment:
-        """Update a comment. Author-only."""
+        """Update a comment. Author-only, unless the caller has resolver
+        **edit** access to the comment's report (moderation)."""
         comment = CommentService._get_comment(comment_id, org)
 
         if comment.is_deleted:
             raise CommentValidationError("Cannot edit a deleted comment")
 
-        if comment.author != orguser:
+        if not CommentService._can_moderate(comment, orguser):
             raise CommentPermissionError("You can only edit your own comments")
 
         comment.content = content
@@ -162,14 +164,15 @@ class CommentService:
         org: Org,
         orguser: OrgUser,
     ) -> None:
-        """Delete a comment. Author-only.
+        """Delete a comment. Author-only, unless the caller has resolver
+        **edit** access to the comment's report (moderation).
 
         Hard-deletes if no other user has commented in the thread (same
         snapshot + target_type + target_id). Soft-deletes otherwise.
         """
         comment = CommentService._get_comment(comment_id, org)
 
-        if comment.author != orguser:
+        if not CommentService._can_moderate(comment, orguser):
             raise CommentPermissionError("You can only delete your own comments")
 
         thread_query = Q(
@@ -286,3 +289,14 @@ class CommentService:
             return Comment.objects.get(id=comment_id, org=org)
         except Comment.DoesNotExist:
             raise CommentNotFoundError(comment_id)
+
+    @staticmethod
+    def _can_moderate(comment: Comment, orguser: OrgUser) -> bool:
+        """Author of the comment, or anyone with resolver **edit** access
+        to the comment's report (owner, admin, or an explicit/general-access
+        editor), may update/delete it. Members are capped at "view" by the
+        resolver, so a view-only Member can never moderate someone else's
+        comment (see ``access_resolver.effective_permission``)."""
+        if comment.author == orguser:
+            return True
+        return effective_permission(orguser, "report", comment.snapshot) == "edit"

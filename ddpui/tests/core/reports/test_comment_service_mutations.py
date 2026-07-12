@@ -18,7 +18,8 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentTargetType
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.models.resource_share import ResourceShare
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.core.reports.comment_service import CommentService
 from ddpui.core.reports.exceptions import (
     CommentNotFoundError,
@@ -83,10 +84,64 @@ def other_user():
 
 @pytest.fixture
 def other_orguser(other_user, org, seed_db):
+    """A same-org peer with NO special access to `snapshot` — Analyst role,
+    no grant, so the snapshot's default general access (all_users/view)
+    resolves them to "view" only. Used to pin that a non-privileged peer
+    cannot moderate someone else's comment."""
     orguser = OrgUser.objects.create(
         user=other_user,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+@pytest.fixture
+def member_user():
+    user = User.objects.create(
+        username="mut_member",
+        email="mut_member@test.com",
+        first_name="Member",
+        last_name="User",
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def member_orguser(member_user, org, seed_db):
+    """A view-only Member — capped at "view" by the resolver regardless of
+    general access or grants."""
+    orguser = OrgUser.objects.create(
+        user=member_user,
+        org=org,
+        new_role=Role.objects.filter(slug=MEMBER_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+@pytest.fixture
+def editor_user():
+    user = User.objects.create(
+        username="mut_editor",
+        email="mut_editor@test.com",
+        first_name="Editor",
+        last_name="User",
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def editor_orguser(editor_user, org, seed_db):
+    """An Analyst granted explicit resolver-edit access on `snapshot` — the
+    "report editor" who should be able to moderate others' comments."""
+    orguser = OrgUser.objects.create(
+        user=editor_user,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -157,6 +212,8 @@ class TestUpdateComment:
         comment.delete()
 
     def test_non_author_raises(self, snapshot, author_orguser, other_orguser, org):
+        """A view-only peer (no resolver-edit on the report) cannot edit
+        someone else's comment."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -171,6 +228,56 @@ class TestUpdateComment:
                 orguser=other_orguser,
                 content="Trying to edit",
             )
+        comment.delete()
+
+    def test_member_cannot_moderate(self, snapshot, author_orguser, member_orguser, org):
+        """A view-only Member can never edit someone else's comment — the
+        resolver caps Members at "view" regardless of general access."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not yours",
+            author=author_orguser,
+            org=org,
+        )
+        with pytest.raises(CommentPermissionError, match="only edit your own"):
+            CommentService.update_comment(
+                comment_id=comment.id,
+                org=org,
+                orguser=member_orguser,
+                content="Member trying to edit",
+            )
+        comment.delete()
+
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_editor_can_moderate(
+        self, mock_mentions, snapshot, author_orguser, editor_orguser, org
+    ):
+        """A report editor (explicit resolver-edit grant) can edit someone
+        else's comment (moderation)."""
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="report",
+            resource_id=str(snapshot.pk),
+            principal_type="user",
+            principal_id=editor_orguser.id,
+            permission="edit",
+            status="active",
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Original",
+            author=author_orguser,
+            org=org,
+        )
+        updated = CommentService.update_comment(
+            comment_id=comment.id,
+            org=org,
+            orguser=editor_orguser,
+            content="Moderated",
+        )
+        assert updated.content == "Moderated"
         comment.delete()
 
     def test_deleted_comment_raises(self, snapshot, author_orguser, org):
@@ -282,6 +389,8 @@ class TestDeleteComment:
         assert my_comment.mentioned_emails == []
 
     def test_non_author_raises(self, snapshot, author_orguser, other_orguser, org):
+        """A view-only peer (no resolver-edit on the report) cannot delete
+        someone else's comment."""
         comment = Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
             snapshot=snapshot,
@@ -296,6 +405,71 @@ class TestDeleteComment:
                 orguser=other_orguser,
             )
         comment.delete()
+
+    def test_member_cannot_moderate(self, snapshot, author_orguser, member_orguser, org):
+        """A view-only Member can never delete someone else's comment."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Not yours",
+            author=author_orguser,
+            org=org,
+        )
+        with pytest.raises(CommentPermissionError, match="only delete your own"):
+            CommentService.delete_comment(
+                comment_id=comment.id,
+                org=org,
+                orguser=member_orguser,
+            )
+        comment.delete()
+
+    def test_editor_can_moderate(self, snapshot, author_orguser, editor_orguser, org):
+        """A report editor (explicit resolver-edit grant) can delete someone
+        else's comment (moderation). The comment is soft-deleted because the
+        thread contains another author's comment (the target itself, from
+        the moderator's perspective)."""
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="report",
+            resource_id=str(snapshot.pk),
+            principal_type="user",
+            principal_id=editor_orguser.id,
+            permission="edit",
+            status="active",
+        )
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Moderate me",
+            author=author_orguser,
+            org=org,
+        )
+        CommentService.delete_comment(
+            comment_id=comment.id,
+            org=org,
+            orguser=editor_orguser,
+        )
+        comment.refresh_from_db()
+        assert comment.is_deleted is True
+        assert comment.content == ""
+
+    def test_owner_can_moderate(self, snapshot, author_orguser, other_orguser, org):
+        """The report owner can delete someone else's comment."""
+        comment = Comment.objects.create(
+            target_type=CommentTargetType.SUMMARY,
+            snapshot=snapshot,
+            content="Peer's comment",
+            author=other_orguser,
+            org=org,
+        )
+        # author_orguser owns the snapshot (created_by) — resolver-edit
+        CommentService.delete_comment(
+            comment_id=comment.id,
+            org=org,
+            orguser=author_orguser,
+        )
+        comment.refresh_from_db()
+        assert comment.is_deleted is True
 
     def test_not_found_raises(self, org, author_orguser):
         with pytest.raises(CommentNotFoundError):
