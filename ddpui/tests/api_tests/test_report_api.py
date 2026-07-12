@@ -31,7 +31,8 @@ from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org_preferences import OrgPreferences
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
+from ddpui.models.resource_share import ResourceShare
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.report_api import (
     list_snapshots,
     create_snapshot,
@@ -105,6 +106,30 @@ def other_orguser(other_authuser, org):
         user=other_authuser,
         org=org,
         new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+
+
+@pytest.fixture
+def member_authuser():
+    """A third django User -- Member/Guest role, no can_share_reports slug"""
+    user = User.objects.create(
+        username="memberreportuser", email="memberreportuser@test.com", password="testpassword"
+    )
+    yield user
+    user.delete()
+
+
+@pytest.fixture
+def member_orguser(member_authuser, org):
+    """A Member OrgUser in the same org -- lacks the can_share_reports slug
+    entirely, so the `@has_permission` decorator blocks it before the
+    resolver is ever consulted."""
+    orguser = OrgUser.objects.create(
+        user=member_authuser,
+        org=org,
+        new_role=Role.objects.filter(slug=MEMBER_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -673,13 +698,75 @@ class TestToggleReportSharing:
             toggle_report_sharing(request, 99999, payload)
         assert exc_info.value.status_code == 404
 
-    def test_sharing_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
-        """Test that non-creator cannot toggle sharing"""
+    def test_sharing_view_only_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
+        """Task 11b: the toggle is no longer creator-only -- it gates on the
+        `can_share_reports` slug (has the decorator) plus resolver **edit**
+        on the report, same as the bulk toggle_public action. `other_orguser`
+        is an Analyst with the slug but only the org's default general
+        access (all_users/view, no explicit grant) on this report, so they
+        resolve to "view" -- not "edit" -- and are still forbidden. Renamed
+        from `test_sharing_non_creator_forbidden`: same 403, new reason."""
         request = mock_request(other_orguser)
         payload = ShareToggle(is_public=True)
         with pytest.raises(HttpError) as exc_info:
             toggle_report_sharing(request, sample_snapshot.id, payload)
         assert exc_info.value.status_code == 403
+
+    def test_sharing_non_creator_with_edit_grant_allowed(
+        self, other_orguser, sample_snapshot, seed_db
+    ):
+        """Task 11b new-behavior pin: a non-creator Analyst with an explicit
+        **edit** `ResourceShare` grant (and the `can_share_reports` slug)
+        CAN toggle sharing -- this is the widening from creator-only to
+        "any editor with the slug" that the bulk toggle_public action
+        already allowed (Task 17)."""
+        ResourceShare.objects.create(
+            org=sample_snapshot.org,
+            resource_type="report",
+            resource_id=str(sample_snapshot.pk),
+            principal_type="user",
+            principal_id=other_orguser.id,
+            permission="edit",
+            status="active",
+        )
+        request = mock_request(other_orguser)
+        payload = ShareToggle(is_public=True)
+        response = toggle_report_sharing(request, sample_snapshot.id, payload)
+
+        assert response["data"]["is_public"] is True
+        sample_snapshot.refresh_from_db()
+        assert sample_snapshot.is_public is True
+
+    def test_sharing_owner_via_ownership_allowed(self, other_orguser, sample_snapshot, seed_db):
+        """Task 11b: the creator/owner path still works through
+        `require_edit_access`, and -- unlike the other pins in this class --
+        via genuine ownership rather than the admin override (`orguser`
+        elsewhere in this file is an Account Manager/admin, so admin
+        override alone would also pass). Reassign ownership to
+        `other_orguser` (a plain Analyst, no grant) and confirm the resolver
+        admits them as owner."""
+        sample_snapshot.owner = other_orguser
+        sample_snapshot.created_by = other_orguser
+        sample_snapshot.save(update_fields=["owner", "created_by"])
+
+        request = mock_request(other_orguser)
+        payload = ShareToggle(is_public=True)
+        response = toggle_report_sharing(request, sample_snapshot.id, payload)
+
+        assert response["data"]["is_public"] is True
+        sample_snapshot.refresh_from_db()
+        assert sample_snapshot.is_public is True
+
+    def test_sharing_member_without_slug_forbidden(self, member_orguser, sample_snapshot, seed_db):
+        """Task 11b new-behavior pin: a Member has neither `can_share_reports`
+        nor an edit grant -- the `@has_permission` decorator blocks the
+        request before the resolver is even consulted (mirrors the bulk
+        path's `share_permission_denied` skip reason)."""
+        request = mock_request(member_orguser)
+        payload = ShareToggle(is_public=True)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_report_sharing(request, sample_snapshot.id, payload)
+        assert exc_info.value.status_code in (403, 404)
 
 
 class TestToggleReportSharingKillSwitch:

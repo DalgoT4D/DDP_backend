@@ -20,7 +20,9 @@ from ddpui.core.reports.exceptions import (
 )
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
+from ddpui.core.sharing import sharing_actions
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.exceptions import SharingValidationError
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.services.dashboard_service import DashboardService, DashboardNotFoundError
 from ddpui.models.org_user import OrgUser
@@ -301,20 +303,36 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
 
 
 @report_router.put("/{snapshot_id}/share/", response=ApiResponse[ShareResponse])
-@has_permission(["can_share_dashboards"])
+@has_permission(["can_share_reports"])
 def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
     """Toggle public sharing for a report snapshot"""
     orguser: OrgUser = request.orguser
     try:
-        snapshot = ReportService.toggle_sharing(
-            snapshot_id, orguser.org, orguser, payload.is_public
-        )
-        response_data = ReportService.build_share_response(snapshot)
-        return api_response(success=True, data=ShareResponse(**response_data))
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
-    except SnapshotPermissionError as err:
-        raise HttpError(403, str(err)) from err
+
+    # Gate: same model as the bulk toggle (Task 17) -- the `can_share_reports`
+    # slug (checked by the decorator above) plus resolver **edit** on the
+    # object. This widens who may toggle from "creator only" to any editor
+    # (grant or general access) with the slug.
+    require_edit_access(orguser, "report", snapshot)
+
+    # The actual flip (kill-switch check, token minting, timestamps) lives in
+    # `sharing_actions.set_public` -- the same function the bulk toggle_public
+    # action uses -- so the kill-switch rule is defined in exactly one place.
+    try:
+        sharing_actions.set_public(orguser, "report", snapshot, payload.is_public)
+    except SharingValidationError as err:
+        raise HttpError(403, err.message) from err
+
+    response_data = ReportService.build_share_response(snapshot)
+    action = "enabled" if payload.is_public else "disabled"
+    logger.info(
+        f"Report {snapshot_id} sharing {action} by user {orguser.user.email}, "
+        f"token: {snapshot.public_share_token}"
+    )
+    return api_response(success=True, data=ShareResponse(**response_data))
 
 
 @report_router.get("/{snapshot_id}/share/", response=ApiResponse[ShareStatus])

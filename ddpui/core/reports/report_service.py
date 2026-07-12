@@ -7,11 +7,9 @@ from datetime import date
 
 from django.conf import settings
 from django.db.models import Q
-from django.utils import timezone
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
 from ddpui.core.sharing.access_resolver import accessible_filter
-from ddpui.core.sharing.public_sharing_gate import org_allows_public_sharing
 from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -903,57 +901,6 @@ class ReportService:
     def _build_private_url(snapshot_id: int) -> str:
         """Build the authenticated URL for a report snapshot."""
         return f"{ReportService._get_frontend_url()}/reports/{snapshot_id}"
-
-    @staticmethod
-    def toggle_sharing(
-        snapshot_id: int, org: Org, orguser: OrgUser, is_public: bool
-    ) -> ReportSnapshot:
-        """Toggle public sharing for a report snapshot.
-
-        Args:
-            snapshot_id: The snapshot ID
-            org: The organization
-            orguser: The user toggling sharing
-            is_public: Whether to make the snapshot public
-
-        Returns:
-            Updated ReportSnapshot instance
-
-        Raises:
-            SnapshotNotFoundError: If snapshot not found
-            SnapshotPermissionError: If user is not the creator
-        """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("Only report creators can modify sharing settings")
-
-        if is_public:
-            # Org-level kill switch: newly publishing or re-enabling is
-            # blocked while off. Turning a link OFF (the `else` branch)
-            # always stays allowed -- people must be able to clean up.
-            if not org_allows_public_sharing(org.id):
-                raise SnapshotPermissionError(
-                    "Public sharing is disabled for this organization. "
-                    "Ask an org admin to re-enable it."
-                )
-
-            if not snapshot.public_share_token:
-                snapshot.public_share_token = secrets.token_urlsafe(48)
-            snapshot.public_shared_at = timezone.now()
-            snapshot.public_disabled_at = None
-        else:
-            snapshot.public_disabled_at = timezone.now()
-
-        snapshot.is_public = is_public
-        snapshot.save()
-
-        logger.info(
-            f"Report {snapshot_id} sharing {'enabled' if is_public else 'disabled'} "
-            f"by user {orguser.user.email}, token: {snapshot.public_share_token}"
-        )
-
-        return snapshot
 
     @staticmethod
     def ensure_share_token(snapshot: ReportSnapshot) -> str:

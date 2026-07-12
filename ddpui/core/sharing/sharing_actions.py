@@ -490,11 +490,13 @@ def set_public(
     contract every ``public_link=True`` rtype's model satisfies
     (``is_public``, ``public_share_token``, ``public_shared_at``,
     ``public_disabled_at`` — Dashboard and ReportSnapshot share these field
-    names), so no per-rtype branching. Mirrors the two existing single-item
-    toggles (`dashboard_native_api.toggle_dashboard_sharing`,
-    `ReportService.toggle_sharing`): enabling mints a token if missing and
-    is blocked while the org kill switch is off; disabling always works and
-    keeps the token for audit.
+    names), so no per-rtype branching. This is the ONE place the flip
+    happens: the single-item toggles (`dashboard_native_api.
+    toggle_dashboard_sharing`, `report_api.toggle_report_sharing`) and the
+    bulk `toggle_public` action all call this function directly, so the
+    kill-switch rule -- enabling mints a token if missing and is blocked
+    while the org kill switch is off; disabling always works and keeps the
+    token for audit -- is defined exactly once.
     """
     entry = _entry_for(rtype)
     if not entry.public_link:

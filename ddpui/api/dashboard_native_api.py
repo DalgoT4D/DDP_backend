@@ -5,7 +5,6 @@ from datetime import timedelta
 
 from ninja import Router
 from ninja.errors import HttpError
-from django.utils import timezone
 from django.db import transaction
 from django.db.models import Prefetch
 
@@ -17,9 +16,10 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
+from ddpui.core.sharing import sharing_actions
 from ddpui.core.sharing.access_resolver import effective_permission
+from ddpui.core.sharing.exceptions import SharingValidationError
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
-from ddpui.core.sharing.public_sharing_gate import require_public_sharing_enabled
 from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
@@ -474,32 +474,21 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Check permissions - only dashboard creator or org admin can modify sharing
-    if dashboard.created_by != orguser:
-        # TODO: Add org admin check if needed
-        raise HttpError(403, "Only dashboard creators can modify sharing settings")
+    # Gate: same model as the bulk toggle (Task 17) -- the `can_share_dashboards`
+    # slug (checked by the decorator above) plus resolver **edit** on the
+    # object. This widens who may toggle from "creator only" to any editor
+    # (grant or general access) with the slug.
+    require_edit_access(orguser, "dashboard", dashboard)
 
     is_public = payload.is_public
 
-    if is_public:
-        # Org-level kill switch: newly publishing or re-enabling is blocked
-        # while off. Turning a link OFF (the `else` branch) always stays
-        # allowed -- people must be able to clean up regardless.
-        require_public_sharing_enabled(orguser.org)
-
-        # Generate token if making public
-        if not dashboard.public_share_token:
-            import secrets
-
-            dashboard.public_share_token = secrets.token_urlsafe(48)
-        dashboard.public_shared_at = timezone.now()
-        dashboard.public_disabled_at = None
-    else:
-        # Disable public sharing but keep token for audit
-        dashboard.public_disabled_at = timezone.now()
-
-    dashboard.is_public = is_public
-    dashboard.save()
+    # The actual flip (kill-switch check, token minting, timestamps) lives in
+    # `sharing_actions.set_public` -- the same function the bulk toggle_public
+    # action uses -- so the kill-switch rule is defined in exactly one place.
+    try:
+        sharing_actions.set_public(orguser, "dashboard", dashboard, is_public)
+    except SharingValidationError as err:
+        raise HttpError(403, err.message) from err
 
     # Build response
     response_data = {

@@ -26,8 +26,9 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
+from ddpui.models.resource_share import ResourceShare
 from ddpui.models.visualization import Chart
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
     get_dashboard,
@@ -90,6 +91,41 @@ def orguser(authuser, org):
     )
     yield orguser
     orguser.delete()
+
+
+@pytest.fixture
+def analyst_orguser(org):
+    """A second OrgUser in the same org, Analyst role, NOT the dashboard
+    creator -- used to pin Task 11b's widened toggle gate (share slug +
+    resolver edit, same as the bulk toggle_public action)."""
+    user = User.objects.create(
+        username="dashanalystuser", email="dashanalystuser@test.com", password="testpassword"
+    )
+    ou = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield ou
+    ou.delete()
+    user.delete()
+
+
+@pytest.fixture
+def member_orguser(org):
+    """A Member OrgUser in the same org -- lacks `can_share_dashboards`
+    entirely, so the `@has_permission` decorator blocks it."""
+    user = User.objects.create(
+        username="dashmemberuser", email="dashmemberuser@test.com", password="testpassword"
+    )
+    ou = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=MEMBER_ROLE).first(),
+    )
+    yield ou
+    ou.delete()
+    user.delete()
 
 
 @pytest.fixture
@@ -766,6 +802,73 @@ class TestToggleDashboardSharingKillSwitch:
             request, sample_dashboard.id, DashboardShareToggle(is_public=False)
         )
         assert response.is_public is False
+
+
+class TestToggleDashboardSharingAuthorization:
+    """Task 11b: `toggle_dashboard_sharing` gates the same way the bulk
+    `toggle_public` action does (Task 17) -- the `can_share_dashboards` slug
+    (checked by the `@has_permission` decorator) plus resolver **edit** on
+    the dashboard -- instead of the old creator-only check. This widens who
+    may toggle: any editor (grant or general access) with the slug, not just
+    the creator."""
+
+    def test_non_creator_view_only_forbidden(self, analyst_orguser, sample_dashboard, seed_db):
+        """An Analyst with the slug but only the org's default general
+        access (all_users/view, no explicit grant) resolves to "view", not
+        "edit" -- still forbidden."""
+        request = mock_request(analyst_orguser)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_dashboard_sharing(
+                request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+            )
+        assert exc_info.value.status_code == 403
+
+        sample_dashboard.refresh_from_db()
+        assert sample_dashboard.is_public is False
+
+    def test_non_creator_with_edit_grant_allowed(self, analyst_orguser, sample_dashboard, seed_db):
+        """New-behavior pin: a non-creator Analyst with an explicit **edit**
+        `ResourceShare` grant (and the `can_share_dashboards` slug) CAN
+        toggle sharing -- the widening from creator-only to "any editor with
+        the slug" that bulk toggle_public already allowed (Task 17)."""
+        ResourceShare.objects.create(
+            org=sample_dashboard.org,
+            resource_type="dashboard",
+            resource_id=str(sample_dashboard.pk),
+            principal_type="user",
+            principal_id=analyst_orguser.id,
+            permission="edit",
+            status="active",
+        )
+        request = mock_request(analyst_orguser)
+        response = toggle_dashboard_sharing(
+            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+        )
+
+        assert response.is_public is True
+        sample_dashboard.refresh_from_db()
+        assert sample_dashboard.is_public is True
+
+    def test_member_without_slug_forbidden(self, member_orguser, sample_dashboard, seed_db):
+        """A Member has neither `can_share_dashboards` nor an edit grant --
+        the `@has_permission` decorator blocks the request before the
+        resolver is consulted (mirrors the bulk path's
+        `share_permission_denied` skip reason)."""
+        request = mock_request(member_orguser)
+        with pytest.raises(HttpError) as exc_info:
+            toggle_dashboard_sharing(
+                request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+            )
+        assert exc_info.value.status_code in (403, 404)
+
+    def test_creator_still_allowed(self, orguser, sample_dashboard, seed_db):
+        """The creator keeps toggling -- ownership resolves to "edit"
+        regardless of the slug-plus-grant path."""
+        request = mock_request(orguser)
+        response = toggle_dashboard_sharing(
+            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+        )
+        assert response.is_public is True
 
 
 # ================================================================================
