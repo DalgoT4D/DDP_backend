@@ -30,6 +30,10 @@ def _normalize_cell(value):
 def _cells_equal(a, b) -> bool:
     if isinstance(a, float) and isinstance(b, float):
         return abs(a - b) <= NUMERIC_TOLERANCE * max(1.0, abs(a), abs(b))
+    if isinstance(a, str) and isinstance(b, str) and a != b:
+        # labels are presentation: gold 'q3' matches agent 'q3 (oct-dec 2025)'
+        shorter, longer = sorted((a, b), key=len)
+        return len(shorter) >= 2 and shorter in longer
     return a == b
 
 
@@ -64,10 +68,13 @@ def gold_satisfied(gold_rows: list, agent_rows: list, answer: str) -> bool:
     Agents legitimately ENRICH results (extra context columns, e.g. total +
     distinct + active in one row), so strict equality over-fails. Rules:
 
-    - Scalar gold (1 row × 1 column): the value must appear in the agent's
-      result AND in the narrated answer — the answer text carries the
-      assertion, so a wrong claim can't pass just because the right number
-      sits in a context column.
+    - Scalar gold (1 row × 1 column): the value must be supported by the
+      result (a matching cell, OR the row count — "7 states" answered with a
+      7-row breakdown) AND appear in the narrated answer, which carries the
+      assertion.
+    - Single-row gold (e.g. LIMIT 1 top/bottom questions): the gold row must
+      appear among the agent's rows (agents often show the full ranking and
+      narrate the winner), and the answer must name the gold row's text cells.
     - Otherwise: some selection of the agent's columns, projected across all
       its rows, must equal the gold rows as a multiset (extra columns are
       fine; extra or missing ROWS are not).
@@ -86,11 +93,26 @@ def gold_satisfied(gold_rows: list, agent_rows: list, answer: str) -> bool:
     if len(gold) == 1 and len(gold[0]) == 1:
         value = gold[0][0]
         in_result = any(_cells_equal(value, cell) for row in agent for cell in row)
-        return in_result and answer_contains_value(answer, _render(value))
+        as_row_count = isinstance(value, float) and value == float(len(agent))
+        return (in_result or as_row_count) and answer_contains_value(answer, _render(value))
 
     gold_width = len(gold[0])
     agent_width = len(agent[0])
-    if len(gold) != len(agent) or gold_width > agent_width:
+    if gold_width > agent_width:
+        return False
+
+    if len(gold) == 1:
+        row_found = any(
+            any(
+                all(_cells_equal(g, agent_row[i]) for g, i in zip(gold[0], col_pick))
+                for col_pick in permutations(range(agent_width), gold_width)
+            )
+            for agent_row in agent
+        )
+        entities = [_render(c) for c in gold[0] if isinstance(c, str)]
+        return row_found and all(answer_contains_value(answer, e) for e in entities)
+
+    if len(gold) != len(agent):
         return False
     for col_pick in permutations(range(agent_width), gold_width):
         projected = [tuple(row[i] for i in col_pick) for row in agent]

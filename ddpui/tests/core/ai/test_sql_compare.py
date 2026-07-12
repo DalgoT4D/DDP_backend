@@ -70,6 +70,36 @@ def test_breakdown_with_wrong_or_extra_rows_fails():
     assert not gold_satisfied(gold, [["East", "41", "x"], ["West", "48", "y"]], "…")
 
 
+def test_scalar_count_satisfied_by_row_count():
+    """'7 states' answered with a 7-row breakdown — the row count IS the value."""
+    from ddpui.core.ai.evals.sql_compare import gold_satisfied
+
+    gold = [{"states_impacted": 7}]
+    agent = [["Bihar", "3"], ["MP", "8"], ["Rajasthan", "3"], ["Telangana", "3"],
+             ["Jharkhand", "2"], ["Chattisgarh", "1"], ["Uttarakhand", "1"]]  # fmt: skip
+    assert gold_satisfied(gold, agent, "**7** states were impacted.")
+    assert not gold_satisfied(gold, agent, "**8** states were impacted.")
+
+
+def test_single_row_gold_found_in_full_ranking():
+    """LIMIT-1 golds pass when the agent shows the whole ranking and narrates
+    the right winner — and fail when it narrates the wrong one."""
+    from ddpui.core.ai.evals.sql_compare import gold_satisfied
+
+    gold = [{"state": "Uttarakhand", "total": 0.0}]
+    agent = [["Uttarakhand", "0.0"], ["Rajasthan", "4012.5"], ["Bihar", "54973.4"]]
+    assert gold_satisfied(gold, agent, "Uttarakhand achieved the least (0).")
+    assert not gold_satisfied(gold, agent, "Rajasthan achieved the least.")
+
+
+def test_label_formatting_tolerated_in_projection():
+    from ddpui.core.ai.evals.sql_compare import gold_satisfied
+
+    gold = [{"period": "Q3", "total": 155718.60}, {"period": "Q4", "total": 4012.50}]
+    agent = [["t", "Q3 (Oct-Dec 2025)", "155718.6"], ["t", "Q4 (Jan-Mar 2026)", "4012.5"]]
+    assert gold_satisfied(gold, agent, "Q3 saw 155,718.6 vs Q4's 4,012.5.")
+
+
 def test_answer_contains_value_ignores_thousands_separators_and_case():
     assert answer_contains_value("You received **₹1,49,09,222** in total.", "14909222")
     assert answer_contains_value("Most are in PUNE district.", "Pune")

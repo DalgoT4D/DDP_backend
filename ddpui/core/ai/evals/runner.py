@@ -29,7 +29,14 @@ logger = CustomLogger("ddpui")
 
 FAITHFULNESS_CRITERIA = (
     "The submission's numbers and named entities are all supported by this "
-    "query result table (a claim not derivable from the table is a failure):\n{table}"
+    "query result table. Numbers derived from the table by simple arithmetic "
+    "(sums, differences, percentage shares, rounding) count as supported. "
+    "Only a claim that cannot be derived from the table is a failure:\n{table}"
+)
+
+EXPECTATIONS_CRITERIA = (
+    "The submission satisfies this expectation of a correct answer "
+    "(judge the substance, not the wording): {expectations}"
 )
 
 
@@ -40,6 +47,7 @@ class ItemResult:
     routing_ok: bool | None = None
     sql_ok: bool | None = None
     faithful: float | None = None
+    expectations: float | None = None
     answer: str = ""
     error: str | None = None
     # failure diagnostics — what ran vs what gold expected
@@ -74,6 +82,8 @@ class RunSummary:
                 flags.append("sql")
             status = "PASS" if r.hard_pass else "FAIL " + ", ".join(flags)
             judge = f"  faithful={r.faithful:.2f}" if r.faithful is not None else ""
+            if r.expectations is not None:
+                judge += f"  expectations={r.expectations:.2f}"
             lines.append(f"  [{status}]{judge} {r.question[:70]}")
             if r.sql_ok is False:
                 lines.append(f"      agent sql : {r.agent_sql[:160]}")
@@ -154,7 +164,32 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
 
     if judge and result.routing_ok is not False:
         result.faithful = judge_faithfulness(item["question"], answer, result_table)
+        if item.get("answer_expectations"):
+            result.expectations = judge_expectations(
+                item["question"], answer, item["answer_expectations"]
+            )
     return result
+
+
+def judge_expectations(question: str, answer: str, expectations: str) -> float | None:
+    """autoevals ClosedQA against the item's answer_expectations — how items
+    with no scoreable SQL (absence questions, context questions) get judged.
+    Fail-open like every judge."""
+    if not answer:
+        return None
+    try:
+        import openai
+        from autoevals import ClosedQA
+
+        result = ClosedQA(client=openai.OpenAI())(
+            input=question,
+            output=answer,
+            criteria=EXPECTATIONS_CRITERIA.format(expectations=expectations[:2000]),
+        )
+        return result.score
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("eval expectations judge failed (fail-open)")
+        return None
 
 
 async def run_items(
@@ -206,6 +241,8 @@ def _record(client, dataset_items, item, result: ItemResult, run_name: str) -> N
             trace.score(name="eval_sql_correct", value=1 if result.sql_ok else 0)
         if result.faithful is not None:
             trace.score(name="eval_faithful", value=result.faithful)
+        if result.expectations is not None:
+            trace.score(name="eval_expectations", value=result.expectations)
         dataset_item = dataset_items.get(item["question"])
         if dataset_item is not None:
             dataset_item.link(trace, run_name)
