@@ -166,6 +166,14 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
+                # A deactivated org blocks all of its users at permission-load, so every
+                # gated endpoint 403s. Enforced here (not via empty permissions) because
+                # @has_permission's bare-except turns an empty-permissions 403 into a 404 —
+                # this raises a real 403. Reactivating the org restores access. See
+                # features/admin-portal/v1/plan.md §4.2.
+                if not orguser.org.is_active:
+                    raise HttpError(403, "your organization has been deactivated")
+
                 redis_client = RedisClient.get_instance()
                 orguser_role_id = None
                 permissions_json = None

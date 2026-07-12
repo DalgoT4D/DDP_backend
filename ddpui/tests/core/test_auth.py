@@ -94,6 +94,96 @@ def test_authenticate_success(
     assert result.permissions == ["perm1", "perm2"]
 
 
+@patch("ddpui.auth.User.objects.filter")
+@patch("ddpui.auth.OrgUser.objects.filter")
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.auth.set_roles_and_permissions_in_redis")
+def test_authenticate_blocks_deactivated_org(
+    mock_set_roles,
+    mock_redis_client,
+    mock_org_user_filter,
+    mock_user_filter,
+    mock_request,
+    mock_user,
+    seed_db,
+):
+    """
+    THE deactivation-enforcement test: a user whose org is deactivated is blocked with
+    403 at permission-load, before any endpoint runs. If this regresses, deactivation
+    silently does nothing.
+    """
+    deactivated_org = Org.objects.create(
+        name="Deactivated Org", slug="deactivated-org", is_active=False
+    )
+    org_user = OrgUser.objects.create(
+        user=mock_user,
+        org=deactivated_org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    mock_user_filter.return_value.first.return_value = mock_user
+    mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
+        org_user
+    )
+    mock_request.headers["x-dalgo-org"] = "deactivated-org"
+    token = str(AccessToken.for_user(mock_user))
+
+    middleware = CustomJwtAuthMiddleware()
+    with pytest.raises(HttpError) as excinfo:
+        middleware.authenticate(mock_request, token)
+    assert excinfo.value.status_code == 403
+    assert str(excinfo.value) == "your organization has been deactivated"
+
+    org_user.delete()
+    deactivated_org.delete()
+
+
+@patch("ddpui.auth.User.objects.filter")
+@patch("ddpui.auth.OrgUser.objects.filter")
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.auth.set_roles_and_permissions_in_redis")
+def test_authenticate_allows_reactivated_org(
+    mock_set_roles,
+    mock_redis_client,
+    mock_org_user_filter,
+    mock_user_filter,
+    mock_request,
+    mock_user,
+    seed_db,
+):
+    """
+    Symmetry: reactivation restores access. An org toggled back to is_active=True
+    authenticates normally, permissions loaded.
+    """
+    org = Org.objects.create(name="Reactivated Org", slug="reactivated-org", is_active=False)
+    # ... admin reactivates it
+    org.is_active = True
+    org.save()
+    org_user = OrgUser.objects.create(
+        user=mock_user,
+        org=org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    mock_user_filter.return_value.first.return_value = mock_user
+    mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
+        org_user
+    )
+    mock_redis_client.return_value.get.return_value = json.dumps(
+        {str(org_user.new_role.id): ["perm1"]}
+    )
+    mock_request.headers["x-dalgo-org"] = "reactivated-org"
+    token = str(AccessToken.for_user(mock_user))
+
+    middleware = CustomJwtAuthMiddleware()
+    result = middleware.authenticate(mock_request, token)
+
+    assert result == mock_request
+    assert result.orguser == org_user
+    assert result.permissions == ["perm1"]
+
+    org_user.delete()
+    org.delete()
+
+
 @patch("ddpui.auth.AccessToken")
 def test_authenticate_invalid_token(mock_access_token, mock_request):
     """Test authentication with an invalid token."""
