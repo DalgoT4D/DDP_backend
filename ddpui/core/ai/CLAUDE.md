@@ -24,6 +24,7 @@ the map new engineers and agents read first.
 | `tools/` | The tools the chat agent can call (discover, query, create charts) | `registry.py` |
 | `guards/` | Deterministic SQL safety — no LLM involved | `sql_guard.py` |
 | `messages/` | Reading LangChain messages: text, artifacts, conversation views | `artifacts.py` |
+| `evals/` | Golden-set eval runner + scorers; datasets as JSONL in git | `README.md` |
 | `tracing.py` | Langfuse tracing — one trace per turn, off unless keys are set | — |
 
 ## The journey of one question
