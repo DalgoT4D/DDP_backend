@@ -137,6 +137,7 @@ class OrgUserResponse(Schema):
     is_llm_active: Optional[bool] = None
     landing_dashboard_id: int | None = None
     org_default_dashboard_id: int | None = None
+    is_platform_admin: bool = False
 
 
 class Invitation(models.Model):

@@ -10,7 +10,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import RolePermission
 from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
@@ -49,6 +49,26 @@ def has_permission(permission_slugs: list):
         return wrapper
 
     return decorator
+
+
+def platform_admin_required(view):
+    """
+    gate a view on the global UserAttributes.is_platform_admin flag.
+
+    unlike @has_permission (which checks per-org permission slugs), this expresses
+    cross-org authority: a Dalgo ops user acting on orgs they don't belong to.
+    mirrors the @has_permission wrapper pattern above (request is args[0]).
+    """
+
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        request = args[0]
+        ua = UserAttributes.objects.filter(user=request.orguser.user).first()
+        if not (ua and ua.is_platform_admin):
+            raise HttpError(403, "platform admin access required")
+        return view(*args, **kwargs)
+
+    return wrapper
 
 
 class CustomAuthMiddleware(HttpBearer):
