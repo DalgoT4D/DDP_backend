@@ -114,3 +114,11 @@ class GeneralAccessUpdateResponse(Schema):
     requires_confirmation: bool = False
     persisting_grants: List[GrantOut] = []
     general_access: Optional[GeneralAccessOut] = None
+
+
+class OwnerTransferRequest(Schema):
+    """POST /api/access/{rtype}/{resource_id}/owner/ — transfer ownership to
+    another same-org, active OrgUser. Transfer is final; there is no
+    reclaim/undo."""
+
+    new_owner_orguser_id: int

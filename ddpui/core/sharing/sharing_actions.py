@@ -9,8 +9,8 @@ Rules of this module:
 - ``access_resolver`` stays read-only — this module is the ONLY place
   Resource Sharing writes happen.
 
-Public links and access requests are later tasks; owner transfer is a later
-task. Only grants + general access mutate here.
+Public links and access requests are later tasks. Grants, general access,
+and ownership transfer mutate here.
 """
 
 from typing import List, Optional
@@ -336,6 +336,62 @@ def remove_grant(orguser: OrgUser, rtype: str, resource, grant_id: int) -> None:
     ).delete()
     if deleted == 0:
         raise GrantNotFoundError("grant not found for this resource")
+
+
+def transfer_ownership(actor: OrgUser, rtype: str, resource, new_owner_orguser_id: int) -> OwnerOut:
+    """Transfer `resource.owner` to `new_owner_orguser_id` (a same-org,
+    active OrgUser). The OLD owner gets an explicit active Edit
+    `ResourceShare` grant -- a uniform rule applied even when the old owner
+    is also `created_by` (who'd already be admitted via
+    `accessible_filter`'s `created_by` clause): it's what keeps their
+    list/detail views consistent, and it's cheap. No reclaim: nothing marks
+    the old owner special afterwards, they just stop passing the owner gate.
+
+    Bypasses `entry.grants` deliberately: that flag gates the public
+    `POST .../grants/` ENDPOINT (a UI capability), not this action -- a
+    `metric`/`kpi` transfer (both `grants=False`) still writes the old
+    owner's Edit row directly via `ResourceShare.objects.update_or_create`,
+    same as every other write in this module, instead of routing through
+    `upsert_grant` (which would reject it).
+    """
+    _entry_for(rtype)  # 404-equivalent validation: rtype must be registered
+
+    old_owner = _owner_orguser(resource)
+    if old_owner is not None and old_owner.id == new_owner_orguser_id:
+        raise SharingValidationError("resource is already owned by this user")
+
+    new_owner = (
+        OrgUser.objects.filter(
+            id=new_owner_orguser_id, org_id=resource.org_id, user__is_active=True
+        )
+        .select_related("user")
+        .first()
+    )
+    if new_owner is None:
+        raise PrincipalNotFoundError("user not found in this organization")
+
+    with transaction.atomic():
+        resource.owner = new_owner
+        resource.save(update_fields=["owner"])
+
+        if old_owner is not None:
+            ResourceShare.objects.update_or_create(
+                org_id=resource.org_id,
+                resource_type=rtype,
+                resource_id=str(resource.pk),
+                principal_type="user",
+                principal_id=old_owner.id,
+                defaults={
+                    "permission": "edit",
+                    "status": "active",
+                    "pending_email": None,
+                    "created_by": actor,
+                },
+            )
+
+    return OwnerOut(
+        orguser_id=new_owner.id, email=new_owner.user.email, name=_orguser_name(new_owner)
+    )
 
 
 def set_general_access(

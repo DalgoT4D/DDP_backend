@@ -28,6 +28,7 @@ for the decision.
 from ninja.errors import HttpError
 
 from ddpui.auth import UNAUTHORIZED
+from ddpui.core.ownership import can_delete_resource
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.shareable_types import get_resource_type
 
@@ -60,6 +61,18 @@ def require_edit_access(viewer, rtype: str, resource) -> None:
     if effective_permission(viewer, rtype, resource) != "edit":
         noun = _NOUN_BY_RTYPE.get(rtype, rtype)
         raise HttpError(403, f"You do not have edit access to this {noun}")
+
+
+def require_owner_access(viewer, rtype: str, resource) -> None:
+    """Raise ``HttpError(403)`` unless ``viewer`` is the CURRENT owner
+    (owner FK, ``created_by`` fallback) or admin/super-admin. Stricter than
+    ``require_edit_access``: general access and grant-derived "edit" never
+    satisfy this -- only literal ownership or the org-wide admin override
+    do. Used by ownership transfer (Task 12): reuses
+    ``ownership.can_delete_resource``, which encodes exactly this rule."""
+    if not can_delete_resource(viewer, resource):
+        noun = _NOUN_BY_RTYPE.get(rtype, rtype)
+        raise HttpError(403, f"You do not have owner access to this {noun}")
 
 
 def require_share_permission(request, rtype: str) -> None:

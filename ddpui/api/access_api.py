@@ -26,6 +26,7 @@ from ddpui.core.sharing.exceptions import (
 )
 from ddpui.core.sharing.gates import (
     require_edit_access,
+    require_owner_access,
     require_share_permission,
     require_view_access,
 )
@@ -37,6 +38,8 @@ from ddpui.schemas.access_schema import (
     GeneralAccessUpdateResponse,
     GrantCreate,
     GrantOut,
+    OwnerOut,
+    OwnerTransferRequest,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import ApiResponse, api_response
@@ -131,3 +134,26 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
 
     message = "Confirmation required" if result.requires_confirmation else "General access updated"
     return api_response(success=True, data=result, message=message)
+
+
+@access_router.post("/{rtype}/{resource_id}/owner/", response=ApiResponse[OwnerOut])
+def transfer_owner(request, rtype: str, resource_id: str, payload: OwnerTransferRequest):
+    """Transfer ownership to another same-org, active OrgUser. The old
+    owner keeps an explicit Edit grant; there is no reclaim. Gate: share
+    slug (registry) + owner-or-admin (stricter than resolver edit --
+    general access/grants alone never pass this)."""
+    orguser: OrgUser = request.orguser
+    require_share_permission(request, rtype)
+    resource = _get_resource_or_404(orguser, rtype, resource_id)
+    require_owner_access(orguser, rtype, resource)
+
+    try:
+        new_owner = sharing_actions.transfer_ownership(
+            orguser, rtype, resource, payload.new_owner_orguser_id
+        )
+    except SharingValidationError as err:
+        raise HttpError(400, err.message) from err
+    except PrincipalNotFoundError as err:
+        raise HttpError(404, err.message) from err
+
+    return api_response(success=True, data=new_owner, message="Ownership transferred")
