@@ -341,12 +341,20 @@ def get_report_sharing_status(request, snapshot_id: int):
     """Get report sharing status"""
     orguser: OrgUser = request.orguser
     try:
-        status_data = ReportService.get_sharing_status(snapshot_id, orguser.org, orguser)
-        return api_response(success=True, data=ShareStatus(**status_data))
+        snapshot = ReportService.get_snapshot(snapshot_id, orguser.org)
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
-    except SnapshotPermissionError as err:
-        raise HttpError(403, str(err)) from err
+
+    # Gate: same model as the toggle (Task 11b) -- the `can_view_dashboards`
+    # slug (checked by the decorator above) plus resolver **view** on the
+    # object. This widens who may read sharing status from "creator only"
+    # to any viewer (grant or general access) with the slug -- the status
+    # GET only reveals whether a resource the viewer can already see is
+    # public, so view access is sufficient (the toggle stays edit-gated).
+    require_view_access(orguser, "report", snapshot)
+
+    status_data = ReportService.get_sharing_status(snapshot)
+    return api_response(success=True, data=ShareStatus(**status_data))
 
 
 # ===== Share via Email =====

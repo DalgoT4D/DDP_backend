@@ -27,6 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.resource_share import ResourceShare
+from ddpui.models.general_access import GeneralAudience
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.dashboard_native_api import (
@@ -40,6 +41,7 @@ from ddpui.api.dashboard_native_api import (
     update_filter,
     delete_filter,
     toggle_dashboard_sharing,
+    get_dashboard_sharing_status,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
@@ -869,6 +871,106 @@ class TestToggleDashboardSharingAuthorization:
             request, sample_dashboard.id, DashboardShareToggle(is_public=True)
         )
         assert response.is_public is True
+
+
+# ================================================================================
+# Test get_dashboard_sharing_status endpoint -- Task 11c view-gate
+# ================================================================================
+
+
+class TestGetDashboardSharingStatus:
+    """Task 11c: `get_dashboard_sharing_status` was creator-only (an inline
+    `dashboard.created_by != orguser` check) -- widened to gate on the
+    `can_view_dashboards` slug (has the `@has_permission` decorator) plus
+    resolver **view**, mirroring the report side. Reads only need view (the
+    status GET just reveals whether an already-visible resource is public);
+    the toggle above stays edit-gated."""
+
+    def test_creator_allowed(self, orguser, sample_dashboard, seed_db):
+        request = mock_request(orguser)
+        response = get_dashboard_sharing_status(request, sample_dashboard.id)
+        assert response.is_public is False
+
+    def test_not_found(self, orguser, seed_db):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc_info:
+            get_dashboard_sharing_status(request, 99999)
+        assert exc_info.value.status_code == 404
+
+    def test_public_status_includes_url(self, orguser, sample_dashboard, seed_db):
+        request = mock_request(orguser)
+        toggle_dashboard_sharing(request, sample_dashboard.id, DashboardShareToggle(is_public=True))
+
+        response = get_dashboard_sharing_status(request, sample_dashboard.id)
+        assert response.is_public is True
+        assert response.public_url is not None
+
+    def test_non_creator_general_view_allowed(self, analyst_orguser, sample_dashboard, seed_db):
+        """New-behavior pin: an Analyst with only the org's default general
+        access (all_users/view, no explicit grant, not the creator) CAN now
+        read sharing status -- previously this was a hard creator-only 403."""
+        request = mock_request(analyst_orguser)
+        response = get_dashboard_sharing_status(request, sample_dashboard.id)
+        assert response.is_public is False
+
+    def test_member_view_allowed_no_slug_needed(self, member_orguser, sample_dashboard, seed_db):
+        """New-behavior pin: a Member -- who lacks `can_share_dashboards`
+        entirely (see `test_member_without_slug_forbidden` above) -- CAN
+        read sharing status on the org's default general-view dashboard.
+        The status GET only needs `can_view_dashboards` + resolver view,
+        never the share slug."""
+        request = mock_request(member_orguser)
+        response = get_dashboard_sharing_status(request, sample_dashboard.id)
+        assert response.is_public is False
+
+    def test_no_access_still_forbidden(self, analyst_orguser, member_orguser, org):
+        """New-behavior pin: a viewer with genuinely NO access (private
+        dashboard, no grant, not the owner) still gets 403 -- the gate is
+        real, just no longer creator-only. Owned by `analyst_orguser` (not
+        the account-manager `orguser`) so no admin override masks the
+        check."""
+        private_dashboard = Dashboard.objects.create(
+            title="Private Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            created_by=analyst_orguser,
+            org=org,
+            general_audience=GeneralAudience.PRIVATE,
+        )
+        try:
+            request = mock_request(member_orguser)
+            with pytest.raises(HttpError) as exc_info:
+                get_dashboard_sharing_status(request, private_dashboard.id)
+            assert exc_info.value.status_code == 403
+        finally:
+            private_dashboard.delete()
+
+    def test_non_creator_with_view_grant_allowed(self, analyst_orguser, member_orguser, org):
+        """A viewer denied by general access (private dashboard) but holding
+        an explicit **view** `ResourceShare` grant CAN read sharing status."""
+        private_dashboard = Dashboard.objects.create(
+            title="Grant-Gated Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            created_by=analyst_orguser,
+            org=org,
+            general_audience=GeneralAudience.PRIVATE,
+        )
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="dashboard",
+            resource_id=str(private_dashboard.pk),
+            principal_type="user",
+            principal_id=member_orguser.id,
+            permission="view",
+            status="active",
+        )
+        try:
+            request = mock_request(member_orguser)
+            response = get_dashboard_sharing_status(request, private_dashboard.id)
+            assert response.is_public is False
+        finally:
+            private_dashboard.delete()
 
 
 # ================================================================================

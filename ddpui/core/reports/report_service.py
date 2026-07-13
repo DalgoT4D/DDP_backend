@@ -941,26 +941,21 @@ class ReportService:
         return response_data
 
     @staticmethod
-    def get_sharing_status(snapshot_id: int, org: Org, orguser: OrgUser) -> dict:
+    def get_sharing_status(snapshot: ReportSnapshot) -> dict:
         """Get sharing status for a report snapshot.
 
+        Fetch + permission gate happen at the API layer (``report_api.
+        get_report_sharing_status``): ``ReportService.get_snapshot`` for the
+        404, then ``gates.require_view_access`` for the 403 -- the core
+        layer cannot raise ``HttpError``, so this method only shapes the
+        response from an already-authorized snapshot.
+
         Args:
-            snapshot_id: The snapshot ID
-            org: The organization
-            orguser: The user requesting the status
+            snapshot: The snapshot instance
 
         Returns:
             Dict compatible with ShareStatus schema
-
-        Raises:
-            SnapshotNotFoundError: If snapshot not found
-            SnapshotPermissionError: If user is not the creator
         """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("Only Report creators can share with others")
-
         response_data = {
             "is_public": snapshot.is_public,
             "public_access_count": snapshot.public_access_count,

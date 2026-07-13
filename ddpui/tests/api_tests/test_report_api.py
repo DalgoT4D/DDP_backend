@@ -8,7 +8,8 @@ Tests:
 4. update_snapshot_summary - success, not found
 5. delete_snapshot - success, not found, non-creator forbidden
 6. toggle_report_sharing - enable, disable, not found, non-creator forbidden
-7. get_report_sharing_status - public, private, not found, non-creator forbidden
+7. get_report_sharing_status - public, private, not found, general-view non-creator
+                                allowed (Task 11c), no-access forbidden, member view allowed
 8. list_dashboard_datetime_columns - success, dashboard not found, no charts, includes filters
 """
 
@@ -32,6 +33,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.resource_share import ResourceShare
+from ddpui.models.general_access import GeneralAudience
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.report_api import (
     list_snapshots,
@@ -842,12 +844,46 @@ class TestGetReportSharingStatus:
             get_report_sharing_status(request, 99999)
         assert exc_info.value.status_code == 404
 
-    def test_status_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
-        """Test that non-creator cannot view sharing status"""
+    def test_status_non_creator_general_view_allowed(self, other_orguser, sample_snapshot, seed_db):
+        """Task 11c: the status GET is no longer creator-only -- it gates on
+        the `can_view_dashboards` slug (has the decorator) plus resolver
+        **view** on the report. `other_orguser` is an Analyst with only the
+        org's default general access (all_users/view, no explicit grant) on
+        this report, which is now enough to read status -- unlike the
+        toggle, which stays edit-gated. Renamed from
+        `test_status_non_creator_forbidden`: same fixtures, opposite
+        expectation now that reads only require view."""
+        request = mock_request(other_orguser)
+        response = get_report_sharing_status(request, sample_snapshot.id)
+        assert response["success"] is True
+        assert response["data"]["is_public"] is False
+
+    def test_status_no_access_forbidden(self, other_orguser, sample_snapshot, seed_db):
+        """Task 11c new-behavior pin: a viewer with NO access at all (general
+        audience flipped to private, no grant) still gets 403 from the
+        status GET -- view access is required, it's just no longer
+        creator-only."""
+        sample_snapshot.general_audience = GeneralAudience.PRIVATE
+        sample_snapshot.save(update_fields=["general_audience"])
+
         request = mock_request(other_orguser)
         with pytest.raises(HttpError) as exc_info:
             get_report_sharing_status(request, sample_snapshot.id)
         assert exc_info.value.status_code == 403
+
+    def test_status_member_view_allowed_no_slug_needed(
+        self, member_orguser, sample_snapshot, seed_db
+    ):
+        """Task 11c new-behavior pin: a Member -- who lacks `can_share_reports`
+        entirely (see `test_sharing_member_without_slug_forbidden`) -- CAN
+        read sharing status on the org's default general-view report. The
+        status GET only needs `can_view_dashboards` + resolver view, never
+        the share slug; matches how the other view-gated reads work (e.g.
+        `get_snapshot_view`)."""
+        request = mock_request(member_orguser)
+        response = get_report_sharing_status(request, sample_snapshot.id)
+        assert response["success"] is True
+        assert response["data"]["is_public"] is False
 
 
 # ================================================================================

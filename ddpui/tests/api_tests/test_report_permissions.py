@@ -33,6 +33,11 @@ requires resolver **view** on the report; update/delete stay author-only
 at the service layer unless the caller has resolver **edit** on the report
 (moderation). ✓* = own comments only — Guests (Members) can never touch
 someone else's comment (resolver caps Members at "view").
+
+Task 11c (status GET re-gate): `get_sharing_status` moved from a
+creator-only check inside `ReportService` to `can_view_dashboards`
+(decorator) + resolver **view** at the API layer, matching the row above --
+see `TestSharingStatusViewGate` (renamed from `TestSharingStatusOwnerCheck`).
 """
 
 import os
@@ -505,32 +510,74 @@ class TestNonGuestCommentAccess:
 
 
 # ================================================================================
-# Test Sharing Status - Owner-only enforcement at service layer
+# Test Sharing Status - view-gated at the API layer (Task 11c)
 # ================================================================================
 
 
-class TestSharingStatusOwnerCheck:
-    """Test that non-owners get 403 from the service layer (not the permission decorator)."""
+class TestSharingStatusViewGate:
+    """Task 11c: the status GET gates on `can_view_dashboards` (decorator)
+    plus resolver **view**, not creator-only. The `snapshot` fixture grants
+    org-wide all_users/edit, so both roles below clear the view bar --
+    Guest is capped at "view" by the resolver, Analyst resolves to "edit"
+    uncapped. Renamed from `TestSharingStatusOwnerCheck`: same fixtures,
+    flipped expectations now that reads only require view, not ownership."""
 
-    def test_guest_gets_403_from_service(self, guest_user, snapshot):
-        """Guest passes permission check (can_view_dashboards) but fails owner-only."""
+    def test_guest_with_general_access_allowed(self, guest_user, snapshot):
+        """Guest resolves to view via the resource's general all_users/edit
+        access (capped at view for Members). Renamed from
+        `test_guest_gets_403_from_service`."""
         request = mock_request(guest_user)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, snapshot.id)
-        assert exc_info.value.status_code == 403
+        response = get_report_sharing_status(request, snapshot.id)
+        assert response["success"] is True
 
-    def test_non_owner_analyst_gets_403_from_service(self, analyst_user, snapshot):
-        """Analyst has can_view_dashboards but isn't the owner → 403."""
+    def test_analyst_with_general_access_allowed(self, analyst_user, snapshot):
+        """Analyst resolves to edit via the resource's general all_users/edit
+        access -- well above the view bar the status GET now requires.
+        Renamed from `test_non_owner_analyst_gets_403_from_service`."""
         request = mock_request(analyst_user)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, snapshot.id)
-        assert exc_info.value.status_code == 403
+        response = get_report_sharing_status(request, snapshot.id)
+        assert response["success"] is True
 
     def test_owner_can_view_sharing_status(self, account_manager_user, snapshot):
         """Owner (creator) can view sharing status."""
         request = mock_request(account_manager_user)
         response = get_report_sharing_status(request, snapshot.id)
         assert response["success"] is True
+
+    def test_no_access_still_forbidden(self, guest_user, analyst_user, org):
+        """New-behavior pin: a viewer with genuinely NO access (private
+        snapshot, no grant, not the owner) still gets 403 -- the gate is
+        real, just no longer creator-only. `analyst_user` (not
+        `account_manager_user`) owns this snapshot so the admin override
+        doesn't mask the check."""
+        private_snapshot = ReportSnapshot.objects.create(
+            title="Private Permission Test Report",
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 3, 31),
+            frozen_dashboard={
+                "title": "Test Dashboard",
+                "grid_columns": 12,
+                "layout_config": [],
+                "components": {},
+                "filters": [],
+            },
+            frozen_chart_configs={},
+            created_by=analyst_user,
+            org=org,
+            general_audience=GeneralAudience.PRIVATE,
+        )
+        try:
+            request = mock_request(guest_user)
+            with pytest.raises(HttpError) as exc_info:
+                get_report_sharing_status(request, private_snapshot.id)
+            assert exc_info.value.status_code == 403
+        finally:
+            private_snapshot.delete()
 
 
 # ================================================================================

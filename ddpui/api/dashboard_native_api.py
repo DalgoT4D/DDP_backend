@@ -528,10 +528,13 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Check permissions - only dashboard creator or org admin can view sharing status
-    if dashboard.created_by != orguser:
-        # TODO: Add org admin check if needed
-        raise HttpError(403, "Only dashboard creators can view sharing settings")
+    # Gate: same model as the other view-only reads (Task 11c) -- the
+    # `can_view_dashboards` slug (checked by the decorator above) plus
+    # resolver **view** on the object. This widens who may read sharing
+    # status from "creator only" to any viewer (grant or general access)
+    # with the slug -- the status GET only reveals whether a resource the
+    # viewer can already see is public, so view access is sufficient.
+    require_view_access(orguser, "dashboard", dashboard)
 
     response_data = {
         "is_public": dashboard.is_public,
