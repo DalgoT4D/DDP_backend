@@ -506,3 +506,42 @@ class TestAccessRequestExpiry:
         assert stale.status == "expired"
         fresh_row = AccessRequest.objects.get(id=fresh_request["data"]["id"])
         assert fresh_row.status == "pending"
+
+
+# ================================================================================
+# Notification deep links -- params must match what the webapp actually reads
+# ================================================================================
+
+
+class TestNotificationDeepLinks:
+    """Pins the per-rtype deep-link shape (Task 15b). The query params are a
+    contract with webapp_v2's pages: /alerts reads `?alertId=`, /metrics reads
+    `?highlight=` (row highlight), /kpis reads `?open=` (opens the detail
+    drawer); dashboards/reports route by path."""
+
+    def test_deep_link_shape_per_rtype(self):
+        from ddpui.core.sharing.access_requests import _build_resource_url, _frontend_url
+
+        base = _frontend_url()
+        assert _build_resource_url("dashboard", 7) == f"{base}/dashboards/7"
+        assert _build_resource_url("report", 7) == f"{base}/reports/7"
+        assert _build_resource_url("alert", 7) == f"{base}/alerts?alertId=7"
+        assert _build_resource_url("metric", 7) == f"{base}/metrics?highlight=7"
+        assert _build_resource_url("kpi", 7) == f"{base}/kpis?open=7"
+
+    def test_metric_request_notification_carries_highlight_link(self, org, analyst, member):
+        metric = Metric.objects.create(
+            org=org,
+            name="deep-link-metric",
+            schema_name="s",
+            table_name="t",
+            column="c",
+            aggregation="sum",
+            created_by=analyst,
+            owner=analyst,
+            general_audience=GeneralAudience.PRIVATE,
+        )
+        _create_request(member, "metric", metric, permission="view")
+
+        notification = Notification.objects.get()
+        assert f"/metrics?highlight={metric.pk}" in notification.message

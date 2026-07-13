@@ -41,16 +41,19 @@ from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.sharing.access_requests")
 
-# Deep-link shape per rtype, mirroring Task 13's `build_alert_url` convention
-# (query-param based for the flat list pages; path-based for the two pages
-# that route by id). Not a registry concern (shareable_types.py is capability
-# data, not presentation) -- kept here, the only caller.
+# Deep-link shape per rtype -- each query param matches what the webapp page
+# actually reads (Task 15b): /alerts reads `?alertId=` (Task 13's
+# `build_alert_url` convention), /metrics reads `?highlight=` (row highlight
+# in metrics-library), /kpis reads `?open=` (auto-opens the detail drawer);
+# dashboards/reports route by path. Not a registry concern
+# (shareable_types.py is capability data, not presentation) -- kept here,
+# the only caller.
 _DEEP_LINK_PATH = {
     "dashboard": "/dashboards/{id}",
     "report": "/reports/{id}",
     "alert": "/alerts?alertId={id}",
-    "metric": "/metrics?metricId={id}",
-    "kpi": "/kpis?kpiId={id}",
+    "metric": "/metrics?highlight={id}",
+    "kpi": "/kpis?open={id}",
 }
 
 _NOUN_BY_RTYPE = {
