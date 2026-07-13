@@ -482,24 +482,33 @@ def build_chart_query(
             # Use first metric for number charts
             metric = payload.metrics[0]
 
+            # Expression path: inline raw SQL expression
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                query_builder.add_column(literal_column(metric.column_expression).label(alias))
             # Handle count with None column case
-            if (
+            elif (
                 metric.aggregation
                 and metric.aggregation.lower() == "count"
                 and metric.column is None
             ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                query_builder.add_aggregate_column(
+                    metric.column,
+                    metric.aggregation,
+                    alias,
+                )
             else:
                 if not metric.column:
                     raise ValueError(f"Column is required for {metric.aggregation} aggregation")
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
 
-            # Just add the aggregate column without any grouping
-            query_builder.add_aggregate_column(
-                metric.column,
-                metric.aggregation,
-                alias,
-            )
+                # Just add the aggregate column without any grouping
+                query_builder.add_aggregate_column(
+                    metric.column,
+                    metric.aggregation,
+                    alias,
+                )
         elif payload.chart_type == "pie":
             # Pie charts need dimension and one metric
             if not payload.dimension_col:
@@ -525,24 +534,33 @@ def build_chart_query(
             # Use first metric for pie charts
             metric = payload.metrics[0]
 
+            # Expression path: inline raw SQL expression
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                query_builder.add_column(literal_column(metric.column_expression).label(alias))
             # Handle count with None column case
-            if (
+            elif (
                 metric.aggregation
                 and metric.aggregation.lower() == "count"
                 and metric.column is None
             ):
                 alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                query_builder.add_aggregate_column(
+                    metric.column,
+                    metric.aggregation,
+                    alias,
+                )
             else:
                 if not metric.column:
                     raise ValueError(f"Column is required for {metric.aggregation} aggregation")
                 alias = metric.alias or f"{metric.aggregation}_{metric.column}"
 
-            # Add aggregate column
-            query_builder.add_aggregate_column(
-                metric.column,
-                metric.aggregation,
-                alias,
-            )
+                # Add aggregate column
+                query_builder.add_aggregate_column(
+                    metric.column,
+                    metric.aggregation,
+                    alias,
+                )
 
             # Group by dimension column and extra dimension if provided
             if time_grain and org_warehouse:
