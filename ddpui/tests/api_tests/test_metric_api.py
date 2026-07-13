@@ -105,6 +105,17 @@ class TestListMetrics:
 
         assert response.data[0].created_by == "metricapiuser@test.com"
 
+    def test_list_metrics_with_null_created_by(self, orguser, sample_metric, seed_db):
+        """created_by is SET_NULL when the creating user is deleted; list_metrics
+        must still return 200 with created_by=None instead of 500ing on the
+        now-null FK dereference."""
+        Metric.objects.filter(id=sample_metric.id).update(created_by=None)
+        request = mock_request(orguser)
+
+        response = list_metrics(request)
+
+        assert response.data[0].created_by is None
+
     def test_list_metrics_search(self, orguser, sample_metric, seed_db):
         request = mock_request(orguser)
         response = list_metrics(request, search="API Test")
@@ -243,6 +254,18 @@ class TestGetMetric:
         assert response.id == sample_metric.id
         assert response.name == sample_metric.name
         assert response.created_by == "metricapiuser@test.com"
+
+    def test_get_metric_with_null_created_by(self, orguser, sample_metric, seed_db):
+        """created_by is SET_NULL when the creating user is deleted; get_metric
+        must still return 200 with created_by=None instead of 500ing on the
+        now-null FK dereference."""
+        Metric.objects.filter(id=sample_metric.id).update(created_by=None)
+        request = mock_request(orguser)
+
+        response = get_metric(request, sample_metric.id)
+
+        assert response.id == sample_metric.id
+        assert response.created_by is None
 
     def test_get_metric_not_found(self, orguser, seed_db):
         request = mock_request(orguser)

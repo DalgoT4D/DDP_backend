@@ -34,7 +34,9 @@ class MetricResponse(Schema):
     column: Optional[str]
     aggregation: Optional[str]
     column_expression: Optional[str]
-    created_by: str  # creator's email
+    created_by: Optional[
+        str
+    ] = None  # creator's email; None if the creating user was deleted (SET_NULL)
     created_at: datetime
     updated_at: datetime
 

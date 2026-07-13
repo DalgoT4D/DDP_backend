@@ -65,7 +65,9 @@ class ChartResponse(Schema):
     chart_type: str
     schema_name: str
     table_name: str
-    created_by: str
+    created_by: Optional[
+        str
+    ] = None  # creator's email; None if the creating user was deleted (SET_NULL)
     extra_config: dict
     created_at: datetime
     updated_at: datetime

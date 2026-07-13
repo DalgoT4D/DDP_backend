@@ -212,6 +212,18 @@ class TestListCharts:
 
         assert response.data[0].created_by == "chartapiuser@test.com"
 
+    def test_list_charts_with_null_created_by(self, orguser, sample_chart, seed_db):
+        """created_by is SET_NULL when the creating user is deleted; list_charts
+        must still return 200 with created_by=None instead of 500ing on the
+        now-null FK dereference."""
+        Chart.objects.filter(id=sample_chart.id).update(created_by=None)
+        request = mock_request(orguser)
+
+        response = list_charts(request, page=1, page_size=10)
+
+        assert response.total == 1
+        assert response.data[0].created_by is None
+
 
 # ================================================================================
 # Test get_chart endpoint
@@ -238,6 +250,18 @@ class TestGetChart:
         response = get_chart(request, sample_chart.id)
 
         assert response.created_by == "chartapiuser@test.com"
+
+    def test_get_chart_with_null_created_by(self, orguser, sample_chart, seed_db):
+        """created_by is SET_NULL when the creating user is deleted; get_chart
+        must still return 200 with created_by=None instead of 500ing on the
+        now-null FK dereference."""
+        Chart.objects.filter(id=sample_chart.id).update(created_by=None)
+        request = mock_request(orguser)
+
+        response = get_chart(request, sample_chart.id)
+
+        assert response.id == sample_chart.id
+        assert response.created_by is None
 
     def test_get_chart_not_found(self, orguser, seed_db):
         """Test getting non-existent chart returns 404"""

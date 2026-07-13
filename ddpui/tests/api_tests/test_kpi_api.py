@@ -127,6 +127,20 @@ class TestListKPIs:
 
         assert response.data[0].created_by == "kpiapiuser@test.com"
 
+    def test_list_kpis_with_null_created_by(self, orguser, sample_kpi, seed_db):
+        """created_by is SET_NULL when the creating user is deleted; list_kpis
+        must still return 200 with created_by=None instead of 500ing on the
+        now-null FK dereference (covers both the KPI's own creator and its
+        nested metric's creator)."""
+        KPI.objects.filter(id=sample_kpi.id).update(created_by=None)
+        Metric.objects.filter(id=sample_kpi.metric_id).update(created_by=None)
+        request = mock_request(orguser)
+
+        response = list_kpis(request)
+
+        assert response.data[0].created_by is None
+        assert response.data[0].metric.created_by is None
+
 
 class TestCreateKPI:
     def test_create_success(self, orguser, sample_metric, seed_db):
@@ -224,6 +238,21 @@ class TestGetKPI:
         assert response.id == sample_kpi.id
         assert response.metric.id == sample_kpi.metric_id
         assert response.created_by == "kpiapiuser@test.com"
+
+    def test_get_with_null_created_by(self, orguser, sample_kpi, seed_db):
+        """created_by is SET_NULL when the creating user is deleted; get_kpi
+        must still return 200 with created_by=None instead of 500ing on the
+        now-null FK dereference (covers both the KPI's own creator and its
+        nested metric's creator)."""
+        KPI.objects.filter(id=sample_kpi.id).update(created_by=None)
+        Metric.objects.filter(id=sample_kpi.metric_id).update(created_by=None)
+        request = mock_request(orguser)
+
+        response = get_kpi(request, sample_kpi.id)
+
+        assert response.id == sample_kpi.id
+        assert response.created_by is None
+        assert response.metric.created_by is None
 
     def test_get_not_found(self, orguser, seed_db):
         request = mock_request(orguser)
