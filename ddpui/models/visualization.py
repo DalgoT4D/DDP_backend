@@ -57,11 +57,13 @@ class Chart(models.Model):
     )
 
     # Metadata
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, db_column="created_by")
+    created_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, db_column="created_by"
+    )
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     last_modified_by = models.ForeignKey(
         OrgUser,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         db_column="last_modified_by",
         null=True,
         related_name="last_modified_by",
