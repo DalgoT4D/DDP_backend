@@ -69,17 +69,8 @@ class ReportService:
 
     @staticmethod
     def _extract_chart_ids(dashboard: Dashboard) -> List[int]:
-        """Extract chart IDs from tabs."""
-        chart_ids = []
-
-        for tab in dashboard.tabs or []:
-            for component in (tab.get("components") or {}).values():
-                if component.get("type") == "chart":
-                    chart_id = component.get("config", {}).get("chartId")
-                    if chart_id:
-                        chart_ids.append(chart_id)
-
-        return list(set(chart_ids))
+        """Extract chart IDs from tabs (delegates to the shared model walk)."""
+        return dashboard.component_ids("chart")
 
     @staticmethod
     def _freeze_chart_configs(dashboard: Dashboard) -> Dict[str, Any]:

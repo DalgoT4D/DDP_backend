@@ -27,10 +27,10 @@ def resolve_dashboard_scope(org: Org, dashboard_id: int | None) -> ResolvedScope
             "about it. Start a new chat from the Chat with Data page."
         )
 
-    chart_ids = _component_ids(dashboard, "chart", "chartId")
+    chart_ids = dashboard.component_ids("chart")
     charts = list(Chart.objects.filter(id__in=chart_ids, org=org))
 
-    kpi_ids = _component_ids(dashboard, "kpi", "kpiId")
+    kpi_ids = dashboard.component_ids("kpi")
     kpis = list(KPI.objects.filter(id__in=kpi_ids, org=org).select_related("metric"))
 
     filters = list(dashboard.filters.all().order_by("order"))
@@ -52,17 +52,6 @@ def resolve_dashboard_scope(org: Org, dashboard_id: int | None) -> ResolvedScope
         allowed_tables=sorted(tables),
         scope_context=_dashboard_context(dashboard, charts, kpis, filters),
     )
-
-
-def _component_ids(dashboard: Dashboard, comp_type: str, id_key: str) -> list[int]:
-    ids = []
-    for tab in dashboard.tabs or []:
-        for component in (tab.get("components") or {}).values():
-            if component.get("type") == comp_type:
-                ref = component.get("config", {}).get(id_key)
-                if ref:
-                    ids.append(ref)
-    return list(set(ids))
 
 
 def _dashboard_context(dashboard, charts, kpis, filters) -> str:
