@@ -5,7 +5,12 @@ import email.mime.multipart
 import email.mime.text
 import email.mime.application
 
+from django.conf import settings
+
 from ddpui.utils.aws_client import AWSClient
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui")
 
 
 def _get_ses_client():
@@ -13,10 +18,30 @@ def _get_ses_client():
     return AWSClient.get_instance("ses")
 
 
+def _ses_available() -> bool:
+    """True when real SES credentials are configured (the same pair AWSClient needs)."""
+    return bool(os.getenv("SES_ACCESS_KEY_ID") and os.getenv("SES_SECRET_ACCESS_KEY"))
+
+
 def send_text_message(to_email, subject, message):
     """
-    send a plain-text email using ses
+    send a plain-text email using ses.
+
+    Local-dev fallback: when settings.DEBUG is True AND no SES credentials are
+    configured, log the email instead of sending it, so flows that email (invite /
+    signup / password-reset) complete without a real SES setup. This can only engage
+    when DEBUG is True — which is off in staging/prod — so a real SES misconfiguration
+    there is never masked; it raises loudly as before.
     """
+    if settings.DEBUG and not _ses_available():
+        logger.info(
+            "[DEV] SES not configured — not sending email. to=%s subject=%s\n%s",
+            to_email,
+            subject,
+            message,
+        )
+        return None
+
     ses = _get_ses_client()
     response = ses.send_email(
         Destination={"ToAddresses": [to_email]},

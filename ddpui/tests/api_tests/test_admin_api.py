@@ -39,17 +39,25 @@ from ddpui.api.user_org_api import get_current_user_v2, post_organization_user_i
 from ddpui.core import orguserfunctions
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
-from ddpui.models.org_user import OrgUser, UserAttributes, Invitation, NewInvitationSchema
+from ddpui.models.org_user import (
+    OrgUser,
+    UserAttributes,
+    Invitation,
+    NewInvitationSchema,
+    AcceptInvitationSchema,
+)
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import (
+    CustomJwtAuthMiddleware,
     ACCOUNT_MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
 )
+from rest_framework_simplejwt.tokens import AccessToken
 
 pytestmark = pytest.mark.django_db
 
@@ -586,3 +594,225 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
     assert all(u.is_active for u in response.users)
     invited_emails = {i.invited_email for i in response.invitations}
     assert "pending@akshara.org" in invited_emails
+
+
+# ============================================================================
+# Week 1 — full admin lifecycle flow (one continuous story, real DB state)
+# ============================================================================
+# This is NOT a per-milestone unit test. It runs the whole super-admin journey —
+# create org, invite, accept, change role, per-org + org-level deactivate/reactivate,
+# cancel invite, remove-with-cascade — as ONE narrative against real rows, so it proves
+# the milestones COMPOSE, not just that each works in isolation. External deps only are
+# mocked: Airbyte (org create), Redis (unavailable in tests), and SES creds forced
+# absent so the invite exercises the real Part-1 dev fallback rather than a mocked email.
+
+
+def _load_permissions(user, org_slug):
+    """
+    Run the REAL CustomJwtAuthMiddleware for (user, org_slug) against REAL DB rows,
+    mocking only Redis (unavailable in tests). Returns the authenticated request on
+    success; raises HttpError exactly where the app enforces org / per-org-user
+    deactivation at permission-load (auth.py:173 / :183). This is how the flow proves a
+    user is BLOCKED or ALLOWED — real enforcement, not a flag read.
+    """
+    request = Mock()
+    request.headers = {"x-dalgo-org": org_slug}
+    token = str(AccessToken.for_user(user))
+    with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
+        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
+    ):
+        mock_redis.return_value.get.return_value = None
+        return CustomJwtAuthMiddleware().authenticate(request, token)
+
+
+def _assert_blocked(user, org_slug, expected_message):
+    """the middleware refuses this (user, org) at permission-load with a 403"""
+    with pytest.raises(HttpError) as excinfo:
+        _load_permissions(user, org_slug)
+    assert excinfo.value.status_code == 403
+    assert str(excinfo.value) == expected_message
+
+
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_week1_full_admin_lifecycle_flow(
+    mock_setup_airbyte, mock_connectors, platform_admin_request, seed_db
+):
+    """
+    The whole Week-1 super-admin story end to end, on real DB state:
+
+      1. admin creates an org via the portal (active, ZERO members)
+      2. admin invites a user by email + role — succeeds with NO real SES (Part 1)
+      3. the user accepts — becomes an OrgUser of the target org at the right role
+      4. admin changes the user's role
+      5. admin deactivates the user IN THIS ORG ONLY — blocked here, untouched elsewhere
+      6. admin reactivates the user — access restored
+      7. admin deactivates the ORG itself — user blocked despite being active
+      8. admin reactivates the org — access restored
+      9. admin invites a 2nd user then cancels it; a DIFFERENT org's invite can't be
+         cancelled through this org's path (404) — org-scoping holds inside the flow
+     10. admin removes the first user — impact count available first, then cascade
+
+    Blocking is proven through the real auth middleware (see _load_permissions).
+    """
+    admin_request = platform_admin_request
+
+    # -- Step 1: create an org via the admin portal --------------------------------
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-akshara")
+    created = post_admin_org(admin_request, AdminCreateOrgSchema(name="Akshara"))
+    assert created.is_active is True
+    assert created.user_count == 0  # a freshly created org has ZERO members
+    org1 = Org.objects.get(id=created.id)
+    assert OrgUser.objects.filter(org=org1).count() == 0
+
+    # -- Step 2: invite a user — succeeds WITHOUT real SES (proves Part 1) ----------
+    # DEBUG=True + no SES creds routes send_invite_user_email through the dev fallback,
+    # so the invite completes and the Invitation row is created without any email mock.
+    with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
+        "ddpui.utils.awsses._ses_available", return_value=False
+    ):
+        post_admin_org_user_invite(
+            admin_request,
+            org1.id,
+            AdminInviteUserSchema(
+                invited_email="priya@akshara.org",
+                invited_role_uuid=_role(ANALYST_ROLE).uuid,
+            ),
+        )
+    invite = Invitation.objects.get(invited_email="priya@akshara.org")
+    assert invite.invited_in_org_id == org1.id  # the TARGET org, not the admin's org
+    assert invite.invited_by.org_id != org1.id  # admin is not a member of Akshara
+    assert invite.invited_new_role.slug == ANALYST_ROLE
+
+    # -- Step 3: the invited user accepts ------------------------------------------
+    _, error = orguserfunctions.accept_invitation_v1(
+        AcceptInvitationSchema(invite_code=invite.invite_code, password="Priya@12345")
+    )
+    assert error is None
+    priya_ou = OrgUser.objects.get(user__email="priya@akshara.org", org=org1)
+    priya_user = priya_ou.user
+    assert priya_ou.new_role.slug == ANALYST_ROLE  # accepted at the invited role
+    assert not Invitation.objects.filter(id=invite.id).exists()  # invite consumed
+
+    # -- Step 4: admin changes the user's role -------------------------------------
+    put_admin_org_user_role(
+        admin_request,
+        org1.id,
+        priya_ou.id,
+        AdminChangeRoleSchema(role_uuid=_role(ACCOUNT_MANAGER_ROLE).uuid),
+    )
+    priya_ou.refresh_from_db()
+    assert priya_ou.new_role.slug == ACCOUNT_MANAGER_ROLE
+
+    # -- Step 5: per-org deactivate — isolation across a SECOND org -----------------
+    # Priya is also a member of a second org. Deactivating her in org1 must not touch
+    # org2 at all. (Real second Org + OrgUser row, per the brief.)
+    org2 = Org.objects.create(name="Bhumi", slug="bhumi")
+    priya_ou2 = OrgUser.objects.create(
+        user=priya_user, org=org2, new_role=_role(GUEST_ROLE)
+    )
+    # sanity: before any deactivation she can load permissions in BOTH orgs
+    assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
+    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
+
+    post_admin_org_user_deactivate(admin_request, org1.id, priya_ou.id)
+    priya_ou.refresh_from_db()
+    priya_ou2.refresh_from_db()
+    priya_user.refresh_from_db()
+    assert priya_ou.is_active is False
+    assert priya_ou2.is_active is True  # the OTHER org is untouched
+    assert priya_user.is_active is True  # the global User flag is never touched
+    # (a) blocked in org1 at permission-load
+    _assert_blocked(
+        priya_user, org1.slug, "your access to this organization has been deactivated"
+    )
+    # (b) org2 access completely unaffected
+    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
+
+    # -- Step 6: reactivate the user — access restored in org1 ---------------------
+    post_admin_org_user_reactivate(admin_request, org1.id, priya_ou.id)
+    priya_ou.refresh_from_db()
+    assert priya_ou.is_active is True
+    assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
+
+    # -- Step 7: deactivate the ORG itself — user blocked despite being active ------
+    post_admin_org_deactivate(admin_request, org1.id)
+    org1.refresh_from_db()
+    priya_ou.refresh_from_db()
+    assert org1.is_active is False
+    assert priya_ou.is_active is True  # the user is active; the ORG is what blocks now
+    _assert_blocked(priya_user, org1.slug, "your organization has been deactivated")
+    # org2 still fine — this org's deactivation is scoped to this org
+    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
+
+    # -- Step 8: reactivate the org — access restored again ------------------------
+    post_admin_org_reactivate(admin_request, org1.id)
+    org1.refresh_from_db()
+    assert org1.is_active is True
+    assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
+
+    # -- Step 9: invite a second user, then cancel; cross-org cancel is 404 --------
+    with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
+        "ddpui.utils.awsses._ses_available", return_value=False
+    ):
+        post_admin_org_user_invite(
+            admin_request,
+            org1.id,
+            AdminInviteUserSchema(
+                invited_email="raj@akshara.org", invited_role_uuid=_role(GUEST_ROLE).uuid
+            ),
+        )
+    raj_invite = Invitation.objects.get(invited_email="raj@akshara.org")
+    delete_admin_org_invitation(admin_request, org1.id, raj_invite.id)
+    assert not Invitation.objects.filter(id=raj_invite.id).exists()  # cancelled
+
+    # a pending invite that belongs to org2 must NOT be cancellable via org1's path
+    with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
+        "ddpui.utils.awsses._ses_available", return_value=False
+    ):
+        post_admin_org_user_invite(
+            admin_request,
+            org2.id,
+            AdminInviteUserSchema(
+                invited_email="pending@bhumi.org",
+                invited_role_uuid=_role(GUEST_ROLE).uuid,
+            ),
+        )
+    bhumi_invite = Invitation.objects.get(invited_email="pending@bhumi.org")
+    with pytest.raises(HttpError) as excinfo:
+        delete_admin_org_invitation(admin_request, org1.id, bhumi_invite.id)
+    assert excinfo.value.status_code == 404
+    assert Invitation.objects.filter(id=bhumi_invite.id).exists()  # survived, org-scoped
+
+    # -- Step 10: removal-impact THEN cascade-remove the first user ----------------
+    # content owned by Priya's org1 membership — this is what removal cascades
+    for i in range(2):
+        Dashboard.objects.create(title=f"d{i}", org=org1, created_by=priya_ou)
+    for i in range(3):
+        Chart.objects.create(
+            title=f"c{i}",
+            chart_type="bar",
+            schema_name="s",
+            table_name="t",
+            org=org1,
+            created_by=priya_ou,
+        )
+    report = ReportSnapshot.objects.create(title="r", org=org1, created_by=priya_ou)
+
+    # the impact count is available BEFORE the destructive remove
+    impact = get_admin_org_user_removal_impact(admin_request, org1.id, priya_ou.id)
+    assert impact.dashboards_deleted == 2
+    assert impact.charts_deleted == 3
+    assert impact.reports_orphaned == 1
+
+    priya_ou_id = priya_ou.id
+    delete_admin_org_user(admin_request, org1.id, priya_ou.id)
+
+    assert not OrgUser.objects.filter(id=priya_ou_id).exists()  # removed from org1
+    assert Dashboard.objects.filter(created_by_id=priya_ou_id).count() == 0  # cascaded
+    assert Chart.objects.filter(created_by_id=priya_ou_id).count() == 0  # cascaded
+    report.refresh_from_db()
+    assert report.created_by is None  # orphaned (SET_NULL), not deleted
+    # the remove is org-scoped: Priya's Bhumi membership is untouched
+    assert OrgUser.objects.filter(id=priya_ou2.id).exists()
+    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
