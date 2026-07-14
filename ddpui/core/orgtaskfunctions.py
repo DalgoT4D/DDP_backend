@@ -29,12 +29,38 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowUpdateSchema3,
 )
 from ddpui.ddpprefect import prefect_service
-from ddpui.core.pipelinefunctions import setup_dbt_core_task_config, setup_dbt_cloud_task_config
-from ddpui.utils.constants import TASK_DBTRUN, TASK_GENERATE_EDR
+from ddpui.core.pipelinefunctions import (
+    setup_dbt_core_task_config,
+    setup_dbt_cloud_task_config,
+    pipeline_with_orgtasks,
+)
+from ddpui.core.orchestrate.pipeline_service import PipelineService
+from ddpui.utils.constants import TASK_GENERATE_EDR, LONG_RUNNING_TASKS
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.models.flow_runs import PrefectFlowRun
 
 logger = CustomLogger("ddpui")
+
+
+def get_transform_task_queue(org: Org):
+    """Return the queue config entry used by manual (transform) dbt deployments.
+
+    Raises:
+        ValueError: if the queue config is missing, the transform_task_queue
+        key is not present, or the queue itself is unavailable/misconfigured.
+    """
+    queue_config = org.get_queue_config()
+    if queue_config is None:
+        raise ValueError(f"queue config not found for org {org.slug}")
+
+    if not hasattr(queue_config, "transform_task_queue"):
+        raise ValueError(f"transform_task_queue key missing in queue config for org {org.slug}")
+
+    transform_queue = queue_config.transform_task_queue
+    if transform_queue is None or not getattr(transform_queue, "name", None):
+        raise ValueError(f"transform_task_queue is not configured for org {org.slug}")
+
+    return transform_queue
 
 
 def create_default_transform_tasks(
@@ -47,8 +73,8 @@ def create_default_transform_tasks(
     for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT], is_system=True).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
 
-        if task.slug == TASK_DBTRUN:
-            # create deployment
+        if task.slug in LONG_RUNNING_TASKS:
+            # create deployment (auto-prepends git + dbt-clean + dbt-deps for dbt tasks)
             create_prefect_deployment_for_dbtcore_task(
                 org_task, cli_profile_block, dbt_project_params
             )
@@ -124,17 +150,55 @@ def create_prefect_deployment_for_dbtcore_task(
     - save the deployment id to an OrgDataFlowv1 object
     - for dbt core operation; the credentials_profile_block is cli profile block
     - for dbt cloud job; the credentials_profile_block is dbt cloud credentials block
+    - only long-running tasks (dbt-run, dbt-test, dbt-seed, dbt-cloud-job) get a
+      deployment; auto-managed prep tasks (git-pull, dbt-clean, dbt-deps) are
+      chained inside long-running deployments and do not get one of their own
     """
+    if org_task.task.slug not in LONG_RUNNING_TASKS:
+        raise ValueError(
+            f"cannot create deployment for {org_task.task.slug} — "
+            f"only long-running tasks ({', '.join(LONG_RUNNING_TASKS)}) get deployments"
+        )
+
     hash_code = generate_hash_id(8)
     deployment_name = f"manual-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
 
+    transform_queue = get_transform_task_queue(org_task.org)
+
     tasks = []
+    # orgtasks that will be mapped to the deployment via DataflowOrgTask; kept in
+    # execution order. For DBT this is the full chain; for DBTCLOUD it's just the
+    # primary task.
+    mapped_orgtasks = [org_task]
+
     if org_task.task.type == TaskType.DBT:
-        tasks = [
-            setup_dbt_core_task_config(
-                org_task, credentials_profile_block, dbt_project_params
-            ).to_json()
+        # Auto-prepend git-pull-or-clone + dbt-clean + dbt-deps ahead of the primary
+        # dbt task, mirroring the chain applied to orchestrated pipelines.
+        org = org_task.org
+        if getattr(transform_queue, "is_workpool_eks", False):
+            git_orgtask = PipelineService.get_or_create_git_clone_orgtask(org)
+        else:
+            git_orgtask = PipelineService.get_or_create_git_pull_orgtask(org)
+
+        chain_orgtasks = [
+            git_orgtask,
+            PipelineService.get_or_create_dbt_clean_orgtask(org),
+            PipelineService.get_or_create_dbt_deps_orgtask(org),
+            org_task,
         ]
+
+        task_configs, err = pipeline_with_orgtasks(
+            org,
+            chain_orgtasks,
+            cli_block=credentials_profile_block,
+            dbt_project_params=dbt_project_params,
+            gitrepo_url=org.dbt.gitrepo_url if org.dbt else None,
+        )
+        if err:
+            raise ValueError(err)
+        tasks = task_configs
+        mapped_orgtasks = chain_orgtasks
+
     elif org_task.task.type == TaskType.DBTCLOUD:
         tasks = [
             setup_dbt_cloud_task_config(
@@ -154,7 +218,7 @@ def create_prefect_deployment_for_dbtcore_task(
                 }
             },
         ),
-        org_task.org.get_queue_config().transform_task_queue,  # manual dbt tasks queue
+        transform_queue,
     )
 
     # store deployment record in django db
@@ -172,10 +236,12 @@ def create_prefect_deployment_for_dbtcore_task(
         dataflow_type="manual",
     )
 
-    DataflowOrgTask.objects.create(
-        dataflow=new_dataflow,
-        orgtask=org_task,
-    )
+    for idx, chained_orgtask in enumerate(mapped_orgtasks):
+        DataflowOrgTask.objects.create(
+            dataflow=new_dataflow,
+            orgtask=chained_orgtask,
+            seq=idx,
+        )
 
     return new_dataflow
 
