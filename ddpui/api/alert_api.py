@@ -11,6 +11,7 @@ from ddpui.core.alerts import scheduling
 from ddpui.core.alerts.alert_service import AlertService
 from ddpui.core.alerts.exceptions import (
     AlertNotFoundError,
+    AlertPermissionError,
     AlertValidationError,
 )
 from ddpui.models.alert import Alert, AlertLog, AlertType
@@ -301,6 +302,8 @@ def delete_alert(request, alert_id: int):
         AlertService.delete_alert(alert_id, orguser.org, orguser)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
     return api_response(success=True)
 
 

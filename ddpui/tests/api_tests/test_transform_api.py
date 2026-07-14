@@ -21,7 +21,6 @@ from ddpui.auth import (
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
     ANALYST_ROLE,
 )
 from ddpui.schemas.org_task_schema import DbtProjectSchema
@@ -196,7 +195,7 @@ def mock_setup_sync_sources(orgdbt: OrgDbt, warehouse: OrgWarehouse):
 
 def test_seed_data(seed_db):
     """a test to seed the database"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
 
@@ -365,13 +364,13 @@ def test_create_dbt_project_check_permission(orguser: OrgUser):
     """
     a failure test to check if the orguser has the correct permission
     """
+    # Access Control v2: analyst is read-only on data infra and lost can_create_dbt_workspace
+    # (pipeline-manager merged into admin). Only admin + super-admin may create a dbt project.
     slugs_have_permission = [
         SUPER_ADMIN_ROLE,
         ACCOUNT_MANAGER_ROLE,
-        ANALYST_ROLE,
-        PIPELINE_MANAGER_ROLE,
     ]
-    slugs_dont_have_permission = [GUEST_ROLE]
+    slugs_dont_have_permission = [GUEST_ROLE, ANALYST_ROLE]
 
     payload = DbtProjectSchema(default_schema="default")
     for slug in slugs_dont_have_permission:

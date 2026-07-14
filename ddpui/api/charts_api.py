@@ -250,7 +250,6 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
         geojson.geojson_data,
         payload.geographic_column,
         payload.value_column,
-        None,  # aggregate_func removed - using metrics
         payload.customizations,
         payload.metrics,
         selected_metric_index,
@@ -868,7 +867,6 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
         geojson.geojson_data,
         payload.geographic_column,
         payload.value_column,
-        None,  # aggregate_func removed - using metrics
         payload.customizations or {},
         payload.metrics,
         selected_metric_index,

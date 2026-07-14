@@ -35,7 +35,9 @@ from ddpui.core.metric.exceptions import (
     MetricNotFoundError,
     MetricValidationError,
     MetricDeleteBlockedError,
+    MetricPermissionError,
 )
+from ddpui.core.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -278,6 +280,12 @@ class MetricService:
     @staticmethod
     def delete_metric(metric_id: int, org: Org, orguser: OrgUser) -> bool:
         metric = MetricService.get_metric(metric_id, org)
+
+        # Authorize before computing consumers so a non-owner is denied without
+        # learning which charts/KPIs depend on the metric
+        if not can_delete_resource(orguser, metric):
+            raise MetricPermissionError("Only the owner or an admin can delete this metric.")
+
         consumers = MetricService.get_metric_consumers(metric_id, org)
 
         if consumers["charts"] or consumers["kpis"]:

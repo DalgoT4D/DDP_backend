@@ -83,7 +83,9 @@ from ddpui.core.kpi.exceptions import (
     KPIServiceError,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
 )
+from ddpui.core.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -317,6 +319,11 @@ class KPIService:
     @staticmethod
     def delete_kpi(kpi_id: int, org: Org, orguser: OrgUser) -> bool:
         kpi = KPIService.get_kpi(kpi_id, org)
+
+        # Authorize before computing dashboard usage so a non-owner is denied
+        # without learning which dashboards depend on the KPI
+        if not can_delete_resource(orguser, kpi):
+            raise KPIPermissionError("Only the owner or an admin can delete this KPI.")
 
         dashboards = KPIService.get_kpi_dashboards(kpi_id, org)
         if dashboards:

@@ -74,6 +74,10 @@ class OrgUser(models.Model):
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
     email_verified = models.BooleanField(default=False)
     llm_optin = models.BooleanField(default=False)  # deprecated
+    has_seen_rbac_notice = models.BooleanField(
+        default=False,
+        help_text="Whether the user has seen the one-time RBAC v2 migration notice",
+    )
     landing_dashboard = models.ForeignKey(
         "ddpui.dashboard",
         on_delete=models.SET_NULL,
@@ -115,6 +119,7 @@ class OrgUserUpdatev1(Schema):
     role_uuid: Optional[uuid.UUID] = None
     email: Optional[str] = None
     active: Optional[bool] = None
+    has_seen_rbac_notice: Optional[bool] = None
 
 
 class OrgUserUpdateNewRole(Schema):
@@ -140,6 +145,7 @@ class OrgUserResponse(Schema):
     org_default_dashboard_id: int | None = None
     subscription_plan: str | None = None
     work_domain: str | None = None
+    has_seen_rbac_notice: bool = False
 
 
 class Invitation(models.Model):
