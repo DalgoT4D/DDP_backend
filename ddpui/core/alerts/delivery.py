@@ -24,7 +24,7 @@ import requests
 
 from ddpui.models.alert import Alert
 from ddpui.models.org_user import OrgUser
-from ddpui.utils import awsses
+from ddpui.utils import awsses, email_templates
 from ddpui.utils.custom_logger import CustomLogger
 
 
@@ -56,11 +56,16 @@ def deliver_email(
     *,
     to_email: str,
     subject: str,
-    body: str,
+    plain_body: str,
+    html_body: str,
 ) -> dict:
-    """Send a plain-text email via SES, returning a delivery dict."""
+    """Send a multipart HTML+plain email via SES, returning a delivery dict.
+
+    Both bodies are prepared once by ``deliver_all`` (via ``render_alert_email``)
+    and passed in — this function is a per-recipient send loop, nothing more.
+    """
     try:
-        awsses.send_text_message(to_email, subject, body)
+        awsses.send_html_message(to_email, subject, plain_body, html_body)
         return {
             "channel": "email",
             "target": to_email,
@@ -118,6 +123,10 @@ def deliver_all(alert: Alert, *, subject: str, body: str) -> list[dict]:
     channels = alert.delivery_channels or []
 
     if "email" in channels:
+        # Wrap the substituted alert body in the shared Dalgo email shell once
+        # per fire — every recipient gets the same rendered pair.
+        plain_body, html_body = email_templates.render_alert_email(alert, body)
+
         recipients = alert.recipients or []
         orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
         orguser_email_by_id: dict[int, str] = {}
@@ -141,8 +150,16 @@ def deliver_all(alert: Alert, *, subject: str, body: str) -> list[dict]:
                     }
                 )
                 continue
-            deliveries.append(deliver_email(to_email=email, subject=subject, body=body))
+            deliveries.append(
+                deliver_email(
+                    to_email=email,
+                    subject=subject,
+                    plain_body=plain_body,
+                    html_body=html_body,
+                )
+            )
 
+    # Slack keeps the raw user body — no HTML shell on webhook posts.
     if "slack" in channels and alert.slack_webhook_url:
         deliveries.append(deliver_slack(webhook_url=alert.slack_webhook_url, body=body))
 
