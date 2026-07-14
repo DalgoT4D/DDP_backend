@@ -511,6 +511,38 @@ class TestSharingStatusOwnerCheck:
 
 
 # ================================================================================
+# Test Sharing - creator-or-admin policy, incl. orphaned snapshots
+# ================================================================================
+
+
+class TestSharingCreatorOrAdmin:
+    """Admins can manage sharing of snapshots they didn't create — including
+    orphaned ones whose creator was deleted (created_by=None)."""
+
+    def test_admin_can_view_sharing_status_of_orphaned_snapshot(self, super_admin_user, snapshot):
+        """an admin can read sharing status after the creator is deleted"""
+        snapshot.created_by = None
+        snapshot.save()
+        request = mock_request(super_admin_user)
+
+        response = get_report_sharing_status(request, snapshot.id)
+
+        assert response["success"] is True
+
+    def test_admin_can_toggle_sharing_of_orphaned_snapshot(self, super_admin_user, snapshot):
+        """an admin can make an orphaned snapshot public"""
+        snapshot.created_by = None
+        snapshot.save()
+        request = mock_request(super_admin_user)
+
+        toggle_report_sharing(request, snapshot.id, ShareToggle(is_public=True))
+
+        snapshot.refresh_from_db()
+        assert snapshot.is_public is True
+        assert snapshot.public_share_token
+
+
+# ================================================================================
 # Test Delete - Owner-only enforcement at service layer
 # ================================================================================
 

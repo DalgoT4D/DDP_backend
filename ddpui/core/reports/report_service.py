@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.ownership import can_delete_resource, is_creator_or_admin
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI
@@ -912,8 +912,10 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("Only report creators can modify sharing settings")
+        if not is_creator_or_admin(orguser, snapshot):
+            raise SnapshotPermissionError(
+                "Only the report creator or an org admin can modify sharing settings"
+            )
 
         if is_public:
             if not snapshot.public_share_token:
@@ -989,8 +991,10 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        if snapshot.created_by != orguser:
-            raise SnapshotPermissionError("Only Report creators can share with others")
+        if not is_creator_or_admin(orguser, snapshot):
+            raise SnapshotPermissionError(
+                "Only the report creator or an org admin can view sharing settings"
+            )
 
         response_data = {
             "is_public": snapshot.is_public,
