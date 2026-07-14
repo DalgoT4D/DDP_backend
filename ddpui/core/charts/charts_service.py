@@ -411,6 +411,9 @@ def metric_sql_alias(metric) -> str:
     Must stay identical between where the query is built (SELECT alias) and where
     the result is read back (row.get(alias)), otherwise every cell reads as None.
     """
+    if metric.column_expression:
+        # Calculated metric — no aggregation/column; alias matches the expression path.
+        return metric.alias or "expression_metric"
     if metric.aggregation.lower() == "count" and metric.column is None:
         return f"count_all_{metric.alias}" if metric.alias else "count_all"
     if not metric.column:
@@ -420,6 +423,8 @@ def metric_sql_alias(metric) -> str:
 
 def metric_display_name(metric) -> str:
     """User-facing header label for a metric."""
+    if metric.column_expression:
+        return metric.alias or "expression_metric"
     if metric.aggregation.lower() == "count" and metric.column is None:
         return metric.alias or "count_all"
     return metric.alias or f"{metric.aggregation}_{metric.column}"
@@ -457,11 +462,14 @@ def build_pivot_table_query(
     for idx, col_dim in enumerate(col_dims):
         query_builder.add_column(column(col_dim).label(f"pivot_col_{idx}"))
 
-    # Add metric aggregations to SELECT
+    # Add metrics to SELECT — calculated metrics are raw aggregate expressions, the
+    # rest are column + aggregation (same split the non-pivot query path uses).
     for metric in payload.metrics:
-        query_builder.add_aggregate_column(
-            metric.column, metric.aggregation, metric_sql_alias(metric)
-        )
+        alias = metric_sql_alias(metric)
+        if metric.column_expression:
+            query_builder.add_column(literal_column(metric.column_expression).label(alias))
+        else:
+            query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
 
     # Add GROUPING() markers for each row dimension
     for row_dim in payload.row_dimensions:

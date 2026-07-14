@@ -1,7 +1,33 @@
 import pytest
 from unittest.mock import MagicMock
 from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
-from ddpui.core.charts.charts_service import build_chart_query
+from ddpui.core.charts.charts_service import (
+    build_chart_query,
+    metric_sql_alias,
+    metric_display_name,
+)
+
+
+class TestExpressionMetricAlias:
+    """metric_sql_alias / metric_display_name must handle calculated (column_expression)
+    metrics — pivot reads results by these aliases, and they used to crash on the
+    None aggregation of an expression metric."""
+
+    def test_sql_alias_uses_metric_alias(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)", alias="Ratio")
+        assert metric_sql_alias(m) == "Ratio"
+
+    def test_sql_alias_falls_back(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)")
+        assert metric_sql_alias(m) == "expression_metric"
+
+    def test_display_name_uses_metric_alias(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)", alias="Ratio")
+        assert metric_display_name(m) == "Ratio"
+
+    def test_display_name_falls_back(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)")
+        assert metric_display_name(m) == "expression_metric"
 
 
 class TestBuildPivotQuery:
@@ -180,6 +206,48 @@ class TestBuildPivotQuery:
         assert "GROUPING" in sql_upper
         assert "_grp_pivot_col_0" in compiled
         assert "_grp_pivot_col_1" in compiled
+
+    def test_pivot_query_supports_calculated_metric(self):
+        """A calculated (column_expression) metric appears as a raw expression in the
+        pivot SELECT with its alias — the query builder must not crash on the missing
+        aggregation/column of an expression metric."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            show_row_subtotals=True,
+            metrics=[
+                ChartMetric(
+                    column_expression="SUM(amount) / NULLIF(COUNT(id), 0)", alias="Avg Spend"
+                ),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        assert "SUM(amount)" in compiled
+        assert "Avg Spend" in compiled  # alias present in SELECT
+        assert "ROLLUP" in compiled.upper()
+
+    def test_pivot_query_supports_simple_and_calculated_together(self):
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+                ChartMetric(column_expression="AVG(amount)", alias="Avg"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        assert "AVG(amount)" in compiled
+        assert "Avg" in compiled
 
     def test_pivot_query_applies_filters(self):
         """Dashboard and chart filters should be applied as WHERE clauses"""
