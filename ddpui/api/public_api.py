@@ -36,6 +36,8 @@ from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDat
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.kpi.kpi_service import KPIService
+from ddpui.core.kpi.exceptions import KPINotFoundError
 from sqlalchemy import func, column, distinct, cast, Float, Date
 
 logger = CustomLogger("ddpui")
@@ -1068,6 +1070,50 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
     except Exception as e:
         logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
+
+
+@public_router.get(
+    "/dashboards/{token}/kpis/{kpi_id}/data/",
+    response={200: ChartDataResponse, 404: PublicErrorResponse},
+)
+def get_public_kpi_data(
+    request,
+    token: str,
+    kpi_id: int,
+    time_grain: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    dashboard_filters: Optional[str] = None,
+):
+    """Get KPI chart data for a public dashboard — no authentication required."""
+    try:
+        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    except Dashboard.DoesNotExist:
+        return 404, PublicErrorResponse(error="Dashboard not found or no longer public", is_valid=False)
+
+    parsed_dashboard_filters = None
+    if dashboard_filters:
+        try:
+            parsed_dashboard_filters = json.loads(dashboard_filters)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid dashboard_filters JSON for public KPI {kpi_id}: {dashboard_filters}")
+
+    try:
+        result = KPIService.get_kpi_data(
+            kpi_id,
+            dashboard.org,
+            time_grain_override=time_grain,
+            date_from=date_from,
+            date_to=date_to,
+            dashboard_filters=parsed_dashboard_filters,
+        )
+    except KPINotFoundError:
+        return 404, PublicErrorResponse(error="KPI not found", is_valid=False)
+    except Exception as e:
+        logger.error(f"Public KPI data error for kpi {kpi_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="KPI data unavailable", is_valid=False)
+
+    return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
 
 
 # =============================================================================
