@@ -187,6 +187,7 @@ def _grant_payload(principal=None, permission="view", email=None, principal_type
 
 
 class TestBulkAddGrant:
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_mixed_selection_applies_where_possible_with_distinct_skip_reasons(
         self, org, analyst, analyst2, member
     ):
@@ -467,6 +468,7 @@ class TestBulkTogglePublic:
 
 
 class TestBulkGates:
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_cross_org_and_unknown_ids_skip_as_not_found(self, org, admin, member):
         """A cross-org resource id must be indistinguishable from a
         nonexistent one — both skip with `not_found`, never a leak. Unknown
@@ -518,6 +520,7 @@ class TestBulkGates:
             {"rtype": "dashboard", "id": str(dash.pk), "reason": "share_permission_denied"}
         ]
 
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_duplicate_items_are_deduplicated(self, org, analyst, member):
         dash = _dashboard(org, analyst)
         response = _bulk(
@@ -574,6 +577,7 @@ class TestBulkGates:
 
 
 class TestBulkAtomicity:
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_one_failing_item_does_not_roll_back_the_others(self, org, analyst, member):
         """Pin: the bulk loop is NOT wrapped in a selection-wide
         transaction. A per-item failure mid-loop (here: forced on the 2nd

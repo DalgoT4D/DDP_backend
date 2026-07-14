@@ -24,6 +24,7 @@ from django.utils import timezone
 from ddpui.auth import MEMBER_ROLE
 from ddpui.core import orguserfunctions
 from ddpui.core.sharing.access_resolver import PERMISSION_RANK, effective_permission
+from ddpui.core.sharing.deep_links import NOUN_BY_RTYPE, build_resource_url, resource_label
 from ddpui.core.sharing.exceptions import (
     GrantNotFoundError,
     PrincipalNotFoundError,
@@ -52,6 +53,10 @@ from ddpui.schemas.access_schema import (
     OwnerOut,
     ViewerOut,
 )
+from ddpui.utils import awsses
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui.core.sharing.sharing_actions")
 
 # Narrower-than comparison for the warn-and-offer protocol (plan Sec 4.5).
 AUDIENCE_ORDER = {
@@ -260,6 +265,31 @@ def _invite_and_create_pending_grant(
     return _email_grant_row(grantor, rtype, resource, email, permission, instant_principal)
 
 
+def _notify_resource_shared(
+    grantor: OrgUser, rtype: str, resource, principal: OrgUser, permission: str
+) -> None:
+    """Email an existing active org user that `resource` was just shared with
+    them (Phase D1). Best-effort: a send failure is logged and swallowed --
+    it must never fail the share request. Sent AFTER the grant row is
+    committed, so a bounced email never leaves a half-applied share."""
+    try:
+        noun = NOUN_BY_RTYPE.get(rtype, rtype)
+        awsses.send_resource_shared_email(
+            to_email=principal.user.email,
+            granter_email=grantor.user.email,
+            resource_name=resource_label(rtype, resource),
+            resource_noun=noun,
+            permission_label="Edit" if permission == "edit" else "View",
+            date_str=timezone.now().strftime("%b %d, %Y"),
+            resource_url=build_resource_url(rtype, resource.pk),
+        )
+    except Exception:  # pylint: disable=broad-except
+        logger.exception(
+            f"failed to send resource-shared email to {principal.user.email} "
+            f"for {rtype} {resource.pk}"
+        )
+
+
 def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -> GrantOut:
     """Grant `payload.permission` on `resource` to a user or group principal.
     A duplicate (same principal, same resource) updates the existing row
@@ -342,7 +372,7 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
                 grantor, rtype, resource, email, payload.permission
             )
 
-    share, _ = ResourceShare.objects.update_or_create(
+    share, created = ResourceShare.objects.update_or_create(
         org_id=grantor.org_id,
         resource_type=rtype,
         resource_id=str(resource.pk),
@@ -355,6 +385,13 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
             "created_by": grantor,
         },
     )
+    # D1: notify only on a genuinely NEW grant to an ACTIVE org user -- never
+    # on a permission update (created is False), never for group grants (this
+    # is the user-principal branch), never on the invite/pending path (that
+    # returns earlier via _invite_and_create_pending_grant, which already
+    # sends its own invitation email).
+    if created and principal.user.is_active:
+        _notify_resource_shared(grantor, rtype, resource, principal, payload.permission)
     return _grant_out(share, {principal.id: principal}, {})
 
 

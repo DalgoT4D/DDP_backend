@@ -16,12 +16,18 @@ to the resolver's ownership semantics.
 
 from typing import Optional
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone as django_timezone
 
 from ddpui.auth import ADMIN_ROLE, SUPER_ADMIN_ROLE
 from ddpui.core.sharing.access_resolver import PERMISSION_RANK, effective_permission
+from ddpui.core.sharing.deep_links import (
+    DEEP_LINK_PATH as _DEEP_LINK_PATH,  # noqa: F401  (re-exported; extracted to deep_links)
+    NOUN_BY_RTYPE as _NOUN_BY_RTYPE,
+    build_resource_url as _build_resource_url,
+    frontend_url as _frontend_url,
+    resource_label as _resource_label,
+)
 from ddpui.core.sharing.exceptions import SharingValidationError
 from ddpui.core.sharing.sharing_actions import _entry_for, _orguser_name, _owner_orguser
 from ddpui.core.sharing.shareable_types import get_resource_type
@@ -40,57 +46,6 @@ from ddpui.schemas.access_schema import (
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.sharing.access_requests")
-
-# Deep-link shape per rtype -- each query param matches what the webapp page
-# actually reads (Task 15b): /alerts reads `?alertId=` (Task 13's
-# `build_alert_url` convention), /metrics reads `?highlight=` (row highlight
-# in metrics-library), /kpis reads `?open=` (auto-opens the detail drawer);
-# dashboards/reports route by path. Not a registry concern
-# (shareable_types.py is capability data, not presentation) -- kept here,
-# the only caller.
-_DEEP_LINK_PATH = {
-    "dashboard": "/dashboards/{id}",
-    "report": "/reports/{id}",
-    "alert": "/alerts?alertId={id}",
-    "metric": "/metrics?highlight={id}",
-    "kpi": "/kpis?open={id}",
-}
-
-_NOUN_BY_RTYPE = {
-    "dashboard": "dashboard",
-    "report": "report",
-    "alert": "alert",
-    "metric": "metric",
-    "kpi": "KPI",
-}
-
-
-def _frontend_url() -> str:
-    return (
-        getattr(settings, "FRONTEND_URL_V2", None)
-        or getattr(settings, "FRONTEND_URL", None)
-        or "http://localhost:3001"
-    )
-
-
-def _build_resource_url(rtype: str, resource_id) -> str:
-    """Deep link back to `resource` in the frontend (best-effort -- falls
-    back to the bare frontend URL for an rtype this map doesn't know, which
-    never happens for a registered rtype today)."""
-    path_template = _DEEP_LINK_PATH.get(rtype)
-    if path_template is None:
-        return _frontend_url()
-    return f"{_frontend_url()}{path_template.format(id=resource_id)}"
-
-
-def _resource_label(rtype: str, resource) -> str:
-    """Best-effort human label: `title` (dashboard/report) or `name`
-    (alert/metric/kpi); falls back to a generic `rtype #id`."""
-    label = getattr(resource, "title", None) or getattr(resource, "name", None)
-    if label:
-        return label
-    noun = _NOUN_BY_RTYPE.get(rtype, rtype)
-    return f"{noun} #{resource.pk}"
 
 
 def _requester_out(orguser: Optional[OrgUser]) -> Optional[RequesterOut]:

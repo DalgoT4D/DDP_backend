@@ -281,6 +281,7 @@ def _post_grant_email(caller, rtype, resource, email, permission="view"):
 
 
 class TestCreateGrant:
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_owner_grants_view_then_edit_updates_in_place(self, org, analyst, member):
         dashboard = _dashboard(org, analyst)
 
@@ -298,6 +299,7 @@ class TestCreateGrant:
         assert rows.count() == 1
         assert rows.first().permission == "edit"
 
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_editor_via_grant_can_grant_up_to_edit(self, org, analyst, analyst2, member):
         dashboard = _dashboard(org, analyst)
         _grant(org, "dashboard", dashboard, analyst2, permission="edit")
@@ -401,6 +403,7 @@ class TestCreateGrant:
 
 
 class TestCreateGrantByEmail:
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
     def test_existing_user_email_grants_instantly_no_invitation(self, org, analyst, member):
         """Sharing with an email that already belongs to an OrgUser in this
         org resolves to that OrgUser immediately -- no Invitation, no
@@ -745,3 +748,79 @@ class TestUpdateGeneralAccess:
         dashboard.refresh_from_db()
         assert dashboard.general_audience == GeneralAudience.ALL_USERS  # nothing committed
         assert ResourceShare.objects.filter(id=foreign_share.id).exists()
+
+
+# ================================================================================
+# D1: "shared a resource with you" notification email
+# ================================================================================
+
+
+class TestResourceSharedEmail:
+    def test_new_grant_to_active_user_sends_email(self, org, analyst, member):
+        dashboard = _dashboard(org, analyst)
+        with patch("ddpui.utils.awsses.send_resource_shared_email") as mock_send:
+            _post_grant(analyst, "dashboard", dashboard, member, "view")
+        assert mock_send.call_count == 1
+        assert mock_send.call_args.kwargs["to_email"] == member.user.email
+
+    def test_permission_update_does_not_send_email(self, org, analyst, member):
+        """The second (in-place update) grant must not re-notify."""
+        dashboard = _dashboard(org, analyst)
+        with patch("ddpui.utils.awsses.send_resource_shared_email") as mock_send:
+            _post_grant(analyst, "dashboard", dashboard, member, "view")  # created -> sends
+            _post_grant(analyst, "dashboard", dashboard, member, "edit")  # update -> silent
+        assert mock_send.call_count == 1
+
+    def test_group_grant_does_not_send_email(self, org, analyst):
+        dashboard = _dashboard(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Funders", created_by=analyst)
+        with patch("ddpui.utils.awsses.send_resource_shared_email") as mock_send:
+            _post_grant(analyst, "dashboard", dashboard, group, "view", principal_type="group")
+        assert mock_send.call_count == 0
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_invite_path_does_not_send_shared_email(self, org, analyst):
+        """An unknown email goes through the invite/pending path, which sends
+        its own invitation email -- the D1 'shared with you' email must NOT
+        also fire (no double-send)."""
+        dashboard = _dashboard(org, analyst)
+        with patch("ddpui.utils.awsses.send_resource_shared_email") as mock_send:
+            _post_grant_email(analyst, "dashboard", dashboard, "future@test.com", "view")
+        assert mock_send.call_count == 0
+
+    def test_inactive_user_grant_does_not_send_email(self, org, analyst, member):
+        member.user.is_active = False
+        member.user.save(update_fields=["is_active"])
+        dashboard = _dashboard(org, analyst)
+        with patch("ddpui.utils.awsses.send_resource_shared_email") as mock_send:
+            _post_grant(analyst, "dashboard", dashboard, member, "view")
+        assert mock_send.call_count == 0
+
+    def test_email_send_failure_does_not_break_the_grant(self, org, analyst, member):
+        """A raising SES send is logged and swallowed -- the grant row still
+        commits and the endpoint returns success."""
+        dashboard = _dashboard(org, analyst)
+        with patch(
+            "ddpui.utils.awsses.send_resource_shared_email",
+            side_effect=RuntimeError("SES down"),
+        ):
+            response = _post_grant(analyst, "dashboard", dashboard, member, "view")
+        assert response["success"] is True
+        assert ResourceShare.objects.filter(
+            resource_type="dashboard", resource_id=str(dashboard.pk), principal_id=member.id
+        ).exists()
+
+    def test_subject_and_body_format(self, org, analyst, member):
+        """Pin the composed subject + plain-text body (names/types/link only,
+        never resource data)."""
+        dashboard = _dashboard(org, analyst)  # title == "Access Api Dashboard"
+        with patch("ddpui.utils.awsses.send_text_message") as mock_send_text:
+            _post_grant(analyst, "dashboard", dashboard, member, "edit")
+
+        assert mock_send_text.call_count == 1
+        to_email, subject, message = mock_send_text.call_args.args
+        assert to_email == member.user.email
+        assert subject == f"{analyst.user.email} shared a dashboard with you"
+        assert "Access Api Dashboard · dashboard —" in message
+        assert "You have been granted Edit access to this dashboard." in message
+        assert f"/dashboards/{dashboard.pk}" in message

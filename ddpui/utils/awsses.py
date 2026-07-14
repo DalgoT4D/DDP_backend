@@ -123,6 +123,45 @@ Click here to accept: {invite_url}
     send_text_message(to_email, "Welcome to Dalgo", message)
 
 
+def send_resource_shared_email(
+    to_email: str,
+    granter_email: str,
+    resource_name: str,
+    resource_noun: str,
+    permission_label: str,
+    date_str: str,
+    resource_url: str,
+) -> None:
+    """Notify an existing active org user that a resource was shared with
+    them (Resource Sharing / Phase D1). Names, types and a deep link only --
+    never resource data."""
+    subject = f"{granter_email} shared a {resource_noun} with you"
+    message = f"""Hello,
+
+{resource_name} · {resource_noun} — {date_str}
+
+You have been granted {permission_label} access to this {resource_noun}.
+
+View: {resource_url}
+"""
+    send_text_message(to_email, subject, message)
+
+
+def send_added_to_group_email(
+    to_email: str, group_name: str, added_by_email: str, workspace_url: str
+) -> None:
+    """Notify an existing active org user that they were added to a group
+    (Resource Sharing / Phase D2)."""
+    subject = f"You have been added to the {group_name} group by {added_by_email}"
+    message = f"""Hello,
+
+You now automatically inherit access to all resources shared with the {group_name} group.
+
+Explore Workspace: {workspace_url}
+"""
+    send_text_message(to_email, subject, message)
+
+
 def send_youve_been_added_email(to_email: str, added_by: str, org_name: str) -> None:
     """sends an email notification informing an existing dalgo user that they have
     been granted access to a new org
