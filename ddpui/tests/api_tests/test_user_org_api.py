@@ -1037,6 +1037,67 @@ def test_post_organization_user_accept_invite_v1_secondaccount(orguser):
     assert User.objects.filter(email="invited_email").count() == 1
 
 
+# ==== M4 regression: the org-param refactor must not change single-org behavior ==
+
+
+def test_accept_invitation_v1_legacy_row_falls_back_to_invited_by_org(orguser):
+    """
+    REGRESSION (admin portal M4): a pre-migration invitation has invited_in_org=None.
+    accept_invitation_v1 must fall back to invited_by.org for such rows, so an existing
+    pending invite still lands the user in exactly the org it did before invited_in_org
+    existed. This is the guarantee that live pending invites keep working.
+    """
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    legacy_invite = Invitation.objects.create(
+        invited_email="legacy_invitee",
+        invited_by=orguser,
+        invited_in_org=None,  # legacy / pre-migration row
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="legacy_code",
+        invited_new_role=guest_role,
+    )
+    assert legacy_invite.invited_in_org is None
+
+    request = mock_request(orguser)
+    payload = AcceptInvitationSchema(invite_code="legacy_code", password="password")
+    response = post_organization_user_accept_invite_v1(request, payload)
+
+    assert response.email == "legacy_invitee"
+    # landed in invited_by.org (the fallback), exactly as before the refactor
+    assert (
+        OrgUser.objects.filter(
+            user__email="legacy_invitee", org=orguser.org, new_role=guest_role
+        ).count()
+        == 1
+    )
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+def test_invite_v1_single_org_sets_invited_in_org_and_accept_round_trips(orguser):
+    """
+    REGRESSION (admin portal M4): the single-org invite endpoint now stamps
+    invited_in_org = the inviter's own org, and accept round-trips the user into that
+    same org. Behavior is identical to before for the regular app — the new column is
+    simply set to the inviter's org.
+    """
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    request = mock_request(orguser)
+    payload = NewInvitationSchema(invited_email="roundtrip", invited_role_uuid=guest_role.uuid)
+
+    post_organization_user_invite_v1(request, payload)
+
+    inv = Invitation.objects.filter(invited_email="roundtrip", invited_by=orguser).first()
+    assert inv is not None
+    assert inv.invited_in_org_id == orguser.org_id  # stamped with the inviter's own org
+
+    accept = post_organization_user_accept_invite_v1(
+        mock_request(orguser),
+        AcceptInvitationSchema(invite_code=inv.invite_code, password="password"),
+    )
+    assert accept.email == "roundtrip"
+    assert OrgUser.objects.filter(user__email="roundtrip", org=orguser.org).count() == 1
+
+
 # ================================================================================
 def test_post_forgot_password_nosuchuser():
     """success test, invalid email address"""

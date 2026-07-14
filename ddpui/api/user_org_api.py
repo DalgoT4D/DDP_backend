@@ -326,34 +326,17 @@ def put_organization_user_v1(request, payload: OrgUserUpdatev1):
 )
 @has_permission(["can_edit_orguser_role"])
 def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
-    """update another OrgUser's role"""
+    """update another OrgUser's role (single-org wrapper around the org-param core)"""
     orguser: OrgUser = request.orguser
 
-    if not orguser.new_role:
-        raise HttpError(403, "Insufficient permissions")
-
-    role_to_be_assgined = Role.objects.filter(uuid=payload.role_uuid).first()
-
-    if not role_to_be_assgined:
-        raise HttpError(400, "Invalid role")
-
-    # you cannot assign a role that is higher than yours
-    if role_to_be_assgined.level > orguser.new_role.level:
-        raise HttpError(403, "Insufficient permissions")
-
-    request_email = payload.toupdate_email.lower().strip()
-    orguser_to_be_assigned = (
-        OrgUser.objects.filter(user__email__iexact=request_email, org=orguser.org)
-        .exclude(user__email__iexact=orguser.user.email)
-        .first()
+    result, error = orguserfunctions.change_orguser_role_in_org(
+        orguser.org, orguser, payload.toupdate_email, payload.role_uuid
     )
-    if not orguser_to_be_assigned:
-        raise HttpError(400, "User does not exist")
+    if error:
+        # preserve the original status codes: permission failures are 403, the rest 400
+        raise HttpError(403 if error == "Insufficient permissions" else 400, error)
 
-    orguser_to_be_assigned.new_role = role_to_be_assgined
-    orguser_to_be_assigned.save()
-
-    return {"success": 1}
+    return result
 
 
 @user_org_router.post("/organizations/warehouse/")

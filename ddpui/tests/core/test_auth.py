@@ -184,6 +184,96 @@ def test_authenticate_allows_reactivated_org(
     org.delete()
 
 
+@patch("ddpui.auth.User.objects.filter")
+@patch("ddpui.auth.OrgUser.objects.filter")
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.auth.set_roles_and_permissions_in_redis")
+def test_authenticate_blocks_deactivated_orguser(
+    mock_set_roles,
+    mock_redis_client,
+    mock_org_user_filter,
+    mock_user_filter,
+    mock_request,
+    mock_user,
+    seed_db,
+):
+    """
+    THE per-org deactivation test (M4): a user deactivated in THIS org
+    (OrgUser.is_active=False) is blocked with 403 at permission-load, even though the
+    org itself is active. If this regresses, per-org "deactivate user" silently does
+    nothing. Distinct message from the org-level block so the two are diagnosable.
+    """
+    active_org = Org.objects.create(name="Active Org", slug="active-org", is_active=True)
+    deactivated_orguser = OrgUser.objects.create(
+        user=mock_user,
+        org=active_org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        is_active=False,  # deactivated in THIS org only
+    )
+    mock_user_filter.return_value.first.return_value = mock_user
+    mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
+        deactivated_orguser
+    )
+    mock_request.headers["x-dalgo-org"] = "active-org"
+    token = str(AccessToken.for_user(mock_user))
+
+    middleware = CustomJwtAuthMiddleware()
+    with pytest.raises(HttpError) as excinfo:
+        middleware.authenticate(mock_request, token)
+    assert excinfo.value.status_code == 403
+    assert str(excinfo.value) == "your access to this organization has been deactivated"
+
+    deactivated_orguser.delete()
+    active_org.delete()
+
+
+@patch("ddpui.auth.User.objects.filter")
+@patch("ddpui.auth.OrgUser.objects.filter")
+@patch("ddpui.auth.RedisClient.get_instance")
+@patch("ddpui.auth.set_roles_and_permissions_in_redis")
+def test_authenticate_allows_active_orguser(
+    mock_set_roles,
+    mock_redis_client,
+    mock_org_user_filter,
+    mock_user_filter,
+    mock_request,
+    mock_user,
+    seed_db,
+):
+    """
+    Risk guard: the per-org check must NEVER block an ACTIVE user. An OrgUser with
+    is_active=True (the default, and what the backfill sets for every active user)
+    authenticates normally. This is the test that proves the new check can't lock out
+    someone who should have access.
+    """
+    org = Org.objects.create(name="Normal Org", slug="normal-org", is_active=True)
+    active_orguser = OrgUser.objects.create(
+        user=mock_user,
+        org=org,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        is_active=True,
+    )
+    mock_user_filter.return_value.first.return_value = mock_user
+    mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
+        active_orguser
+    )
+    mock_redis_client.return_value.get.return_value = json.dumps(
+        {str(active_orguser.new_role.id): ["perm1"]}
+    )
+    mock_request.headers["x-dalgo-org"] = "normal-org"
+    token = str(AccessToken.for_user(mock_user))
+
+    middleware = CustomJwtAuthMiddleware()
+    result = middleware.authenticate(mock_request, token)
+
+    assert result == mock_request
+    assert result.orguser == active_orguser
+    assert result.permissions == ["perm1"]
+
+    active_orguser.delete()
+    org.delete()
+
+
 @patch("ddpui.auth.AccessToken")
 def test_authenticate_invalid_token(mock_access_token, mock_request):
     """Test authentication with an invalid token."""
