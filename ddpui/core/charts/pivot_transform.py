@@ -2,11 +2,16 @@
 Pivot table post-processing: flattens ROLLUP output into a list of self-describing cells.
 
 Each ROLLUP row becomes one cell tagged with (row_kind, col_kind). The tags name
-which of the 3x3 grid regions the cell belongs to; the frontend derives the axes,
-spans, and layout from the cells. Nothing here pre-shapes a grid.
+which of the 3x3 grid regions the cell belongs to; the frontend derives the row
+axis, spans, and layout from the cells. Nothing here pre-shapes a grid.
+
+The one thing the frontend cannot derive is column order: ROLLUP output is
+row-major and sparse, so the response also carries a canonical, globally-sorted
+column axis (column_keys / column_subtotal_keys) sorted by raw value here — where
+the native types (datetime for time grains) are still available.
 
 Column keys are lists like ["Maharashtra", "Education"] for a two-column-dimension
-pivot. Cell order mirrors the input (SQL ORDER BY); this module never re-sorts.
+pivot.
 """
 NULL_DISPLAY_LABEL = "(No value)"
 
@@ -64,6 +69,42 @@ def _col_key(row: dict, num_col_dims: int) -> list[str]:
     return parts
 
 
+def _raw_col_key(row: dict, num_col_dims: int) -> tuple:
+    """Unformatted (native-typed) real column-dimension values, up to the first
+    rolled-up dim. Used only for sorting the column axis so time-grained headers
+    order chronologically (native datetime) rather than lexically."""
+    parts = []
+    for i in range(num_col_dims):
+        if row.get(f"_grp_pivot_col_{i}", 0) == 1:
+            break
+        parts.append(row.get(f"pivot_col_{i}"))
+    return tuple(parts)
+
+
+def _raw_sort_key(raw_key: tuple) -> tuple:
+    """Sort key ordering NULLs last and comparing raw values by their native type."""
+    return tuple((v is None, v) for v in raw_key)
+
+
+def _ordered_column_axis(
+    flat_rows: list[dict], num_col_dims: int, col_kind: str
+) -> list[list[str]]:
+    """The canonical, globally-sorted list of unique column keys of one col_kind.
+
+    ROLLUP output is row-major and may be sparse, so the column order cannot be
+    read off cell arrival order — we collect every distinct key and sort by its
+    raw value. `formatted_by_raw` maps raw tuple -> display key; we sort on raw,
+    emit formatted.
+    """
+    if num_col_dims == 0:
+        return []
+    formatted_by_raw: dict[tuple, list[str]] = {}
+    for row in flat_rows:
+        if _classify_col_kind(row, num_col_dims) == col_kind:
+            formatted_by_raw[_raw_col_key(row, num_col_dims)] = _col_key(row, num_col_dims)
+    return [formatted_by_raw[r] for r in sorted(formatted_by_raw, key=_raw_sort_key)]
+
+
 def rotate_to_pivot(
     flat_rows: list[dict],
     row_dim_cols: list[str],
@@ -86,14 +127,17 @@ def rotate_to_pivot(
             "values":   [<metric>, ...],
         }
 
-    Subtotal cells are dropped unless their toggle is on. Cell order is preserved
-    from the input, so chronological ordering rides on the SQL ORDER BY.
+    Subtotal cells are dropped unless their toggle is on. Row order is preserved
+    from the input; the column axis (column_keys / column_subtotal_keys) is the
+    canonical sorted order the frontend must render columns in.
 
     Returns:
         {
             "row_dimension_names": ["district", "program"],
             "column_dimension_names": ["month", "program"],
             "metric_headers": ["Count", "Spend"],
+            "column_keys": [["2026-01", "Education"], ...],   # sorted leaf axis
+            "column_subtotal_keys": [["2026-01"], ...],       # [] unless enabled
             "cells": [...],
         }
     """
@@ -119,9 +163,19 @@ def rotate_to_pivot(
             }
         )
 
+    # The canonical column axes are sorted here (raw value) because ROLLUP output is
+    # row-major and sparse — the frontend cannot recover column order from the cells.
+    column_subtotal_keys = (
+        _ordered_column_axis(flat_rows, num_col_dims, "col_subtotal")
+        if show_column_subtotals
+        else []
+    )
+
     return {
         "row_dimension_names": row_dim_cols,
         "column_dimension_names": col_dim_names,
         "metric_headers": metric_display_names if metric_display_names else metric_aliases,
+        "column_keys": _ordered_column_axis(flat_rows, num_col_dims, "leaf"),
+        "column_subtotal_keys": column_subtotal_keys,
         "cells": cells,
     }

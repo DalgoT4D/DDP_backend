@@ -186,6 +186,8 @@ class TestContract:
             "row_dimension_names",
             "column_dimension_names",
             "metric_headers",
+            "column_keys",
+            "column_subtotal_keys",
             "cells",
         }
         assert result["row_dimension_names"] == ["district", "program"]
@@ -450,6 +452,98 @@ class TestCellOrderPreserved:
         )
         leaf_keys = [c["col_key"] for c in result["cells"] if c["col_kind"] == "leaf"]
         assert leaf_keys == [["2026-01"], ["2026-02"], ["2026-03"]]
+
+
+class TestColumnOrdering:
+    """The response carries a canonical, globally-sorted column axis.
+
+    ROLLUP output is row-major and can be sparse (a row may skip a column that a
+    later row has). The column order therefore cannot be derived from cell arrival
+    order — the backend sorts it here by raw value so headers are always correct.
+    """
+
+    def test_sparse_leaf_columns_sorted_globally(self):
+        # District A has no Feb; district B has all three months. In arrival order
+        # the columns first appear as Jan, Mar (from A), then Feb (from B) — so a
+        # first-appearance axis would wrongly yield [Jan, Mar, Feb].
+        rows = [
+            {
+                "district": "A",
+                "pivot_col_0": "2026-01",
+                "Count": 1,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "A",
+                "pivot_col_0": "2026-03",
+                "Count": 2,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "B",
+                "pivot_col_0": "2026-01",
+                "Count": 3,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "B",
+                "pivot_col_0": "2026-02",
+                "Count": 4,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "B",
+                "pivot_col_0": "2026-03",
+                "Count": 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["month"],
+            metric_aliases=["Count"],
+        )
+        assert result["column_keys"] == [["2026-01"], ["2026-02"], ["2026-03"]]
+
+    def test_column_subtotal_keys_ordered_and_gated(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_MULTI_COL,
+            row_dim_cols=["district"],
+            num_col_dims=2,
+            col_dim_names=["month", "program"],
+            metric_aliases=["Count"],
+            show_column_subtotals=True,
+        )
+        assert result["column_keys"] == [["2026-01", "Education"], ["2026-01", "Health"]]
+        assert result["column_subtotal_keys"] == [["2026-01"]]
+
+    def test_column_subtotal_keys_empty_when_disabled(self):
+        result = rotate_to_pivot(
+            flat_rows=SAMPLE_ROWS_MULTI_COL,
+            row_dim_cols=["district"],
+            num_col_dims=2,
+            col_dim_names=["month", "program"],
+            metric_aliases=["Count"],
+        )
+        assert result["column_subtotal_keys"] == []
+
+    def test_no_column_dims_empty_axis(self):
+        result = rotate_to_pivot(
+            flat_rows=[{"district": "M", "Count": 1, "_grp_district": 0}],
+            row_dim_cols=["district"],
+            num_col_dims=0,
+            col_dim_names=[],
+            metric_aliases=["Count"],
+        )
+        assert result["column_keys"] == []
+        assert result["column_subtotal_keys"] == []
 
 
 class TestPivotSqlAliasContract:
