@@ -1074,7 +1074,7 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
 
 @public_router.get(
     "/dashboards/{token}/kpis/{kpi_id}/data/",
-    response={200: ChartDataResponse, 404: PublicErrorResponse},
+    response={200: ChartDataResponse, 400: PublicErrorResponse, 404: PublicErrorResponse},
 )
 def get_public_kpi_data(
     request,
@@ -1097,6 +1097,7 @@ def get_public_kpi_data(
             parsed_dashboard_filters = json.loads(dashboard_filters)
         except json.JSONDecodeError:
             logger.warning(f"Invalid dashboard_filters JSON for public KPI {kpi_id}: {dashboard_filters}")
+            return 400, PublicErrorResponse(error="Invalid dashboard_filters: must be valid JSON", is_valid=False)
 
     try:
         result = KPIService.get_kpi_data(
