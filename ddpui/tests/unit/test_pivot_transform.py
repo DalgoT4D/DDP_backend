@@ -454,6 +454,113 @@ class TestCellOrderPreserved:
         assert leaf_keys == [["2026-01"], ["2026-02"], ["2026-03"]]
 
 
+class TestGrandTotalGating:
+    """The two grand-total toggles are honored in the transform.
+
+    - show_row_grand_total gates the rightmost "Total" column (col_kind row_total),
+      but only when column dimensions exist (without them, row_total holds the
+      primary data and must always survive).
+    - show_column_grand_total gates the bottom "Total" row (row_kind grand_total).
+    """
+
+    def test_row_grand_total_dropped_with_col_dims(self):
+        rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Edu",
+                "Count": 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "Mumbai",
+                "pivot_col_0": None,
+                "Count": 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 1,
+            },
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["program"],
+            metric_aliases=["Count"],
+            show_row_grand_total=False,
+        )
+        kinds = [c["col_kind"] for c in result["cells"]]
+        assert "row_total" not in kinds
+        assert "leaf" in kinds
+
+    def test_row_grand_total_kept_without_col_dims(self):
+        # No column dims: the single value column IS the data, never a grand total.
+        rows = [{"district": "Mumbai", "Count": 5, "_grp_district": 0}]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=0,
+            col_dim_names=[],
+            metric_aliases=["Count"],
+            show_row_grand_total=False,
+        )
+        assert result["cells"][0]["col_kind"] == "row_total"
+        assert result["cells"][0]["values"] == [5]
+
+    def test_column_grand_total_dropped(self):
+        rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Edu",
+                "Count": 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": None,
+                "pivot_col_0": "Edu",
+                "Count": 5,
+                "_grp_district": 1,
+                "_grp_pivot_col_0": 0,
+            },
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["program"],
+            metric_aliases=["Count"],
+            show_column_grand_total=False,
+        )
+        assert all(c["row_kind"] != "grand_total" for c in result["cells"])
+
+    def test_column_grand_total_kept_when_enabled(self):
+        rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Edu",
+                "Count": 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": None,
+                "pivot_col_0": "Edu",
+                "Count": 5,
+                "_grp_district": 1,
+                "_grp_pivot_col_0": 0,
+            },
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["program"],
+            metric_aliases=["Count"],
+            show_column_grand_total=True,
+        )
+        assert any(c["row_kind"] == "grand_total" for c in result["cells"])
+
+
 class TestColumnOrdering:
     """The response carries a canonical, globally-sorted column axis.
 
@@ -612,6 +719,10 @@ class TestGetPivotTableDataPipeline:
             row_dimensions=["district"],
             column_dimensions=["program"],
             metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
+            # Enable both grand totals so the pipeline emits the row_total + grand_total
+            # cells asserted below (the flags now gate these end-to-end).
+            show_row_grand_total=True,
+            show_column_grand_total=True,
         )
         alias = metric_sql_alias(payload.metrics[0])  # "Count"
 
@@ -722,3 +833,43 @@ class TestGetPivotTableDataPipeline:
         result, _ = self._run(payload, flat_rows)
         leaf = [c for c in result["cells"] if c["col_kind"] == "leaf"][0]
         assert leaf["values"] == [None]  # value lost because the alias didn't match
+
+    def test_grand_total_flags_gate_cells_end_to_end(self):
+        # show_row_grand_total / show_column_grand_total default False on the payload;
+        # the service must then drop the rightmost Total column and bottom Total row.
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
+        )
+        alias = metric_sql_alias(payload.metrics[0])
+        flat_rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Edu",
+                alias: 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "Mumbai",
+                "pivot_col_0": None,
+                alias: 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 1,
+            },
+            {
+                "district": None,
+                "pivot_col_0": None,
+                alias: 5,
+                "_grp_district": 1,
+                "_grp_pivot_col_0": 1,
+            },
+        ]
+        result, _ = self._run(payload, flat_rows)
+        # Only the leaf cell survives; row_total (rightmost) and grand_total (bottom) gone.
+        assert [c["col_kind"] for c in result["cells"]] == ["leaf"]
+        assert all(c["row_kind"] != "grand_total" for c in result["cells"])

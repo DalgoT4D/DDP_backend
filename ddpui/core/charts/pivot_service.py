@@ -54,4 +54,6 @@ def get_pivot_table_data(
         metric_display_names=metric_display_names,
         show_column_subtotals=payload.show_column_subtotals,
         show_row_subtotals=payload.show_row_subtotals,
+        show_row_grand_total=payload.show_row_grand_total,
+        show_column_grand_total=payload.show_column_grand_total,
     )

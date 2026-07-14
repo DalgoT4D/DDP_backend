@@ -114,6 +114,8 @@ def rotate_to_pivot(
     metric_display_names: list[str] | None = None,
     show_column_subtotals: bool = False,
     show_row_subtotals: bool = True,
+    show_row_grand_total: bool = True,
+    show_column_grand_total: bool = True,
 ) -> dict:
     """
     Flatten ROLLUP rows into a cells[] response.
@@ -127,9 +129,13 @@ def rotate_to_pivot(
             "values":   [<metric>, ...],
         }
 
-    Subtotal cells are dropped unless their toggle is on. Row order is preserved
-    from the input; the column axis (column_keys / column_subtotal_keys) is the
-    canonical sorted order the frontend must render columns in.
+    Subtotal and grand-total cells are dropped unless their toggle is on:
+    show_row_subtotals / show_column_subtotals gate the subtotal axes,
+    show_column_grand_total gates the bottom "Total" row, and show_row_grand_total
+    gates the rightmost "Total" column (ignored when there are no column dims, since
+    row_total then holds the primary data). Row order is preserved from the input;
+    the column axis (column_keys / column_subtotal_keys) is the canonical sorted
+    order the frontend must render columns in.
 
     Returns:
         {
@@ -141,16 +147,24 @@ def rotate_to_pivot(
             "cells": [...],
         }
     """
+    has_col_dims = num_col_dims > 0
     cells = []
     for row in flat_rows:
         row_kind = _classify_row_kind(row, row_dim_cols)
         col_kind = _classify_col_kind(row, num_col_dims)
 
-        # ROLLUP always emits intermediate subtotal rows; drop them when the
-        # payload didn't ask for that axis of subtotals.
+        # ROLLUP always emits the intermediate subtotal / grand-total rows; drop the
+        # ones the payload didn't ask for.
         if row_kind == "row_subtotal" and not show_row_subtotals:
             continue
         if col_kind == "col_subtotal" and not show_column_subtotals:
+            continue
+        # Bottom "Total" row (each column across rows).
+        if row_kind == "grand_total" and not show_column_grand_total:
+            continue
+        # Rightmost "Total" column (each row across cols) — only a grand total when
+        # column dims exist; without them row_total holds the primary data.
+        if col_kind == "row_total" and has_col_dims and not show_row_grand_total:
             continue
 
         cells.append(
