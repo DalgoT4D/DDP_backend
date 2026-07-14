@@ -7,6 +7,10 @@ from ninja.errors import HttpError
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask
+from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.org_plans import OrgPlans
+from ddpui.models.org_preferences import OrgPreferences
+from ddpui.models.llm import LlmSession
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -77,10 +81,15 @@ class OrgCleanupService:
             delete_transform_orgtask_ids.append(org_task.id)
 
         # delete deployments in prefect related to transform tasks
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            orgtask__id__in=delete_transform_orgtask_ids
-        ).all():
-            dataflow = dataflow_orgtask.dataflow
+        # iterate over distinct dataflows (a chained manual dataflow has
+        # multiple DataflowOrgTask rows pointing at the same dataflow — the
+        # cascade delete during the loop would otherwise invalidate later rows)
+        dataflow_ids = set(
+            DataflowOrgTask.objects.filter(
+                orgtask__id__in=delete_transform_orgtask_ids
+            ).values_list("dataflow_id", flat=True)
+        )
+        for dataflow in OrgDataFlowv1.objects.filter(id__in=dataflow_ids):
             logger.info(
                 f"Will delete dataflow deployment: {dataflow.deployment_name} from prefect & DB"
             )
@@ -311,11 +320,21 @@ class OrgCleanupService:
 
     def delete_orgusers(self):
         """
-        deletes all org users
+        deletes all org users; first removes UserPreferences rows that FK to
+        each OrgUser (they don't CASCADE) so the OrgUser delete doesn't
+        violate the FK constraint.
         """
         for orguser in OrgUser.objects.filter(org=self.org):
             logger.info("will delete orguser %s", orguser.user.email)
             if not self.dry_run:
+                n_prefs = UserPreferences.objects.filter(orguser=orguser).count()
+                if n_prefs:
+                    logger.info(
+                        "deleting %s UserPreferences row(s) attached to orguser %s",
+                        n_prefs,
+                        orguser.user.email,
+                    )
+                    UserPreferences.objects.filter(orguser=orguser).delete()
                 orguser.delete()
 
     def delete_edr_pipelines(self):
@@ -385,6 +404,21 @@ class OrgCleanupService:
             if os.path.exists(org_dir):
                 shutil.rmtree(org_dir)
                 logger.info(f"deleted org directory from disk {org_dir}")
+
+        # delete rows whose FK to Org does not cascade at the DB level even
+        # though the Django model declares on_delete=CASCADE (mismatch between
+        # model definition and actual Postgres constraint from an older migration)
+        for model_cls, label in (
+            (OrgPlans, "OrgPlans"),
+            (OrgPreferences, "OrgPreferences"),
+            (LlmSession, "LlmSession"),
+        ):
+            n = model_cls.objects.filter(org=self.org).count()
+            if n:
+                logger.info(f"will delete {n} {label} row(s) for org")
+                if not self.dry_run:
+                    model_cls.objects.filter(org=self.org).delete()
+                    logger.info(f"deleted {n} {label} row(s) for org")
 
         # delete org object itself
         logger.info(f"will delete org {self.org.name} from DB")
