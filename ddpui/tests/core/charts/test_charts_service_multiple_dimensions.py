@@ -435,14 +435,14 @@ class TestTransformDataForMap:
         assert out["matched_regions"] == 1
         assert out["available_metrics"][0]["display_name"] == "sum(district_population)"
 
-    def test_calculated_metric_resolved_dict(self):
-        """Saved calculated metrics arrive resolved as dicts — also supported."""
-        metric = {
-            "column": None,
-            "aggregation": None,
-            "column_expression": "avg(district_population)",
-            "alias": "avg pop",
-        }
+    def test_calculated_metric_with_alias(self):
+        """Expression metric whose alias differs from the expression text."""
+        metric = ChartMetric(
+            column=None,
+            aggregation=None,
+            column_expression="avg(district_population)",
+            alias="avg pop",
+        )
         out = transform_data_for_map(
             self._results("avg pop", 42.0), self.GEOJSON, "state_name", None, {}, [metric], 0
         )
