@@ -120,9 +120,11 @@ def get_pagination_params(payload: ChartDataPayload):
     Extract pagination parameters from payload.
     Returns (limit, offset) tuple with proper defaults.
     """
-    # Table charts use a custom preview pagination path; avoid inner LIMIT/OFFSET
-    # so that table-specific query logic is applied consistently.
-    if payload.chart_type == "table":
+    # Table charts use a custom preview pagination path. Pivot tables are never
+    # paginated and build a ROLLUP query with grouping columns. Both must avoid the
+    # generic inner LIMIT/OFFSET so their own query logic is applied (and so a legacy
+    # saved pivot with pagination.enabled doesn't hit the incompatible generic path).
+    if payload.chart_type in ("table", "pivot_table"):
         return None, None
 
     # Check if pagination is enabled in extra_config
@@ -252,6 +254,13 @@ def build_chart_data_payload(
         limit=100,
         extra_config=ec,
         dashboard_filters=resolved_dashboard_filters,
+        # Pivot table fields live in extra_config when saved, but need to be top-level on the payload
+        row_dimensions=ec.get("row_dimensions"),
+        column_dimensions=ec.get("column_dimensions"),
+        show_row_subtotals=ec.get("show_row_subtotals") or False,
+        show_column_subtotals=ec.get("show_column_subtotals") or False,
+        show_row_grand_total=ec.get("show_row_grand_total") or False,
+        show_column_grand_total=ec.get("show_column_grand_total") or False,
     )
 
     payload.dimensions = normalize_dimensions(payload)
@@ -376,22 +385,11 @@ def build_multi_metric_query(
             if not metric.aggregation:
                 raise ValueError(f"Aggregation function is required for metric")
 
-            # Handle count with None column case
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-            # Note: We don't validate aliases because they can be human-readable display names
-            # with spaces and special characters (e.g., "Total Count", "Average Price")
-            # The aliases are only used as dictionary keys in the result set, not in SQL
+            # Shared alias rule (count-all prefix, uniqueness) — same func pivot uses,
+            # so every chart type builds SQL aliases identically. Aliases are only dict
+            # keys in the result set, not validated as SQL identifiers, so human-readable
+            # display names with spaces/special chars (e.g. "Total Count") are fine.
+            alias = metric_sql_alias(metric)
 
             query_builder.add_aggregate_column(
                 metric.column,
@@ -403,6 +401,102 @@ def build_multi_metric_query(
     if time_grain and dimensions:
         # Order by the first dimension column (which will have time grain applied) in ascending order (chronological)
         query_builder.order_cols_by([(dimensions[0], "asc")])
+
+    return query_builder
+
+
+def metric_sql_alias(metric) -> str:
+    """SQL column alias for a metric aggregate.
+
+    Must stay identical between where the query is built (SELECT alias) and where
+    the result is read back (row.get(alias)), otherwise every cell reads as None.
+    """
+    if metric.column_expression:
+        # Calculated metric — no aggregation/column; alias matches the expression path.
+        return metric.alias or "expression_metric"
+    if metric.aggregation.lower() == "count" and metric.column is None:
+        return f"count_all_{metric.alias}" if metric.alias else "count_all"
+    if not metric.column:
+        raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+    return metric.alias or f"{metric.aggregation}_{metric.column}"
+
+
+def metric_display_name(metric) -> str:
+    """User-facing header label for a metric."""
+    if metric.column_expression:
+        return metric.alias or "expression_metric"
+    if metric.aggregation.lower() == "count" and metric.column is None:
+        return metric.alias or "count_all"
+    return metric.alias or f"{metric.aggregation}_{metric.column}"
+
+
+def build_pivot_table_query(
+    payload: ChartDataPayload,
+    query_builder: AggQueryBuilder,
+) -> AggQueryBuilder:
+    """Build ROLLUP query for pivot table with GROUPING() markers.
+
+    Supports multiple column dimensions. Each column dimension becomes
+    pivot_col_0, pivot_col_1, ... in the SELECT with corresponding
+    GROUPING markers _grp_pivot_col_0, _grp_pivot_col_1, ...
+
+    ROLLUP(pivot_col_0, pivot_col_1) produces:
+    - (val0, val1) — leaf cells
+    - (val0, NULL/_grp=1) — column subtotals for val0
+    - (NULL/_grp=1, NULL/_grp=1) — overall column total
+    """
+    if not payload.row_dimensions:
+        raise ValueError("At least one row dimension is required for pivot tables")
+    if not payload.metrics or len(payload.metrics) == 0:
+        raise ValueError("At least one metric is required for pivot tables")
+
+    # The bottom "Total" row (column grand total) requires rolling up all row dimensions.
+    needs_row_rollup = payload.show_row_subtotals or payload.show_column_grand_total
+    col_dims = payload.column_dimensions or []
+
+    # Add row dimension columns to SELECT (labelled so get_row_labels can read row[row_dim])
+    for row_dim in payload.row_dimensions:
+        query_builder.add_column(column(row_dim).label(row_dim))
+
+    # Add column dimension columns to SELECT
+    for idx, col_dim in enumerate(col_dims):
+        query_builder.add_column(column(col_dim).label(f"pivot_col_{idx}"))
+
+    # Add metrics to SELECT — calculated metrics are raw aggregate expressions, the
+    # rest are column + aggregation (same split the non-pivot query path uses).
+    for metric in payload.metrics:
+        alias = metric_sql_alias(metric)
+        if metric.column_expression:
+            query_builder.add_column(literal_column(metric.column_expression).label(alias))
+        else:
+            query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
+
+    # Add GROUPING() markers for each row dimension
+    for row_dim in payload.row_dimensions:
+        query_builder.add_grouping_column(column(row_dim), f"_grp_{row_dim}")
+
+    # Add GROUPING() markers for each column dimension
+    for idx, col_dim in enumerate(col_dims):
+        query_builder.add_grouping_column(column(col_dim), f"_grp_pivot_col_{idx}")
+
+    # GROUP BY row dimensions — use ROLLUP when subtotals/grand total are requested
+    row_group_exprs = [column(row_dim) for row_dim in payload.row_dimensions]
+    if needs_row_rollup:
+        query_builder.group_cols_by_rollup(*row_group_exprs)
+    else:
+        query_builder.group_cols_by(*row_group_exprs)
+
+    # GROUP BY column dimensions — ROLLUP so column totals are identifiable
+    if col_dims:
+        query_builder.group_cols_by_rollup(*[column(col_dim) for col_dim in col_dims])
+
+    # ORDER BY row dimensions then column dimensions for consistent output
+    order_cols = [(dim, "asc") for dim in payload.row_dimensions]
+    for idx in range(len(col_dims)):
+        order_cols.append((f"pivot_col_{idx}", "asc"))
+    # NULLS LAST so ROLLUP subtotal/total rows sort below their group on both
+    # Postgres (NULLS LAST default) and BigQuery (NULLS FIRST default).
+    query_builder.order_cols_by(order_cols, nulls_last=True)
 
     return query_builder
 
@@ -438,6 +532,18 @@ def build_chart_query(
         # No pagination, use original table directly
         query_builder = AggQueryBuilder()
         query_builder.fetch_from(payload.table_name, payload.schema_name)
+
+        # Pivot table charts have their own query builder with ROLLUP support
+        if payload.chart_type == "pivot_table":
+            query_builder = build_pivot_table_query(payload, query_builder)
+
+            # Apply filters
+            if payload.dashboard_filters:
+                query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
+            if payload.extra_config and payload.extra_config.get("filters"):
+                query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+
+            return query_builder
 
         # Now build the rest of the query logic on top of the (possibly paginated) data source
         # Table charts can work with just dimensions (no metrics) - non-aggregated query
@@ -482,24 +588,29 @@ def build_chart_query(
             # Use first metric for number charts
             metric = payload.metrics[0]
 
-            # Handle count with None column case
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+            # Expression metric: inline raw SQL (e.g. "SUM(a)/SUM(b)") — no aggregation/column.
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                query_builder.add_column(literal_column(metric.column_expression).label(alias))
             else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                # Handle count with None column case
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
+                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                else:
+                    if not metric.column:
+                        raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
 
-            # Just add the aggregate column without any grouping
-            query_builder.add_aggregate_column(
-                metric.column,
-                metric.aggregation,
-                alias,
-            )
+                # Just add the aggregate column without any grouping
+                query_builder.add_aggregate_column(
+                    metric.column,
+                    metric.aggregation,
+                    alias,
+                )
         elif payload.chart_type == "pie":
             # Pie charts need dimension and one metric
             if not payload.dimension_col:
@@ -525,24 +636,29 @@ def build_chart_query(
             # Use first metric for pie charts
             metric = payload.metrics[0]
 
-            # Handle count with None column case
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+            # Expression metric: inline raw SQL (e.g. "SUM(a)/SUM(b)") — no aggregation/column.
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                query_builder.add_column(literal_column(metric.column_expression).label(alias))
             else:
-                if not metric.column:
-                    raise ValueError(f"Column is required for {metric.aggregation} aggregation")
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+                # Handle count with None column case
+                if (
+                    metric.aggregation
+                    and metric.aggregation.lower() == "count"
+                    and metric.column is None
+                ):
+                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
+                else:
+                    if not metric.column:
+                        raise ValueError(f"Column is required for {metric.aggregation} aggregation")
+                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
 
-            # Add aggregate column
-            query_builder.add_aggregate_column(
-                metric.column,
-                metric.aggregation,
-                alias,
-            )
+                # Add aggregate column
+                query_builder.add_aggregate_column(
+                    metric.column,
+                    metric.aggregation,
+                    alias,
+                )
 
             # Group by dimension column and extra dimension if provided
             if time_grain and org_warehouse:
@@ -1131,7 +1247,11 @@ def transform_data_for_chart(
 
         # Use first metric for pie charts
         metric = payload.metrics[0]
-        if metric.aggregation and metric.aggregation.lower() == "count" and metric.column is None:
+        if metric.column_expression:
+            # Expression metric: alias must match the query's label (metric.alias or fallback).
+            alias = metric.alias or "expression_metric"
+            display_name = metric.alias or "Expression"
+        elif metric.aggregation and metric.aggregation.lower() == "count" and metric.column is None:
             alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
             display_name = metric.alias or "Total Count"
         else:
@@ -1444,7 +1564,11 @@ def transform_data_for_chart(
             metric = payload.metrics[0]
             row = results[0] if results else {}
 
-            if (
+            if metric.column_expression:
+                # Expression metric: alias must match the query's label (metric.alias or fallback).
+                alias = metric.alias or "expression_metric"
+                display_name = metric.alias or "Expression"
+            elif (
                 metric.aggregation
                 and metric.aggregation.lower() == "count"
                 and metric.column is None

@@ -49,7 +49,7 @@ from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.auth import (
     SUPER_ADMIN_ROLE,
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
 )
@@ -130,7 +130,9 @@ def account_manager_user(org, seed_db):
 
 @pytest.fixture
 def pipeline_manager_user(org, seed_db):
-    user, orguser = _create_orguser("pipemgr", "pipemgr@test.com", org, PIPELINE_MANAGER_ROLE)
+    # pipeline-manager merged into admin in Access Control v2; these tests now exercise an
+    # admin-role user (still a high role with full dashboard/report permissions).
+    user, orguser = _create_orguser("pipemgr", "pipemgr@test.com", org, ADMIN_ROLE)
     yield orguser
     orguser.delete()
     user.delete()
@@ -509,6 +511,38 @@ class TestSharingStatusOwnerCheck:
 
 
 # ================================================================================
+# Test Sharing - creator-or-admin policy, incl. orphaned snapshots
+# ================================================================================
+
+
+class TestSharingCreatorOrAdmin:
+    """Admins can manage sharing of snapshots they didn't create — including
+    orphaned ones whose creator was deleted (created_by=None)."""
+
+    def test_admin_can_view_sharing_status_of_orphaned_snapshot(self, super_admin_user, snapshot):
+        """an admin can read sharing status after the creator is deleted"""
+        snapshot.created_by = None
+        snapshot.save()
+        request = mock_request(super_admin_user)
+
+        response = get_report_sharing_status(request, snapshot.id)
+
+        assert response["success"] is True
+
+    def test_admin_can_toggle_sharing_of_orphaned_snapshot(self, super_admin_user, snapshot):
+        """an admin can make an orphaned snapshot public"""
+        snapshot.created_by = None
+        snapshot.save()
+        request = mock_request(super_admin_user)
+
+        toggle_report_sharing(request, snapshot.id, ShareToggle(is_public=True))
+
+        snapshot.refresh_from_db()
+        assert snapshot.is_public is True
+        assert snapshot.public_share_token
+
+
+# ================================================================================
 # Test Delete - Owner-only enforcement at service layer
 # ================================================================================
 
@@ -516,9 +550,9 @@ class TestSharingStatusOwnerCheck:
 class TestDeleteOwnerCheck:
     """Test that non-owners get 403 from the service layer even with delete permission."""
 
-    def test_non_owner_with_delete_permission_gets_403(self, pipeline_manager_user, snapshot):
-        """Pipeline Manager has can_delete_dashboards but isn't the creator → 403."""
-        request = mock_request(pipeline_manager_user)
+    def test_non_owner_with_delete_permission_gets_403(self, analyst_user, snapshot):
+        """Analyst isn't the owner or an admin → 403 on delete."""
+        request = mock_request(analyst_user)
         with pytest.raises(HttpError) as exc_info:
             delete_snapshot(request, snapshot.id)
         assert exc_info.value.status_code == 403

@@ -190,12 +190,14 @@ def org_with_transformation_tasks(tmpdir_factory, seed_master_tasks_db):
     for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT]).all():
         org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
 
-        if task.slug == "dbt-run":
+        # create a manual deployment for each LONG_RUNNING dbt system task —
+        # mirrors what create_default_transform_tasks would produce in prod
+        if task.slug in ("dbt-run", "dbt-test", "dbt-seed"):
             new_dataflow = OrgDataFlowv1.objects.create(
                 org=org,
-                name="test-dbtrun-deployment",
-                deployment_name="test-dbtrun-deployment",
-                deployment_id="test-dbtrun-deployment-id",
+                name=f"test-{task.slug}-deployment",
+                deployment_name=f"test-{task.slug}-deployment",
+                deployment_id=f"test-{task.slug}-deployment-id",
                 dataflow_type="manual",
             )
 
@@ -229,7 +231,7 @@ def orguser_transform_tasks(org_with_transformation_tasks):
 
 def test_seed_data(seed_db):
     """a test to seed the database"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
 
@@ -285,13 +287,20 @@ def test_post_system_transformation_tasks_warehouse_not_setup(orguser_dbt_worksp
 )
 def test_post_system_transformation_tasks_success_postgres_warehouse(
     orguser_dbt_workspace,
+    seed_master_tasks_db,
 ):
-    """tests POST /tasks/transform/ success with postgres warehouse"""
+    """POST /tasks/transform/ success with postgres warehouse; verifies one
+    Prefect deployment is created per LONG_RUNNING system task (dbt-run,
+    dbt-test, dbt-seed)."""
+    from ddpui.ddpprefect import prefect_service
+
     request = mock_request(orguser_dbt_workspace)
 
     OrgWarehouse.objects.create(org=request.orguser.org, wtype="postgres")
 
     post_system_transformation_tasks(request)
+
+    assert prefect_service.create_dataflow_v1.call_count == 3
 
 
 @patch.multiple(
@@ -325,22 +334,35 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
 )
 def test_post_system_transformation_tasks_success_bigquery_warehouse(
     orguser_dbt_workspace,
+    seed_master_tasks_db,
 ):
-    """tests POST /tasks/transform/ success with bigquery warehouse"""
+    """POST /tasks/transform/ success with bigquery warehouse; verifies one
+    Prefect deployment is created per LONG_RUNNING system task (dbt-run,
+    dbt-test, dbt-seed)."""
+    from ddpui.ddpprefect import prefect_service
+
     request = mock_request(orguser_dbt_workspace)
 
     OrgWarehouse.objects.create(org=request.orguser.org, wtype="bigquery")
 
     post_system_transformation_tasks(request)
 
+    assert prefect_service.create_dataflow_v1.call_count == 3
+
 
 def test_get_prefect_transformation_tasks_success(orguser_transform_tasks):
-    """tests GET /tasks/transform/ success"""
+    """GET /tasks/transform/ returns only user-visible tasks and excludes
+    auto-managed dependencies (git-pull, git-clone, dbt-clean, dbt-deps) and
+    tasks not present in TRANSFORM_TASKS_SEQ (dbt-docs-generate)."""
     request = mock_request(orguser_transform_tasks)
 
-    get_prefect_transformation_tasks(request)
+    response = get_prefect_transformation_tasks(request)
 
+    # underlying OrgTasks are all seeded as building blocks
     assert OrgTask.objects.filter(org=request.orguser.org).count() == 8  # including git, dbt
+
+    slugs_returned = {row["slug"] for row in response}
+    assert slugs_returned == {"dbt-run", "dbt-test", "dbt-seed"}
 
 
 @patch.multiple(
