@@ -451,7 +451,7 @@ def test_chart_filter_by_schema_and_table(orguser, org, seed_db):
 
 def test_chart_type_choices():
     """Test that chart type choices are correctly defined"""
-    expected_types = ["bar", "pie", "line", "number", "map"]
+    expected_types = ["bar", "pie", "line", "number", "map", "table", "pivot_table"]
     actual_types = [choice[0] for choice in CHART_TYPE_CHOICES]
 
     assert set(expected_types) == set(actual_types)
