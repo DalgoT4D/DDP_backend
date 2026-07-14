@@ -786,3 +786,93 @@ class TestListDashboardDatetimeColumns:
             with pytest.raises(HttpError) as exc_info:
                 list_dashboard_datetime_columns(request, sample_dashboard.id)
             assert exc_info.value.status_code == 502
+
+
+# ================================================================================
+# Audit Log Tests for Reports
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+class TestReportAuditLogs:
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_create_snapshot_creates_audit_log(
+        self, mock_audit_log, orguser, sample_dashboard, sample_filter, sample_chart, seed_db
+    ):
+        """Test that creating a report snapshot creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = SnapshotCreate(
+            dashboard_id=sample_dashboard.id,
+            title="Audit Log Test Report",
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+        )
+
+        response = create_snapshot(request, payload)
+
+        # Response is wrapped with api_response: {"success": True, "data": {...}}
+        assert response["data"]["title"] == "Audit Log Test Report"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.CREATE
+        assert call_kwargs["resource_name"] == "Audit Log Test Report"
+
+        # Cleanup
+        ReportSnapshot.objects.filter(title="Audit Log Test Report").delete()
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_update_snapshot_creates_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """Test that updating a report snapshot creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = SnapshotUpdate(summary="Updated summary text")
+
+        response = update_snapshot(request, sample_snapshot.id, payload)
+
+        # Response is wrapped with api_response: {"success": True, "data": {...}}
+        assert response["data"]["summary"] == "Updated summary text"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.UPDATE
+        assert call_kwargs["resource_id"] == str(sample_snapshot.id)
+        assert "field_changes" in call_kwargs
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_delete_snapshot_creates_audit_log(
+        self, mock_audit_log, orguser, org, seed_db
+    ):
+        """Test that deleting a report snapshot creates an audit log entry."""
+        snapshot = ReportSnapshot.objects.create(
+            title="Report To Delete",
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+            frozen_dashboard={},
+            frozen_chart_configs={},
+            created_by=orguser,
+            org=org,
+        )
+        snapshot_id = snapshot.id
+
+        request = mock_request(orguser)
+        delete_snapshot(request, snapshot_id)
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.DELETE
+        assert call_kwargs["resource_id"] == str(snapshot_id)
+        assert call_kwargs["resource_name"] == "Report To Delete"

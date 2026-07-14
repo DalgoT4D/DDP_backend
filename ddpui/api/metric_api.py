@@ -16,6 +16,7 @@ from ddpui.schemas.metric_schema import (
     MetricValidateResponse,
 )
 from ddpui.models.org import OrgWarehouse
+from ddpui.models.metric import Metric
 from ddpui.core.metric.metric_service import (
     MetricService,
     MetricNotFoundError,
@@ -25,6 +26,8 @@ from ddpui.core.metric.metric_service import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
+from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
 
@@ -91,6 +94,7 @@ def list_metrics(
 def create_metric(request, payload: MetricPayload):
     """Create a new metric"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
         metric = MetricService.create_metric(
@@ -102,6 +106,15 @@ def create_metric(request, payload: MetricPayload):
             aggregation=payload.aggregation,
             column_expression=payload.column_expression,
             orguser=orguser,
+        )
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.METRIC,
+            resource_id=str(metric.id),
+            resource_name=metric.name,
+            action=AuditLogAction.CREATE,
         )
     except MetricValidationError as e:
         raise HttpError(400, e.message) from None
@@ -174,14 +187,47 @@ def get_metric(request, metric_id: int):
 def update_metric(request, metric_id: int, payload: MetricPayload):
     """Update a metric"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Capture old state for field_changes tracking
+    old_metric = Metric.objects.filter(id=metric_id, org=org).first()
+    old_state = {}
+    if old_metric:
+        old_state = {
+            "name": old_metric.name,
+            "description": old_metric.description or "",
+            "aggregation": old_metric.aggregation,
+            "column": old_metric.column or "",
+        }
 
     try:
         metric = MetricService.update_metric(
             metric_id=metric_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             payload=payload,
         )
+
+        # Compute field changes
+        new_state = {
+            "name": metric.name,
+            "description": metric.description or "",
+            "aggregation": metric.aggregation,
+            "column": metric.column or "",
+        }
+        field_changes = compute_changes(old_state, new_state)
+
+        # Only create audit log if there are actual changes
+        if field_changes:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.METRIC,
+                resource_id=str(metric_id),
+                resource_name=metric.name,
+                action=AuditLogAction.UPDATE,
+                field_changes=field_changes,
+            )
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
     except MetricValidationError as e:
@@ -207,15 +253,29 @@ def update_metric(request, metric_id: int, payload: MetricPayload):
 def delete_metric(request, metric_id: int):
     """Delete a metric (blocked if referenced by charts or KPIs)"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Capture metric name before deletion
+    metric = Metric.objects.filter(id=metric_id, org=org).first()
+    metric_name = metric.name if metric else str(metric_id)
 
     try:
-        MetricService.delete_metric(metric_id, orguser.org, orguser)
+        MetricService.delete_metric(metric_id, org, orguser)
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
     except MetricDeleteBlockedError as e:
         raise HttpError(409, e.message) from None
     except MetricPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.METRIC,
+        resource_id=str(metric_id),
+        resource_name=metric_name,
+        action=AuditLogAction.DELETE,
+    )
 
     return api_response(success=True)
 

@@ -213,3 +213,81 @@ class TestDeleteKPI:
         with pytest.raises(HttpError) as exc_info:
             delete_kpi(request, 99999)
         assert exc_info.value.status_code == 404
+
+
+# ── Audit Log Tests ─────────────────────────────────────────────────────────
+from unittest.mock import patch
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+class TestKPIAuditLogs:
+    @patch("ddpui.api.kpi_api.create_audit_log")
+    def test_create_kpi_creates_audit_log(self, mock_audit_log, orguser, sample_metric, seed_db):
+        """Test that creating a KPI creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = KPICreate(
+            name="Audit Log Test KPI",
+            metric_id=sample_metric.id,
+            direction="increase",
+            time_grain="monthly",
+            target_value=1000.0,
+            extra_config=KPIExtraConfig(),
+        )
+
+        response = create_kpi(request, payload)
+
+        assert response.name == "Audit Log Test KPI"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.KPI
+        assert call_kwargs["action"] == AuditLogAction.CREATE
+        assert call_kwargs["resource_name"] == "Audit Log Test KPI"
+
+        # Cleanup
+        KPI.objects.filter(name="Audit Log Test KPI").delete()
+
+    @patch("ddpui.api.kpi_api.create_audit_log")
+    def test_update_kpi_creates_audit_log(self, mock_audit_log, orguser, sample_kpi, seed_db):
+        """Test that updating a KPI creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = KPIUpdate(
+            name="Updated KPI Name",
+            target_value=2000.0,
+            extra_config=KPIExtraConfig(),
+        )
+
+        response = update_kpi(request, sample_kpi.id, payload)
+
+        assert response.name == "Updated KPI Name"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.KPI
+        assert call_kwargs["action"] == AuditLogAction.UPDATE
+        assert call_kwargs["resource_id"] == str(sample_kpi.id)
+        assert "field_changes" in call_kwargs
+
+    @patch("ddpui.api.kpi_api.create_audit_log")
+    def test_delete_kpi_creates_audit_log(self, mock_audit_log, orguser, sample_metric, org, seed_db):
+        """Test that deleting a KPI creates an audit log entry."""
+        kpi = KPI.objects.create(
+            name="KPI To Delete",
+            metric=sample_metric,
+            target_value=500.0,
+            extra_config={},
+            created_by=orguser,
+            org=org,
+        )
+        kpi_id = kpi.id
+
+        request = mock_request(orguser)
+        delete_kpi(request, kpi_id)
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.KPI
+        assert call_kwargs["action"] == AuditLogAction.DELETE
+        assert call_kwargs["resource_id"] == str(kpi_id)
+        assert call_kwargs["resource_name"] == "KPI To Delete"

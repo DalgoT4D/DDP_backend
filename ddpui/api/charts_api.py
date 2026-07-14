@@ -44,6 +44,8 @@ from ddpui.schemas.chart_schemas import (
     GeoJSONUpload,
 )
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
 
@@ -1093,6 +1095,7 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # ChartData / ChartService operate on dicts internally; ChartCreate.extra_config
     # is a typed sub-schema (validated already), so convert back here.
@@ -1122,6 +1125,15 @@ def create_chart(request, payload: ChartCreate):
 
         logger.info(f"Chart {chart.id} saved successfully (type={chart.chart_type})")
 
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart.id),
+            resource_name=chart.title,
+            action=AuditLogAction.CREATE,
+        )
+
     except ChartValidationError as e:
         logger.error(f"Chart validation error: {e.message}")
         raise HttpError(400, e.message) from None
@@ -1148,6 +1160,10 @@ def create_chart(request, payload: ChartCreate):
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Capture old state for field_changes tracking
+    old_chart = Chart.objects.filter(id=chart_id, org=org).first()
 
     # ChartUpdate.extra_config is a typed sub-schema when chart_type was sent
     # alongside it; otherwise it's still a raw dict (or None). Either way the
@@ -1159,7 +1175,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     try:
         chart = ChartService.update_chart(
             chart_id=chart_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             title=payload.title,
             description=payload.description,
@@ -1168,6 +1184,23 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             table_name=payload.table_name,
             extra_config=extra_config,
         )
+
+        # Compute field changes using service method
+        field_changes = {}
+        if old_chart:
+            field_changes = ChartService.compute_field_changes(old_chart, chart)
+
+        # Only create audit log if there are actual changes
+        if field_changes:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.CHART,
+                resource_id=str(chart_id),
+                resource_name=chart.title,
+                action=AuditLogAction.UPDATE,
+                field_changes=field_changes,
+            )
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
     except ChartValidationError as e:
@@ -1192,13 +1225,27 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Capture chart name before deletion
+    chart = Chart.objects.filter(id=chart_id, org=org).first()
+    chart_name = chart.title if chart else str(chart_id)
 
     try:
-        ChartService.delete_chart(chart_id, orguser.org, orguser)
+        ChartService.delete_chart(chart_id, org, orguser)
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CHART,
+        resource_id=str(chart_id),
+        resource_name=chart_name,
+        action=AuditLogAction.DELETE,
+    )
 
     return {"success": True}
 
@@ -1208,12 +1255,30 @@ def delete_chart(request, chart_id: int):
 def bulk_delete_charts(request, payload: BulkDeleteRequest):
     """Delete multiple charts"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     if not payload.chart_ids:
         raise HttpError(400, "No chart IDs provided")
 
+    # Capture chart names before deletion
+    charts = Chart.objects.filter(id__in=payload.chart_ids, org=org)
+    chart_names = {chart.id: chart.title for chart in charts}
+
     try:
-        result = ChartService.bulk_delete_charts(payload.chart_ids, orguser.org, orguser)
+        result = ChartService.bulk_delete_charts(payload.chart_ids, org, orguser)
+
+        # Log single audit entry for bulk delete
+        deleted_count = result.get("deleted_count", 0)
+        if deleted_count > 0:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.CHART,
+                resource_id=",".join(str(cid) for cid in payload.chart_ids),
+                resource_name=f"{deleted_count} charts",
+                action=AuditLogAction.DELETE,
+            )
+
         return {
             "success": True,
             **result,

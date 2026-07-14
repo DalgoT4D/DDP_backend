@@ -43,6 +43,8 @@ from ddpui.schemas.report_schema import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import ApiResponse, api_response
+from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui.report_api")
 
@@ -73,6 +75,7 @@ def list_snapshots(
 def create_snapshot(request, payload: SnapshotCreate):
     """Create a new snapshot from a dashboard"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
     try:
         s = ReportService.create_snapshot(
             title=payload.title,
@@ -82,6 +85,16 @@ def create_snapshot(request, payload: SnapshotCreate):
             period_end=payload.period_end,
             period_start=payload.period_start,
         )
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.REPORT,
+            resource_id=str(s.id),
+            resource_name=s.title,
+            action=AuditLogAction.CREATE,
+        )
+
         return api_response(
             success=True,
             data=SnapshotResponse.from_model(s),
@@ -179,8 +192,37 @@ def get_report_kpi_data(
 def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Capture old state for field_changes tracking
+    try:
+        old_snapshot = ReportService.get_snapshot(snapshot_id, org)
+        old_state = {
+            "title": old_snapshot.title,
+            "summary": old_snapshot.summary or "",
+        }
+    except SnapshotNotFoundError:
+        old_state = {}
+
     try:
         snapshot = ReportService.update_snapshot(snapshot_id, payload, orguser)
+
+        # Compute field changes
+        new_state = {"title": snapshot.title, "summary": snapshot.summary}
+        field_changes = compute_changes(old_state, new_state)
+
+        # Only create audit log if there are actual changes
+        if field_changes:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.REPORT,
+                resource_id=str(snapshot_id),
+                resource_name=snapshot.title,
+                action=AuditLogAction.UPDATE,
+                field_changes=field_changes,
+            )
+
         return api_response(
             success=True,
             data=SnapshotUpdateResponse.from_model(snapshot),
@@ -195,8 +237,27 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
 def delete_snapshot(request, snapshot_id: int):
     """Delete a snapshot"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Capture snapshot name before deletion
     try:
-        ReportService.delete_snapshot(snapshot_id, orguser.org, orguser)
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+        snapshot_name = snapshot.title
+    except SnapshotNotFoundError:
+        snapshot_name = str(snapshot_id)
+
+    try:
+        ReportService.delete_snapshot(snapshot_id, org, orguser)
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.REPORT,
+            resource_id=str(snapshot_id),
+            resource_name=snapshot_name,
+            action=AuditLogAction.DELETE,
+        )
+
         return api_response(
             success=True, data=SnapshotDeleteResponse(), message="Snapshot deleted successfully"
         )
@@ -269,11 +330,21 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
 def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
     """Toggle public sharing for a report snapshot"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
     try:
-        snapshot = ReportService.toggle_sharing(
-            snapshot_id, orguser.org, orguser, payload.is_public
-        )
+        snapshot = ReportService.toggle_sharing(snapshot_id, org, orguser, payload.is_public)
         response_data = ReportService.build_share_response(snapshot)
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.REPORT,
+            resource_id=str(snapshot_id),
+            resource_name=snapshot.title,
+            action=AuditLogAction.SHARE,
+            field_changes={"is_public": {"old": not payload.is_public, "new": payload.is_public}},
+        )
+
         return api_response(success=True, data=ShareResponse(**response_data))
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
@@ -401,17 +472,28 @@ def list_comments(
 def create_comment(request, snapshot_id: int, payload: CommentCreate):
     """Create a comment on a report snapshot"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
         comment = CommentService.create_comment(
             snapshot_id=snapshot_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             target_type=payload.target_type,
             content=payload.content,
             target_id=payload.target_id,
             mentioned_emails=payload.mentioned_emails,
         )
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.COMMENT,
+            resource_id=str(comment.id),
+            resource_name=f"Comment on snapshot {snapshot_id}",
+            action=AuditLogAction.CREATE,
+        )
+
         return api_response(
             success=True,
             data=CommentResponse.from_model(comment),
@@ -429,15 +511,26 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
 def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentUpdate):
     """Update a comment (author-only)"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
         comment = CommentService.update_comment(
             comment_id=comment_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             content=payload.content,
             mentioned_emails=payload.mentioned_emails,
         )
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.COMMENT,
+            resource_id=str(comment_id),
+            resource_name=f"Comment on snapshot {snapshot_id}",
+            action=AuditLogAction.UPDATE,
+        )
+
         return api_response(
             success=True,
             data=CommentResponse.from_model(comment),
@@ -454,13 +547,24 @@ def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentU
 def delete_comment(request, snapshot_id: int, comment_id: int):
     """Delete a comment (author-only)"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
         CommentService.delete_comment(
             comment_id=comment_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
         )
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.COMMENT,
+            resource_id=str(comment_id),
+            resource_name=f"Comment on snapshot {snapshot_id}",
+            action=AuditLogAction.DELETE,
+        )
+
         return api_response(success=True, message="Comment deleted")
     except CommentNotFoundError as err:
         raise HttpError(404, str(err)) from err

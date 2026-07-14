@@ -689,3 +689,124 @@ class TestGetChartData:
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
     assert Role.objects.count() == 4
+
+
+# ================================================================================
+# Audit Log Tests for Charts
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.charts_api.create_audit_log")
+def test_create_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org_warehouse):
+    """Test that creating a chart creates an audit log entry."""
+    request = mock_request(orguser)
+    payload = ChartCreate(
+        title="Audit Log Test Chart",
+        chart_type="bar",
+        schema_name="public",
+        table_name="users",
+        extra_config={
+            "dimension_column": "date",
+            "metrics": [{"column": "amount", "aggregation": "sum"}],
+        },
+    )
+
+    response = create_chart(request, payload)
+
+    assert response.title == "Audit Log Test Chart"
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["orguser"] == orguser
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_name"] == "Audit Log Test Chart"
+
+    # Cleanup
+    Chart.objects.filter(title="Audit Log Test Chart").delete()
+
+
+@patch("ddpui.api.charts_api.create_audit_log")
+def test_update_chart_creates_audit_log(mock_audit_log, seed_db, orguser, sample_chart):
+    """Test that updating a chart creates an audit log entry."""
+    request = mock_request(orguser)
+    payload = ChartUpdate(title="Updated Chart Title")
+
+    response = update_chart(request, sample_chart.id, payload)
+
+    assert response.title == "Updated Chart Title"
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == str(sample_chart.id)
+    # field_changes should track the title change
+    assert "field_changes" in call_kwargs
+
+
+@patch("ddpui.api.charts_api.create_audit_log")
+def test_delete_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org):
+    """Test that deleting a chart creates an audit log entry."""
+    # Create a chart to delete
+    chart = Chart.objects.create(
+        title="Chart To Delete",
+        chart_type="bar",
+        schema_name="public",
+        table_name="users",
+        extra_config={},
+        created_by=orguser,
+        last_modified_by=orguser,
+        org=org,
+    )
+    chart_id = chart.id
+
+    request = mock_request(orguser)
+    delete_chart(request, chart_id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == str(chart_id)
+    assert call_kwargs["resource_name"] == "Chart To Delete"
+
+
+@patch("ddpui.api.charts_api.create_audit_log")
+def test_bulk_delete_charts_creates_audit_log(mock_audit_log, seed_db, orguser, org):
+    """Test that bulk deleting charts creates an audit log entry."""
+    # Create charts to delete
+    chart1 = Chart.objects.create(
+        title="Bulk Delete Chart 1",
+        chart_type="bar",
+        schema_name="public",
+        table_name="users",
+        extra_config={},
+        created_by=orguser,
+        last_modified_by=orguser,
+        org=org,
+    )
+    chart2 = Chart.objects.create(
+        title="Bulk Delete Chart 2",
+        chart_type="bar",
+        schema_name="public",
+        table_name="users",
+        extra_config={},
+        created_by=orguser,
+        last_modified_by=orguser,
+        org=org,
+    )
+
+    request = mock_request(orguser)
+    payload = BulkDeleteRequest(chart_ids=[chart1.id, chart2.id])
+
+    bulk_delete_charts(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert "2 charts" in call_kwargs["resource_name"]

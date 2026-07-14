@@ -167,15 +167,17 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
         }
         field_changes = compute_changes(old_state, new_state)
 
-        create_audit_log(
-            org=orguser.org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.PIPELINE,
-            resource_id=deployment_id,
-            resource_name=payload.name or old_state["name"],
-            action=AuditLogAction.UPDATE,
-            field_changes=field_changes,
-        )
+        # Only create audit log if there are actual changes
+        if field_changes:
+            create_audit_log(
+                org=orguser.org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.PIPELINE,
+                resource_id=deployment_id,
+                resource_name=payload.name or old_state["name"],
+                action=AuditLogAction.UPDATE,
+                field_changes=field_changes,
+            )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -200,9 +202,7 @@ def post_deployment_set_schedule(request, deployment_id, status):
         raise HttpError(400, "register an organization first")
 
     # Get pipeline name for audit log
-    pipeline = OrgDataFlowv1.objects.filter(
-        org=orguser.org, deployment_id=deployment_id
-    ).first()
+    pipeline = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
     pipeline_name = pipeline.name if pipeline else deployment_id
 
     # Track schedule status change

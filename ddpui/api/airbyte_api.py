@@ -139,9 +139,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 
     # Capture state before update for field_changes tracking
     try:
-        old_source = airbyte_service.get_source(
-            orguser.org.airbyte_workspace_id, source_id
-        )
+        old_source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
         old_name = old_source.get("name", "")
     except Exception:
         old_name = ""
@@ -170,15 +168,17 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     if old_name and old_name != payload.name:
         field_changes["name"] = {"old": old_name, "new": payload.name}
 
-    create_audit_log(
-        org=orguser.org,
-        orguser=orguser,
-        resource_type=AuditLogResourceType.DATA_SOURCE,
-        resource_id=source["sourceId"],
-        resource_name=source.get("name", payload.name or ""),
-        action=AuditLogAction.UPDATE,
-        field_changes=field_changes,
-    )
+    # Only create audit log if there are actual changes
+    if field_changes:
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DATA_SOURCE,
+            resource_id=source["sourceId"],
+            resource_name=source.get("name", payload.name or ""),
+            action=AuditLogAction.UPDATE,
+            field_changes=field_changes,
+        )
     return {"sourceId": source["sourceId"]}
 
 
@@ -544,9 +544,7 @@ def put_airbyte_connection_v1(
 
     # Capture state before update for field_changes tracking
     try:
-        old_connection = airbyte_service.get_connection(
-            org.airbyte_workspace_id, connection_id
-        )
+        old_connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
         old_state = {
             "name": old_connection.get("name", ""),
             "destinationSchema": old_connection.get("namespaceFormat", ""),
@@ -565,15 +563,17 @@ def put_airbyte_connection_v1(
     }
     field_changes = compute_changes(old_state, new_state) if old_state else {}
 
-    create_audit_log(
-        org=org,
-        orguser=orguser,
-        resource_type=AuditLogResourceType.CONNECTION,
-        resource_id=connection_id,
-        resource_name=payload.name or res.get("name", ""),
-        action=AuditLogAction.UPDATE,
-        field_changes=field_changes,
-    )
+    # Only create audit log if there are actual changes
+    if field_changes:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CONNECTION,
+            resource_id=connection_id,
+            resource_name=payload.name or res.get("name", ""),
+            action=AuditLogAction.UPDATE,
+            field_changes=field_changes,
+        )
 
     return res
 

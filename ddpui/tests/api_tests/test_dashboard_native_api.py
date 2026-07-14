@@ -694,3 +694,104 @@ class TestDuplicateDashboardTabs:
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
     assert Role.objects.count() == 4
+
+
+# ================================================================================
+# Audit Log Tests for Native Dashboards
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
+    """Test that creating a dashboard creates an audit log entry."""
+    request = mock_request(orguser)
+    payload = DashboardCreate(title="Audit Log Test Dashboard")
+
+    response = create_dashboard(request, payload)
+
+    assert response.title == "Audit Log Test Dashboard"
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["orguser"] == orguser
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_name"] == "Audit Log Test Dashboard"
+
+    # Cleanup
+    Dashboard.objects.filter(title="Audit Log Test Dashboard").delete()
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sample_dashboard):
+    """Test that updating a dashboard creates an audit log entry."""
+    request = mock_request(orguser)
+    payload = DashboardUpdate(title="Updated Dashboard Title")
+
+    response = update_dashboard(request, sample_dashboard.id, payload)
+
+    assert response.title == "Updated Dashboard Title"
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == str(sample_dashboard.id)
+    # field_changes should be present
+    assert "field_changes" in call_kwargs
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_delete_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, org):
+    """Test that deleting a dashboard creates an audit log entry."""
+    # Create two dashboards (can't delete the last one in an org)
+    dashboard_keep = Dashboard.objects.create(
+        title="Dashboard To Keep",
+        dashboard_type="native",
+        grid_columns=12,
+        created_by=orguser,
+        org=org,
+    )
+    dashboard = Dashboard.objects.create(
+        title="Dashboard To Delete",
+        dashboard_type="native",
+        grid_columns=12,
+        created_by=orguser,
+        org=org,
+    )
+    dashboard_id = dashboard.id
+
+    request = mock_request(orguser)
+    delete_dashboard(request, dashboard_id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == str(dashboard_id)
+    assert call_kwargs["resource_name"] == "Dashboard To Delete"
+
+    # Cleanup
+    dashboard_keep.delete()
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_duplicate_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sample_dashboard):
+    """Test that duplicating a dashboard creates an audit log entry."""
+    request = mock_request(orguser)
+
+    response = duplicate_dashboard(request, sample_dashboard.id)
+
+    assert "Copy" in response.title
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    # Duplicate uses CREATE action since it creates a new dashboard
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_id"] == str(response.id)
+
+    # Cleanup
+    Dashboard.objects.filter(id=response.id).delete()
