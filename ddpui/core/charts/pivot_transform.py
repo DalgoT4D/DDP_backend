@@ -153,8 +153,7 @@ def rotate_to_pivot(
         row_kind = _classify_row_kind(row, row_dim_cols)
         col_kind = _classify_col_kind(row, num_col_dims)
 
-        # ROLLUP always emits the intermediate subtotal / grand-total rows; drop the
-        # ones the payload didn't ask for.
+        # ROLLUP can emit subtotal rows the payload didn't ask for; drop them.
         if row_kind == "row_subtotal" and not show_row_subtotals:
             continue
         if col_kind == "col_subtotal" and not show_column_subtotals:
