@@ -1089,15 +1089,21 @@ def get_public_kpi_data(
     try:
         dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
     except Dashboard.DoesNotExist:
-        return 404, PublicErrorResponse(error="Dashboard not found or no longer public", is_valid=False)
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
     parsed_dashboard_filters = None
     if dashboard_filters:
         try:
             parsed_dashboard_filters = json.loads(dashboard_filters)
         except json.JSONDecodeError:
-            logger.warning(f"Invalid dashboard_filters JSON for public KPI {kpi_id}: {dashboard_filters}")
-            return 400, PublicErrorResponse(error="Invalid dashboard_filters: must be valid JSON", is_valid=False)
+            logger.warning(
+                f"Invalid dashboard_filters JSON for public KPI {kpi_id}: {dashboard_filters}"
+            )
+            return 400, PublicErrorResponse(
+                error="Invalid dashboard_filters: must be valid JSON", is_valid=False
+            )
 
     kpi_in_dashboard = any(
         comp.get("type") == "kpi" and comp.get("config", {}).get("kpiId") == kpi_id
@@ -1467,18 +1473,25 @@ def get_public_report_kpi_data(
     try:
         snapshot = _get_public_report_snapshot(token, request=request)
     except ReportSnapshot.DoesNotExist:
-        return 404, PublicErrorResponse(error="Report not found or no longer public", is_valid=False)
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
 
     parsed_dashboard_filters = None
     if dashboard_filters:
         try:
             parsed_dashboard_filters = json.loads(dashboard_filters)
         except json.JSONDecodeError:
-            logger.warning(f"Invalid dashboard_filters JSON for public report KPI {kpi_id}: {dashboard_filters}")
-            return 400, PublicErrorResponse(error="Invalid dashboard_filters: must be valid JSON", is_valid=False)
+            logger.warning(
+                f"Invalid dashboard_filters JSON for public report KPI {kpi_id}: {dashboard_filters}"
+            )
+            return 400, PublicErrorResponse(
+                error="Invalid dashboard_filters: must be valid JSON", is_valid=False
+            )
 
     try:
         from ddpui.core.reports.report_service import ReportService
+
         result = ReportService.get_report_kpi_data(
             snapshot.id,
             kpi_id,
