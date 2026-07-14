@@ -375,6 +375,41 @@ def test_get_current_userv2_has_orguser_id(orguser):
     assert response[0].orguser_id == orguser.id
 
 
+def test_get_organization_users_invited_by_populated(seed_db, orguser):
+    """Phase A / A1: a user who joined via an invitation shows the inviter's
+    email in `invited_by`; matching is case-insensitive on the invited email"""
+    invitee_authuser = User.objects.create(
+        username="invitee-username", email="invitee@example.com", password="password"
+    )
+    OrgUser.objects.create(
+        user=invitee_authuser,
+        org=orguser.org,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    Invitation.objects.create(
+        invited_email="INVITEE@example.com",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite-code-a1",
+    )
+
+    request = mock_request(orguser)
+    response = get_organization_users(request)
+
+    by_email = {resp.email: resp for resp in response}
+    assert by_email["invitee@example.com"].invited_by == orguser.user.email
+
+
+def test_get_organization_users_invited_by_none(seed_db, orguser):
+    """Phase A / A1: a user with no invitation (e.g. the org's first admin)
+    has invited_by None"""
+    request = mock_request(orguser)
+
+    response = get_organization_users(request)
+
+    assert response[0].invited_by is None
+
+
 # ================================================================================
 
 

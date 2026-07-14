@@ -28,6 +28,10 @@ class GroupOut(Schema):
     shared_resource_count: int
     created_by: Optional[GroupCreatorOut] = None
     created_at: datetime
+    # Phase A / A2 (design alignment): up to 4 ACTIVE member emails for the
+    # avatar stack in the Groups table. Only the list path fills this;
+    # create/rename/detail leave it empty.
+    member_preview: List[str] = []
 
 
 class GroupMemberOut(Schema):

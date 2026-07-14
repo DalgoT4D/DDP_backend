@@ -215,6 +215,17 @@ def get_organization_users(request):
     # warehouse
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
+    # Phase A / A1: map invited-email -> inviter's email in one query (no
+    # N+1); iterate oldest-first so the most recent invitation wins on
+    # duplicate emails
+    inviter_email_map: dict[str, str] = {}
+    for invitation in (
+        Invitation.objects.filter(invited_by__org=org)
+        .select_related("invited_by__user")
+        .order_by("invited_on")
+    ):
+        inviter_email_map[invitation.invited_email.lower()] = invitation.invited_by.user.email
+
     res = []
     for curr_orguser in OrgUser.objects.filter(org=org).prefetch_related(
         Prefetch(
@@ -258,6 +269,7 @@ def get_organization_users(request):
                     curr_orguser.org.base_plan() == OrgType.DEMO if curr_orguser.org else False
                 ),
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
+                invited_by=inviter_email_map.get(curr_orguser.user.email.lower()),
             )
         )
 

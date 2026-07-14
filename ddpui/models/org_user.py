@@ -152,6 +152,11 @@ class OrgUserResponse(Schema):
     subscription_plan: str | None = None
     work_domain: str | None = None
     has_seen_rbac_notice: bool = False
+    # Phase A / A1 (design alignment): the inviter's email for the "Created
+    # By" column on the People table; None when the user joined without an
+    # invitation (e.g. the org's first admin). Only populated by
+    # GET /organizations/users.
+    invited_by: str | None = None
 
 
 def default_invitation_expiry():

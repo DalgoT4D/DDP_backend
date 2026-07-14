@@ -147,6 +147,37 @@ class TestListGroups:
         assert by_id[group["id"]].member_count == 1
         assert by_id[group["id"]].shared_resource_count == 1
 
+    def test_list_member_preview_capped_at_4_active_only(self, org, analyst):
+        """Phase A / A2: the list path returns up to 4 ACTIVE member emails
+        for the avatar stack; pending invites are excluded and a group with
+        no members gets an empty preview."""
+        from ddpui.api.groups_api import create_group, list_groups
+        from ddpui.schemas.group_schema import GroupCreate
+
+        group = create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+        empty_group = create_group(mock_request(analyst), GroupCreate(name="Empty"))["data"]
+
+        active_emails = []
+        for i in range(5):
+            member_orguser = _make_orguser(org, MEMBER_ROLE, f"groupsapi-preview-{i}")
+            UserGroupMember.objects.create(
+                group_id=group["id"], orguser=member_orguser, status="active"
+            )
+            active_emails.append(member_orguser.user.email)
+        UserGroupMember.objects.create(
+            group_id=group["id"], pending_email="pending@test.com", status="pending"
+        )
+
+        response = list_groups(mock_request(analyst))
+        by_id = {g.id: g for g in response["data"]}
+
+        preview = by_id[group["id"]].member_preview
+        assert len(preview) == 4
+        assert set(preview) <= set(active_emails)
+        assert "pending@test.com" not in preview
+        assert by_id[group["id"]].member_count == 5
+        assert by_id[empty_group["id"]].member_preview == []
+
     def test_list_scoped_to_org(self, org, analyst):
         from ddpui.api.groups_api import create_group, list_groups
         from ddpui.schemas.group_schema import GroupCreate

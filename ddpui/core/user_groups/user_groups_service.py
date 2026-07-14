@@ -17,7 +17,7 @@ Rules of this module:
 from typing import List, Optional
 
 from django.db import transaction
-from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery
 from django.db.models.functions import Coalesce
 
 from ddpui.core.ownership import is_admin_or_super_admin
@@ -102,7 +102,12 @@ def _annotated_groups(org_id):
     )
 
 
-def _group_out(group: UserGroup) -> GroupOut:
+# Phase A / A2: how many member emails the list path returns for the
+# Groups-table avatar stack (design frame 1184:3242 shows 4 circles + "+N").
+MEMBER_PREVIEW_LIMIT = 4
+
+
+def _group_out(group: UserGroup, member_preview: Optional[List[str]] = None) -> GroupOut:
     return GroupOut(
         id=group.id,
         name=group.name,
@@ -110,12 +115,38 @@ def _group_out(group: UserGroup) -> GroupOut:
         shared_resource_count=group.annotated_shared_resource_count,
         created_by=_creator_out(group.created_by),
         created_at=group.created_at,
+        member_preview=member_preview or [],
     )
 
 
 def list_groups(orguser: OrgUser) -> List[GroupOut]:
-    """All of `orguser`'s org's groups, with member/shared-resource counts."""
-    return [_group_out(g) for g in _annotated_groups(orguser.org_id).order_by("name")]
+    """All of `orguser`'s org's groups, with member/shared-resource counts
+    and a preview of up to ``MEMBER_PREVIEW_LIMIT`` active member emails
+    (prefetched in one query — no N+1)."""
+    groups = (
+        _annotated_groups(orguser.org_id)
+        .order_by("name")
+        .prefetch_related(
+            Prefetch(
+                "members",
+                queryset=UserGroupMember.objects.filter(
+                    status=UserGroupMemberStatus.ACTIVE, orguser__isnull=False
+                )
+                .select_related("orguser__user")
+                .order_by("id"),
+                to_attr="prefetched_active_members",
+            )
+        )
+    )
+    return [
+        _group_out(
+            g,
+            member_preview=[
+                m.orguser.user.email for m in g.prefetched_active_members[:MEMBER_PREVIEW_LIMIT]
+            ],
+        )
+        for g in groups
+    ]
 
 
 def _get_group_or_404(orguser: OrgUser, group_id: int) -> UserGroup:
