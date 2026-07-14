@@ -22,15 +22,34 @@ from ddpui.api.admin_api import (
     put_admin_org,
     post_admin_org_deactivate,
     post_admin_org_reactivate,
+    get_admin_org_users,
+    post_admin_org_user_invite,
+    put_admin_org_user_role,
+    post_admin_org_user_deactivate,
+    post_admin_org_user_reactivate,
+    get_admin_org_user_removal_impact,
+    delete_admin_org_user,
+    delete_admin_org_invitation,
     AdminCreateOrgSchema,
     AdminUpdateOrgSchema,
+    AdminInviteUserSchema,
+    AdminChangeRoleSchema,
 )
-from ddpui.api.user_org_api import get_current_user_v2
+from ddpui.api.user_org_api import get_current_user_v2, post_organization_user_invite_v1
+from ddpui.core import orguserfunctions
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
-from ddpui.models.org_user import OrgUser, UserAttributes
+from ddpui.models.org_user import OrgUser, UserAttributes, Invitation, NewInvitationSchema
 from ddpui.models.role_based_access import Role, RolePermission
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.visualization import Chart
+from ddpui.models.report import ReportSnapshot
+from ddpui.auth import (
+    ACCOUNT_MANAGER_ROLE,
+    SUPER_ADMIN_ROLE,
+    ANALYST_ROLE,
+    GUEST_ROLE,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -277,3 +296,293 @@ def test_admin_deactivate_and_reactivate_org(platform_admin_request):
     org.refresh_from_db()
     assert org.is_active is True
     assert reactivated.is_active is True
+
+
+# ============================================================================
+# Milestone 4 — Users tab: invite / role / deactivate / remove / cancel invite
+# ============================================================================
+# The platform admin (the `orguser` fixture, in "admin-test-org") is NOT a member
+# of the target orgs below — every test exercises the cross-org path.
+
+
+def _role(slug):
+    return Role.objects.filter(slug=slug).first()
+
+
+def _make_org(name, slug):
+    return Org.objects.create(name=name, slug=slug)
+
+
+def _make_member(org, email, role_slug):
+    """create a User + OrgUser in `org` with `role_slug`; return the OrgUser"""
+    user = User.objects.create(username=email, email=email)
+    return OrgUser.objects.create(user=user, org=org, new_role=_role(role_slug))
+
+
+@pytest.fixture
+def akshara(seed_db):
+    return _make_org("Akshara", "akshara")
+
+
+@pytest.fixture
+def bhumi(seed_db):
+    return _make_org("Bhumi", "bhumi")
+
+
+# ---- guard: the new routes are gated too --------------------------------------
+
+
+def test_admin_users_routes_forbidden_for_non_platform_admin(orguser, akshara):
+    """a non-platform-admin is refused with 403 on the Users-tab routes"""
+    request = mock_request(orguser)
+    for call in (
+        lambda: get_admin_org_users(request, akshara.id),
+        lambda: get_admin_org_user_removal_impact(request, akshara.id, 1),
+        lambda: delete_admin_org_invitation(request, akshara.id, 1),
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            call()
+        assert excinfo.value.status_code == 403
+
+
+# ---- invite (cross-org) + invite-cap-skip -------------------------------------
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+def test_admin_invite_into_org_records_target_org(platform_admin_request, akshara):
+    """
+    inviting a NEW email into Akshara creates an Invitation whose invited_in_org is
+    Akshara — even though invited_by (the platform admin) belongs to a different org.
+    This is what lets accept/cancel resolve the correct org cross-org.
+    """
+    payload = AdminInviteUserSchema(
+        invited_email="newuser@akshara.org",
+        invited_role_uuid=_role(GUEST_ROLE).uuid,
+    )
+    post_admin_org_user_invite(platform_admin_request, akshara.id, payload)
+
+    inv = Invitation.objects.filter(invited_email="newuser@akshara.org").first()
+    assert inv is not None
+    assert inv.invited_in_org_id == akshara.id  # target org, not the admin's org
+    assert inv.invited_by.org_id != akshara.id  # admin is NOT a member of Akshara
+    assert inv.invited_new_role.slug == GUEST_ROLE
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+def test_admin_invite_cap_skipped_for_platform_admin(platform_admin_request, akshara):
+    """
+    INVITE-CAP-SKIP (plan §8 #1): the platform admin's own role is account-manager
+    (level 4). A regular inviter at level 4 CANNOT invite a super-admin (level 5) —
+    proven by the contrast assertion below. Via the admin portal the cap is skipped,
+    so the same admin CAN invite at super-admin.
+    """
+    super_admin_uuid = _role(SUPER_ADMIN_ROLE).uuid
+
+    # contrast: as a regular single-org inviter, account-manager -> super-admin is refused
+    regular_payload = NewInvitationSchema(
+        invited_email="wouldberefused@akshara.org",
+        invited_role_uuid=super_admin_uuid,
+    )
+    _, regular_error = orguserfunctions.invite_user_v1(
+        platform_admin_request.orguser, regular_payload
+    )
+    assert regular_error == "Insufficient permissions for this operation"
+
+    # via the admin portal the SAME admin may invite at super-admin (cap skipped)
+    payload = AdminInviteUserSchema(
+        invited_email="bigboss@akshara.org",
+        invited_role_uuid=super_admin_uuid,
+    )
+    post_admin_org_user_invite(platform_admin_request, akshara.id, payload)
+
+    inv = Invitation.objects.filter(invited_email="bigboss@akshara.org").first()
+    assert inv is not None
+    assert inv.invited_new_role.slug == SUPER_ADMIN_ROLE
+    assert inv.invited_in_org_id == akshara.id
+
+
+def test_admin_invite_into_missing_org_404(platform_admin_request):
+    """inviting into a non-existent org is 404"""
+    payload = AdminInviteUserSchema(
+        invited_email="x@y.org", invited_role_uuid=_role(GUEST_ROLE).uuid
+    )
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_org_user_invite(platform_admin_request, 999999, payload)
+    assert excinfo.value.status_code == 404
+
+
+# ---- change role (cross-org, cap skipped) -------------------------------------
+
+
+def test_admin_change_role_in_org(platform_admin_request, akshara):
+    """the admin can change a member's role, even up to super-admin (cap skipped)"""
+    member = _make_member(akshara, "member@akshara.org", GUEST_ROLE)
+    payload = AdminChangeRoleSchema(role_uuid=_role(SUPER_ADMIN_ROLE).uuid)
+
+    response = put_admin_org_user_role(platform_admin_request, akshara.id, member.id, payload)
+
+    member.refresh_from_db()
+    assert member.new_role.slug == SUPER_ADMIN_ROLE
+    assert response.new_role_slug == SUPER_ADMIN_ROLE
+
+
+def test_admin_change_role_wrong_org_404(platform_admin_request, akshara, bhumi):
+    """changing the role of an ouid that belongs to a DIFFERENT org is 404"""
+    bhumi_member = _make_member(bhumi, "member@bhumi.org", GUEST_ROLE)
+    payload = AdminChangeRoleSchema(role_uuid=_role(ANALYST_ROLE).uuid)
+    with pytest.raises(HttpError) as excinfo:
+        # ask for the Bhumi member via the Akshara path
+        put_admin_org_user_role(platform_admin_request, akshara.id, bhumi_member.id, payload)
+    assert excinfo.value.status_code == 404
+
+
+# ---- per-org deactivate: isolation --------------------------------------------
+
+
+def test_admin_deactivate_user_in_org_only(platform_admin_request, akshara, bhumi):
+    """
+    DEACTIVATION SYMMETRY (acceptance): Priya is in both Akshara and Bhumi.
+    Deactivating her in Akshara sets ONLY the Akshara OrgUser inactive — her Bhumi
+    OrgUser stays active and the global User.is_active is untouched. Mirrors the M3
+    org-symmetry test.
+    """
+    priya_user = User.objects.create(username="priya@ngo.org", email="priya@ngo.org")
+    akshara_ou = OrgUser.objects.create(
+        user=priya_user, org=akshara, new_role=_role(GUEST_ROLE)
+    )
+    bhumi_ou = OrgUser.objects.create(user=priya_user, org=bhumi, new_role=_role(GUEST_ROLE))
+
+    response = post_admin_org_user_deactivate(platform_admin_request, akshara.id, akshara_ou.id)
+
+    akshara_ou.refresh_from_db()
+    bhumi_ou.refresh_from_db()
+    priya_user.refresh_from_db()
+    assert akshara_ou.is_active is False  # deactivated HERE
+    assert response.is_active is False
+    assert bhumi_ou.is_active is True  # untouched in the other org
+    assert priya_user.is_active is True  # global flag never touched
+
+    # reactivation flips only the Akshara row back
+    post_admin_org_user_reactivate(platform_admin_request, akshara.id, akshara_ou.id)
+    akshara_ou.refresh_from_db()
+    bhumi_ou.refresh_from_db()
+    assert akshara_ou.is_active is True
+    assert bhumi_ou.is_active is True
+
+
+# ---- removal-impact count + cascade -------------------------------------------
+
+
+def test_admin_removal_impact_counts_are_accurate(platform_admin_request, akshara):
+    """
+    REMOVAL-IMPACT COUNT (plan §4.6 / research §5): the endpoint returns the exact
+    number of dashboards/charts that removal would cascade-delete and reports that
+    would be orphaned — counted against real rows tied to the user via created_by,
+    and scoped to THAT user (content by another user is not counted).
+    """
+    priya = _make_member(akshara, "priya@akshara.org", GUEST_ROLE)
+    other = _make_member(akshara, "other@akshara.org", GUEST_ROLE)
+
+    for i in range(3):
+        Dashboard.objects.create(title=f"d{i}", org=akshara, created_by=priya)
+    for i in range(5):
+        Chart.objects.create(
+            title=f"c{i}",
+            chart_type="bar",
+            schema_name="s",
+            table_name="t",
+            org=akshara,
+            created_by=priya,
+        )
+    for i in range(2):
+        ReportSnapshot.objects.create(title=f"r{i}", org=akshara, created_by=priya)
+
+    # content owned by a DIFFERENT user must not be counted
+    Dashboard.objects.create(title="not-priyas", org=akshara, created_by=other)
+
+    impact = get_admin_org_user_removal_impact(platform_admin_request, akshara.id, priya.id)
+    assert impact.dashboards_deleted == 3
+    assert impact.charts_deleted == 5
+    assert impact.reports_orphaned == 2
+
+
+def test_admin_remove_user_cascades_content(platform_admin_request, akshara):
+    """
+    removing the user hard-deletes the OrgUser and cascades their Dashboards/Charts
+    (created_by CASCADE); their ReportSnapshots survive with created_by set NULL
+    (SET_NULL). The count seen in the warning matches what actually disappears.
+    """
+    priya = _make_member(akshara, "priya2@akshara.org", GUEST_ROLE)
+    dash = Dashboard.objects.create(title="d", org=akshara, created_by=priya)
+    chart = Chart.objects.create(
+        title="c",
+        chart_type="bar",
+        schema_name="s",
+        table_name="t",
+        org=akshara,
+        created_by=priya,
+    )
+    report = ReportSnapshot.objects.create(title="r", org=akshara, created_by=priya)
+    priya_id = priya.id
+
+    delete_admin_org_user(platform_admin_request, akshara.id, priya.id)
+
+    assert not OrgUser.objects.filter(id=priya_id).exists()
+    assert not Dashboard.objects.filter(id=dash.id).exists()  # cascaded
+    assert not Chart.objects.filter(id=chart.id).exists()  # cascaded
+    report.refresh_from_db()
+    assert report.created_by is None  # orphaned, not deleted
+
+
+# ---- org-scoped cancel invite -------------------------------------------------
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+def test_admin_cancel_invite_is_org_scoped(platform_admin_request, akshara, bhumi):
+    """
+    ORG-SCOPED CANCEL (plan §8 / research §8): a Bhumi invitation cannot be cancelled
+    through the Akshara path — the endpoint scopes by invited_in_org, so a wrong-org id
+    yields 404 and the invite survives. Cancelling through the correct org succeeds.
+    This is the fix for the loose global DELETE /users/invitations/delete/{id}.
+    """
+    # an invitation that belongs to Bhumi
+    payload = AdminInviteUserSchema(
+        invited_email="pending@bhumi.org", invited_role_uuid=_role(GUEST_ROLE).uuid
+    )
+    post_admin_org_user_invite(platform_admin_request, bhumi.id, payload)
+    inv = Invitation.objects.filter(invited_email="pending@bhumi.org").first()
+    assert inv.invited_in_org_id == bhumi.id
+
+    # cancelling via ANOTHER org (Akshara) must fail with 404 and leave it intact
+    with pytest.raises(HttpError) as excinfo:
+        delete_admin_org_invitation(platform_admin_request, akshara.id, inv.id)
+    assert excinfo.value.status_code == 404
+    assert Invitation.objects.filter(id=inv.id).exists()
+
+    # cancelling via the correct org (Bhumi) succeeds
+    delete_admin_org_invitation(platform_admin_request, bhumi.id, inv.id)
+    assert not Invitation.objects.filter(id=inv.id).exists()
+
+
+# ---- users list ---------------------------------------------------------------
+
+
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+def test_admin_org_users_lists_members_and_pending(platform_admin_request, akshara):
+    """the Users tab payload lists members (with per-org status) and pending invites"""
+    member = _make_member(akshara, "member@akshara.org", GUEST_ROLE)
+    post_admin_org_user_invite(
+        platform_admin_request,
+        akshara.id,
+        AdminInviteUserSchema(
+            invited_email="pending@akshara.org", invited_role_uuid=_role(GUEST_ROLE).uuid
+        ),
+    )
+
+    response = get_admin_org_users(platform_admin_request, akshara.id)
+
+    emails = {u.email for u in response.users}
+    assert "member@akshara.org" in emails
+    assert all(u.is_active for u in response.users)
+    invited_emails = {i.invited_email for i in response.invitations}
+    assert "pending@akshara.org" in invited_emails
