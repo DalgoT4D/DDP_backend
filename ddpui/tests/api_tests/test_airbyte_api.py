@@ -737,12 +737,11 @@ def test_post_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace
 @patch("ddpui.api.airbyte_api.create_audit_log")
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    update_source=Mock(
-        return_value={"sourceId": "existing-source-id", "sourceName": "Updated Source"}
-    ),
+    get_source=Mock(return_value={"name": "Old Source"}),
+    update_source=Mock(return_value={"sourceId": "existing-source-id", "name": "Updated Source"}),
 )
 def test_put_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
-    """Test that updating a source creates an audit log entry"""
+    """Test that updating a source creates an audit log entry when name changes"""
     request = mock_request(orguser_workspace)
 
     payload = AirbyteSourceUpdate(
@@ -757,6 +756,7 @@ def test_put_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace,
     assert call_kwargs["org"] == orguser_workspace.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DATA_SOURCE
     assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["field_changes"] == {"name": {"old": "Old Source", "new": "Updated Source"}}
 
 
 @patch("ddpui.api.airbyte_api.create_audit_log")
