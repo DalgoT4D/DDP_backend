@@ -1099,6 +1099,14 @@ def get_public_kpi_data(
             logger.warning(f"Invalid dashboard_filters JSON for public KPI {kpi_id}: {dashboard_filters}")
             return 400, PublicErrorResponse(error="Invalid dashboard_filters: must be valid JSON", is_valid=False)
 
+    kpi_in_dashboard = any(
+        comp.get("type") == "kpi" and comp.get("config", {}).get("kpiId") == kpi_id
+        for tab in (dashboard.tabs or [])
+        for comp in (tab.get("components") or {}).values()
+    )
+    if not kpi_in_dashboard:
+        return 404, PublicErrorResponse(error="KPI not found on this dashboard", is_valid=False)
+
     try:
         result = KPIService.get_kpi_data(
             kpi_id,
