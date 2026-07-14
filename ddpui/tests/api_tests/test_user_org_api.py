@@ -43,6 +43,7 @@ from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.alert import Alert
+from ddpui.services.dashboard_service import DashboardService, DashboardPermissionError
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import (
     OrgUser,
@@ -520,6 +521,45 @@ def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, o
     alert.delete()
     kpi.delete()
     metric.delete()
+    user.delete()
+
+
+def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1(seed_db, orguser):
+    """after a creator is deleted, their dashboard can be deleted by an admin but not a member"""
+    request = mock_request(orguser)
+    payload = DeleteOrgUserPayload(email="useremail")
+    user = User.objects.create(email=payload.email, username=payload.email)
+    creator = OrgUser.objects.create(
+        org=orguser.org,
+        user=user,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    dashboard = Dashboard.objects.create(
+        title="orphaned-dashboard", org=orguser.org, created_by=creator
+    )
+    # a second dashboard so the orphaned one isn't the org's last (deleting
+    # the last dashboard is blocked by a separate rule)
+    Dashboard.objects.create(title="other-dashboard", org=orguser.org, created_by=orguser)
+
+    delete_organization_users_v1(request, payload)
+    dashboard.refresh_from_db()
+    assert dashboard.created_by is None
+
+    # a non-admin member of the org cannot delete the orphaned dashboard
+    member_user = User.objects.create(email="member-email", username="member-email")
+    member = OrgUser.objects.create(
+        org=orguser.org,
+        user=member_user,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    with pytest.raises(DashboardPermissionError):
+        DashboardService.delete_dashboard(dashboard.id, orguser.org, member)
+    assert Dashboard.objects.filter(id=dashboard.id).exists()
+
+    # an admin can delete it (the requestor orguser fixture holds the admin role)
+    assert DashboardService.delete_dashboard(dashboard.id, orguser.org, orguser) is True
+    assert not Dashboard.objects.filter(id=dashboard.id).exists()
+    member_user.delete()
     user.delete()
 
 
