@@ -478,15 +478,15 @@ def test_admin_deactivate_user_in_org_only(platform_admin_request, akshara, bhum
     assert bhumi_ou.is_active is True
 
 
-# ---- removal-impact count + cascade -------------------------------------------
+# ---- removal-impact count + orphaning -----------------------------------------
 
 
 def test_admin_removal_impact_counts_are_accurate(platform_admin_request, akshara):
     """
     REMOVAL-IMPACT COUNT (plan §4.6 / research §5): the endpoint returns the exact
-    number of dashboards/charts that removal would cascade-delete and reports that
-    would be orphaned — counted against real rows tied to the user via created_by,
-    and scoped to THAT user (content by another user is not counted).
+    number of dashboards/charts/reports that removal would orphan (their created_by set
+    to NULL — kept, not deleted) — counted against real rows tied to the user via
+    created_by, and scoped to THAT user (content by another user is not counted).
     """
     priya = _make_member(akshara, "priya@akshara.org", GUEST_ROLE)
     other = _make_member(akshara, "other@akshara.org", GUEST_ROLE)
@@ -509,16 +509,17 @@ def test_admin_removal_impact_counts_are_accurate(platform_admin_request, akshar
     Dashboard.objects.create(title="not-priyas", org=akshara, created_by=other)
 
     impact = get_admin_org_user_removal_impact(platform_admin_request, akshara.id, priya.id)
-    assert impact.dashboards_deleted == 3
-    assert impact.charts_deleted == 5
+    assert impact.dashboards_orphaned == 3
+    assert impact.charts_orphaned == 5
     assert impact.reports_orphaned == 2
 
 
-def test_admin_remove_user_cascades_content(platform_admin_request, akshara):
+def test_admin_remove_user_orphans_content(platform_admin_request, akshara):
     """
-    removing the user hard-deletes the OrgUser and cascades their Dashboards/Charts
-    (created_by CASCADE); their ReportSnapshots survive with created_by set NULL
-    (SET_NULL). The count seen in the warning matches what actually disappears.
+    removing the user hard-deletes the OrgUser but KEEPS their Dashboards/Charts/Reports
+    — all three created_by FKs are SET_NULL (Access Control v2 / PR #1428 switched
+    Dashboard & Chart from CASCADE to SET_NULL; ReportSnapshot already was). The content
+    survives with created_by=None; the removal-impact count is the orphan count.
     """
     priya = _make_member(akshara, "priya2@akshara.org", GUEST_ROLE)
     dash = Dashboard.objects.create(title="d", org=akshara, created_by=priya)
@@ -536,9 +537,12 @@ def test_admin_remove_user_cascades_content(platform_admin_request, akshara):
     delete_admin_org_user(platform_admin_request, akshara.id, priya.id)
 
     assert not OrgUser.objects.filter(id=priya_id).exists()
-    assert not Dashboard.objects.filter(id=dash.id).exists()  # cascaded
-    assert not Chart.objects.filter(id=chart.id).exists()  # cascaded
+    # content is KEPT (not cascade-deleted); only the creator link is cleared
+    dash.refresh_from_db()
+    chart.refresh_from_db()
     report.refresh_from_db()
+    assert dash.created_by is None  # orphaned, not deleted
+    assert chart.created_by is None  # orphaned, not deleted
     assert report.created_by is None  # orphaned, not deleted
 
 
@@ -601,7 +605,7 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
 # ============================================================================
 # This is NOT a per-milestone unit test. It runs the whole super-admin journey —
 # create org, invite, accept, change role, per-org + org-level deactivate/reactivate,
-# cancel invite, remove-with-cascade — as ONE narrative against real rows, so it proves
+# cancel invite, remove-with-orphaning — as ONE narrative against real rows, so it proves
 # the milestones COMPOSE, not just that each works in isolation. External deps only are
 # mocked: Airbyte (org create), Redis (unavailable in tests), and SES creds forced
 # absent so the invite exercises the real Part-1 dev fallback rather than a mocked email.
@@ -651,7 +655,8 @@ def test_week1_full_admin_lifecycle_flow(
       8. admin reactivates the org — access restored
       9. admin invites a 2nd user then cancels it; a DIFFERENT org's invite can't be
          cancelled through this org's path (404) — org-scoping holds inside the flow
-     10. admin removes the first user — impact count available first, then cascade
+     10. admin removes the first user — orphan-impact count available first, then their
+         content is orphaned (created_by NULLed, kept), not cascade-deleted
 
     Blocking is proven through the real auth middleware (see _load_permissions).
     """
@@ -784,11 +789,13 @@ def test_week1_full_admin_lifecycle_flow(
     assert excinfo.value.status_code == 404
     assert Invitation.objects.filter(id=bhumi_invite.id).exists()  # survived, org-scoped
 
-    # -- Step 10: removal-impact THEN cascade-remove the first user ----------------
-    # content owned by Priya's org1 membership — this is what removal cascades
-    for i in range(2):
-        Dashboard.objects.create(title=f"d{i}", org=org1, created_by=priya_ou)
-    for i in range(3):
+    # -- Step 10: removal-impact THEN remove the first user (content is orphaned) ---
+    # content owned by Priya's org1 membership — removal orphans it (created_by→NULL,
+    # kept), it is NOT cascade-deleted (Access Control v2 / PR #1428).
+    dashboards = [
+        Dashboard.objects.create(title=f"d{i}", org=org1, created_by=priya_ou) for i in range(2)
+    ]
+    charts = [
         Chart.objects.create(
             title=f"c{i}",
             chart_type="bar",
@@ -797,20 +804,27 @@ def test_week1_full_admin_lifecycle_flow(
             org=org1,
             created_by=priya_ou,
         )
+        for i in range(3)
+    ]
     report = ReportSnapshot.objects.create(title="r", org=org1, created_by=priya_ou)
 
-    # the impact count is available BEFORE the destructive remove
+    # the orphan-impact count is available BEFORE the remove
     impact = get_admin_org_user_removal_impact(admin_request, org1.id, priya_ou.id)
-    assert impact.dashboards_deleted == 2
-    assert impact.charts_deleted == 3
+    assert impact.dashboards_orphaned == 2
+    assert impact.charts_orphaned == 3
     assert impact.reports_orphaned == 1
 
     priya_ou_id = priya_ou.id
     delete_admin_org_user(admin_request, org1.id, priya_ou.id)
 
     assert not OrgUser.objects.filter(id=priya_ou_id).exists()  # removed from org1
-    assert Dashboard.objects.filter(created_by_id=priya_ou_id).count() == 0  # cascaded
-    assert Chart.objects.filter(created_by_id=priya_ou_id).count() == 0  # cascaded
+    # content is KEPT, orphaned (created_by SET_NULL) — not cascade-deleted
+    for dash in dashboards:
+        dash.refresh_from_db()
+        assert dash.created_by is None  # orphaned, not deleted
+    for chart in charts:
+        chart.refresh_from_db()
+        assert chart.created_by is None  # orphaned, not deleted
     report.refresh_from_db()
     assert report.created_by is None  # orphaned (SET_NULL), not deleted
     # the remove is org-scoped: Priya's Bhumi membership is untouched

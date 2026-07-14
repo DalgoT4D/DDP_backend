@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0160_add_dashboard_tabs"),
+        ("ddpui", "0168_alter_alert_created_by_alter_chart_created_by_and_more"),
     ]
 
     operations = [

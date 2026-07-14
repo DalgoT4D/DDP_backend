@@ -124,6 +124,9 @@ def test_authenticate_blocks_deactivated_org(
     mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
         org_user
     )
+    # first redis.get is the JTI blacklist check -> None (not blacklisted); the org-block
+    # raises before any permission lookup, so a single None return covers the whole path
+    mock_redis_client.return_value.get.return_value = None
     mock_request.headers["x-dalgo-org"] = "deactivated-org"
     token = str(AccessToken.for_user(mock_user))
 
@@ -167,9 +170,9 @@ def test_authenticate_allows_reactivated_org(
     mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
         org_user
     )
-    mock_redis_client.return_value.get.return_value = json.dumps(
-        {str(org_user.new_role.id): ["perm1"]}
-    )
+    # call 1 is the JTI blacklist check -> None (not blacklisted); later calls load perms
+    permissions_json = json.dumps({str(org_user.new_role.id): ["perm1"]})
+    mock_redis_client.return_value.get.side_effect = [None, permissions_json, permissions_json]
     mock_request.headers["x-dalgo-org"] = "reactivated-org"
     token = str(AccessToken.for_user(mock_user))
 
@@ -214,6 +217,9 @@ def test_authenticate_blocks_deactivated_orguser(
     mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
         deactivated_orguser
     )
+    # first redis.get is the JTI blacklist check -> None (not blacklisted); the per-org
+    # block raises before any permission lookup, so a single None covers the whole path
+    mock_redis_client.return_value.get.return_value = None
     mock_request.headers["x-dalgo-org"] = "active-org"
     token = str(AccessToken.for_user(mock_user))
 
@@ -257,9 +263,9 @@ def test_authenticate_allows_active_orguser(
     mock_org_user_filter.return_value.filter.return_value.select_related.return_value.first.return_value = (
         active_orguser
     )
-    mock_redis_client.return_value.get.return_value = json.dumps(
-        {str(active_orguser.new_role.id): ["perm1"]}
-    )
+    # call 1 is the JTI blacklist check -> None (not blacklisted); later calls load perms
+    permissions_json = json.dumps({str(active_orguser.new_role.id): ["perm1"]})
+    mock_redis_client.return_value.get.side_effect = [None, permissions_json, permissions_json]
     mock_request.headers["x-dalgo-org"] = "normal-org"
     token = str(AccessToken.for_user(mock_user))
 

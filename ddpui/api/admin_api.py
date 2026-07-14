@@ -260,13 +260,15 @@ class AdminChangeRoleSchema(Schema):
 
 class RemovalImpactSchema(Schema):
     """
-    what removing a user would destroy. Drives the confirm dialog's warning.
-    Dashboard/Chart created_by are CASCADE (deleted); ReportSnapshot is SET_NULL
-    (orphaned, kept). See research §5.
+    what removing a user would orphan. Drives the confirm dialog's warning.
+    Dashboard/Chart/ReportSnapshot created_by are all SET_NULL — the content is KEPT,
+    only the creator link is cleared (its created_by becomes NULL). Nothing is deleted.
+    (Access Control v2 / PR #1428 switched Dashboard & Chart from CASCADE to SET_NULL;
+    ReportSnapshot was already SET_NULL.) See research §5.
     """
 
-    dashboards_deleted: int
-    charts_deleted: int
+    dashboards_orphaned: int
+    charts_orphaned: int
     reports_orphaned: int
 
 
@@ -434,15 +436,15 @@ def post_admin_org_user_reactivate(request, org_id: int, orguser_id: int):
 @platform_admin_required
 def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
     """
-    Count the content that removing this user would cascade-delete, so the confirm
-    dialog can warn before the destructive action. Counts are exact ORM counts on the
-    created_by FK. See plan.md §4.6 / research §5.
+    Count the content that removing this user would orphan (its created_by set to NULL —
+    the content is kept, not deleted), so the confirm dialog can warn before the action.
+    Counts are exact ORM counts on the created_by FK. See plan.md §4.6 / research §5.
     """
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
     return RemovalImpactSchema(
-        dashboards_deleted=Dashboard.objects.filter(created_by=orguser).count(),
-        charts_deleted=Chart.objects.filter(created_by=orguser).count(),
+        dashboards_orphaned=Dashboard.objects.filter(created_by=orguser).count(),
+        charts_orphaned=Chart.objects.filter(created_by=orguser).count(),
         reports_orphaned=ReportSnapshot.objects.filter(created_by=orguser).count(),
     )
 

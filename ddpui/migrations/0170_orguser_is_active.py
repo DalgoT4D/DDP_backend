@@ -18,7 +18,7 @@ def backfill_is_active(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0161_org_is_active"),
+        ("ddpui", "0169_org_is_active"),
     ]
 
     operations = [
