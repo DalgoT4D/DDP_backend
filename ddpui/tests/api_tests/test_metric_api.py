@@ -405,7 +405,9 @@ class TestMetricAuditLogs:
 
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     @patch("ddpui.api.metric_api.create_audit_log")
-    def test_update_metric_creates_audit_log(self, mock_audit_log, mock_validate, orguser, sample_metric, seed_db):
+    def test_update_metric_creates_audit_log(
+        self, mock_audit_log, mock_validate, orguser, sample_metric, seed_db
+    ):
         """Test that updating a metric creates an audit log entry."""
         OrgWarehouse.objects.create(org=orguser.org, wtype="postgres", credentials={})
         request = mock_request(orguser)

@@ -115,16 +115,12 @@ class AuditLog(models.Model):
         # These make searching by org+timestamp, org+user, etc. much faster
         indexes = [
             models.Index(fields=["org", "timestamp"], name="auditlog_org_ts_idx"),
-            models.Index(
-                fields=["org", "orguser", "timestamp"], name="auditlog_org_orguser_idx"
-            ),
+            models.Index(fields=["org", "orguser", "timestamp"], name="auditlog_org_orguser_idx"),
             models.Index(
                 fields=["org", "resource_type", "timestamp"],
                 name="auditlog_org_restype_idx",
             ),
-            models.Index(
-                fields=["org", "action", "timestamp"], name="auditlog_org_action_idx"
-            ),
+            models.Index(fields=["org", "action", "timestamp"], name="auditlog_org_action_idx"),
         ]
 
     def __str__(self):

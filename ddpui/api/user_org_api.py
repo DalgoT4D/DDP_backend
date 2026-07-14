@@ -415,7 +415,9 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
         raise HttpError(400, "User does not exist")
 
     # Capture old role for audit log
-    old_role_slug = orguser_to_be_assigned.new_role.slug if orguser_to_be_assigned.new_role else None
+    old_role_slug = (
+        orguser_to_be_assigned.new_role.slug if orguser_to_be_assigned.new_role else None
+    )
 
     orguser_to_be_assigned.new_role = role_to_be_assgined
     orguser_to_be_assigned.save()
@@ -427,9 +429,7 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
         AuditLogAction.UPDATE,
         resource_id=str(orguser_to_be_assigned.id),
         resource_name=orguser_to_be_assigned.user.email,
-        field_changes=compute_changes(
-            {"role": old_role_slug}, {"role": role_to_be_assgined.slug}
-        ),
+        field_changes=compute_changes({"role": old_role_slug}, {"role": role_to_be_assgined.slug}),
     )
 
     return {"success": 1}
@@ -629,9 +629,7 @@ def post_organization_user_accept_invite_v1(
                 resource_id="",
                 resource_name=invited_email,
                 action=AuditLogAction.UPDATE,
-                field_changes=compute_changes(
-                    {"status": "pending"}, {"status": "accepted"}
-                ),
+                field_changes=compute_changes({"status": "pending"}, {"status": "accepted"}),
             )
             create_audit_log(
                 org=invited_by_org,

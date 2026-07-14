@@ -135,9 +135,7 @@ def _write_audit_log(
         django.db.connection.close()
 
 
-def compute_changes(
-    before: dict, after: dict, exclude_fields: list[str] | None = None
-) -> dict:
+def compute_changes(before: dict, after: dict, exclude_fields: list[str] | None = None) -> dict:
     """
     Compares two dictionaries and returns what changed.
 

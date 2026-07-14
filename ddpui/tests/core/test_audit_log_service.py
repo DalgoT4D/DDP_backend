@@ -29,13 +29,12 @@ pytestmark = pytest.mark.django_db
 # FIXTURES - These create test data that our tests can use
 # ============================================================================
 
+
 @pytest.fixture
 def test_user():
     """Creates a test Django user."""
     user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpassword"
+        username="testuser", email="test@example.com", password="testpassword"
     )
     yield user
     user.delete()
@@ -60,6 +59,7 @@ def test_orguser(test_user, test_org):
 # ============================================================================
 # TESTS FOR compute_changes()
 # ============================================================================
+
 
 class TestComputeChanges:
     """Tests for the compute_changes helper function."""
@@ -137,6 +137,7 @@ class TestComputeChanges:
 # We mock django.db.connection.close() because closing the connection
 # in tests breaks pytest's database cleanup.
 # ============================================================================
+
 
 class TestWriteAuditLog:
     """Tests for the _write_audit_log internal function."""
@@ -243,6 +244,7 @@ class TestWriteAuditLog:
 # (Django tests use transactions that other threads can't access)
 # ============================================================================
 
+
 class TestCreateAuditLog:
     """Tests for the create_audit_log public function."""
 
@@ -262,6 +264,7 @@ class TestCreateAuditLog:
 
         # Give the thread a moment to execute
         import time
+
         time.sleep(0.1)
 
         # Verify _write_audit_log was called with correct arguments
@@ -289,6 +292,7 @@ class TestCreateAuditLog:
         )
 
         import time
+
         time.sleep(0.1)
 
         mock_write.assert_called_once()
@@ -308,6 +312,7 @@ class TestCreateAuditLog:
         )
 
         import time
+
         time.sleep(0.1)
 
         mock_write.assert_called_once()

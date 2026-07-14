@@ -846,9 +846,7 @@ class TestReportAuditLogs:
         assert "field_changes" in call_kwargs
 
     @patch("ddpui.api.report_api.create_audit_log")
-    def test_delete_snapshot_creates_audit_log(
-        self, mock_audit_log, orguser, org, seed_db
-    ):
+    def test_delete_snapshot_creates_audit_log(self, mock_audit_log, orguser, org, seed_db):
         """Test that deleting a report snapshot creates an audit log entry."""
         snapshot = ReportSnapshot.objects.create(
             title="Report To Delete",

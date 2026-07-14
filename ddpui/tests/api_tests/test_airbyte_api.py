@@ -737,7 +737,9 @@ def test_post_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace
 @patch("ddpui.api.airbyte_api.create_audit_log")
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    update_source=Mock(return_value={"sourceId": "existing-source-id", "sourceName": "Updated Source"}),
+    update_source=Mock(
+        return_value={"sourceId": "existing-source-id", "sourceName": "Updated Source"}
+    ),
 )
 def test_put_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
     """Test that updating a source creates an audit log entry"""
@@ -760,7 +762,9 @@ def test_put_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace,
 @patch("ddpui.api.airbyte_api.create_audit_log")
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
-    create_destination=Mock(return_value={"destinationId": "new-dest-id", "destinationName": "Test Warehouse"}),
+    create_destination=Mock(
+        return_value={"destinationId": "new-dest-id", "destinationName": "Test Warehouse"}
+    ),
 )
 def test_post_airbyte_destination_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
     """Test that creating a warehouse/destination creates an audit log entry"""

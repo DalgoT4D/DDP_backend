@@ -395,9 +395,7 @@ class ChartService:
         return field_changes
 
     @staticmethod
-    def _extract_config_changes(
-        old_config: dict, new_config: dict, prefix: str = "config"
-    ) -> dict:
+    def _extract_config_changes(old_config: dict, new_config: dict, prefix: str = "config") -> dict:
         """
         Recursively compare config objects and return changes.
 
@@ -422,9 +420,7 @@ class ChartService:
 
             # Both are dicts - recurse
             if isinstance(old_val, dict) and isinstance(new_val, dict):
-                nested_changes = ChartService._extract_config_changes(
-                    old_val, new_val, full_key
-                )
+                nested_changes = ChartService._extract_config_changes(old_val, new_val, full_key)
                 changes.update(nested_changes)
             # Both are lists - compare
             elif isinstance(old_val, list) and isinstance(new_val, list):

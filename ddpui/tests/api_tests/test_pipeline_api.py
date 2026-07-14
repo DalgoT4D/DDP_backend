@@ -1392,7 +1392,9 @@ from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
         return_value={"deployment": {"id": "new-deploy-id", "name": "test-deploy"}}
     ),
 )
-def test_post_prefect_dataflow_v1_creates_audit_log(mock_audit_log, orguser_transform_tasks, seed_db):
+def test_post_prefect_dataflow_v1_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
     """Test that creating a pipeline creates an audit log entry"""
     request = mock_request(orguser_transform_tasks)
 
@@ -1418,7 +1420,9 @@ def test_post_prefect_dataflow_v1_creates_audit_log(mock_audit_log, orguser_tran
     "ddpui.ddpprefect.prefect_service",
     delete_deployment_by_id=Mock(return_value=True),
 )
-def test_delete_prefect_dataflow_v1_creates_audit_log(mock_audit_log, orguser_transform_tasks, seed_db):
+def test_delete_prefect_dataflow_v1_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
     """Test that deleting a pipeline creates an audit log entry"""
     request = mock_request(orguser_transform_tasks)
 
@@ -1445,7 +1449,9 @@ def test_delete_prefect_dataflow_v1_creates_audit_log(mock_audit_log, orguser_tr
     "ddpui.ddpprefect.prefect_service",
     set_deployment_schedule=Mock(return_value=True),
 )
-def test_post_deployment_set_schedule_creates_audit_log(mock_audit_log, orguser_transform_tasks, seed_db):
+def test_post_deployment_set_schedule_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
     """Test that toggling pipeline schedule creates an audit log entry"""
     request = mock_request(orguser_transform_tasks)
     org = orguser_transform_tasks.org

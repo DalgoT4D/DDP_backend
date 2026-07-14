@@ -269,7 +269,9 @@ class TestKPIAuditLogs:
         assert "field_changes" in call_kwargs
 
     @patch("ddpui.api.kpi_api.create_audit_log")
-    def test_delete_kpi_creates_audit_log(self, mock_audit_log, orguser, sample_metric, org, seed_db):
+    def test_delete_kpi_creates_audit_log(
+        self, mock_audit_log, orguser, sample_metric, org, seed_db
+    ):
         """Test that deleting a KPI creates an audit log entry."""
         kpi = KPI.objects.create(
             name="KPI To Delete",
