@@ -1,12 +1,35 @@
-import pytest
-from ddpui.core.charts.pivot_transform import (
-    classify_row,
-    get_row_labels,
-    rotate_to_pivot,
-    is_column_total,
-)
+"""
+Tests for the cells[] pivot transform.
 
-# Simulated ROLLUP output rows with ONE column dimension (pivot_col_0)
+rotate_to_pivot flattens ROLLUP output into one self-describing cell per filled
+(row_key, col_key) slot. Each cell carries (row_kind, col_kind) tags instead of
+being routed into positional buckets. The frontend derives the grid from cells.
+
+Also holds the functional / contract tests (TestPivotSqlAliasContract,
+TestGetPivotTableDataPipeline) that lock the SQL-builder <-> transform contract and
+drive the real get_pivot_table_data entry point — the unit tests above cannot catch
+alias drift on their own.
+"""
+
+from unittest.mock import MagicMock, patch
+
+from sqlalchemy import create_engine
+
+from ddpui.core.charts.pivot_transform import rotate_to_pivot
+from ddpui.core.charts.charts_service import build_chart_query, metric_sql_alias
+from ddpui.core.charts.pivot_service import get_pivot_table_data
+from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
+
+
+def _org_warehouse(wtype="postgres"):
+    ow = MagicMock()
+    ow.wtype = wtype
+    return ow
+
+
+# Simulated ROLLUP output rows with ONE column dimension (pivot_col_0 = date).
+# Each district/program pair emits a leaf cell (real date) and a row_total cell
+# (date rolled up, _grp_pivot_col_0=1).
 SAMPLE_ROWS_SINGLE_COL = [
     {
         "district": "Mumbai",
@@ -48,7 +71,7 @@ SAMPLE_ROWS_SINGLE_COL = [
         "_grp_program": 0,
         "_grp_pivot_col_0": 1,
     },
-    # Subtotal for Mumbai
+    # Row subtotal for Mumbai (program rolled up)
     {
         "district": "Mumbai",
         "program": None,
@@ -69,7 +92,7 @@ SAMPLE_ROWS_SINGLE_COL = [
         "_grp_program": 1,
         "_grp_pivot_col_0": 1,
     },
-    # Grand total
+    # Grand total (both row dims rolled up)
     {
         "district": None,
         "program": None,
@@ -92,7 +115,7 @@ SAMPLE_ROWS_SINGLE_COL = [
     },
 ]
 
-# Simulated ROLLUP output with TWO column dimensions (pivot_col_0, pivot_col_1)
+# Simulated ROLLUP output with TWO column dimensions (pivot_col_0=month, pivot_col_1=program).
 SAMPLE_ROWS_MULTI_COL = [
     # Leaf cells
     {
@@ -113,7 +136,7 @@ SAMPLE_ROWS_MULTI_COL = [
         "_grp_pivot_col_0": 0,
         "_grp_pivot_col_1": 0,
     },
-    # Column subtotal (month total across programs) — skipped in rendering
+    # Column subtotal (month total across programs) — partial column grouping
     {
         "district": "Mumbai",
         "pivot_col_0": "2026-01",
@@ -123,7 +146,7 @@ SAMPLE_ROWS_MULTI_COL = [
         "_grp_pivot_col_0": 0,
         "_grp_pivot_col_1": 1,
     },
-    # Overall column total
+    # Overall column total (row_total) — all column dims grouped
     {
         "district": "Mumbai",
         "pivot_col_0": None,
@@ -133,7 +156,7 @@ SAMPLE_ROWS_MULTI_COL = [
         "_grp_pivot_col_0": 1,
         "_grp_pivot_col_1": 1,
     },
-    # Grand total
+    # Grand total, row_total
     {
         "district": None,
         "pivot_col_0": None,
@@ -146,62 +169,12 @@ SAMPLE_ROWS_MULTI_COL = [
 ]
 
 
-class TestClassifyRow:
-    def test_data_row(self):
-        row = {"_grp_district": 0, "_grp_program": 0}
-        assert classify_row(row, ["district", "program"]) == "data"
-
-    def test_subtotal_row(self):
-        row = {"_grp_district": 0, "_grp_program": 1}
-        assert classify_row(row, ["district", "program"]) == "subtotal"
-
-    def test_grand_total_row(self):
-        row = {"_grp_district": 1, "_grp_program": 1}
-        assert classify_row(row, ["district", "program"]) == "grand_total"
+def _cells(result):
+    return result["cells"]
 
 
-class TestIsColumnTotal:
-    def test_single_col_total(self):
-        row = {"_grp_pivot_col_0": 1}
-        assert is_column_total(row, 1) is True
-
-    def test_single_col_not_total(self):
-        row = {"_grp_pivot_col_0": 0}
-        assert is_column_total(row, 1) is False
-
-    def test_multi_col_all_total(self):
-        row = {"_grp_pivot_col_0": 1, "_grp_pivot_col_1": 1}
-        assert is_column_total(row, 2) is True
-
-    def test_multi_col_partial(self):
-        row = {"_grp_pivot_col_0": 0, "_grp_pivot_col_1": 1}
-        assert is_column_total(row, 2) is False
-
-    def test_no_col_dims(self):
-        assert is_column_total({}, 0) is False
-
-
-class TestGetRowLabels:
-    def test_data_row_labels(self):
-        row = {"district": "Mumbai", "program": "Education", "_grp_district": 0, "_grp_program": 0}
-        assert get_row_labels(row, ["district", "program"]) == ["Mumbai", "Education"]
-
-    def test_subtotal_row_labels(self):
-        row = {"district": "Mumbai", "program": None, "_grp_district": 0, "_grp_program": 1}
-        assert get_row_labels(row, ["district", "program"]) == ["Mumbai"]
-
-    def test_null_in_real_data(self):
-        row = {"district": None, "program": "Education", "_grp_district": 0, "_grp_program": 0}
-        assert get_row_labels(row, ["district", "program"]) == ["(No value)", "Education"]
-
-    def test_raw_datetime_value_passthrough(self):
-        # Row dimension values are rendered verbatim (no server-side formatting).
-        row = {"enrolled_at": "2025-08-12T20:45:58", "_grp_enrolled_at": 0}
-        assert get_row_labels(row, ["enrolled_at"]) == ["2025-08-12T20:45:58"]
-
-
-class TestRotateToPivotSingleColumn:
-    def test_basic_rotation(self):
+class TestContract:
+    def test_top_level_keys(self):
         result = rotate_to_pivot(
             flat_rows=SAMPLE_ROWS_SINGLE_COL,
             row_dim_cols=["district", "program"],
@@ -209,70 +182,160 @@ class TestRotateToPivotSingleColumn:
             col_dim_names=["date"],
             metric_aliases=["Count", "Spend"],
         )
-        assert "column_keys" in result
-        assert "column_dimension_names" in result
-        assert "metric_headers" in result
-        assert "rows" in result
-        assert "grand_total" in result
+        assert set(result.keys()) == {
+            "row_dimension_names",
+            "column_dimension_names",
+            "metric_headers",
+            "cells",
+        }
+        assert result["row_dimension_names"] == ["district", "program"]
+        assert result["column_dimension_names"] == ["date"]
+        assert result["metric_headers"] == ["Count", "Spend"]
 
-        # Should have 2 data rows + 1 subtotal
-        assert len(result["rows"]) == 3
-        assert result["grand_total"] is not None
-        assert result["grand_total"]["row_total"] == [3, 1050]
-
-    def test_subtotal_row_flagged(self):
+    def test_display_names_override_headers(self):
         result = rotate_to_pivot(
+            flat_rows=[{"district": "M", "Count": 1, "_grp_district": 0}],
+            row_dim_cols=["district"],
+            num_col_dims=0,
+            col_dim_names=[],
+            metric_aliases=["Count"],
+            metric_display_names=["Total Count"],
+        )
+        assert result["metric_headers"] == ["Total Count"]
+
+    def test_empty_input(self):
+        result = rotate_to_pivot(
+            flat_rows=[],
+            row_dim_cols=["district"],
+            num_col_dims=1,
+            col_dim_names=["date"],
+            metric_aliases=["Count"],
+        )
+        assert result["cells"] == []
+
+
+class TestSingleColumn:
+    def _run(self):
+        return rotate_to_pivot(
             flat_rows=SAMPLE_ROWS_SINGLE_COL,
             row_dim_cols=["district", "program"],
             num_col_dims=1,
             col_dim_names=["date"],
             metric_aliases=["Count", "Spend"],
         )
-        subtotal_rows = [r for r in result["rows"] if r["is_subtotal"]]
-        assert len(subtotal_rows) == 1
-        assert subtotal_rows[0]["row_labels"] == ["Mumbai"]
+
+    def test_leaf_cell(self):
+        cells = _cells(self._run())
+        leaf = [
+            c for c in cells if c["row_key"] == ["Mumbai", "Education"] and c["col_kind"] == "leaf"
+        ]
+        assert leaf == [
+            {
+                "row_key": ["Mumbai", "Education"],
+                "col_key": ["2026-01-01"],
+                "row_kind": "data",
+                "col_kind": "leaf",
+                "values": [1, 450],
+            }
+        ]
+
+    def test_row_total_cell(self):
+        cells = _cells(self._run())
+        rt = [
+            c
+            for c in cells
+            if c["row_key"] == ["Mumbai", "Education"] and c["col_kind"] == "row_total"
+        ]
+        assert rt == [
+            {
+                "row_key": ["Mumbai", "Education"],
+                "col_key": [],
+                "row_kind": "data",
+                "col_kind": "row_total",
+                "values": [1, 450],
+            }
+        ]
+
+    def test_row_subtotal_present(self):
+        cells = _cells(self._run())
+        sub = [c for c in cells if c["row_kind"] == "row_subtotal"]
+        # Mumbai subtotal emits a leaf cell + a row_total cell
+        assert {tuple(c["col_kind"] for c in sub)} == {("leaf", "row_total")}
+        assert all(c["row_key"] == ["Mumbai"] for c in sub)
+
+    def test_grand_total_row_total(self):
+        cells = _cells(self._run())
+        gt = [c for c in cells if c["row_kind"] == "grand_total" and c["col_kind"] == "row_total"]
+        assert gt == [
+            {
+                "row_key": [],
+                "col_key": [],
+                "row_kind": "grand_total",
+                "col_kind": "row_total",
+                "values": [3, 1050],
+            }
+        ]
 
 
-class TestRotateToPivotMultiColumn:
-    def test_multi_column_rotation(self):
-        result = rotate_to_pivot(
+class TestMultiColumn:
+    def _run(self, **kw):
+        return rotate_to_pivot(
             flat_rows=SAMPLE_ROWS_MULTI_COL,
             row_dim_cols=["district"],
             num_col_dims=2,
             col_dim_names=["month", "program"],
             metric_aliases=["Count"],
+            **kw,
         )
-        # Should have composite column keys
-        assert len(result["column_keys"]) == 2
-        assert result["column_keys"][0] == ["2026-01", "Education"]
-        assert result["column_keys"][1] == ["2026-01", "Health"]
-        assert result["column_dimension_names"] == ["month", "program"]
 
-        # Data row for Mumbai
-        data_rows = [r for r in result["rows"] if not r["is_subtotal"]]
-        assert len(data_rows) == 1
-        assert data_rows[0]["row_labels"] == ["Mumbai"]
-        assert data_rows[0]["values"][0] == [5]
-        assert data_rows[0]["values"][1] == [3]
-        assert data_rows[0]["row_total"] == [8]
-
-    def test_multi_column_grand_total(self):
-        result = rotate_to_pivot(
-            flat_rows=SAMPLE_ROWS_MULTI_COL,
-            row_dim_cols=["district"],
-            num_col_dims=2,
-            col_dim_names=["month", "program"],
-            metric_aliases=["Count"],
+    def test_leaf_cells(self):
+        cells = _cells(self._run(show_column_subtotals=True))
+        assert any(
+            c["col_key"] == ["2026-01", "Education"]
+            and c["col_kind"] == "leaf"
+            and c["row_key"] == ["Mumbai"]
+            and c["values"] == [5]
+            for c in cells
         )
-        assert result["grand_total"] is not None
-        assert result["grand_total"]["row_total"] == [8]
+        assert any(
+            c["col_key"] == ["2026-01", "Health"] and c["col_kind"] == "leaf" and c["values"] == [3]
+            for c in cells
+        )
+
+    def test_column_subtotal_cell(self):
+        cells = _cells(self._run(show_column_subtotals=True))
+        sub = [c for c in cells if c["col_kind"] == "col_subtotal"]
+        assert sub == [
+            {
+                "row_key": ["Mumbai"],
+                "col_key": ["2026-01"],
+                "row_kind": "data",
+                "col_kind": "col_subtotal",
+                "values": [8],
+            }
+        ]
+
+    def test_column_subtotal_dropped_by_default(self):
+        cells = _cells(self._run())  # show_column_subtotals defaults False
+        assert all(c["col_kind"] != "col_subtotal" for c in cells)
+
+    def test_row_total_and_grand_total(self):
+        cells = _cells(self._run(show_column_subtotals=True))
+        assert any(
+            c["col_key"] == []
+            and c["col_kind"] == "row_total"
+            and c["row_key"] == ["Mumbai"]
+            and c["values"] == [8]
+            for c in cells
+        )
+        assert any(
+            c["row_kind"] == "grand_total" and c["col_kind"] == "row_total" and c["values"] == [8]
+            for c in cells
+        )
 
 
 class TestRowSubtotalToggle:
-    def test_subtotals_dropped_when_disabled(self):
-        # SAMPLE_ROWS_SINGLE_COL contains a Mumbai subtotal row. With
-        # show_row_subtotals=False (grand-total-only request), ROLLUP still
-        # emits it but the transform must drop it; grand total is preserved.
+    def test_dropped_when_disabled(self):
         result = rotate_to_pivot(
             flat_rows=SAMPLE_ROWS_SINGLE_COL,
             row_dim_cols=["district", "program"],
@@ -281,11 +344,11 @@ class TestRowSubtotalToggle:
             metric_aliases=["Count", "Spend"],
             show_row_subtotals=False,
         )
-        assert all(not r["is_subtotal"] for r in result["rows"])
-        assert result["grand_total"] is not None
-        assert result["grand_total"]["row_total"] == [3, 1050]
+        assert all(c["row_kind"] != "row_subtotal" for c in result["cells"])
+        # grand total survives
+        assert any(c["row_kind"] == "grand_total" for c in result["cells"])
 
-    def test_subtotals_kept_when_enabled(self):
+    def test_kept_when_enabled(self):
         result = rotate_to_pivot(
             flat_rows=SAMPLE_ROWS_SINGLE_COL,
             row_dim_cols=["district", "program"],
@@ -294,22 +357,89 @@ class TestRowSubtotalToggle:
             metric_aliases=["Count", "Spend"],
             show_row_subtotals=True,
         )
-        assert any(r["is_subtotal"] for r in result["rows"])
+        assert any(c["row_kind"] == "row_subtotal" for c in result["cells"])
 
 
-class TestColumnKeyChronologicalOrder:
-    def test_columns_sorted_by_raw_value(self):
-        # Raw values arrive out of order; columns must sort by raw value, not
-        # insertion order. ISO datetime strings sort chronologically.
+class TestNoColumnDims:
+    def test_values_go_to_row_total(self):
+        result = rotate_to_pivot(
+            flat_rows=[{"district": "Mumbai", "Count": 5, "_grp_district": 0}],
+            row_dim_cols=["district"],
+            num_col_dims=0,
+            col_dim_names=[],
+            metric_aliases=["Count"],
+        )
+        assert result["cells"] == [
+            {
+                "row_key": ["Mumbai"],
+                "col_key": [],
+                "row_kind": "data",
+                "col_kind": "row_total",
+                "values": [5],
+            }
+        ]
+
+
+class TestNullHandling:
+    def test_null_row_dim_value_labelled(self):
+        rows = [
+            {
+                "district": None,
+                "program": "Education",
+                "pivot_col_0": "2026-01",
+                "Count": 1,
+                "_grp_district": 0,
+                "_grp_program": 0,
+                "_grp_pivot_col_0": 0,
+            }
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district", "program"],
+            num_col_dims=1,
+            col_dim_names=["month"],
+            metric_aliases=["Count"],
+        )
+        leaf = [c for c in result["cells"] if c["col_kind"] == "leaf"][0]
+        assert leaf["row_key"] == ["(No value)", "Education"]
+
+    def test_null_col_dim_value_labelled(self):
+        # A genuine NULL in a real (non-rolled-up) column dim value.
         rows = [
             {
                 "district": "Mumbai",
-                "pivot_col_0": f"2026-{m:02d}-01 00:00:00",
+                "pivot_col_0": None,
+                "pivot_col_1": "Education",
+                "Count": 1,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+                "_grp_pivot_col_1": 0,
+            }
+        ]
+        result = rotate_to_pivot(
+            flat_rows=rows,
+            row_dim_cols=["district"],
+            num_col_dims=2,
+            col_dim_names=["month", "program"],
+            metric_aliases=["Count"],
+        )
+        leaf = [c for c in result["cells"] if c["col_kind"] == "leaf"][0]
+        assert leaf["col_key"] == ["(No value)", "Education"]
+
+
+class TestCellOrderPreserved:
+    def test_cells_follow_input_order(self):
+        # Backend no longer re-sorts; it trusts SQL ORDER BY. Cell order mirrors
+        # flat_rows arrival order (leaf cells first here).
+        rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": f"2026-{m:02d}",
                 "Count": c,
                 "_grp_district": 0,
                 "_grp_pivot_col_0": 0,
             }
-            for m, c in [(3, 30), (1, 10), (2, 20)]
+            for m, c in [(1, 10), (2, 20), (3, 30)]
         ]
         result = rotate_to_pivot(
             flat_rows=rows,
@@ -318,8 +448,183 @@ class TestColumnKeyChronologicalOrder:
             col_dim_names=["month"],
             metric_aliases=["Count"],
         )
-        assert result["column_keys"] == [
-            ["2026-01-01 00:00:00"],
-            ["2026-02-01 00:00:00"],
-            ["2026-03-01 00:00:00"],
+        leaf_keys = [c["col_key"] for c in result["cells"] if c["col_kind"] == "leaf"]
+        assert leaf_keys == [["2026-01"], ["2026-02"], ["2026-03"]]
+
+
+class TestPivotSqlAliasContract:
+    """The SQL the builder emits must carry exactly the columns rotate_to_pivot reads.
+
+    rotate_to_pivot reads, per input row:
+      - _grp_<row_dim>            (row-dimension GROUPING flags)
+      - pivot_col_<i>             (column-dimension values)
+      - _grp_pivot_col_<i>        (column-dimension GROUPING flags)
+      - metric_sql_alias(metric)  (metric values)
+
+    If the builder renames any of these, the transform silently reads None and the
+    pivot renders empty. This test fails the moment that contract drifts.
+    """
+
+    def test_all_transform_keys_present_in_sql(self):
+        metrics = [
+            ChartMetric(column="id", aggregation="count", alias="Beneficiaries"),
+            ChartMetric(column="amount", aggregation="sum", alias="Spend"),
         ]
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district", "program"],
+            column_dimensions=["month", "program_type"],
+            metrics=metrics,
+        )
+        qb = build_chart_query(payload, _org_warehouse())
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+
+        # Row-dimension grouping flags (the keys _classify_row_kind / _row_key read).
+        for row_dim in payload.row_dimensions:
+            assert f"_grp_{row_dim}" in compiled
+
+        # Column-dimension value + grouping-flag aliases (0-indexed per col dim).
+        for i in range(len(payload.column_dimensions)):
+            assert f"pivot_col_{i}" in compiled
+            assert f"_grp_pivot_col_{i}" in compiled
+
+        # Metric aliases the transform reads back with row.get(alias).
+        for metric in metrics:
+            assert metric_sql_alias(metric) in compiled
+
+
+class TestGetPivotTableDataPipeline:
+    """Drive the real service entry point, mocking only the warehouse round-trip."""
+
+    def _run(self, payload, flat_rows):
+        mock_client = MagicMock()
+        # A real (lazy, never-connected) Postgres engine so .compile(bind=...) uses
+        # the actual dialect; the DB round-trip itself is what we stub.
+        mock_client.engine = create_engine("postgresql+psycopg2://u:p@localhost/db")
+        mock_client.execute.return_value = flat_rows
+        with patch(
+            "ddpui.core.charts.pivot_service.get_warehouse_client",
+            return_value=mock_client,
+        ):
+            return get_pivot_table_data(_org_warehouse(), payload), mock_client
+
+    def test_single_col_pipeline_produces_expected_cells(self):
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
+        )
+        alias = metric_sql_alias(payload.metrics[0])  # "Count"
+
+        # Simulated ROLLUP output: Mumbai leaves (Edu/Health), Mumbai row total,
+        # and the grand-total rows.
+        flat_rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Edu",
+                alias: 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Health",
+                alias: 3,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": "Mumbai",
+                "pivot_col_0": None,
+                alias: 8,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 1,
+            },
+            {
+                "district": None,
+                "pivot_col_0": "Edu",
+                alias: 5,
+                "_grp_district": 1,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": None,
+                "pivot_col_0": "Health",
+                alias: 3,
+                "_grp_district": 1,
+                "_grp_pivot_col_0": 0,
+            },
+            {
+                "district": None,
+                "pivot_col_0": None,
+                alias: 8,
+                "_grp_district": 1,
+                "_grp_pivot_col_0": 1,
+            },
+        ]
+
+        result, mock_client = self._run(payload, flat_rows)
+
+        # The warehouse was actually queried.
+        assert mock_client.execute.called
+        # Metadata wired through from the payload.
+        assert result["row_dimension_names"] == ["district"]
+        assert result["column_dimension_names"] == ["program"]
+        assert result["metric_headers"] == ["Count"]
+
+        cells = result["cells"]
+        assert len(cells) == 6
+        # Leaf cell for Mumbai/Edu carries the real metric value (not None -> alias ok).
+        assert {
+            "row_key": ["Mumbai"],
+            "col_key": ["Edu"],
+            "row_kind": "data",
+            "col_kind": "leaf",
+            "values": [5],
+        } in cells
+        # Row total for Mumbai across programs.
+        assert {
+            "row_key": ["Mumbai"],
+            "col_key": [],
+            "row_kind": "data",
+            "col_kind": "row_total",
+            "values": [8],
+        } in cells
+        # Overall grand total.
+        assert {
+            "row_key": [],
+            "col_key": [],
+            "row_kind": "grand_total",
+            "col_kind": "row_total",
+            "values": [8],
+        } in cells
+
+    def test_wrong_metric_alias_would_null_all_values(self):
+        """Guard proving the alias contract matters: if the warehouse rows are keyed
+        by a different alias than metric_sql_alias, every value reads None. This is
+        what alias drift looks like end-to-end."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
+        )
+        flat_rows = [
+            {
+                "district": "Mumbai",
+                "pivot_col_0": "Edu",
+                "WRONG_ALIAS": 5,
+                "_grp_district": 0,
+                "_grp_pivot_col_0": 0,
+            },
+        ]
+        result, _ = self._run(payload, flat_rows)
+        leaf = [c for c in result["cells"] if c["col_kind"] == "leaf"][0]
+        assert leaf["values"] == [None]  # value lost because the alias didn't match
