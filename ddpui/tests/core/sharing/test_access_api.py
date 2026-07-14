@@ -272,11 +272,13 @@ def _post_grant(caller, rtype, resource, principal, permission="view", principal
     return create_grant(mock_request(caller), rtype, str(resource.pk), payload)
 
 
-def _post_grant_email(caller, rtype, resource, email, permission="view"):
+def _post_grant_email(caller, rtype, resource, email, permission="view", invite_role=None):
     from ddpui.api.access_api import create_grant
     from ddpui.schemas.access_schema import GrantCreate
 
-    payload = GrantCreate(principal_type="user", email=email, permission=permission)
+    payload = GrantCreate(
+        principal_type="user", email=email, permission=permission, invite_role=invite_role
+    )
     return create_grant(mock_request(caller), rtype, str(resource.pk), payload)
 
 
@@ -456,6 +458,118 @@ class TestCreateGrantByEmail:
         _post_grant_email(admin, "dashboard", dashboard, "admin-invitee@test.com", "view")
         invitation = Invitation.objects.get(invited_email="admin-invitee@test.com")
         assert invitation.invited_new_role.slug == MEMBER_ROLE
+
+    # ---- invite_role (Phase C3): the share-flow invite may carry a role ----
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_non_admin_invite_role_escalation_403_and_nothing_created(self, org, analyst):
+        """Requesting a non-Member invite role is admin-only: an analyst
+        asking for invite_role='analyst' 403s BEFORE any invitation email or
+        pending grant row exists."""
+        dashboard = _dashboard(org, analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant_email(
+                analyst, "dashboard", dashboard, "escalate@test.com", "view", invite_role="analyst"
+            )
+        assert excinfo.value.status_code == 403
+        assert not Invitation.objects.filter(invited_email__iexact="escalate@test.com").exists()
+        assert not ResourceShare.objects.filter(pending_email__iexact="escalate@test.com").exists()
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_non_admin_invite_role_member_still_allowed(self, org, analyst):
+        response = _post_grant_email(
+            analyst,
+            "dashboard",
+            _dashboard(org, analyst),
+            "plain@test.com",
+            "view",
+            invite_role="member",
+        )
+        assert response["data"]["status"] == "pending"
+        invitation = Invitation.objects.get(invited_email="plain@test.com")
+        assert invitation.invited_new_role.slug == MEMBER_ROLE
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_admin_invite_role_analyst_invitation_carries_role(self, org, admin):
+        dashboard = _dashboard(org, admin)
+
+        response = _post_grant_email(
+            admin,
+            "dashboard",
+            dashboard,
+            "future-analyst@test.com",
+            "view",
+            invite_role="analyst",
+        )
+
+        assert response["data"]["status"] == "pending"
+        invitation = Invitation.objects.get(invited_email="future-analyst@test.com")
+        assert invitation.invited_new_role.slug == ANALYST_ROLE
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_admin_invite_role_admin_invitation_carries_role(self, org, admin):
+        dashboard = _dashboard(org, admin)
+
+        _post_grant_email(
+            admin, "dashboard", dashboard, "future-admin@test.com", "view", invite_role="admin"
+        )
+
+        invitation = Invitation.objects.get(invited_email="future-admin@test.com")
+        assert invitation.invited_new_role.slug == ADMIN_ROLE
+
+    def test_invalid_invite_role_400(self, org, admin):
+        dashboard = _dashboard(org, admin)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant_email(
+                admin, "dashboard", dashboard, "x@test.com", "view", invite_role="super-admin"
+            )
+        assert excinfo.value.status_code == 400
+        assert not Invitation.objects.filter(invited_email__iexact="x@test.com").exists()
+
+    def test_invite_role_ignored_for_known_org_email(self, org, analyst, member):
+        """invite_role is only consulted on the invite path: sharing with an
+        existing org member's email grants instantly and never re-roles them
+        — so a non-admin sending it isn't a 403 either."""
+        dashboard = _dashboard(org, analyst)
+
+        response = _post_grant_email(
+            analyst, "dashboard", dashboard, member.user.email, "view", invite_role="admin"
+        )
+
+        assert response["data"]["status"] == "active"
+        member.refresh_from_db()
+        assert member.new_role.slug == MEMBER_ROLE
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_accept_grants_invited_user_the_chosen_role(self, org, admin):
+        """Extends the T9 activation contract: an admin's invite_role choice
+        sticks — accepting the invitation creates the OrgUser AS that role,
+        and their resolver access reflects it (an analyst editor is NOT
+        capped to view the way a Member is)."""
+        dashboard = _dashboard(org, admin)
+        _post_grant_email(
+            admin, "dashboard", dashboard, "newanalyst@test.com", "edit", invite_role="analyst"
+        )
+
+        invitation = Invitation.objects.get(invited_email="newanalyst@test.com")
+        assert invitation.invited_new_role.slug == ANALYST_ROLE
+
+        payload = AcceptInvitationSchema(invite_code=invitation.invite_code, password="password123")
+        new_orguser, error = accept_invitation_v1(payload)
+        assert error is None
+
+        new_orguser_obj = OrgUser.objects.get(user_id=new_orguser.user_id, org=org)
+        assert new_orguser_obj.new_role.slug == ANALYST_ROLE
+
+        share = ResourceShare.objects.get(
+            org=org, resource_type="dashboard", resource_id=str(dashboard.pk)
+        )
+        assert share.status == "active"
+        assert share.principal_id == new_orguser_obj.id
+
+        assert effective_permission(new_orguser_obj, "dashboard", dashboard) == "edit"
 
     def test_email_and_principal_id_together_400(self, org, analyst, member):
         from ddpui.api.access_api import create_grant

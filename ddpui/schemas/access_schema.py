@@ -82,16 +82,22 @@ class GrantCreate(Schema):
     For principal_type="user", the sharing modal may address the principal
     either by `principal_id` (a same-org OrgUser) or by `email` (Task 9 —
     the share-flow invite): an `email` belonging to an existing OrgUser
-    grants instantly; an unknown `email` invites them (as a Member) and
-    creates a pending grant that activates when they accept. Exactly one of
+    grants instantly; an unknown `email` invites them and creates a pending
+    grant that activates when they accept. Exactly one of
     `principal_id`/`email` must be set; `email` is invalid for
     principal_type="group".
+
+    `invite_role` (Phase C3) is only consulted on that unknown-email invite
+    path: the invited user's role, one of the member/analyst/admin slugs
+    (default member). Non-member values require the CALLER to be an
+    admin/super-admin — 403 otherwise.
     """
 
     principal_type: str
     principal_id: Optional[int] = None
     email: Optional[str] = None
     permission: str
+    invite_role: Optional[str] = None
 
 
 class GeneralAccessUpdate(Schema):
