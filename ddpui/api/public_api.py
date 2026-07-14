@@ -1443,3 +1443,42 @@ def get_public_report_map_data(request, token: str):
     except Exception as e:
         logger.error(f"Public report map data error: {str(e)}")
         return 404, PublicErrorResponse(error="Map data unavailable", is_valid=False)
+
+
+@public_router.get(
+    "/reports/{token}/kpis/{kpi_id}/data/",
+    response={200: ChartDataResponse, 400: PublicErrorResponse, 404: PublicErrorResponse},
+)
+def get_public_report_kpi_data(
+    request,
+    token: str,
+    kpi_id: int,
+    dashboard_filters: Optional[str] = None,
+):
+    """Get KPI data for a public report snapshot — no authentication required."""
+    try:
+        snapshot = _get_public_report_snapshot(token, request=request)
+    except ReportSnapshot.DoesNotExist:
+        return 404, PublicErrorResponse(error="Report not found or no longer public", is_valid=False)
+
+    parsed_dashboard_filters = None
+    if dashboard_filters:
+        try:
+            parsed_dashboard_filters = json.loads(dashboard_filters)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid dashboard_filters JSON for public report KPI {kpi_id}: {dashboard_filters}")
+            return 400, PublicErrorResponse(error="Invalid dashboard_filters: must be valid JSON", is_valid=False)
+
+    try:
+        from ddpui.core.reports.report_service import ReportService
+        result = ReportService.get_report_kpi_data(
+            snapshot.id,
+            kpi_id,
+            snapshot.org,
+            dashboard_filters=parsed_dashboard_filters,
+        )
+    except Exception as e:
+        logger.error(f"Public report KPI data error for kpi {kpi_id}: {str(e)}")
+        return 404, PublicErrorResponse(error="KPI data unavailable", is_valid=False)
+
+    return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
