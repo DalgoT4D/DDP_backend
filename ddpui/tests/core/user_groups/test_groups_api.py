@@ -16,6 +16,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 import pytest
+from unittest.mock import Mock, patch
 from django.contrib.auth.models import User
 from ninja.errors import HttpError
 
@@ -339,6 +340,7 @@ class TestDeleteGroup:
 # ================================================================================
 
 
+@patch("ddpui.utils.awsses.send_added_to_group_email", Mock())
 class TestAddMember:
     def test_creator_adds_member(self, org, analyst, member):
         from ddpui.api.groups_api import add_member, create_group
@@ -392,6 +394,7 @@ class TestAddMember:
 # ================================================================================
 
 
+@patch("ddpui.utils.awsses.send_added_to_group_email", Mock())
 class TestRemoveMember:
     def test_creator_removes_member(self, org, analyst, member):
         from ddpui.api.groups_api import add_member, create_group, remove_member
@@ -434,3 +437,79 @@ class TestRemoveMember:
             remove_member(mock_request(analyst2), group["id"], added["id"])
         assert excinfo.value.status_code == 403
         assert UserGroupMember.objects.filter(id=added["id"]).exists()
+
+
+# ================================================================================
+# D2: "added to a group" notification email
+# ================================================================================
+
+
+class TestAddedToGroupEmail:
+    def _create_group(self, analyst):
+        from ddpui.api.groups_api import create_group
+        from ddpui.schemas.group_schema import GroupCreate
+
+        return create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+
+    def test_new_member_sends_email(self, org, analyst, member):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        with patch("ddpui.utils.awsses.send_added_to_group_email") as mock_send:
+            add_member(mock_request(analyst), group["id"], GroupMemberCreate(orguser_id=member.id))
+        assert mock_send.call_count == 1
+        assert mock_send.call_args.kwargs["to_email"] == member.user.email
+
+    def test_repeat_add_does_not_send_email(self, org, analyst, member):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        with patch("ddpui.utils.awsses.send_added_to_group_email") as mock_send:
+            add_member(mock_request(analyst), group["id"], GroupMemberCreate(orguser_id=member.id))
+            add_member(mock_request(analyst), group["id"], GroupMemberCreate(orguser_id=member.id))
+        assert mock_send.call_count == 1  # only the first, genuinely-new add
+
+    def test_inactive_member_does_not_send_email(self, org, analyst, member):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        member.user.is_active = False
+        member.user.save(update_fields=["is_active"])
+        group = self._create_group(analyst)
+        with patch("ddpui.utils.awsses.send_added_to_group_email") as mock_send:
+            add_member(mock_request(analyst), group["id"], GroupMemberCreate(orguser_id=member.id))
+        assert mock_send.call_count == 0
+
+    def test_email_send_failure_does_not_break_add_member(self, org, analyst, member):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        with patch(
+            "ddpui.utils.awsses.send_added_to_group_email",
+            side_effect=RuntimeError("SES down"),
+        ):
+            response = add_member(
+                mock_request(analyst), group["id"], GroupMemberCreate(orguser_id=member.id)
+            )
+        assert response["success"] is True
+        assert UserGroupMember.objects.filter(group_id=group["id"], orguser=member).exists()
+
+    def test_subject_and_body_format(self, org, analyst, member):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)  # name == "Funders"
+        with patch("ddpui.utils.awsses.send_text_message") as mock_send_text:
+            add_member(mock_request(analyst), group["id"], GroupMemberCreate(orguser_id=member.id))
+
+        assert mock_send_text.call_count == 1
+        to_email, subject, message = mock_send_text.call_args.args
+        assert to_email == member.user.email
+        assert subject == f"You have been added to the Funders group by {analyst.user.email}"
+        assert (
+            "You now automatically inherit access to all resources shared with the Funders group."
+            in message
+        )

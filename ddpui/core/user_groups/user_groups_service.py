@@ -16,6 +16,7 @@ Rules of this module:
 
 from typing import List, Optional
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery
 from django.db.models.functions import Coalesce
@@ -40,6 +41,39 @@ from ddpui.schemas.group_schema import (
     GroupOut,
     GroupUpdate,
 )
+from ddpui.utils import awsses
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui.core.user_groups.user_groups_service")
+
+
+def _workspace_url() -> str:
+    """Absolute frontend root for the "Explore Workspace" CTA -- prefers the
+    v2 webapp URL, mirroring the settings-fallback pattern used across the
+    codebase (mention_service, alerts, reports). Kept local so user_groups
+    stays free of any core/sharing dependency."""
+    return (
+        getattr(settings, "FRONTEND_URL_V2", None)
+        or getattr(settings, "FRONTEND_URL", None)
+        or "http://localhost:3001"
+    )
+
+
+def _notify_added_to_group(adder: OrgUser, group: UserGroup, member: OrgUser) -> None:
+    """Email a newly-added active member that they were added to `group`
+    (Phase D2). Best-effort: a send failure is logged and swallowed -- it
+    must never fail the add-member request."""
+    try:
+        awsses.send_added_to_group_email(
+            to_email=member.user.email,
+            group_name=group.name,
+            added_by_email=adder.user.email,
+            workspace_url=_workspace_url(),
+        )
+    except Exception:  # pylint: disable=broad-except
+        logger.exception(
+            f"failed to send added-to-group email to {member.user.email} for group {group.id}"
+        )
 
 
 def _display_name(user) -> str:
@@ -238,11 +272,17 @@ def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> G
     if target is None:
         raise MemberNotFoundError("orguser not found in this organization")
 
-    member, _created = UserGroupMember.objects.get_or_create(
+    member, created = UserGroupMember.objects.get_or_create(
         group=group,
         orguser=target,
         defaults={"status": UserGroupMemberStatus.ACTIVE},
     )
+    # D2: notify only on a genuinely NEW active membership for an ACTIVE org
+    # user -- never on an idempotent re-add (created is False). add_member
+    # only ever creates orguser-backed rows, so pending-email rows never
+    # reach here.
+    if created and target.user.is_active:
+        _notify_added_to_group(orguser, group, target)
     return _member_out(member)
 
 
