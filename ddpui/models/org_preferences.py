@@ -1,7 +1,7 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from django.utils import timezone
 
 
@@ -21,12 +21,18 @@ class OrgPreferences(models.Model):
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
 
-    # Resource Sharing — org-level defaults for newly created shareable resources.
-    default_general_audience = models.CharField(
-        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    # Resource Sharing — org-level defaults for newly created shareable
+    # resources. D1: per-role levels, replacing the old audience+level pair.
+    # Default is VIEW/VIEW (not NONE/NONE) to preserve the pre-per-role
+    # product default (GeneralAudience.ALL_USERS + GeneralLevel.VIEW) for
+    # any org whose OrgPreferences row is auto-created by a settings-panel
+    # read/write path (GET, LLM opt-in, Discord toggle, sharing toggle)
+    # before the org has ever explicitly configured these levels.
+    default_analyst_level = models.CharField(
+        max_length=5, choices=AccessLevel.choices, default=AccessLevel.VIEW
     )
-    default_general_level = models.CharField(
-        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    default_member_level = models.CharField(
+        max_length=5, choices=AccessLevel.choices, default=AccessLevel.VIEW
     )
     allow_public_sharing = models.BooleanField(default=True)
 
@@ -48,6 +54,6 @@ class OrgPreferences(models.Model):
             "enable_discord_notifications": bool(self.enable_discord_notifications),
             "discord_webhook": self.discord_webhook,
             "allow_public_sharing": bool(self.allow_public_sharing),
-            "default_general_audience": self.default_general_audience,
-            "default_general_level": self.default_general_level,
+            "default_analyst_level": self.default_analyst_level,
+            "default_member_level": self.default_member_level,
         }

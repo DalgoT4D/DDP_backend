@@ -30,10 +30,15 @@ class OwnerOut(Schema):
 
 
 class GeneralAccessOut(Schema):
-    """Layer 1: the resource's org-wide general-access setting."""
+    """Layer 1: the resource's per-role general-access levels (D1).
 
-    audience: str
-    level: str
+    Replaces the old ``audience``/``level`` pair -- Admins are never
+    represented here (they always have full access); Analysts and Members
+    each get their own independent level ("none"/"view"/"edit").
+    """
+
+    analyst_level: str
+    member_level: str
 
 
 class GrantOut(Schema):
@@ -103,14 +108,19 @@ class GrantCreate(Schema):
 class GeneralAccessUpdate(Schema):
     """PUT /api/access/{rtype}/{resource_id}/general/ — change general access.
 
+    `analyst_level`/`member_level` (D1) replace the old `audience`/`level`
+    pair -- each independently one of "none"/"view"/"edit".
+
     `remove_grant_ids` drives the narrowing warn-and-offer protocol: absent
     (None) on a narrowing change with active grants, the server returns
     `requires_confirmation` and changes nothing; the client re-sends with
-    the field present (possibly []) to commit.
+    the field present (possibly []) to commit. Narrowing is now evaluated
+    per role -- e.g. dropping `member_level` from "view" to "none" only
+    flags grants held by Members.
     """
 
-    audience: str
-    level: str
+    analyst_level: str
+    member_level: str
     remove_grant_ids: Optional[List[int]] = None
 
 

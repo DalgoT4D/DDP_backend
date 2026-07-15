@@ -70,7 +70,7 @@ from ddpui.api.charts_api import (
     get_map_data_overlay,
 )
 from ddpui.core.sharing.chart_access import ChartRenderContext
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -138,7 +138,9 @@ class TestChartDataPreviewGate:
     ):
         mock_preview.return_value = PREVIEW_RESULT
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_chart_data_preview(
@@ -158,7 +160,9 @@ class TestChartDataPreviewGate:
     ):
         chart = _chart(org, analyst)
         other_chart = _chart(org, analyst, title="Other Chart")
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [other_chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [other_chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -211,7 +215,7 @@ class TestChartDataPreviewGate:
             name="Chart Post Gate Other Org", slug="cpg-other", airbyte_workspace_id="w9"
         )
         other_dashboard = _dashboard_with_charts(
-            other_org, analyst, GeneralAudience.ALL_USERS, [chart]
+            other_org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
         )
         request = mock_request(member)
 
@@ -231,7 +235,9 @@ class TestChartDataPreviewGate:
     ):
         mock_preview.return_value = PREVIEW_RESULT
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.PRIVATE, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
         _grant(org, "dashboard", dashboard, member)
         request = mock_request(member)
 
@@ -258,7 +264,9 @@ class TestChartDataPreviewGate:
         """chart_id + dashboard_id grants access to THAT chart's own
         table -- not an oracle for querying an unrelated schema/table."""
         chart = _chart(org, analyst)  # schema_name="public", table_name="beneficiaries"
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -288,7 +296,9 @@ class TestMapDataOverlayGate:
         mock_build.return_value = MagicMock()
         mock_execute.return_value = MAP_ROWS
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_map_data_overlay(
@@ -306,7 +316,9 @@ class TestMapDataOverlayGate:
     ):
         chart = _chart(org, analyst)
         other_chart = _chart(org, analyst, title="Other Chart")
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [other_chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [other_chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -374,7 +386,7 @@ class TestMapDataOverlayGate:
             name="Map Post Gate Other Org", slug="mpg-other", airbyte_workspace_id="w8"
         )
         other_dashboard = _dashboard_with_charts(
-            other_org, analyst, GeneralAudience.ALL_USERS, [chart]
+            other_org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
         )
         request = mock_request(member)
 
@@ -395,7 +407,9 @@ class TestMapDataOverlayGate:
         self, mock_get_wh, mock_build, mock_execute, org, member, analyst, org_warehouse
     ):
         chart = _chart(org, analyst)  # schema_name="public", table_name="beneficiaries"
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -427,7 +441,9 @@ class TestRunChartQuerySeamForPostEndpoints:
     ):
         mock_run.return_value = PREVIEW_RESULT
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(analyst)
 
         response = get_chart_data_preview(
@@ -468,7 +484,9 @@ class TestRunChartQuerySeamForPostEndpoints:
         mock_build.return_value = MagicMock()
         mock_run.return_value = MAP_ROWS
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(analyst)
 
         response = get_map_data_overlay(
@@ -500,7 +518,9 @@ class TestChartDataPreviewTotalRowsGate:
     ):
         mock_total.return_value = 42
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_chart_data_preview_total_rows(
@@ -530,7 +550,9 @@ class TestChartDataPreviewTotalRowsGate:
     @patch("ddpui.core.charts.charts_service.get_chart_data_total_rows")
     def test_schema_table_mismatch_denied(self, mock_total, org, member, analyst, org_warehouse):
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:

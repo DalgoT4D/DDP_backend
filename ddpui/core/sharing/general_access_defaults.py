@@ -1,29 +1,38 @@
 """Task 11 Part C: seed org-default General access at resource creation.
 
-Every shareable rtype (dashboard/report/alert/metric/kpi -- the ``general``
-entries in ``shareable_types.RESOURCE_TYPES``) has ``general_audience``/
-``general_level`` columns whose Django field defaults are
-``all_users``/``view``. This helper lets a create path override those with
-the org's configured preference (``OrgPreferences.default_general_audience``/
-``default_general_level``, Task 1) instead, without each of the 5 create
-paths re-implementing the same "read OrgPreferences, fall back" lookup.
+D1 (permission-model rework): every shareable rtype (dashboard/report/alert/
+metric/kpi -- the ``general`` entries in ``shareable_types.RESOURCE_TYPES``)
+has ``analyst_level``/``member_level`` columns whose Django field defaults
+are ``none``/``none``. This helper lets a create path override those with
+the org's configured preference (``OrgPreferences.default_analyst_level``/
+``default_member_level``) instead, without each of the 5 create paths
+re-implementing the same "read OrgPreferences, fall back" lookup. For an
+org with no OrgPreferences row at all, the fallback is (view, view) --
+the pre-per-role product default -- not the model field defaults.
 """
 
 from typing import Tuple
 
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org_preferences import OrgPreferences
 
 
-def get_org_general_defaults(org_id: int) -> Tuple[str, str]:
-    """(general_audience, general_level) to seed a newly created shareable
+def get_org_role_level_defaults(org_id: int) -> Tuple[str, str]:
+    """(analyst_level, member_level) to seed a newly created shareable
     resource with: the org's configured defaults if it has a preferences
-    row, else the model defaults (``all_users``/``view``)."""
+    row, else (view, view).
+
+    An org with no OrgPreferences row at all has never configured sharing,
+    so it falls back to (view, view) rather than the model field defaults
+    (none/none) -- this preserves the pre-per-role product default (the old
+    GeneralAudience.ALL_USERS + GeneralLevel.VIEW pair applied to every
+    resource) for orgs that simply haven't touched this setting yet.
+    """
     prefs = (
         OrgPreferences.objects.filter(org_id=org_id)
-        .only("default_general_audience", "default_general_level")
+        .only("default_analyst_level", "default_member_level")
         .first()
     )
     if prefs is None:
-        return GeneralAudience.ALL_USERS, GeneralLevel.VIEW
-    return prefs.default_general_audience, prefs.default_general_level
+        return AccessLevel.VIEW, AccessLevel.VIEW
+    return prefs.default_analyst_level, prefs.default_member_level

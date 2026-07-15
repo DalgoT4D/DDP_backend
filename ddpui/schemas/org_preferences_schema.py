@@ -44,11 +44,13 @@ class UpdateDiscordNotificationsSchema(Schema):
 class UpdateSharingPreferencesSchema(Schema):
     """Schema for updating org-level Resource Sharing preferences
     (Task 11 Part B). Admin-gated -- see `update_sharing_preferences`.
+
+    D1: per-role level defaults, replacing the old audience+level pair.
     """
 
     allow_public_sharing: Optional[bool] = None
-    default_general_audience: Optional[str] = None
-    default_general_level: Optional[str] = None
+    default_analyst_level: Optional[str] = None
+    default_member_level: Optional[str] = None
 
 
 class CreateOrgSupersetDetailsSchema(Schema):

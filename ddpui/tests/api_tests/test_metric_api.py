@@ -169,14 +169,14 @@ class TestCreateMetric:
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
     def test_create_uses_org_general_defaults(self, mock_validate, orguser, seed_db):
         """Task 11 Part C: a new metric adopts the org's default General
-        access when set, else the model defaults (all_users/view)."""
+        access when set, else the model defaults (D1: none/none)."""
         from ddpui.models.org_preferences import OrgPreferences
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+        from ddpui.models.general_access import AccessLevel
 
         OrgPreferences.objects.create(
             org=orguser.org,
-            default_general_audience=GeneralAudience.ADMINS,
-            default_general_level=GeneralLevel.VIEW,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.NONE,
         )
         request = mock_request(orguser)
         payload = MetricPayload(
@@ -189,16 +189,18 @@ class TestCreateMetric:
         response = create_metric(request, payload)
 
         metric = Metric.objects.get(id=response.id)
-        assert metric.general_audience == GeneralAudience.ADMINS
-        assert metric.general_level == GeneralLevel.VIEW
+        assert metric.analyst_level == AccessLevel.VIEW
+        assert metric.member_level == AccessLevel.NONE
         metric.delete()
 
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
-    def test_create_falls_back_to_model_defaults_when_no_preferences_row(
+    def test_create_falls_back_to_view_view_when_no_preferences_row(
         self, mock_validate, orguser, seed_db
     ):
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         from ddpui.models.org_preferences import OrgPreferences
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+        from ddpui.models.general_access import AccessLevel
 
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
         request = mock_request(orguser)
@@ -212,8 +214,8 @@ class TestCreateMetric:
         response = create_metric(request, payload)
 
         metric = Metric.objects.get(id=response.id)
-        assert metric.general_audience == GeneralAudience.ALL_USERS
-        assert metric.general_level == GeneralLevel.VIEW
+        assert metric.analyst_level == AccessLevel.VIEW
+        assert metric.member_level == AccessLevel.VIEW
         metric.delete()
 
     def test_create_invalid_both_paths(self, orguser, seed_db):

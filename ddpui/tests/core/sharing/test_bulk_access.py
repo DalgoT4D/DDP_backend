@@ -28,7 +28,7 @@ from ninja.errors import HttpError
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.models.alert import Alert, AlertType
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import Invitation, OrgUser
@@ -88,29 +88,29 @@ def member(org, seed_db):
     ou.delete()
 
 
-def _dashboard(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+def _dashboard(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
     return Dashboard.objects.create(
         title="Bulk Test Dashboard",
         org=org_obj,
         owner=owner,
         created_by=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
     )
 
 
-def _report(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+def _report(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
     return ReportSnapshot.objects.create(
         title="Bulk Test Report",
         org=org_obj,
         owner=owner,
         created_by=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
     )
 
 
-def _metric(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+def _metric(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
     return Metric.objects.create(
         org=org_obj,
         name="bulk-metric",
@@ -120,12 +120,12 @@ def _metric(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel
         aggregation="sum",
         created_by=owner,
         owner=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
     )
 
 
-def _alert(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+def _alert(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
     return Alert.objects.create(
         org=org_obj,
         name="bulk-alert",
@@ -141,8 +141,8 @@ def _alert(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.
         message_template="test",
         owner=owner,
         created_by=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
     )
 
 
@@ -202,7 +202,7 @@ class TestBulkAddGrant:
         _grant(org, "report", report, analyst2, permission="view")
         # analyst2 resolves to edit on the metric via general access, so it
         # passes the edit gate and is skipped by the capability flag instead
-        metric = _metric(org, analyst, GeneralAudience.ANALYSTS_PLUS, GeneralLevel.EDIT)
+        metric = _metric(org, analyst, AccessLevel.EDIT, AccessLevel.NONE)
 
         response = _bulk(
             analyst2,
@@ -313,29 +313,34 @@ class TestBulkAddGrant:
 # ================================================================================
 
 
-def _general_payload(audience, level="view", remove_grant_ids=None):
+def _general_payload(analyst_level, member_level, remove_grant_ids=None):
     from ddpui.schemas.access_schema import GeneralAccessUpdate
 
-    return GeneralAccessUpdate(audience=audience, level=level, remove_grant_ids=remove_grant_ids)
+    return GeneralAccessUpdate(
+        analyst_level=analyst_level, member_level=member_level, remove_grant_ids=remove_grant_ids
+    )
 
 
 class TestBulkSetGeneral:
     def test_narrowing_confirms_only_resources_with_grants_and_resend_commits(
         self, org, analyst, member
     ):
-        """Narrowing 3 dashboards to private where only one has an active
+        """Narrowing 3 dashboards to none/none where only one has an active
         grant: the other two apply immediately on the FIRST call; the
         granted one comes back in requires_confirmation untouched. The
         re-send (remove_grant_ids present) commits it and deletes the
         grant."""
-        dash1 = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
-        dash2 = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
-        dash3 = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dash1 = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
+        dash2 = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
+        dash3 = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
         share = _grant(org, "dashboard", dash2, member)
 
         items = [("dashboard", dash1.pk), ("dashboard", dash2.pk), ("dashboard", dash3.pk)]
         response = _bulk(
-            analyst, items, "set_general", set_general=_general_payload("private", "view")
+            analyst,
+            items,
+            "set_general",
+            set_general=_general_payload(AccessLevel.NONE, AccessLevel.NONE),
         )
 
         data = response["data"]
@@ -354,9 +359,10 @@ class TestBulkSetGeneral:
         dash1.refresh_from_db()
         dash2.refresh_from_db()
         dash3.refresh_from_db()
-        assert dash1.general_audience == GeneralAudience.PRIVATE
-        assert dash3.general_audience == GeneralAudience.PRIVATE
-        assert dash2.general_audience == GeneralAudience.ALL_USERS  # untouched
+        assert dash1.analyst_level == AccessLevel.NONE
+        assert dash3.analyst_level == AccessLevel.NONE
+        assert dash2.analyst_level == AccessLevel.VIEW  # untouched
+        assert dash2.member_level == AccessLevel.VIEW  # untouched
         assert ResourceShare.objects.filter(id=share.id).exists()
 
         # re-send just the undecided resource with the grant marked for removal
@@ -364,36 +370,40 @@ class TestBulkSetGeneral:
             analyst,
             [("dashboard", dash2.pk)],
             "set_general",
-            set_general=_general_payload("private", "view", remove_grant_ids=[share.id]),
+            set_general=_general_payload(
+                AccessLevel.NONE, AccessLevel.NONE, remove_grant_ids=[share.id]
+            ),
         )
         data = response["data"]
         assert data["applied"] == [{"rtype": "dashboard", "id": str(dash2.pk)}]
         assert data["requires_confirmation"] == []
         dash2.refresh_from_db()
-        assert dash2.general_audience == GeneralAudience.PRIVATE
+        assert dash2.analyst_level == AccessLevel.NONE
+        assert dash2.member_level == AccessLevel.NONE
         assert not ResourceShare.objects.filter(id=share.id).exists()
 
     def test_resend_with_empty_remove_list_commits_keeping_grants(self, org, analyst, member):
-        dash = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dash = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
         share = _grant(org, "dashboard", dash, member)
 
         response = _bulk(
             analyst,
             [("dashboard", dash.pk)],
             "set_general",
-            set_general=_general_payload("admins", "view", remove_grant_ids=[]),
+            set_general=_general_payload(AccessLevel.VIEW, AccessLevel.NONE, remove_grant_ids=[]),
         )
         assert response["data"]["applied_count"] == 1
         dash.refresh_from_db()
-        assert dash.general_audience == GeneralAudience.ADMINS
+        assert dash.analyst_level == AccessLevel.VIEW
+        assert dash.member_level == AccessLevel.NONE
         assert ResourceShare.objects.filter(id=share.id).exists()  # deliberately kept
 
     def test_remove_grant_ids_outside_the_selection_404_whole_request(self, org, analyst, member):
         """A grant id belonging to a resource NOT in the (gate-surviving)
         selection is a client bug — 404 for the whole request, nothing
         committed. Mirrors the single-item endpoint."""
-        dash = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
-        other_dash = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dash = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
+        other_dash = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
         foreign_share = _grant(org, "dashboard", other_dash, member)
 
         with pytest.raises(HttpError) as excinfo:
@@ -402,12 +412,13 @@ class TestBulkSetGeneral:
                 [("dashboard", dash.pk)],
                 "set_general",
                 set_general=_general_payload(
-                    "private", "view", remove_grant_ids=[foreign_share.id]
+                    AccessLevel.NONE, AccessLevel.NONE, remove_grant_ids=[foreign_share.id]
                 ),
             )
         assert excinfo.value.status_code == 404
         dash.refresh_from_db()
-        assert dash.general_audience == GeneralAudience.ALL_USERS  # nothing committed
+        assert dash.analyst_level == AccessLevel.VIEW  # nothing committed
+        assert dash.member_level == AccessLevel.VIEW  # nothing committed
         assert ResourceShare.objects.filter(id=foreign_share.id).exists()
 
 
@@ -536,7 +547,7 @@ class TestBulkGates:
         """Design choice (documented): a caller with no can_share_* slugs
         gets every item skipped with `share_permission_denied` — bulk is
         apply-where-possible, never an all-or-nothing 403."""
-        dash = _dashboard(org, analyst, GeneralAudience.ALL_USERS, GeneralLevel.EDIT)
+        dash = _dashboard(org, analyst, AccessLevel.EDIT, AccessLevel.EDIT)
 
         response = _bulk(
             member,

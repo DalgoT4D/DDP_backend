@@ -22,7 +22,7 @@ from ninja.errors import HttpError
 
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org
 from ddpui.models.org_user import Invitation, OrgUser
 from ddpui.models.resource_share import ResourceShare
@@ -319,7 +319,8 @@ class TestDeleteGroup:
             org=org,
             owner=analyst,
             created_by=analyst,
-            general_audience=GeneralAudience.PRIVATE,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         ResourceShare.objects.create(
             org=org,

@@ -19,7 +19,7 @@ from sqlalchemy.dialects import postgresql
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin, is_owner
 from ddpui.core.sharing.access_resolver import accessible_filter
-from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
+from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
@@ -277,12 +277,12 @@ class DashboardService:
 
         response_data["filters"] = filters_data
 
-        # Resource Sharing (Task 6b Part A). No extra query: general_audience/
-        # general_level/owner_id/created_by_id are already columns on
+        # Resource Sharing (Task 6b Part A). No extra query: analyst_level/
+        # member_level/owner_id/created_by_id are already columns on
         # `dashboard`, compared directly against orguser.id -- never against
         # the .owner/.created_by FK objects, which would trigger a query.
-        response_data["general_audience"] = dashboard.general_audience
-        response_data["general_level"] = dashboard.general_level
+        response_data["analyst_level"] = dashboard.analyst_level
+        response_data["member_level"] = dashboard.member_level
         response_data["is_owner"] = orguser is not None and is_owner(orguser, dashboard)
         response_data["is_creator"] = orguser is not None and dashboard.created_by_id == orguser.id
 
@@ -345,7 +345,7 @@ class DashboardService:
             components={},
         ).model_dump()
 
-        general_audience, general_level = get_org_general_defaults(orguser.org_id)
+        analyst_level, member_level = get_org_role_level_defaults(orguser.org_id)
 
         dashboard = Dashboard.objects.create(
             title=data.title,
@@ -355,8 +355,8 @@ class DashboardService:
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
-            general_audience=general_audience,
-            general_level=general_level,
+            analyst_level=analyst_level,
+            member_level=member_level,
         )
 
         logger.info(f"Created dashboard {dashboard.id} for org {orguser.org.id}")

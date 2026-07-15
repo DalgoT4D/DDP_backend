@@ -24,7 +24,7 @@ from ddpui.auth import ANALYST_ROLE, MEMBER_ROLE
 from ddpui.core.sharing.access_resolver import accessible_filter, effective_permission
 from ddpui.core.sharing.gates import require_edit_access
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import ResourceShare
@@ -64,9 +64,10 @@ def group_member(org, seed_db):
 @pytest.fixture
 def analyst_group_member(org, seed_db):
     """An Analyst-tier group member — used where the test wants an
-    edit-level group grant to actually resolve to edit (Member-tier viewers
-    are capped at "view" regardless of source, per the ladder's step 5;
-    that's a separate, already-tested rule, not what this file covers)."""
+    edit-level group grant to actually resolve to edit (a Member-tier
+    viewer's own GRANT contribution is capped at "view" regardless of the
+    grant's permission, per the ladder's step 4; that's a separate,
+    already-tested rule, not what this file covers)."""
     return _make_orguser(org, ANALYST_ROLE, "groupres-analyst-groupmember")
 
 
@@ -75,14 +76,14 @@ def non_member(org, seed_db):
     return _make_orguser(org, MEMBER_ROLE, "groupres-nonmember")
 
 
-def _dashboard(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+def _dashboard(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
     return Dashboard.objects.create(
         title="Group Resolver Dashboard",
         org=org_obj,
         owner=owner,
         created_by=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
     )
 
 

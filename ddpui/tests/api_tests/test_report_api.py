@@ -33,7 +33,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.resource_share import ResourceShare
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.report_api import (
     list_snapshots,
@@ -218,7 +218,11 @@ def sample_chart(orguser, org):
 
 @pytest.fixture
 def sample_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart):
-    """A pre-created snapshot for testing"""
+    """A pre-created snapshot for testing. General access explicitly
+    view/view (D1) -- several dependent tests exercise "the org's default
+    general access" (documented as the old all_users/view default; no
+    OrgPreferences row exists in this org, so `create_snapshot` would
+    otherwise fall back to the model's own locked-down none/none default)."""
     from ddpui.core.reports.report_service import ReportService
 
     snapshot = ReportService.create_snapshot(
@@ -233,6 +237,9 @@ def sample_snapshot(orguser, org, sample_dashboard, sample_filter, sample_chart)
         period_end=date(2025, 1, 31),
         orguser=orguser,
     )
+    snapshot.analyst_level = AccessLevel.VIEW
+    snapshot.member_level = AccessLevel.VIEW
+    snapshot.save(update_fields=["analyst_level", "member_level"])
     yield snapshot
     try:
         snapshot.refresh_from_db()
@@ -478,12 +485,10 @@ class TestCreateSnapshotOrgGeneralDefaults:
     def test_uses_org_defaults_when_set(
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
     ):
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
-
         OrgPreferences.objects.create(
             org=orguser.org,
-            default_general_audience=GeneralAudience.ADMINS,
-            default_general_level=GeneralLevel.VIEW,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.NONE,
         )
         request = mock_request(orguser)
         payload = SnapshotCreate(
@@ -497,15 +502,15 @@ class TestCreateSnapshotOrgGeneralDefaults:
         )
         response = create_snapshot(request, payload)
         snapshot = ReportSnapshot.objects.get(id=response["data"]["id"])
-        assert snapshot.general_audience == GeneralAudience.ADMINS
-        assert snapshot.general_level == GeneralLevel.VIEW
+        assert snapshot.analyst_level == AccessLevel.VIEW
+        assert snapshot.member_level == AccessLevel.NONE
         snapshot.delete()
 
-    def test_falls_back_to_model_defaults_when_no_preferences_row(
+    def test_falls_back_to_view_view_when_no_preferences_row(
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
     ):
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
-
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
         request = mock_request(orguser)
         payload = SnapshotCreate(
@@ -519,8 +524,8 @@ class TestCreateSnapshotOrgGeneralDefaults:
         )
         response = create_snapshot(request, payload)
         snapshot = ReportSnapshot.objects.get(id=response["data"]["id"])
-        assert snapshot.general_audience == GeneralAudience.ALL_USERS
-        assert snapshot.general_level == GeneralLevel.VIEW
+        assert snapshot.analyst_level == AccessLevel.VIEW
+        assert snapshot.member_level == AccessLevel.VIEW
         snapshot.delete()
 
 
@@ -863,8 +868,9 @@ class TestGetReportSharingStatus:
         audience flipped to private, no grant) still gets 403 from the
         status GET -- view access is required, it's just no longer
         creator-only."""
-        sample_snapshot.general_audience = GeneralAudience.PRIVATE
-        sample_snapshot.save(update_fields=["general_audience"])
+        sample_snapshot.analyst_level = AccessLevel.NONE
+        sample_snapshot.member_level = AccessLevel.NONE
+        sample_snapshot.save(update_fields=["analyst_level", "member_level"])
 
         request = mock_request(other_orguser)
         with pytest.raises(HttpError) as exc_info:

@@ -10,7 +10,7 @@ from django.db.models import Q
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
 from ddpui.core.sharing.access_resolver import accessible_filter
-from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
+from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI
@@ -580,7 +580,7 @@ class ReportService:
             else:
                 frozen_chart_configs[k] = FrozenChartConfig(**v).model_dump()
 
-        general_audience, general_level = get_org_general_defaults(orguser.org_id)
+        analyst_level, member_level = get_org_role_level_defaults(orguser.org_id)
 
         snapshot = ReportSnapshot.objects.create(
             title=title,
@@ -591,8 +591,8 @@ class ReportService:
             frozen_chart_configs=frozen_chart_configs,
             created_by=orguser,
             org=orguser.org,
-            general_audience=general_audience,
-            general_level=general_level,
+            analyst_level=analyst_level,
+            member_level=member_level,
         )
 
         logger.info(f"Created snapshot {snapshot.id} from dashboard {dashboard_id}")

@@ -646,17 +646,17 @@ class TestCreateDashboardDefaultTab:
 
 class TestCreateDashboardOrgGeneralDefaults:
     """Task 11 Part C: a new dashboard adopts the org's default General
-    access (OrgPreferences.default_general_audience/level) when set, else
-    the model defaults (all_users/view)."""
+    access (D1: OrgPreferences.default_analyst_level/default_member_level)
+    when set, else the model defaults (none/none)."""
 
     def test_uses_org_defaults_when_set(self, orguser, seed_db):
         from ddpui.models.org_preferences import OrgPreferences
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+        from ddpui.models.general_access import AccessLevel
 
         OrgPreferences.objects.create(
             org=orguser.org,
-            default_general_audience=GeneralAudience.ADMINS,
-            default_general_level=GeneralLevel.VIEW,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.NONE,
         )
 
         dashboard = DashboardService.create_dashboard(
@@ -664,14 +664,16 @@ class TestCreateDashboardOrgGeneralDefaults:
             orguser,
         )
 
-        assert dashboard.general_audience == GeneralAudience.ADMINS
-        assert dashboard.general_level == GeneralLevel.VIEW
+        assert dashboard.analyst_level == AccessLevel.VIEW
+        assert dashboard.member_level == AccessLevel.NONE
 
         dashboard.delete()
 
-    def test_falls_back_to_model_defaults_when_no_preferences_row(self, orguser, seed_db):
+    def test_falls_back_to_view_view_when_no_preferences_row(self, orguser, seed_db):
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         from ddpui.models.org_preferences import OrgPreferences
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+        from ddpui.models.general_access import AccessLevel
 
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
 
@@ -680,8 +682,8 @@ class TestCreateDashboardOrgGeneralDefaults:
             orguser,
         )
 
-        assert dashboard.general_audience == GeneralAudience.ALL_USERS
-        assert dashboard.general_level == GeneralLevel.VIEW
+        assert dashboard.analyst_level == AccessLevel.VIEW
+        assert dashboard.member_level == AccessLevel.VIEW
 
         dashboard.delete()
 

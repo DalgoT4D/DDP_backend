@@ -4,7 +4,7 @@ types are enumerated; ``access_resolver.py`` must never branch on
 ``if resource_type == "dashboard"`` — it reads the registry instead.
 
 Every registered entry's model must satisfy the shareable contract: it has
-``general_audience``, ``general_level``, ``owner``, ``created_by``, ``org``,
+``analyst_level``, ``member_level``, ``owner``, ``created_by``, ``org``,
 and a string-able pk. ``chart`` is deliberately NOT registered — charts ride
 along with their dashboard and are not independently shareable.
 """
@@ -26,7 +26,7 @@ class ShareableType:
 
     rtype: str
     model: Type[Model]
-    general: bool  # supports Layer 1 general access (general_audience/general_level)
+    general: bool  # supports Layer 1 general access (analyst_level/member_level)
     grants: bool  # supports Layer 2 per-principal ResourceShare grants
     public_link: bool  # supports a public share link
     requests: bool  # supports "request access" flow

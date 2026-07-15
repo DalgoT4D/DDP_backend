@@ -42,7 +42,7 @@ from ddpui.api.dashboard_native_api import (
 )
 from ddpui.api.kpi_api import create_annotation, delete_annotation, update_annotation
 from ddpui.models.dashboard import DashboardFilter, DashboardFilterType, DashboardLock
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.schemas.dashboard_schema import FilterCreate, FilterUpdate
 from ddpui.schemas.kpi_schema import AnnotationEntryCreate, AnnotationEntryUpdate
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -67,7 +67,7 @@ def admin(org, seed_db):
     ou.delete()
 
 
-EDITABLE = {"general_audience": GeneralAudience.PRIVATE, "general_level": GeneralLevel.VIEW}
+EDITABLE = {"analyst_level": AccessLevel.NONE, "member_level": AccessLevel.NONE}
 
 
 def _filter_create_payload(**overrides):

@@ -27,7 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.resource_share import ResourceShare
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.visualization import Chart
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.dashboard_native_api import (
@@ -132,7 +132,11 @@ def member_orguser(org):
 
 @pytest.fixture
 def sample_dashboard(orguser, org):
-    """A sample dashboard for testing"""
+    """A sample dashboard for testing. General access explicitly view/view
+    (D1) -- several dependent tests exercise "the org's default general
+    access" (documented as the old all_users/view default) and must not
+    rely on the model's own field default, which is now locked-down
+    none/none, not view/view."""
     dashboard = Dashboard.objects.create(
         title="Test Dashboard",
         description="Test Description",
@@ -140,6 +144,8 @@ def sample_dashboard(orguser, org):
         grid_columns=12,
         created_by=orguser,
         org=org,
+        analyst_level=AccessLevel.VIEW,
+        member_level=AccessLevel.VIEW,
     )
     yield dashboard
     try:
@@ -653,24 +659,22 @@ class TestDuplicateDashboardOrgGeneralDefaults:
     def test_duplicate_uses_org_defaults_not_source_values(
         self, orguser, sample_dashboard, seed_db
     ):
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
-
-        sample_dashboard.general_audience = GeneralAudience.ALL_USERS
-        sample_dashboard.general_level = GeneralLevel.EDIT
+        sample_dashboard.analyst_level = AccessLevel.EDIT
+        sample_dashboard.member_level = AccessLevel.EDIT
         sample_dashboard.save()
 
         OrgPreferences.objects.create(
             org=orguser.org,
-            default_general_audience=GeneralAudience.ADMINS,
-            default_general_level=GeneralLevel.VIEW,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.NONE,
         )
 
         request = mock_request(orguser)
         response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
 
         new_dashboard = Dashboard.objects.get(id=response.id)
-        assert new_dashboard.general_audience == GeneralAudience.ADMINS
-        assert new_dashboard.general_level == GeneralLevel.VIEW
+        assert new_dashboard.analyst_level == AccessLevel.VIEW
+        assert new_dashboard.member_level == AccessLevel.NONE
         new_dashboard.delete()
 
 
@@ -935,7 +939,8 @@ class TestGetDashboardSharingStatus:
             grid_columns=12,
             created_by=analyst_orguser,
             org=org,
-            general_audience=GeneralAudience.PRIVATE,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         try:
             request = mock_request(member_orguser)
@@ -954,7 +959,8 @@ class TestGetDashboardSharingStatus:
             grid_columns=12,
             created_by=analyst_orguser,
             org=org,
-            general_audience=GeneralAudience.PRIVATE,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         ResourceShare.objects.create(
             org=org,

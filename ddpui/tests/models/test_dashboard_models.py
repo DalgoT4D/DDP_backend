@@ -176,8 +176,12 @@ def test_dashboard_create_with_defaults(orguser, org, seed_db):
     assert dashboard.is_public is False
     assert dashboard.public_access_count == 0
     assert dashboard.tabs == []
-    assert dashboard.general_audience == "all_users"
-    assert dashboard.general_level == "view"
+    # D1: the raw model-field default is locked-down ("none"/"none") --
+    # create paths that want the org's configured default instead call
+    # `get_org_role_level_defaults` explicitly (see
+    # ddpui/tests/core/sharing/test_general_access_defaults.py).
+    assert dashboard.analyst_level == "none"
+    assert dashboard.member_level == "none"
     assert dashboard.owner is None
 
     dashboard.delete()
