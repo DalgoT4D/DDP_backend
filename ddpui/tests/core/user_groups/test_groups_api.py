@@ -570,6 +570,114 @@ class TestAddMemberByEmail:
         invitation = Invitation.objects.get(invited_email="future-analyst@test.com")
         assert invitation.invited_new_role.slug == ANALYST_ROLE
 
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_cross_org_existing_user_email_provisions_instant_org_user_and_active_membership(
+        self, org, analyst
+    ):
+        """PINS current behavior, NOT a spec -- flagged as a product
+        decision worth revisiting (instant cross-org provisioning — pinned
+        pending product review).
+
+        Adding a member by email reuses `sharing_actions._invite_email_once`,
+        whose `invite_user_v1` call treats ANY existing platform `User`
+        (regardless of which org they already belong to) as "already has an
+        account": it instantly creates a brand-new `OrgUser` for them in
+        THIS org and returns it -- no `Invitation`, no confirmation step
+        from the invitee, no admin approval. The group consumer inherits
+        this exactly as the share flow does, so an admin who mistypes a
+        stranger's email (who happens to have a Dalgo account in some other
+        org) immediately grants them org membership AND an active seat in
+        this group.
+
+        The role granted is whatever `_resolve_invite_role` resolves to for
+        THIS request (Member, since `analyst` passes no `invite_role`
+        here) -- never the role the person holds in their other org."""
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        other_org = Org.objects.create(name="Other Org (cross-org email)", slug="grp-xorg-em")
+        cross_org_user = _make_orguser(other_org, ADMIN_ROLE, "groupsapi-crossorg")
+        cross_org_email = cross_org_user.user.email
+
+        group = self._create_group(analyst)
+
+        with (
+            patch("ddpui.utils.awsses.send_youve_been_added_email") as mock_added_to_dalgo,
+            patch("ddpui.utils.awsses.send_added_to_group_email") as mock_added_to_group,
+        ):
+            response = add_member(
+                mock_request(analyst), group["id"], GroupMemberCreate(email=cross_org_email)
+            )
+
+        # instant OrgUser in THIS org, no Invitation ever created for it
+        assert not Invitation.objects.filter(invited_email__iexact=cross_org_email).exists()
+        new_orguser = OrgUser.objects.get(org=org, user__email__iexact=cross_org_email)
+        assert new_orguser.id != cross_org_user.id  # a SEPARATE OrgUser row, one per org
+        assert (
+            new_orguser.new_role.slug == MEMBER_ROLE
+        )  # resolved default, not their other-org ADMIN_ROLE
+
+        # active membership, immediately -- no pending row at all
+        assert response["success"] is True
+        assert response["data"]["orguser_id"] == new_orguser.id
+        assert response["data"]["status"] == "active"
+        assert UserGroupMember.objects.filter(
+            group_id=group["id"], orguser=new_orguser, status=UserGroupMemberStatus.ACTIVE
+        ).exists()
+
+        # both emails fire: invite_user_v1's "you've been added to this
+        # Dalgo org" notice, AND the group's own D2 "added to group" email
+        # (fired by _add_active_member since this is a genuinely new,
+        # active membership for an active user).
+        mock_added_to_dalgo.assert_called_once()
+        assert mock_added_to_dalgo.call_args.args[0] == cross_org_email
+        mock_added_to_group.assert_called_once()
+        assert mock_added_to_group.call_args.kwargs["to_email"] == cross_org_email
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_reinviting_same_pending_email_dedupes_no_duplicate_row(self, org, admin):
+        """Same-org re-invite dedupe (mirrors the share flow's pin in
+        `test_access_api.TestCreateGrantByEmail
+        .test_reinviting_same_pending_email_dedupes_and_keeps_original_role`):
+        adding the SAME email a second time -- even by an admin requesting
+        a higher `invite_role` -- refreshes the existing `Invitation`
+        instead of creating a second one, and does NOT change its
+        `invited_new_role`. The pending `UserGroupMember` row is also
+        naturally idempotent (`get_or_create` keyed on group + pending
+        email), so no duplicate membership row appears either."""
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(admin)
+        email = "repeat-group-invitee@test.com"
+
+        first = add_member(mock_request(admin), group["id"], GroupMemberCreate(email=email))["data"]
+        assert first["status"] == "pending"
+        invitation = Invitation.objects.get(invited_email__iexact=email, invited_by__org=org)
+        assert invitation.invited_new_role.slug == MEMBER_ROLE
+        first_invited_on = invitation.invited_on
+
+        second = add_member(
+            mock_request(admin),
+            group["id"],
+            GroupMemberCreate(email=email, invite_role=ANALYST_ROLE),
+        )["data"]
+
+        assert (
+            Invitation.objects.filter(invited_email__iexact=email, invited_by__org=org).count() == 1
+        )
+        invitation.refresh_from_db()
+        assert invitation.invited_new_role.slug == MEMBER_ROLE  # unchanged, not escalated
+        assert invitation.invited_on >= first_invited_on  # refreshed, not stale
+
+        assert (
+            UserGroupMember.objects.filter(
+                group_id=group["id"], pending_email=email, status=UserGroupMemberStatus.PENDING
+            ).count()
+            == 1
+        )
+        assert second["id"] == first["id"]  # same row, not a duplicate
+
 
 # ================================================================================
 # DELETE /api/groups/{id}/members/{member_id}

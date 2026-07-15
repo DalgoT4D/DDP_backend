@@ -531,6 +531,49 @@ class TestCreateGrantByEmail:
         assert excinfo.value.status_code == 400
         assert not Invitation.objects.filter(invited_email__iexact="x@test.com").exists()
 
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_reinviting_same_pending_email_dedupes_and_keeps_original_role(
+        self, org, analyst, admin
+    ):
+        """PINS `invite_user_v1`'s same-org re-invite branch (the one
+        `_invite_email_once` delegates to): an email with an existing
+        pending `Invitation` in this org, shared again -- even by an admin
+        requesting a HIGHER invite_role the second time -- does NOT create
+        a second `Invitation` row and does NOT change `invited_new_role`.
+        Only `invited_on`/`expires_at` move (a resend), and the invite
+        email fires again. The role is fixed at whatever the FIRST invite
+        resolved to; a later, more-privileged caller can't silently
+        upgrade a pending invitee's role by re-sharing with them."""
+        dashboard = _dashboard(org, analyst)
+        email = "repeat-share-invitee@test.com"
+
+        _post_grant_email(analyst, "dashboard", dashboard, email, "view")  # default: Member
+        invitation = Invitation.objects.get(invited_email__iexact=email, invited_by__org=org)
+        assert invitation.invited_new_role.slug == MEMBER_ROLE
+        first_invited_on = invitation.invited_on
+
+        # admin re-shares with the SAME email, asking for a higher role --
+        # the dedupe branch ignores invite_role entirely.
+        _post_grant_email(admin, "dashboard", dashboard, email, "view", invite_role="analyst")
+
+        assert (
+            Invitation.objects.filter(invited_email__iexact=email, invited_by__org=org).count() == 1
+        )
+        invitation.refresh_from_db()
+        assert invitation.invited_new_role.slug == MEMBER_ROLE  # unchanged, not escalated
+        assert invitation.invited_on >= first_invited_on  # refreshed, not stale
+
+        # still exactly one pending grant row on this resource, not stacked
+        assert (
+            ResourceShare.objects.filter(
+                org=org,
+                resource_type="dashboard",
+                resource_id=str(dashboard.pk),
+                pending_email__iexact=email,
+            ).count()
+            == 1
+        )
+
     def test_invite_role_ignored_for_known_org_email(self, org, analyst, member):
         """invite_role is only consulted on the invite path: sharing with an
         existing org member's email grants instantly and never re-roles them
