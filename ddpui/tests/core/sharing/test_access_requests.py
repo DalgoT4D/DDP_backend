@@ -115,6 +115,24 @@ class TestCreateAccessRequest:
         recipient = NotificationRecipient.objects.first()
         assert recipient.recipient_id == analyst.id
 
+    def test_new_request_notification_carries_actionable_metadata(self, org, analyst, member):
+        """The owner's "new request" notification carries a structured
+        payload (batch 2 / F6) so the Notifications page can render inline
+        Approve/Deny instead of forcing a trip through the share modal."""
+        dashboard = _dashboard(org, analyst)
+
+        created = _create_request(member, "dashboard", dashboard, permission="edit", note="pls")
+
+        notification = Notification.objects.get()
+        assert notification.metadata == {
+            "kind": "access_request",
+            "request_id": created["data"]["id"],
+            "resource_type": "dashboard",
+            "resource_name": dashboard.title,
+            "requester_email": member.user.email,
+            "requested_permission": "edit",
+        }
+
     def test_requester_with_existing_access_400(self, org, analyst, analyst2):
         dashboard = _dashboard(org, analyst)
         _grant(org, "dashboard", dashboard, analyst2, permission="view")
@@ -275,6 +293,19 @@ class TestApproveAccessRequest:
         assert Notification.objects.count() == 1
         recipient = NotificationRecipient.objects.first()
         assert recipient.recipient_id == member.id
+
+    def test_decision_notification_has_no_actionable_payload(self, org, analyst, member):
+        """Only the "new request" notification is actionable -- the
+        requester's decision notification carries no `metadata` (there is
+        nothing left to decide)."""
+        dashboard = _dashboard(org, analyst)
+        created = _create_request(member, "dashboard", dashboard, permission="view")
+        Notification.objects.all().delete()
+
+        _approve(analyst, created["data"]["id"])
+
+        notification = Notification.objects.get()
+        assert notification.metadata is None
 
     def test_owner_downgrades_edit_request_to_view_on_approve(self, org, analyst, member):
         dashboard = _dashboard(org, analyst)

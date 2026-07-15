@@ -15,6 +15,7 @@ from ddpui.core.notifications.notifications_functions import (
     get_notification_history,
     get_notification_recipients,
     fetch_user_notifications,
+    fetch_user_notifications_v1,
     mark_notification_as_read_or_unread,
     delete_scheduled_notification,
     get_unread_notifications_count,
@@ -222,6 +223,45 @@ def test_get_user_notifications(orguser):
     assert error is None
     assert result["success"] is True
     assert len(result["res"]) >= 0
+
+
+def test_get_user_notifications_v1_metadata_null_safe_for_old_rows(orguser, sent_notification):
+    """A pre-existing notification (no payload) still returns a `metadata`
+    key, just `None` -- the frontend falls back to plain-text rendering."""
+    error, result = fetch_user_notifications_v1(orguser, 1, 10)
+    assert error is None
+    assert result["success"] is True
+    row = next(r for r in result["res"] if r["id"] == sent_notification.id)
+    assert row["metadata"] is None
+
+
+def test_get_user_notifications_v1_returns_actionable_metadata(orguser):
+    """The v1 list API (what the webapp's Notifications page calls) surfaces
+    the structured access-request payload so the row can render Approve/Deny
+    inline (batch 2 / F6)."""
+    payload = {
+        "kind": "access_request",
+        "request_id": 42,
+        "resource_type": "dashboard",
+        "resource_name": "Sales",
+        "requester_email": "member@example.com",
+        "requested_permission": "view",
+    }
+    notification = Notification.objects.create(
+        author="test_author",
+        message="test_message",
+        urgent=False,
+        sent_time=timezone.now(),
+        metadata=payload,
+    )
+    NotificationRecipient.objects.create(notification=notification, recipient=orguser)
+
+    error, result = fetch_user_notifications_v1(orguser, 1, 10)
+    assert error is None
+    row = next(r for r in result["res"] if r["id"] == notification.id)
+    assert row["metadata"] == payload
+
+    notification.delete()
 
 
 def test_mark_notification_as_read(orguser, unsent_notification):

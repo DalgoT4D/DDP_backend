@@ -12,6 +12,13 @@ class Notification(models.Model):
     urgent = models.BooleanField(default=False)
     scheduled_time = models.DateTimeField(null=True, blank=True)
     sent_time = models.DateTimeField(null=True, blank=True)
+    # Structured payload for notifications a frontend row can act on directly
+    # (e.g. access-request Approve/Deny) -- nullable so every pre-existing
+    # notification (and every notification type that has no action) is
+    # unaffected and keeps rendering as plain text. Kept generic (no
+    # access-request-specific columns) so any future actionable notification
+    # can reuse the same field instead of growing the model further.
+    metadata = models.JSONField(null=True, blank=True, default=None)
 
 
 class NotificationRecipient(models.Model):

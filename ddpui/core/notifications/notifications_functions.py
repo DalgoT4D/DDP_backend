@@ -276,6 +276,10 @@ def fetch_user_notifications(
     }
 
 
+# Note: only this v1 fetch (what the webapp's Notifications page calls,
+# GET /api/notifications/v1) is wired to return `metadata` -- the older
+# `fetch_user_notifications` above has no known caller left in the webapp
+# and is left untouched per "smallest change" (batch 2 / F6).
 def fetch_user_notifications_v1(
     orguser: OrgUser, page: int, limit: int, read_status: int = None
 ) -> Tuple[Optional[None], Dict[str, Any]]:
@@ -308,6 +312,10 @@ def fetch_user_notifications_v1(
                 "scheduled_time": notification.scheduled_time,
                 "sent_time": notification.sent_time,
                 "read_status": recipient.read_status,
+                # Structured access-request payload (batch 2 / F6) -- `None`
+                # for every notification without one; the frontend falls
+                # back to plain-text rendering on `None`.
+                "metadata": notification.metadata,
             }
         )
 
