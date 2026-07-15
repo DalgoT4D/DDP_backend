@@ -7,7 +7,9 @@ org's configured defaults (OrgPreferences.default_analyst_level/
 default_member_level) when set, else the model defaults (none/none).
 
 Tests:
-1. No OrgPreferences row -> (none, none)
+1. No OrgPreferences row -> (view, view) -- the pre-per-role product
+   default for orgs that have never configured sharing, not the model
+   field defaults (none/none).
 2. Row with explicit non-default values -> those values
 """
 
@@ -41,11 +43,13 @@ def org():
 
 
 class TestGetOrgRoleLevelDefaults:
-    def test_no_preferences_row_falls_back_to_model_defaults(self, org):
+    def test_no_preferences_row_falls_back_to_view_view(self, org):
+        """Pre-per-role product default for unconfigured orgs: (view, view),
+        not the model field defaults (none, none)."""
         assert not OrgPreferences.objects.filter(org=org).exists()
         analyst_level, member_level = get_org_role_level_defaults(org.id)
-        assert analyst_level == AccessLevel.NONE
-        assert member_level == AccessLevel.NONE
+        assert analyst_level == AccessLevel.VIEW
+        assert member_level == AccessLevel.VIEW
 
     def test_row_with_explicit_defaults(self, org):
         OrgPreferences.objects.create(

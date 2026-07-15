@@ -200,9 +200,11 @@ def test_create_alert_uses_org_general_defaults(seed_db, orguser, sample_metric)
     assert alert.member_level == AccessLevel.NONE
 
 
-def test_create_alert_falls_back_to_model_defaults_when_no_preferences_row(
+def test_create_alert_falls_back_to_view_view_when_no_preferences_row(
     seed_db, orguser, sample_metric
 ):
+    """No OrgPreferences row -> (view, view), the pre-per-role product
+    default for unconfigured orgs -- not the model field defaults."""
     from ddpui.models.org_preferences import OrgPreferences
 
     assert not OrgPreferences.objects.filter(org=orguser.org).exists()
@@ -212,8 +214,8 @@ def test_create_alert_falls_back_to_model_defaults_when_no_preferences_row(
     response = create_alert(request, payload)
 
     alert = Alert.objects.get(id=response.id)
-    assert alert.analyst_level == AccessLevel.NONE
-    assert alert.member_level == AccessLevel.NONE
+    assert alert.analyst_level == AccessLevel.VIEW
+    assert alert.member_level == AccessLevel.VIEW
 
 
 def test_create_kpi_rag_alert(seed_db, orguser, sample_kpi):

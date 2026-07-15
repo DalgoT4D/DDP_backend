@@ -194,9 +194,11 @@ class TestCreateMetric:
         metric.delete()
 
     @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
-    def test_create_falls_back_to_model_defaults_when_no_preferences_row(
+    def test_create_falls_back_to_view_view_when_no_preferences_row(
         self, mock_validate, orguser, seed_db
     ):
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         from ddpui.models.org_preferences import OrgPreferences
         from ddpui.models.general_access import AccessLevel
 
@@ -212,8 +214,8 @@ class TestCreateMetric:
         response = create_metric(request, payload)
 
         metric = Metric.objects.get(id=response.id)
-        assert metric.analyst_level == AccessLevel.NONE
-        assert metric.member_level == AccessLevel.NONE
+        assert metric.analyst_level == AccessLevel.VIEW
+        assert metric.member_level == AccessLevel.VIEW
         metric.delete()
 
     def test_create_invalid_both_paths(self, orguser, seed_db):

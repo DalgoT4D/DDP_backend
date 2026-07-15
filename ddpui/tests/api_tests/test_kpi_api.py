@@ -184,9 +184,11 @@ class TestCreateKPI:
         assert kpi.member_level == AccessLevel.NONE
         kpi.delete()
 
-    def test_create_falls_back_to_model_defaults_when_no_preferences_row(
+    def test_create_falls_back_to_view_view_when_no_preferences_row(
         self, orguser, sample_metric, seed_db
     ):
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         from ddpui.models.org_preferences import OrgPreferences
         from ddpui.models.general_access import AccessLevel
 
@@ -202,8 +204,8 @@ class TestCreateKPI:
         response = create_kpi(request, payload)
 
         kpi = KPI.objects.get(id=response.id)
-        assert kpi.analyst_level == AccessLevel.NONE
-        assert kpi.member_level == AccessLevel.NONE
+        assert kpi.analyst_level == AccessLevel.VIEW
+        assert kpi.member_level == AccessLevel.VIEW
         kpi.delete()
 
     def test_create_invalid_metric(self, orguser, seed_db):

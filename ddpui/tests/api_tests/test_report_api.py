@@ -506,9 +506,11 @@ class TestCreateSnapshotOrgGeneralDefaults:
         assert snapshot.member_level == AccessLevel.NONE
         snapshot.delete()
 
-    def test_falls_back_to_model_defaults_when_no_preferences_row(
+    def test_falls_back_to_view_view_when_no_preferences_row(
         self, orguser, sample_dashboard, sample_chart, sample_filter, seed_db
     ):
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
         request = mock_request(orguser)
         payload = SnapshotCreate(
@@ -522,8 +524,8 @@ class TestCreateSnapshotOrgGeneralDefaults:
         )
         response = create_snapshot(request, payload)
         snapshot = ReportSnapshot.objects.get(id=response["data"]["id"])
-        assert snapshot.analyst_level == AccessLevel.NONE
-        assert snapshot.member_level == AccessLevel.NONE
+        assert snapshot.analyst_level == AccessLevel.VIEW
+        assert snapshot.member_level == AccessLevel.VIEW
         snapshot.delete()
 
 

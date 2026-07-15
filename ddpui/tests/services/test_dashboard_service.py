@@ -669,7 +669,9 @@ class TestCreateDashboardOrgGeneralDefaults:
 
         dashboard.delete()
 
-    def test_falls_back_to_model_defaults_when_no_preferences_row(self, orguser, seed_db):
+    def test_falls_back_to_view_view_when_no_preferences_row(self, orguser, seed_db):
+        """No OrgPreferences row -> (view, view), the pre-per-role product
+        default for unconfigured orgs -- not the model field defaults."""
         from ddpui.models.org_preferences import OrgPreferences
         from ddpui.models.general_access import AccessLevel
 
@@ -680,8 +682,8 @@ class TestCreateDashboardOrgGeneralDefaults:
             orguser,
         )
 
-        assert dashboard.analyst_level == AccessLevel.NONE
-        assert dashboard.member_level == AccessLevel.NONE
+        assert dashboard.analyst_level == AccessLevel.VIEW
+        assert dashboard.member_level == AccessLevel.VIEW
 
         dashboard.delete()
 

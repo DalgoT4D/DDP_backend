@@ -93,14 +93,17 @@ def analyst_orguser(analyst_authuser, org):
 
 class TestGetOrgPreferencesSharingFields:
     def test_get_returns_the_three_fields_with_no_row(self, orguser, seed_db):
+        """GET auto-creates a row with the model defaults, which are
+        (view, view) -- the pre-per-role product default for orgs that
+        have never explicitly configured sharing -- not (none, none)."""
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
         request = mock_request(orguser)
         response = get_org_preferences(request)
 
         res = response["res"]
         assert res["allow_public_sharing"] is True
-        assert res["default_analyst_level"] == AccessLevel.NONE
-        assert res["default_member_level"] == AccessLevel.NONE
+        assert res["default_analyst_level"] == AccessLevel.VIEW
+        assert res["default_member_level"] == AccessLevel.VIEW
 
     def test_get_returns_the_three_fields_with_row(self, orguser, seed_db):
         OrgPreferences.objects.create(
@@ -160,9 +163,14 @@ class TestUpdateSharingPreferences:
         assert exc_info.value.status_code == 400
 
     def test_creates_preferences_row_when_missing(self, orguser, seed_db):
+        """A row auto-created via this endpoint (no explicit level in the
+        payload) carries the (view, view) model defaults -- the
+        pre-per-role product default -- not (none, none)."""
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
         request = mock_request(orguser)
         payload = UpdateSharingPreferencesSchema(allow_public_sharing=False)
         update_sharing_preferences(request, payload)
 
-        assert OrgPreferences.objects.filter(org=orguser.org).exists()
+        prefs = OrgPreferences.objects.get(org=orguser.org)
+        assert prefs.default_analyst_level == AccessLevel.VIEW
+        assert prefs.default_member_level == AccessLevel.VIEW
