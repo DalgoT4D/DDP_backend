@@ -24,10 +24,10 @@ from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.general_access import GeneralAudience
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import Invitation, OrgUser
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.role_based_access import Role
-from ddpui.models.user_group import UserGroup, UserGroupMember
+from ddpui.models.user_group import UserGroup, UserGroupMember, UserGroupMemberStatus
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -415,6 +415,124 @@ class TestAddMember:
         with pytest.raises(HttpError) as excinfo:
             add_member(mock_request(analyst2), group["id"], GroupMemberCreate(orguser_id=member.id))
         assert excinfo.value.status_code == 403
+
+    def test_both_orguser_id_and_email_rejected(self, org, analyst, member):
+        from ddpui.api.groups_api import add_member, create_group
+        from ddpui.schemas.group_schema import GroupCreate, GroupMemberCreate
+
+        group = create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+        with pytest.raises(HttpError) as excinfo:
+            add_member(
+                mock_request(analyst),
+                group["id"],
+                GroupMemberCreate(orguser_id=member.id, email=member.user.email),
+            )
+        assert excinfo.value.status_code == 400
+
+    def test_neither_orguser_id_nor_email_rejected(self, org, analyst):
+        from ddpui.api.groups_api import add_member, create_group
+        from ddpui.schemas.group_schema import GroupCreate, GroupMemberCreate
+
+        group = create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+        with pytest.raises(HttpError) as excinfo:
+            add_member(mock_request(analyst), group["id"], GroupMemberCreate())
+        assert excinfo.value.status_code == 400
+
+
+# ================================================================================
+# POST /api/groups/{id}/members -- email path (M4 / batch 2b)
+# ================================================================================
+
+
+@patch("ddpui.utils.awsses.send_added_to_group_email", Mock())
+class TestAddMemberByEmail:
+    def _create_group(self, analyst):
+        from ddpui.api.groups_api import create_group
+        from ddpui.schemas.group_schema import GroupCreate
+
+        return create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+
+    def test_existing_user_email_adds_instantly(self, org, analyst, member):
+        """An email matching an existing org member resolves like the
+        orguser_id path -- no Invitation, active membership immediately."""
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        response = add_member(
+            mock_request(analyst), group["id"], GroupMemberCreate(email=member.user.email)
+        )
+        assert response["success"] is True
+        assert response["data"]["orguser_id"] == member.id
+        assert response["data"]["status"] == "active"
+        assert not Invitation.objects.filter(invited_email__iexact=member.user.email).exists()
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_unknown_email_creates_invitation_and_pending_row(self, org, analyst):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        response = add_member(
+            mock_request(analyst), group["id"], GroupMemberCreate(email="future@test.com")
+        )
+
+        assert response["success"] is True
+        assert response["data"]["orguser_id"] is None
+        assert response["data"]["pending_email"] == "future@test.com"
+        assert response["data"]["status"] == "pending"
+
+        invitation = Invitation.objects.get(invited_email="future@test.com", invited_by=analyst)
+        # No invite-role picker in the group-invite design (unlike the share
+        # modal's) -- every group invite lands at Member, no escalation path.
+        assert invitation.invited_new_role.slug == MEMBER_ROLE
+
+        assert UserGroupMember.objects.filter(
+            group_id=group["id"],
+            pending_email="future@test.com",
+            status=UserGroupMemberStatus.PENDING,
+        ).exists()
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_pending_row_activates_through_existing_signup_path(self, org, analyst):
+        """Proves the new email-invite path's PENDING row activates through
+        the SAME `orguserfunctions.activate_pending_shares_and_memberships`
+        used by the share flow -- no bespoke activation logic here."""
+        from ddpui.api.groups_api import add_member
+        from ddpui.core.orguserfunctions import accept_invitation_v1
+        from ddpui.models.org_user import AcceptInvitationSchema
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        added = add_member(
+            mock_request(analyst), group["id"], GroupMemberCreate(email="newmember@test.com")
+        )["data"]
+        assert added["status"] == "pending"
+
+        invitation = Invitation.objects.get(invited_email="newmember@test.com")
+        payload = AcceptInvitationSchema(invite_code=invitation.invite_code, password="password123")
+        new_orguser, error = accept_invitation_v1(payload)
+        assert error is None
+
+        new_orguser_obj = OrgUser.objects.get(user_id=new_orguser.user_id, org=org)
+        member_row = UserGroupMember.objects.get(id=added["id"])
+        assert member_row.status == UserGroupMemberStatus.ACTIVE
+        assert member_row.orguser_id == new_orguser_obj.id
+        assert member_row.pending_email is None
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_pending_email_add_does_not_send_added_to_group_email(self, org, analyst):
+        """D2's "added to a group" email fires only for ACTIVE members --
+        staging a pending invite must not fire it."""
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        with patch("ddpui.utils.awsses.send_added_to_group_email") as mock_send:
+            add_member(
+                mock_request(analyst), group["id"], GroupMemberCreate(email="quiet@test.com")
+            )
+        assert mock_send.call_count == 0
 
 
 # ================================================================================

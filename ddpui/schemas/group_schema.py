@@ -69,6 +69,11 @@ class GroupUpdate(Schema):
 
 
 class GroupMemberCreate(Schema):
-    """POST /api/groups/{id}/members — add a member by OrgUser id."""
+    """POST /api/groups/{id}/members — add a member by OrgUser id OR by
+    email (exactly one). An email matching an existing org member adds them
+    directly; an unknown (or not-yet-active) email invites them via the
+    share-flow's invite machinery and stages a PENDING row that activates on
+    signup (M4 -- see ``orguserfunctions.activate_pending_shares_and_memberships``)."""
 
-    orguser_id: int
+    orguser_id: Optional[int] = None
+    email: Optional[str] = None

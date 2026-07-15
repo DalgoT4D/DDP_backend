@@ -22,6 +22,14 @@ from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquer
 from django.db.models.functions import Coalesce
 
 from ddpui.core.ownership import is_admin_or_super_admin
+from ddpui.core.sharing.exceptions import SharingValidationError
+
+# Reuses the share-flow's "invite this email, return an instant OrgUser or
+# None" primitive rather than re-implementing invite/Invitation handling
+# here (Phase M4 -- see the module's `add_member` docstring). This is the
+# one place Groups depends on core/sharing; it stays a leaf import (no
+# ResourceShare/grant machinery is pulled in).
+from ddpui.core.sharing.sharing_actions import _invite_email_once
 from ddpui.core.user_groups.exceptions import (
     GroupNameCollisionError,
     GroupNotFoundError,
@@ -262,31 +270,82 @@ def delete_group(orguser: OrgUser, group_id: int) -> None:
         group.delete()  # cascades UserGroupMember rows via FK
 
 
-def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> GroupMemberOut:
-    """Add an OrgUser (same org) as an active member. Creator or Admin only.
-    Adding an existing member is idempotent — returns the existing row."""
-    group = _get_group_or_404(orguser, group_id)
-    _require_creator_or_admin(orguser, group)
-
-    target = (
-        OrgUser.objects.filter(id=payload.orguser_id, org_id=orguser.org_id)
-        .select_related("user")
-        .first()
-    )
-    if target is None:
-        raise MemberNotFoundError("orguser not found in this organization")
-
+def _add_active_member(adder: OrgUser, group: UserGroup, target: OrgUser) -> GroupMemberOut:
+    """Create (or no-op onto) an ACTIVE membership row for `target` and fire
+    the D2 notification on a genuinely new one. Shared by the orguser_id
+    path and the email path's "matches an existing org member" / "invite
+    resolved instantly" branches -- all three end up here so the idempotency
+    and notification rule lives in exactly one place."""
     member, created = UserGroupMember.objects.get_or_create(
         group=group,
         orguser=target,
         defaults={"status": UserGroupMemberStatus.ACTIVE},
     )
     # D2: notify only on a genuinely NEW active membership for an ACTIVE org
-    # user -- never on an idempotent re-add (created is False). add_member
-    # only ever creates orguser-backed rows, so pending-email rows never
-    # reach here.
+    # user -- never on an idempotent re-add (created is False).
     if created and target.user.is_active:
-        _notify_added_to_group(orguser, group, target)
+        _notify_added_to_group(adder, group, target)
+    return _member_out(member)
+
+
+def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> GroupMemberOut:
+    """Add a member by OrgUser id OR by email (exactly one). Creator or
+    Admin only. Adding an existing member is idempotent — returns the
+    existing row.
+
+    Email branches (M4 -- batch 2b):
+    - matches an existing org member (any status, mirroring
+      ``sharing_actions.upsert_grant``'s email lookup) -> same as the
+      orguser_id path.
+    - unknown (or not-yet-active) -> reused share-flow invite machinery
+      (``sharing_actions._invite_email_once``) at **Member** only -- no
+      admin role-escalation option here; the design has no invite-role
+      picker for group invites (unlike the share modal's), so every group
+      invite lands at Member -- then a PENDING row, matched by email and
+      flipped to ACTIVE on signup by
+      ``orguserfunctions.activate_pending_shares_and_memberships`` (already
+      wired; not rebuilt here).
+    """
+    group = _get_group_or_404(orguser, group_id)
+    _require_creator_or_admin(orguser, group)
+
+    if payload.orguser_id is not None and payload.email:
+        raise GroupValidationError("provide only one of orguser_id or email")
+    if payload.orguser_id is None and not payload.email:
+        raise GroupValidationError("orguser_id or email is required")
+
+    if payload.orguser_id is not None:
+        target = (
+            OrgUser.objects.filter(id=payload.orguser_id, org_id=orguser.org_id)
+            .select_related("user")
+            .first()
+        )
+        if target is None:
+            raise MemberNotFoundError("orguser not found in this organization")
+        return _add_active_member(orguser, group, target)
+
+    email = payload.email.strip().lower()
+    target = (
+        OrgUser.objects.filter(org_id=orguser.org_id, user__email__iexact=email)
+        .select_related("user")
+        .first()
+    )
+    if target is not None:
+        return _add_active_member(orguser, group, target)
+
+    try:
+        instant_principal = _invite_email_once(orguser, email)
+    except SharingValidationError as err:
+        raise GroupValidationError(str(err)) from err
+
+    if instant_principal is not None:
+        return _add_active_member(orguser, group, instant_principal)
+
+    member, _created = UserGroupMember.objects.get_or_create(
+        group=group,
+        pending_email=email,
+        defaults={"status": UserGroupMemberStatus.PENDING},
+    )
     return _member_out(member)
 
 

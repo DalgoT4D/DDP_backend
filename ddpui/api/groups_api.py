@@ -111,8 +111,9 @@ def delete_group(request, group_id: int):
 @groups_router.post("/{group_id}/members/", response=ApiResponse[GroupMemberOut])
 @has_permission(["can_manage_user_groups"])
 def add_member(request, group_id: int, payload: GroupMemberCreate):
-    """Add a same-org OrgUser as a member. Idempotent. Creator or Admin
-    only."""
+    """Add a member by ``orguser_id`` OR ``email`` (exactly one). An unknown
+    email invites them (Member only) and stages a pending row. Idempotent.
+    Creator or Admin only."""
     orguser: OrgUser = request.orguser
     try:
         member = user_groups_service.add_member(orguser, group_id, payload)
@@ -122,6 +123,8 @@ def add_member(request, group_id: int, payload: GroupMemberCreate):
         raise HttpError(403, err.message) from err
     except MemberNotFoundError as err:
         raise HttpError(404, err.message) from err
+    except GroupValidationError as err:
+        raise HttpError(400, err.message) from err
     return api_response(success=True, data=member, message="Member added")
 
 
