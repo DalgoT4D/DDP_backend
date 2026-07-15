@@ -21,13 +21,14 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from ddpui.auth import MEMBER_ROLE
+from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.core import orguserfunctions
 from ddpui.core.sharing.access_resolver import PERMISSION_RANK, effective_permission
 from ddpui.core.sharing.deep_links import NOUN_BY_RTYPE, build_resource_url, resource_label
 from ddpui.core.sharing.exceptions import (
     GrantNotFoundError,
     PrincipalNotFoundError,
+    SharingPermissionError,
     SharingValidationError,
 )
 from ddpui.core.sharing.public_sharing_gate import org_allows_public_sharing
@@ -69,6 +70,10 @@ AUDIENCE_ORDER = {
 # Hard cap on a bulk selection (Task 17) — a plain constant, enforced at
 # the API layer before any per-item work happens.
 BULK_MAX_ITEMS = 100
+
+# Roles a share-flow email invite may assign (Phase C3). super-admin is
+# deliberately NOT invitable through sharing.
+INVITABLE_ROLE_SLUGS = (MEMBER_ROLE, ANALYST_ROLE, ADMIN_ROLE)
 
 
 def _entry_for(rtype: str) -> ShareableType:
@@ -184,12 +189,39 @@ def get_access_overview(viewer: OrgUser, rtype: str, resource) -> AccessOverview
     )
 
 
-def _invite_email_once(grantor: OrgUser, email: str) -> Optional[OrgUser]:
-    """Send ONE share-flow invite for `email` (Task 9 / Part B), always as a
-    **Member** -- Part C's explicit "non-Admin invites Member only" cap,
-    applied uniformly (this path never exposes a role choice, so it never
-    re-opens the `inviter.level >= invitee.level` loophole `invite_user_v1`
-    itself still has).
+def _resolve_invite_role(grantor: OrgUser, invite_role: Optional[str]) -> Role:
+    """The role a share-flow invite assigns (Phase C3). Default **Member**.
+
+    A non-Member role may only be requested by an admin/super-admin caller
+    -- 403 otherwise. This is deliberately STRICTER than `invite_user_v1`'s
+    own `invited_role.level > inviter.level` tier check (which would let an
+    analyst mint analysts): the share flow keeps Part C's "non-Admin invites
+    Member only" cap, now with an admin-only escape hatch. The level check
+    still runs downstream inside `invite_user_v1` as defense in depth.
+    """
+    slug = invite_role or MEMBER_ROLE
+    if slug not in INVITABLE_ROLE_SLUGS:
+        raise SharingValidationError(f"invalid invite_role '{invite_role}'")
+
+    if slug != MEMBER_ROLE:
+        grantor_slug = grantor.new_role.slug if grantor.new_role else None
+        if grantor_slug not in (ADMIN_ROLE, SUPER_ADMIN_ROLE):
+            raise SharingPermissionError(f"only admins can invite new users as {slug}")
+
+    role = Role.objects.filter(slug=slug).first()
+    if role is None:
+        raise SharingValidationError(f"the {slug} role is not configured for this org")
+    return role
+
+
+def _invite_email_once(
+    grantor: OrgUser, email: str, invite_role: Optional[str] = None
+) -> Optional[OrgUser]:
+    """Send ONE share-flow invite for `email` (Task 9 / Part B) at the
+    resolved invite role -- **Member** unless an admin caller chose more
+    (`_resolve_invite_role`, Phase C3). The role gate runs BEFORE
+    `invite_user_v1`, so an over-privileged request never sends an email or
+    creates an `Invitation`.
 
     `invite_user_v1` short-circuits to an *instant* OrgUser when `email`
     already has a platform account (even one outside this org) -- no
@@ -197,12 +229,10 @@ def _invite_email_once(grantor: OrgUser, email: str) -> Optional[OrgUser]:
     it happens, else None (a real Invitation was created/refreshed and the
     caller should write pending grant rows).
     """
-    member_role = Role.objects.filter(slug=MEMBER_ROLE).first()
-    if member_role is None:
-        raise SharingValidationError("the Member role is not configured for this org")
+    role = _resolve_invite_role(grantor, invite_role)
 
     _, error = orguserfunctions.invite_user_v1(
-        grantor, NewInvitationSchema(invited_email=email, invited_role_uuid=member_role.uuid)
+        grantor, NewInvitationSchema(invited_email=email, invited_role_uuid=role.uuid)
     )
     if error:
         raise SharingValidationError(error)
@@ -255,13 +285,19 @@ def _email_grant_row(
 
 
 def _invite_and_create_pending_grant(
-    grantor: OrgUser, rtype: str, resource, email: str, permission: str
+    grantor: OrgUser,
+    rtype: str,
+    resource,
+    email: str,
+    permission: str,
+    invite_role: Optional[str] = None,
 ) -> GrantOut:
     """The single-resource share-flow invite: `email` isn't an OrgUser of
-    this org yet -- invite once, then write the (pending or instant) grant
-    row. Bulk (Task 17) uses the same two halves directly so a selection of
-    N resources still sends exactly ONE invitation."""
-    instant_principal = _invite_email_once(grantor, email)
+    this org yet -- invite once (at `invite_role`, Member by default), then
+    write the (pending or instant) grant row. Bulk (Task 17) uses the same
+    two halves directly so a selection of N resources still sends exactly
+    ONE invitation."""
+    instant_principal = _invite_email_once(grantor, email, invite_role)
     return _email_grant_row(grantor, rtype, resource, email, permission, instant_principal)
 
 
@@ -369,7 +405,7 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
         )
         if principal is None:
             return _invite_and_create_pending_grant(
-                grantor, rtype, resource, email, payload.permission
+                grantor, rtype, resource, email, payload.permission, payload.invite_role
             )
 
     share, created = ResourceShare.objects.update_or_create(
@@ -645,7 +681,7 @@ def _bulk_add_grant(
     if not eligible:
         return
 
-    instant_principal = _invite_email_once(actor, unknown_email)
+    instant_principal = _invite_email_once(actor, unknown_email, payload.invite_role)
     for rtype, resource in eligible:
         _email_grant_row(
             actor, rtype, resource, unknown_email, payload.permission, instant_principal

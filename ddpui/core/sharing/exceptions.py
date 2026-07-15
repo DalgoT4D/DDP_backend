@@ -21,3 +21,8 @@ class GrantNotFoundError(SharingError):
 
 class PrincipalNotFoundError(SharingError):
     """Grant target isn't an OrgUser of this org — maps to 404."""
+
+
+class SharingPermissionError(SharingError):
+    """Caller lacks the role required for this sharing action (e.g. a
+    non-admin requesting a non-Member invite role) — maps to 403."""

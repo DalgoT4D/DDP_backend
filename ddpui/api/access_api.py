@@ -33,6 +33,7 @@ from ddpui.core.sharing import access_requests, sharing_actions
 from ddpui.core.sharing.exceptions import (
     GrantNotFoundError,
     PrincipalNotFoundError,
+    SharingPermissionError,
     SharingValidationError,
 )
 from ddpui.core.sharing.access_resolver import effective_permission
@@ -109,6 +110,8 @@ def create_grant(request, rtype: str, resource_id: str, payload: GrantCreate):
         grant = sharing_actions.upsert_grant(orguser, rtype, resource, payload)
     except SharingValidationError as err:
         raise HttpError(400, err.message) from err
+    except SharingPermissionError as err:
+        raise HttpError(403, err.message) from err
     except PrincipalNotFoundError as err:
         raise HttpError(404, err.message) from err
 
@@ -243,6 +246,10 @@ def bulk_access(request, payload: BulkAccessRequest):
         result = sharing_actions.bulk_apply(orguser, payload, resolved, skipped)
     except SharingValidationError as err:
         raise HttpError(400, err.message) from err
+    except SharingPermissionError as err:
+        # A caller-privilege problem (e.g. non-admin invite_role escalation)
+        # fails the whole request — it can't succeed for ANY item.
+        raise HttpError(403, err.message) from err
     except GrantNotFoundError as err:
         raise HttpError(404, err.message) from err
     except PrincipalNotFoundError as err:
