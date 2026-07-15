@@ -44,6 +44,10 @@ class GroupMemberOut(Schema):
     name: Optional[str] = None
     pending_email: Optional[str] = None
     status: str
+    # The member's org-role slug (e.g. "analyst"), populated on the detail
+    # path from their OrgUser.new_role. Pending-email rows have no OrgUser
+    # yet, so this stays None for them (Phase F5).
+    role: Optional[str] = None
 
 
 class GroupDetailOut(GroupOut):
