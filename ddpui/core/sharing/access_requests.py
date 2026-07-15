@@ -71,18 +71,30 @@ def _request_out(access_request: AccessRequest) -> AccessRequestOut:
     )
 
 
-def _notify(recipient: OrgUser, author_email: str, message: str, email_subject: str) -> None:
+def _notify(
+    recipient: OrgUser,
+    author_email: str,
+    message: str,
+    email_subject: str,
+    metadata: Optional[dict] = None,
+) -> None:
     """One in-app Notification + NotificationRecipient row, sent
     immediately -- mirrors `MentionService._create_in_app_notification`'s
     minimal shape (Resource Sharing keeps this to in-app only; no
     email-preference wiring the way comment @mentions do, per the "keep it
-    simple" brief for this task)."""
+    simple" brief for this task).
+
+    `metadata` (batch 2 / F6) is the structured payload the Notifications
+    page reads to render inline Approve/Deny directly on a "new request"
+    row -- left `None` for every other notification (e.g. the decision
+    notification below), which keeps rendering as plain text."""
     notification = Notification.objects.create(
         author=author_email,
         message=message,
         email_subject=email_subject,
         urgent=False,
         sent_time=django_timezone.now(),
+        metadata=metadata,
     )
     NotificationRecipient.objects.create(notification=notification, recipient=recipient)
 
@@ -114,8 +126,20 @@ def _notify_new_request(
         f'your {noun} "{label}". {link}'
     )
     subject = f'{requester_name} requested access to "{label}"'
+    # Generic `Notification.metadata` payload (batch 2 / F6): `kind`
+    # discriminates for future actionable-notification types the frontend
+    # may add later. Only THIS notification (new request landed) gets one --
+    # the decision notification below has nothing left to act on.
+    metadata = {
+        "kind": "access_request",
+        "request_id": access_request.id,
+        "resource_type": rtype,
+        "resource_name": label,
+        "requester_email": requester.user.email,
+        "requested_permission": access_request.requested_permission,
+    }
     for recipient in recipients:
-        _notify(recipient, requester.user.email, message, subject)
+        _notify(recipient, requester.user.email, message, subject, metadata=metadata)
 
 
 def _notify_decision(
