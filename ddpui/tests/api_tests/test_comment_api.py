@@ -32,7 +32,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentTargetType, CommentReadStatus
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.resource_share import ResourceShare
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.api.report_api import (
@@ -156,6 +156,10 @@ def editor_orguser(editor_authuser, org, seed_db):
 
 @pytest.fixture
 def snapshot(org, orguser):
+    """General access explicitly view/view for both roles (D1) -- this
+    fixture's whole point is "every org member gets view via general
+    access", so it must not rely on the model's own field default (which
+    is now locked-down none/none, not the old all_users/view)."""
     snapshot = ReportSnapshot.objects.create(
         title="Comment API Report",
         date_column={},
@@ -165,6 +169,8 @@ def snapshot(org, orguser):
         frozen_chart_configs={"10": {"title": "Chart A"}, "20": {"title": "Chart B"}},
         created_by=orguser,
         org=org,
+        analyst_level=AccessLevel.VIEW,
+        member_level=AccessLevel.VIEW,
     )
     yield snapshot
     snapshot.delete()
@@ -183,8 +189,8 @@ def private_snapshot(org, orguser):
         frozen_chart_configs={"10": {"title": "Chart A"}},
         created_by=orguser,
         org=org,
-        general_audience=GeneralAudience.PRIVATE,
-        general_level=GeneralLevel.VIEW,
+        analyst_level=AccessLevel.NONE,
+        member_level=AccessLevel.NONE,
     )
     yield snapshot
     snapshot.delete()

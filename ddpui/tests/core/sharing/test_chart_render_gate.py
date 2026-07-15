@@ -41,7 +41,7 @@ from ninja.errors import HttpError
 from ddpui.api.charts_api import get_chart, get_chart_data_by_id
 from ddpui.core.sharing.chart_access import ChartRenderContext, run_chart_query
 from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardFilterType
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.visualization import Chart
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -94,15 +94,15 @@ def _chart(org_obj, creator, owner=None, title="Render Gate Chart"):
     )
 
 
-def _dashboard_with_charts(org_obj, owner, audience, charts, level=GeneralLevel.VIEW):
+def _dashboard_with_charts(org_obj, owner, analyst_level, member_level, charts):
     """A dashboard whose single tab holds one chart tile per chart in `charts`."""
     return Dashboard.objects.create(
         title="Render Gate Dashboard",
         org=org_obj,
         owner=owner,
         created_by=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
         tabs=[
             {
                 "id": "tab-1",
@@ -130,7 +130,9 @@ class TestChartDataDashboardContext:
         """Member + valid dashboard_id + view access on that dashboard -> 200 with data."""
         mock_generate.return_value = CHART_RESULT
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_chart_data_by_id(request, chart.id, dashboard_id=dashboard.id)
@@ -146,7 +148,9 @@ class TestChartDataDashboardContext:
         chart is NOT on grants nothing."""
         chart = _chart(org, analyst)
         other_chart = _chart(org, analyst, title="Other Chart")
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [other_chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [other_chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -160,7 +164,9 @@ class TestChartDataDashboardContext:
     ):
         """Chart IS on the dashboard, but the resolver denies view on it."""
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.PRIVATE, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -175,7 +181,9 @@ class TestChartDataDashboardContext:
         """A ResourceShare grant on the framing dashboard admits the member."""
         mock_generate.return_value = CHART_RESULT
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.PRIVATE, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
         _grant(org, "dashboard", dashboard, member)
         request = mock_request(member)
 
@@ -194,7 +202,8 @@ class TestChartDataDashboardContext:
         other_dashboard = Dashboard.objects.create(
             title="Other org dashboard",
             org=other_org,
-            general_audience=GeneralAudience.ALL_USERS,
+            analyst_level=AccessLevel.VIEW,
+            member_level=AccessLevel.VIEW,
             tabs=[
                 {
                     "id": "tab-1",
@@ -310,7 +319,9 @@ class TestDashboardFiltersWithDashboardId:
         resolved = [{"column": "region", "operator": "eq", "value": "north"}]
         mock_resolve.return_value = resolved
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         filter_obj = DashboardFilter.objects.create(
             dashboard=dashboard,
             name="Region",
@@ -346,7 +357,9 @@ class TestRunChartQuerySeam:
         it out means no generate/warehouse call ever happens."""
         mock_run.return_value = CHART_RESULT
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(analyst)
 
         response = get_chart_data_by_id(request, chart.id, dashboard_id=dashboard.id)
@@ -386,7 +399,9 @@ class TestChartDetailContextGate:
 
     def test_member_with_dashboard_view_access_200(self, org, member, analyst):
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_chart(request, chart.id, dashboard_id=dashboard.id)
@@ -395,7 +410,9 @@ class TestChartDetailContextGate:
     def test_member_denied_when_chart_not_on_dashboard(self, org, member, analyst):
         chart = _chart(org, analyst)
         other_chart = _chart(org, analyst, title="Other Chart")
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [other_chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [other_chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -404,7 +421,9 @@ class TestChartDetailContextGate:
 
     def test_member_denied_on_private_dashboard(self, org, member, analyst):
         chart = _chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.PRIVATE, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:

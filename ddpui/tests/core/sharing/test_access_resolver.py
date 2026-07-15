@@ -3,6 +3,12 @@
 
 Pure read-only decision ladder — real ORM objects via fixtures (no mocks for
 the resource/viewer graph), stubbed ``get_group_ids`` (no Redis, no HTTP).
+
+D1 (permission-model rework): general access is now one independent
+``AccessLevel`` per role (``analyst_level``/``member_level``) instead of an
+(audience, level) threshold pair — Admins are never stored (always full
+access at step 1). See ``access_resolver`` module docstring for the updated
+decision ladder.
 """
 
 import os
@@ -24,7 +30,7 @@ from ddpui.core.sharing.access_resolver import (
 )
 from ddpui.core.sharing.shareable_types import RESOURCE_TYPES
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import ResourceShare
@@ -96,14 +102,14 @@ def other_org_admin(other_org, seed_db):
     ou.delete()
 
 
-def _dashboard(org_obj, owner=None, created_by=None, audience=None, level=None):
+def _dashboard(org_obj, owner=None, created_by=None, analyst_level=None, member_level=None):
     return Dashboard.objects.create(
         title="Resolver Test Dashboard",
         org=org_obj,
         owner=owner,
         created_by=created_by,
-        general_audience=audience or GeneralAudience.PRIVATE,
-        general_level=level or GeneralLevel.VIEW,
+        analyst_level=analyst_level or AccessLevel.NONE,
+        member_level=member_level or AccessLevel.NONE,
     )
 
 
@@ -112,99 +118,124 @@ def _dashboard(org_obj, owner=None, created_by=None, audience=None, level=None):
 # ================================================================================
 
 
-def test_super_admin_gets_edit_even_on_private_resource(org, super_admin, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+def test_super_admin_gets_edit_even_on_locked_down_resource(org, super_admin, member):
+    resource = _dashboard(org, owner=member)
     assert effective_permission(super_admin, "dashboard", resource) == "edit"
 
 
-def test_admin_gets_edit_even_on_private_resource(org, admin, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+def test_admin_gets_edit_even_on_locked_down_resource(org, admin, member):
+    resource = _dashboard(org, owner=member)
     assert effective_permission(admin, "dashboard", resource) == "edit"
 
 
 # ================================================================================
-# Cell 2/3: owner -> edit (even private); owner-fallback to created_by
+# Cell 2/3: owner -> edit (even locked-down); owner-fallback to created_by
 # ================================================================================
 
 
-def test_owner_gets_edit_even_when_general_is_private(org, analyst):
-    resource = _dashboard(org, owner=analyst, audience=GeneralAudience.PRIVATE)
+def test_owner_gets_edit_even_when_general_access_is_locked_down(org, analyst):
+    resource = _dashboard(org, owner=analyst)
     assert effective_permission(analyst, "dashboard", resource) == "edit"
 
 
 def test_owner_fallback_to_created_by_when_owner_is_null(org, analyst):
-    resource = _dashboard(org, owner=None, created_by=analyst, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=None, created_by=analyst)
     assert effective_permission(analyst, "dashboard", resource) == "edit"
 
 
-def test_non_owner_non_creator_analyst_denied_on_private(org, analyst, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+def test_non_owner_non_creator_analyst_denied_when_locked_down(org, analyst, member):
+    resource = _dashboard(org, owner=member)
     assert effective_permission(analyst, "dashboard", resource) is None
 
 
 # ================================================================================
-# Cell 4: general access matrix — audience tier x role tier
+# Cell 4: general access matrix — per-role level x viewer role (D1)
 # ================================================================================
 
 
 @pytest.mark.parametrize(
-    "audience,role_fixture,expected",
+    "analyst_level,member_level,role_fixture,expected",
     [
-        # private admits nobody via general access, at any tier
-        (GeneralAudience.PRIVATE, "member", None),
-        (GeneralAudience.PRIVATE, "analyst", None),
-        # admins-only tier: analyst/member excluded
-        (GeneralAudience.ADMINS, "member", None),
-        (GeneralAudience.ADMINS, "analyst", None),
-        # analysts_plus: analyst and above admitted, member excluded
-        (GeneralAudience.ANALYSTS_PLUS, "member", None),
-        (GeneralAudience.ANALYSTS_PLUS, "analyst", "view"),
-        # all_users: every org member admitted
-        (GeneralAudience.ALL_USERS, "member", "view"),
-        (GeneralAudience.ALL_USERS, "analyst", "view"),
+        # none/none admits nobody via general access, at any tier
+        (AccessLevel.NONE, AccessLevel.NONE, "member", None),
+        (AccessLevel.NONE, AccessLevel.NONE, "analyst", None),
+        # analyst_level=view, member_level=none: analyst admitted, member excluded
+        (AccessLevel.VIEW, AccessLevel.NONE, "member", None),
+        (AccessLevel.VIEW, AccessLevel.NONE, "analyst", "view"),
+        # both view: every org member admitted
+        (AccessLevel.VIEW, AccessLevel.VIEW, "member", "view"),
+        (AccessLevel.VIEW, AccessLevel.VIEW, "analyst", "view"),
+        # D1: member_level is independently settable, INCLUDING "edit" --
+        # the whole point of this rework ("Analyst=Edit, Member=View" and
+        # its mirror must both be storable).
+        (AccessLevel.NONE, AccessLevel.EDIT, "member", "edit"),
+        (AccessLevel.VIEW, AccessLevel.EDIT, "member", "edit"),
+        (AccessLevel.EDIT, AccessLevel.VIEW, "analyst", "edit"),
+        (AccessLevel.EDIT, AccessLevel.VIEW, "member", "view"),
         # admin: org-wide override (step 1) beats general access at every
-        # tier, including private -- always "edit" regardless of audience.
-        (GeneralAudience.PRIVATE, "admin", "edit"),
-        (GeneralAudience.ADMINS, "admin", "edit"),
-        (GeneralAudience.ANALYSTS_PLUS, "admin", "edit"),
-        (GeneralAudience.ALL_USERS, "admin", "edit"),
+        # level, including none/none -- always "edit".
+        (AccessLevel.NONE, AccessLevel.NONE, "admin", "edit"),
+        (AccessLevel.EDIT, AccessLevel.EDIT, "admin", "edit"),
     ],
 )
-def test_general_access_audience_by_role_tier(
-    request, org, member, analyst, admin, audience, role_fixture, expected
+def test_general_access_by_role_and_level(
+    request, org, member, analyst, admin, analyst_level, member_level, role_fixture, expected
 ):
     viewer = request.getfixturevalue(role_fixture)
     # Owned by nobody in this fixture set (a stranger orguser), so ownership
     # never masks the general-access decision under test.
     stranger = member if role_fixture != "member" else analyst
-    resource = _dashboard(org, owner=stranger, audience=audience, level=GeneralLevel.VIEW)
+    resource = _dashboard(
+        org, owner=stranger, analyst_level=analyst_level, member_level=member_level
+    )
     assert effective_permission(viewer, "dashboard", resource) == expected
 
 
 def test_general_access_grants_the_resources_own_level_not_a_hardcoded_view(org, analyst, member):
-    """Pins step 3 actually returning `resource.general_level` rather than a
+    """Pins step 3 actually returning the role's stored level rather than a
     hardcoded "view" -- every other matrix cell above uses level=VIEW, so
     without this cell a regression collapsing step 3 to "view" would still
     pass the full suite."""
-    resource = _dashboard(
-        org, owner=member, audience=GeneralAudience.ALL_USERS, level=GeneralLevel.EDIT
-    )
+    resource = _dashboard(org, owner=member, analyst_level=AccessLevel.EDIT)
     assert effective_permission(analyst, "dashboard", resource) == "edit"
 
 
 # ================================================================================
-# Cell 5: general_level=edit + Member -> capped at view
+# Cell 5: the Member cap moved with D1 -- it no longer applies to the
+# general-access contribution (member_level="edit" is a real outcome, see
+# Cell 4 above), but it's UNCHANGED for the grant contribution, since
+# direct/group grants are explicitly untouched by this rework.
 # ================================================================================
 
 
-def test_member_capped_at_view_even_when_general_level_is_edit(org, member, analyst):
-    resource = _dashboard(
-        org,
-        owner=analyst,
-        audience=GeneralAudience.ALL_USERS,
-        level=GeneralLevel.EDIT,
+def test_member_grant_capped_at_view_even_when_grant_permission_is_edit(org, member, analyst):
+    resource = _dashboard(org, owner=analyst)
+    ResourceShare.objects.create(
+        org=org,
+        resource_type="dashboard",
+        resource_id=str(resource.pk),
+        principal_type="user",
+        principal_id=member.id,
+        permission="edit",
+        status="active",
     )
     assert effective_permission(member, "dashboard", resource) == "view"
+
+
+def test_analyst_grant_is_not_capped(org, analyst, member):
+    """Contrast with the Member-only cap above: an Analyst's own grant is
+    never capped, at any level."""
+    resource = _dashboard(org, owner=member)
+    ResourceShare.objects.create(
+        org=org,
+        resource_type="dashboard",
+        resource_id=str(resource.pk),
+        principal_type="user",
+        principal_id=analyst.id,
+        permission="edit",
+        status="active",
+    )
+    assert effective_permission(analyst, "dashboard", resource) == "edit"
 
 
 # ================================================================================
@@ -213,7 +244,7 @@ def test_member_capped_at_view_even_when_general_level_is_edit(org, member, anal
 
 
 def test_user_grant_view(org, analyst, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -227,7 +258,7 @@ def test_user_grant_view(org, analyst, member):
 
 
 def test_user_grant_edit(org, analyst, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -241,7 +272,7 @@ def test_user_grant_edit(org, analyst, member):
 
 
 def test_group_grant_via_injected_stub(org, analyst, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -261,9 +292,7 @@ def test_group_grant_via_injected_stub(org, analyst, member):
 
 
 def test_best_of_general_view_and_grant_edit_is_edit_for_non_member(org, analyst, member):
-    resource = _dashboard(
-        org, owner=member, audience=GeneralAudience.ANALYSTS_PLUS, level=GeneralLevel.VIEW
-    )
+    resource = _dashboard(org, owner=member, analyst_level=AccessLevel.VIEW)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -282,7 +311,7 @@ def test_best_of_general_view_and_grant_edit_is_edit_for_non_member(org, analyst
 
 
 def test_pending_grant_grants_nothing(org, analyst, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -301,7 +330,7 @@ def test_pending_grant_grants_nothing(org, analyst, member):
 
 
 def test_audience_principal_type_row_grants_nothing(org, analyst, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -320,7 +349,9 @@ def test_audience_principal_type_row_grants_nothing(org, analyst, member):
 
 
 def test_cross_org_viewer_denied_even_if_admin_in_own_org(org, other_org_admin, member):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.ALL_USERS)
+    resource = _dashboard(
+        org, owner=member, analyst_level=AccessLevel.VIEW, member_level=AccessLevel.VIEW
+    )
     assert effective_permission(other_org_admin, "dashboard", resource) is None
 
 
@@ -331,7 +362,9 @@ def test_cross_org_viewer_denied_even_if_admin_in_own_org(org, other_org_admin, 
 
 def test_null_role_denied_not_crash(org, member):
     viewer = _make_orguser(org, None, "resolver-null-role")
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.ALL_USERS)
+    resource = _dashboard(
+        org, owner=member, analyst_level=AccessLevel.VIEW, member_level=AccessLevel.VIEW
+    )
     try:
         result = effective_permission(viewer, "dashboard", resource)
     finally:
@@ -346,7 +379,9 @@ def test_legacy_unknown_role_slug_denied_not_crash(org, member):
         org=org,
         new_role=legacy_role,
     )
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.ALL_USERS)
+    resource = _dashboard(
+        org, owner=member, analyst_level=AccessLevel.VIEW, member_level=AccessLevel.VIEW
+    )
     try:
         result = effective_permission(viewer, "dashboard", resource)
     finally:
@@ -357,12 +392,12 @@ def test_legacy_unknown_role_slug_denied_not_crash(org, member):
 
 def test_null_role_with_explicit_grant_still_grants_access(org, member):
     """Documented interpretation: grants (step 4) are evaluated independent
-    of role and are NOT gated by a known role rank -- a viewer whose role
-    was deleted/never set can still use an explicit share. Only the
-    role-gated general-access path (step 3) and the Member cap (step 5)
-    depend on a resolvable role slug."""
+    of role and are NOT gated by a resolvable role slug -- a viewer whose
+    role was deleted/never set can still use an explicit share. Only the
+    role-gated general-access path (step 3) and the Member grant cap (step
+    4) depend on a resolvable role slug."""
     viewer = _make_orguser(org, None, "resolver-null-role-grant")
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -387,14 +422,16 @@ def test_null_role_with_explicit_grant_still_grants_access(org, member):
 def test_accessible_filter_member_sees_exactly_admitted_set(
     django_assert_num_queries, org, member, analyst
 ):
-    # Private, not owned/created by member, no grant -> NOT visible.
-    private_hidden = _dashboard(org, owner=analyst, audience=GeneralAudience.PRIVATE)
-    # all_users tier admits every member -> visible via general access.
-    general_visible = _dashboard(org, owner=analyst, audience=GeneralAudience.ALL_USERS)
-    # analysts_plus tier excludes member -> NOT visible via general access.
-    tier_excluded = _dashboard(org, owner=analyst, audience=GeneralAudience.ANALYSTS_PLUS)
-    # Private but explicitly granted to member -> visible via grant.
-    granted_visible = _dashboard(org, owner=analyst, audience=GeneralAudience.PRIVATE)
+    # Locked down, not owned/created by member, no grant -> NOT visible.
+    private_hidden = _dashboard(org, owner=analyst)
+    # member_level=view admits every Member -> visible via general access.
+    general_visible = _dashboard(
+        org, owner=analyst, analyst_level=AccessLevel.VIEW, member_level=AccessLevel.VIEW
+    )
+    # member_level=none excludes Member even though analyst_level=view -> NOT visible.
+    tier_excluded = _dashboard(org, owner=analyst, analyst_level=AccessLevel.VIEW)
+    # Locked down but explicitly granted to member -> visible via grant.
+    granted_visible = _dashboard(org, owner=analyst)
     ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",
@@ -404,8 +441,8 @@ def test_accessible_filter_member_sees_exactly_admitted_set(
         permission="view",
         status="active",
     )
-    # Private but owned by member -> visible via ownership.
-    owned_visible = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    # Locked down but owned by member -> visible via ownership.
+    owned_visible = _dashboard(org, owner=member)
 
     with django_assert_num_queries(1):
         visible_ids = set(
@@ -426,7 +463,7 @@ def test_accessible_filter_member_sees_exactly_admitted_set(
 
 
 def test_registry_contract_attrs_present_on_every_registered_model():
-    contract_attrs = ("general_audience", "general_level", "owner", "created_by", "org")
+    contract_attrs = ("analyst_level", "member_level", "owner", "created_by", "org")
     assert RESOURCE_TYPES, "registry should not be empty"
     for rtype, entry in RESOURCE_TYPES.items():
         for attr in contract_attrs:
@@ -446,7 +483,7 @@ def test_chart_is_not_registered():
 def test_principal_match_q_matches_user_and_group_excludes_pending_and_audience(
     org, analyst, member
 ):
-    resource = _dashboard(org, owner=member, audience=GeneralAudience.PRIVATE)
+    resource = _dashboard(org, owner=member)
     user_grant = ResourceShare.objects.create(
         org=org,
         resource_type="dashboard",

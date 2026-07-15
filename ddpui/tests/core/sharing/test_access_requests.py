@@ -31,7 +31,7 @@ from ninja.errors import HttpError
 from ddpui.auth import ANALYST_ROLE
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.models.access_request import AccessRequest
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.metric import Metric
 from ddpui.models.notifications import Notification, NotificationRecipient
 from ddpui.models.org import Org
@@ -447,7 +447,8 @@ class TestApproveAccessRequest:
             aggregation="sum",
             created_by=analyst,
             owner=analyst,
-            general_audience=GeneralAudience.PRIVATE,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         created = _create_request(member, "metric", metric, permission="view")
 
@@ -570,7 +571,8 @@ class TestNotificationDeepLinks:
             aggregation="sum",
             created_by=analyst,
             owner=analyst,
-            general_audience=GeneralAudience.PRIVATE,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         _create_request(member, "metric", metric, permission="view")
 

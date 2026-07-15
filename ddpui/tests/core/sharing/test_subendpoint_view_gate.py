@@ -47,7 +47,7 @@ from ddpui.api.report_api import (
     share_report_via_email,
 )
 from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardFilterType
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.schemas.report_schema import ReportShareViaEmailRequest
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 from ddpui.tests.core.sharing.test_detail_view_gate import (
@@ -74,7 +74,7 @@ pytestmark = pytest.mark.django_db
 class TestReportChartDataGate:
     @patch("ddpui.api.report_api.ReportService.get_report_chart_data")
     def test_member_denied_on_private_resource(self, mock_get_data, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -85,7 +85,7 @@ class TestReportChartDataGate:
     @patch("ddpui.api.report_api.ReportService.get_report_chart_data")
     def test_member_allowed_on_granted_resource(self, mock_get_data, org, member, analyst):
         mock_get_data.return_value = {"data": {}, "echarts_config": {}}
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "report", snapshot, member)
         request = mock_request(member)
 
@@ -96,7 +96,7 @@ class TestReportChartDataGate:
     @patch("ddpui.api.report_api.ReportService.get_report_chart_data")
     def test_admin_allowed_on_any_resource(self, mock_get_data, org, admin, member):
         mock_get_data.return_value = {"data": {}, "echarts_config": {}}
-        snapshot = _snapshot(org, member, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_report_chart_data(request, snapshot.id, 1)
@@ -106,7 +106,7 @@ class TestReportChartDataGate:
 class TestReportKpiDataGate:
     @patch("ddpui.api.report_api.ReportService.get_report_kpi_data")
     def test_member_denied_on_private_resource(self, mock_get_data, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -117,7 +117,7 @@ class TestReportKpiDataGate:
     @patch("ddpui.api.report_api.ReportService.get_report_kpi_data")
     def test_member_allowed_on_granted_resource(self, mock_get_data, org, member, analyst):
         mock_get_data.return_value = {"data": {}, "echarts_config": {}}
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "report", snapshot, member)
         request = mock_request(member)
 
@@ -127,7 +127,7 @@ class TestReportKpiDataGate:
     @patch("ddpui.api.report_api.ReportService.get_report_kpi_data")
     def test_admin_allowed_on_any_resource(self, mock_get_data, org, admin, member):
         mock_get_data.return_value = {"data": {}, "echarts_config": {}}
-        snapshot = _snapshot(org, member, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_report_kpi_data(request, snapshot.id, 1)
@@ -141,7 +141,7 @@ class TestReportKpiDataGate:
 
 class TestReportPdfExportGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -153,7 +153,7 @@ class TestReportPdfExportGate:
     def test_member_allowed_on_granted_resource(self, mock_token, mock_pdf, org, member, analyst):
         mock_token.return_value = "tok"
         mock_pdf.return_value = b"%PDF-1.4"
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "report", snapshot, member)
         request = mock_request(member)
 
@@ -165,7 +165,7 @@ class TestReportPdfExportGate:
     def test_admin_allowed_on_any_resource(self, mock_token, mock_pdf, org, admin, member):
         mock_token.return_value = "tok"
         mock_pdf.return_value = b"%PDF-1.4"
-        snapshot = _snapshot(org, member, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = export_report_pdf(request, snapshot.id)
@@ -185,7 +185,7 @@ class TestReportPdfExportGate:
 class TestReportShareViaEmailGate:
     @patch("ddpui.api.report_api.send_report_email_task")
     def test_analyst_denied_on_private_resource_not_owned(self, mock_task, org, analyst, admin):
-        snapshot = _snapshot(org, admin, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, admin, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(analyst)
         payload = ReportShareViaEmailRequest(recipient_emails=["x@test.com"])
 
@@ -196,7 +196,7 @@ class TestReportShareViaEmailGate:
 
     @patch("ddpui.api.report_api.send_report_email_task")
     def test_analyst_allowed_on_granted_resource(self, mock_task, org, analyst, admin):
-        snapshot = _snapshot(org, admin, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, admin, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "report", snapshot, analyst)
         request = mock_request(analyst)
         payload = ReportShareViaEmailRequest(recipient_emails=["x@test.com"])
@@ -206,7 +206,7 @@ class TestReportShareViaEmailGate:
 
     @patch("ddpui.api.report_api.send_report_email_task")
     def test_admin_allowed_on_any_resource(self, mock_task, org, admin, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
         payload = ReportShareViaEmailRequest(recipient_emails=["x@test.com"])
 
@@ -222,7 +222,7 @@ class TestReportShareViaEmailGate:
 
 class TestDashboardDatetimeColumnsGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -230,7 +230,7 @@ class TestDashboardDatetimeColumnsGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "dashboard", dashboard, member)
         request = mock_request(member)
 
@@ -238,7 +238,7 @@ class TestDashboardDatetimeColumnsGate:
         assert response["success"] is True
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        dashboard = _dashboard(org, member, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = list_dashboard_datetime_columns(request, dashboard.id)
@@ -252,7 +252,7 @@ class TestDashboardDatetimeColumnsGate:
 
 class TestReportCommentStatesGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -260,7 +260,7 @@ class TestReportCommentStatesGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "report", snapshot, member)
         request = mock_request(member)
 
@@ -268,7 +268,7 @@ class TestReportCommentStatesGate:
         assert response["success"] is True
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        snapshot = _snapshot(org, member, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_comment_states(request, snapshot.id)
@@ -277,7 +277,7 @@ class TestReportCommentStatesGate:
 
 class TestReportListCommentsGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -285,7 +285,7 @@ class TestReportListCommentsGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        snapshot = _snapshot(org, analyst, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "report", snapshot, member)
         request = mock_request(member)
 
@@ -293,7 +293,7 @@ class TestReportListCommentsGate:
         assert response["success"] is True
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        snapshot = _snapshot(org, member, GeneralAudience.PRIVATE)
+        snapshot = _snapshot(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = list_comments(request, snapshot.id, target_type="summary")
@@ -307,7 +307,7 @@ class TestReportListCommentsGate:
 
 class TestMetricPreviewGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        metric = _metric(org, analyst, GeneralAudience.PRIVATE)
+        metric = _metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -315,7 +315,7 @@ class TestMetricPreviewGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        metric = _metric(org, analyst, GeneralAudience.PRIVATE)
+        metric = _metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "metric", metric, member)
         request = mock_request(member)
 
@@ -323,7 +323,7 @@ class TestMetricPreviewGate:
         assert response.error == "Warehouse not configured"
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        metric = _metric(org, member, GeneralAudience.PRIVATE)
+        metric = _metric(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = preview_metric(request, metric.id)
@@ -332,7 +332,7 @@ class TestMetricPreviewGate:
 
 class TestMetricConsumersGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        metric = _metric(org, analyst, GeneralAudience.PRIVATE)
+        metric = _metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -340,7 +340,7 @@ class TestMetricConsumersGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        metric = _metric(org, analyst, GeneralAudience.PRIVATE)
+        metric = _metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "metric", metric, member)
         request = mock_request(member)
 
@@ -348,7 +348,7 @@ class TestMetricConsumersGate:
         assert response.charts == []
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        metric = _metric(org, member, GeneralAudience.PRIVATE)
+        metric = _metric(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_metric_consumers(request, metric.id)
@@ -362,7 +362,7 @@ class TestMetricConsumersGate:
 
 class TestKpiDashboardsGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -370,7 +370,7 @@ class TestKpiDashboardsGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "kpi", kpi, member)
         request = mock_request(member)
 
@@ -378,7 +378,7 @@ class TestKpiDashboardsGate:
         assert response == []
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        kpi = _kpi_with_metric(org, member, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_kpi_dashboards(request, kpi.id)
@@ -387,7 +387,7 @@ class TestKpiDashboardsGate:
 
 class TestKpiConsumersGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -395,7 +395,7 @@ class TestKpiConsumersGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "kpi", kpi, member)
         request = mock_request(member)
 
@@ -403,7 +403,7 @@ class TestKpiConsumersGate:
         assert response["dashboards"] == []
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        kpi = _kpi_with_metric(org, member, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_kpi_consumers(request, kpi.id)
@@ -412,7 +412,7 @@ class TestKpiConsumersGate:
 
 class TestKpiDataGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -420,7 +420,7 @@ class TestKpiDataGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "kpi", kpi, member)
         request = mock_request(member)
 
@@ -428,7 +428,7 @@ class TestKpiDataGate:
         assert response.data == {}
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        kpi = _kpi_with_metric(org, member, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_kpi_data(request, kpi.id)
@@ -437,7 +437,7 @@ class TestKpiDataGate:
 
 class TestKpiNotesGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -445,7 +445,7 @@ class TestKpiNotesGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        kpi = _kpi_with_metric(org, analyst, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "kpi", kpi, member)
         request = mock_request(member)
 
@@ -453,7 +453,7 @@ class TestKpiNotesGate:
         assert response == []
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        kpi = _kpi_with_metric(org, member, GeneralAudience.PRIVATE)
+        kpi = _kpi_with_metric(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = list_annotations(request, kpi.id)
@@ -467,7 +467,7 @@ class TestKpiNotesGate:
 
 class TestAlertLogsGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        alert = _alert(org, analyst, GeneralAudience.PRIVATE)
+        alert = _alert(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -475,7 +475,7 @@ class TestAlertLogsGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        alert = _alert(org, analyst, GeneralAudience.PRIVATE)
+        alert = _alert(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "alert", alert, member)
         request = mock_request(member)
 
@@ -483,7 +483,7 @@ class TestAlertLogsGate:
         assert response.total == 0
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        alert = _alert(org, member, GeneralAudience.PRIVATE)
+        alert = _alert(org, member, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = get_alert_logs(request, alert.id)
@@ -497,7 +497,7 @@ class TestAlertLogsGate:
 
 class TestDashboardGetFilterGate:
     def test_member_denied_on_private_resource(self, org, member, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         filter_obj = DashboardFilter.objects.create(
             dashboard=dashboard,
             name="Region",
@@ -513,7 +513,7 @@ class TestDashboardGetFilterGate:
         assert exc_info.value.status_code == 403
 
     def test_member_allowed_on_granted_resource(self, org, member, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         filter_obj = DashboardFilter.objects.create(
             dashboard=dashboard,
             name="Region",
@@ -529,7 +529,7 @@ class TestDashboardGetFilterGate:
         assert response.id == filter_obj.id
 
     def test_admin_allowed_on_any_resource(self, org, admin, member):
-        dashboard = _dashboard(org, member, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, member, AccessLevel.NONE, AccessLevel.NONE)
         filter_obj = DashboardFilter.objects.create(
             dashboard=dashboard,
             name="Region",
@@ -553,7 +553,7 @@ class TestDashboardDuplicateGate:
     """
 
     def test_analyst_denied_on_private_resource_not_owned(self, org, analyst, admin):
-        dashboard = _dashboard(org, admin, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, admin, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(analyst)
 
         with pytest.raises(HttpError) as exc_info:
@@ -562,7 +562,7 @@ class TestDashboardDuplicateGate:
         assert Dashboard.objects.filter(org=org, title__startswith="Copy of").count() == 0
 
     def test_analyst_allowed_on_granted_resource(self, org, analyst, admin):
-        dashboard = _dashboard(org, admin, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, admin, AccessLevel.NONE, AccessLevel.NONE)
         _grant(org, "dashboard", dashboard, analyst)
         request = mock_request(analyst)
 
@@ -570,7 +570,7 @@ class TestDashboardDuplicateGate:
         assert response.title == f"Copy of {dashboard.title}"
 
     def test_admin_allowed_on_any_resource(self, org, admin, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst, AccessLevel.NONE, AccessLevel.NONE)
         request = mock_request(admin)
 
         response = duplicate_dashboard(request, dashboard.id)

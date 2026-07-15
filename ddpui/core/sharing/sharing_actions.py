@@ -33,7 +33,7 @@ from ddpui.core.sharing.exceptions import (
 )
 from ddpui.core.sharing.public_sharing_gate import org_allows_public_sharing
 from ddpui.core.sharing.shareable_types import ShareableType, get_resource_type
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import ACCESS_LEVEL_RANK, AccessLevel, GeneralLevel
 from ddpui.models.org_user import NewInvitationSchema, OrgUser
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.role_based_access import Role
@@ -58,14 +58,6 @@ from ddpui.utils import awsses
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.sharing.sharing_actions")
-
-# Narrower-than comparison for the warn-and-offer protocol (plan Sec 4.5).
-AUDIENCE_ORDER = {
-    GeneralAudience.PRIVATE: 0,
-    GeneralAudience.ADMINS: 1,
-    GeneralAudience.ANALYSTS_PLUS: 2,
-    GeneralAudience.ALL_USERS: 3,
-}
 
 # Hard cap on a bulk selection (Task 17) — a plain constant, enforced at
 # the API layer before any per-item work happens.
@@ -165,7 +157,7 @@ def get_access_overview(viewer: OrgUser, rtype: str, resource) -> AccessOverview
     general_out = None
     if entry.general:
         general_out = GeneralAccessOut(
-            audience=resource.general_audience, level=resource.general_level
+            analyst_level=resource.analyst_level, member_level=resource.member_level
         )
 
     shares = list(_grants_for(rtype, resource).filter(status__in=["active", "pending"]))
@@ -500,36 +492,86 @@ def transfer_ownership(actor: OrgUser, rtype: str, resource, new_owner_orguser_i
     )
 
 
+def _narrowed_roles(resource, payload: GeneralAccessUpdate) -> set:
+    """Which of {ANALYST_ROLE, MEMBER_ROLE} had their general-access level
+    narrowed by this change -- the new level ranks lower than the current
+    one. D1: each role's narrowing is independent -- widening one role
+    while narrowing the other in the SAME request still flags the narrowed
+    one (e.g. analyst_level view->edit + member_level view->none narrows
+    Members only)."""
+    narrowed = set()
+    if ACCESS_LEVEL_RANK[payload.analyst_level] < ACCESS_LEVEL_RANK.get(resource.analyst_level, 0):
+        narrowed.add(ANALYST_ROLE)
+    if ACCESS_LEVEL_RANK[payload.member_level] < ACCESS_LEVEL_RANK.get(resource.member_level, 0):
+        narrowed.add(MEMBER_ROLE)
+    return narrowed
+
+
+def _persisting_grants_for_narrowed_roles(rtype: str, resource, narrowed_roles: set) -> list:
+    """Active grants that would keep someone admitted even after the
+    narrowing commits -- the warn-and-offer prompt's contents.
+
+    Filtered to the roles actually narrowed (D1): a `user`-principal grant
+    held by an Analyst is irrelevant to a member_level-only narrowing,
+    since nothing about that Analyst's access is changing. `group`-principal
+    grants are conservatively ALWAYS included -- a group's membership can
+    mix roles, and resolving "does this group contain anyone whose narrowed
+    role would otherwise lose access" would need a per-group membership
+    join this task doesn't build; over-warning (surfacing a group grant
+    that might not be affected) is the safer default over silently
+    dropping people the admin should be told about.
+    """
+    if not narrowed_roles:
+        return []
+    grants = list(_grants_for(rtype, resource).filter(status="active"))
+    if not grants:
+        return []
+
+    user_ids = [g.principal_id for g in grants if g.principal_type == "user" and g.principal_id]
+    role_by_orguser_id = dict(
+        OrgUser.objects.filter(id__in=user_ids).values_list("id", "new_role__slug")
+    )
+
+    persisting = []
+    for grant in grants:
+        if grant.principal_type == "group":
+            persisting.append(grant)
+        elif role_by_orguser_id.get(grant.principal_id) in narrowed_roles:
+            persisting.append(grant)
+    return persisting
+
+
 def set_general_access(
     orguser: OrgUser,  # pylint: disable=unused-argument  (kept: actor context, audit hook)
     rtype: str,
     resource,
     payload: GeneralAccessUpdate,
 ) -> GeneralAccessUpdateResponse:
-    """Change the resource's general access, with the narrowing
-    warn-and-offer protocol (plan Sec 4.5):
+    """Change the resource's per-role general access (D1: `analyst_level`/
+    `member_level`, each independently "none"/"view"/"edit"), with the
+    narrowing warn-and-offer protocol (plan Sec 4.5) now evaluated per role:
 
-    - Widening (or same-width) changes apply immediately.
-    - Narrowing while active grants exist: the first call (no
-      `remove_grant_ids` field) returns `requires_confirmation=True` with
-      the grants that would keep people in, and changes NOTHING. The client
-      re-sends with `remove_grant_ids` (possibly []) to commit.
+    - Each role's level is compared independently -- narrowing is per role,
+      not an overall audience-width comparison.
+    - Narrowing a role while active grants held by that role's principals
+      exist: the first call (no `remove_grant_ids` field) returns
+      `requires_confirmation=True` with the grants that would keep those
+      people in, and changes NOTHING. The client re-sends with
+      `remove_grant_ids` (possibly []) to commit.
     """
     entry = _entry_for(rtype)
     if not entry.general:
         raise SharingValidationError(f"{rtype} does not support general access")
 
-    if payload.audience not in GeneralAudience.values:
-        raise SharingValidationError(f"invalid audience '{payload.audience}'")
-    if payload.level not in GeneralLevel.values:
-        raise SharingValidationError(f"invalid level '{payload.level}'")
+    if payload.analyst_level not in AccessLevel.values:
+        raise SharingValidationError(f"invalid analyst_level '{payload.analyst_level}'")
+    if payload.member_level not in AccessLevel.values:
+        raise SharingValidationError(f"invalid member_level '{payload.member_level}'")
 
-    current_rank = AUDIENCE_ORDER.get(resource.general_audience, 0)
-    new_rank = AUDIENCE_ORDER[payload.audience]
-    narrowing = new_rank < current_rank
+    narrowed_roles = _narrowed_roles(resource, payload)
 
-    if narrowing and payload.remove_grant_ids is None:
-        persisting = list(_grants_for(rtype, resource).filter(status="active"))
+    if narrowed_roles and payload.remove_grant_ids is None:
+        persisting = _persisting_grants_for_narrowed_roles(rtype, resource, narrowed_roles)
         if persisting:
             return GeneralAccessUpdateResponse(
                 requires_confirmation=True,
@@ -544,12 +586,14 @@ def set_general_access(
                 raise GrantNotFoundError("one or more grant ids not found for this resource")
             removable.delete()
 
-        resource.general_audience = payload.audience
-        resource.general_level = payload.level
-        resource.save(update_fields=["general_audience", "general_level"])
+        resource.analyst_level = payload.analyst_level
+        resource.member_level = payload.member_level
+        resource.save(update_fields=["analyst_level", "member_level"])
 
     return GeneralAccessUpdateResponse(
-        general_access=GeneralAccessOut(audience=payload.audience, level=payload.level)
+        general_access=GeneralAccessOut(
+            analyst_level=payload.analyst_level, member_level=payload.member_level
+        )
     )
 
 
@@ -727,10 +771,10 @@ def _bulk_set_general(
     them) while every other resource applies immediately. The re-send
     (field present, possibly []) commits per resource with that resource's
     slice of the flat id list."""
-    if payload.audience not in GeneralAudience.values:
-        raise SharingValidationError(f"invalid audience '{payload.audience}'")
-    if payload.level not in GeneralLevel.values:
-        raise SharingValidationError(f"invalid level '{payload.level}'")
+    if payload.analyst_level not in AccessLevel.values:
+        raise SharingValidationError(f"invalid analyst_level '{payload.analyst_level}'")
+    if payload.member_level not in AccessLevel.values:
+        raise SharingValidationError(f"invalid member_level '{payload.member_level}'")
 
     ids_by_resource = None
     if payload.remove_grant_ids is not None:
@@ -744,7 +788,9 @@ def _bulk_set_general(
         if ids_by_resource is not None:
             item_ids = ids_by_resource.get((rtype, str(resource.pk)), [])
         item_payload = GeneralAccessUpdate(
-            audience=payload.audience, level=payload.level, remove_grant_ids=item_ids
+            analyst_level=payload.analyst_level,
+            member_level=payload.member_level,
+            remove_grant_ids=item_ids,
         )
         try:
             result = set_general_access(actor, rtype, resource, item_payload)

@@ -15,7 +15,7 @@ from ddpui.schemas.org_preferences_schema import (
     UpdateSharingPreferencesSchema,
 )
 from ddpui.core.ownership import is_admin_or_super_admin
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
@@ -147,15 +147,15 @@ def update_sharing_preferences(request, payload: UpdateSharingPreferencesSchema)
     org = orguser.org
 
     if (
-        payload.default_general_audience is not None
-        and payload.default_general_audience not in GeneralAudience.values
+        payload.default_analyst_level is not None
+        and payload.default_analyst_level not in AccessLevel.values
     ):
-        raise HttpError(400, f"invalid audience '{payload.default_general_audience}'")
+        raise HttpError(400, f"invalid analyst_level '{payload.default_analyst_level}'")
     if (
-        payload.default_general_level is not None
-        and payload.default_general_level not in GeneralLevel.values
+        payload.default_member_level is not None
+        and payload.default_member_level not in AccessLevel.values
     ):
-        raise HttpError(400, f"invalid level '{payload.default_general_level}'")
+        raise HttpError(400, f"invalid member_level '{payload.default_member_level}'")
 
     org_preferences = OrgPreferences.objects.filter(org=org).first()
     if org_preferences is None:
@@ -163,10 +163,10 @@ def update_sharing_preferences(request, payload: UpdateSharingPreferencesSchema)
 
     if payload.allow_public_sharing is not None:
         org_preferences.allow_public_sharing = payload.allow_public_sharing
-    if payload.default_general_audience is not None:
-        org_preferences.default_general_audience = payload.default_general_audience
-    if payload.default_general_level is not None:
-        org_preferences.default_general_level = payload.default_general_level
+    if payload.default_analyst_level is not None:
+        org_preferences.default_analyst_level = payload.default_analyst_level
+    if payload.default_member_level is not None:
+        org_preferences.default_member_level = payload.default_member_level
     org_preferences.save()
 
     return {"success": True, "res": org_preferences.to_json()}

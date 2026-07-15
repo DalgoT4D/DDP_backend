@@ -135,11 +135,11 @@ def get_public_dashboard(request, token: str):
             "last_modified_by": None,
             "is_locked": False,
             "locked_by": None,
-            # Resource Sharing config (general_audience/general_level) is an
+            # Resource Sharing config (analyst_level/member_level) is an
             # org-internal detail -- don't leak it to anonymous viewers.
             # is_owner/is_creator already default False (no viewer identity).
-            "general_audience": None,
-            "general_level": None,
+            "analyst_level": None,
+            "member_level": None,
         }
 
         # Log public access

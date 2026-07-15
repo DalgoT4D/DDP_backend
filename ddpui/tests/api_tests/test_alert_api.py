@@ -25,7 +25,7 @@ from ddpui.api.alert_api import test_slack_webhook as run_slack_webhook_test
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.models.alert import Alert
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -182,14 +182,13 @@ def test_create_metric_threshold_alert(seed_db, orguser, sample_metric):
 
 def test_create_alert_uses_org_general_defaults(seed_db, orguser, sample_metric):
     """Task 11 Part C: a new alert adopts the org's default General access
-    when set, else the model defaults (all_users/view)."""
+    when set, else the model defaults (D1: none/none)."""
     from ddpui.models.org_preferences import OrgPreferences
-    from ddpui.models.general_access import GeneralAudience, GeneralLevel
 
     OrgPreferences.objects.create(
         org=orguser.org,
-        default_general_audience=GeneralAudience.ADMINS,
-        default_general_level=GeneralLevel.VIEW,
+        default_analyst_level=AccessLevel.VIEW,
+        default_member_level=AccessLevel.NONE,
     )
     request = mock_request(orguser)
     payload = _base_payload(orguser, metric_id=sample_metric.id)
@@ -197,15 +196,14 @@ def test_create_alert_uses_org_general_defaults(seed_db, orguser, sample_metric)
     response = create_alert(request, payload)
 
     alert = Alert.objects.get(id=response.id)
-    assert alert.general_audience == GeneralAudience.ADMINS
-    assert alert.general_level == GeneralLevel.VIEW
+    assert alert.analyst_level == AccessLevel.VIEW
+    assert alert.member_level == AccessLevel.NONE
 
 
 def test_create_alert_falls_back_to_model_defaults_when_no_preferences_row(
     seed_db, orguser, sample_metric
 ):
     from ddpui.models.org_preferences import OrgPreferences
-    from ddpui.models.general_access import GeneralAudience, GeneralLevel
 
     assert not OrgPreferences.objects.filter(org=orguser.org).exists()
     request = mock_request(orguser)
@@ -214,8 +212,8 @@ def test_create_alert_falls_back_to_model_defaults_when_no_preferences_row(
     response = create_alert(request, payload)
 
     alert = Alert.objects.get(id=response.id)
-    assert alert.general_audience == GeneralAudience.ALL_USERS
-    assert alert.general_level == GeneralLevel.VIEW
+    assert alert.analyst_level == AccessLevel.NONE
+    assert alert.member_level == AccessLevel.NONE
 
 
 def test_create_kpi_rag_alert(seed_db, orguser, sample_kpi):
@@ -381,7 +379,9 @@ def test_group_recipient_grants_no_resource_access(
     )
     # Isolate the recipients-grant-nothing rule from general access: force
     # private so only owner/admin/grant paths could possibly admit anyone.
-    Alert.objects.filter(id=created.id).update(general_audience=GeneralAudience.PRIVATE)
+    Alert.objects.filter(id=created.id).update(
+        analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE
+    )
     UserGroupMember.objects.create(group=sample_group, orguser=analyst_orguser, status="active")
 
     alert = Alert.objects.get(id=created.id)

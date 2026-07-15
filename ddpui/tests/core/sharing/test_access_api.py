@@ -25,7 +25,7 @@ from ddpui.core.orguserfunctions import accept_invitation_v1
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.shareable_types import RESOURCE_TYPES
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import AcceptInvitationSchema, Invitation, OrgUser
@@ -87,14 +87,14 @@ def member(org, seed_db):
     ou.delete()
 
 
-def _dashboard(org_obj, owner, audience=GeneralAudience.PRIVATE, level=GeneralLevel.VIEW):
+def _dashboard(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
     return Dashboard.objects.create(
         title="Access Api Dashboard",
         org=org_obj,
         owner=owner,
         created_by=owner,
-        general_audience=audience,
-        general_level=level,
+        analyst_level=analyst_level,
+        member_level=member_level,
     )
 
 
@@ -136,7 +136,7 @@ class TestGetAccess:
     def test_overview_shows_owner_general_and_grants(self, org, analyst, analyst2, member):
         from ddpui.api.access_api import get_access
 
-        dashboard = _dashboard(org, analyst, GeneralAudience.ANALYSTS_PLUS, GeneralLevel.VIEW)
+        dashboard = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.NONE)
         active = _grant(org, "dashboard", dashboard, member, permission="view")
         pending = ResourceShare.objects.create(
             org=org,
@@ -163,7 +163,7 @@ class TestGetAccess:
         }
         assert data["owner"]["orguser_id"] == analyst.id
         assert data["owner"]["email"] == analyst.user.email
-        assert data["general_access"] == {"audience": "analysts_plus", "level": "view"}
+        assert data["general_access"] == {"analyst_level": "view", "member_level": "none"}
         by_id = {g["id"]: g for g in data["grants"]}
         assert by_id[active.id]["principal_type"] == "user"
         assert by_id[active.id]["principal_id"] == member.id
@@ -204,7 +204,7 @@ class TestGetAccess:
         """The GET is gated by resolver view only — no can_share_* slug."""
         from ddpui.api.access_api import get_access
 
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS, GeneralLevel.VIEW)
+        dashboard = _dashboard(org, analyst, AccessLevel.VIEW, AccessLevel.VIEW)
         response = get_access(mock_request(member), "dashboard", str(dashboard.pk))
         assert response["success"] is True
         assert response["data"]["viewer"] == {"effective_permission": "view", "is_owner": False}
@@ -212,7 +212,7 @@ class TestGetAccess:
     def test_viewer_without_view_access_is_denied(self, org, analyst, member):
         from ddpui.api.access_api import get_access
 
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst)
         with pytest.raises(HttpError) as excinfo:
             get_access(mock_request(member), "dashboard", str(dashboard.pk))
         assert excinfo.value.status_code == 403
@@ -229,8 +229,8 @@ class TestGetAccess:
             aggregation="sum",
             created_by=analyst,
             owner=analyst,
-            general_audience=GeneralAudience.ANALYSTS_PLUS,
-            general_level=GeneralLevel.VIEW,
+            analyst_level=AccessLevel.VIEW,
+            member_level=AccessLevel.NONE,
         )
         response = get_access(mock_request(analyst), "metric", str(metric.pk))
         data = response["data"]
@@ -318,7 +318,7 @@ class TestCreateGrant:
         assert excinfo.value.status_code == 403
 
     def test_member_blocked_by_slug(self, org, analyst, member):
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS, GeneralLevel.EDIT)
+        dashboard = _dashboard(org, analyst, AccessLevel.EDIT, AccessLevel.EDIT)
 
         with pytest.raises(HttpError) as excinfo:
             _post_grant(member, "dashboard", dashboard, analyst, "view")
@@ -777,75 +777,90 @@ class TestDeleteGrant:
 # ================================================================================
 
 
-def _put_general(caller, rtype, resource, audience, level="view", remove_grant_ids=None):
+def _put_general(caller, rtype, resource, analyst_level, member_level, remove_grant_ids=None):
     from ddpui.api.access_api import update_general_access
     from ddpui.schemas.access_schema import GeneralAccessUpdate
 
-    payload = GeneralAccessUpdate(audience=audience, level=level, remove_grant_ids=remove_grant_ids)
+    payload = GeneralAccessUpdate(
+        analyst_level=analyst_level, member_level=member_level, remove_grant_ids=remove_grant_ids
+    )
     return update_general_access(mock_request(caller), rtype, str(resource.pk), payload)
 
 
 class TestUpdateGeneralAccess:
     def test_widening_applies_immediately(self, org, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.PRIVATE)
+        dashboard = _dashboard(org, analyst)  # none/none
 
-        response = _put_general(analyst, "dashboard", dashboard, "all_users", "view")
+        response = _put_general(analyst, "dashboard", dashboard, "view", "view")
         assert response["data"]["requires_confirmation"] is False
-        assert response["data"]["general_access"] == {"audience": "all_users", "level": "view"}
+        assert response["data"]["general_access"] == {
+            "analyst_level": "view",
+            "member_level": "view",
+        }
         dashboard.refresh_from_db()
-        assert dashboard.general_audience == GeneralAudience.ALL_USERS
+        assert dashboard.analyst_level == AccessLevel.VIEW
+        assert dashboard.member_level == AccessLevel.VIEW
 
     def test_narrowing_with_active_grants_warns_and_changes_nothing(self, org, analyst, member):
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dashboard = _dashboard(org, analyst, "view", "view")
         share = _grant(org, "dashboard", dashboard, member)
 
-        response = _put_general(analyst, "dashboard", dashboard, "private", "view")
+        response = _put_general(analyst, "dashboard", dashboard, "view", "none")
         assert response["data"]["requires_confirmation"] is True
         assert [g["id"] for g in response["data"]["persisting_grants"]] == [share.id]
         dashboard.refresh_from_db()
-        assert dashboard.general_audience == GeneralAudience.ALL_USERS  # unchanged
+        assert dashboard.analyst_level == AccessLevel.VIEW  # unchanged
+        assert dashboard.member_level == AccessLevel.VIEW  # unchanged
         assert ResourceShare.objects.filter(id=share.id).exists()  # untouched
 
     def test_resend_with_remove_grant_ids_commits_and_removes(self, org, analyst, member):
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dashboard = _dashboard(org, analyst, "view", "view")
         share = _grant(org, "dashboard", dashboard, member)
 
         response = _put_general(
-            analyst, "dashboard", dashboard, "private", "view", remove_grant_ids=[share.id]
+            analyst, "dashboard", dashboard, "view", "none", remove_grant_ids=[share.id]
         )
         assert response["data"]["requires_confirmation"] is False
         dashboard.refresh_from_db()
-        assert dashboard.general_audience == GeneralAudience.PRIVATE
+        assert dashboard.member_level == AccessLevel.NONE
         assert not ResourceShare.objects.filter(id=share.id).exists()
 
     def test_resend_with_empty_remove_list_commits_keeping_grants(self, org, analyst, member):
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dashboard = _dashboard(org, analyst, "view", "view")
         share = _grant(org, "dashboard", dashboard, member)
 
         response = _put_general(
-            analyst, "dashboard", dashboard, "admins", "view", remove_grant_ids=[]
+            analyst, "dashboard", dashboard, "none", "none", remove_grant_ids=[]
         )
         assert response["data"]["requires_confirmation"] is False
         dashboard.refresh_from_db()
-        assert dashboard.general_audience == GeneralAudience.ADMINS
+        assert dashboard.analyst_level == AccessLevel.NONE
+        assert dashboard.member_level == AccessLevel.NONE
         assert ResourceShare.objects.filter(id=share.id).exists()  # deliberately kept
 
     def test_narrowing_with_no_grants_applies_immediately(self, org, analyst):
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dashboard = _dashboard(org, analyst, "view", "view")
 
-        response = _put_general(analyst, "dashboard", dashboard, "private", "view")
+        response = _put_general(analyst, "dashboard", dashboard, "none", "none")
         assert response["data"]["requires_confirmation"] is False
         dashboard.refresh_from_db()
-        assert dashboard.general_audience == GeneralAudience.PRIVATE
+        assert dashboard.analyst_level == AccessLevel.NONE
+        assert dashboard.member_level == AccessLevel.NONE
 
-    def test_invalid_audience_400(self, org, analyst):
+    def test_invalid_analyst_level_400(self, org, analyst):
         dashboard = _dashboard(org, analyst)
         with pytest.raises(HttpError) as excinfo:
             _put_general(analyst, "dashboard", dashboard, "everyone-on-earth", "view")
         assert excinfo.value.status_code == 400
 
+    def test_invalid_member_level_400(self, org, analyst):
+        dashboard = _dashboard(org, analyst)
+        with pytest.raises(HttpError) as excinfo:
+            _put_general(analyst, "dashboard", dashboard, "view", "everyone-on-earth")
+        assert excinfo.value.status_code == 400
+
     def test_remove_grant_ids_of_other_resource_404_and_rolls_back(self, org, analyst, member):
-        dashboard = _dashboard(org, analyst, GeneralAudience.ALL_USERS)
+        dashboard = _dashboard(org, analyst, "view", "view")
         other_dashboard = _dashboard(org, analyst)
         foreign_share = _grant(org, "dashboard", other_dashboard, member)
 
@@ -854,14 +869,69 @@ class TestUpdateGeneralAccess:
                 analyst,
                 "dashboard",
                 dashboard,
-                "private",
                 "view",
+                "none",
                 remove_grant_ids=[foreign_share.id],
             )
         assert excinfo.value.status_code == 404
         dashboard.refresh_from_db()
-        assert dashboard.general_audience == GeneralAudience.ALL_USERS  # nothing committed
+        assert dashboard.member_level == AccessLevel.VIEW  # nothing committed
         assert ResourceShare.objects.filter(id=foreign_share.id).exists()
+
+    # ---- D1: narrowing is now evaluated PER ROLE, not as one audience width ----
+
+    def test_narrowing_member_level_does_not_flag_an_analysts_grant(
+        self, org, analyst, analyst2, member
+    ):
+        """analyst_level is untouched by this change -- an Analyst's own
+        grant is irrelevant to a member_level-only narrowing and must not
+        gate the commit."""
+        dashboard = _dashboard(org, analyst, "view", "view")
+        _grant(org, "dashboard", dashboard, analyst2, permission="view")
+
+        response = _put_general(analyst, "dashboard", dashboard, "view", "none")
+        assert response["data"]["requires_confirmation"] is False
+        dashboard.refresh_from_db()
+        assert dashboard.analyst_level == AccessLevel.VIEW
+        assert dashboard.member_level == AccessLevel.NONE
+
+    def test_widening_analyst_and_narrowing_member_in_the_same_request_flags_member_only(
+        self, org, analyst, member
+    ):
+        """The brief's example: dropping member_level (view -> none) while
+        WIDENING analyst_level (none -> edit) in the same request must still
+        flag the Member's grant -- each role's narrowing is independent."""
+        dashboard = _dashboard(org, analyst, "none", "view")
+        member_share = _grant(org, "dashboard", dashboard, member, permission="view")
+
+        response = _put_general(analyst, "dashboard", dashboard, "edit", "none")
+        assert response["data"]["requires_confirmation"] is True
+        assert [g["id"] for g in response["data"]["persisting_grants"]] == [member_share.id]
+        dashboard.refresh_from_db()
+        assert dashboard.analyst_level == AccessLevel.NONE  # unchanged -- nothing committed
+        assert dashboard.member_level == AccessLevel.VIEW  # unchanged -- nothing committed
+
+    def test_group_grant_is_conservatively_always_flagged_on_any_narrowing(
+        self, org, analyst, member
+    ):
+        """A group's membership can mix roles, so a group grant is always
+        surfaced in the warn-and-offer prompt for ANY narrowed role --
+        documented over-warning, see `_persisting_grants_for_narrowed_roles`."""
+        dashboard = _dashboard(org, analyst, "view", "view")
+        group = UserGroup.objects.create(org=org, name="Mixed Group", created_by=analyst)
+        group_share = ResourceShare.objects.create(
+            org=org,
+            resource_type="dashboard",
+            resource_id=str(dashboard.pk),
+            principal_type="group",
+            principal_id=group.id,
+            permission="view",
+            status="active",
+        )
+
+        response = _put_general(analyst, "dashboard", dashboard, "view", "none")
+        assert response["data"]["requires_confirmation"] is True
+        assert [g["id"] for g in response["data"]["persisting_grants"]] == [group_share.id]
 
 
 # ================================================================================

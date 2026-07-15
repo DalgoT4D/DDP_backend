@@ -56,7 +56,7 @@ from django.contrib.auth.models import User
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.comment import Comment, CommentTargetType
 from ddpui.auth import (
@@ -171,11 +171,20 @@ def guest_user(org, seed_db):
 def snapshot(org, account_manager_user):
     """A pre-created snapshot owned by account_manager_user.
 
-    This file tests ROLE-slug capabilities, so the snapshot is shared
-    org-wide with edit — otherwise the resolver's object-level edit gate
-    (Task 5) would 403 the non-owner analyst before the slug semantics
-    under test are reached. Object-level gating is covered in
+    This file tests ROLE-slug capabilities, so the snapshot gives Analysts
+    edit — otherwise the resolver's object-level edit gate (Task 5) would
+    403 the non-owner analyst before the slug semantics under test are
+    reached. Object-level gating is covered in
     ddpui/tests/core/sharing/test_update_edit_guard.py.
+
+    Members/Guests (GUEST_ROLE is an alias for MEMBER_ROLE, see
+    ddpui.auth) get "view" only, not "edit": D1 makes ``member_level``
+    independently settable and UNCAPPED for the general-access
+    contribution, so setting it to "edit" here would give guests real
+    moderation rights over other people's comments, defeating this file's
+    `TestGuestCommentRestrictions` cases (pre-D1, the resolver's blanket
+    Member cap forced this down to "view" regardless of the stored level;
+    D1 requires that choice be made explicitly per role instead).
     """
     snapshot = ReportSnapshot.objects.create(
         title="Permission Test Report",
@@ -192,8 +201,8 @@ def snapshot(org, account_manager_user):
         frozen_chart_configs={"10": {"title": "Chart A"}, "20": {"title": "Chart B"}},
         created_by=account_manager_user,
         org=org,
-        general_audience=GeneralAudience.ALL_USERS,
-        general_level=GeneralLevel.EDIT,
+        analyst_level=AccessLevel.EDIT,
+        member_level=AccessLevel.VIEW,
     )
     yield snapshot
     try:
@@ -569,7 +578,8 @@ class TestSharingStatusViewGate:
             frozen_chart_configs={},
             created_by=analyst_user,
             org=org,
-            general_audience=GeneralAudience.PRIVATE,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         try:
             request = mock_request(guest_user)

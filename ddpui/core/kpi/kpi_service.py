@@ -20,7 +20,7 @@ from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
 from ddpui.core.metric.metric_service import MetricService
 from ddpui.core.ownership import is_admin_or_super_admin
 from ddpui.core.sharing.access_resolver import accessible_filter
-from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
+from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.services.dashboard_service import DashboardService
 from ddpui.schemas.kpi_schema import (
     KPICreate,
@@ -228,7 +228,7 @@ class KPIService:
         # Verify metric exists and belongs to org
         metric = MetricService.get_metric(payload.metric_id, orguser.org)
 
-        general_audience, general_level = get_org_general_defaults(orguser.org_id)
+        analyst_level, member_level = get_org_role_level_defaults(orguser.org_id)
 
         kpi = KPI.objects.create(
             metric=metric,
@@ -245,8 +245,8 @@ class KPIService:
             org=orguser.org,
             created_by=orguser,
             last_modified_by=orguser,
-            general_audience=general_audience,
-            general_level=general_level,
+            analyst_level=analyst_level,
+            member_level=member_level,
         )
 
         logger.info(f"Created KPI {kpi.id} '{kpi.name}' for org {orguser.org.id}")

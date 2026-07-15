@@ -20,7 +20,7 @@ from ddpui.core.sharing import sharing_actions
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.exceptions import SharingValidationError
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
-from ddpui.core.sharing.general_access_defaults import get_org_general_defaults
+from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -195,8 +195,8 @@ def duplicate_dashboard(request, dashboard_id: int):
 
     # Create a copy of the dashboard. The copy is a NEW resource: it adopts
     # the org's default General access, NOT the original's (copying the
-    # source's audience could silently widen access).
-    general_audience, general_level = get_org_general_defaults(orguser.org_id)
+    # source's levels could silently widen access).
+    analyst_level, member_level = get_org_role_level_defaults(orguser.org_id)
 
     with transaction.atomic():
         new_dashboard = Dashboard.objects.create(
@@ -208,8 +208,8 @@ def duplicate_dashboard(request, dashboard_id: int):
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
-            general_audience=general_audience,
-            general_level=general_level,
+            analyst_level=analyst_level,
+            member_level=member_level,
         )
 
         # Copy all filters and create ID mapping

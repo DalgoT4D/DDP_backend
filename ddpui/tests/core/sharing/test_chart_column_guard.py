@@ -47,7 +47,7 @@ from ddpui.api.charts_api import (
     get_map_data_overlay,
 )
 from ddpui.models.dashboard import DashboardFilter, DashboardFilterType
-from ddpui.models.general_access import GeneralAudience
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.visualization import Chart
 from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
@@ -191,7 +191,9 @@ class TestPreviewLegitimateTiles:
     ):
         mock_preview.return_value = PREVIEW_RESULT
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_chart_data_preview(
@@ -213,7 +215,9 @@ class TestPreviewLegitimateTiles:
         mock_preview.return_value = PREVIEW_RESULT
         mock_wh.return_value = MagicMock()
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         dash_filter = _dashboard_filter(dashboard, column_name="ward")
         mock_resolve.return_value = [
             {
@@ -248,7 +252,9 @@ class TestPreviewLegitimateTiles:
         dimension column (chart-element-v2 drill-down behavior)."""
         mock_preview.return_value = PREVIEW_RESULT
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload(dimensions=["category"])
         payload.extra_config["filters"] = list(TABLE_CONFIG["filters"]) + [
             {"column": "district", "operator": "equals", "value": "North"}
@@ -271,7 +277,9 @@ class TestPreviewMutationVectors:
     @patch("ddpui.core.charts.charts_service.get_chart_data_table_preview")
     def test_extra_dimension_denied(self, mock_preview, org, member, analyst, org_warehouse):
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload(dimensions=["district", "category", "phone_number"])
         request = mock_request(member)
 
@@ -284,7 +292,9 @@ class TestPreviewMutationVectors:
     @patch("ddpui.core.charts.charts_service.get_chart_data_table_preview")
     def test_swapped_metric_column_denied(self, mock_preview, org, member, analyst, org_warehouse):
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload(
             metrics=[ChartMetric(column="salary", aggregation="max", alias="Total Amount")]
         )
@@ -300,7 +310,9 @@ class TestPreviewMutationVectors:
         """Filtering on a column that is neither in the chart's config nor a
         dashboard filter is a single-row probe primitive -> 403."""
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload()
         payload.extra_config["filters"] = list(TABLE_CONFIG["filters"]) + [
             {"column": "phone_number", "operator": "like", "value": "98%"}
@@ -318,7 +330,9 @@ class TestPreviewMutationVectors:
     ):
         """ORDER BY on an unreferenced column is a value oracle -> 403."""
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload()
         payload.extra_config["sort"] = [{"column": "phone_number", "direction": "asc"}]
         request = mock_request(member)
@@ -335,7 +349,9 @@ class TestPreviewMutationVectors:
         """column_expression is raw SQL (literal_column). Not in the saved
         config -> 403 no matter what it says."""
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload(
             metrics=[
                 ChartMetric(
@@ -358,7 +374,9 @@ class TestPreviewMutationVectors:
         """Column names hidden inside extra_config itself (not just the
         top-level payload fields) are checked too."""
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload()
         payload.extra_config["metrics"] = [{"column": "phone_number", "aggregation": "max"}]
         request = mock_request(member)
@@ -377,8 +395,12 @@ class TestPreviewMutationVectors:
         """dashboard_filters may only name the FRAMING dashboard's filters --
         another dashboard's filter id would smuggle in its column."""
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
-        other_dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
+        other_dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         foreign_filter = _dashboard_filter(other_dashboard, column_name="phone_number")
         request = mock_request(member)
 
@@ -407,7 +429,9 @@ class TestTotalRowsColumnGuard:
     ):
         mock_total.return_value = 42
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_chart_data_preview_total_rows(
@@ -419,7 +443,9 @@ class TestTotalRowsColumnGuard:
     @patch("ddpui.core.charts.charts_service.get_chart_data_total_rows")
     def test_extra_dimension_denied(self, mock_total, org, member, analyst, org_warehouse):
         chart = _saved_chart(org, analyst)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         payload = _tile_preview_payload(dimensions=["district", "phone_number"])
         request = mock_request(member)
 
@@ -447,7 +473,9 @@ class TestMapOverlayColumnGuard:
         mock_build.return_value = MagicMock()
         mock_execute.return_value = MAP_ROWS
         chart = _saved_chart(org, analyst, chart_type="map", extra_config=MAP_CONFIG)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_map_data_overlay(
@@ -468,7 +496,9 @@ class TestMapOverlayColumnGuard:
         mock_build.return_value = MagicMock()
         mock_execute.return_value = MAP_ROWS
         chart = _saved_chart(org, analyst, chart_type="map", extra_config=MAP_CONFIG)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         response = get_map_data_overlay(
@@ -490,7 +520,9 @@ class TestMapOverlayColumnGuard:
         self, mock_get_wh, mock_build, mock_execute, org, member, analyst, org_warehouse
     ):
         chart = _saved_chart(org, analyst, chart_type="map", extra_config=MAP_CONFIG)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -513,7 +545,9 @@ class TestMapOverlayColumnGuard:
     ):
         """Map `filters` is {column: value} -- a novel key is a row probe."""
         chart = _saved_chart(org, analyst, chart_type="map", extra_config=MAP_CONFIG)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:
@@ -535,7 +569,9 @@ class TestMapOverlayColumnGuard:
         self, mock_get_wh, mock_build, mock_execute, org, member, analyst, org_warehouse
     ):
         chart = _saved_chart(org, analyst, chart_type="map", extra_config=MAP_CONFIG)
-        dashboard = _dashboard_with_charts(org, analyst, GeneralAudience.ALL_USERS, [chart])
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.VIEW, AccessLevel.VIEW, [chart]
+        )
         request = mock_request(member)
 
         with pytest.raises(HttpError) as exc_info:

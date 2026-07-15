@@ -28,7 +28,7 @@ from ddpui.api.metric_api import update_metric
 from ddpui.api.report_api import update_snapshot
 from ddpui.models.alert import Alert, AlertType
 from ddpui.models.dashboard import Dashboard
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -87,7 +87,7 @@ def _grant_edit(org_obj, rtype, resource, principal):
     )
 
 
-VIEW_ONLY = {"general_audience": GeneralAudience.ANALYSTS_PLUS, "general_level": GeneralLevel.VIEW}
+VIEW_ONLY = {"analyst_level": AccessLevel.VIEW, "member_level": AccessLevel.NONE}
 
 
 def _dashboard(org_obj, owner_ou, **general):
@@ -205,8 +205,8 @@ class TestEditorCanUpdate:
         dashboard = _dashboard(
             org,
             owner,
-            general_audience=GeneralAudience.PRIVATE,
-            general_level=GeneralLevel.VIEW,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         _grant_edit(org, "dashboard", dashboard, analyst)
 
@@ -218,8 +218,8 @@ class TestEditorCanUpdate:
         metric = _metric(
             org,
             owner,
-            general_audience=GeneralAudience.ANALYSTS_PLUS,
-            general_level=GeneralLevel.EDIT,
+            analyst_level=AccessLevel.EDIT,
+            member_level=AccessLevel.NONE,
         )
         update_metric(
             mock_request(analyst),
@@ -239,8 +239,8 @@ class TestEditorCanUpdate:
         alert = _alert(
             org,
             owner,
-            general_audience=GeneralAudience.PRIVATE,
-            general_level=GeneralLevel.VIEW,
+            analyst_level=AccessLevel.NONE,
+            member_level=AccessLevel.NONE,
         )
         toggle_alert(mock_request(owner), alert.id, AlertToggle(is_active=False))
         alert.refresh_from_db()

@@ -5,7 +5,7 @@ from django.db import models
 from django.utils import timezone
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import GeneralAudience, GeneralLevel
+from ddpui.models.general_access import AccessLevel
 
 
 class DashboardType(str, Enum):
@@ -109,11 +109,14 @@ class Dashboard(models.Model):
     )
 
     # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
-    general_audience = models.CharField(
-        max_length=15, choices=GeneralAudience.choices, default=GeneralAudience.ALL_USERS
+    # D1: per-role levels, replacing the old audience+level pair -- Admins
+    # are never stored here (always full access), Analysts and Members each
+    # get their own independent level.
+    analyst_level = models.CharField(
+        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
     )
-    general_level = models.CharField(
-        max_length=5, choices=GeneralLevel.choices, default=GeneralLevel.VIEW
+    member_level = models.CharField(
+        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
     )
 
     # Metadata

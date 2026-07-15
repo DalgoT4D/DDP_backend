@@ -160,14 +160,14 @@ class TestCreateKPI:
 
     def test_create_uses_org_general_defaults(self, orguser, sample_metric, seed_db):
         """Task 11 Part C: a new KPI adopts the org's default General
-        access when set, else the model defaults (all_users/view)."""
+        access when set, else the model defaults (D1: none/none)."""
         from ddpui.models.org_preferences import OrgPreferences
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+        from ddpui.models.general_access import AccessLevel
 
         OrgPreferences.objects.create(
             org=orguser.org,
-            default_general_audience=GeneralAudience.ADMINS,
-            default_general_level=GeneralLevel.VIEW,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.NONE,
         )
         request = mock_request(orguser)
         payload = KPICreate(
@@ -180,15 +180,15 @@ class TestCreateKPI:
         response = create_kpi(request, payload)
 
         kpi = KPI.objects.get(id=response.id)
-        assert kpi.general_audience == GeneralAudience.ADMINS
-        assert kpi.general_level == GeneralLevel.VIEW
+        assert kpi.analyst_level == AccessLevel.VIEW
+        assert kpi.member_level == AccessLevel.NONE
         kpi.delete()
 
     def test_create_falls_back_to_model_defaults_when_no_preferences_row(
         self, orguser, sample_metric, seed_db
     ):
         from ddpui.models.org_preferences import OrgPreferences
-        from ddpui.models.general_access import GeneralAudience, GeneralLevel
+        from ddpui.models.general_access import AccessLevel
 
         assert not OrgPreferences.objects.filter(org=orguser.org).exists()
         request = mock_request(orguser)
@@ -202,8 +202,8 @@ class TestCreateKPI:
         response = create_kpi(request, payload)
 
         kpi = KPI.objects.get(id=response.id)
-        assert kpi.general_audience == GeneralAudience.ALL_USERS
-        assert kpi.general_level == GeneralLevel.VIEW
+        assert kpi.analyst_level == AccessLevel.NONE
+        assert kpi.member_level == AccessLevel.NONE
         kpi.delete()
 
     def test_create_invalid_metric(self, orguser, seed_db):
