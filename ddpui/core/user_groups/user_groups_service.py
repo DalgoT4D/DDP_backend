@@ -99,6 +99,8 @@ def _member_out(member: UserGroupMember) -> GroupMemberOut:
         name=_display_name(orguser.user) if orguser else None,
         pending_email=member.pending_email,
         status=member.status,
+        # Pending-email rows have no orguser -> role stays None.
+        role=orguser.new_role.slug if orguser and orguser.new_role_id else None,
     )
 
 
@@ -194,7 +196,9 @@ def _get_group_or_404(orguser: OrgUser, group_id: int) -> UserGroup:
 def get_group(orguser: OrgUser, group_id: int) -> GroupDetailOut:
     """One group plus its members."""
     group = _get_group_or_404(orguser, group_id)
-    members = list(group.members.select_related("orguser__user").order_by("id"))
+    members = list(
+        group.members.select_related("orguser__user", "orguser__new_role").order_by("id")
+    )
     return GroupDetailOut(
         id=group.id,
         name=group.name,

@@ -218,6 +218,34 @@ class TestGetGroup:
         assert data["members"][0]["orguser_id"] == member.id
         assert data["members"][0]["email"] == member.user.email
 
+    def test_active_member_role_reflects_their_org_role(self, org, analyst, member):
+        """F5: an active member's row carries their org-role slug, read off
+        their OrgUser -- not hardcoded to any particular role."""
+        from ddpui.api.groups_api import create_group, get_group
+        from ddpui.schemas.group_schema import GroupCreate
+
+        group = create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+        UserGroupMember.objects.create(group_id=group["id"], orguser=member, status="active")
+
+        response = get_group(mock_request(analyst), group["id"])
+        member_row = response["data"]["members"][0]
+        assert member_row["role"] == member.new_role.slug
+
+    def test_pending_member_role_is_none(self, org, analyst):
+        """Pending-email rows have no OrgUser yet, so role stays None."""
+        from ddpui.api.groups_api import create_group, get_group
+        from ddpui.schemas.group_schema import GroupCreate
+
+        group = create_group(mock_request(analyst), GroupCreate(name="Funders"))["data"]
+        UserGroupMember.objects.create(
+            group_id=group["id"], pending_email="new.person@test.com", status="pending"
+        )
+
+        response = get_group(mock_request(analyst), group["id"])
+        member_row = response["data"]["members"][0]
+        assert member_row["status"] == "pending"
+        assert member_row["role"] is None
+
     def test_cross_org_group_404(self, org, analyst):
         from ddpui.api.groups_api import create_group, get_group
         from ddpui.schemas.group_schema import GroupCreate
