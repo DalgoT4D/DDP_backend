@@ -170,7 +170,9 @@ def _bulk(caller, items, action, **kwargs):
     return bulk_access(mock_request(caller), payload)
 
 
-def _grant_payload(principal=None, permission="view", email=None, principal_type="user"):
+def _grant_payload(
+    principal=None, permission="view", email=None, principal_type="user", invite_role=None
+):
     from ddpui.schemas.access_schema import GrantCreate
 
     return GrantCreate(
@@ -178,6 +180,7 @@ def _grant_payload(principal=None, permission="view", email=None, principal_type
         principal_id=principal.id if principal is not None else None,
         email=email,
         permission=permission,
+        invite_role=invite_role,
     )
 
 
@@ -277,6 +280,32 @@ class TestBulkAddGrant:
             ("dashboard", str(dash2.pk)),
             ("report", str(report.pk)),
         }
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_non_admin_invite_role_escalation_403_and_nothing_created(self, org, analyst):
+        """Mirrors the single-grant pin (test_access_api.py, Phase C3): a
+        non-admin asking for invite_role='analyst' on the bulk invite path
+        403s the WHOLE request, before any Invitation or pending grant row
+        is written."""
+        dash1 = _dashboard(org, analyst)
+        dash2 = _dashboard(org, analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            _bulk(
+                analyst,
+                [("dashboard", dash1.pk), ("dashboard", dash2.pk)],
+                "add_grant",
+                add_grant=_grant_payload(
+                    email="bulk-escalate@test.com", permission="view", invite_role="analyst"
+                ),
+            )
+        assert excinfo.value.status_code == 403
+        assert not Invitation.objects.filter(
+            invited_email__iexact="bulk-escalate@test.com"
+        ).exists()
+        assert not ResourceShare.objects.filter(
+            pending_email__iexact="bulk-escalate@test.com"
+        ).exists()
 
 
 # ================================================================================
