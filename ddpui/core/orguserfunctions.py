@@ -250,7 +250,12 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
+            invitation.invited_email,
+            invitation.invited_by.user.email,
+            invite_url,
+            org_name=invitation.invited_by.org.name,
+            role_name=invitation.invited_new_role.name,
+            date_str=django_timezone.now().strftime("%b %d, %Y"),
         )
         logger.info(
             f"Resent invitation to {invited_email} to join {orguser.org.name} "
@@ -273,7 +278,12 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     # trigger an email to the user
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
     awsses.send_invite_user_email(
-        invitation.invited_email, invitation.invited_by.user.email, invite_url
+        invitation.invited_email,
+        invitation.invited_by.user.email,
+        invite_url,
+        org_name=invitation.invited_by.org.name,
+        role_name=invitation.invited_new_role.name,
+        date_str=django_timezone.now().strftime("%b %d, %Y"),
     )
 
     logger.info(
@@ -420,7 +430,12 @@ def resend_invitation(invitation_id: str):
         frontend_url = os.getenv("FRONTEND_URL")
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
         awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
+            invitation.invited_email,
+            invitation.invited_by.user.email,
+            invite_url,
+            org_name=invitation.invited_by.org.name,
+            role_name=invitation.invited_new_role.name,
+            date_str=django_timezone.now().strftime("%b %d, %Y"),
         )
 
     return None, None

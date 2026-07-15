@@ -194,6 +194,126 @@ def render_mention_email(
     return plain_text, html_body
 
 
+def render_invite_user_email(
+    invited_by_email: str,
+    org_name: str,
+    role_name: str,
+    invite_url: str,
+    date_str: str,
+) -> tuple:
+    """Render HTML + plain-text email for a platform invitation.
+
+    Args:
+        invited_by_email: Email of the person who sent the invite
+        org_name: Name of the org/workspace the invitee is joining
+        role_name: Display name of the role granted to the invitee
+        invite_url: Absolute URL through which the invitee accepts and sets
+            their password
+        date_str: Pre-formatted date string for the invite (e.g. "Jul 16, 2026")
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    safe_inviter = html.escape(invited_by_email)
+    safe_org_name = html.escape(org_name)
+    safe_role_name = html.escape(role_name)
+    safe_invite_url = html.escape(invite_url)
+    safe_date = html.escape(date_str)
+
+    plain_text = (
+        f"{invited_by_email} has invited you to join Dalgo\n"
+        f"\n"
+        f"{org_name} Workspace -- {date_str}\n"
+        f"\n"
+        f"You have been granted {role_name} access. Set up your account to "
+        f"begin exploring the workspace.\n"
+        f"\n"
+        f"Accept your invitation: {invite_url}\n"
+        f"\n"
+        f"---\n"
+        f"You received this email because {invited_by_email} invited you to join Dalgo.\n"
+    )
+
+    html_body = f"""\
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5; padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#00897B; padding:20px 32px;">
+              <h1 style="color:#ffffff; margin:0; font-size:18px; font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+
+              <!-- Headline -->
+              <p style="margin:0 0 6px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                {safe_inviter} has invited you to join Dalgo
+              </p>
+
+              <!-- Workspace + date -->
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; line-height:1.4;">
+                {safe_org_name} Workspace &mdash; {safe_date}
+              </p>
+
+              <!-- Granted-role callout -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background-color:#f0fdfa; border-left:4px solid #00897B; padding:12px 16px; border-radius:0 4px 4px 0;">
+                    <p style="margin:0; font-size:14px; color:#1f2937; line-height:1.5;">
+                      You have been granted <strong>{safe_role_name}</strong> access. Set up your account to begin exploring the workspace.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:28px;">
+                <tr>
+                  <td>
+                    <a href="{safe_invite_url}"
+                       style="display:inline-block; background-color:#00897B; color:#ffffff;
+                              padding:10px 24px; text-decoration:none; border-radius:6px;
+                              font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                      Accept Invitation
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
+              <p style="margin:0; font-size:12px; color:#9ca3af; line-height:1.5;">
+                You received this email because {safe_inviter} invited you to join Dalgo.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+    return plain_text, html_body
+
+
 def render_share_report_email(
     sender_name: str,
     report_title: str,
