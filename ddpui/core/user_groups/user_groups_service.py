@@ -22,7 +22,7 @@ from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquer
 from django.db.models.functions import Coalesce
 
 from ddpui.core.ownership import is_admin_or_super_admin
-from ddpui.core.sharing.exceptions import SharingValidationError
+from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
 
 # Reuses the share-flow's "invite this email, return an instant OrgUser or
 # None" primitive rather than re-implementing invite/Invitation handling
@@ -298,11 +298,12 @@ def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> G
       ``sharing_actions.upsert_grant``'s email lookup) -> same as the
       orguser_id path.
     - unknown (or not-yet-active) -> reused share-flow invite machinery
-      (``sharing_actions._invite_email_once``) at **Member** only -- no
-      admin role-escalation option here; the design has no invite-role
-      picker for group invites (unlike the share modal's), so every group
-      invite lands at Member -- then a PENDING row, matched by email and
-      flipped to ACTIVE on signup by
+      (``sharing_actions._invite_email_once``) at ``payload.invite_role``
+      (Member unless an admin/super-admin caller chose more -- the design's
+      "Assign new invites role before adding to group" banner mirrors the
+      share modal's admin-only picker, see
+      ``sharing_actions._resolve_invite_role``, reused as-is) -- then a
+      PENDING row, matched by email and flipped to ACTIVE on signup by
       ``orguserfunctions.activate_pending_shares_and_memberships`` (already
       wired; not rebuilt here).
     """
@@ -334,7 +335,9 @@ def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> G
         return _add_active_member(orguser, group, target)
 
     try:
-        instant_principal = _invite_email_once(orguser, email)
+        instant_principal = _invite_email_once(orguser, email, payload.invite_role)
+    except SharingPermissionError as err:
+        raise GroupPermissionError(str(err)) from err
     except SharingValidationError as err:
         raise GroupValidationError(str(err)) from err
 

@@ -534,6 +534,39 @@ class TestAddMemberByEmail:
             )
         assert mock_send.call_count == 0
 
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_analyst_cannot_escalate_invite_role(self, org, analyst):
+        """The design's "Assign new invites role" banner mirrors the share
+        modal's admin-only picker (`_resolve_invite_role`) -- a non-admin
+        creator requesting a non-Member invite role is rejected, same as the
+        share flow."""
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(analyst)
+        with pytest.raises(HttpError) as excinfo:
+            add_member(
+                mock_request(analyst),
+                group["id"],
+                GroupMemberCreate(email="escalate@test.com", invite_role=ADMIN_ROLE),
+            )
+        assert excinfo.value.status_code == 403
+        assert not Invitation.objects.filter(invited_email="escalate@test.com").exists()
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_admin_can_invite_at_a_higher_role(self, org, admin):
+        from ddpui.api.groups_api import add_member
+        from ddpui.schemas.group_schema import GroupMemberCreate
+
+        group = self._create_group(admin)
+        add_member(
+            mock_request(admin),
+            group["id"],
+            GroupMemberCreate(email="future-analyst@test.com", invite_role=ANALYST_ROLE),
+        )
+        invitation = Invitation.objects.get(invited_email="future-analyst@test.com")
+        assert invitation.invited_new_role.slug == ANALYST_ROLE
+
 
 # ================================================================================
 # DELETE /api/groups/{id}/members/{member_id}

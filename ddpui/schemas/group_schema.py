@@ -73,7 +73,13 @@ class GroupMemberCreate(Schema):
     email (exactly one). An email matching an existing org member adds them
     directly; an unknown (or not-yet-active) email invites them via the
     share-flow's invite machinery and stages a PENDING row that activates on
-    signup (M4 -- see ``orguserfunctions.activate_pending_shares_and_memberships``)."""
+    signup (M4 -- see ``orguserfunctions.activate_pending_shares_and_memberships``).
+
+    ``invite_role`` is only consulted on the unknown-email path -- Member
+    unless an admin/super-admin caller chose a higher role (mirrors the
+    share modal's role picker; see ``sharing_actions._resolve_invite_role``,
+    reused as-is: a non-admin requesting a non-Member role gets a 403)."""
 
     orguser_id: Optional[int] = None
     email: Optional[str] = None
+    invite_role: Optional[str] = None
