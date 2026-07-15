@@ -42,19 +42,36 @@ verification_url
 
 
 def test_send_invite_user_email():
-    """tests send_invite_user_email"""
-    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
-        send_invite_user_email("to_email", "invited_by_email", "invite_url")
-        message = """Hello,
+    """tests send_invite_user_email sends a branded HTML invitation with a
+    plain-text alternative, via send_html_message (not send_text_message)"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send_html_message:
+        send_invite_user_email(
+            "to_email",
+            "invited_by_email",
+            "invite_url",
+            org_name="Test Org",
+            role_name="Analyst",
+            date_str="Jul 16, 2026",
+        )
+        mock_send_html_message.assert_called_once()
+        args, _ = mock_send_html_message.call_args
+        to_email, subject, plain_text, html_body = args
 
-Welcome to Dalgo.
+        assert to_email == "to_email"
+        assert subject == "invited_by_email has invited you to join Dalgo"
 
-You have been invited by invited_by_email
+        # plain-text alternative carries the same facts
+        assert "invited_by_email" in plain_text
+        assert "Test Org" in plain_text
+        assert "Analyst" in plain_text
+        assert "invite_url" in plain_text
 
-Click here to accept: invite_url
-
-    """
-        mock_send_text_message.assert_called_once_with("to_email", "Welcome to Dalgo", message)
+        # HTML body carries role, org name, invite link and the CTA copy
+        assert "invited_by_email" in html_body
+        assert "Test Org" in html_body
+        assert "Analyst" in html_body
+        assert "invite_url" in html_body
+        assert "Accept Invitation" in html_body
 
 
 def test_send_youve_been_added_email():

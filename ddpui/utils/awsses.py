@@ -6,6 +6,7 @@ import email.mime.text
 import email.mime.application
 
 from ddpui.utils.aws_client import AWSClient
+from ddpui.utils.email_templates import render_invite_user_email
 
 
 def _get_ses_client():
@@ -109,18 +110,27 @@ Welcome to Dalgo! Please verify your email address by clicking the link below
     send_text_message(to_email, "Welcome to Dalgo", message)
 
 
-def send_invite_user_email(to_email: str, invited_by_email: str, invite_url: str) -> None:
-    """send an invitation email to the user with the invite link through which they will set their password"""
-    message = f"""Hello,
-
-Welcome to Dalgo.
-
-You have been invited by {invited_by_email}
-
-Click here to accept: {invite_url}
-
-    """
-    send_text_message(to_email, "Welcome to Dalgo", message)
+def send_invite_user_email(
+    to_email: str,
+    invited_by_email: str,
+    invite_url: str,
+    org_name: str,
+    role_name: str,
+    date_str: str,
+) -> None:
+    """send a branded HTML invitation email to the user with the invite link
+    through which they will set their password. Content is limited to the
+    inviter's email, the granted role, the org name, the invite link and the
+    invite date -- nothing else."""
+    subject = f"{invited_by_email} has invited you to join Dalgo"
+    plain_text, html_body = render_invite_user_email(
+        invited_by_email=invited_by_email,
+        org_name=org_name,
+        role_name=role_name,
+        invite_url=invite_url,
+        date_str=date_str,
+    )
+    send_html_message(to_email, subject, plain_text, html_body)
 
 
 def send_resource_shared_email(
