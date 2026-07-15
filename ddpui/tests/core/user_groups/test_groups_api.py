@@ -483,8 +483,11 @@ class TestAddMemberByEmail:
         assert response["data"]["status"] == "pending"
 
         invitation = Invitation.objects.get(invited_email="future@test.com", invited_by=analyst)
-        # No invite-role picker in the group-invite design (unlike the share
-        # modal's) -- every group invite lands at Member, no escalation path.
+        # No invite_role passed here, so it defaults to Member. An admin
+        # caller may pick a higher invite_role (see
+        # test_admin_can_invite_at_a_higher_role below); a non-admin caller
+        # attempting to escalate is rejected with a 403 (see
+        # test_analyst_cannot_escalate_invite_role).
         assert invitation.invited_new_role.slug == MEMBER_ROLE
 
         assert UserGroupMember.objects.filter(
