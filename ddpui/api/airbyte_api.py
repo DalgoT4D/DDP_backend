@@ -21,8 +21,8 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
-    SourceOAuthConsentCreate,
-    SourceOAuthCreate,
+    SourceGoogleOAuthConsentCreate,
+    SourceGoogleOAuthCreate,
 )
 from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
@@ -31,6 +31,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
+from ddpui.core.oauth import google_oauth_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
@@ -122,7 +123,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
 @airbyte_router.post("/sources/oauth/consent/")
 @has_permission(["can_create_source"])
-def post_source_oauth_consent(request, payload: SourceOAuthConsentCreate):
+def post_source_oauth_consent(request, payload: SourceGoogleOAuthConsentCreate):
     """Start the Google OAuth flow: build the Google consent URL and mint a state nonce.
 
     Dalgo builds the URL itself (client_id from env, redirect_uri = Dalgo's own backend
@@ -132,7 +133,7 @@ def post_source_oauth_consent(request, payload: SourceOAuthConsentCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return airbytehelpers.get_source_oauth_consent(orguser, payload.sourceDefId)
+    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceDefId)
 
 
 @airbyte_router.get("/sources/oauth/callback", auth=None)
@@ -144,12 +145,14 @@ def get_source_oauth_callback(request, state: str = None, code: str = None, erro
     opaque `ref`, and 302s the popup back to the frontend callback page carrying only that
     `ref` (or an `error`). The auth code and refresh_token never reach the browser.
     """
-    return HttpResponseRedirect(airbytehelpers.oauth_callback_redirect_url(state, code, error))
+    return HttpResponseRedirect(
+        google_oauth_service.oauth_callback_redirect_url(state, code, error)
+    )
 
 
 @airbyte_router.post("/sources/oauth/create/")
 @has_permission(["can_create_source"])
-def post_source_oauth_create(request, payload: SourceOAuthCreate):
+def post_source_oauth_create(request, payload: SourceGoogleOAuthCreate):
     """Create (or update) the source from a redeemed OAuth `ref`.
 
     Redeems the `ref` for the stashed refresh_token, builds the connector credentials

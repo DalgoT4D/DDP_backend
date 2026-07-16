@@ -33,13 +33,13 @@ class AirbyteSourceUpdateCheckConnection(Schema):
     config: dict
 
 
-class SourceOAuthConsentCreate(Schema):
+class SourceGoogleOAuthConsentCreate(Schema):
     """Request to start the Google OAuth consent flow for a source"""
 
     sourceDefId: str
 
 
-class SourceOAuthCreate(Schema):
+class SourceGoogleOAuthCreate(Schema):
     """Create (or update) a source from a redeemed Google OAuth `ref`.
 
     The user fills in `name` + `config` (e.g. spreadsheet_id) and authenticates via Google;

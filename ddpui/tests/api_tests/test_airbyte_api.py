@@ -38,6 +38,7 @@ from ddpui.api.airbyte_api import (
     post_source_oauth_create,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
+from ddpui.core.oauth.google_oauth_provider import GSHEETS_SOURCE_DEFINITION_ID as GSHEETS_DEF_ID
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import (
     AirbyteSourceCreate,
@@ -45,8 +46,8 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationCreate,
     AirbyteDestinationUpdateCheckConnection,
-    SourceOAuthConsentCreate,
-    SourceOAuthCreate,
+    SourceGoogleOAuthConsentCreate,
+    SourceGoogleOAuthCreate,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui import ddpprefect
@@ -273,15 +274,15 @@ def _oauth_env(monkeypatch):
         "AIRBYTE_OAUTH_REDIRECT_URL",
         "https://api.dalgo.org/api/airbyte/sources/oauth/callback",
     )
-    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_ID", "cid")
-    monkeypatch.setenv("AIRBYTE_GSHEETS_OAUTH_CLIENT_SECRET", "csecret")
+    monkeypatch.setenv("AIRBYTE_GOOGLE_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AIRBYTE_GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("FRONTEND_URL_V2", "https://app.dalgo.org")
 
 
 def _use_fake_redis(monkeypatch):
     fake_redis = FakeRedis()
     monkeypatch.setattr(
-        "ddpui.ddpairbyte.airbytehelpers.RedisClient.get_instance", lambda: fake_redis
+        "ddpui.core.oauth.google_oauth_service.RedisClient.get_instance", lambda: fake_redis
     )
     return fake_redis
 
@@ -292,7 +293,7 @@ def test_post_source_oauth_consent_without_workspace(seed_db, orguser):
     request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        post_source_oauth_consent(request, SourceOAuthConsentCreate(sourceDefId="fake-id"))
+        post_source_oauth_consent(request, SourceGoogleOAuthConsentCreate(sourceDefId="fake-id"))
 
     assert str(excinfo.value) == "create an airbyte workspace first"
 
@@ -303,7 +304,9 @@ def test_post_source_oauth_consent_builds_google_url(seed_db, orguser_workspace,
     fake_redis = _use_fake_redis(monkeypatch)
     request = mock_request(orguser_workspace)
 
-    result = post_source_oauth_consent(request, SourceOAuthConsentCreate(sourceDefId="gsheets-id"))
+    result = post_source_oauth_consent(
+        request, SourceGoogleOAuthConsentCreate(sourceDefId=GSHEETS_DEF_ID)
+    )
 
     parsed = urlparse(result["authUrl"])
     assert parsed.netloc == "accounts.google.com"
@@ -321,7 +324,7 @@ def test_post_source_oauth_consent_builds_google_url(seed_db, orguser_workspace,
     stored = json.loads(fake_redis.store[f"airbyte_oauth_state:{state}"])
     assert stored["orguser_id"] == orguser_workspace.id
     assert stored["workspace_id"] == orguser_workspace.org.airbyte_workspace_id
-    assert stored["source_definition_id"] == "gsheets-id"
+    assert stored["source_definition_id"] == GSHEETS_DEF_ID
 
 
 # ---- callback: public, exchanges code server-side, stashes a ref ------------
@@ -341,9 +344,9 @@ def test_oauth_callback_happy_path(seed_db, orguser_workspace, monkeypatch):
     """callback exchanges the code with Google, stashes a ref, redirects with ?ref"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    state = _seed_state(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     monkeypatch.setattr(
-        "ddpui.ddpairbyte.airbytehelpers.requests.post",
+        "ddpui.core.oauth.google_oauth_service.requests.post",
         lambda *a, **k: FakeResponse(200, {"refresh_token": "rt-123", "access_token": "at"}),
     )
     request = mock_request(orguser_workspace)
@@ -362,7 +365,7 @@ def test_oauth_callback_happy_path(seed_db, orguser_workspace, monkeypatch):
     stored = json.loads(fake_redis.store[f"airbyte_oauth_ref:{ref}"])
     assert stored["refresh_token"] == "rt-123"
     assert stored["orguser_id"] == orguser_workspace.id
-    assert stored["source_definition_id"] == "gsheets-id"
+    assert stored["source_definition_id"] == GSHEETS_DEF_ID
     # state nonce is single-use — consumed
     assert f"airbyte_oauth_state:{state}" not in fake_redis.store
 
@@ -377,7 +380,7 @@ def test_oauth_callback_bad_state_redirects_error(seed_db, orguser_workspace, mo
         called["post"] = True
         return FakeResponse(200, {"refresh_token": "rt"})
 
-    monkeypatch.setattr("ddpui.ddpairbyte.airbytehelpers.requests.post", _post)
+    monkeypatch.setattr("ddpui.core.oauth.google_oauth_service.requests.post", _post)
     request = mock_request(orguser_workspace)
 
     response = get_source_oauth_callback(request, state="never-issued", code="c")
@@ -403,9 +406,9 @@ def test_oauth_callback_no_refresh_token_redirects_error(seed_db, orguser_worksp
     """if Google returns no refresh_token, callback redirects with an error, stores no ref"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    state = _seed_state(fake_redis, orguser_workspace, "gsheets-id")
+    state = _seed_state(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     monkeypatch.setattr(
-        "ddpui.ddpairbyte.airbytehelpers.requests.post",
+        "ddpui.core.oauth.google_oauth_service.requests.post",
         lambda *a, **k: FakeResponse(200, {"access_token": "at"}),  # no refresh_token
     )
     request = mock_request(orguser_workspace)
@@ -439,13 +442,13 @@ def test_post_source_oauth_create_success(seed_db, orguser_workspace, monkeypatc
     """create redeems the ref, injects all-three credentials server-side, creates the source"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    ref = _seed_ref(fake_redis, orguser_workspace, "gsheets-id")
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     request = mock_request(orguser_workspace)
 
     result = post_source_oauth_create(
         request,
-        SourceOAuthCreate(
-            sourceDefId="gsheets-id",
+        SourceGoogleOAuthCreate(
+            sourceDefId=GSHEETS_DEF_ID,
             name="my sheet",
             config={"spreadsheet_id": "https://sheet"},
             ref=ref,
@@ -458,7 +461,7 @@ def test_post_source_oauth_create_success(seed_db, orguser_workspace, monkeypatc
     airbyte_service.create_source.assert_called_once_with(
         orguser_workspace.org.airbyte_workspace_id,
         "my sheet",
-        "gsheets-id",
+        GSHEETS_DEF_ID,
         {
             "spreadsheet_id": "https://sheet",
             "credentials": {
@@ -481,13 +484,13 @@ def test_post_source_oauth_create_reauth_updates(seed_db, orguser_workspace, mon
     """with a sourceId, create updates the existing source rather than creating a new one"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    ref = _seed_ref(fake_redis, orguser_workspace, "gsheets-id")
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     request = mock_request(orguser_workspace)
 
     result = post_source_oauth_create(
         request,
-        SourceOAuthCreate(
-            sourceDefId="gsheets-id",
+        SourceGoogleOAuthCreate(
+            sourceDefId=GSHEETS_DEF_ID,
             name="my sheet",
             config={"spreadsheet_id": "https://sheet"},
             ref=ref,
@@ -508,7 +511,7 @@ def test_post_source_oauth_create_reauth_updates(seed_db, orguser_workspace, mon
                 "refresh_token": "rt-123",
             },
         },
-        "gsheets-id",
+        GSHEETS_DEF_ID,
     )
 
 
@@ -521,8 +524,8 @@ def test_post_source_oauth_create_expired_ref(seed_db, orguser_workspace, monkey
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_create(
             request,
-            SourceOAuthCreate(
-                sourceDefId="gsheets-id", name="my sheet", config={}, ref="never-issued"
+            SourceGoogleOAuthCreate(
+                sourceDefId=GSHEETS_DEF_ID, name="my sheet", config={}, ref="never-issued"
             ),
         )
 
@@ -535,13 +538,15 @@ def test_post_source_oauth_create_foreign_ref_rejected(
     """a ref minted for org A's OrgUser cannot be redeemed by an OrgUser from a different org"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    ref = _seed_ref(fake_redis, orguser_workspace, "gsheets-id")
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     request = mock_request(orguser_workspace_b)
 
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_create(
             request,
-            SourceOAuthCreate(sourceDefId="gsheets-id", name="my sheet", config={}, ref=ref),
+            SourceGoogleOAuthCreate(
+                sourceDefId=GSHEETS_DEF_ID, name="my sheet", config={}, ref=ref
+            ),
         )
 
     assert str(excinfo.value) == "oauth session does not match this request"
@@ -551,13 +556,15 @@ def test_post_source_oauth_create_wrong_sourcedef_rejected(seed_db, orguser_work
     """a ref minted for one source definition cannot create another"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    ref = _seed_ref(fake_redis, orguser_workspace, "gsheets-id")
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     request = mock_request(orguser_workspace)
 
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_create(
             request,
-            SourceOAuthCreate(sourceDefId="a-different-id", name="my sheet", config={}, ref=ref),
+            SourceGoogleOAuthCreate(
+                sourceDefId="a-different-id", name="my sheet", config={}, ref=ref
+            ),
         )
 
     assert str(excinfo.value) == "oauth session does not match this request"
