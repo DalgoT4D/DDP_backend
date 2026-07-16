@@ -57,7 +57,7 @@ from ddpui.schemas.access_schema import (
     GeneralAccessUpdate,
     GeneralAccessUpdateResponse,
     GrantCreate,
-    GrantOut,
+    GrantCreateResponse,
     OwnerOut,
     OwnerTransferRequest,
 )
@@ -97,17 +97,23 @@ def get_access(request, rtype: str, resource_id: str):
     return api_response(success=True, data=overview)
 
 
-@access_router.post("/{rtype}/{resource_id}/grants/", response=ApiResponse[GrantOut])
+@access_router.post("/{rtype}/{resource_id}/grants/", response=ApiResponse[GrantCreateResponse])
 def create_grant(request, rtype: str, resource_id: str, payload: GrantCreate):
     """Grant a user view/edit on this resource (duplicate grants update in
-    place). Gate: share slug (registry) + resolver edit."""
+    place). Gate: share slug (registry) + resolver edit.
+
+    v1.1 M2: granting on a DASHBOARD whose tiles the new principal cannot
+    see standalone returns `requires_confirmation` with the under-covering
+    charts named and writes nothing — re-send with `extend_chart_ids` (a
+    subset of those charts; needs Edit on each) and/or `proceed=true` to
+    commit (the broadening warning's contract)."""
     orguser: OrgUser = request.orguser
     require_share_permission(request, rtype)
     resource = _get_resource_or_404(orguser, rtype, resource_id)
     require_edit_access(orguser, rtype, resource)
 
     try:
-        grant = sharing_actions.upsert_grant(orguser, rtype, resource, payload)
+        result = sharing_actions.upsert_grant_with_coverage(orguser, rtype, resource, payload)
     except SharingValidationError as err:
         raise HttpError(400, err.message) from err
     except SharingPermissionError as err:
@@ -115,7 +121,8 @@ def create_grant(request, rtype: str, resource_id: str, payload: GrantCreate):
     except PrincipalNotFoundError as err:
         raise HttpError(404, err.message) from err
 
-    return api_response(success=True, data=grant, message="Access granted")
+    message = "Confirmation required" if result.requires_confirmation else "Access granted"
+    return api_response(success=True, data=result, message=message)
 
 
 @access_router.delete("/{rtype}/{resource_id}/grants/{grant_id}/", response=ApiResponse[None])
@@ -151,6 +158,10 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
         result = sharing_actions.set_general_access(orguser, rtype, resource, payload)
     except SharingValidationError as err:
         raise HttpError(400, err.message) from err
+    except SharingPermissionError as err:
+        # v1.1 M2: a confirmed broadening `extend_chart_ids` needs Edit on
+        # each named chart
+        raise HttpError(403, err.message) from err
     except GrantNotFoundError as err:
         raise HttpError(404, err.message) from err
 

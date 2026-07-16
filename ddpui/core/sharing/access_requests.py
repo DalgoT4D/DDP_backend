@@ -319,7 +319,14 @@ def _insert_grant(
     Member-grants-deferred check (`sharing_actions._reject_member_principal`)
     deliberately -- approving a Member's own access request still writes
     their grant; that block only applies to NEW proactive shares (the share
-    modal / bulk / invites), not to deciding a request someone already made."""
+    modal / bulk / invites), not to deciding a request someone already made.
+
+    Note this cannot become a Member back door onto `member_sharing=False`
+    rtypes (charts): Member requesters are blocked upstream in
+    `create_access_request`, and even a historical/hand-written Member
+    grant row on a chart resolves to NOTHING for a Member viewer --
+    `access_resolver._member_excluded` drops the grant contribution at
+    read time (defense in depth on both ends of this write)."""
     ResourceShare.objects.update_or_create(
         org_id=resource.org_id,
         resource_type=rtype,

@@ -96,9 +96,12 @@ class Chart(models.Model):
 
     def clean(self):
         """v1.1 member-pin: Member chart sharing is deferred, so
-        ``member_level`` may only ever be "none". The sharing API enforces
-        the same rule (``shareable_types`` registry ``member_sharing=False``)
-        — this is the model-layer backstop for any other write path."""
+        ``member_level`` should stay "none". The REAL enforcement lives in
+        the sharing API (``shareable_types`` registry ``member_sharing=False``)
+        and the resolver (which gives Member viewers nothing on charts even
+        if a stray value slips in). This is only a best-effort backstop —
+        Django doesn't call ``clean()`` on plain ``save()``/``update()``, so
+        write paths must not rely on it."""
         super().clean()
         if self.member_level != AccessLevel.NONE:
             raise ValidationError(

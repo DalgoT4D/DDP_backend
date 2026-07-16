@@ -11,6 +11,7 @@ from django.db.models import Q
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
 from ddpui.core.sharing.access_resolver import accessible_filter
+from ddpui.core.sharing.chart_access import dashboard_chart_ids
 from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.models.general_access import AccessLevel
 from ddpui.models.visualization import Chart
@@ -333,28 +334,14 @@ class ChartService:
         # Verify chart exists
         ChartService.get_chart(chart_id, org)
 
-        # Find dashboards that have this chart in their components
-        dashboards_with_chart = []
-        dashboards = Dashboard.objects.filter(org=org)
-
-        for dashboard in dashboards:
-            found = False
-            for tab in dashboard.tabs or []:
-                for component in (tab.get("components") or {}).values():
-                    if (
-                        component.get("type") == DashboardComponentType.CHART.value
-                        and component.get("config", {}).get("chartId") == chart_id
-                    ):
-                        dashboards_with_chart.append(
-                            {
-                                "id": dashboard.id,
-                                "title": dashboard.title,
-                                "dashboard_type": dashboard.dashboard_type,
-                            }
-                        )
-                        found = True
-                        break
-                if found:
-                    break
-
-        return dashboards_with_chart
+        # Find dashboards that have this chart in their components -- the
+        # ONE consolidated tile-walk (chart_access.dashboard_chart_ids).
+        return [
+            {
+                "id": dashboard.id,
+                "title": dashboard.title,
+                "dashboard_type": dashboard.dashboard_type,
+            }
+            for dashboard in Dashboard.objects.filter(org=org)
+            if chart_id in dashboard_chart_ids(dashboard)
+        ]

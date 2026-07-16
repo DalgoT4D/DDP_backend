@@ -5,11 +5,16 @@ Rules of this module:
 - NO HTTP concerns: raise ``ddpui.core.sharing.exceptions`` errors; the API
   layer maps them to status codes.
 - NO per-rtype branching: every capability/permission-slug lookup reads the
-  ``shareable_types`` registry entry (data, not if/else). The ONE deliberate
-  exception is ``MEMBER_GRANTS_DEFERRED_RTYPES`` below -- a v1.1 policy
+  ``shareable_types`` registry entry (data, not if/else). TWO deliberate
+  exceptions: ``MEMBER_GRANTS_DEFERRED_RTYPES`` below -- a v1.1 policy
   decision (which rtypes exclude Member principals from proactive grants),
   not a capability, so it stays a plain rtype set here instead of a new
-  ``ShareableType`` field every registry entry would need to carry.
+  ``ShareableType`` field every registry entry would need to carry -- and
+  the ``rtype == "dashboard"`` broadening-warning branches (v1.1 M2):
+  dashboards are the only rtype that CONTAINS other shareable resources
+  (chart tiles render inline — spec §3), so "does this widening expose an
+  inner chart" is dashboard domain policy, computed by
+  ``core.sharing.coverage``, not a registry capability.
 - ``access_resolver`` stays read-only — this module is the ONLY place
   Resource Sharing writes happen.
 
@@ -27,7 +32,9 @@ from django.utils import timezone
 
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.core import orguserfunctions
+from ddpui.core.sharing import coverage
 from ddpui.core.sharing.access_resolver import PERMISSION_RANK, effective_permission
+from ddpui.core.sharing.chart_access import dashboard_chart_ids
 from ddpui.core.sharing.deep_links import NOUN_BY_RTYPE, build_resource_url, resource_label
 from ddpui.core.sharing.exceptions import (
     GrantNotFoundError,
@@ -42,6 +49,7 @@ from ddpui.models.org_user import NewInvitationSchema, OrgUser
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.role_based_access import Role
 from ddpui.models.user_group import UserGroup, UserGroupMemberStatus
+from ddpui.models.visualization import Chart
 from ddpui.schemas.access_schema import (
     AccessOverviewResponse,
     BulkAccessRequest,
@@ -50,10 +58,12 @@ from ddpui.schemas.access_schema import (
     BulkItemRef,
     BulkSkippedItem,
     CapabilityFlags,
+    ChartCoverageOut,
     GeneralAccessOut,
     GeneralAccessUpdate,
     GeneralAccessUpdateResponse,
     GrantCreate,
+    GrantCreateResponse,
     GrantOut,
     OwnerOut,
     ViewerOut,
@@ -592,6 +602,190 @@ def transfer_ownership(actor: OrgUser, rtype: str, resource, new_owner_orguser_i
     )
 
 
+# ================================================================================
+# v1.1 M2: the dashboard-broadening warnings ("no silent broadening path")
+# and their "extend" action. Dashboard-only by design — see the module
+# docstring's second per-rtype exception.
+# ================================================================================
+
+
+def extend_charts_to_cover_dashboard(actor: OrgUser, dashboard, charts: List[Chart]) -> None:
+    """The "extend" half of the broadening/embed warnings (spec §3): bring
+    each chart's own STANDALONE access up to cover ``dashboard``'s current
+    audience.
+
+    - Raise ``chart.analyst_level`` "none" -> "view" when the dashboard
+      admits Analysts at all (view suffices for exposure honesty — inline
+      viewers only ever VIEW the tile; an existing "view"/"edit" level is
+      never touched, never lowered).
+    - Copy the dashboard's ACTIVE direct grants onto the chart at View:
+      Analyst/Admin user principals and group principals. Member (or
+      null/legacy-role) user principals are SKIPPED — Member chart sharing
+      is deferred and ``member_sharing=False`` stays intact; the warning
+      copy says so. Pending (email) rows aren't people yet — skipped.
+      An existing grant row on the chart is left as-is (never downgraded
+      from Edit, pending stays pending).
+
+    Requires the ACTOR to resolve to Edit on every chart (spec §1: "extend
+    requires Edit on the chart") — raises ``SharingPermissionError`` before
+    any write. ``member_level`` is never touched.
+    """
+    if not charts:
+        return
+
+    for chart in charts:
+        if effective_permission(actor, "chart", chart) != "edit":
+            raise SharingPermissionError(
+                f'you need Edit access on the chart "{chart.title}" to extend it'
+            )
+
+    grants = list(_grants_for("dashboard", dashboard).filter(status="active"))
+    user_ids = [g.principal_id for g in grants if g.principal_type == "user" and g.principal_id]
+    role_by_orguser_id = dict(
+        OrgUser.objects.filter(id__in=user_ids).values_list("id", "new_role__slug")
+    )
+
+    with transaction.atomic():
+        for chart in charts:
+            if (
+                dashboard.analyst_level != AccessLevel.NONE
+                and chart.analyst_level == AccessLevel.NONE
+            ):
+                chart.analyst_level = AccessLevel.VIEW
+                chart.save(update_fields=["analyst_level"])
+
+            for grant in grants:
+                if grant.principal_id is None:
+                    continue
+                if grant.principal_type == "user":
+                    if role_by_orguser_id.get(grant.principal_id) not in (
+                        ANALYST_ROLE,
+                        ADMIN_ROLE,
+                        SUPER_ADMIN_ROLE,
+                    ):
+                        continue  # Member / null-role principals skipped (spec §3)
+                elif grant.principal_type != "group":
+                    continue
+                ResourceShare.objects.get_or_create(
+                    org_id=dashboard.org_id,
+                    resource_type="chart",
+                    resource_id=str(chart.pk),
+                    principal_type=grant.principal_type,
+                    principal_id=grant.principal_id,
+                    defaults={
+                        "permission": "view",
+                        "status": "active",
+                        "pending_email": None,
+                        "created_by": actor,
+                    },
+                )
+
+
+def _broadening_confirmed(payload) -> bool:
+    """The broadening re-send contract, mirroring ``remove_grant_ids``'s
+    presence semantics: EITHER field present commits — ``extend_chart_ids``
+    (possibly []) extends that subset, ``proceed=true`` acknowledges the
+    exposure without touching charts."""
+    return payload.extend_chart_ids is not None or bool(payload.proceed)
+
+
+def _validate_extend_subset(extend_chart_ids, warned: List[ChartCoverageOut]) -> set:
+    """The ONE definition of the extend-subset rule: every confirmed id must
+    be a chart the warning named (nothing else is extendable through this
+    side door). Returns the id set; raises the shared 400 otherwise."""
+    extend_ids = set(extend_chart_ids or [])
+    if extend_ids and not extend_ids <= {v.chart_id for v in warned}:
+        raise SharingValidationError(
+            "extend_chart_ids must be a subset of the under-covering charts"
+        )
+    return extend_ids
+
+
+def _extend_confirmed_subset(
+    actor: OrgUser, dashboard, extend_chart_ids, warned: List[ChartCoverageOut]
+) -> None:
+    """Validate + run the confirmed ``extend_chart_ids``."""
+    extend_ids = _validate_extend_subset(extend_chart_ids, warned)
+    if not extend_ids:
+        return
+    charts = list(Chart.objects.filter(id__in=extend_ids, org_id=dashboard.org_id))
+    extend_charts_to_cover_dashboard(actor, dashboard, charts)
+
+
+def _grant_widening_verdicts(
+    grantor: OrgUser, dashboard, payload: GrantCreate
+) -> List[ChartCoverageOut]:
+    """Which tiles a NEW grant on ``dashboard`` would expose to the
+    payload's principal. Resolves the principal READ-ONLY and leniently:
+    an unresolvable principal yields no verdicts here and falls through to
+    ``upsert_grant``'s own validation/404."""
+    if payload.principal_type == "group":
+        if payload.principal_id is None:
+            return []
+        group = UserGroup.objects.filter(id=payload.principal_id, org_id=dashboard.org_id).first()
+        if group is None:
+            return []
+        return coverage.under_covering_for_new_principal(grantor, dashboard, principal_group=group)
+
+    if payload.principal_type != "user":
+        return []
+
+    principal = None
+    if payload.principal_id is not None:
+        principal = (
+            OrgUser.objects.filter(id=payload.principal_id, org_id=dashboard.org_id)
+            .select_related("user", "new_role")
+            .first()
+        )
+    elif payload.email:
+        principal = (
+            OrgUser.objects.filter(
+                org_id=dashboard.org_id, user__email__iexact=payload.email.strip().lower()
+            )
+            .select_related("user", "new_role")
+            .first()
+        )
+        if principal is None:
+            # unknown-email invite: judged by the role the invite would mint
+            return coverage.under_covering_for_new_principal(
+                grantor, dashboard, invite_role=payload.invite_role
+            )
+    if principal is None:
+        return []
+    return coverage.under_covering_for_new_principal(
+        grantor, dashboard, principal_orguser=principal
+    )
+
+
+def upsert_grant_with_coverage(
+    grantor: OrgUser, rtype: str, resource, payload: GrantCreate
+) -> GrantCreateResponse:
+    """``upsert_grant`` wrapped in the dashboard-broadening warn-and-offer
+    (v1.1 M2). For every rtype but dashboard this is a pass-through.
+
+    For a dashboard: if the new principal cannot see one or more tiles
+    standalone and the payload carries neither confirm field, NOTHING is
+    written and the under-covering charts come back named
+    (``requires_confirmation=True``). The re-send commits the grant, then
+    runs the confirmed ``extend_chart_ids`` subset (extend copies the
+    dashboard's grants — including the one just written — onto the charts).
+    """
+    if rtype != "dashboard":
+        return GrantCreateResponse(grant=upsert_grant(grantor, rtype, resource, payload))
+
+    verdicts = _grant_widening_verdicts(grantor, resource, payload)
+    if verdicts and not _broadening_confirmed(payload):
+        return GrantCreateResponse(requires_confirmation=True, under_covering_charts=verdicts)
+
+    # validate the extend subset BEFORE the grant write so a bad subset
+    # cannot leave a half-applied share
+    _validate_extend_subset(payload.extend_chart_ids, verdicts)
+
+    grant = upsert_grant(grantor, rtype, resource, payload)
+    _extend_confirmed_subset(grantor, resource, payload.extend_chart_ids, verdicts)
+    return GrantCreateResponse(grant=grant)
+
+
 def _narrowed_roles(resource, payload: GeneralAccessUpdate) -> set:
     """Which of {ANALYST_ROLE, MEMBER_ROLE} had their general-access level
     narrowed by this change -- the new level ranks lower than the current
@@ -642,7 +836,7 @@ def _persisting_grants_for_narrowed_roles(rtype: str, resource, narrowed_roles: 
 
 
 def set_general_access(
-    orguser: OrgUser,  # pylint: disable=unused-argument  (kept: actor context, audit hook)
+    orguser: OrgUser,
     rtype: str,
     resource,
     payload: GeneralAccessUpdate,
@@ -658,6 +852,15 @@ def set_general_access(
       `requires_confirmation=True` with the grants that would keep those
       people in, and changes NOTHING. The client re-sends with
       `remove_grant_ids` (possibly []) to commit.
+
+    v1.1 M2 adds the BROADENING mirror for dashboards: RAISING a role's
+    level past an inner chart's own access returns `requires_confirmation`
+    with the under-covering charts named (nothing changed) unless the
+    payload carries `extend_chart_ids`/`proceed`. A request that narrows
+    one role and widens the other returns BOTH prompts in one response.
+    On the confirmed commit, `extend_chart_ids` (a subset of the warned
+    charts; caller needs Edit on each) is extended AFTER the levels save,
+    so extend covers the dashboard's NEW audience.
     """
     entry = _entry_for(rtype)
     if not entry.general:
@@ -674,13 +877,23 @@ def set_general_access(
 
     narrowed_roles = _narrowed_roles(resource, payload)
 
+    persisting = []
     if narrowed_roles and payload.remove_grant_ids is None:
         persisting = _persisting_grants_for_narrowed_roles(rtype, resource, narrowed_roles)
-        if persisting:
-            return GeneralAccessUpdateResponse(
-                requires_confirmation=True,
-                persisting_grants=_grants_out(persisting, resource.org_id),
-            )
+
+    widening_charts: List[ChartCoverageOut] = []
+    if rtype == "dashboard":
+        widening_charts = coverage.under_covering_for_general_widening(
+            orguser, resource, payload.analyst_level, payload.member_level
+        )
+    needs_widen_confirm = bool(widening_charts) and not _broadening_confirmed(payload)
+
+    if persisting or needs_widen_confirm:
+        return GeneralAccessUpdateResponse(
+            requires_confirmation=True,
+            persisting_grants=_grants_out(persisting, resource.org_id),
+            under_covering_charts=widening_charts if needs_widen_confirm else [],
+        )
 
     with transaction.atomic():
         if payload.remove_grant_ids:
@@ -694,6 +907,10 @@ def set_general_access(
         resource.member_level = payload.member_level
         resource.save(update_fields=["analyst_level", "member_level"])
 
+        if rtype == "dashboard" and payload.extend_chart_ids:
+            # after the save: extend covers the dashboard's NEW audience
+            _extend_confirmed_subset(orguser, resource, payload.extend_chart_ids, widening_charts)
+
     return GeneralAccessUpdateResponse(
         general_access=GeneralAccessOut(
             analyst_level=payload.analyst_level, member_level=payload.member_level
@@ -702,11 +919,12 @@ def set_general_access(
 
 
 def set_public(
-    actor: OrgUser,  # pylint: disable=unused-argument -- kept as actor context / audit hook
+    actor: OrgUser,
     rtype: str,
     resource,
     is_public: bool,
-) -> None:
+    proceed: bool = False,
+) -> Optional[List[ChartCoverageOut]]:
     """Set the resource's public-link state — generic over the public-link
     contract every ``public_link=True`` rtype's model satisfies
     (``is_public``, ``public_share_token``, ``public_shared_at``,
@@ -718,10 +936,24 @@ def set_public(
     kill-switch rule -- enabling mints a token if missing and is blocked
     while the org kill switch is off; disabling always works and keeps the
     token for audit -- is defined exactly once.
+
+    v1.1 M2 broadening warning (dashboards only): ENABLING while the link
+    is currently off exposes every tile chart anonymously — unless
+    ``proceed`` is True, the under-covering charts come back as the return
+    value and NOTHING is flipped (the caller turns them into a
+    ``requires_confirmation`` response). Public exposure is never
+    extendable (charts have no public links), only acknowledgeable.
+    Returns None when the flip committed. Reports return None always
+    (frozen chart configs — nothing to expose); so does disabling.
     """
     entry = _entry_for(rtype)
     if not entry.public_link:
         raise SharingValidationError(f"{rtype} does not support public links")
+
+    if is_public and rtype == "dashboard" and not resource.is_public and not proceed:
+        under_covering = coverage.under_covering_for_public_enable(actor, resource)
+        if under_covering:
+            return under_covering
 
     if is_public:
         if not org_allows_public_sharing(resource.org_id):
@@ -740,6 +972,7 @@ def set_public(
     resource.save(
         update_fields=["is_public", "public_share_token", "public_shared_at", "public_disabled_at"]
     )
+    return None
 
 
 # ================================================================================
@@ -778,17 +1011,47 @@ def _validate_bulk_grant_payload(payload: GrantCreate) -> None:
             raise SharingValidationError("principal_id or email is required")
 
 
+def _item_extend_ids(resource, flat_extend_ids, consumed: set):
+    """The slice of a bulk request's flat ``extend_chart_ids`` that belongs
+    to this dashboard: the ids that are tiles on it (chart pks are unique
+    org-wide, so a flat list needs no per-resource nesting — mirroring
+    ``remove_grant_ids``). Marks them consumed so the caller can 400 on
+    leftovers that matched no selected dashboard."""
+    if flat_extend_ids is None:
+        return None
+    tile_ids = dashboard_chart_ids(resource)
+    item_ids = [cid for cid in flat_extend_ids if cid in tile_ids]
+    consumed.update(item_ids)
+    return item_ids
+
+
+def _require_all_extend_ids_consumed(flat_extend_ids, consumed: set) -> None:
+    if flat_extend_ids and set(flat_extend_ids) - consumed:
+        raise SharingValidationError(
+            "one or more extend_chart_ids are not tiles of the selected dashboards"
+        )
+
+
 def _bulk_add_grant(
     actor: OrgUser,
     payload: GrantCreate,
     resolved: ResolvedItems,
     applied: List[BulkItemRef],
     skipped: List[BulkSkippedItem],
+    confirmations: List[BulkConfirmationItem],
 ) -> None:
     """`upsert_grant` per resource — except the unknown-email case, where
     the invite half runs ONCE for the whole selection (one Invitation, one
-    email) and only the per-resource grant rows are fanned out."""
+    email) and only the per-resource grant rows are fanned out.
+
+    v1.1 M2: dashboard items whose tiles the new principal can't see
+    standalone land in `confirmations` (nothing written for them) on the
+    first call — ONE aggregated broadening prompt for the selection. The
+    re-send carries `proceed`/`extend_chart_ids` (a flat list, partitioned
+    per dashboard by tile membership) on the same action payload."""
     _validate_bulk_grant_payload(payload)
+
+    consumed_extend_ids: set = set()
 
     unknown_email = None
     if payload.principal_type == "user" and payload.email and payload.principal_id is None:
@@ -802,20 +1065,40 @@ def _bulk_add_grant(
             if not get_resource_type(rtype).grants:
                 _skip(skipped, rtype, resource, "grants_not_supported")
                 continue
+            item_payload = payload
+            if rtype == "dashboard" and payload.extend_chart_ids is not None:
+                item_payload = payload.model_copy(
+                    update={
+                        "extend_chart_ids": _item_extend_ids(
+                            resource, payload.extend_chart_ids, consumed_extend_ids
+                        )
+                    }
+                )
             try:
-                upsert_grant(actor, rtype, resource, payload)
+                result = upsert_grant_with_coverage(actor, rtype, resource, item_payload)
             except PrincipalNotFoundError:
                 _skip(skipped, rtype, resource, "principal_not_found")
             except SharingValidationError:
                 _skip(skipped, rtype, resource, "validation_error")
             else:
-                applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+                if result.requires_confirmation:
+                    confirmations.append(
+                        BulkConfirmationItem(
+                            rtype=rtype,
+                            id=str(resource.pk),
+                            under_covering_charts=result.under_covering_charts,
+                        )
+                    )
+                else:
+                    applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+        _require_all_extend_ids_consumed(payload.extend_chart_ids, consumed_extend_ids)
         return
 
     # Unknown email: decide eligibility per resource FIRST (an over-cap or
     # capability-blocked selection must not send an email), then invite
     # once, then write one grant row per eligible resource.
     eligible: ResolvedItems = []
+    warned_by_key: dict = {}
     for rtype, resource in resolved:
         entry = get_resource_type(rtype)
         if not entry.grants:
@@ -839,8 +1122,28 @@ def _bulk_add_grant(
         if PERMISSION_RANK.get(payload.permission, 0) > PERMISSION_RANK.get(grantor_level or "", 0):
             _skip(skipped, rtype, resource, "validation_error")
             continue
+        # v1.1 M2: an unconfirmed under-covering dashboard must not have an
+        # invite sent on its behalf — it needs the broadening confirmation.
+        # The confirmed extend subsets are validated HERE, pre-invite, so a
+        # bad extend list can never leave a sent email behind.
+        if rtype == "dashboard":
+            verdicts = coverage.under_covering_for_new_principal(
+                actor, resource, invite_role=payload.invite_role
+            )
+            if verdicts and not _broadening_confirmed(payload):
+                confirmations.append(
+                    BulkConfirmationItem(
+                        rtype=rtype, id=str(resource.pk), under_covering_charts=verdicts
+                    )
+                )
+                continue
+            if payload.extend_chart_ids is not None:
+                item_ids = _item_extend_ids(resource, payload.extend_chart_ids, consumed_extend_ids)
+                _validate_extend_subset(item_ids, verdicts)
+                warned_by_key[(rtype, str(resource.pk))] = (item_ids, verdicts)
         eligible.append((rtype, resource))
 
+    _require_all_extend_ids_consumed(payload.extend_chart_ids, consumed_extend_ids)
     if not eligible:
         return
 
@@ -849,6 +1152,9 @@ def _bulk_add_grant(
         _email_grant_row(
             actor, rtype, resource, unknown_email, payload.permission, instant_principal
         )
+        item_ids, verdicts = warned_by_key.get((rtype, str(resource.pk)), (None, []))
+        if item_ids:
+            _extend_confirmed_subset(actor, resource, item_ids, verdicts)
         applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
 
 
@@ -899,6 +1205,8 @@ def _bulk_set_general(
     if payload.remove_grant_ids is not None:
         ids_by_resource = _partition_remove_grant_ids(actor, payload.remove_grant_ids, resolved)
 
+    consumed_extend_ids: set = set()
+
     for rtype, resource in resolved:
         if not get_resource_type(rtype).general:
             _skip(skipped, rtype, resource, "general_access_not_supported")
@@ -906,10 +1214,19 @@ def _bulk_set_general(
         item_ids = None
         if ids_by_resource is not None:
             item_ids = ids_by_resource.get((rtype, str(resource.pk)), [])
+        item_extend_ids = None
+        if rtype == "dashboard" and payload.extend_chart_ids is not None:
+            # flat list partitioned per dashboard by tile membership, same
+            # shape rule as remove_grant_ids (globally-unique pks)
+            item_extend_ids = _item_extend_ids(
+                resource, payload.extend_chart_ids, consumed_extend_ids
+            )
         item_payload = GeneralAccessUpdate(
             analyst_level=payload.analyst_level,
             member_level=payload.member_level,
             remove_grant_ids=item_ids,
+            extend_chart_ids=item_extend_ids,
+            proceed=payload.proceed,
         )
         try:
             result = set_general_access(actor, rtype, resource, item_payload)
@@ -922,10 +1239,13 @@ def _bulk_set_general(
                     rtype=rtype,
                     id=str(resource.pk),
                     persisting_grants=result.persisting_grants,
+                    under_covering_charts=result.under_covering_charts,
                 )
             )
         else:
             applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+
+    _require_all_extend_ids_consumed(payload.extend_chart_ids, consumed_extend_ids)
 
 
 def _bulk_toggle_public(
@@ -934,10 +1254,16 @@ def _bulk_toggle_public(
     resolved: ResolvedItems,
     applied: List[BulkItemRef],
     skipped: List[BulkSkippedItem],
+    confirmations: List[BulkConfirmationItem],
+    proceed: bool = False,
 ) -> None:
     """`set_public` per resource. The kill switch is read once for the
     request: enabling while it's off skips every public-linkable item
-    (reason `public_sharing_disabled`); disabling is always allowed."""
+    (reason `public_sharing_disabled`); disabling is always allowed.
+
+    v1.1 M2: ENABLING a dashboard exposes its tiles anonymously — without
+    `proceed`, those dashboards land in `confirmations` (link not flipped)
+    with their charts named; the re-send carries `proceed=true`."""
     enable_allowed = org_allows_public_sharing(actor.org_id) if is_public else True
     for rtype, resource in resolved:
         if not get_resource_type(rtype).public_link:
@@ -947,11 +1273,18 @@ def _bulk_toggle_public(
             _skip(skipped, rtype, resource, "public_sharing_disabled")
             continue
         try:
-            set_public(actor, rtype, resource, is_public)
+            under_covering = set_public(actor, rtype, resource, is_public, proceed=proceed)
         except SharingValidationError:
             _skip(skipped, rtype, resource, "validation_error")
         else:
-            applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
+            if under_covering:
+                confirmations.append(
+                    BulkConfirmationItem(
+                        rtype=rtype, id=str(resource.pk), under_covering_charts=under_covering
+                    )
+                )
+            else:
+                applied.append(BulkItemRef(rtype=rtype, id=str(resource.pk)))
 
 
 def bulk_apply(
@@ -970,11 +1303,19 @@ def bulk_apply(
     confirmations: List[BulkConfirmationItem] = []
 
     if payload.action == "add_grant":
-        _bulk_add_grant(actor, payload.add_grant, resolved, applied, skipped)
+        _bulk_add_grant(actor, payload.add_grant, resolved, applied, skipped, confirmations)
     elif payload.action == "set_general":
         _bulk_set_general(actor, payload.set_general, resolved, applied, skipped, confirmations)
     elif payload.action == "toggle_public":
-        _bulk_toggle_public(actor, payload.toggle_public.is_public, resolved, applied, skipped)
+        _bulk_toggle_public(
+            actor,
+            payload.toggle_public.is_public,
+            resolved,
+            applied,
+            skipped,
+            confirmations,
+            proceed=bool(payload.toggle_public.proceed),
+        )
     else:  # the API layer validates first; this is defense in depth
         raise SharingValidationError(f"invalid action '{payload.action}'")
 

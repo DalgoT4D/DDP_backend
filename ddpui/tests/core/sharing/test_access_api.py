@@ -300,6 +300,19 @@ class TestGetAccess:
 # ================================================================================
 
 
+def _unwrap_grant_envelope(response):
+    """v1.1 M2 changed the POST grants envelope to GrantCreateResponse
+    (`{requires_confirmation, under_covering_charts, grant}` — mirroring the
+    narrowing contract's nesting). These helpers unwrap the committed grant
+    back to `data` so this file's many pre-M2 assertions keep reading the
+    (unchanged) grant-row contract. The confirmation contract itself is
+    covered in test_broadening_warnings.py."""
+    data = response.get("data")
+    if isinstance(data, dict) and "grant" in data and not data.get("requires_confirmation"):
+        return {**response, "data": data["grant"]}
+    return response
+
+
 def _post_grant(caller, rtype, resource, principal, permission="view", principal_type="user"):
     from ddpui.api.access_api import create_grant
     from ddpui.schemas.access_schema import GrantCreate
@@ -309,7 +322,9 @@ def _post_grant(caller, rtype, resource, principal, permission="view", principal
         principal_id=principal.id if hasattr(principal, "id") else principal,
         permission=permission,
     )
-    return create_grant(mock_request(caller), rtype, str(resource.pk), payload)
+    return _unwrap_grant_envelope(
+        create_grant(mock_request(caller), rtype, str(resource.pk), payload)
+    )
 
 
 def _post_grant_email(caller, rtype, resource, email, permission="view", invite_role=None):
@@ -319,7 +334,9 @@ def _post_grant_email(caller, rtype, resource, email, permission="view", invite_
     payload = GrantCreate(
         principal_type="user", email=email, permission=permission, invite_role=invite_role
     )
-    return create_grant(mock_request(caller), rtype, str(resource.pk), payload)
+    return _unwrap_grant_envelope(
+        create_grant(mock_request(caller), rtype, str(resource.pk), payload)
+    )
 
 
 class TestCreateGrant:

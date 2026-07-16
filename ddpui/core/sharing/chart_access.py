@@ -83,18 +83,47 @@ class ChartRenderContext:
     dashboard_id: Optional[int] = None
 
 
-def _dashboard_chart_ids(dashboard: Dashboard) -> Set[int]:
-    """Ids of every chart placed as a tile on this dashboard, across tabs.
-    Mirrors the tabs->components->config.chartId walk in
-    ChartService.get_chart_dashboards / DashboardService.get_dashboard_charts."""
+def chart_ids_in_tabs(tabs) -> Set[int]:
+    """Ids of every chart tile in a raw ``tabs`` JSON structure (a list of
+    tab dicts). THE one tabs->components->config.chartId walk (M2
+    consolidation) — ``dashboard_chart_ids`` wraps it for a Dashboard row;
+    ``update_dashboard``'s tile validation calls it on the incoming payload.
+
+    Fails CLOSED on malformed shapes (M0 review follow-up): a non-list
+    ``tabs``, a non-dict tab/component/config, or a non-integer ``chartId``
+    contributes nothing instead of raising — a membership check against the
+    result then denies, and a tile listing simply omits the junk entry.
+    ``bool`` is excluded explicitly (it subclasses ``int``; ``True`` must
+    not read as chart id 1)."""
     chart_ids: Set[int] = set()
-    for tab in dashboard.tabs or []:
-        for component in (tab.get("components") or {}).values():
-            if component.get("type") == DashboardComponentType.CHART.value:
-                chart_id = component.get("config", {}).get("chartId")
-                if chart_id is not None:
-                    chart_ids.add(chart_id)
+    if not isinstance(tabs, list):
+        return chart_ids
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        components = tab.get("components")
+        if not isinstance(components, dict):
+            continue
+        for component in components.values():
+            if not isinstance(component, dict):
+                continue
+            if component.get("type") != DashboardComponentType.CHART.value:
+                continue
+            config = component.get("config")
+            if not isinstance(config, dict):
+                continue
+            chart_id = config.get("chartId")
+            if isinstance(chart_id, int) and not isinstance(chart_id, bool):
+                chart_ids.add(chart_id)
     return chart_ids
+
+
+def dashboard_chart_ids(dashboard: Dashboard) -> Set[int]:
+    """Ids of every chart placed as a tile on this dashboard, across tabs.
+    Public as of M2: the single tile-walk shared by the render gate (below),
+    the public chart endpoints (M0 leak fix), the coverage service, and the
+    chart<->dashboard listing services."""
+    return chart_ids_in_tabs(dashboard.tabs)
 
 
 def _is_analyst_plus(orguser: OrgUser) -> bool:
@@ -127,7 +156,7 @@ def require_chart_view_access(
             dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
         except Dashboard.DoesNotExist:
             raise HttpError(404, "Dashboard not found") from None
-        if chart.id not in _dashboard_chart_ids(dashboard):
+        if chart.id not in dashboard_chart_ids(dashboard):
             raise HttpError(403, "You do not have access to this chart")
         if effective_permission(orguser, "dashboard", dashboard) is None:
             raise HttpError(403, "You do not have access to this chart")

@@ -8,6 +8,8 @@ from typing import Optional, List
 
 from ninja import Schema, Field
 
+from ddpui.schemas.access_schema import ChartCoverageOut
+
 
 # =============================================================================
 # Dashboard Schemas
@@ -36,7 +38,15 @@ class DashboardTabSchema(Schema):
 
 
 class DashboardUpdate(Schema):
-    """Schema for updating a dashboard"""
+    """Schema for updating a dashboard.
+
+    ``extend_chart_ids``/``proceed`` (v1.1 M2) are the embed-warning
+    confirmation: a tabs payload that ADDS charts under-covering the
+    dashboard's audience 409s with the coverage verdicts unless one of
+    them is present. ``extend_chart_ids`` (a subset of the warned charts;
+    caller needs Edit on each) extends those charts after the save;
+    ``proceed=true`` saves without touching them (exposure acknowledged —
+    tiles render inline regardless)."""
 
     title: Optional[str] = None
     description: Optional[str] = None
@@ -45,6 +55,8 @@ class DashboardUpdate(Schema):
     tabs: Optional[List[DashboardTabSchema]] = None
     filter_layout: Optional[str] = None
     is_published: Optional[bool] = None
+    extend_chart_ids: Optional[List[int]] = None
+    proceed: Optional[bool] = None
 
 
 class DashboardFilterResponse(Schema):
@@ -157,18 +169,30 @@ class LockResponse(Schema):
 
 
 class ShareToggle(Schema):
-    """Schema for toggling public sharing (used by dashboards and reports)"""
+    """Schema for toggling public sharing (used by dashboards and reports).
+
+    ``proceed`` (v1.1 M2, dashboards only): enabling a dashboard's public
+    link exposes every tile chart anonymously — the first enable call
+    (``proceed`` absent) returns ``requires_confirmation`` naming those
+    charts and flips nothing; re-send with ``proceed=true`` to commit.
+    Ignored for reports (frozen chart configs — nothing to expose) and for
+    disabling."""
 
     is_public: bool
+    proceed: Optional[bool] = None
 
 
 class ShareResponse(Schema):
-    """Schema for share response (used by dashboards and reports)"""
+    """Schema for share response (used by dashboards and reports).
+    ``requires_confirmation``/``under_covering_charts`` (v1.1 M2): the
+    dashboard-enable broadening warning — when set, nothing was flipped."""
 
     is_public: bool
     public_url: Optional[str] = None
     public_share_token: Optional[str] = None
     message: str
+    requires_confirmation: bool = False
+    under_covering_charts: List[ChartCoverageOut] = []
 
 
 class ShareStatus(Schema):

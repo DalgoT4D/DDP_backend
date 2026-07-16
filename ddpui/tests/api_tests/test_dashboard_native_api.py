@@ -406,18 +406,37 @@ class TestUpdateDashboard:
         assert excinfo.value.status_code == 404
 
     def test_update_dashboard_layout_and_components(self, orguser, sample_dashboard, seed_db):
-        """Test updating layout and components via tabs"""
+        """Test updating layout and components via tabs.
+
+        v1.1 M2: chart ids newly present in the tabs payload must be REAL
+        org-owned charts (blind ids used to be accepted as opaque JSON),
+        and embedding into this member-visible dashboard needs the embed
+        confirmation — `proceed=True` here (the warning flow itself is
+        covered in test_update_dashboard_tiles.py)."""
         from ddpui.schemas.dashboard_schema import DashboardTabSchema
 
         request = mock_request(orguser)
+
+        charts = [
+            Chart.objects.create(
+                title=f"Layout Chart {i}",
+                chart_type="bar",
+                schema_name="public",
+                table_name="t",
+                extra_config={},
+                created_by=orguser,
+                org=orguser.org,
+            )
+            for i in (1, 2)
+        ]
 
         new_layout = [
             {"i": "chart-1", "x": 0, "y": 0, "w": 6, "h": 4},
             {"i": "chart-2", "x": 6, "y": 0, "w": 6, "h": 4},
         ]
         new_components = {
-            "chart-1": {"type": "chart", "config": {"chartId": 1}},
-            "chart-2": {"type": "chart", "config": {"chartId": 2}},
+            "chart-1": {"type": "chart", "config": {"chartId": charts[0].id}},
+            "chart-2": {"type": "chart", "config": {"chartId": charts[1].id}},
         }
 
         payload = DashboardUpdate(
@@ -428,7 +447,8 @@ class TestUpdateDashboard:
                     layout_config=new_layout,
                     components=new_components,
                 )
-            ]
+            ],
+            proceed=True,
         )
 
         response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)

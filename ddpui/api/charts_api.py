@@ -410,24 +410,12 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
 
     logger.info(f"Map data overlay request: {payload}")
 
-    chart = None
-    if payload.chart_id is not None:
-        try:
-            chart = Chart.objects.get(id=payload.chart_id, org=orguser.org)
-        except Chart.DoesNotExist:
-            raise HttpError(404, "Chart not found") from None
-        if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
-            raise HttpError(403, "Payload does not match the referenced chart")
-        require_chart_view_access(orguser, chart, payload.dashboard_id)
-        if payload.dashboard_id is not None:
-            # Context-admitted (Task 6d): the dashboard framed this render, so
-            # the payload may only reference the saved chart's own columns
-            # (plus the dashboard's filter columns for filter clauses).
-            require_payload_within_chart_config(
-                chart, payload.dashboard_id, payload, payload.dashboard_filters
-            )
-    else:
-        require_analyst_plus(orguser)
+    # M2: the SAME gate ladder as every raw-payload endpoint —
+    # `_gate_raw_chart_payload` is the one definition (this endpoint carries
+    # chart_id/dashboard_id in the body rather than as query params).
+    chart = _gate_raw_chart_payload(
+        orguser, payload, payload.chart_id, payload.dashboard_id, payload.dashboard_filters
+    )
 
     try:
         # Get org warehouse
@@ -550,10 +538,65 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         raise HttpError(500, f"Error generating map data overlay: {str(e)}")
 
 
+def _gate_raw_chart_payload(
+    orguser,
+    payload: ChartDataPayload,
+    chart_id: Optional[int],
+    dashboard_id: Optional[int],
+    dashboard_filters=None,
+) -> Optional[Chart]:
+    """v1.1 M2 (promoted M1-review Important): the raw-payload warehouse
+    endpoints (`/chart-data/`, `/map-data/`, `/download-csv/`) were
+    Member-reachable (`can_view_charts`) and resolver-blind — an arbitrary
+    schema/table/metrics payload hit the warehouse with no per-chart check
+    at all. The preview siblings (`/chart-data-preview/`, its total-rows
+    twin, `/map-data-overlay/`) route through this SAME helper, so the gate
+    ladder has exactly one definition across all six raw-payload endpoints:
+
+    - WITH `chart_id`: org-scoped fetch (404), the payload's schema/table
+      must match the chart's own (403 — a chart you can see is not an
+      oracle for other tables), then `require_chart_view_access`
+      (dashboard context: membership + resolver view on the dashboard;
+      standalone: resolver view on the CHART). A dashboard context
+      additionally pins the payload's columns to the saved config
+      (`require_payload_within_chart_config`).
+    - WITHOUT `chart_id` (a raw, unsaved config — the chart BUILDER's
+      surface): Analyst+ only, the same role rank chart building requires
+      (`can_create_charts` is seeded Analyst+). Members lose nothing they
+      were meant to have — every Member-facing render path carries a
+      chart/dashboard context.
+
+    Returns the Chart when one framed the request (for the
+    `run_chart_query` choke-point), else None.
+    """
+    if chart_id is None:
+        require_analyst_plus(orguser)
+        return None
+    try:
+        chart = Chart.objects.get(id=chart_id, org=orguser.org)
+    except Chart.DoesNotExist:
+        raise HttpError(404, "Chart not found") from None
+    if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
+        raise HttpError(403, "Payload does not match the referenced chart")
+    require_chart_view_access(orguser, chart, dashboard_id)
+    if dashboard_id is not None:
+        require_payload_within_chart_config(chart, dashboard_id, payload, dashboard_filters)
+    return chart
+
+
 @charts_router.post("/chart-data/", response=ChartDataResponse)
 @has_permission(["can_view_charts"])
-def get_chart_data(request, payload: ChartDataPayload):
-    """Get chart data with ECharts configuration"""
+def get_chart_data(
+    request,
+    payload: ChartDataPayload,
+    chart_id: Optional[int] = None,
+    dashboard_id: Optional[int] = None,
+):
+    """Get chart data with ECharts configuration.
+
+    `chart_id`/`dashboard_id` are the same access-context query params as
+    the preview siblings — see `_gate_raw_chart_payload`. Without them the
+    request is the chart builder's raw-config path: Analyst+ only (M2)."""
     orguser = request.orguser
 
     # Log the incoming payload for debugging
@@ -563,6 +606,8 @@ def get_chart_data(request, payload: ChartDataPayload):
     logger.info(
         f"Columns - x_axis: {payload.x_axis}, y_axis: {payload.y_axis}, dimension_col: {payload.dimension_col}, metrics: {payload.metrics}"
     )
+
+    chart = _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id)
 
     # Validate user has access to schema/table
     if not has_schema_access(request, payload.schema_name):
@@ -582,8 +627,19 @@ def get_chart_data(request, payload: ChartDataPayload):
 
     # Use the common function to generate data and config
     try:
-        result = generate_chart_data_and_config(payload, org_warehouse)
+        # Routed through the run_chart_query choke-point (Layer 2/3 hook)
+        # when a saved chart framed the request.
+        execute = lambda: generate_chart_data_and_config(payload, org_warehouse, chart_id)
+        if chart is not None:
+            result = run_chart_query(
+                orguser, chart, ChartRenderContext(dashboard_id=dashboard_id), execute
+            )
+        else:
+            result = execute()
         return ChartDataResponse(data=result["data"], echarts_config=result["echarts_config"])
+    except HttpError:
+        # a future access check inside run_chart_query must surface as-is
+        raise
     except ValueError as e:
         logger.error(f"ValueError generating chart data: {str(e)}")
         raise HttpError(400, str(e))
@@ -624,25 +680,8 @@ def get_chart_data_preview(
 
     orguser = request.orguser
 
-    chart = None
-    if chart_id is not None:
-        try:
-            chart = Chart.objects.get(id=chart_id, org=orguser.org)
-        except Chart.DoesNotExist:
-            raise HttpError(404, "Chart not found") from None
-        if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
-            # require_chart_view_access only proves the viewer may see THIS
-            # chart -- not an oracle for querying whatever table the
-            # payload names.
-            raise HttpError(403, "Payload does not match the referenced chart")
-        require_chart_view_access(orguser, chart, dashboard_id)
-        if dashboard_id is not None:
-            # Context-admitted (Task 6d): the payload may only reference the
-            # saved chart's own columns (plus the framing dashboard's filter
-            # columns for filter clauses).
-            require_payload_within_chart_config(chart, dashboard_id, payload, dashboard_filters)
-    else:
-        require_analyst_plus(orguser)
+    # M2 consolidation: the same gate ladder as every raw-payload endpoint.
+    chart = _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id, dashboard_filters)
 
     # Validate user has access to schema/table
     if not has_schema_access(request, payload.schema_name):
@@ -770,22 +809,9 @@ def get_chart_data_preview_total_rows(
 
     orguser = request.orguser
 
-    chart = None
-    if chart_id is not None:
-        try:
-            chart = Chart.objects.get(id=chart_id, org=orguser.org)
-        except Chart.DoesNotExist:
-            raise HttpError(404, "Chart not found") from None
-        if payload.schema_name != chart.schema_name or payload.table_name != chart.table_name:
-            raise HttpError(403, "Payload does not match the referenced chart")
-        require_chart_view_access(orguser, chart, dashboard_id)
-        if dashboard_id is not None:
-            # Context-admitted (Task 6d): same column-set guard as the
-            # sibling /chart-data-preview/ -- a row COUNT under attacker
-            # filters is a probe primitive too.
-            require_payload_within_chart_config(chart, dashboard_id, payload, dashboard_filters)
-    else:
-        require_analyst_plus(orguser)
+    # M2 consolidation: the same gate ladder as every raw-payload endpoint
+    # (a row COUNT under attacker filters is a probe primitive too).
+    chart = _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id, dashboard_filters)
 
     # Validate user has access to schema/table
     if not has_schema_access(request, payload.schema_name):
@@ -962,9 +988,20 @@ def get_geojson_data(request, geojson_id: int):
 
 @charts_router.post("/map-data/", response=dict)
 @has_permission(["can_view_charts"])
-def generate_map_chart_data(request, payload: ChartDataPayload):
-    """Generate map chart data - simplified for basic map functionality"""
+def generate_map_chart_data(
+    request,
+    payload: ChartDataPayload,
+    chart_id: Optional[int] = None,
+    dashboard_id: Optional[int] = None,
+):
+    """Generate map chart data - simplified for basic map functionality.
+
+    M2: gated like every other raw-payload warehouse endpoint — this one
+    previously had NO schema/table/chart check at all beyond the GeoJSON
+    org check. See `_gate_raw_chart_payload`."""
     orguser = request.orguser
+
+    chart = _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id)
 
     # Import map services
     from ddpui.core.charts.maps_service import build_map_query, transform_data_for_map
@@ -992,9 +1029,17 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
     # Build query using existing service
     query_builder = build_map_query(payload, org_warehouse=org_warehouse)
 
-    # Execute query using existing service method
+    # Execute query using existing service method — routed through the
+    # run_chart_query choke-point (Layer 2/3 hook) when a saved chart
+    # framed the request.
     logger.info(f"Executing map query for geojson_id: {geojson_id}")
-    dict_results = charts_service.execute_query(warehouse, query_builder)
+    execute = lambda: charts_service.execute_query(warehouse, query_builder)
+    if chart is not None:
+        dict_results = run_chart_query(
+            orguser, chart, ChartRenderContext(dashboard_id=dashboard_id), execute
+        )
+    else:
+        dict_results = execute()
     logger.info(f"Map query results: {len(dict_results)} rows")
 
     # Transform data for map visualization - support both multiple metrics and legacy single metric
@@ -1096,10 +1141,22 @@ def stream_chart_data_csv(org_warehouse, payload: ChartDataPayload, page_size=50
 @charts_router.post("/download-csv/")
 @has_permission(["can_view_charts"])
 def download_chart_data_csv(
-    request, payload: ChartDataPayload, dashboard_filters: Optional[str] = None
+    request,
+    payload: ChartDataPayload,
+    dashboard_filters: Optional[str] = None,
+    chart_id: Optional[int] = None,
+    dashboard_id: Optional[int] = None,
 ):
-    """Stream and download chart data as CSV with all filters/aggregations applied (authenticated)"""
+    """Stream and download chart data as CSV with all filters/aggregations
+    applied (authenticated).
+
+    M2: gated like the other raw-payload warehouse endpoints — a CSV export
+    is the highest-bandwidth read of them all. See
+    `_gate_raw_chart_payload`. (The streaming generator itself stays
+    outside `run_chart_query` — the gate runs before the response starts.)"""
     orguser: OrgUser = request.orguser
+
+    _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id, dashboard_filters)
 
     # Validate user has access to schema/table
     if not has_schema_access(request, payload.schema_name):

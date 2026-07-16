@@ -19,6 +19,7 @@ from sqlalchemy.dialects import postgresql
 
 from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin, is_owner
 from ddpui.core.sharing.access_resolver import accessible_filter
+from ddpui.core.sharing.chart_access import dashboard_chart_ids
 from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.models.dashboard import (
     Dashboard,
@@ -980,15 +981,9 @@ class DashboardService:
         except Dashboard.DoesNotExist:
             raise ValueError("Dashboard not found")
 
-        chart_ids = []
-
-        # Extract chart IDs from tabs
-        for tab in dashboard.tabs or []:
-            for _, component_config in (tab.get("components") or {}).items():
-                if component_config.get("type") == DashboardComponentType.CHART.value:
-                    chart_id = component_config.get("config", {}).get("chartId")
-                    if chart_id:
-                        chart_ids.append(chart_id)
+        # Extract chart IDs from tabs -- the ONE consolidated tile-walk
+        # (chart_access.dashboard_chart_ids), fail-closed on malformed tabs.
+        chart_ids = dashboard_chart_ids(dashboard)
 
         # Fetch chart details
         charts = Chart.objects.filter(id__in=chart_ids, org=orguser.org)

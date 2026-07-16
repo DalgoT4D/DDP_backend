@@ -15,12 +15,15 @@ from ddpui.models.dashboard import (
     DashboardFilterType,
 )
 from ddpui.models.org_user import OrgUser
+from ddpui.models.visualization import Chart
 from ddpui.auth import has_permission
-from ddpui.core.sharing import sharing_actions
+from ddpui.core.sharing import coverage, sharing_actions
 from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.exceptions import SharingValidationError
+from ddpui.core.sharing.chart_access import chart_ids_in_tabs, dashboard_chart_ids
+from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
+from ddpui.schemas.access_schema import DashboardChartCoverageResponse, EmbedCoverageConfirmation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -129,10 +132,21 @@ def create_dashboard(request, payload: DashboardCreate):
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
 
 
-@dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
+@dashboard_native_router.get(
+    "/{dashboard_id}/chart-coverage/", response=DashboardChartCoverageResponse
+)
 @has_permission(["can_edit_dashboards"])
-def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
-    """Update dashboard with auto-save support"""
+def get_dashboard_chart_coverage(request, dashboard_id: int, chart_id: Optional[int] = None):
+    """Chart-coverage verdicts for this dashboard (v1.1 M2).
+
+    With ``chart_id``: that one chart's verdict against the dashboard's
+    current audience — the embed warning's pre-flight, so the chart need
+    not be a tile yet (it must be org-owned; cross-org is 404). Without:
+    every under-covering tile — the broadening panels' listing.
+
+    Gate: dashboard EDIT (slug + resolver) — the verdicts reveal chart
+    names and audience gaps, the same information the editor already sees.
+    """
     orguser: OrgUser = request.orguser
 
     try:
@@ -140,6 +154,101 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
     require_edit_access(orguser, "dashboard", dashboard)
+
+    if chart_id is not None:
+        chart = Chart.objects.filter(id=chart_id, org=orguser.org).first()
+        if chart is None:
+            raise HttpError(404, "Chart not found")
+        verdicts = coverage.coverage_for_charts(orguser, dashboard, [chart])
+    else:
+        verdicts = coverage.dashboard_under_covering_charts(orguser, dashboard)
+
+    return DashboardChartCoverageResponse(
+        dashboard_id=dashboard.id,
+        covered=all(v.covered for v in verdicts),
+        charts=verdicts,
+    )
+
+
+def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpdate):
+    """v1.1 M2: `update_dashboard` is a raw-JSON overwrite of `tabs` — without
+    this, ANY chart id could be embedded blind (cross-org, or one the caller
+    can't even view). For every chart id present in the incoming tabs but not
+    already a tile:
+
+    - it must be org-owned (400 — a malformed payload, mirroring the tile
+      validation the service's config validator does),
+    - the caller must resolve to >= view on it (403 — you can't embed what
+      you can't see),
+    - if it under-covers the dashboard's audience, the client must have
+      passed the embed-warning contract (`extend_chart_ids`/`proceed`);
+      otherwise the coverage verdicts come back in a 409 and nothing saves.
+      A CONFIRMED embed is never blocked (spec §3: inline rendering is the
+      rule; the warning is exposure honesty, not a lock).
+
+    Returns ``(confirmation, charts_to_extend)``: a non-None confirmation
+    means "reply 409, save nothing"; otherwise ``charts_to_extend`` is the
+    confirmed ``extend_chart_ids`` subset to extend after the save commits.
+    """
+    if payload.tabs is None:
+        return None, []
+
+    incoming_ids = chart_ids_in_tabs([tab.model_dump() for tab in payload.tabs])
+    new_ids = incoming_ids - dashboard_chart_ids(dashboard)
+    if not new_ids:
+        return None, []
+
+    charts = {c.id: c for c in Chart.objects.filter(id__in=new_ids, org=orguser.org)}
+    missing = sorted(new_ids - charts.keys())
+    if missing:
+        # cross-org ids are indistinguishable from nonexistent ones
+        raise HttpError(400, f"unknown chart ids in tabs payload: {missing}")
+
+    for chart in charts.values():
+        if effective_permission(orguser, "chart", chart) is None:
+            raise HttpError(403, "You do not have access to this chart")
+
+    verdicts = coverage.coverage_for_charts(orguser, dashboard, list(charts.values()))
+    under_covering = [v for v in verdicts if not v.covered]
+    if not under_covering:
+        return None, []
+
+    confirmed = payload.extend_chart_ids is not None or bool(payload.proceed)
+    if not confirmed:
+        # 409, not a 200-with-flag: the 200 response shape (DashboardResponse)
+        # stays stable for every already-working save path.
+        return EmbedCoverageConfirmation(under_covering_charts=under_covering), []
+
+    extend_ids = set(payload.extend_chart_ids or [])
+    warned_ids = {v.chart_id for v in under_covering}
+    if not extend_ids <= warned_ids:
+        raise HttpError(400, "extend_chart_ids must be a subset of the under-covering charts")
+    return None, [charts[chart_id] for chart_id in sorted(extend_ids)]
+
+
+@dashboard_native_router.put(
+    "/{dashboard_id}/", response={200: DashboardResponse, 409: EmbedCoverageConfirmation}
+)
+@has_permission(["can_edit_dashboards"])
+def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
+    """Update dashboard with auto-save support.
+
+    v1.1 M2: chart ids newly present in the ``tabs`` payload are validated
+    (org-owned + resolver view for the caller), and under-covering embeds
+    409 with the coverage verdicts unless the request carries the embed
+    confirmation (``extend_chart_ids``/``proceed`` — see
+    ``_validate_new_tile_charts``)."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    require_edit_access(orguser, "dashboard", dashboard)
+
+    confirmation, charts_to_extend = _validate_new_tile_charts(orguser, dashboard, payload)
+    if confirmation is not None:
+        return 409, confirmation
 
     try:
         dashboard = DashboardService.update_dashboard(
@@ -153,6 +262,16 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
 
+    if charts_to_extend:
+        try:
+            sharing_actions.extend_charts_to_cover_dashboard(orguser, dashboard, charts_to_extend)
+        except SharingPermissionError as err:
+            # The embed itself is saved (never blocked once confirmed); the
+            # extend half needs Edit on each chart and fails loudly.
+            raise HttpError(403, err.message) from err
+
+    # plain (not `200, ...`) so ninja still infers 200 and direct-call tests
+    # keep receiving the DashboardResponse itself
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
 
 
@@ -485,10 +604,24 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     # The actual flip (kill-switch check, token minting, timestamps) lives in
     # `sharing_actions.set_public` -- the same function the bulk toggle_public
     # action uses -- so the kill-switch rule is defined in exactly one place.
+    # v1.1 M2: enabling exposes every tile anonymously -- the first call
+    # (no `proceed`) returns the under-covering charts named and flips
+    # NOTHING; the client re-sends with `proceed=true` (Cancel is the
+    # default in the UI). Public exposure is not extendable.
     try:
-        sharing_actions.set_public(orguser, "dashboard", dashboard, is_public)
+        under_covering = sharing_actions.set_public(
+            orguser, "dashboard", dashboard, is_public, proceed=bool(payload.proceed)
+        )
     except SharingValidationError as err:
         raise HttpError(403, err.message) from err
+
+    if under_covering:
+        return DashboardShareResponse(
+            is_public=dashboard.is_public,
+            message="Confirmation required: enabling the public link exposes charts inline",
+            requires_confirmation=True,
+            under_covering_charts=under_covering,
+        )
 
     # Build response
     response_data = {

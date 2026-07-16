@@ -23,7 +23,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
 from ddpui.api.charts_api import MapDataOverlayPayload
 from ddpui.core.charts import charts_service
-from ddpui.core.sharing.chart_access import _dashboard_chart_ids
+from ddpui.core.sharing.chart_access import dashboard_chart_ids
 
 from ddpui.api.dashboard_native_api import (
     DashboardResponse,
@@ -69,13 +69,13 @@ def _get_public_dashboard_chart(dashboard: Dashboard, chart_id: int) -> Chart:
     guessing/iterating ``chart_id`` -- not just the charts actually placed
     on that public dashboard. Reuses the same tabs->components->config.chartId
     walk the authenticated path already gates on
-    (``ddpui.core.sharing.chart_access._dashboard_chart_ids``), so there's no
+    (``ddpui.core.sharing.chart_access.dashboard_chart_ids``), so there's no
     fourth copy of that membership walk.
 
     Raises ``Exception`` (caught by each caller's existing generic handler)
     if the chart isn't org-owned or isn't a tile on this dashboard.
     """
-    if chart_id not in _dashboard_chart_ids(dashboard):
+    if chart_id not in dashboard_chart_ids(dashboard):
         raise Exception("Chart not found in dashboard's organization")
     chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
     if not chart:
@@ -970,7 +970,7 @@ def download_public_chart_data_csv(
 
         # Get the chart and verify it belongs to the dashboard's organization
         # AND is actually a tile on it (not just any chart in the org).
-        if chart_id not in _dashboard_chart_ids(dashboard):
+        if chart_id not in dashboard_chart_ids(dashboard):
             raise HttpError(404, "Chart not found in dashboard's organization")
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
