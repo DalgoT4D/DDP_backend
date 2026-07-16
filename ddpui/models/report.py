@@ -62,10 +62,8 @@ class ReportSnapshot(models.Model):
     public_access_count = models.IntegerField(default=0)
     last_public_accessed = models.DateTimeField(null=True, blank=True)
 
-    # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
-    # D1: per-role levels, replacing the old audience+level pair -- Admins
-    # are never stored here (always full access), Analysts and Members each
-    # get their own independent level.
+    # General access — per-role sharing levels. Admins are never stored here;
+    # Analysts and Members each get an independent level.
     analyst_level = models.CharField(
         max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
     )

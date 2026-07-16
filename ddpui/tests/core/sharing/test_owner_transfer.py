@@ -1,4 +1,4 @@
-"""Task 12: ownership transfer — `POST /api/access/{rtype}/{resource_id}/owner/`.
+"""Ownership transfer — `POST /api/access/{rtype}/{resource_id}/owner/`.
 
 Gate: CURRENT owner (`ownership.can_delete_resource` semantics: owner FK,
 `created_by` fallback) OR admin/super-admin, PLUS the rtype's share-permission

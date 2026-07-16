@@ -1,4 +1,4 @@
-"""Task 5b: close the sub-resource WRITE gap the Task 5 review found.
+"""Close the sub-resource WRITE gap the Task 5 review found.
 
 Task 5 added `require_edit_access` (resolver-edit object check) after the
 slug gate on the 5 main resource UPDATE endpoints. It missed that several

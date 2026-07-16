@@ -1,4 +1,4 @@
-"""Task 17: POST /api/access/bulk/ — one action applied across a selection
+"""POST /api/access/bulk/ — one action applied across a selection
 of resources (mixed rtypes allowed).
 
 Bulk semantics are apply-where-possible: every item is independently

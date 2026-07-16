@@ -3,12 +3,8 @@ from ddpui.models.org_user import OrgUser
 
 
 def is_admin_or_super_admin(orguser: OrgUser) -> bool:
-    """True if orguser holds the admin or super-admin role (org-level override).
-
-    Used to bypass Resource Sharing's `accessible_filter` on list endpoints —
-    the filter is deliberately not admin-aware (plan Sec 4.4), so callers who
-    need "admin sees everything in-org" must check this themselves.
-    """
+    """True if orguser holds the admin or super-admin role. `accessible_filter`
+    is deliberately not admin-aware, so list endpoints check this themselves."""
     return orguser.new_role is not None and orguser.new_role.slug in (
         ADMIN_ROLE,
         SUPER_ADMIN_ROLE,
@@ -16,20 +12,9 @@ def is_admin_or_super_admin(orguser: OrgUser) -> bool:
 
 
 def is_owner(orguser: OrgUser, resource) -> bool:
-    """Return True if orguser is literally the resource's owner.
-
-    Allowed when:
-    - orguser is the resource's owner (``owner_id``), OR
-    - ``owner_id`` is null and orguser created the resource (``created_by_id``) --
-      a fallback for rows that predate the ``owner`` column or whose owner was
-      cleared by a SET_NULL on user deletion.
-
-    Unlike ``can_delete_resource``, this has NO admin override -- it answers
-    "does this viewer own this resource", not "may this viewer delete it".
-    Mirrors ``ddpui.core.sharing.access_resolver._is_owner``. Uses
-    getattr-safe access since some resources passed in (e.g. legacy mocks
-    in tests) may not define ``owner``.
-    """
+    """True if orguser is literally the resource's owner: ``owner_id``, falling
+    back to ``created_by_id`` when owner is null. No admin override, unlike
+    ``can_delete_resource``. Mirrors ``access_resolver._is_owner``."""
     owner_id = getattr(resource, "owner_id", None)
     if owner_id is not None:
         return owner_id == orguser.id

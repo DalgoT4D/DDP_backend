@@ -1,28 +1,8 @@
-"""The doorman: a re-usable 403 gate for content sub-endpoints (Task 3b).
+"""Reusable HTTP gates for by-id endpoints: view/edit/owner checks and the
+dynamic share-permission check for routes generic over ``{rtype}``.
 
-Task 3 inlined ``if effective_permission(...) is None: raise HttpError(403,
-"You do not have access to this <noun>")`` at the 5 single-resource detail
-GETs. Task 3b repeats that exact check across every other by-id
-sub-endpoint that serves a resource's content (chart/KPI data, previews,
-consumers, logs, notes, filters, ...) so the check is pulled into one
-function here instead of re-typing (and risking re-wording) it a dozen
-times across 5 files.
-
-Task 5 adds the two mutation-side gates:
-
-- ``require_edit_access`` — resolver-edit object check for update endpoints
-  and the ``/api/access/*`` mutation routes.
-- ``require_share_permission`` — the dynamic mirror of ``@has_permission``
-  for routes generic over ``{rtype}``: a static decorator literal cannot
-  vary per rtype, so the slug is read from the registry entry
-  (``share_permission_slug``) and checked against ``request.permissions``
-  (the same Redis-backed set the decorator reads) with identical observable
-  semantics — a missing slug raises ``HttpError(404, "unauthorized")``,
-  exactly what ``@has_permission`` raises.
-
-This module is NOT the resolver — it never decides access, it only raises.
-``access_resolver.effective_permission`` remains the single source of truth
-for the decision.
+This module never decides access, it only raises —
+``access_resolver.effective_permission`` stays the single source of truth.
 """
 
 from ninja.errors import HttpError
@@ -32,11 +12,9 @@ from ddpui.core.ownership import can_delete_resource
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.shareable_types import get_resource_type
 
-# Matches the exact wording Task 3 used at each detail GET. "kpi" -> "KPI"
-# is deliberate: that's the casing in kpi_api.get_kpi's message.
+# Matches the exact wording of each detail GET's 403; "kpi" -> "KPI" is
+# deliberate casing.
 _NOUN_BY_RTYPE = {
-    # "chart" matches chart_access's existing wording: "You do not have
-    # access to this chart".
     "chart": "chart",
     "dashboard": "dashboard",
     "report": "report",
@@ -48,41 +26,32 @@ _NOUN_BY_RTYPE = {
 
 def require_view_access(viewer, rtype: str, resource) -> None:
     """Raise ``HttpError(403)`` unless ``viewer`` has at least view access
-    to ``resource``. No-op (returns None) for admins, owners, and anyone
-    else ``effective_permission`` admits — mirrors the inline gate Task 3
-    added to the 5 detail GETs.
-    """
+    to ``resource``."""
     if effective_permission(viewer, rtype, resource) is None:
         noun = _NOUN_BY_RTYPE.get(rtype, rtype)
         raise HttpError(403, f"You do not have access to this {noun}")
 
 
 def require_edit_access(viewer, rtype: str, resource) -> None:
-    """Raise ``HttpError(403)`` unless ``viewer`` resolves to **edit** on
-    ``resource``. Used by resource update endpoints (after their slug gate)
-    and by the ``/api/access/*`` mutation routes."""
+    """Raise ``HttpError(403)`` unless ``viewer`` resolves to edit on ``resource``."""
     if effective_permission(viewer, rtype, resource) != "edit":
         noun = _NOUN_BY_RTYPE.get(rtype, rtype)
         raise HttpError(403, f"You do not have edit access to this {noun}")
 
 
 def require_owner_access(viewer, rtype: str, resource) -> None:
-    """Raise ``HttpError(403)`` unless ``viewer`` is the CURRENT owner
-    (owner FK, ``created_by`` fallback) or admin/super-admin. Stricter than
-    ``require_edit_access``: general access and grant-derived "edit" never
-    satisfy this -- only literal ownership or the org-wide admin override
-    do. Used by ownership transfer (Task 12): reuses
-    ``ownership.can_delete_resource``, which encodes exactly this rule."""
+    """Raise ``HttpError(403)`` unless ``viewer`` is the current owner or an
+    admin. Stricter than ``require_edit_access``: grant-derived "edit" never
+    satisfies this."""
     if not can_delete_resource(viewer, resource):
         noun = _NOUN_BY_RTYPE.get(rtype, rtype)
         raise HttpError(403, f"You do not have owner access to this {noun}")
 
 
 def require_share_permission(request, rtype: str) -> None:
-    """Dynamic ``@has_permission([...])`` for routes generic over ``{rtype}``:
-    checks the rtype's ``share_permission_slug`` (registry data) against
-    ``request.permissions``. Mirrors the decorator's observable behavior —
-    any failure raises ``HttpError(404, "unauthorized")``."""
+    """Dynamic ``@has_permission`` for routes generic over ``{rtype}``: checks
+    the registry's ``share_permission_slug`` against ``request.permissions``.
+    Any failure raises the decorator's exact ``HttpError(404, "unauthorized")``."""
     entry = get_resource_type(rtype)
     slug = entry.share_permission_slug if entry else None
     if slug is None or not request.permissions or not set(request.permissions).issuperset({slug}):

@@ -133,11 +133,8 @@ class OrgUserResponse(Schema):
     """structure for returning an OrgUser in an http response"""
 
     user_id: int
-    # Task 6b Part B: the OrgUser PK -- distinct from `user_id` (the Django
-    # User FK). Resource Sharing's grant endpoints (`POST
-    # /api/access/.../grants/` `principal_id`, `POST
-    # /api/groups/{id}/members/` `orguser_id`) key principals by this, not
-    # by `user_id`. Purely additive.
+    # The OrgUser PK — distinct from `user_id` (the Django User FK). The
+    # sharing/group endpoints key principals by this, not by `user_id`.
     orguser_id: int
     email: str
     org: Optional[OrgSchema] = None
@@ -152,16 +149,14 @@ class OrgUserResponse(Schema):
     subscription_plan: str | None = None
     work_domain: str | None = None
     has_seen_rbac_notice: bool = False
-    # Phase A / A1 (design alignment): the inviter's email for the "Created
-    # By" column on the People table; None when the user joined without an
-    # invitation (e.g. the org's first admin). Only populated by
+    # The inviter's email for the People table's "Created By" column; None
+    # when the user joined without an invitation. Only populated by
     # GET /organizations/users.
     invited_by: str | None = None
 
 
 def default_invitation_expiry():
-    """30 days from now — the default (and resend-refreshed) `Invitation.expires_at`
-    (Task 9 / plan Sec 4.6 invites)."""
+    """30 days from now — the default (and resend-refreshed) `Invitation.expires_at`."""
     return timezone.now() + timedelta(days=30)
 
 

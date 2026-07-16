@@ -1,19 +1,11 @@
-"""Resource Sharing grants: the ``ResourceShare`` model (Layer 2 of Resource
-Sharing — explicit per-principal grants, on top of Layer 1's general access).
+"""The ``ResourceShare`` model: one row = one per-principal grant (view/edit)
+on a specific resource.
 
-One row = one grant: a principal (user, group, or in future a value like an
-audience tier) has some permission (view/edit) on a specific resource.
-
-The resource pointer is deliberately soft: ``resource_type`` + ``resource_id``
-(a string), not a FK to Dashboard/ReportSnapshot/etc. This is a Layer 2/3
-contract — ``resource_id`` needs to hold UUID pks and warehouse
-"schema.table" identifiers later, not just the integer pks used today. Do
-not "improve" this into a FK, and do not add a ``via_container`` field —
-both are out of scope for this task.
-
-The principal is similarly an open enum (``principal_type``): "user" and
-"group" are matched by the access resolver in v1; "audience" is reserved
-for a future deferred behavior and is never matched today.
+The resource pointer is deliberately soft — ``resource_type`` + a string
+``resource_id``, not a FK — because it must later hold UUID pks and
+warehouse "schema.table" identifiers. Do not "improve" this into a FK.
+``principal_type`` is an open enum: "user" and "group" are matched by the
+resolver; "audience" is reserved and never matched today.
 """
 
 from django.db import models

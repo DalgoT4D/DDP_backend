@@ -1,4 +1,4 @@
-"""Task 15 (Milestone 9): request-access backend -- request -> owner
+"""Request-access backend -- request -> owner
 approves -> grant + notification.
 
 Endpoints:

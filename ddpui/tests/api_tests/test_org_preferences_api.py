@@ -1,4 +1,4 @@
-"""Task 11 Part B: `/api/orgpreferences` exposure of the three Resource
+"""`/api/orgpreferences` exposure of the three Resource
 Sharing fields (allow_public_sharing/default_analyst_level/
 default_member_level -- D1: per-role level defaults, replacing the old
 default_general_audience/default_general_level pair).

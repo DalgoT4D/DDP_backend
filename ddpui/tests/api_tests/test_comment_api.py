@@ -777,7 +777,7 @@ class TestDeleteComment:
 
 # ================================================================================
 # Test: anonymous/public viewers stay blocked (comments live behind the
-# authenticated router — Task 14)
+# authenticated router)
 # ================================================================================
 
 

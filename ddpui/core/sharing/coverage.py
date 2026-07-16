@@ -1,41 +1,20 @@
-"""The honesty ledger: READ-ONLY chart-coverage verdicts for dashboards
-(v1.1 Milestone 2).
+"""Read-only chart-coverage verdicts for dashboards.
 
-A chart renders INLINE wherever its containing dashboard renders (spec §3 —
-"no locked tiles, ever"), so a dashboard's audience can be WIDER than a
-tile chart's own stated audience. This module answers, for one dashboard
-and a set of charts, exactly where the two diverge:
+A chart renders inline wherever its dashboard renders, so a dashboard's
+audience can be wider than a tile chart's own. For one dashboard and a set
+of charts this module reports where the two diverge:
 
-- **role gap** — a role the dashboard's general access admits (level !=
-  "none") that the chart's own levels don't. The analyst gap is
-  *extendable* (raise ``chart.analyst_level``); the member gap is
-  *informational* in v1.1 (``member_level`` is pinned to "none" on charts —
-  Member chart sharing is deferred), so it can only be acknowledged.
-- **principal gap** — an active direct grant on the dashboard (user or
-  group) whose principal does not resolve to >= view on the chart
-  standalone. User principals with the Member role are flagged
-  ``skipped_member`` (extend never copies them — spec §3); everything else
-  is extendable (copy the principal onto the chart at View).
-- **public exposure** — the dashboard's public link is on, so the chart is
-  anonymously visible inline. Never extendable (charts have no public
-  links), only acknowledgeable.
-
-Two consumers:
-
-1. ``GET /api/dashboards/{id}/chart-coverage/`` — the embed warning's
-   pre-flight (single chart) and the whole-dashboard listing (all
-   under-covering tiles) the broadening panels show.
-2. The dashboard-widening warnings (``sharing_actions``): action-scoped
-   variants that name only the charts THE ACTION would newly expose.
+- role gap: a role the dashboard admits that the chart's levels don't
+  (analyst gaps are extendable; member gaps are informational — charts
+  can't admit Members yet).
+- principal gap: a dashboard grant whose principal can't see the chart
+  standalone (Member principals flagged ``skipped_member``, never copied).
+- public exposure: the dashboard's public link is on — acknowledgeable only,
+  charts have no public links.
 
 Deliberately dashboard+chart specific: dashboards are the only container
-rtype (reports copy chart configs by value and are immune), so this is
-domain policy, not per-rtype branching the registry should hide.
-
-All functions here are pure reads over batched queries — one pass over the
-tiles, a fixed number of queries regardless of tile/grant counts (no N+1):
-charts, dashboard grants, chart grants, principal users, principal group
-memberships, and the viewer's own chart grants.
+rtype (reports copy chart configs by value). Pure reads over batched
+queries — a fixed number of queries regardless of tile/grant counts.
 """
 
 from typing import Dict, Iterable, List, Optional, Set
@@ -156,17 +135,15 @@ class _CoverageContext:
     # -- per-chart rules ---------------------------------------------------
 
     def chart_covers_orguser(self, chart: Chart, principal: OrgUser) -> bool:
-        """Does ``principal`` resolve to >= view on ``chart`` STANDALONE?
-        Mirrors ``access_resolver.effective_permission``'s ladder on batched
-        data (admin/owner/general/grants, with the v1.1 Member exclusion for
-        charts) — kept in lockstep with the resolver's chart rules."""
+        """Does `principal` resolve to >= view on `chart` standalone? Mirrors
+        `access_resolver.effective_permission` on batched data — keep in lockstep."""
         slug = _role_slug(principal)
         if slug in _ADMIN_SLUGS:
             return True
         if _is_owner(principal, chart):
             return True
-        # v1.1: Member viewers get nothing from general access or grants on
-        # charts (member_sharing=False) — resolver rule, mirrored here.
+        # Member viewers get nothing from general access or grants on charts
+        # (member_sharing=False) — resolver rule, mirrored here.
         if slug == MEMBER_ROLE:
             return False
         if slug == ANALYST_ROLE and _level_admits(chart.analyst_level):
@@ -177,15 +154,12 @@ class _CoverageContext:
         return bool(principal_groups & self.chart_group_grants.get(chart.id, set()))
 
     def chart_covers_group(self, chart: Chart, group_id: int) -> bool:
-        """A group principal is only credibly covered by a matching group
-        grant on the chart — a group can mix roles, so general access can't
-        vouch for all its members. Over-warning is the safe default (same
-        call the narrowing prompt made for groups)."""
+        """A group principal is only covered by a matching group grant on the
+        chart — a group can mix roles, so general access can't vouch for all members."""
         return group_id in self.chart_group_grants.get(chart.id, set())
 
     def viewer_can_edit_chart(self, chart: Chart) -> bool:
-        """resolver-edit on the chart for the CALLING viewer, off batched
-        data — drives the warning UI's extend affordance per chart."""
+        """Resolver-edit on the chart for the calling viewer, off batched data."""
         slug = _role_slug(self.viewer)
         if slug in _ADMIN_SLUGS:
             return True
@@ -199,7 +173,7 @@ class _CoverageContext:
 
     def principal_gaps_for_chart(self, chart: Chart) -> List[PrincipalGapOut]:
         """Every dashboard direct-grant principal (deduplicated) that this
-        chart does not admit standalone — the verdict's principal-gap list."""
+        chart does not admit standalone."""
         gaps: List[PrincipalGapOut] = []
         seen: Set[tuple] = set()
         for share in self.dashboard_grants:
@@ -261,14 +235,13 @@ def _verdict(
 
 
 def _full_verdict(ctx: _CoverageContext, chart: Chart) -> ChartCoverageOut:
-    """Coverage against the dashboard's CURRENT audience — the embed
-    pre-flight and the whole-dashboard listing."""
+    """Coverage against the dashboard's current audience."""
     dashboard = ctx.dashboard
     role_gaps: List[str] = []
     if _level_admits(dashboard.analyst_level) and not _level_admits(chart.analyst_level):
         role_gaps.append(ANALYST_GAP)
-    # member_level is pinned to "none" on charts in v1.1, so a
-    # member-visible dashboard always exposes past the chart's own levels.
+    # member_level is pinned to "none" on charts, so a member-visible
+    # dashboard always exposes past the chart's own levels.
     if _level_admits(dashboard.member_level):
         role_gaps.append(MEMBER_GAP)
     return _verdict(
@@ -290,9 +263,7 @@ def _tile_charts(dashboard: Dashboard) -> List[Chart]:
 def coverage_for_charts(
     viewer: OrgUser, dashboard: Dashboard, charts: Iterable[Chart]
 ) -> List[ChartCoverageOut]:
-    """Full verdicts (current dashboard audience) for specific charts —
-    the embed pre-flight (charts about to be added need not be tiles yet)
-    and ``update_dashboard``'s tile validation."""
+    """Full verdicts for specific charts — the charts need not be tiles yet."""
     charts = list(charts)
     ctx = _CoverageContext(viewer, dashboard, charts)
     return [_full_verdict(ctx, chart) for chart in charts]
@@ -301,8 +272,7 @@ def coverage_for_charts(
 def dashboard_under_covering_charts(
     viewer: OrgUser, dashboard: Dashboard
 ) -> List[ChartCoverageOut]:
-    """Every tile of ``dashboard`` whose verdict is not ``covered`` — the
-    whole-dashboard (bulk) mode of the coverage endpoint."""
+    """Every tile of `dashboard` whose verdict is not `covered`."""
     return [
         v for v in coverage_for_charts(viewer, dashboard, _tile_charts(dashboard)) if not v.covered
     ]
@@ -310,19 +280,16 @@ def dashboard_under_covering_charts(
 
 # ================================================================================
 # Action-scoped variants — which tiles would THIS widening newly expose?
-# Used by the broadening warnings so the prompt names only the charts the
-# action is about, not every gap the dashboard already had.
+# The prompt names only the charts the action is about, not every existing gap.
 # ================================================================================
 
 
 def under_covering_for_general_widening(
     viewer: OrgUser, dashboard: Dashboard, new_analyst_level: str, new_member_level: str
 ) -> List[ChartCoverageOut]:
-    """Tiles a general-access RAISE would expose. Analyst raise: tiles whose
-    ``analyst_level`` is "none" (extendable). Member raise: every tile
-    (informational — charts can't admit Members in v1.1). A raise within an
-    already-admitted role (view -> edit) still checks, per the milestone
-    contract ("raising a role level"), against the post-change levels."""
+    """Tiles a general-access raise would expose. Analyst raise: tiles whose
+    `analyst_level` is "none". Member raise: every tile (charts can't admit
+    Members). A view -> edit raise still checks against the post-change levels."""
     analyst_widened = ACCESS_LEVEL_RANK.get(new_analyst_level, 0) > ACCESS_LEVEL_RANK.get(
         dashboard.analyst_level, 0
     )
@@ -357,22 +324,17 @@ def under_covering_for_new_principal(
     principal_group: Optional[UserGroup] = None,
     invite_role: Optional[str] = None,
 ) -> List[ChartCoverageOut]:
-    """Tiles a NEW direct grant on the dashboard would expose to exactly
-    that principal. Pass exactly one of ``principal_orguser`` /
-    ``principal_group`` / ``invite_role`` (the unknown-email invite path —
-    no OrgUser exists yet, so coverage is judged by the role the invite
-    would mint: admins always covered, analysts by the chart's
-    ``analyst_level``, members never in v1.1)."""
+    """Tiles a new direct grant on the dashboard would expose to that principal.
+    Pass exactly one of `principal_orguser` / `principal_group` / `invite_role`
+    (the unknown-email path — coverage judged by the role the invite would mint)."""
     charts = _tile_charts(dashboard)
     if not charts:
         return []
     ctx = _CoverageContext(viewer, dashboard, charts)
 
     if principal_orguser is not None:
-        # The context only batch-loads group memberships for the dashboard's
-        # EXISTING audience — a brand-new principal's memberships must be
-        # loaded too, or a chart that covers them via a group grant would
-        # falsely warn (resolver parity: one extra query).
+        # The context only batch-loads memberships for the existing audience —
+        # load the new principal's too, or a group-covered chart would falsely warn.
         ctx.groups_by_orguser[principal_orguser.id] = set(
             UserGroupMember.objects.filter(
                 orguser_id=principal_orguser.id, status=UserGroupMemberStatus.ACTIVE
@@ -421,9 +383,8 @@ def under_covering_for_new_principal(
 def under_covering_for_public_enable(
     viewer: OrgUser, dashboard: Dashboard
 ) -> List[ChartCoverageOut]:
-    """Every tile, flagged with the public-exposure class — enabling the
-    public link exposes ALL inline content anonymously (informational, not
-    extendable; charts have no public links in v1.1)."""
+    """Every tile, flagged as public exposure — enabling the public link
+    exposes all inline content anonymously."""
     charts = _tile_charts(dashboard)
     if not charts:
         return []

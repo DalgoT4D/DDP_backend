@@ -131,16 +131,9 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
 
 @orgpreference_router.put("/sharing/")
 def update_sharing_preferences(request, payload: UpdateSharingPreferencesSchema):
-    """Update org-level Resource Sharing preferences (Task 11 Part B):
-    the public-sharing kill switch and the default General access newly
-    created resources adopt. Admin-gated -- unlike the general-purpose
-    `/` GET/POST above, sharing is an org-wide policy lever, so only an
-    org admin (or super-admin) may change it, mirroring the admin-only
-    gating already used for LLM/Discord settings in this router (there
-    via `@has_permission`; here via a direct role check since minting a
-    new RBAC permission slug would require a data migration seeding it
-    into existing databases, out of scope for this task).
-    """
+    """Update org-level Resource Sharing preferences: the public-sharing kill
+    switch and the default general access new resources adopt. Admin-only via
+    a direct role check — an org-wide policy lever, not a per-user setting."""
     orguser: OrgUser = request.orguser
     if not is_admin_or_super_admin(orguser):
         raise HttpError(403, "Only org admins can edit sharing settings")

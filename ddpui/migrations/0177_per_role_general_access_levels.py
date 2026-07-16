@@ -1,34 +1,11 @@
-# D1 (permission-model rework): replace the single (audience, level) general
-# access pair with two independent per-role levels -- analyst_level and
-# member_level -- at both layers: the 5 shareable resource models (Dashboard,
-# ReportSnapshot, Metric, KPI, Alert) and the OrgPreferences org-wide default.
+# Replace the single (audience, level) general-access pair with independent
+# per-role levels (analyst_level, member_level) on the 5 shareable models and
+# the OrgPreferences defaults.
 #
-# The old audience+level pair could never express "Analyst=Edit, Member=View"
-# -- an "analysts_plus" audience gave everyone at or above that tier the SAME
-# single level. Two independent per-role fields make that storable.
-#
-# Operation order matters: AddField (new columns, default "none") runs BEFORE
-# the RunPython data migration (which needs the OLD columns still present to
-# read from) BEFORE RemoveField (old columns). Reversing re-adds the old
-# columns, re-populates them from the new ones (which are still present at
-# that point), then drops the new columns.
-#
-# Forward mapping (old -> new), applied identically to both layers:
-#   private            -> (none, none)
-#   admins              -> (none, none)
-#   analysts_plus(X)    -> (X, none)
-#   all_users(X)        -> (X, X)
-#
-# Reverse mapping (best-effort, LOSSY -- documented per D1 brief):
-#   (none, none)  -> private
-#   (X, none)     -> analysts_plus X            [X != none]
-#   (X, X)        -> all_users X                [X != none]
-#   anything else (member has a level the analyst doesn't share, e.g.
-#   (edit, view), (view, edit), or a level on member_level with
-#   analyst_level="none") -> analysts_plus edit -- the old model has no way
-#   to express "Member sees something Analyst doesn't" or "Analyst and
-#   Member both have access but at different levels", so this collapses
-#   every such case to the same lossy fallback.
+# Operation order matters: AddField runs BEFORE the RunPython data migration
+# (which reads the OLD columns) BEFORE RemoveField. The reverse mapping is
+# best-effort and lossy — mixed cases the old model can't express collapse
+# to analysts_plus/edit (see REVERSE_PAIR).
 
 from django.db import migrations, models
 

@@ -1,4 +1,4 @@
-"""Task 4: the chart render-path contract (plan Sec 3.3).
+"""The chart render-path contract (plan Sec 3.3).
 
 Charts are NOT shareable — a chart is visible wherever its dashboards are
 visible. The two by-id chart GETs (`/api/charts/{id}/` detail and

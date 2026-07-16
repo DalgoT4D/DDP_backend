@@ -1,4 +1,4 @@
-"""Task 7 Part B: the two group-management permission slugs — seed fixtures
+"""The two group-management permission slugs — seed fixtures
 (fresh installs) and the 0173 data migration (existing databases).
 
 Mirrors ddpui/tests/core/sharing/test_share_permission_seed.py exactly.

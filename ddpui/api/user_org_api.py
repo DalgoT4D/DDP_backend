@@ -215,9 +215,8 @@ def get_organization_users(request):
     # warehouse
     warehouse = OrgWarehouse.objects.filter(org=org).first()
 
-    # Phase A / A1: map invited-email -> inviter's email in one query (no
-    # N+1); iterate oldest-first so the most recent invitation wins on
-    # duplicate emails
+    # Map invited-email -> inviter's email in one query; iterate oldest-first
+    # so the most recent invitation wins on duplicate emails.
     inviter_email_map: dict[str, str] = {}
     for invitation in (
         Invitation.objects.filter(invited_by__org=org)

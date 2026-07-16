@@ -1,4 +1,4 @@
-"""Task 5: the sharing mutations — `/api/access/*` endpoints backed by
+"""The sharing mutations — `/api/access/*` endpoints backed by
 `sharing_actions.py`.
 
 Route functions are called directly (as the rest of the API test suite does)
@@ -530,7 +530,7 @@ class TestCreateGrant:
 
 
 # ================================================================================
-# POST /api/access/{rtype}/{resource_id}/grants/ — email path (Task 9)
+# POST /api/access/{rtype}/{resource_id}/grants/ — email path
 # ================================================================================
 
 
@@ -592,7 +592,7 @@ class TestCreateGrantByEmail:
         invitation = Invitation.objects.get(invited_email="admin-invitee@test.com")
         assert invitation.invited_new_role.slug == MEMBER_ROLE
 
-    # ---- invite_role (Phase C3): the share-flow invite may carry a role ----
+    # ---- invite_role: the share-flow invite may carry a role ----
 
     @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
     def test_non_admin_invite_role_escalation_403_and_nothing_created(self, org, analyst):
@@ -661,7 +661,7 @@ class TestCreateGrantByEmail:
         assert excinfo.value.status_code == 400
         assert not Invitation.objects.filter(invited_email__iexact="x@test.com").exists()
 
-    # ---- M5: metric/kpi Member-invite deferral ----
+    # ---- metric/kpi Member-invite deferral ----
 
     def test_metric_unknown_email_default_invite_blocked_400(self, org, analyst):
         """Default invite_role (Member) on a member-grants-deferred rtype
@@ -1244,9 +1244,8 @@ class TestResourceSharedEmail:
 
 
 # ================================================================================
-# M5: metric/kpi POST /grants/ regression -- owner grants, editor-via-grant
-# re-shares up to own level, viewer blocked (mirrors the dashboard versions
-# of these three tests, now that the path is genuinely open for metric/kpi).
+# metric/kpi POST /grants/ regression — owner grants, editor-via-grant
+# re-shares up to own level, viewer blocked (mirrors the dashboard versions).
 # ================================================================================
 
 
@@ -1302,12 +1301,10 @@ class TestMetricKpiGrantRegression:
 
 
 # ================================================================================
-# M5: Member-cap resolver semantics -- a grant row can never admit a Member
-# viewer above "view" on metric/kpi, even reached via a group (the one path
-# that CAN still put a Member behind an active grant, since direct Member
-# grants are blocked at write time). This is the existing, generic
-# `effective_permission` rule (untouched by M5) -- pinned here for metric/kpi
-# specifically per the milestone brief.
+# Member-cap resolver semantics — a grant row can never admit a Member viewer
+# above "view" on metric/kpi, even via a group (the one path that can still
+# put a Member behind an active grant, since direct Member grants are blocked
+# at write time).
 # ================================================================================
 
 
@@ -1326,8 +1323,7 @@ class TestMemberCapOnMetricKpiGrants:
             status="active",
         )
 
-        # ...but a Member viewer's contribution from ANY grant stays capped
-        # at "view" -- the pre-D1 rule, untouched by M5.
+        # ...but a Member viewer's contribution from any grant stays capped at "view".
         assert effective_permission(member, "metric", metric) == "view"
 
     def test_member_via_group_grant_capped_at_view_on_kpi(self, org, analyst, member):
@@ -1348,9 +1344,8 @@ class TestMemberCapOnMetricKpiGrants:
 
 
 # ================================================================================
-# M5: D1 "shared a resource with you" email -- NOUN_BY_RTYPE/deep links
-# already covered both rtypes before this milestone (deep_links.py); this
-# pins the grant-share email path itself now fires for them.
+# "Shared a resource with you" email — pins that the grant-share email path
+# fires for metric/kpi.
 # ================================================================================
 
 

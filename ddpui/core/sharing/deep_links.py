@@ -1,21 +1,12 @@
-"""Frontend deep-link + resource-presentation helpers for Resource Sharing,
-shared by the read/notify paths (``access_requests.py``) and the write path
-(``sharing_actions.py``).
-
-Lives in its own module so both can import it without a cycle:
-``access_requests`` imports ``sharing_actions`` (for the owner-resolution
-helpers), so ``sharing_actions`` cannot import back from ``access_requests``.
-The deep-link map + URL/label builders that Task 15b put in
-``access_requests`` are extracted here verbatim (same query-param shapes the
-webapp pages read) so the grant-notification email reuses them instead of
-duplicating the URL shapes.
+"""Frontend deep-link + resource-presentation helpers, shared by
+``access_requests`` and ``sharing_actions``. Lives in its own module so
+both can import it without a cycle.
 """
 
 from django.conf import settings
 
-# Deep-link shape per rtype -- each query param matches what the webapp page
-# actually reads (Task 15b): /alerts reads `?alertId=`, /metrics reads
-# `?highlight=`, /kpis reads `?open=`; dashboards/reports route by path.
+# Deep-link shape per rtype — each query param matches what the webapp page
+# actually reads.
 DEEP_LINK_PATH = {
     "chart": "/charts/{id}",
     "dashboard": "/dashboards/{id}",
@@ -44,9 +35,8 @@ def frontend_url() -> str:
 
 
 def build_resource_url(rtype: str, resource_id) -> str:
-    """Deep link back to `resource` in the frontend (best-effort -- falls
-    back to the bare frontend URL for an rtype this map doesn't know, which
-    never happens for a registered rtype today)."""
+    """Deep link back to the resource in the frontend; falls back to the bare
+    frontend URL for an unknown rtype."""
     path_template = DEEP_LINK_PATH.get(rtype)
     if path_template is None:
         return frontend_url()

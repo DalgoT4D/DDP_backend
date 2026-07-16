@@ -1,4 +1,4 @@
-"""Task 7 Part A: the UserGroup/UserGroupMember model constraints —
+"""The UserGroup/UserGroupMember model constraints —
 unique(org, name), unique(group, orguser), unique(group, pending_email),
 and the "exactly one of orguser/pending_email" CheckConstraint.
 """

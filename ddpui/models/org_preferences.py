@@ -21,13 +21,9 @@ class OrgPreferences(models.Model):
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
 
-    # Resource Sharing — org-level defaults for newly created shareable
-    # resources. D1: per-role levels, replacing the old audience+level pair.
-    # Default is VIEW/VIEW (not NONE/NONE) to preserve the pre-per-role
-    # product default (GeneralAudience.ALL_USERS + GeneralLevel.VIEW) for
-    # any org whose OrgPreferences row is auto-created by a settings-panel
-    # read/write path (GET, LLM opt-in, Discord toggle, sharing toggle)
-    # before the org has ever explicitly configured these levels.
+    # Org-level defaults for newly created shareable resources. VIEW/VIEW
+    # (not NONE/NONE) preserves the pre-existing product default for orgs
+    # whose row is auto-created before they ever configure these levels.
     default_analyst_level = models.CharField(
         max_length=5, choices=AccessLevel.choices, default=AccessLevel.VIEW
     )

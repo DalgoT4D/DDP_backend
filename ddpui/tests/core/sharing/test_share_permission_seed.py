@@ -1,4 +1,4 @@
-"""Task 5 Part A: the four new share-permission slugs — seed fixtures
+"""The four new share-permission slugs — seed fixtures
 (fresh installs) and the 0171 data migration (existing databases).
 
 The migration function is exercised directly against the live app registry:

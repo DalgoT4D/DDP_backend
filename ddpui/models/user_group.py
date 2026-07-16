@@ -1,17 +1,9 @@
-"""Groups: the ``UserGroup``/``UserGroupMember`` models (Task 7 — Milestone 3).
+"""The ``UserGroup``/``UserGroupMember`` models — a general org-membership
+concept that knows nothing about grants; ``ResourceShare`` references a group
+by id via its soft ``principal_type="group"`` pointer, not a FK.
 
-Groups live in the org app, NOT ``core/sharing`` — they are a general
-org-membership concept (Layers 2-3 of Resource Sharing import them, but
-Groups themselves know nothing about grants). A ``UserGroup`` is just a
-named set of ``OrgUser``s within one org; ``ResourceShare`` rows reference a
-group by id via the existing soft ``principal_type="group"`` /
-``principal_id`` pointer (see ``ddpui/models/resource_share.py``) — there is
-no FK from ``ResourceShare`` to ``UserGroup``.
-
-``UserGroupMember.pending_email`` rows are schema-only in this task: the
-invite flow that creates them lands in M4. A membership row always has
-exactly one of ``orguser``/``pending_email`` set (enforced by a DB
-``CheckConstraint``), so a half-invited row can never exist.
+A membership row always has exactly one of ``orguser``/``pending_email`` set
+(DB CheckConstraint), so a half-invited row can never exist.
 """
 
 from django.db import models
@@ -22,9 +14,7 @@ from ddpui.models.org_user import OrgUser
 
 
 class UserGroupMemberStatus(models.TextChoices):
-    """Whether a membership row is a real (accepted) member or a pending
-    invite. Only ACTIVE rows are created by this task's endpoints — PENDING
-    is reserved for the M4 invite flow."""
+    """Whether a membership row is a real (accepted) member or a pending invite."""
 
     ACTIVE = "active"
     PENDING = "pending"

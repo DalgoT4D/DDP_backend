@@ -1,12 +1,6 @@
-# Generated for Resource Sharing Task 1 — backfill owner + general access.
-#
-# 0168 added `owner`, `general_audience`, `general_level` with Django field
-# defaults, so existing rows already hold "all_users"/"view" for the two
-# general-access columns (Django backfills the default at column-add time).
-# `owner` copies from `created_by` instead of a static default, so that needs
-# an explicit data migration — this file does that, plus a belt-and-braces
-# pass over general_audience/general_level in case any row slipped through
-# without the default applied.
+# Backfill owner + general access. `owner` copies from `created_by`, which
+# needs an explicit data migration; the general-access pass is a belt-and-braces
+# top-up in case any row missed the 0168 column defaults.
 
 from django.db import migrations
 from django.db.models import F

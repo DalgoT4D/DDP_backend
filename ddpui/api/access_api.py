@@ -1,29 +1,18 @@
 """Access (Resource Sharing) API — `/api/access/*`.
 
 Thin routes generic over ``{rtype}``: validate the rtype against the
-shareable-types registry, gate, delegate to ``sharing_actions``, wrap in
-``api_response``.
+registry, gate, delegate to ``sharing_actions``, wrap in ``api_response``.
 
-Gating (plan Sec 4.5 / Task 5 brief):
-- GET (read): resolver **view** gate only. There is no static
-  ``@has_permission`` slug literal here because the route is generic over
-  rtype — anyone the resolver admits to view the resource may see who else
-  has access to it.
-- Mutations (POST/DELETE grants, PUT general): ``require_share_permission``
-  — the dynamic mirror of ``@has_permission`` reading the rtype's
-  ``share_permission_slug`` from the registry — PLUS resolver **edit** on
-  the object.
-- Access requests (Milestone 9): creating a request has NO gate beyond
-  "authenticated org member" — a Member without access must be able to ask.
-  Approve/decline gate on ``require_owner_access`` ONLY (owner-or-admin) —
-  deliberately WITHOUT ``require_share_permission``, unlike every other
-  mutation here (including ownership transfer). Deciding a request is owner
-  business, not a sharing-permission-gated action: a Member who owns a
-  resource (e.g. via ownership transfer, Task 12) holds no ``can_share_*``
-  slug but must still be able to approve/decline requests on their own
-  resource — the task brief spells out the slug interaction for create
-  ("no share slug") and pointedly omits one for approve/decline, read here
-  as intentional.
+Gating:
+- Reads: resolver view only — anyone who can view the resource may see who
+  else has access to it (no static slug; the route is generic over rtype).
+- Mutations: ``require_share_permission`` (dynamic slug from the registry)
+  plus resolver edit on the object.
+- Access requests: creating one needs only an authenticated org member — a
+  Member without access must be able to ask. Approve/decline gate on
+  owner-or-admin only, deliberately without the share slug: a Member who
+  owns a resource holds no ``can_share_*`` slug but must still be able to
+  decide requests on their own resource.
 """
 
 from ninja import Router
@@ -100,13 +89,10 @@ def get_access(request, rtype: str, resource_id: str):
 @access_router.post("/{rtype}/{resource_id}/grants/", response=ApiResponse[GrantCreateResponse])
 def create_grant(request, rtype: str, resource_id: str, payload: GrantCreate):
     """Grant a user view/edit on this resource (duplicate grants update in
-    place). Gate: share slug (registry) + resolver edit.
-
-    v1.1 M2: granting on a DASHBOARD whose tiles the new principal cannot
-    see standalone returns `requires_confirmation` with the under-covering
-    charts named and writes nothing — re-send with `extend_chart_ids` (a
-    subset of those charts; needs Edit on each) and/or `proceed=true` to
-    commit (the broadening warning's contract)."""
+    place). Gate: share slug + resolver edit. Granting on a dashboard whose
+    tiles the new principal can't see standalone returns
+    `requires_confirmation` and writes nothing — re-send with
+    `extend_chart_ids` and/or `proceed=true` to commit."""
     orguser: OrgUser = request.orguser
     require_share_permission(request, rtype)
     resource = _get_resource_or_404(orguser, rtype, resource_id)
@@ -127,7 +113,7 @@ def create_grant(request, rtype: str, resource_id: str, payload: GrantCreate):
 
 @access_router.delete("/{rtype}/{resource_id}/grants/{grant_id}/", response=ApiResponse[None])
 def delete_grant(request, rtype: str, resource_id: str, grant_id: int):
-    """Revoke one grant. Gate: share slug (registry) + resolver edit."""
+    """Revoke one grant. Gate: share slug + resolver edit."""
     orguser: OrgUser = request.orguser
     require_share_permission(request, rtype)
     resource = _get_resource_or_404(orguser, rtype, resource_id)
@@ -148,7 +134,7 @@ def delete_grant(request, rtype: str, resource_id: str, grant_id: int):
 )
 def update_general_access(request, rtype: str, resource_id: str, payload: GeneralAccessUpdate):
     """Change general access with the narrowing warn-and-offer protocol.
-    Gate: share slug (registry) + resolver edit."""
+    Gate: share slug + resolver edit."""
     orguser: OrgUser = request.orguser
     require_share_permission(request, rtype)
     resource = _get_resource_or_404(orguser, rtype, resource_id)
@@ -159,8 +145,7 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
     except SharingValidationError as err:
         raise HttpError(400, err.message) from err
     except SharingPermissionError as err:
-        # v1.1 M2: a confirmed broadening `extend_chart_ids` needs Edit on
-        # each named chart
+        # a confirmed broadening `extend_chart_ids` needs Edit on each chart
         raise HttpError(403, err.message) from err
     except GrantNotFoundError as err:
         raise HttpError(404, err.message) from err
@@ -171,10 +156,9 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
 
 @access_router.post("/{rtype}/{resource_id}/owner/", response=ApiResponse[OwnerOut])
 def transfer_owner(request, rtype: str, resource_id: str, payload: OwnerTransferRequest):
-    """Transfer ownership to another same-org, active OrgUser. The old
-    owner keeps an explicit Edit grant; there is no reclaim. Gate: share
-    slug (registry) + owner-or-admin (stricter than resolver edit --
-    general access/grants alone never pass this)."""
+    """Transfer ownership to another same-org, active OrgUser. The old owner
+    keeps an explicit Edit grant; there is no reclaim. Gate: share slug +
+    owner-or-admin (stricter than resolver edit)."""
     orguser: OrgUser = request.orguser
     require_share_permission(request, rtype)
     resource = _get_resource_or_404(orguser, rtype, resource_id)
@@ -194,16 +178,11 @@ def transfer_owner(request, rtype: str, resource_id: str, payload: OwnerTransfer
 
 @access_router.post("/bulk/", response=ApiResponse[BulkAccessResponse])
 def bulk_access(request, payload: BulkAccessRequest):
-    """Apply ONE action (add_grant / set_general / toggle_public) across a
-    selection of resources, mixed rtypes allowed. Apply-where-possible:
-    every item is independently gated — registry rtype, the rtype's share
-    slug (a Member with no slugs gets every item skipped, not a 403),
-    org-scoped fetch (cross-org ids are `not_found`, indistinguishable from
-    nonexistent), resolver edit — and per-item failures become `skipped`
-    entries with a reason code. Only request-shape problems 4xx the whole
-    request: empty selection, selection over BULK_MAX_ITEMS, unknown
-    action, missing/malformed action payload, and (for set_general
-    re-sends) `remove_grant_ids` that don't belong to the selection."""
+    """Apply one action (add_grant / set_general / toggle_public) across a
+    selection of resources, mixed rtypes allowed. Every item is independently
+    gated (registry rtype, share slug, org-scoped fetch, resolver edit) and
+    per-item failures become `skipped` entries with a reason code. Only
+    request-shape problems 4xx the whole request."""
     orguser: OrgUser = request.orguser
 
     if not payload.items:
@@ -273,9 +252,8 @@ def bulk_access(request, payload: BulkAccessRequest):
 
 
 def _get_access_request_or_404(orguser: OrgUser, request_id: int):
-    """Fetch an ``AccessRequest`` scoped to the caller's org -- a cross-org
-    id is indistinguishable from a nonexistent one, same rule as
-    ``_get_resource_or_404``."""
+    """Fetch an ``AccessRequest`` scoped to the caller's org — a cross-org id
+    is indistinguishable from a nonexistent one."""
     access_request = access_requests.get_access_request_or_none(orguser.org_id, request_id)
     if access_request is None:
         raise HttpError(404, "Access request not found")
@@ -284,10 +262,9 @@ def _get_access_request_or_404(orguser: OrgUser, request_id: int):
 
 @access_router.post("/{rtype}/{resource_id}/requests/", response=ApiResponse[AccessRequestOut])
 def create_access_request(request, rtype: str, resource_id: str, payload: AccessRequestCreate):
-    """Ask for access to this resource. Gate: any authenticated org member
-    -- no share-permission slug (Members must be able to ask). 400s if the
-    caller already has effective access, or the rtype doesn't support
-    requests."""
+    """Ask for access to this resource. Gate: any authenticated org member —
+    no share slug (Members must be able to ask). 400s if the caller already
+    has access or the rtype doesn't support requests."""
     orguser: OrgUser = request.orguser
     resource = _get_resource_or_404(orguser, rtype, resource_id)
 
@@ -311,11 +288,8 @@ def list_access_requests(request):
 
 @access_router.post("/requests/{request_id}/approve/", response=ApiResponse[AccessRequestOut])
 def approve_access_request(request, request_id: int, payload: AccessRequestDecision):
-    """Approve a request: inserts a grant (works for every registered
-    rtype, including grants=False metric/kpi -- an internal write, same
-    pattern as ownership transfer). Gate: owner-or-admin on the requested
-    resource ONLY -- NOT mere editors, deciding access is owner business;
-    deliberately no share-permission slug (see module docstring)."""
+    """Approve a request: inserts a grant. Gate: owner-or-admin on the
+    requested resource only — deliberately no share slug (see module docstring)."""
     orguser: OrgUser = request.orguser
     access_request = _get_access_request_or_404(orguser, request_id)
     resource = _get_resource_or_404(
@@ -334,8 +308,7 @@ def approve_access_request(request, request_id: int, payload: AccessRequestDecis
 @access_router.post("/requests/{request_id}/decline/", response=ApiResponse[AccessRequestOut])
 def decline_access_request(request, request_id: int):
     """Decline a request: no grant, notifies the requester. Gate:
-    owner-or-admin on the requested resource ONLY (no share-permission
-    slug -- see module docstring)."""
+    owner-or-admin only (no share slug — see module docstring)."""
     orguser: OrgUser = request.orguser
     access_request = _get_access_request_or_404(orguser, request_id)
     resource = _get_resource_or_404(

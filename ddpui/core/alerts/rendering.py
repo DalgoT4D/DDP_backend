@@ -58,13 +58,8 @@ def render(template: str, values: Mapping[str, Any]) -> str:
 
 
 def build_alert_url(alert_id: int) -> str:
-    """Deep link back to the alert in the frontend.
-
-    Appended to every fired notification (see `append_alert_link`) so a
-    recipient without resource access to the alert has somewhere to click
-    that lands them on the request-access flow — Resource Sharing plan Sec 4
-    "Alerts": "the notification carries trigger context."
-    """
+    """Deep link back to the alert in the frontend. Appended to every fired
+    notification so a recipient without access lands on the request-access flow."""
     frontend_url = (
         getattr(settings, "FRONTEND_URL_V2", None)
         or getattr(settings, "FRONTEND_URL", None)
@@ -74,14 +69,8 @@ def build_alert_url(alert_id: int) -> str:
 
 
 def append_alert_link(body: str, alert_id: int) -> str:
-    """Append a fixed footer line carrying the alert id + a deep link.
-
-    Always appended regardless of the author's message_template — the
-    triggering metric/kpi/value context already flows through the
-    template's tokens (and the alert name is in the subject); this
-    guarantees the alert's identity, and a way back to it, survive even for
-    templates that don't reference any tokens at all.
-    """
+    """Append a fixed footer with the alert id + deep link — always, so the
+    alert's identity survives even templates that reference no tokens."""
     return f"{body}\n\nView this alert (#{alert_id}): {build_alert_url(alert_id)}"
 
 

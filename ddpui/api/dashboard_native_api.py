@@ -136,16 +136,9 @@ def create_dashboard(request, payload: DashboardCreate):
 )
 @has_permission(["can_edit_dashboards"])
 def get_dashboard_chart_coverage(request, dashboard_id: int, chart_id: Optional[int] = None):
-    """Chart-coverage verdicts for this dashboard (v1.1 M2).
-
-    With ``chart_id``: that one chart's verdict against the dashboard's
-    current audience — the embed warning's pre-flight, so the chart need
-    not be a tile yet (it must be org-owned; cross-org is 404). Without:
-    every under-covering tile — the broadening panels' listing.
-
-    Gate: dashboard EDIT (slug + resolver) — the verdicts reveal chart
-    names and audience gaps, the same information the editor already sees.
-    """
+    """Chart-coverage verdicts for this dashboard. With ``chart_id``: that one
+    chart's verdict (the embed pre-flight — the chart need not be a tile yet).
+    Without: every under-covering tile. Gate: dashboard edit."""
     orguser: OrgUser = request.orguser
 
     try:
@@ -170,24 +163,16 @@ def get_dashboard_chart_coverage(request, dashboard_id: int, chart_id: Optional[
 
 
 def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpdate):
-    """v1.1 M2: `update_dashboard` is a raw-JSON overwrite of `tabs` — without
-    this, ANY chart id could be embedded blind (cross-org, or one the caller
-    can't even view). For every chart id present in the incoming tabs but not
-    already a tile:
+    """`update_dashboard` overwrites `tabs` as raw JSON — without this, any
+    chart id could be embedded blind. Every chart id newly present in the
+    incoming tabs must be org-owned (400), viewable by the caller (403), and —
+    if it under-covers the dashboard's audience — confirmed via
+    `extend_chart_ids`/`proceed`, else the coverage verdicts come back in a
+    409 and nothing saves. A confirmed embed is never blocked.
 
-    - it must be org-owned (400 — a malformed payload, mirroring the tile
-      validation the service's config validator does),
-    - the caller must resolve to >= view on it (403 — you can't embed what
-      you can't see),
-    - if it under-covers the dashboard's audience, the client must have
-      passed the embed-warning contract (`extend_chart_ids`/`proceed`);
-      otherwise the coverage verdicts come back in a 409 and nothing saves.
-      A CONFIRMED embed is never blocked (spec §3: inline rendering is the
-      rule; the warning is exposure honesty, not a lock).
-
-    Returns ``(confirmation, charts_to_extend)``: a non-None confirmation
-    means "reply 409, save nothing"; otherwise ``charts_to_extend`` is the
-    confirmed ``extend_chart_ids`` subset to extend after the save commits.
+    Returns (confirmation, charts_to_extend): a non-None confirmation means
+    "reply 409, save nothing"; otherwise charts_to_extend is the confirmed
+    subset to extend after the save commits.
     """
     if payload.tabs is None:
         return None, []
@@ -210,16 +195,9 @@ def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpd
     verdicts = coverage.coverage_for_charts(orguser, dashboard, list(charts.values()))
     under_covering = [v for v in verdicts if not v.covered]
     if not under_covering:
-        # Clean coverage short-circuits here, BEFORE any subset check runs
-        # on ``payload.extend_chart_ids`` -- the asymmetry against the
-        # shared helper (below): ``upsert_grant_with_coverage`` calls
-        # ``sharing_actions._validate_extend_subset`` UNCONDITIONALLY (even
-        # against an empty ``verdicts``, see sharing_actions.py:791), so a
-        # garbage/non-subset ``extend_chart_ids`` there still 400s when
-        # coverage is clean. Here, the same garbage is silently ignored
-        # once the dashboard is already fully covered. Harmless today
-        # (nothing to extend either way), but a future refactor that
-        # unifies the two call sites must not assume they behave alike.
+        # Clean coverage returns before any subset check — unlike
+        # `sharing_actions._validate_extend_subset`, which 400s a garbage
+        # extend_chart_ids even when clean. Mind this before unifying the two.
         return None, []
 
     confirmed = payload.extend_chart_ids is not None or bool(payload.proceed)
@@ -228,15 +206,9 @@ def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpd
         # stays stable for every already-working save path.
         return EmbedCoverageConfirmation(under_covering_charts=under_covering), []
 
-    # Inline copy of ``sharing_actions._validate_extend_subset`` (that
-    # module's version is the ONE definition the rest of the package uses --
-    # see sharing_actions.py:692). This copy exists because the embed path
-    # runs BEFORE the dashboard save, off ``EmbedCoverageConfirmation``
-    # (bare dict "under_covering", not the ``ChartCoverageOut`` list the
-    # other version takes) -- not worth reshaping just to share one `<=`
-    # check. The two copies only diverge in the early-return-when-clean
-    # case above; once here, under_covering is always non-empty and both
-    # copies validate identically.
+    # Inline copy of `sharing_actions._validate_extend_subset` — the embed path
+    # runs before the dashboard save, off a different shape. Once here,
+    # under_covering is non-empty and both copies validate identically.
     extend_ids = set(payload.extend_chart_ids or [])
     warned_ids = {v.chart_id for v in under_covering}
     if not extend_ids <= warned_ids:
@@ -249,13 +221,9 @@ def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpd
 )
 @has_permission(["can_edit_dashboards"])
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
-    """Update dashboard with auto-save support.
-
-    v1.1 M2: chart ids newly present in the ``tabs`` payload are validated
-    (org-owned + resolver view for the caller), and under-covering embeds
-    409 with the coverage verdicts unless the request carries the embed
-    confirmation (``extend_chart_ids``/``proceed`` — see
-    ``_validate_new_tile_charts``)."""
+    """Update dashboard with auto-save support. Chart ids newly present in
+    ``tabs`` are validated, and under-covering embeds 409 with the coverage
+    verdicts unless the request carries the embed confirmation."""
     orguser: OrgUser = request.orguser
 
     try:
@@ -315,13 +283,9 @@ def delete_dashboard(request, dashboard_id: int):
 @has_permission(["can_create_dashboards"])
 def duplicate_dashboard(request, dashboard_id: int):
     """Duplicate a dashboard with all its configurations, filters, and tabs.
-
-    v1.1 M2.x: the copy INHERITS the source dashboard's General access
-    (analyst_level/member_level) instead of the org's defaults -- same or
-    narrower audience by construction (the tiles are unchanged), so no
-    coverage warning is needed and no silent broadening is possible.
-    Grants and public-link state are NOT copied (see the inline comment
-    above the level assignment for why that's also narrowing-safe)."""
+    The copy inherits the source's general access — a same-or-narrower audience
+    by construction, so no coverage warning is needed. Grants and public-link
+    state are not copied."""
     orguser: OrgUser = request.orguser
 
     # Get the original dashboard
@@ -332,27 +296,13 @@ def duplicate_dashboard(request, dashboard_id: int):
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Duplicating clones the ORIGINAL dashboard's full content (filters,
-    # tabs) into a new dashboard the caller then owns outright — gate on
-    # the original's view permission, same as reading it directly would be.
+    # Duplicating clones the original's full content, so gate on the
+    # original's view permission — same as reading it directly.
     require_view_access(orguser, "dashboard", original_dashboard)
 
-    # Create a copy of the dashboard. The copy INHERITS the SOURCE
-    # dashboard's General access (analyst_level/member_level) rather than
-    # the org's defaults: the tiles inside are the same charts, at the same
-    # (or narrower, via the source's own coverage warnings) audience, so
-    # inheriting is same-or-narrower BY CONSTRUCTION -- no new coverage gap
-    # is possible and no re-warning is needed. Seeding at the org's WIDER
-    # defaults instead would silently broaden a narrowed source (e.g. a
-    # dashboard deliberately dropped to Private around a Private chart)
-    # into a General-access container around the same tiles, bypassing
-    # every warning M2 added.
-    #
-    # Grants (``ResourceShare`` rows) and public-link state are deliberately
-    # NOT copied: the duplicate is a NEW resource with its own id, so no
-    # grant row addresses it yet, and ``is_public``/``public_share_token``
-    # default False/null on creation below -- both are one-way narrowing
-    # relative to the source, so they need no warning either.
+    # The copy inherits the source's general access, not the org's defaults:
+    # seeding at wider defaults would silently broaden a deliberately
+    # narrowed source around the same tiles, bypassing the coverage warnings.
     analyst_level = original_dashboard.analyst_level
     member_level = original_dashboard.member_level
 
@@ -632,21 +582,14 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Gate: same model as the bulk toggle (Task 17) -- the `can_share_dashboards`
-    # slug (checked by the decorator above) plus resolver **edit** on the
-    # object. This widens who may toggle from "creator only" to any editor
-    # (grant or general access) with the slug.
+    # Any editor with the share slug may toggle, not just the creator.
     require_edit_access(orguser, "dashboard", dashboard)
 
     is_public = payload.is_public
 
-    # The actual flip (kill-switch check, token minting, timestamps) lives in
-    # `sharing_actions.set_public` -- the same function the bulk toggle_public
-    # action uses -- so the kill-switch rule is defined in exactly one place.
-    # v1.1 M2: enabling exposes every tile anonymously -- the first call
-    # (no `proceed`) returns the under-covering charts named and flips
-    # NOTHING; the client re-sends with `proceed=true` (Cancel is the
-    # default in the UI). Public exposure is not extendable.
+    # The actual flip lives in `sharing_actions.set_public` (shared with the
+    # bulk toggle). Enabling without `proceed` returns the under-covering
+    # charts and flips nothing; the client re-sends with proceed=true.
     try:
         under_covering = sharing_actions.set_public(
             orguser, "dashboard", dashboard, is_public, proceed=bool(payload.proceed)
@@ -700,12 +643,8 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Gate: same model as the other view-only reads (Task 11c) -- the
-    # `can_view_dashboards` slug (checked by the decorator above) plus
-    # resolver **view** on the object. This widens who may read sharing
-    # status from "creator only" to any viewer (grant or general access)
-    # with the slug -- the status GET only reveals whether a resource the
-    # viewer can already see is public, so view access is sufficient.
+    # View access suffices: the status GET only reveals whether a resource
+    # the viewer can already see is public.
     require_view_access(orguser, "dashboard", dashboard)
 
     response_data = {

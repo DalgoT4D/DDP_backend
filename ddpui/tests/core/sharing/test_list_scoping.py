@@ -1,4 +1,4 @@
-"""Part A of Task 3: `accessible_filter` wired into the 5 list services.
+"""`accessible_filter` wired into the 5 list services.
 
 Each rtype gets the same shape of test: a Member sees exactly the admitted
 set (locked-down/hidden, both-roles-view/visible, analyst-only/

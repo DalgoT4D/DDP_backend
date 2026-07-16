@@ -312,15 +312,11 @@ def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
-    # Gate: same model as the bulk toggle (Task 17) -- the `can_share_reports`
-    # slug (checked by the decorator above) plus resolver **edit** on the
-    # object. This widens who may toggle from "creator only" to any editor
-    # (grant or general access) with the slug.
+    # Any editor with the share slug may toggle, not just the creator.
     require_edit_access(orguser, "report", snapshot)
 
-    # The actual flip (kill-switch check, token minting, timestamps) lives in
-    # `sharing_actions.set_public` -- the same function the bulk toggle_public
-    # action uses -- so the kill-switch rule is defined in exactly one place.
+    # The actual flip lives in `sharing_actions.set_public` (shared with the
+    # bulk toggle), so the kill-switch rule is defined in exactly one place.
     try:
         sharing_actions.set_public(orguser, "report", snapshot, payload.is_public)
     except SharingValidationError as err:
@@ -345,12 +341,8 @@ def get_report_sharing_status(request, snapshot_id: int):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
-    # Gate: same model as the toggle (Task 11b) -- the `can_view_dashboards`
-    # slug (checked by the decorator above) plus resolver **view** on the
-    # object. This widens who may read sharing status from "creator only"
-    # to any viewer (grant or general access) with the slug -- the status
-    # GET only reveals whether a resource the viewer can already see is
-    # public, so view access is sufficient (the toggle stays edit-gated).
+    # View access suffices: the status GET only reveals whether a resource
+    # the viewer can already see is public (the toggle stays edit-gated).
     require_view_access(orguser, "report", snapshot)
 
     status_data = ReportService.get_sharing_status(snapshot)

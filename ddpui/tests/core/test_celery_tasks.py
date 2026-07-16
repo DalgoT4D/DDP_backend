@@ -827,7 +827,7 @@ def test_clear_stuck_locks_no_time_fields(orguser):
 
 
 # ================================================================================
-# cleanup_expired_invitations (Task 9)
+# cleanup_expired_invitations
 # ================================================================================
 
 

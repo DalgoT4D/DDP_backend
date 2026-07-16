@@ -1,7 +1,5 @@
-"""Request/response contracts for the `/api/groups/*` endpoints (Task 7).
-
-The list/detail response shapes are a frontend contract (the Groups page and
-the sharing modal's group picker both consume them) — keep them stable.
+"""Request/response contracts for the `/api/groups/*` endpoints. The
+list/detail response shapes are a frontend contract — keep them stable.
 """
 
 from datetime import datetime
@@ -28,15 +26,14 @@ class GroupOut(Schema):
     shared_resource_count: int
     created_by: Optional[GroupCreatorOut] = None
     created_at: datetime
-    # Phase A / A2 (design alignment): up to 4 ACTIVE member emails for the
-    # avatar stack in the Groups table. Only the list path fills this;
-    # create/rename/detail leave it empty.
+    # Up to 4 active member emails for the Groups-table avatar stack. Only
+    # the list path fills this; create/rename/detail leave it empty.
     member_preview: List[str] = []
 
 
 class GroupMemberOut(Schema):
-    """One `UserGroupMember` row. `pending_email` rows (M4 invite flow) have
-    no `orguser_id`/`email`/`name` — those are schema-only in this task."""
+    """One `UserGroupMember` row. `pending_email` rows have no
+    `orguser_id`/`email`/`name`."""
 
     id: int
     orguser_id: Optional[int] = None
@@ -44,9 +41,8 @@ class GroupMemberOut(Schema):
     name: Optional[str] = None
     pending_email: Optional[str] = None
     status: str
-    # The member's org-role slug (e.g. "analyst"), populated on the detail
-    # path from their OrgUser.new_role. Pending-email rows have no OrgUser
-    # yet, so this stays None for them (Phase F5).
+    # The member's org-role slug, populated on the detail path. Pending-email
+    # rows have no OrgUser yet, so this stays None for them.
     role: Optional[str] = None
 
 
@@ -69,16 +65,11 @@ class GroupUpdate(Schema):
 
 
 class GroupMemberCreate(Schema):
-    """POST /api/groups/{id}/members — add a member by OrgUser id OR by
-    email (exactly one). An email matching an existing org member adds them
-    directly; an unknown (or not-yet-active) email invites them via the
-    share-flow's invite machinery and stages a PENDING row that activates on
-    signup (M4 -- see ``orguserfunctions.activate_pending_shares_and_memberships``).
-
-    ``invite_role`` is only consulted on the unknown-email path -- Member
-    unless an admin/super-admin caller chose a higher role (mirrors the
-    share modal's role picker; see ``sharing_actions._resolve_invite_role``,
-    reused as-is: a non-admin requesting a non-Member role gets a 403)."""
+    """POST /api/groups/{id}/members — add a member by OrgUser id or by email
+    (exactly one). An email matching an org member adds them directly; an
+    unknown email invites them and stages a pending row that activates on
+    signup. ``invite_role`` only applies to that invite path (default Member;
+    higher roles need an admin caller)."""
 
     orguser_id: Optional[int] = None
     email: Optional[str] = None

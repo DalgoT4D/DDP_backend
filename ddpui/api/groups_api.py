@@ -1,16 +1,10 @@
-"""Groups API — `/api/groups/*` (Task 7).
+"""Groups API — `/api/groups/*`. Thin routes: validate, gate, delegate to
+`user_groups_service`, wrap in `api_response`.
 
-Thin routes: validate, gate, delegate to `user_groups_service`, wrap in
-`api_response`.
-
-Gating:
-- Base access (list/get, create) is Analyst+ via the static
-  `@has_permission` decorator (`can_view_user_groups` for reads,
-  `can_manage_user_groups` for create and every mutation of a specific
-  group). Member holds neither slug.
-- Rename/delete/add-member/remove-member additionally require the caller be
-  the group's creator or an Admin — an object-level check enforced in
-  `user_groups_service`, mirroring `ddpui.core.ownership`'s pattern.
+Base access is via `@has_permission` (`can_view_user_groups` for reads,
+`can_manage_user_groups` for mutations; Members hold neither slug).
+Mutations of a specific group additionally require its creator or an Admin,
+enforced in `user_groups_service`.
 """
 
 from typing import List

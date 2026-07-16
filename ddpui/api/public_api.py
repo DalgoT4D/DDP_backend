@@ -46,10 +46,9 @@ public_router = Router()
 
 
 def _require_dashboard_alive(dashboard: Dashboard) -> None:
-    """Raise ``Dashboard.DoesNotExist`` if the org's public-sharing kill
-    switch (``OrgPreferences.allow_public_sharing``) is off, treating the
-    token as dead without touching `is_public`/`public_share_token` -- so
-    flipping the switch back on revives the link with no extra code."""
+    """Raise ``Dashboard.DoesNotExist`` if the org's public-sharing kill switch
+    is off — the token reads as dead, but nothing is written, so flipping the
+    switch back on revives the link."""
     if not org_allows_public_sharing(dashboard.org_id):
         raise Dashboard.DoesNotExist()
 
@@ -61,19 +60,10 @@ def _require_report_alive(snapshot: ReportSnapshot) -> None:
 
 
 def _get_public_dashboard_chart(dashboard: Dashboard, chart_id: int) -> Chart:
-    """Chart lookup for public-dashboard chart endpoints -- org-scoped AND
-    tile-scoped.
-
-    Without the tile check, an org match alone lets anyone holding a public
-    dashboard link fetch ANY chart in that org (config + data) by
-    guessing/iterating ``chart_id`` -- not just the charts actually placed
-    on that public dashboard. Reuses the same tabs->components->config.chartId
-    walk the authenticated path already gates on
-    (``ddpui.core.sharing.chart_access.dashboard_chart_ids``), so there's no
-    fourth copy of that membership walk.
-
-    Raises ``Exception`` (caught by each caller's existing generic handler)
-    if the chart isn't org-owned or isn't a tile on this dashboard.
+    """Chart lookup for public-dashboard chart endpoints — org-scoped and
+    tile-scoped. Without the tile check, anyone holding a public dashboard
+    link could fetch any chart in that org by iterating ``chart_id``. Raises
+    ``Exception`` (caught by each caller's generic handler) otherwise.
     """
     if chart_id not in dashboard_chart_ids(dashboard):
         raise Exception("Chart not found in dashboard's organization")

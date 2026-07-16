@@ -42,11 +42,8 @@ class UpdateDiscordNotificationsSchema(Schema):
 
 
 class UpdateSharingPreferencesSchema(Schema):
-    """Schema for updating org-level Resource Sharing preferences
-    (Task 11 Part B). Admin-gated -- see `update_sharing_preferences`.
-
-    D1: per-role level defaults, replacing the old audience+level pair.
-    """
+    """Schema for updating org-level Resource Sharing preferences.
+    Admin-gated — see `update_sharing_preferences`."""
 
     allow_public_sharing: Optional[bool] = None
     default_analyst_level: Optional[str] = None

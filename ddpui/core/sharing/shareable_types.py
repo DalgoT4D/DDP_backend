@@ -1,15 +1,8 @@
-"""The menu: which resource types can be shared, and what capabilities they
-support. DATA ONLY — no logic, no branching. This is the ONE place resource
-types are enumerated; ``access_resolver.py`` must never branch on
-``if resource_type == "dashboard"`` — it reads the registry instead.
-
-Every registered entry's model must satisfy the shareable contract: it has
-``analyst_level``, ``member_level``, ``owner``, ``created_by``, ``org``,
-and a string-able pk. ``chart`` is registered as of v1.1 (Q0 decision #1
-reversed) — a chart's own general access + grants govern its STANDALONE
-surfaces only; inline it still renders wherever its containing dashboard
-renders (``chart_access.require_chart_view_access``'s dashboard-context
-branch, unchanged).
+"""Registry of shareable resource types and their capabilities. Data only —
+the one place resource types are enumerated; consumers read the registry
+instead of branching on rtype. Every registered model must satisfy the
+shareable contract: ``analyst_level``, ``member_level``, ``owner``,
+``created_by``, ``org``, and a string-able pk.
 """
 
 from dataclasses import dataclass
@@ -35,12 +28,9 @@ class ShareableType:
     public_link: bool  # supports a public share link
     requests: bool  # supports "request access" flow
     share_permission_slug: str  # RBAC slug gating this rtype's sharing mutations
-    # v1.1: False = Member sharing is DEFERRED for this rtype (charts):
-    # member_level stays pinned to "none", Member user-principal grants and
-    # Member-role email invites are rejected, Member requesters are blocked,
-    # and the resolver/accessible_filter give Member viewers no general/grant
-    # contribution (group grants stay allowed — their Member members simply
-    # resolve to nothing). Ownership is untouched.
+    # False = Member sharing is deferred for this rtype: member_level pinned
+    # to "none", Member grants/invites/requests rejected, and the resolver
+    # gives Member viewers nothing beyond ownership.
     member_sharing: bool = True
 
 

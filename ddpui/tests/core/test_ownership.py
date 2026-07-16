@@ -61,8 +61,8 @@ def test_resource_with_null_creator_allows_admin():
 
 
 # ---------------------------------------------------------------------------
-# Owner-first behavior (Resource Sharing Task 1): owner_id wins when set;
-# created_by_id is only consulted as a fallback when owner_id is null.
+# Owner-first behavior: owner_id wins when set; created_by_id is only
+# consulted as a fallback when owner_id is null.
 # ---------------------------------------------------------------------------
 
 

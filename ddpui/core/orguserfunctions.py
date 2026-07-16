@@ -294,14 +294,9 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
 
 
 def activate_pending_shares_and_memberships(email: str, org, orguser: OrgUser) -> None:
-    """Flip Resource Sharing's pending rows for ``email`` in ``org`` to
-    active, now that ``orguser`` exists for that email (Task 9 / plan Sec
-    4.6 invites — the share-flow invite's activation path).
-
-    ``Invitation`` has no org FK, so callers match pending rows by
-    ``invited_by__org`` (passed in as ``org``) + email — never globally by
-    email alone, or an email invited to two orgs would cross-activate.
-    """
+    """Flip Resource Sharing's pending rows for ``email`` in ``org`` to active,
+    now that ``orguser`` exists for that email. Always matched by org + email —
+    never by email alone, or an email invited to two orgs would cross-activate."""
     ResourceShare.objects.filter(
         org=org,
         status="pending",
@@ -448,15 +443,10 @@ def resend_invitation(invitation_id: str):
 
 
 def cleanup_expired_invitations() -> dict:
-    """Daily cleanup (Celery beat, Task 9): delete `Invitation` rows whose
-    `expires_at` has passed, plus any pending `ResourceShare` / pending
-    `UserGroupMember` rows the share-flow invite (Part B) created for that
-    email in that org.
-
-    `Invitation` has no org FK, so pending rows are matched by
-    `invited_by__org` + email, never by email alone -- the same email
-    invited to two orgs must not cross-cancel the other org's pending grant.
-    """
+    """Daily cleanup: delete `Invitation` rows past `expires_at`, plus the
+    pending `ResourceShare`/`UserGroupMember` rows created for that email in
+    that org. Matched by org + email, never by email alone — the same email
+    invited to two orgs must not cross-cancel the other org's pending grant."""
     now = django_timezone.now()
     expired = list(Invitation.objects.filter(expires_at__lt=now).select_related("invited_by__org"))
 

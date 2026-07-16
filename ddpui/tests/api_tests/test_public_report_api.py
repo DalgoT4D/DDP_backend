@@ -287,7 +287,7 @@ class TestGetPublicReport:
 
 
 # ================================================================================
-# Test get_public_report -- Task 11 org-level public-sharing kill switch
+# Test get_public_report — org-level public-sharing kill switch
 # ================================================================================
 
 

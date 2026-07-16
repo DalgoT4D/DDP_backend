@@ -1,4 +1,4 @@
-"""Task 6b Part C: closing Task 4's gap for table/map dashboard tiles.
+"""Closing Task 4's gap for table/map dashboard tiles.
 
 `POST /api/charts/chart-data-preview/` and `POST /api/charts/map-data-overlay/`
 serve chart data for table/map tile types but were out of Task 4's scope
@@ -427,9 +427,8 @@ class TestMapDataOverlayGate:
 
 
 # ================================================================================
-# run_chart_query seam -- pin that the chart_id-present path actually routes
-# through it (Task 4's TestRunChartQuerySeam pattern), not just that its
-# pass-through result comes back unchanged.
+# run_chart_query seam — pin that the chart_id-present path actually routes
+# through it, not just that its pass-through result comes back unchanged.
 # ================================================================================
 
 

@@ -1,4 +1,4 @@
-"""Task 7 Part B: `/api/groups/*` — CRUD + membership.
+"""`/api/groups/*` — CRUD + membership.
 
 Route functions are called directly (as the rest of the API test suite
 does) via `mock_request(orguser)`, which exercises the real permission
@@ -441,7 +441,7 @@ class TestAddMember:
 
 
 # ================================================================================
-# POST /api/groups/{id}/members -- email path (M4 / batch 2b)
+# POST /api/groups/{id}/members — email path
 # ================================================================================
 
 

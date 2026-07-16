@@ -1,4 +1,4 @@
-"""v1.1 Milestone 2 — the dashboard-broadening warnings.
+"""The dashboard-broadening warnings.
 
 Three widening paths, each mirroring the shipped NARROWING warn-and-offer
 contract (first call returns ``requires_confirmation`` naming the

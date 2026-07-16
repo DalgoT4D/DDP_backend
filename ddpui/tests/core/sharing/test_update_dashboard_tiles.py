@@ -1,4 +1,4 @@
-"""v1.1 Milestone 2 — `update_dashboard` tile validation (the blind-JSON
+"""`update_dashboard` tile validation (the blind-JSON
 overwrite hole).
 
 `PUT /api/dashboards/{id}/` writes the raw `tabs` JSON; before M2 ANY chart

@@ -1,4 +1,4 @@
-"""v1.1 Milestone 2 — the consolidated tile-walk + the coverage service.
+"""The consolidated tile-walk + the coverage service.
 
 Covers:
 
@@ -57,7 +57,7 @@ def _tile_tab(*chart_ids):
 
 
 # ================================================================================
-# The consolidated tile-walk — malformed tabs fail CLOSED (M0 follow-up)
+# The consolidated tile-walk — malformed tabs fail closed
 # ================================================================================
 
 
@@ -396,15 +396,13 @@ class TestCoverageEndpointGates:
 
 
 # ================================================================================
-# Coverage <-> resolver parity guard (M2 review, pulled forward)
+# Coverage <-> resolver parity guard
 # ================================================================================
 #
-# ``coverage._CoverageContext.chart_covers_orguser`` is a hand-mirrored,
-# batched subset of ``access_resolver.effective_permission``'s real ladder
-# (admin / owner / general-access / grants, with the v1.1 Member exclusion
-# for charts) -- the two are NOT sharing code, so nothing stops them
-# drifting apart as either module changes independently. This is the
-# tripwire: for every principal class the two functions must agree.
+# ``coverage._CoverageContext.chart_covers_orguser`` hand-mirrors
+# ``access_resolver.effective_permission``'s ladder without sharing code, so
+# nothing stops them drifting apart. This is the tripwire: for every
+# principal class the two functions must agree.
 
 
 def _assert_coverage_resolver_parity(principal, chart, dashboard, expected_covered: bool) -> None:

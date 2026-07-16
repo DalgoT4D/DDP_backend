@@ -1,4 +1,4 @@
-"""v1.1 M2 — gating the raw-payload warehouse endpoints (promoted M1-review
+"""Gating the raw-payload warehouse endpoints (promoted M1-review
 Important).
 
 `POST /api/charts/chart-data/`, `/map-data/` and `/download-csv/` take a

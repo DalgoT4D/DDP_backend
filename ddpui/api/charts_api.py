@@ -280,8 +280,8 @@ def list_charts(
     request, page: int = 1, page_size: int = 10, search: str = None, chart_type: str = None
 ):
     """List charts for the organization with pagination and filtering.
-    v1.1: scoped by Resource Sharing — non-admin viewers only see charts
-    their role's general access, a grant, or ownership admits."""
+    Non-admin viewers only see charts their general access, a grant, or
+    ownership admits."""
     orguser: OrgUser = request.orguser
 
     # Validate pagination parameters
@@ -382,11 +382,8 @@ class MapDataOverlayPayload(Schema):
     extra_config: Optional[Dict[str, Any]] = Field(
         default_factory=dict
     )  # Additional configuration including chart-level filters, pagination, sorting, etc.
-    # Access context (Task 6b Part C), as body fields -- this endpoint takes
-    # a single Payload argument and already carries dashboard_filters
-    # in-body, so chart_id/dashboard_id follow that convention rather than
-    # becoming query params. See get_chart_data_preview's docstring for the
-    # full contract; identical semantics here.
+    # Access context as body fields (this endpoint carries everything in-body);
+    # same semantics as the preview endpoints' query params.
     chart_id: Optional[int] = None
     dashboard_id: Optional[int] = None
 
@@ -395,24 +392,15 @@ class MapDataOverlayPayload(Schema):
 @has_permission(["can_view_charts"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
     """Get map data overlay (separate from GeoJSON) for data visualization.
-
-    Decorator moved from `can_view_warehouse_data` (Analyst+ only, and this
-    endpoint's ONLY access control -- it never calls `has_schema_access`)
-    to `can_view_charts` (Members included) so Members can reach the new
-    `chart_id`+`dashboard_id` dashboard-tile path below. The config-only
-    branch (`chart_id` absent) calls `require_analyst_plus` explicitly to
-    restore the pre-task restriction on that path -- a raw schema/table
-    query is exactly the arbitrary-warehouse-read case
-    `can_view_warehouse_data` existed to stop, and there's no saved chart
-    there to scope it to.
-    """
+    Uses `can_view_charts` so Members can reach the dashboard-tile path; the
+    config-only branch calls `require_analyst_plus` to keep raw warehouse
+    reads Analyst+ only."""
     orguser = request.orguser
 
     logger.info(f"Map data overlay request: {payload}")
 
-    # M2: the SAME gate ladder as every raw-payload endpoint —
-    # `_gate_raw_chart_payload` is the one definition (this endpoint carries
-    # chart_id/dashboard_id in the body rather than as query params).
+    # Same gate ladder as every raw-payload endpoint; chart_id/dashboard_id
+    # arrive in the body here rather than as query params.
     chart = _gate_raw_chart_payload(
         orguser, payload, payload.chart_id, payload.dashboard_id, payload.dashboard_filters
     )
@@ -496,9 +484,9 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             metrics=metrics,
         )
 
-        # Routed through the run_chart_query choke-point (Layer 2/3 hook)
-        # when a saved chart is in play; the config-only path has no Chart
-        # row to hand the seam, so it executes straight through.
+        # Routed through the run_chart_query choke-point when a saved chart
+        # is in play; the config-only path has no Chart row, so it executes
+        # straight through.
         execute = lambda: charts_service.execute_chart_query(
             warehouse_client, query_builder, execute_payload
         )
@@ -545,29 +533,16 @@ def _gate_raw_chart_payload(
     dashboard_id: Optional[int],
     dashboard_filters=None,
 ) -> Optional[Chart]:
-    """v1.1 M2 (promoted M1-review Important): the raw-payload warehouse
-    endpoints (`/chart-data/`, `/map-data/`, `/download-csv/`) were
-    Member-reachable (`can_view_charts`) and resolver-blind — an arbitrary
-    schema/table/metrics payload hit the warehouse with no per-chart check
-    at all. The preview siblings (`/chart-data-preview/`, its total-rows
-    twin, `/map-data-overlay/`) route through this SAME helper, so the gate
-    ladder has exactly one definition across all six raw-payload endpoints:
+    """The one gate ladder for all six raw-payload warehouse endpoints.
 
-    - WITH `chart_id`: org-scoped fetch (404), the payload's schema/table
-      must match the chart's own (403 — a chart you can see is not an
-      oracle for other tables), then `require_chart_view_access`
-      (dashboard context: membership + resolver view on the dashboard;
-      standalone: resolver view on the CHART). A dashboard context
-      additionally pins the payload's columns to the saved config
-      (`require_payload_within_chart_config`).
-    - WITHOUT `chart_id` (a raw, unsaved config — the chart BUILDER's
-      surface): Analyst+ only, the same role rank chart building requires
-      (`can_create_charts` is seeded Analyst+). Members lose nothing they
-      were meant to have — every Member-facing render path carries a
-      chart/dashboard context.
+    - With `chart_id`: org-scoped fetch (404), the payload's schema/table must
+      match the chart's own (403 — a chart you can see is not an oracle for
+      other tables), then `require_chart_view_access`; a dashboard context
+      additionally pins the payload's columns to the saved config.
+    - Without `chart_id` (a raw, unsaved config — the builder's surface):
+      Analyst+ only. Every Member-facing render path carries a context.
 
-    Returns the Chart when one framed the request (for the
-    `run_chart_query` choke-point), else None.
+    Returns the Chart when one framed the request, else None.
     """
     if chart_id is None:
         require_analyst_plus(orguser)
@@ -592,11 +567,8 @@ def get_chart_data(
     chart_id: Optional[int] = None,
     dashboard_id: Optional[int] = None,
 ):
-    """Get chart data with ECharts configuration.
-
-    `chart_id`/`dashboard_id` are the same access-context query params as
-    the preview siblings — see `_gate_raw_chart_payload`. Without them the
-    request is the chart builder's raw-config path: Analyst+ only (M2)."""
+    """Get chart data with ECharts configuration. `chart_id`/`dashboard_id`
+    are the access-context query params — see `_gate_raw_chart_payload`."""
     orguser = request.orguser
 
     # Log the incoming payload for debugging
@@ -627,8 +599,8 @@ def get_chart_data(
 
     # Use the common function to generate data and config
     try:
-        # Routed through the run_chart_query choke-point (Layer 2/3 hook)
-        # when a saved chart framed the request.
+        # Routed through the run_chart_query choke-point when a saved chart
+        # framed the request.
         execute = lambda: generate_chart_data_and_config(payload, org_warehouse, chart_id)
         if chart is not None:
             result = run_chart_query(
@@ -663,24 +635,14 @@ def get_chart_data_preview(
     chart_id: Optional[int] = None,
 ):
     """Get paginated data preview for chart using the same query as chart data.
-
-    `chart_id`/`dashboard_id` are query params (matching this endpoint's
-    existing `dashboard_filters` convention -- unlike `map-data-overlay`,
-    this payload is shared with other chart-data endpoints, so
-    access-context params stay outside it). They are the ACCESS CONTEXT for
-    a saved chart rendered as a dashboard table tile: with `chart_id`, view
-    access rides on `require_chart_view_access` (dashboard membership +
-    resolver view when `dashboard_id` is also given; standalone Analyst+/
-    owner otherwise) -- see `ddpui.core.sharing.chart_access`. Without
-    `chart_id` (the chart-builder's unsaved-config live preview -- there's
-    no chart to own), the request stays Analyst+ role-gated; Members can't
-    reach the builder.
-    """
+    `chart_id`/`dashboard_id` are the access context for a saved chart rendered
+    as a dashboard table tile — see `_gate_raw_chart_payload`. Without
+    `chart_id` (the builder's live preview) the request stays Analyst+."""
     import json
 
     orguser = request.orguser
 
-    # M2 consolidation: the same gate ladder as every raw-payload endpoint.
+    # Same gate ladder as every raw-payload endpoint.
     chart = _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id, dashboard_filters)
 
     # Validate user has access to schema/table
@@ -741,11 +703,9 @@ def get_chart_data_preview(
     logger.info(f"Chart data preview - modified payload dimensions: {modified_payload.dimensions}")
 
     try:
-        # Get table preview using the same query builder as chart data
-        # This ensures preview shows exactly what will be used for the chart.
-        # Routed through the run_chart_query choke-point (Layer 2/3 hook)
-        # when a saved chart is in play; the config-only builder preview
-        # has no Chart row to hand the seam, so it calls straight through.
+        # Same query builder as chart data, so the preview shows exactly what
+        # the chart will use. Routed through the run_chart_query choke-point
+        # when a saved chart is in play.
         execute = lambda: charts_service.get_chart_data_table_preview(
             org_warehouse, modified_payload, page, limit
         )
@@ -798,19 +758,14 @@ def get_chart_data_preview_total_rows(
     dashboard_id: Optional[int] = None,
     chart_id: Optional[int] = None,
 ):
-    """Get total rows for chart data preview.
-
-    `chart_id`/`dashboard_id` are the same access-context query params as
-    the sibling `/chart-data-preview/` endpoint (same decorator, same
-    frontend hook pair, same pre-task gap) -- see get_chart_data_preview's
-    docstring for the contract.
-    """
+    """Get total rows for chart data preview. `chart_id`/`dashboard_id` are the
+    same access-context params as the sibling `/chart-data-preview/` endpoint."""
     import json
 
     orguser = request.orguser
 
-    # M2 consolidation: the same gate ladder as every raw-payload endpoint
-    # (a row COUNT under attacker filters is a probe primitive too).
+    # Same gate ladder as every raw-payload endpoint — a row count under
+    # attacker filters is a probe primitive too.
     chart = _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id, dashboard_filters)
 
     # Validate user has access to schema/table
@@ -865,11 +820,8 @@ def get_chart_data_preview_total_rows(
         dashboard_filters=resolved_dashboard_filters,  # Add resolved dashboard filters
     )
 
-    # Get total rows using the same query builder as chart data. Routed
-    # through the run_chart_query choke-point (Layer 2/3 hook -- a row
-    # count is warehouse-bound and leaks row-level information too) when a
-    # saved chart is in play; the config-only path has no Chart row to
-    # hand the seam.
+    # Same query builder as chart data; routed through the run_chart_query
+    # choke-point when a saved chart is in play.
     execute = lambda: charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
     if chart is not None:
         total_rows = run_chart_query(
@@ -1029,8 +981,7 @@ def generate_map_chart_data(
     # Build query using existing service
     query_builder = build_map_query(payload, org_warehouse=org_warehouse)
 
-    # Execute query using existing service method — routed through the
-    # run_chart_query choke-point (Layer 2/3 hook) when a saved chart
+    # Routed through the run_chart_query choke-point when a saved chart
     # framed the request.
     logger.info(f"Executing map query for geojson_id: {geojson_id}")
     execute = lambda: charts_service.execute_query(warehouse, query_builder)
@@ -1148,12 +1099,9 @@ def download_chart_data_csv(
     dashboard_id: Optional[int] = None,
 ):
     """Stream and download chart data as CSV with all filters/aggregations
-    applied (authenticated).
-
-    M2: gated like the other raw-payload warehouse endpoints — a CSV export
-    is the highest-bandwidth read of them all. See
-    `_gate_raw_chart_payload`. (The streaming generator itself stays
-    outside `run_chart_query` — the gate runs before the response starts.)"""
+    applied (authenticated). Gated like the other raw-payload endpoints; the
+    streaming generator stays outside `run_chart_query` — the gate runs
+    before the response starts."""
     orguser: OrgUser = request.orguser
 
     _gate_raw_chart_payload(orguser, payload, chart_id, dashboard_id, dashboard_filters)
@@ -1206,9 +1154,8 @@ def download_chart_data_csv(
 @charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_charts"])
 def get_chart(request, chart_id: int, dashboard_id: Optional[int] = None):
-    """Get a specific chart. `dashboard_id` is the access context for
-    dashboard tiles — charts are not shareable, so a Member's view access
-    rides on the framing dashboard's (standalone stays Analyst+/owner)."""
+    """Get a specific chart. `dashboard_id` is the access context for dashboard
+    tiles — inline view access rides on the framing dashboard's."""
     orguser: OrgUser = request.orguser
 
     try:
@@ -1240,12 +1187,9 @@ def get_chart_data_by_id(
     dashboard_filters: Optional[str] = None,
     dashboard_id: Optional[int] = None,
 ):
-    """Get chart data using saved chart configuration with optional dashboard filters.
-
-    `dashboard_id` is the ACCESS CONTEXT (which dashboard framed this render;
-    charts are not shareable, so view access rides on the dashboard's).
-    `dashboard_filters` is a filter-values payload — the two are independent.
-    """
+    """Get chart data using saved chart configuration with optional dashboard
+    filters. `dashboard_id` is the access context (which dashboard framed this
+    render); `dashboard_filters` is a filter-values payload — independent."""
     orguser = request.orguser
     try:
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
@@ -1373,10 +1317,8 @@ def create_chart(request, payload: ChartCreate):
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
 def update_chart(request, chart_id: int, payload: ChartUpdate):
-    """Update a chart. v1.1: the role slug alone is no longer enough — the
-    caller must also resolve to Edit on THIS chart (owner, admin, or the
-    chart's analyst_level/grants; day-one unchanged via the "edit" backfill).
-    """
+    """Update a chart. The role slug alone is not enough — the caller must
+    also resolve to Edit on this chart."""
     orguser: OrgUser = request.orguser
 
     try:
@@ -1462,9 +1404,8 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
 @has_permission(["can_view_charts"])
 def get_chart_dashboards(request, chart_id: int):
-    """Get list of dashboards that use this chart. v1.1: a standalone chart
-    surface — resolver View on the chart required (a narrowed chart must
-    not leak its dashboard memberships)."""
+    """Get list of dashboards that use this chart. Requires view on the chart —
+    a narrowed chart must not leak its dashboard memberships."""
     orguser: OrgUser = request.orguser
 
     try:

@@ -1,4 +1,4 @@
-"""Task 11 Part A: org-level public-sharing kill switch on public dashboard
+"""Org-level public-sharing kill switch on public dashboard
 render endpoints.
 
 `OrgPreferences.allow_public_sharing` is read fresh on every public-render
@@ -223,13 +223,9 @@ class TestGetPublicGeojsonDataKillSwitch:
 
 
 # ================================================================================
-# Milestone 0: public chart tile-membership leak fix.
-#
-# Before the fix, `get_public_chart_metadata`/`get_public_chart_data` only
-# checked that the requested chart_id belonged to the public dashboard's org
-# -- not that it was actually placed as a tile on that dashboard. Anyone
-# holding any org's public dashboard link could fetch metadata/data for
-# EVERY chart in the org by guessing/iterating chart_id.
+# Public chart tile-membership leak fix: the public chart endpoints must
+# check the chart is actually a tile on the dashboard, not just org-owned —
+# otherwise any public dashboard link could fetch every chart in the org.
 # ================================================================================
 
 

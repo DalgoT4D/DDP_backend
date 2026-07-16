@@ -1,4 +1,4 @@
-"""Task 3b: view-gate the content sub-endpoints (closes the T3 review gap).
+"""View-gate the content sub-endpoints (closes the T3 review gap).
 
 Task 3 gated the single detail GET per resource type (report/dashboard/
 alert/metric/kpi). This suite covers every OTHER by-id sub-endpoint on the

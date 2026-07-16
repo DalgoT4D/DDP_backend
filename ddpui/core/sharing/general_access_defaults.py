@@ -1,14 +1,5 @@
-"""Task 11 Part C: seed org-default General access at resource creation.
-
-D1 (permission-model rework): every shareable rtype (dashboard/report/alert/
-metric/kpi -- the ``general`` entries in ``shareable_types.RESOURCE_TYPES``)
-has ``analyst_level``/``member_level`` columns whose Django field defaults
-are ``none``/``none``. This helper lets a create path override those with
-the org's configured preference (``OrgPreferences.default_analyst_level``/
-``default_member_level``) instead, without each of the 5 create paths
-re-implementing the same "read OrgPreferences, fall back" lookup. For an
-org with no OrgPreferences row at all, the fallback is (view, view) --
-the pre-per-role product default -- not the model field defaults.
+"""Seed org-default general access at resource creation: one shared
+"read OrgPreferences, fall back" lookup for every create path.
 """
 
 from typing import Tuple
@@ -18,16 +9,10 @@ from ddpui.models.org_preferences import OrgPreferences
 
 
 def get_org_role_level_defaults(org_id: int) -> Tuple[str, str]:
-    """(analyst_level, member_level) to seed a newly created shareable
-    resource with: the org's configured defaults if it has a preferences
-    row, else (view, view).
-
-    An org with no OrgPreferences row at all has never configured sharing,
-    so it falls back to (view, view) rather than the model field defaults
-    (none/none) -- this preserves the pre-per-role product default (the old
-    GeneralAudience.ALL_USERS + GeneralLevel.VIEW pair applied to every
-    resource) for orgs that simply haven't touched this setting yet.
-    """
+    """(analyst_level, member_level) to seed a new shareable resource: the
+    org's configured defaults, else (view, view). The fallback is deliberately
+    not the model field defaults (none/none) — it preserves the pre-existing
+    product default for orgs that never touched this setting."""
     prefs = (
         OrgPreferences.objects.filter(org_id=org_id)
         .only("default_analyst_level", "default_member_level")

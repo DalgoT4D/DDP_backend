@@ -1,17 +1,8 @@
-"""Request-access (Milestone 9): a Member without access asks, an owner (or
-admin) decides. Approving INSERTS a ``ResourceShare`` grant -- this module is
-the second (and last) place ``sharing_actions.py``'s "NO writes outside this
-package" rule extends to; it earns its own file because the create / list /
-approve / decline flow, plus its own notification wiring, would otherwise
-crowd ``sharing_actions.py`` past a single-glance read (plan Sec 4.0's
-explicit deferral for Milestone 9).
-
-Reuses ``sharing_actions._owner_orguser`` / ``_orguser_name`` / `_entry_for`
-directly (private helpers, same package) instead of re-deriving the
-owner-resolution rule a second time -- it must stay byte-for-byte identical
-to the resolver's ownership semantics.
-
-``access_resolver`` stays read-only, untouched by this module.
+"""Request-access flow: a user without access asks, an owner (or admin)
+decides. Approving inserts a ``ResourceShare`` grant — the only sharing
+write outside ``sharing_actions``. Reuses that module's private helpers so
+owner resolution stays identical to the resolver's; ``access_resolver``
+stays read-only.
 """
 
 from typing import Optional
@@ -78,16 +69,9 @@ def _notify(
     email_subject: str,
     metadata: Optional[dict] = None,
 ) -> None:
-    """One in-app Notification + NotificationRecipient row, sent
-    immediately -- mirrors `MentionService._create_in_app_notification`'s
-    minimal shape (Resource Sharing keeps this to in-app only; no
-    email-preference wiring the way comment @mentions do, per the "keep it
-    simple" brief for this task).
-
-    `metadata` (batch 2 / F6) is the structured payload the Notifications
-    page reads to render inline Approve/Deny directly on a "new request"
-    row -- left `None` for every other notification (e.g. the decision
-    notification below), which keeps rendering as plain text."""
+    """One in-app Notification + NotificationRecipient row, sent immediately.
+    `metadata` is the structured payload the Notifications page reads to render
+    inline Approve/Deny on a "new request" row; None renders as plain text."""
     notification = Notification.objects.create(
         author=author_email,
         message=message,
@@ -126,10 +110,8 @@ def _notify_new_request(
         f'your {noun} "{label}". {link}'
     )
     subject = f'{requester_name} requested access to "{label}"'
-    # Generic `Notification.metadata` payload (batch 2 / F6): `kind`
-    # discriminates for future actionable-notification types the frontend
-    # may add later. Only THIS notification (new request landed) gets one --
-    # the decision notification below has nothing left to act on.
+    # `kind` discriminates future actionable-notification types. Only the
+    # new-request notification gets metadata — a decision has nothing to act on.
     metadata = {
         "kind": "access_request",
         "request_id": access_request.id,
@@ -176,9 +158,8 @@ def _ensure_decidable(access_request: AccessRequest) -> None:
 
 
 def get_access_request_or_none(org_id, request_id: int) -> Optional[AccessRequest]:
-    """Fetch an ``AccessRequest`` scoped to `org_id` -- a cross-org id is
-    indistinguishable from a nonexistent one (mirrors
-    ``access_api._get_resource_or_404``'s rule)."""
+    """Fetch an ``AccessRequest`` scoped to `org_id` — a cross-org id is
+    indistinguishable from a nonexistent one."""
     return (
         AccessRequest.objects.select_related(
             "requester", "requester__user", "decided_by", "decided_by__user"
@@ -191,23 +172,16 @@ def get_access_request_or_none(org_id, request_id: int) -> Optional[AccessReques
 def create_access_request(
     requester: OrgUser, rtype: str, resource, payload: AccessRequestCreate
 ) -> AccessRequestOut:
-    """Ask for access to `resource`. 400s if the rtype doesn't support
-    requests, the permission is invalid, or the requester already has
-    effective access. A duplicate live pending request from the same
-    requester for the same resource is refreshed in place (note,
-    permission, expiry) instead of stacking a second row -- and does not
-    re-notify the owner a second time for the same ask. This also covers a
-    `pending` row that is PAST its `expires_at` but hasn't been swept to
-    `expired` yet by the daily cleanup task (up to a 24h window) -- it is
-    still refreshed in place, never left to coexist with a second pending
-    row for the same ask."""
+    """Ask for access to `resource`. 400s if the rtype doesn't support requests,
+    the permission is invalid, or the requester already has access. A duplicate
+    pending request (including one past expiry but not yet swept) is refreshed
+    in place instead of stacking a second row, and does not re-notify the owner."""
     entry = _entry_for(rtype)
     if not entry.requests:
         raise SharingValidationError(f"{rtype} does not support access requests")
 
-    # v1.1: Member sharing is deferred on member_sharing=False rtypes
-    # (charts) -- a Member's request could never be granted, so block it
-    # with a pointer at the path that DOES work for them.
+    # On member_sharing=False rtypes a Member's request could never be
+    # granted, so block it with a pointer at the path that does work.
     requester_slug = requester.new_role.slug if requester.new_role else None
     if not entry.member_sharing and requester_slug == MEMBER_ROLE:
         noun = _NOUN_BY_RTYPE.get(rtype, rtype)
@@ -249,10 +223,8 @@ def create_access_request(
 
 
 def _decidable_resource_ids(viewer: OrgUser, rtype: str, resource_ids: list) -> set:
-    """Among `resource_ids` (all of rtype `rtype`, all in viewer's org),
-    return the subset viewer may decide requests for: the resource's owner
-    (or `created_by` fallback) is viewer. Admin/super-admin short-circuits
-    the whole call at the caller."""
+    """The subset of `resource_ids` the viewer may decide requests for — the
+    resources they own. Admins short-circuit at the caller."""
     model = get_resource_type(rtype).model
     owned = set()
     for pk, owner_id, created_by_id in model.objects.filter(
@@ -265,10 +237,9 @@ def _decidable_resource_ids(viewer: OrgUser, rtype: str, resource_ids: list) -> 
 
 
 def list_access_requests(viewer: OrgUser) -> AccessRequestListResponse:
-    """`incoming`: pending requests on resources viewer can decide (owner,
-    owner-fallback created_by, or admin/super-admin -- admin sees every
-    pending request in-org). `outgoing`: viewer's own requests, any status.
-    """
+    """`incoming`: pending requests on resources the viewer can decide (owner,
+    or admin — admins see every pending request in-org). `outgoing`: the
+    viewer's own requests, any status."""
     outgoing = list(
         AccessRequest.objects.filter(org_id=viewer.org_id, requester=viewer)
         .select_related("requester", "requester__user", "decided_by", "decided_by__user")
@@ -310,31 +281,13 @@ def list_access_requests(viewer: OrgUser) -> AccessRequestListResponse:
 def _insert_grant(
     actor: OrgUser, rtype: str, resource, principal: OrgUser, permission: str
 ) -> None:
-    """Internal grant write for approve -- bypasses `entry.grants` /
-    `sharing_actions.upsert_grant` deliberately, same pattern Task 12's
-    ownership transfer used: the owner deciding a request may always grant
-    up to Edit on their own resource, even for a hypothetical `grants=False`
-    rtype (metric/kpi held that flag before M5's registry flip) whose public
-    `POST /grants/` endpoint would reject this. Also bypasses M5's
-    Member-grants-deferred check (`sharing_actions._reject_member_principal`)
-    deliberately -- approving a Member's own access request still writes
-    their grant; that block only applies to NEW proactive shares (the share
-    modal / bulk / invites), not to deciding a request someone already made.
-
-    Note this cannot become a Member back door onto `member_sharing=False`
-    rtypes (charts): Member requesters are blocked upstream in
-    `create_access_request`, and even a historical/hand-written Member
-    grant row on a chart resolves to NOTHING for a Member viewer --
-    `access_resolver._member_excluded` drops the grant contribution at
-    read time (defense in depth on both ends of this write).
-
-    Also deliberately bypasses the v1.1 M2 dashboard-broadening warning
-    (`sharing_actions`'s under-covering-chart prompt): approving a request
-    is the owner (or admin) DECIDING to grant exactly what the requester
-    asked for, not a proactive share the owner might not have thought
-    through -- there is no "did you mean to expose this chart too?"
-    question to ask when the owner is answering a request that already
-    named the resource."""
+    """Grant write for approve. Deliberately bypasses `upsert_grant`'s
+    `entry.grants` flag, the Member-grants-deferred check, and the
+    dashboard-broadening warning: the owner is deciding a request that
+    already named the resource, not making a proactive share. Not a Member
+    back door onto member_sharing=False rtypes — Member requesters are
+    blocked upstream, and the resolver drops Member grant contributions
+    on charts at read time anyway."""
     ResourceShare.objects.update_or_create(
         org_id=resource.org_id,
         resource_type=rtype,
@@ -401,11 +354,9 @@ def decline_access_request(
 
 
 def expire_stale_requests() -> int:
-    """Daily cleanup (Celery beat, extends Task 9's `cleanup_expired_invitations`
-    tick): mark pending `AccessRequest` rows whose `expires_at` has passed as
-    `expired`. `approve`/`decline` separately 400 on an expired-but-still
-    "pending" row on their own (a race between the beat tick and a
-    decision) -- this sweep just keeps the pending inbox/badge honest."""
+    """Daily cleanup: mark pending rows past `expires_at` as expired.
+    approve/decline 400 on expired rows on their own; this sweep just keeps
+    the pending inbox/badge honest."""
     updated = AccessRequest.objects.filter(
         status=AccessRequest.STATUS_PENDING, expires_at__lt=django_timezone.now()
     ).update(status=AccessRequest.STATUS_EXPIRED)

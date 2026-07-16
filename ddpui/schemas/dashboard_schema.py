@@ -38,15 +38,9 @@ class DashboardTabSchema(Schema):
 
 
 class DashboardUpdate(Schema):
-    """Schema for updating a dashboard.
-
-    ``extend_chart_ids``/``proceed`` (v1.1 M2) are the embed-warning
-    confirmation: a tabs payload that ADDS charts under-covering the
-    dashboard's audience 409s with the coverage verdicts unless one of
-    them is present. ``extend_chart_ids`` (a subset of the warned charts;
-    caller needs Edit on each) extends those charts after the save;
-    ``proceed=true`` saves without touching them (exposure acknowledged —
-    tiles render inline regardless)."""
+    """Schema for updating a dashboard. ``extend_chart_ids``/``proceed`` are
+    the embed-warning confirmation: a tabs payload adding under-covering
+    charts 409s unless one of them is present."""
 
     title: Optional[str] = None
     description: Optional[str] = None
@@ -96,10 +90,8 @@ class DashboardResponse(Schema):
     created_at: datetime
     updated_at: datetime
     filters: List[DashboardFilterResponse] = []
-    # Resource Sharing (Task 6b Part A) -- general access + viewer-relative
-    # ownership, for the ShareModal's badges. Optional so the public
+    # Sharing fields for the ShareModal's badges. Optional so the public
     # dashboard response (no authenticated viewer) can omit them.
-    # D1: per-role levels, replacing the old audience+level pair.
     analyst_level: Optional[str] = None
     member_level: Optional[str] = None
     is_owner: bool = False

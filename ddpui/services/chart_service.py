@@ -157,11 +157,9 @@ class ChartService:
             (required dimension_column, metric aggregation enum, customizations
             constraints, etc.) before reaching this method.
         """
-        # v1.1: new charts seed general access from the org's defaults like
-        # every other shareable resource -- EXCEPT member_level, which is
-        # clamped to "none" regardless of the org default (decision #2:
-        # Member chart sharing is deferred; Members keep seeing charts
-        # inline inside shared dashboards/reports).
+        # New charts seed general access from the org's defaults — except
+        # member_level, which is clamped to "none" regardless of the default
+        # (Member chart sharing is deferred).
         analyst_level, _ = get_org_role_level_defaults(orguser.org_id)
 
         chart = Chart.objects.create(
@@ -334,8 +332,8 @@ class ChartService:
         # Verify chart exists
         ChartService.get_chart(chart_id, org)
 
-        # Find dashboards that have this chart in their components -- the
-        # ONE consolidated tile-walk (chart_access.dashboard_chart_ids).
+        # Find dashboards that have this chart as a tile, via the shared
+        # tile-walk (chart_access.dashboard_chart_ids).
         return [
             {
                 "id": dashboard.id,

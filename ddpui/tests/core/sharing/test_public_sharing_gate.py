@@ -1,4 +1,4 @@
-"""Task 11 Part A: the org-level public-sharing kill switch.
+"""The org-level public-sharing kill switch.
 
 `OrgPreferences.allow_public_sharing` (Task 1) is a per-org master switch.
 `org_allows_public_sharing` is the pure boolean read (no row -> default

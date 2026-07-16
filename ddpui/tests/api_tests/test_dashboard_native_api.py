@@ -842,7 +842,7 @@ class TestDuplicateDashboardTabs:
 
 
 # ================================================================================
-# Test toggle_dashboard_sharing endpoint -- Task 11 public-sharing kill switch
+# Test toggle_dashboard_sharing endpoint — public-sharing kill switch
 # ================================================================================
 
 
@@ -959,7 +959,7 @@ class TestToggleDashboardSharingAuthorization:
 
 
 # ================================================================================
-# Test get_dashboard_sharing_status endpoint -- Task 11c view-gate
+# Test get_dashboard_sharing_status endpoint — view-gate
 # ================================================================================
 
 

@@ -1,4 +1,4 @@
-"""v1.1 Milestone 1: charts join the sharing model.
+"""Charts join the sharing model.
 
 Covers the chart-specific rules layered onto the (already generic) sharing
 machinery:

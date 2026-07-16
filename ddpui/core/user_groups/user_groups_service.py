@@ -1,17 +1,10 @@
 """Groups service: create/rename/delete ``UserGroup`` rows and manage their
-membership (Task 7 — Milestone 3). Groups live in the org app, NOT
-``core/sharing`` — Layers 2-3 import groups without the grant machinery;
-``ResourceShare`` only ever sees a group by id via its existing soft
-``principal_type="group"`` pointer.
+membership. Kept outside ``core/sharing`` — ``ResourceShare`` only ever sees
+a group by id via its soft ``principal_type="group"`` pointer.
 
-Rules of this module:
-- NO HTTP concerns: raise ``ddpui.core.user_groups.exceptions`` errors; the
-  API layer maps them to status codes.
-- "Creator or Admin" is the object-level check (mirrors
-  ``ddpui.core.ownership.is_admin_or_super_admin``) gating every mutation of
-  a specific group: rename, delete, add/remove member. Base
-  create/read access is Analyst+ (``can_manage_user_groups`` /
-  ``can_view_user_groups``, checked by the API layer's ``@has_permission``).
+No HTTP concerns: raise ``ddpui.core.user_groups.exceptions``; the API layer
+maps them to status codes. "Creator or Admin" gates every mutation of a
+specific group; base create/read access is checked by ``@has_permission``.
 """
 
 from typing import List, Optional
@@ -24,11 +17,8 @@ from django.db.models.functions import Coalesce
 from ddpui.core.ownership import is_admin_or_super_admin
 from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
 
-# Reuses the share-flow's "invite this email, return an instant OrgUser or
-# None" primitive rather than re-implementing invite/Invitation handling
-# here (Phase M4 -- see the module's `add_member` docstring). This is the
-# one place Groups depends on core/sharing; it stays a leaf import (no
-# ResourceShare/grant machinery is pulled in).
+# The one place Groups depends on core/sharing: reuse the share-flow invite
+# primitive rather than re-implementing invite/Invitation handling here.
 from ddpui.core.sharing.sharing_actions import _invite_email_once
 from ddpui.core.user_groups.exceptions import (
     GroupNameCollisionError,
@@ -56,10 +46,8 @@ logger = CustomLogger("ddpui.core.user_groups.user_groups_service")
 
 
 def _workspace_url() -> str:
-    """Absolute frontend root for the "Explore Workspace" CTA -- prefers the
-    v2 webapp URL, mirroring the settings-fallback pattern used across the
-    codebase (mention_service, alerts, reports). Kept local so user_groups
-    stays free of any core/sharing dependency."""
+    """Absolute frontend root for the "Explore Workspace" CTA. Kept local so
+    user_groups stays free of any core/sharing dependency."""
     return (
         getattr(settings, "FRONTEND_URL_V2", None)
         or getattr(settings, "FRONTEND_URL", None)
@@ -68,9 +56,8 @@ def _workspace_url() -> str:
 
 
 def _notify_added_to_group(adder: OrgUser, group: UserGroup, member: OrgUser) -> None:
-    """Email a newly-added active member that they were added to `group`
-    (Phase D2). Best-effort: a send failure is logged and swallowed -- it
-    must never fail the add-member request."""
+    """Email a newly-added active member that they were added to `group`.
+    Best-effort: a send failure is logged and swallowed, never failing the add."""
     try:
         awsses.send_added_to_group_email(
             to_email=member.user.email,
@@ -85,8 +72,7 @@ def _notify_added_to_group(adder: OrgUser, group: UserGroup, member: OrgUser) ->
 
 
 def _display_name(user) -> str:
-    """Display name convention used across the codebase (dbt_api, alert_api,
-    sharing_actions)."""
+    """Display name convention used across the codebase."""
     return f"{user.first_name} {user.last_name}".strip() or user.email
 
 
@@ -113,9 +99,8 @@ def _member_out(member: UserGroupMember) -> GroupMemberOut:
 
 
 def _shared_resource_count_expr():
-    """Correlated count of active ``ResourceShare`` rows granted to a group
-    (``principal_type="group"``), as a queryset annotation expression. A
-    subquery, not a Python loop — one query for the whole list."""
+    """Correlated count of active ``ResourceShare`` rows granted to a group, as
+    a queryset annotation — one query for the whole list."""
     counts = (
         ResourceShare.objects.filter(
             principal_type="group",
@@ -146,8 +131,7 @@ def _annotated_groups(org_id):
     )
 
 
-# Phase A / A2: how many member emails the list path returns for the
-# Groups-table avatar stack (design frame 1184:3242 shows 4 circles + "+N").
+# How many member emails the list path returns for the Groups-table avatar stack.
 MEMBER_PREVIEW_LIMIT = 4
 
 
@@ -164,9 +148,8 @@ def _group_out(group: UserGroup, member_preview: Optional[List[str]] = None) -> 
 
 
 def list_groups(orguser: OrgUser) -> List[GroupOut]:
-    """All of `orguser`'s org's groups, with member/shared-resource counts
-    and a preview of up to ``MEMBER_PREVIEW_LIMIT`` active member emails
-    (prefetched in one query — no N+1)."""
+    """All of the org's groups, with counts and a preview of up to
+    ``MEMBER_PREVIEW_LIMIT`` active member emails (prefetched, no N+1)."""
     groups = (
         _annotated_groups(orguser.org_id)
         .order_by("name")
@@ -271,42 +254,25 @@ def delete_group(orguser: OrgUser, group_id: int) -> None:
 
 
 def _add_active_member(adder: OrgUser, group: UserGroup, target: OrgUser) -> GroupMemberOut:
-    """Create (or no-op onto) an ACTIVE membership row for `target` and fire
-    the D2 notification on a genuinely new one. Shared by the orguser_id
-    path and the email path's "matches an existing org member" / "invite
-    resolved instantly" branches -- all three end up here so the idempotency
-    and notification rule lives in exactly one place."""
+    """Create (or no-op onto) an active membership row for `target`, notifying
+    on a genuinely new one. All add paths end up here so the idempotency and
+    notification rule lives in exactly one place."""
     member, created = UserGroupMember.objects.get_or_create(
         group=group,
         orguser=target,
         defaults={"status": UserGroupMemberStatus.ACTIVE},
     )
-    # D2: notify only on a genuinely NEW active membership for an ACTIVE org
-    # user -- never on an idempotent re-add (created is False).
+    # Notify only on a genuinely new active membership for an active org user.
     if created and target.user.is_active:
         _notify_added_to_group(adder, group, target)
     return _member_out(member)
 
 
 def add_member(orguser: OrgUser, group_id: int, payload: GroupMemberCreate) -> GroupMemberOut:
-    """Add a member by OrgUser id OR by email (exactly one). Creator or
-    Admin only. Adding an existing member is idempotent — returns the
-    existing row.
-
-    Email branches (M4 -- batch 2b):
-    - matches an existing org member (any status, mirroring
-      ``sharing_actions.upsert_grant``'s email lookup) -> same as the
-      orguser_id path.
-    - unknown (or not-yet-active) -> reused share-flow invite machinery
-      (``sharing_actions._invite_email_once``) at ``payload.invite_role``
-      (Member unless an admin/super-admin caller chose more -- the design's
-      "Assign new invites role before adding to group" banner mirrors the
-      share modal's admin-only picker, see
-      ``sharing_actions._resolve_invite_role``, reused as-is) -- then a
-      PENDING row, matched by email and flipped to ACTIVE on signup by
-      ``orguserfunctions.activate_pending_shares_and_memberships`` (already
-      wired; not rebuilt here).
-    """
+    """Add a member by OrgUser id or by email (exactly one). Creator or Admin
+    only; adding an existing member is idempotent. An email matching an org
+    member behaves like the orguser_id path; an unknown email goes through the
+    share-flow invite and leaves a pending row, flipped to active on signup."""
     group = _get_group_or_404(orguser, group_id)
     _require_creator_or_admin(orguser, group)
 

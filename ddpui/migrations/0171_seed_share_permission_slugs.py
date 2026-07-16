@@ -1,21 +1,11 @@
-"""Resource Sharing: seed the per-rtype share-permission slugs.
+"""Seed the per-rtype share-permission slugs, granted to the same roles that
+hold `can_share_dashboards`; Member deliberately gets none.
 
-`can_share_dashboards` already exists (seed pk 72). This adds the four
-sibling slugs for the other shareable rtypes and grants them to the same
-roles that hold `can_share_dashboards` (super-admin, admin, analyst).
-Member deliberately gets none — sharing mutations are Analyst+ only.
-There is NO `can_share_charts`: charts are not independently shareable.
-
-Fresh installs get the same rows from seed/002_permissions.json +
-seed/003_role_permissions.json; this migration mirrors them onto existing
-databases (idempotent via get_or_create, safe before or after
-`migrate_rbac_v2_roles`, and tolerant of roles that don't exist yet).
-
-The role->permission map is cached in Redis (ROLE_PERMISSIONS_REDIS_KEY);
-the middleware rebuilds it lazily when the key is absent (ddpui/auth.py),
-so we just delete the key. Never call set_roles_and_permissions_in_redis()
-here — Redis-less environments (CI) must still migrate, hence the
-try/except around the delete.
+Fresh installs get the same rows from the seed JSON; this migration mirrors
+them onto existing databases (idempotent, tolerant of absent roles). Only
+DELETE the Redis role-permission cache so it rebuilds lazily — never call
+set_roles_and_permissions_in_redis() here, Redis-less environments (CI)
+must still migrate.
 """
 
 import os

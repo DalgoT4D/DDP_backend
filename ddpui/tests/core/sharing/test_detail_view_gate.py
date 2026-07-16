@@ -1,4 +1,4 @@
-"""Part B of Task 3: view-gate the 5 single-resource GET endpoints.
+"""View-gate the 5 single-resource GET endpoints.
 
 After the existing org-scoped fetch, deny with 403 when
 `effective_permission(viewer, rtype, resource)` is None. 403 (not 404) is

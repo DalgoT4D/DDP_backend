@@ -1,19 +1,11 @@
-# Resource Sharing v1.1: charts join the sharing model.
+# Charts join the sharing model.
 #
-# 1. Chart gains the per-role general-access columns every shareable rtype
-#    has (analyst_level / member_level). The AddField defaults ARE the
-#    behavior-preserving backfill (v1.1 decision #3): every existing chart
-#    row gets analyst_level="edit", member_level="none" — exactly today's
-#    effective behavior (all analysts see/edit all charts; Members see them
-#    only inside shared containers). Nothing changes for anyone on migration
-#    day. member_level is pinned to "none" in v1.1 (decision #2: Member
-#    chart sharing deferred). Reverse = drop the columns.
-#
-# 2. Seed the new `can_share_charts` permission slug for EXISTING databases,
-#    granted to the same roles that hold `can_share_dashboards` (super-admin,
-#    admin, analyst; legacy account-manager included) — mirrors
-#    0171_seed_share_permission_slugs. Fresh installs get the same rows from
-#    seed/002_permissions.json + seed/003_role_permissions.json.
+# 1. Chart gains analyst_level / member_level. The AddField defaults ARE the
+#    behavior-preserving backfill: existing rows get analyst_level="edit",
+#    member_level="none" — exactly the pre-migration effective behavior, so
+#    nothing changes for anyone on migration day.
+# 2. Seed the `can_share_charts` slug for existing databases, mirroring 0171;
+#    fresh installs get the same rows from the seed JSON.
 
 import os
 

@@ -519,7 +519,7 @@ class TestNonGuestCommentAccess:
 
 
 # ================================================================================
-# Test Sharing Status - view-gated at the API layer (Task 11c)
+# Test Sharing Status - view-gated at the API layer
 # ================================================================================
 
 

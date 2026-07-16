@@ -1,4 +1,4 @@
-"""Task 6b Part A: the dashboard LIST/DETAIL response DTO gains sharing
+"""The dashboard LIST/DETAIL response DTO gains sharing
 fields the frontend's ShareModal follow-up needs — `analyst_level`,
 `member_level` (D1: straight off the model columns, replacing the old
 `general_audience`/`general_level` pair) and `is_owner`/`is_creator`

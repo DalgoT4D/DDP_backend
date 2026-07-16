@@ -1,19 +1,8 @@
-"""Groups (Task 7): seed the `can_manage_user_groups` / `can_view_user_groups`
-permission slugs.
-
-No existing slug family fits "Analyst+ create/read, Member excluded" for
-group management (the closest sibling, invitations, is admin-only for
-create/edit/delete and admin+analyst only for view — see plan discussion in
-the Task 7 report). So this adds two new slugs, granted to the same roles
-that hold `can_share_dashboards` (super-admin, admin, analyst); Member gets
-neither.
-
-Fresh installs get the same rows from seed/002_permissions.json +
-seed/003_role_permissions.json; this migration mirrors them onto existing
-databases (idempotent via get_or_create, safe before or after
-`migrate_rbac_v2_roles`, and tolerant of roles that don't exist yet).
-Follows 0171_seed_share_permission_slugs.py's pattern exactly, including the
-Redis-cache-invalidation try/except.
+"""Seed the `can_manage_user_groups` / `can_view_user_groups` slugs, granted
+to the same roles that hold `can_share_dashboards`; Member gets neither.
+Mirrors the seed JSON onto existing databases (idempotent, tolerant of absent
+roles); follows 0171's pattern, including the Redis cache-invalidation
+try/except.
 """
 
 import os

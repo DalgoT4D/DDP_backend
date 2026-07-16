@@ -1,4 +1,4 @@
-"""Task 7 Part C.1: the resolver's `get_group_ids` seam wired to real
+"""The resolver's `get_group_ids` seam wired to real
 `UserGroupMember` rows, as the DEFAULT — every existing caller (lists,
 detail gates, access endpoints) that doesn't pass `get_group_ids` must pick
 up group membership with no edits.

@@ -1,4 +1,4 @@
-"""Part C of Task 5: resolver-`edit` object checks on the 5 rtypes' update
+"""Resolver-`edit` object checks on the 5 rtypes' update
 endpoints, after their existing slug gate (deferred from Task 3 by design).
 
 The slug gate (`can_edit_*`) says what the ROLE may do in general; the

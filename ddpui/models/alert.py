@@ -80,12 +80,9 @@ class Alert(models.Model):
     # Recipients — JSON list. Each entry:
     #   {"type": "orguser", "orguser_id": int}
     #   {"type": "external", "email": str}
-    #   {"type": "group", "group_id": int}   -- expanded to the group's ACTIVE
-    #       members' delivery targets at fire time (dedupe against any
-    #       directly-listed recipient); a deleted/empty group at fire time is
-    #       skipped gracefully. Being a recipient here is delivery-only — it
-    #       grants NO resource access to the alert (ResourceShare governs that
-    #       separately; see plan Sec 4 "Alerts").
+    #   {"type": "group", "group_id": int}   -- expanded to the group's active
+    #       members at fire time (deduped; a deleted/empty group is skipped).
+    #       Delivery-only: being a recipient grants no access to the alert.
     # Replaced wholesale on edit.
     recipients = models.JSONField(default=list)
 
@@ -93,10 +90,8 @@ class Alert(models.Model):
     is_active = models.BooleanField(default=True)
     last_evaluated_at = models.DateTimeField(null=True, blank=True)  # UTC
 
-    # General access (org-wide default sharing) — Layer 1 of Resource Sharing.
-    # D1: per-role levels, replacing the old audience+level pair -- Admins
-    # are never stored here (always full access), Analysts and Members each
-    # get their own independent level.
+    # General access — per-role sharing levels. Admins are never stored here;
+    # Analysts and Members each get an independent level.
     analyst_level = models.CharField(
         max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
     )

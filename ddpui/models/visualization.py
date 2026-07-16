@@ -58,17 +58,11 @@ class Chart(models.Model):
         default=dict, help_text="Create chart form config including customizations"
     )
 
-    # General access (org-wide default sharing) — Layer 1 of Resource Sharing
-    # (v1.1: charts join the sharing model). Same per-role declaration as
-    # Dashboard, with ONE deliberate difference: ``analyst_level`` defaults to
-    # EDIT, not NONE — the behavior-preserving value (v1.1 decision #3: all
-    # analysts could see/edit all charts before charts had access fields, so
-    # any row created without explicit levels keeps today's behavior; the
-    # service create path overrides with the org's defaults).
-    # ``member_level`` is PINNED to "none" in v1.1 (decision #2: Member chart
-    # sharing is deferred — Members see charts only inline inside shared
-    # dashboards/reports); ``clean()`` and the sharing API both reject any
-    # other value.
+    # General access, with one deliberate difference from Dashboard:
+    # analyst_level defaults to EDIT — the behavior-preserving value for rows
+    # created without explicit levels (the create path overrides with org
+    # defaults). member_level is pinned to "none" (Member chart sharing is
+    # deferred); clean() and the sharing API both reject any other value.
     analyst_level = models.CharField(
         max_length=5, choices=AccessLevel.choices, default=AccessLevel.EDIT
     )
@@ -95,13 +89,9 @@ class Chart(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def clean(self):
-        """v1.1 member-pin: Member chart sharing is deferred, so
-        ``member_level`` should stay "none". The REAL enforcement lives in
-        the sharing API (``shareable_types`` registry ``member_sharing=False``)
-        and the resolver (which gives Member viewers nothing on charts even
-        if a stray value slips in). This is only a best-effort backstop —
-        Django doesn't call ``clean()`` on plain ``save()``/``update()``, so
-        write paths must not rely on it."""
+        """Best-effort backstop keeping ``member_level`` at "none" — the real
+        enforcement lives in the sharing API and resolver. Django doesn't call
+        ``clean()`` on plain save()/update(), so write paths must not rely on it."""
         super().clean()
         if self.member_level != AccessLevel.NONE:
             raise ValidationError(

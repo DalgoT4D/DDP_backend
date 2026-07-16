@@ -1,4 +1,4 @@
-"""Task 6d: column-set guard for context-admitted table/map chart POSTs.
+"""Column-set guard for context-admitted table/map chart POSTs.
 
 Task 6b let a Member reach `POST /api/charts/chart-data-preview/` (+
 `total-rows`) and `POST /api/charts/map-data-overlay/` via a

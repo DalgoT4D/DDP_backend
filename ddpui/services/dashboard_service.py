@@ -278,10 +278,8 @@ class DashboardService:
 
         response_data["filters"] = filters_data
 
-        # Resource Sharing (Task 6b Part A). No extra query: analyst_level/
-        # member_level/owner_id/created_by_id are already columns on
-        # `dashboard`, compared directly against orguser.id -- never against
-        # the .owner/.created_by FK objects, which would trigger a query.
+        # No extra query: these are columns on `dashboard`, compared against
+        # orguser.id directly — never via the FK objects, which would query.
         response_data["analyst_level"] = dashboard.analyst_level
         response_data["member_level"] = dashboard.member_level
         response_data["is_owner"] = orguser is not None and is_owner(orguser, dashboard)
@@ -981,8 +979,7 @@ class DashboardService:
         except Dashboard.DoesNotExist:
             raise ValueError("Dashboard not found")
 
-        # Extract chart IDs from tabs -- the ONE consolidated tile-walk
-        # (chart_access.dashboard_chart_ids), fail-closed on malformed tabs.
+        # Extract chart ids via the shared tile-walk, fail-closed on malformed tabs.
         chart_ids = dashboard_chart_ids(dashboard)
 
         # Fetch chart details

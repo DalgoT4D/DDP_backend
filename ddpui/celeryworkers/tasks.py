@@ -1254,13 +1254,8 @@ def clear_stuck_locks():
 @app.task(bind=False)
 def cleanup_expired_invitations():
     """Delete expired `Invitation` rows and their pending
-    `ResourceShare`/`UserGroupMember` rows (Task 9 / plan Sec 4.6 invites).
-
-    Also sweeps stale pending `AccessRequest` rows to `expired` (Task 15 /
-    Milestone 9) -- same daily beat tick, kept together rather than a
-    second periodic task since both are "delete/expire stuff whose 30-day
-    clock ran out" sweeps.
-    """
+    `ResourceShare`/`UserGroupMember` rows. Also sweeps stale pending
+    `AccessRequest` rows to `expired` — same daily 30-day-clock sweep."""
     logger.info("Starting periodic cleanup of expired invitations")
     counts = orguserfunctions.cleanup_expired_invitations()
     logger.info(f"cleanup_expired_invitations done: {counts}")

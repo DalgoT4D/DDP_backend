@@ -1,4 +1,4 @@
-"""Task 11 Part C: org-default General access seeded at resource creation.
+"""Org-default General access seeded at resource creation.
 
 D1 (permission-model rework): `get_org_role_level_defaults` is the one
 shared helper the 5 create paths (dashboard/report/alert/metric/kpi) call

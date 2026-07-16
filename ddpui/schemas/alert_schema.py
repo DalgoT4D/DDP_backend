@@ -13,9 +13,8 @@ class RecipientIn(Schema):
     type: Literal["orguser", "external", "group"]
     orguser_id: Optional[int] = None
     email: Optional[str] = None
-    # UserGroup id — expanded to the group's active members' delivery targets
-    # at fire time (see ddpui.core.alerts.delivery._expand_recipients). Being
-    # a recipient here never grants resource access to the alert itself.
+    # UserGroup id, expanded to the group's active members at fire time.
+    # Being a recipient never grants resource access to the alert itself.
     group_id: Optional[int] = None
 
 
