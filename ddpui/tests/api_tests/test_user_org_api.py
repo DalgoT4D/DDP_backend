@@ -1088,7 +1088,7 @@ def test_get_invitations_v1_no_org(orguser):
 
 
 def test_get_invitations_v1(orguser):
-    """success - return invitations"""
+    """success - return invitations, including who sent them"""
     request = mock_request(orguser)
     guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
     Invitation.objects.create(
@@ -1105,6 +1105,63 @@ def test_get_invitations_v1(orguser):
         "uuid": guest_role.uuid,
         "name": guest_role.name,
     }
+    assert response[0]["invited_by"] == orguser.user.email
+
+
+def test_get_invitations_v1_is_org_wide(authuser, org_without_workspace):
+    """success - an admin sees invitations sent by *another* admin in the same org,
+    with the correct inviter attributed to each row"""
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+
+    orguser_a = OrgUser.objects.create(
+        user=authuser,
+        org=org_without_workspace,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+    user_b = User.objects.create(
+        username="second-admin-username", email="second-admin-email", password="pwd"
+    )
+    orguser_b = OrgUser.objects.create(
+        user=user_b,
+        org=org_without_workspace,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+
+    Invitation.objects.create(
+        invited_by=orguser_a,
+        invited_email="invited-by-a",
+        invited_on=timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0)),
+        invited_new_role=guest_role,
+    )
+    Invitation.objects.create(
+        invited_by=orguser_b,
+        invited_email="invited-by-b",
+        invited_on=timezone.as_ist(datetime(2023, 1, 2, 10, 0, 0)),
+        invited_new_role=guest_role,
+    )
+
+    # admin B calls the endpoint and should see admin A's invite too
+    request = mock_request(orguser_b)
+    response = get_invitations_v1(request)
+
+    assert len(response) == 2
+    by_email = {row["invited_email"]: row["invited_by"] for row in response}
+    assert by_email["invited-by-a"] == orguser_a.user.email
+    assert by_email["invited-by-b"] == orguser_b.user.email
+
+    orguser_a.delete()
+    orguser_b.delete()
+    user_b.delete()
+
+
+def test_get_invitations_v1_permission_gate_unchanged(orguser):
+    """the endpoint still requires can_view_invitations -- a role without it is rejected"""
+    orguser.new_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    orguser.save()
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_invitations_v1(request)
+    assert excinfo.value.status_code == 404
 
 
 # ================================================================================

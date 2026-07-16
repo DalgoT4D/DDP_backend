@@ -485,7 +485,7 @@ def post_organization_user_accept_invite_v1(
 @user_org_router.get("/v1/users/invitations/")
 @has_permission(["can_view_invitations"])
 def get_invitations_v1(request):
-    """Get all invitations sent by the current user"""
+    """Get all pending invitations for the requestor's org (org-wide, not just self-sent)"""
     retval, error = orguserfunctions.get_invitations_from_orguser_v1(request.orguser)
     if error:
         raise HttpError(400, error)
