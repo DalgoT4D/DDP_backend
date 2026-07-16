@@ -10,7 +10,7 @@ from ninja.errors import HttpError
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.org_task_schema import SelectedStream
 from ddpui.utils.custom_logger import CustomLogger
@@ -112,12 +112,29 @@ def setup_dbt_core_task_config(
     seq: int = 1,
 ):
     """constructs the prefect payload for a dbt job"""
+    # Populate env for the runner flow (proxy/prefect_flows_runner.py). Old flow
+    # ignores env; keeping cli_profile_block above means a rollback stays safe.
+    # Keys use the same hyphen convention as `secret-git-pull-url-block`.
+    warehouse = OrgWarehouse.objects.filter(org=org_task.org).first()
+    env = {}
+    if warehouse:
+        env["wtype"] = warehouse.wtype
+        env["default-schema"] = dbt_project_params.target
+        if warehouse.secret_block:
+            env["warehouse-secret-block-name"] = warehouse.secret_block.block_name
+        else:
+            logger.warning(
+                "OrgWarehouse for org=%s has no secret_block — runner-mode deployments will fail. "
+                "Run create_or_update_org_cli_block to create the Secret block.",
+                org_task.org.slug,
+            )
+
     return PrefectDbtTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
         commands=[f"{dbt_project_params.dbt_binary} {org_task.get_task_parameters()}"],
         type=DBTCORE,
-        env={},
+        env=env,
         working_dir=dbt_project_params.project_dir,
         profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
         project_dir=dbt_project_params.project_dir,

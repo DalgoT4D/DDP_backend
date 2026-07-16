@@ -246,6 +246,16 @@ class OrgWarehouse(models.Model):
         max_length=10, null=True
     )
     bq_location = models.CharField(max_length=100, null=True)
+    # Prefect Secret block mirroring the warehouse creds. JSON-encoded value:
+    # {"creds": {...}, "extras": {...}}. Read by the runner flow at flow-run start.
+    # Nullable so pre-migration rows work; populated on next warehouse-cred write.
+    secret_block = models.ForeignKey(
+        "OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

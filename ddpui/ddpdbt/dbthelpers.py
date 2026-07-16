@@ -1,10 +1,12 @@
+import json
 import os
 from pathlib import Path
 import yaml
 from ninja.errors import HttpError
 
 from ddpui.ddpdbt.schema import DbtProjectParams
-from ddpui.ddpprefect import DBTCLIPROFILE, prefect_service
+from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
+from ddpui.ddpprefect.schema import PrefectSecretBlockEdit
 from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
@@ -135,4 +137,77 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
             orgdbt.cli_profile_block = cli_profile_block
             orgdbt.save()
 
+    # Mirror creds to the runner-flow Secret block. Non-fatal on failure so
+    # the CLI-profile-block path (authoritative until cutover) still wins.
+    create_or_update_wh_secret_block(
+        org, warehouse, dbt_creds, bqlocation=bqlocation, priority=priority
+    )
+
     return (cli_profile_block, dbt_project_params), None
+
+
+def create_or_update_wh_secret_block(
+    org: Org,
+    warehouse: OrgWarehouse,
+    dbt_creds: dict,
+    bqlocation: str = None,
+    priority: str = None,
+):
+    """Upsert the warehouse's Prefect Secret block — the runner-flow artifact
+    read by proxy/prefect_flows_runner.py at flow-run start.
+
+    Block name is deterministic: `dalgo-wh-<org.slug>`.
+    Value is JSON-encoded {"creds": ..., "extras": ...}:
+      creds  = airbyte destination fields the runner uses to shape profiles.yml
+               (host, port, user, password, database, SSL bits; or keyfile_json
+               for BigQuery).
+      extras = profile-shaping settings that aren't credentials:
+                 bigquery → {"location": bqlocation, "priority": priority}
+                 postgres → {} (all settings live in creds)
+
+    Also upserts an OrgPrefectBlockv1 row and sets `warehouse.secret_block`.
+    Errors are logged and swallowed — the caller's CLI-profile-block path stays
+    authoritative during the transition.
+
+    Returns the OrgPrefectBlockv1 row on success, None on failure.
+    """
+    wh_extras = {}
+    if warehouse.wtype == "bigquery":
+        if bqlocation:
+            wh_extras["location"] = bqlocation
+        if priority:
+            wh_extras["priority"] = priority
+
+    wh_secret_block_name = f"dalgo-wh-{org.slug}"
+    try:
+        wh_secret_response = prefect_service.upsert_secret_block(
+            PrefectSecretBlockEdit(
+                block_name=wh_secret_block_name,
+                secret=json.dumps({"creds": dbt_creds, "extras": wh_extras}),
+            )
+        )
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        logger.error(
+            "Failed to upsert warehouse secret block %s for org=%s , err=%s",
+            wh_secret_block_name,
+            org.slug,
+            str(error),
+        )
+        return None
+
+    wh_block_row, _ = OrgPrefectBlockv1.objects.update_or_create(
+        block_name=wh_secret_response["block_name"],
+        defaults={
+            "org": org,
+            "block_type": SECRET,
+            "block_id": wh_secret_response["block_id"],
+        },
+    )
+    warehouse.secret_block = wh_block_row
+    warehouse.save(update_fields=["secret_block"])
+    logger.info(
+        "Upserted warehouse secret block %s for org=%s",
+        wh_secret_response["block_name"],
+        org.slug,
+    )
+    return wh_block_row

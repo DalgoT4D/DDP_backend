@@ -143,21 +143,23 @@ PREFECT_PROXY_API_URL=
 
 The platform now supports multiple DBT versions using `uv` and `pyproject.toml` for better dependency management.
 
+The dbt version sources live in [prefect-proxy/docker/](../prefect-proxy/docker/) — the same directory that builds the Prefect job-runner image.
+
 #### For DBT 1.8.7 (current production)
 ```bash
-cd dbt_deps/dbt-1.8.7/
+cd ../prefect-proxy/docker/dbt-1.8.7/
 UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv uv sync
 ```
 
 #### For DBT 1.9.8 (migration target)
 ```bash
-cd dbt_deps/dbt-1.9.8/
+cd ../prefect-proxy/docker/dbt-1.9.8/
 UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.9.8 uv sync
 ```
 
 #### For DBT 1.10.19
 ```bash
-cd dbt_deps/dbt-1.10.19/
+cd ../prefect-proxy/docker/dbt-1.10.19/
 UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.10.19 uv sync
 ```
 

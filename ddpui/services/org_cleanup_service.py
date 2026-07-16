@@ -251,6 +251,28 @@ class OrgCleanupService:
                 secretsmanager.delete_warehouse_credentials(warehouse)
                 logger.info("deleted warehouse credentials from secrets manager")
 
+                # Delete the warehouse Secret block (runner-flow artifact). The FK
+                # will null out on warehouse.delete() below (SET_NULL), but the
+                # OrgPrefectBlockv1 row and the Prefect block itself must be cleaned
+                # up explicitly.
+                wh_secret_block = warehouse.secret_block
+                if wh_secret_block:
+                    try:
+                        prefect_service.delete_secret_block(wh_secret_block.block_id)
+                        logger.info(
+                            f"deleted warehouse secret block {wh_secret_block.block_name} in prefect"
+                        )
+                    except Exception as err:  # pylint: disable=broad-exception-caught
+                        logger.error(
+                            "error deleting warehouse secret block %s in prefect: %s",
+                            wh_secret_block.block_name,
+                            str(err),
+                        )
+                    wh_secret_block.delete()
+                    logger.info(
+                        f"deleted OrgPrefectBlockv1 row for warehouse secret block"
+                    )
+
                 try:
                     airbyte_service.delete_destination(
                         self.org.airbyte_workspace_id, warehouse.airbyte_destination_id
