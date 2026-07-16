@@ -197,11 +197,13 @@ class TestOwnerTransfer:
     def test_metric_grantless_rtype_old_owner_still_gets_edit_grant_row(
         self, org, analyst, analyst2
     ):
-        """`metric` has `grants=False` (the public POST /grants/ 400s for
-        it), but that capability flag gates the grants ENDPOINT, not the
-        ownership-transfer action. The old owner still receives an internal
-        ResourceShare Edit row so their access stays consistent even though
-        they could never have created that row via POST /grants/."""
+        """Ownership transfer bypasses `entry.grants` unconditionally (that
+        flag gates the public POST /grants/ ENDPOINT, not this action) -- so
+        the old owner still receives an internal ResourceShare Edit row for
+        `metric` regardless of the flag's value. (Named "grantless" from
+        before M5's registry flip, when metric held `grants=False`; M5 makes
+        it `grants=True`, but the bypass -- and this pin -- hold either way.)
+        """
         metric = Metric.objects.create(
             org=org,
             name="owner-xfer-metric",

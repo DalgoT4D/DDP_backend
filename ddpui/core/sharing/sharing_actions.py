@@ -5,7 +5,11 @@ Rules of this module:
 - NO HTTP concerns: raise ``ddpui.core.sharing.exceptions`` errors; the API
   layer maps them to status codes.
 - NO per-rtype branching: every capability/permission-slug lookup reads the
-  ``shareable_types`` registry entry (data, not if/else).
+  ``shareable_types`` registry entry (data, not if/else). The ONE deliberate
+  exception is ``MEMBER_GRANTS_DEFERRED_RTYPES`` below -- a v1.1 policy
+  decision (which rtypes exclude Member principals from proactive grants),
+  not a capability, so it stays a plain rtype set here instead of a new
+  ``ShareableType`` field every registry entry would need to carry.
 - ``access_resolver`` stays read-only — this module is the ONLY place
   Resource Sharing writes happen.
 
@@ -66,6 +70,46 @@ BULK_MAX_ITEMS = 100
 # Roles a share-flow email invite may assign (Phase C3). super-admin is
 # deliberately NOT invitable through sharing.
 INVITABLE_ROLE_SLUGS = (MEMBER_ROLE, ANALYST_ROLE, ADMIN_ROLE)
+
+# v1.1: rtypes where a Member principal/invite is deliberately excluded from
+# PROACTIVE grants (the share modal / bulk / email invites) -- a v1.1-wide
+# consistency call (dashboards/reports/alerts keep allowing Member grants;
+# metric/kpi don't -- chart won't either once its own Milestone lands, on a
+# separate branch). Members still reach these resources via general access
+# or an approved access request (`access_requests.approve_access_request`
+# is untouched by this) -- this only blocks NEW direct/invite grants. Group
+# grants are untouched too: a group's membership can mix roles, and a
+# Member's contribution through a group grant is still capped at "view" by
+# the resolver (`access_resolver.effective_permission`), independent of
+# this rtype-level gate.
+MEMBER_GRANTS_DEFERRED_RTYPES = frozenset({"metric", "kpi"})
+
+
+def _reject_member_principal(rtype: str, principal: OrgUser) -> None:
+    """400s a direct grant to a Member-role user principal on a
+    member-grants-deferred rtype. No-op for every other rtype."""
+    if rtype not in MEMBER_GRANTS_DEFERRED_RTYPES:
+        return
+    principal_role = principal.new_role.slug if principal.new_role else None
+    if principal_role == MEMBER_ROLE:
+        raise SharingValidationError(
+            f"{rtype} can only be shared directly with Analysts or Admins right now "
+            "-- Member grants aren't available yet"
+        )
+
+
+def _reject_member_invite(rtype: str, invite_role: Optional[str]) -> None:
+    """400s an unknown-email invite that would resolve to Member on a
+    member-grants-deferred rtype -- mirrors `_reject_member_principal` for
+    the not-yet-an-OrgUser path. Runs BEFORE any invite email/Invitation is
+    sent/created. No-op for every other rtype."""
+    if rtype not in MEMBER_GRANTS_DEFERRED_RTYPES:
+        return
+    if (invite_role or MEMBER_ROLE) == MEMBER_ROLE:
+        raise SharingValidationError(
+            f"{rtype} invites can only be sent at Analyst or Admin right now "
+            "-- Member invites aren't available yet"
+        )
 
 
 def _entry_for(rtype: str) -> ShareableType:
@@ -289,6 +333,7 @@ def _invite_and_create_pending_grant(
     write the (pending or instant) grant row. Bulk (Task 17) uses the same
     two halves directly so a selection of N resources still sends exactly
     ONE invitation."""
+    _reject_member_invite(rtype, invite_role)
     instant_principal = _invite_email_once(grantor, email, invite_role)
     return _email_grant_row(grantor, rtype, resource, email, permission, instant_principal)
 
@@ -383,7 +428,7 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
     if payload.principal_id is not None:
         principal = (
             OrgUser.objects.filter(id=payload.principal_id, org_id=grantor.org_id)
-            .select_related("user")
+            .select_related("user", "new_role")
             .first()
         )
         if principal is None:
@@ -392,13 +437,19 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
         email = payload.email.strip().lower()
         principal = (
             OrgUser.objects.filter(org_id=grantor.org_id, user__email__iexact=email)
-            .select_related("user")
+            .select_related("user", "new_role")
             .first()
         )
         if principal is None:
             return _invite_and_create_pending_grant(
                 grantor, rtype, resource, email, payload.permission, payload.invite_role
             )
+
+    # v1.1: a Member principal is blocked on member-grants-deferred rtypes
+    # (metric/kpi today) -- checked here, AFTER principal resolution but
+    # BEFORE the write, so it applies whether the principal came in by
+    # principal_id or by a known-user email match.
+    _reject_member_principal(rtype, principal)
 
     share, created = ResourceShare.objects.update_or_create(
         org_id=grantor.org_id,
@@ -447,10 +498,13 @@ def transfer_ownership(actor: OrgUser, rtype: str, resource, new_owner_orguser_i
 
     Bypasses `entry.grants` deliberately: that flag gates the public
     `POST .../grants/` ENDPOINT (a UI capability), not this action -- a
-    `metric`/`kpi` transfer (both `grants=False`) still writes the old
-    owner's Edit row directly via `ResourceShare.objects.update_or_create`,
-    same as every other write in this module, instead of routing through
-    `upsert_grant` (which would reject it).
+    transfer on a hypothetical `grants=False` rtype (metric/kpi held that
+    flag before M5's registry flip) still writes the old owner's Edit row
+    directly via `ResourceShare.objects.update_or_create`, same as every
+    other write in this module, instead of routing through `upsert_grant`
+    (which would reject it). Also bypasses the Member-grants-deferred check
+    (`_reject_member_principal`) -- the old owner keeps their existing
+    access level regardless of role, same as pre-M5.
     """
     _entry_for(rtype)  # 404-equivalent validation: rtype must be registered
 
@@ -715,6 +769,12 @@ def _bulk_add_grant(
     for rtype, resource in resolved:
         if not get_resource_type(rtype).grants:
             _skip(skipped, rtype, resource, "grants_not_supported")
+            continue
+        if (
+            rtype in MEMBER_GRANTS_DEFERRED_RTYPES
+            and (payload.invite_role or MEMBER_ROLE) == MEMBER_ROLE
+        ):
+            _skip(skipped, rtype, resource, "member_grants_deferred")
             continue
         grantor_level = effective_permission(actor, rtype, resource)
         if PERMISSION_RANK.get(payload.permission, 0) > PERMISSION_RANK.get(grantor_level or "", 0):

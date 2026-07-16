@@ -434,10 +434,16 @@ class TestApproveAccessRequest:
     def test_metric_request_approve_grants_access_bypassing_grants_false_flag(
         self, org, analyst, member
     ):
-        """`metric` has `grants=False` (its public POST /grants/ 400s), but
-        approving a request still inserts a ResourceShare row via the
-        internal write path -- same pattern as ownership transfer (Task
-        12)."""
+        """Approving a request inserts a ResourceShare row via the internal
+        write path (`access_requests._insert_grant`), which bypasses
+        `entry.grants` unconditionally -- same pattern as ownership transfer
+        (Task 12). Named "grantless" from before M5's registry flip, when
+        metric held `grants=False` and its public POST /grants/ 400'd; M5
+        makes it `grants=True`, but the bypass -- and this pin -- hold
+        either way. Requester here is a Member: approve still writes their
+        grant even though M5 blocks a Member principal on the now-open
+        POST /grants/ path (that block only applies to NEW proactive
+        shares, not to deciding a request already made)."""
         metric = Metric.objects.create(
             org=org,
             name="access-req-metric",
