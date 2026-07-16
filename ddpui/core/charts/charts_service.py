@@ -829,12 +829,20 @@ def apply_chart_filters(
     grouped_filters = defaultdict(list)
     single_filters = []
 
+    VALUE_INDEPENDENT_OPERATORS = ("is_null", "is_not_null")
+
     for filter_config in filters:
         column_name = filter_config["column"]
         operator = filter_config["operator"]
 
         if not column_name or operator is None:
             continue
+
+        # Skip filters with empty/None values for operators that require a value
+        if operator not in VALUE_INDEPENDENT_OPERATORS:
+            value = filter_config.get("value")
+            if value is None or value == "":
+                continue
 
         # Timestamp date filters need day-range logic — keep full config
         if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):

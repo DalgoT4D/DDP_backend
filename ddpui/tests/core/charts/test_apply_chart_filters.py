@@ -110,3 +110,32 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    def test_empty_string_value_skipped_for_numeric_operators(self):
+        """Filters with empty string values are skipped to avoid SQL type errors"""
+        for operator in [
+            "greater_than",
+            "less_than",
+            "greater_than_equal",
+            "less_than_equal",
+        ]:
+            sql = get_where_sql([make_filter("total_advance", operator, "")])
+            assert len(sql) == 0, f"Expected no WHERE clause for operator={operator} with empty value"
+
+    def test_none_value_skipped_for_operators(self):
+        """Filters with None values are skipped to avoid SQL errors"""
+        for operator in ["greater_than", "equals", "not_equals", "like"]:
+            sql = get_where_sql([make_filter("total_advance", operator, None)])
+            assert len(sql) == 0, f"Expected no WHERE clause for operator={operator} with None value"
+
+    def test_empty_value_skipped_for_equals(self):
+        """equals/not_equals filters with empty string values are skipped"""
+        for operator in ["equals", "not_equals"]:
+            sql = get_where_sql([make_filter("status", operator, "")])
+            assert len(sql) == 0, f"Expected no WHERE clause for operator={operator} with empty value"
+
+    def test_valid_value_still_applied(self):
+        """Filters with valid non-empty values still produce WHERE clauses"""
+        sql = get_where_sql([make_filter("total_advance", "greater_than", "100")])
+        assert len(sql) == 1
+        assert "100" in sql[0]
