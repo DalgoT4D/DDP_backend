@@ -27,6 +27,8 @@ django.setup()
 import pytest
 from ninja.errors import HttpError
 
+from ddpui.core.sharing import coverage
+from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.chart_access import chart_ids_in_tabs, dashboard_chart_ids
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.general_access import AccessLevel
@@ -391,3 +393,115 @@ class TestCoverageEndpointGates:
         verdict = _coverage(analyst, dashboard, candidate).charts[0]
         assert verdict.covered is False
         assert verdict.role_gaps == ["analyst"]
+
+
+# ================================================================================
+# Coverage <-> resolver parity guard (M2 review, pulled forward)
+# ================================================================================
+#
+# ``coverage._CoverageContext.chart_covers_orguser`` is a hand-mirrored,
+# batched subset of ``access_resolver.effective_permission``'s real ladder
+# (admin / owner / general-access / grants, with the v1.1 Member exclusion
+# for charts) -- the two are NOT sharing code, so nothing stops them
+# drifting apart as either module changes independently. This is the
+# tripwire: for every principal class the two functions must agree.
+
+
+def _assert_coverage_resolver_parity(principal, chart, dashboard, expected_covered: bool) -> None:
+    ctx = coverage._CoverageContext(principal, dashboard, [chart])
+    coverage_result = ctx.chart_covers_orguser(chart, principal)
+    resolver_result = effective_permission(principal, "chart", chart) is not None
+    assert coverage_result is expected_covered, "coverage.chart_covers_orguser diverged"
+    assert resolver_result is expected_covered, "effective_permission diverged"
+    assert coverage_result == resolver_result, "coverage/resolver parity broken"
+
+
+class TestCoverageResolverParity:
+    def test_admin_always_covered(self, org, admin, analyst):
+        chart = _narrow_chart(org, analyst)
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _assert_coverage_resolver_parity(admin, chart, dashboard, True)
+
+    def test_owner_always_covered(self, org, analyst):
+        chart = _narrow_chart(org, analyst)  # analyst is created_by -> owner
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _assert_coverage_resolver_parity(analyst, chart, dashboard, True)
+
+    def test_analyst_with_level_covered(self, org, analyst, analyst2):
+        chart = _chart(org, analyst)  # analyst_level defaults to edit -> admits
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _assert_coverage_resolver_parity(analyst2, chart, dashboard, True)
+
+    def test_analyst_without_level_not_covered(self, org, analyst, analyst2):
+        chart = _narrow_chart(org, analyst)  # analyst_level pinned to none
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _assert_coverage_resolver_parity(analyst2, chart, dashboard, False)
+
+    def test_direct_granted_principal_covered(self, org, analyst, analyst2):
+        chart = _narrow_chart(org, analyst)
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _chart_grant(org, chart, analyst2)
+        _assert_coverage_resolver_parity(analyst2, chart, dashboard, True)
+
+    def test_group_member_covered_via_chart_group_grant(self, org, analyst, analyst2):
+        chart = _narrow_chart(org, analyst)
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        # Name analyst2 on the dashboard so the batched context resolves
+        # their group memberships -- ``_CoverageContext`` only pre-loads
+        # group membership for principals it already sees as dashboard
+        # grant targets (a batching detail, not a resolver rule).
+        _dashboard_grant(org, dashboard, analyst2)
+        group = UserGroup.objects.create(org=org, name="Parity Guild")
+        UserGroupMember.objects.create(
+            group=group, orguser=analyst2, status=UserGroupMemberStatus.ACTIVE
+        )
+        _chart_grant(org, chart, group)
+        _assert_coverage_resolver_parity(analyst2, chart, dashboard, True)
+
+    def test_member_never_covered_even_with_direct_grant(self, org, analyst, member):
+        chart = _chart(org, analyst)
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _chart_grant(org, chart, member)
+        _assert_coverage_resolver_parity(member, chart, dashboard, False)
+
+
+class TestCoverageForChartsFixedQueryCount:
+    def test_coverage_for_charts_query_count_is_fixed(
+        self, org, analyst, analyst2, member, django_assert_num_queries
+    ):
+        """Pins ``coverage_for_charts``'s "batched, fixed query count"
+        design (module docstring): dashboard grants, chart grants, grant
+        principals, their group memberships, and the viewer's own edit
+        grants -- one pass regardless of tile/grant counts (the group-
+        principal lookup is skipped here since this dashboard has no group
+        grant, itself part of the fixed-shape design: no extra query per
+        principal type actually present). A regression here means a
+        per-tile or per-grant query crept back in."""
+        chart = _narrow_chart(org, analyst)
+        dashboard = _dashboard_with_charts(
+            org, analyst, AccessLevel.NONE, AccessLevel.NONE, [chart]
+        )
+        _dashboard_grant(org, dashboard, analyst2)
+        _dashboard_grant(org, dashboard, member)
+        group = UserGroup.objects.create(org=org, name="Query Count Guild")
+        UserGroupMember.objects.create(
+            group=group, orguser=analyst2, status=UserGroupMemberStatus.ACTIVE
+        )
+        _chart_grant(org, chart, group)
+
+        with django_assert_num_queries(5):
+            coverage.coverage_for_charts(analyst2, dashboard, [chart])

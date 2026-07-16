@@ -692,7 +692,21 @@ def _broadening_confirmed(payload) -> bool:
 def _validate_extend_subset(extend_chart_ids, warned: List[ChartCoverageOut]) -> set:
     """The ONE definition of the extend-subset rule: every confirmed id must
     be a chart the warning named (nothing else is extendable through this
-    side door). Returns the id set; raises the shared 400 otherwise."""
+    side door). Returns the id set; raises the shared 400 otherwise.
+
+    ``dashboard_native_api._validate_new_tile_charts`` (the tile-save/embed
+    path) keeps its own inline copy of this same ``<=`` check instead of
+    calling this function directly -- it runs before the dashboard save,
+    off the bare ``EmbedCoverageConfirmation`` shape rather than a
+    ``ChartCoverageOut`` list. The two copies diverge on ONE edge: this
+    function's call site (``upsert_grant_with_coverage``, below) runs it
+    UNCONDITIONALLY, even against an empty ``verdicts`` list, so a
+    garbage/non-subset ``extend_chart_ids`` still 400s when coverage is
+    clean; the API path's copy returns early on clean coverage BEFORE
+    reaching its version of this check, so the same garbage is silently
+    ignored there. Harmless today (nothing to extend either way when
+    clean), but keep this asymmetry in mind before unifying the two call
+    sites."""
     extend_ids = set(extend_chart_ids or [])
     if extend_ids and not extend_ids <= {v.chart_id for v in warned}:
         raise SharingValidationError(

@@ -671,30 +671,91 @@ class TestDeleteFilter:
 # ================================================================================
 
 
-class TestDuplicateDashboardOrgGeneralDefaults:
-    """Task 11 Part C: a duplicated dashboard is a NEW resource -- it adopts
-    the org's default General access, not the source dashboard's (copying
-    the source's audience could silently widen access)."""
+class TestDuplicateDashboardInheritsSourceLevels:
+    """M2.x (review fix): a duplicated dashboard INHERITS the SOURCE
+    dashboard's General access (analyst_level/member_level), not the org's
+    defaults. The tiles are unchanged, so inheriting is same-or-narrower
+    BY CONSTRUCTION -- no new coverage gap is possible, so no re-warning is
+    needed. Seeding at the (potentially wider) org defaults instead would
+    silently broaden a narrowed source into a wider container around the
+    same tiles -- exactly the bypass M2's warnings exist to prevent.
 
-    def test_duplicate_uses_org_defaults_not_source_values(
+    Grants and public-link state are NOT copied: the duplicate is a new
+    resource nobody has been granted on yet, and it never inherits an
+    enabled public link."""
+
+    def test_duplicate_of_narrowed_dashboard_keeps_its_levels(
         self, orguser, sample_dashboard, seed_db
     ):
-        sample_dashboard.analyst_level = AccessLevel.EDIT
-        sample_dashboard.member_level = AccessLevel.EDIT
+        """A dashboard deliberately narrowed below the org defaults (e.g.
+        around a Private chart) must duplicate at the SAME narrow levels,
+        not widen back out to the org defaults."""
+        sample_dashboard.analyst_level = AccessLevel.NONE
+        sample_dashboard.member_level = AccessLevel.NONE
         sample_dashboard.save()
 
         OrgPreferences.objects.create(
             org=orguser.org,
-            default_analyst_level=AccessLevel.VIEW,
-            default_member_level=AccessLevel.NONE,
+            default_analyst_level=AccessLevel.EDIT,
+            default_member_level=AccessLevel.VIEW,
         )
 
         request = mock_request(orguser)
         response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
 
         new_dashboard = Dashboard.objects.get(id=response.id)
-        assert new_dashboard.analyst_level == AccessLevel.VIEW
+        assert new_dashboard.analyst_level == AccessLevel.NONE
         assert new_dashboard.member_level == AccessLevel.NONE
+        new_dashboard.delete()
+
+    def test_duplicate_of_org_default_dashboard_is_unchanged(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """When the source already sits at the org defaults, inheriting
+        looks identical to the old "always seed at org defaults" behavior
+        -- the case the pre-fix code happened to get right."""
+        OrgPreferences.objects.create(
+            org=orguser.org,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.VIEW,
+        )
+        sample_dashboard.analyst_level = AccessLevel.VIEW
+        sample_dashboard.member_level = AccessLevel.VIEW
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_dashboard = Dashboard.objects.get(id=response.id)
+        assert new_dashboard.analyst_level == AccessLevel.VIEW
+        assert new_dashboard.member_level == AccessLevel.VIEW
+        new_dashboard.delete()
+
+    def test_duplicate_does_not_copy_grants_or_public_state(
+        self, orguser, analyst_orguser, sample_dashboard, seed_db
+    ):
+        sample_dashboard.is_public = True
+        sample_dashboard.public_share_token = "source-token"
+        sample_dashboard.save()
+        ResourceShare.objects.create(
+            org=orguser.org,
+            resource_type="dashboard",
+            resource_id=str(sample_dashboard.pk),
+            principal_type="user",
+            principal_id=analyst_orguser.id,
+            permission="view",
+            status="active",
+        )
+
+        request = mock_request(orguser)
+        response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_dashboard = Dashboard.objects.get(id=response.id)
+        assert new_dashboard.is_public is False
+        assert new_dashboard.public_share_token is None
+        assert not ResourceShare.objects.filter(
+            resource_type="dashboard", resource_id=str(new_dashboard.pk)
+        ).exists()
         new_dashboard.delete()
 
 

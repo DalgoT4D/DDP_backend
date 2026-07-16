@@ -326,7 +326,15 @@ def _insert_grant(
     `create_access_request`, and even a historical/hand-written Member
     grant row on a chart resolves to NOTHING for a Member viewer --
     `access_resolver._member_excluded` drops the grant contribution at
-    read time (defense in depth on both ends of this write)."""
+    read time (defense in depth on both ends of this write).
+
+    Also deliberately bypasses the v1.1 M2 dashboard-broadening warning
+    (`sharing_actions`'s under-covering-chart prompt): approving a request
+    is the owner (or admin) DECIDING to grant exactly what the requester
+    asked for, not a proactive share the owner might not have thought
+    through -- there is no "did you mean to expose this chart too?"
+    question to ask when the owner is answering a request that already
+    named the resource."""
     ResourceShare.objects.update_or_create(
         org_id=resource.org_id,
         resource_type=rtype,

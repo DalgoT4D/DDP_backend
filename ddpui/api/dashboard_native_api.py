@@ -22,7 +22,6 @@ from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.chart_access import chart_ids_in_tabs, dashboard_chart_ids
 from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
 from ddpui.core.sharing.gates import require_edit_access, require_view_access
-from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
 from ddpui.schemas.access_schema import DashboardChartCoverageResponse, EmbedCoverageConfirmation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
@@ -211,6 +210,16 @@ def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpd
     verdicts = coverage.coverage_for_charts(orguser, dashboard, list(charts.values()))
     under_covering = [v for v in verdicts if not v.covered]
     if not under_covering:
+        # Clean coverage short-circuits here, BEFORE any subset check runs
+        # on ``payload.extend_chart_ids`` -- the asymmetry against the
+        # shared helper (below): ``upsert_grant_with_coverage`` calls
+        # ``sharing_actions._validate_extend_subset`` UNCONDITIONALLY (even
+        # against an empty ``verdicts``, see sharing_actions.py:791), so a
+        # garbage/non-subset ``extend_chart_ids`` there still 400s when
+        # coverage is clean. Here, the same garbage is silently ignored
+        # once the dashboard is already fully covered. Harmless today
+        # (nothing to extend either way), but a future refactor that
+        # unifies the two call sites must not assume they behave alike.
         return None, []
 
     confirmed = payload.extend_chart_ids is not None or bool(payload.proceed)
@@ -219,6 +228,15 @@ def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpd
         # stays stable for every already-working save path.
         return EmbedCoverageConfirmation(under_covering_charts=under_covering), []
 
+    # Inline copy of ``sharing_actions._validate_extend_subset`` (that
+    # module's version is the ONE definition the rest of the package uses --
+    # see sharing_actions.py:692). This copy exists because the embed path
+    # runs BEFORE the dashboard save, off ``EmbedCoverageConfirmation``
+    # (bare dict "under_covering", not the ``ChartCoverageOut`` list the
+    # other version takes) -- not worth reshaping just to share one `<=`
+    # check. The two copies only diverge in the early-return-when-clean
+    # case above; once here, under_covering is always non-empty and both
+    # copies validate identically.
     extend_ids = set(payload.extend_chart_ids or [])
     warned_ids = {v.chart_id for v in under_covering}
     if not extend_ids <= warned_ids:
@@ -296,7 +314,14 @@ def delete_dashboard(request, dashboard_id: int):
 @dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
 @has_permission(["can_create_dashboards"])
 def duplicate_dashboard(request, dashboard_id: int):
-    """Duplicate a dashboard with all its configurations and filters"""
+    """Duplicate a dashboard with all its configurations, filters, and tabs.
+
+    v1.1 M2.x: the copy INHERITS the source dashboard's General access
+    (analyst_level/member_level) instead of the org's defaults -- same or
+    narrower audience by construction (the tiles are unchanged), so no
+    coverage warning is needed and no silent broadening is possible.
+    Grants and public-link state are NOT copied (see the inline comment
+    above the level assignment for why that's also narrowing-safe)."""
     orguser: OrgUser = request.orguser
 
     # Get the original dashboard
@@ -312,10 +337,24 @@ def duplicate_dashboard(request, dashboard_id: int):
     # the original's view permission, same as reading it directly would be.
     require_view_access(orguser, "dashboard", original_dashboard)
 
-    # Create a copy of the dashboard. The copy is a NEW resource: it adopts
-    # the org's default General access, NOT the original's (copying the
-    # source's levels could silently widen access).
-    analyst_level, member_level = get_org_role_level_defaults(orguser.org_id)
+    # Create a copy of the dashboard. The copy INHERITS the SOURCE
+    # dashboard's General access (analyst_level/member_level) rather than
+    # the org's defaults: the tiles inside are the same charts, at the same
+    # (or narrower, via the source's own coverage warnings) audience, so
+    # inheriting is same-or-narrower BY CONSTRUCTION -- no new coverage gap
+    # is possible and no re-warning is needed. Seeding at the org's WIDER
+    # defaults instead would silently broaden a narrowed source (e.g. a
+    # dashboard deliberately dropped to Private around a Private chart)
+    # into a General-access container around the same tiles, bypassing
+    # every warning M2 added.
+    #
+    # Grants (``ResourceShare`` rows) and public-link state are deliberately
+    # NOT copied: the duplicate is a NEW resource with its own id, so no
+    # grant row addresses it yet, and ``is_public``/``public_share_token``
+    # default False/null on creation below -- both are one-way narrowing
+    # relative to the source, so they need no warning either.
+    analyst_level = original_dashboard.analyst_level
+    member_level = original_dashboard.member_level
 
     with transaction.atomic():
         new_dashboard = Dashboard.objects.create(
