@@ -1,5 +1,6 @@
 import json
 import os
+import requests
 from urllib.parse import urlparse, parse_qs
 import django
 
@@ -284,12 +285,15 @@ class FakeRedis:
 class FakeResponse:
     """Minimal requests.Response stand-in for the Google token endpoint"""
 
-    def __init__(self, status_code, payload):
+    def __init__(self, status_code, payload=None, text=None, json_raises=False):
         self.status_code = status_code
         self._payload = payload
-        self.text = json.dumps(payload)
+        self._json_raises = json_raises
+        self.text = text if text is not None else json.dumps(payload)
 
     def json(self):
+        if self._json_raises:
+            raise ValueError("response body is not valid json")
         return self._payload
 
 
@@ -443,6 +447,44 @@ def test_oauth_callback_no_refresh_token_redirects_error(seed_db, orguser_worksp
     assert response.status_code == 302
     assert "error=" in response.url
     # no ref stashed
+    assert not any(k.startswith("airbyte_oauth_ref:") for k in fake_redis.store)
+
+
+def test_oauth_callback_request_timeout_redirects_error(seed_db, orguser_workspace, monkeypatch):
+    """a network timeout reaching Google redirects with an error, not an uncaught 500"""
+    _oauth_env(monkeypatch)
+    fake_redis = _use_fake_redis(monkeypatch)
+    state = _seed_state(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
+
+    def _raise_timeout(*a, **k):
+        raise requests.exceptions.Timeout("google is slow")
+
+    monkeypatch.setattr("ddpui.core.oauth.google_oauth_service.requests.post", _raise_timeout)
+    request = mock_request(orguser_workspace)
+
+    response = get_source_oauth_callback(request, state=state, code="c")
+
+    assert response.status_code == 302
+    assert "error=oauth_failed" in response.url
+    # state consumed, no ref stashed
+    assert not any(k.startswith("airbyte_oauth_ref:") for k in fake_redis.store)
+
+
+def test_oauth_callback_non_json_response_redirects_error(seed_db, orguser_workspace, monkeypatch):
+    """a 200 with a non-JSON body redirects with an error, not an uncaught 500"""
+    _oauth_env(monkeypatch)
+    fake_redis = _use_fake_redis(monkeypatch)
+    state = _seed_state(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
+    monkeypatch.setattr(
+        "ddpui.core.oauth.google_oauth_service.requests.post",
+        lambda *a, **k: FakeResponse(200, text="<html>gateway error</html>", json_raises=True),
+    )
+    request = mock_request(orguser_workspace)
+
+    response = get_source_oauth_callback(request, state=state, code="c")
+
+    assert response.status_code == 302
+    assert "error=oauth_failed" in response.url
     assert not any(k.startswith("airbyte_oauth_ref:") for k in fake_redis.store)
 
 

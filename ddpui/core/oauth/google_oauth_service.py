@@ -152,22 +152,32 @@ def exchange_google_oauth_code(code: str) -> dict:
 
     Returns Google's token response. Raises if the exchange failed or no refresh_token came
     back (which happens if access_type=offline/prompt=consent were dropped)."""
-    response = requests.post(
-        GOOGLE_OAUTH_TOKEN_URL,
-        data={
-            "code": code,
-            "client_id": oauth_client_id(),
-            "client_secret": oauth_client_secret(),
-            "redirect_uri": _oauth_redirect_url(),
-            "grant_type": "authorization_code",
-        },
-        timeout=30,
-    )
+    try:
+        response = requests.post(
+            GOOGLE_OAUTH_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": oauth_client_id(),
+                "client_secret": oauth_client_secret(),
+                "redirect_uri": _oauth_redirect_url(),
+                "grant_type": "authorization_code",
+            },
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as err:
+        # timeout / connection error reaching Google — surface as a normal oauth failure
+        logger.error("google token exchange request error: %s", err)
+        raise HttpError(500, "failed to complete the oauth flow") from err
     if response.status_code != 200:
         # the body may carry error detail; log it, don't surface it to the caller
         logger.error("google token exchange failed: %s %s", response.status_code, response.text)
         raise HttpError(500, "failed to complete the oauth flow")
-    tokens = response.json()
+    try:
+        tokens = response.json()
+    except ValueError as err:
+        # a 200 with a non-JSON body — treat as a failed exchange, not a 500 crash
+        logger.error("google token exchange returned non-JSON body: %s", response.text[:200])
+        raise HttpError(500, "failed to complete the oauth flow") from err
     if "refresh_token" not in tokens:
         logger.error("google token exchange returned no refresh_token: keys=%s", list(tokens))
         raise HttpError(400, "oauth did not return a refresh token")
