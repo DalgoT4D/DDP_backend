@@ -117,6 +117,7 @@ def _grant(org_obj, rtype, resource, principal_orguser, permission="view", statu
 
 def test_registry_maps_every_rtype_to_a_share_permission_slug():
     expected = {
+        "chart": "can_share_charts",
         "dashboard": "can_share_dashboards",
         "report": "can_share_reports",
         "alert": "can_share_alerts",
@@ -238,10 +239,12 @@ class TestGetAccess:
         assert data["viewer"] == {"effective_permission": "edit", "is_owner": True}
 
     def test_unknown_rtype_404(self, org, admin):
+        # "chart" is a registered rtype since v1.1 -- use a genuinely
+        # unknown one to keep testing the registry-validation 404.
         from ddpui.api.access_api import get_access
 
         with pytest.raises(HttpError) as excinfo:
-            get_access(mock_request(admin), "chart", "1")
+            get_access(mock_request(admin), "widget", "1")
         assert excinfo.value.status_code == 404
 
     def test_cross_org_resource_404(self, org, admin, analyst):

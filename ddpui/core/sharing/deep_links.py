@@ -17,6 +17,7 @@ from django.conf import settings
 # actually reads (Task 15b): /alerts reads `?alertId=`, /metrics reads
 # `?highlight=`, /kpis reads `?open=`; dashboards/reports route by path.
 DEEP_LINK_PATH = {
+    "chart": "/charts/{id}",
     "dashboard": "/dashboards/{id}",
     "report": "/reports/{id}",
     "alert": "/alerts?alertId={id}",
@@ -25,6 +26,7 @@ DEEP_LINK_PATH = {
 }
 
 NOUN_BY_RTYPE = {
+    "chart": "chart",
     "dashboard": "dashboard",
     "report": "report",
     "alert": "alert",

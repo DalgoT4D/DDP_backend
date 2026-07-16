@@ -458,7 +458,7 @@ def test_accessible_filter_member_sees_exactly_admitted_set(
 
 # ================================================================================
 # Cell 12: registry contract — every registered rtype's model has the
-# shareable contract attrs; `chart` is not registered.
+# shareable contract attrs; `chart` is registered as of v1.1.
 # ================================================================================
 
 
@@ -470,8 +470,23 @@ def test_registry_contract_attrs_present_on_every_registered_model():
             assert hasattr(entry.model, attr), f"{rtype}'s model missing '{attr}'"
 
 
-def test_chart_is_not_registered():
-    assert "chart" not in RESOURCE_TYPES
+def test_chart_is_registered_with_v11_capabilities():
+    """v1.1 (Q0 decision #1 reversed): charts are independently shareable —
+    general access + grants + requests, NO public link, and Member sharing
+    deferred (member_sharing=False). Every other rtype keeps the default
+    member_sharing=True."""
+    entry = RESOURCE_TYPES.get("chart")
+    assert entry is not None
+    assert entry.model.__name__ == "Chart"
+    assert entry.general is True
+    assert entry.grants is True
+    assert entry.public_link is False
+    assert entry.requests is True
+    assert entry.share_permission_slug == "can_share_charts"
+    assert entry.member_sharing is False
+    for rtype, other in RESOURCE_TYPES.items():
+        if rtype != "chart":
+            assert other.member_sharing is True, rtype
 
 
 # ================================================================================

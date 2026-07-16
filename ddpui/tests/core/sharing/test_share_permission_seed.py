@@ -44,8 +44,10 @@ def slugs_for(role_slug: str) -> set:
 
 def test_seed_fixtures_contain_the_share_slugs(seed_db):
     assert NEW_SLUGS <= set(Permission.objects.values_list("slug", flat=True))
-    # no can_share_charts — charts are not independently shareable
-    assert not Permission.objects.filter(slug="can_share_charts").exists()
+    # v1.1: charts are independently shareable — can_share_charts is seeded
+    # too (fixture rows mirrored by migration 0179 for existing databases;
+    # covered in test_chart_sharing_v11.py)
+    assert Permission.objects.filter(slug="can_share_charts").exists()
 
 
 def test_seed_grants_share_slugs_to_admin_and_analyst_not_member(seed_db):

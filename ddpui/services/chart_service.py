@@ -9,7 +9,10 @@ from dataclasses import dataclass
 
 from django.db.models import Q
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.ownership import can_delete_resource, is_admin_or_super_admin
+from ddpui.core.sharing.access_resolver import accessible_filter
+from ddpui.core.sharing.general_access_defaults import get_org_role_level_defaults
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -87,6 +90,7 @@ class ChartService:
     @staticmethod
     def list_charts(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
@@ -96,6 +100,10 @@ class ChartService:
 
         Args:
             org: The organization
+            orguser: The viewer, used to scope results to what Resource
+                Sharing admits (general access, grants, ownership) — admins
+                see everything in-org, unrestricted. Same rule as the
+                dashboard list (v1.1: charts are shareable).
             page: Page number (1-indexed)
             page_size: Number of items per page
             search: Optional search term (searches title, description, schema_name, table_name)
@@ -105,6 +113,9 @@ class ChartService:
             Tuple of (charts list, total count)
         """
         query = Q(org=org)
+
+        if not is_admin_or_super_admin(orguser):
+            query &= accessible_filter(orguser, "chart")
 
         if search:
             query &= (
@@ -145,6 +156,13 @@ class ChartService:
             (required dimension_column, metric aggregation enum, customizations
             constraints, etc.) before reaching this method.
         """
+        # v1.1: new charts seed general access from the org's defaults like
+        # every other shareable resource -- EXCEPT member_level, which is
+        # clamped to "none" regardless of the org default (decision #2:
+        # Member chart sharing is deferred; Members keep seeing charts
+        # inline inside shared dashboards/reports).
+        analyst_level, _ = get_org_role_level_defaults(orguser.org_id)
+
         chart = Chart.objects.create(
             title=data.title,
             description=data.description,
@@ -155,6 +173,8 @@ class ChartService:
             created_by=orguser,
             last_modified_by=orguser,
             org=orguser.org,
+            analyst_level=analyst_level,
+            member_level=AccessLevel.NONE,
         )
 
         logger.info(f"Created chart {chart.id} for org {orguser.org.id}")

@@ -35,6 +35,9 @@ from ddpui.core.sharing.shareable_types import get_resource_type
 # Matches the exact wording Task 3 used at each detail GET. "kpi" -> "KPI"
 # is deliberate: that's the casing in kpi_api.get_kpi's message.
 _NOUN_BY_RTYPE = {
+    # "chart" matches chart_access's existing wording: "You do not have
+    # access to this chart".
+    "chart": "chart",
     "dashboard": "dashboard",
     "report": "report",
     "alert": "alert",

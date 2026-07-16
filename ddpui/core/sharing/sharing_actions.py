@@ -75,6 +75,48 @@ def _entry_for(rtype: str) -> ShareableType:
     return entry
 
 
+# Role slugs a user-principal grant may target on a member_sharing=False
+# rtype (v1.1 charts: Member sharing deferred -- Analyst/Admin only).
+_MEMBER_SHARING_EXEMPT_SLUGS = (ANALYST_ROLE, ADMIN_ROLE, SUPER_ADMIN_ROLE)
+
+
+def _member_share_blocked_message(rtype: str) -> str:
+    noun = NOUN_BY_RTYPE.get(rtype, rtype)
+    return (
+        f"{noun}s cannot be shared with Members yet — Members keep seeing "
+        f"them inside shared dashboards and reports"
+    )
+
+
+def _require_grantable_principal_role(entry: ShareableType, principal: OrgUser) -> None:
+    """v1.1: on a member_sharing=False rtype (charts), a user-principal grant
+    may only target an Analyst/Admin principal -- Member (or null/legacy
+    role) principals are rejected with a clear 400. Group grants are NOT
+    routed here: they stay allowed, and the resolver simply gives their
+    Member members nothing."""
+    if entry.member_sharing:
+        return
+    principal_slug = principal.new_role.slug if principal.new_role else None
+    if principal_slug not in _MEMBER_SHARING_EXEMPT_SLUGS:
+        raise SharingValidationError(_member_share_blocked_message(entry.rtype))
+
+
+def _require_invitable_role_for_rtype(entry: ShareableType, invite_role: Optional[str]) -> None:
+    """v1.1: on a member_sharing=False rtype (charts), a share-flow email
+    invite must resolve to an Analyst/Admin role (which `_resolve_invite_role`
+    makes admin-caller-only). The default invite role is Member, so an
+    invite without an explicit Analyst/Admin `invite_role` is rejected with
+    a clear 400 -- BEFORE any invitation email or pending row exists."""
+    if entry.member_sharing:
+        return
+    if (invite_role or MEMBER_ROLE) == MEMBER_ROLE:
+        noun = NOUN_BY_RTYPE.get(entry.rtype, entry.rtype)
+        raise SharingValidationError(
+            f"{noun}s cannot be shared with Members yet — invite them as an "
+            f"Analyst or Admin instead"
+        )
+
+
 def _orguser_name(orguser: OrgUser) -> str:
     """Display name convention used across the codebase (dbt_api, alert_api)."""
     user = orguser.user
@@ -396,9 +438,12 @@ def upsert_grant(grantor: OrgUser, rtype: str, resource, payload: GrantCreate) -
             .first()
         )
         if principal is None:
+            _require_invitable_role_for_rtype(entry, payload.invite_role)
             return _invite_and_create_pending_grant(
                 grantor, rtype, resource, email, payload.permission, payload.invite_role
             )
+
+    _require_grantable_principal_role(entry, principal)
 
     share, created = ResourceShare.objects.update_or_create(
         org_id=grantor.org_id,
@@ -567,6 +612,10 @@ def set_general_access(
         raise SharingValidationError(f"invalid analyst_level '{payload.analyst_level}'")
     if payload.member_level not in AccessLevel.values:
         raise SharingValidationError(f"invalid member_level '{payload.member_level}'")
+    # v1.1 member-pin: on a member_sharing=False rtype (charts), member_level
+    # may only ever be "none".
+    if payload.member_level != AccessLevel.NONE and not entry.member_sharing:
+        raise SharingValidationError(_member_share_blocked_message(rtype))
 
     narrowed_roles = _narrowed_roles(resource, payload)
 
@@ -713,8 +762,17 @@ def _bulk_add_grant(
     # once, then write one grant row per eligible resource.
     eligible: ResolvedItems = []
     for rtype, resource in resolved:
-        if not get_resource_type(rtype).grants:
+        entry = get_resource_type(rtype)
+        if not entry.grants:
             _skip(skipped, rtype, resource, "grants_not_supported")
+            continue
+        try:
+            # v1.1: a Member-role invite is ineligible on member_sharing=False
+            # rtypes (charts) -- skip those items rather than emailing an
+            # invite that could never produce a valid chart grant.
+            _require_invitable_role_for_rtype(entry, payload.invite_role)
+        except SharingValidationError:
+            _skip(skipped, rtype, resource, "validation_error")
             continue
         grantor_level = effective_permission(actor, rtype, resource)
         if PERMISSION_RANK.get(payload.permission, 0) > PERMISSION_RANK.get(grantor_level or "", 0):

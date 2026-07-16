@@ -37,6 +37,14 @@ leaves UNTOUCHED.
 All role reads are getattr-safe: a viewer with a null/unknown role never
 raises, it is just denied whatever that role would have granted. A viewer
 in a different org than the resource always gets None.
+
+v1.1: rtypes whose registry entry says ``member_sharing=False`` (charts —
+Member sharing deferred) give Member viewers NOTHING from steps 3-4:
+``member_level`` is pinned to "none" anyway, and grant rows (including
+group grants whose membership contains Members) resolve to nothing for a
+Member viewer. Ownership (step 2) is untouched — a Member who owns a chart
+keeps edit. This is registry DATA read per the module's own rule, not an
+``if resource_type == ...`` branch.
 """
 
 from typing import Callable, Optional, Set
@@ -45,6 +53,7 @@ from django.db.models import BigIntegerField, Q
 from django.db.models.functions import Cast
 
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE, SUPER_ADMIN_ROLE
+from ddpui.core.sharing.shareable_types import get_resource_type
 from ddpui.models.general_access import AccessLevel
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.user_group import UserGroupMember, UserGroupMemberStatus
@@ -95,6 +104,17 @@ def _default_get_group_ids(viewer):
 def _role_slug(viewer) -> Optional[str]:
     role = getattr(viewer, "new_role", None)
     return getattr(role, "slug", None) if role is not None else None
+
+
+def _member_excluded(role_slug: Optional[str], rtype: str) -> bool:
+    """True when this viewer is a Member and ``rtype``'s registry entry has
+    ``member_sharing=False`` (v1.1: charts) — steps 3-4 then contribute
+    nothing for them. Unknown rtypes are not excluded here; they fail
+    elsewhere (registry validation / no fields to read)."""
+    if role_slug != MEMBER_ROLE:
+        return False
+    entry = get_resource_type(rtype)
+    return entry is not None and not entry.member_sharing
 
 
 def _best_permission(*perms: Optional[str]) -> Optional[str]:
@@ -192,6 +212,12 @@ def effective_permission(
     if _is_owner(viewer, resource):
         return "edit"
 
+    # v1.1: Member viewers get nothing from steps 3-4 for rtypes with
+    # member_sharing=False (charts) -- member_level is pinned to "none" and
+    # grant rows (incl. group grants containing Members) resolve to nothing.
+    if _member_excluded(role_slug, rtype):
+        return None
+
     # Step 3: this role's own general-access level (uncapped -- D1 makes
     # member_level="edit" a real, storable outcome).
     general = _general_permission(role_slug, resource)
@@ -227,19 +253,26 @@ def accessible_filter(
     viewer_org_id = getattr(viewer, "org_id", None)
     role_slug = _role_slug(viewer)
 
-    field_name = GENERAL_LEVEL_FIELD_BY_ROLE.get(role_slug)
-    general_q = ~Q(**{field_name: AccessLevel.NONE}) if field_name is not None else _NEVER_Q
+    # v1.1: same Member exclusion as effective_permission's steps 3-4 --
+    # for member_sharing=False rtypes (charts) a Member viewer is admitted
+    # by ownership only, never by general access or grant rows.
+    if _member_excluded(role_slug, rtype):
+        general_q = _NEVER_Q
+        granted_q = _NEVER_Q
+    else:
+        field_name = GENERAL_LEVEL_FIELD_BY_ROLE.get(role_slug)
+        general_q = ~Q(**{field_name: AccessLevel.NONE}) if field_name is not None else _NEVER_Q
 
-    granted_ids = (
-        ResourceShare.objects.filter(
-            principal_match_q(viewer, get_group_ids),
-            org_id=viewer_org_id,
-            resource_type=rtype,
+        granted_ids = (
+            ResourceShare.objects.filter(
+                principal_match_q(viewer, get_group_ids),
+                org_id=viewer_org_id,
+                resource_type=rtype,
+            )
+            .annotate(_resource_pk=Cast("resource_id", output_field=BigIntegerField()))
+            .values_list("_resource_pk", flat=True)
         )
-        .annotate(_resource_pk=Cast("resource_id", output_field=BigIntegerField()))
-        .values_list("_resource_pk", flat=True)
-    )
-    granted_q = Q(id__in=granted_ids)
+        granted_q = Q(id__in=granted_ids)
 
     owned_q = Q(owner_id=getattr(viewer, "id", None)) | Q(created_by_id=getattr(viewer, "id", None))
 

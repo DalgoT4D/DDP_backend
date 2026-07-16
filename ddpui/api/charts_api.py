@@ -26,6 +26,7 @@ from ddpui.core.sharing.chart_access import (
     require_payload_within_chart_config,
     run_chart_query,
 )
+from ddpui.core.sharing.gates import require_edit_access, require_view_access
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -278,7 +279,9 @@ class ChartListResponse(Schema):
 def list_charts(
     request, page: int = 1, page_size: int = 10, search: str = None, chart_type: str = None
 ):
-    """List charts for the organization with pagination and filtering"""
+    """List charts for the organization with pagination and filtering.
+    v1.1: scoped by Resource Sharing — non-admin viewers only see charts
+    their role's general access, a grant, or ownership admits."""
     orguser: OrgUser = request.orguser
 
     # Validate pagination parameters
@@ -289,6 +292,7 @@ def list_charts(
 
     charts, total = ChartService.list_charts(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -1312,8 +1316,17 @@ def create_chart(request, payload: ChartCreate):
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
 def update_chart(request, chart_id: int, payload: ChartUpdate):
-    """Update a chart"""
+    """Update a chart. v1.1: the role slug alone is no longer enough — the
+    caller must also resolve to Edit on THIS chart (owner, admin, or the
+    chart's analyst_level/grants; day-one unchanged via the "edit" backfill).
+    """
     orguser: OrgUser = request.orguser
+
+    try:
+        existing_chart = ChartService.get_chart(chart_id, orguser.org)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+    require_edit_access(orguser, "chart", existing_chart)
 
     # ChartUpdate.extra_config is a typed sub-schema when chart_type was sent
     # alongside it; otherwise it's still a raw dict (or None). Either way the
@@ -1392,8 +1405,16 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
 @has_permission(["can_view_charts"])
 def get_chart_dashboards(request, chart_id: int):
-    """Get list of dashboards that use this chart"""
+    """Get list of dashboards that use this chart. v1.1: a standalone chart
+    surface — resolver View on the chart required (a narrowed chart must
+    not leak its dashboard memberships)."""
     orguser: OrgUser = request.orguser
+
+    try:
+        chart = ChartService.get_chart(chart_id, orguser.org)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+    require_view_access(orguser, "chart", chart)
 
     try:
         dashboards = ChartService.get_chart_dashboards(chart_id, orguser.org)

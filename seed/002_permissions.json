@@ -726,5 +726,13 @@
             "name": "Can View User Groups",
             "slug": "can_view_user_groups"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 92,
+        "fields": {
+            "name": "Can Share Charts",
+            "slug": "can_share_charts"
+        }
     }
 ]
