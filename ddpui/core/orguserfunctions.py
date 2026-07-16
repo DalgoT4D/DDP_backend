@@ -402,7 +402,7 @@ def get_invitations_from_orguser_v1(orguser: OrgUser):
 
     invitations = (
         Invitation.objects.filter(invited_by__org=orguser.org)
-        .select_related("invited_by__user")
+        .select_related("invited_by__user", "invited_new_role")
         .order_by("-invited_on")
         .all()
     )
