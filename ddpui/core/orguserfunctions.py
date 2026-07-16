@@ -396,11 +396,16 @@ def get_invitations_from_orguser(orguser: OrgUser):
 
 
 def get_invitations_from_orguser_v1(orguser: OrgUser):
-    """get all invitations sent by an orguser"""
+    """get all pending invitations for the orguser's org (org-wide, not just self-sent)"""
     if orguser.org is None:
         return None, "create an organization first"
 
-    invitations = Invitation.objects.filter(invited_by=orguser).order_by("-invited_on").all()
+    invitations = (
+        Invitation.objects.filter(invited_by__org=orguser.org)
+        .select_related("invited_by__user")
+        .order_by("-invited_on")
+        .all()
+    )
     res = []
     for invitation in invitations:
         res.append(
@@ -412,6 +417,7 @@ def get_invitations_from_orguser_v1(orguser: OrgUser):
                     "name": invitation.invited_new_role.name,
                 },
                 "invited_on": invitation.invited_on,
+                "invited_by": invitation.invited_by.user.email,
             }
         )
 
