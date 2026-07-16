@@ -1,15 +1,21 @@
-"""The render path for charts, which are NOT shareable (plan Sec 3.3).
+"""The render path for charts (plan Sec 3.3; v1.1: charts are now
+independently shareable).
 
-A chart is visible wherever its dashboards are visible. This module holds
-the two pieces of that contract:
+The two-layer contract (v1.1 spec Sec 3): a chart renders INLINE wherever
+its containing dashboard renders — the dashboard-context branch below is
+that rule and is unchanged from v1. The chart's OWN general access +
+grants govern its STANDALONE surfaces (Charts page, builder, pickers,
+by-id data endpoints without a dashboard context). This module holds:
 
 - ``require_chart_view_access`` — the 403 gate for the by-id chart GETs.
   With a ``dashboard_id`` access context it demands BOTH that the chart is
   actually ON that dashboard (membership — without it, ``dashboard_id`` is
   an oracle to read arbitrary charts; plan Sec 5) and that the resolver
   grants >= view on that same-org dashboard. Without one (standalone:
-  builder / Charts page) it keeps today's Analyst+ behavior, admits the
-  chart's owner, and denies plain Members.
+  builder / Charts page) it asks the resolver for view on the CHART itself
+  (v1.1) — admins, owners, analysts the chart's ``analyst_level``/grants
+  admit; plain Members stay denied (Member chart sharing is deferred, and
+  the resolver excludes Member grant contributions for charts).
 
 - ``require_analyst_plus`` — the same standalone role-rank rule, exposed
   for the two table/map POST endpoints' config-only path (a raw,
@@ -91,16 +97,6 @@ def _dashboard_chart_ids(dashboard: Dashboard) -> Set[int]:
     return chart_ids
 
 
-def _is_chart_owner(orguser: OrgUser, chart: Chart) -> bool:
-    """owner_id wins; created_by is the fallback when owner is null. Mirrors
-    ddpui.core.ownership.can_delete_resource (and the resolver's _is_owner)."""
-    owner_id = getattr(chart, "owner_id", None)
-    if owner_id is not None:
-        return owner_id == orguser.id
-    created_by_id = getattr(chart, "created_by_id", None)
-    return created_by_id is not None and created_by_id == orguser.id
-
-
 def _is_analyst_plus(orguser: OrgUser) -> bool:
     role = getattr(orguser, "new_role", None)
     rank = ROLE_RANK.get(getattr(role, "slug", None) if role is not None else None)
@@ -115,10 +111,16 @@ def require_chart_view_access(
     Dashboard context (``dashboard_id`` given): 404 if the dashboard does
     not exist in the viewer's org (cross-org ids are indistinguishable from
     nonexistent ones, matching the detail-GET convention); 403 if the chart
-    is not on that dashboard or the resolver denies view on it.
+    is not on that dashboard or the resolver denies view on it. This branch
+    is the v1 inline-rendering rule, UNCHANGED in v1.1 — inline access never
+    consults the chart's own levels ("no locked tiles, ever").
 
-    Standalone: Analyst+ passes (today's behavior), the chart's owner
-    passes, everyone else (plain Members, null/legacy roles) gets 403.
+    Standalone (v1.1): the resolver decides on the CHART itself — admins
+    and owners pass (ladder steps 1-2), Analysts pass via the chart's
+    ``analyst_level`` (backfilled to "edit", so day-one behavior is
+    unchanged) or a grant; plain Members are denied (``member_level`` is
+    pinned to "none" and Member grant contributions are excluded for
+    charts).
     """
     if dashboard_id is not None:
         try:
@@ -131,11 +133,8 @@ def require_chart_view_access(
             raise HttpError(403, "You do not have access to this chart")
         return
 
-    if _is_analyst_plus(orguser):
-        return
-    if _is_chart_owner(orguser, chart):
-        return
-    raise HttpError(403, "You do not have access to this chart")
+    if effective_permission(orguser, "chart", chart) is None:
+        raise HttpError(403, "You do not have access to this chart")
 
 
 def require_analyst_plus(orguser: OrgUser) -> None:

@@ -1,7 +1,9 @@
 """Chart/Visualization models for Dalgo platform"""
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.postgres.fields import ArrayField
+from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
@@ -56,6 +58,24 @@ class Chart(models.Model):
         default=dict, help_text="Create chart form config including customizations"
     )
 
+    # General access (org-wide default sharing) — Layer 1 of Resource Sharing
+    # (v1.1: charts join the sharing model). Same per-role declaration as
+    # Dashboard, with ONE deliberate difference: ``analyst_level`` defaults to
+    # EDIT, not NONE — the behavior-preserving value (v1.1 decision #3: all
+    # analysts could see/edit all charts before charts had access fields, so
+    # any row created without explicit levels keeps today's behavior; the
+    # service create path overrides with the org's defaults).
+    # ``member_level`` is PINNED to "none" in v1.1 (decision #2: Member chart
+    # sharing is deferred — Members see charts only inline inside shared
+    # dashboards/reports); ``clean()`` and the sharing API both reject any
+    # other value.
+    analyst_level = models.CharField(
+        max_length=5, choices=AccessLevel.choices, default=AccessLevel.EDIT
+    )
+    member_level = models.CharField(
+        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
+    )
+
     # Metadata
     created_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, db_column="created_by"
@@ -73,6 +93,17 @@ class Chart(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        """v1.1 member-pin: Member chart sharing is deferred, so
+        ``member_level`` may only ever be "none". The sharing API enforces
+        the same rule (``shareable_types`` registry ``member_sharing=False``)
+        — this is the model-layer backstop for any other write path."""
+        super().clean()
+        if self.member_level != AccessLevel.NONE:
+            raise ValidationError(
+                {"member_level": "charts cannot be shared with Members yet (v1.1)"}
+            )
 
     def __str__(self):
         return f"{self.title} ({self.chart_type})"

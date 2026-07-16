@@ -19,7 +19,7 @@ from typing import Optional
 from django.db import transaction
 from django.utils import timezone as django_timezone
 
-from ddpui.auth import ADMIN_ROLE, SUPER_ADMIN_ROLE
+from ddpui.auth import ADMIN_ROLE, MEMBER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.core.sharing.access_resolver import PERMISSION_RANK, effective_permission
 from ddpui.core.sharing.deep_links import (
     DEEP_LINK_PATH as _DEEP_LINK_PATH,  # noqa: F401  (re-exported; extracted to deep_links)
@@ -204,6 +204,17 @@ def create_access_request(
     entry = _entry_for(rtype)
     if not entry.requests:
         raise SharingValidationError(f"{rtype} does not support access requests")
+
+    # v1.1: Member sharing is deferred on member_sharing=False rtypes
+    # (charts) -- a Member's request could never be granted, so block it
+    # with a pointer at the path that DOES work for them.
+    requester_slug = requester.new_role.slug if requester.new_role else None
+    if not entry.member_sharing and requester_slug == MEMBER_ROLE:
+        noun = _NOUN_BY_RTYPE.get(rtype, rtype)
+        raise SharingValidationError(
+            f"{noun}s can't be shared with Members yet — request access to "
+            f"the dashboard instead"
+        )
 
     if payload.requested_permission not in GeneralLevel.values:
         raise SharingValidationError(f"invalid permission '{payload.requested_permission}'")
