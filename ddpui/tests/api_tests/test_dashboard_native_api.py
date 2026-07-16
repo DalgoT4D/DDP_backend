@@ -27,7 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
     get_dashboard,
@@ -38,10 +38,13 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
+    toggle_dashboard_sharing,
+    get_dashboard_sharing_status,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
+    DashboardShareToggle,
     FilterCreate,
     FilterUpdate,
 )
@@ -687,10 +690,70 @@ class TestDuplicateDashboardTabs:
 
 
 # ================================================================================
+# Test sharing permission gates (creator-or-admin, incl. orphaned dashboards)
+# ================================================================================
+
+
+class TestSharingPermissions:
+    """Sharing is manageable by the creator or an org admin — including
+    dashboards whose creator was deleted (created_by=None)."""
+
+    def test_admin_can_toggle_sharing_on_orphaned_dashboard(self, orguser, org, seed_db):
+        """an admin can make an orphaned dashboard public"""
+        dashboard = Dashboard.objects.create(title="Orphaned", org=org, created_by=None)
+        request = mock_request(orguser)
+
+        response = toggle_dashboard_sharing(
+            request, dashboard.id, DashboardShareToggle(is_public=True)
+        )
+
+        dashboard.refresh_from_db()
+        assert dashboard.is_public is True
+        assert dashboard.public_share_token
+        assert response.is_public is True
+        dashboard.delete()
+
+    def test_admin_can_view_sharing_status_of_orphaned_dashboard(self, orguser, org, seed_db):
+        """an admin can read the sharing status of an orphaned dashboard"""
+        dashboard = Dashboard.objects.create(
+            title="Orphaned", org=org, created_by=None, is_public=True
+        )
+        request = mock_request(orguser)
+
+        response = get_dashboard_sharing_status(request, dashboard.id)
+
+        assert response.is_public is True
+        dashboard.delete()
+
+    def test_non_admin_still_cannot_toggle_sharing_of_others_dashboard(self, orguser, org, seed_db):
+        """an analyst (has the share permission, not an admin) can neither toggle
+        nor view sharing of a dashboard they didn't create"""
+        dashboard = Dashboard.objects.create(title="Not theirs", org=org, created_by=orguser)
+        analyst_user = User.objects.create(username="analyst-share", email="analyst-share")
+        analyst = OrgUser.objects.create(
+            user=analyst_user, org=org, new_role=Role.objects.filter(slug=ANALYST_ROLE).first()
+        )
+        request = mock_request(analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            toggle_dashboard_sharing(request, dashboard.id, DashboardShareToggle(is_public=True))
+        assert "creator or an org admin" in str(excinfo.value)
+
+        with pytest.raises(HttpError) as excinfo:
+            get_dashboard_sharing_status(request, dashboard.id)
+        assert "creator or an org admin" in str(excinfo.value)
+
+        dashboard.refresh_from_db()
+        assert dashboard.is_public is False
+        dashboard.delete()
+        analyst_user.delete()
+
+
+# ================================================================================
 # Test seed data
 # ================================================================================
 
 
 def test_seed_data(seed_db):
     """Test that seed data is loaded correctly"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4

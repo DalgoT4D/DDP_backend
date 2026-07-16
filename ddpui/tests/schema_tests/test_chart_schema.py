@@ -250,6 +250,56 @@ class TestSchemaSerialization:
 
 
 # ================================================================================
+# Test pivot_table chart_type acceptance + typed extra_config
+# ================================================================================
+
+
+class TestPivotTableChartCreate:
+    """ChartCreate must accept chart_type='pivot_table' and type its extra_config."""
+
+    def _extra(self, **overrides):
+        base = {
+            "row_dimensions": ["ngo_name"],
+            "column_dimensions": ["date"],
+            "metrics": [{"column": None, "aggregation": "count", "alias": "Total Count"}],
+        }
+        base.update(overrides)
+        return base
+
+    def test_pivot_table_accepted_and_typed(self):
+        chart = ChartCreate(
+            title="Grants by NGO",
+            chart_type="pivot_table",
+            schema_name="intermediate",
+            table_name="date_pivot_table",
+            extra_config=self._extra(show_column_grand_total=True),
+        )
+        assert chart.chart_type == "pivot_table"
+        assert chart.extra_config.row_dimensions == ["ngo_name"]
+        assert chart.extra_config.column_dimensions == ["date"]
+
+    def test_pivot_table_requires_a_row_dimension(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="pivot_table",
+                schema_name="s",
+                table_name="d",
+                extra_config=self._extra(row_dimensions=[]),
+            )
+
+    def test_pivot_table_requires_a_metric(self):
+        with pytest.raises(ValidationError):
+            ChartCreate(
+                title="t",
+                chart_type="pivot_table",
+                schema_name="s",
+                table_name="d",
+                extra_config=self._extra(metrics=[]),
+            )
+
+
+# ================================================================================
 # Test Edge Cases (NOT tested by API tests)
 # ================================================================================
 

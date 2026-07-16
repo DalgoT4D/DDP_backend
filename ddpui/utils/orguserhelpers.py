@@ -33,6 +33,7 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         is_demo=orguser.org.base_plan() == OrgType.DEMO if orguser.org else False,
         subscription_plan=orguser.org.base_plan() if orguser.org else None,
         work_domain=orguser.work_domain,
+        has_seen_rbac_notice=orguser.has_seen_rbac_notice,
     )
     if orguser.org:
         response.org.tnc_accepted = OrgTnC.objects.filter(org=orguser.org).exists()

@@ -20,3 +20,8 @@ class MetricDeleteBlockedError(MetricServiceError):
     def __init__(self, message: str, consumers: dict):
         super().__init__(message, "DELETE_BLOCKED")
         self.consumers = consumers
+
+
+class MetricPermissionError(MetricServiceError):
+    def __init__(self, message: str):
+        super().__init__(message, "PERMISSION_DENIED")

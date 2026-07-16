@@ -29,7 +29,7 @@ from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.reports.report_service import ReportService
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
@@ -90,7 +90,7 @@ def other_orguser(other_authuser, org):
     orguser = OrgUser.objects.create(
         user=other_authuser,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -597,6 +597,47 @@ class TestDeleteSnapshot:
         """Non-creator cannot delete a snapshot"""
         with pytest.raises(SnapshotPermissionError):
             ReportService.delete_snapshot(sample_snapshot.id, org, other_orguser)
+
+    def test_delete_non_admin_creator_can_delete_own(
+        self, org, other_orguser, sample_dashboard, sample_filter, sample_chart, seed_db
+    ):
+        """A non-admin (analyst) creator hits the owner branch — the admin-role
+        `orguser` in test_delete_success passes via the admin override instead"""
+        snapshot = ReportService.create_snapshot(
+            title="Analyst Report",
+            dashboard_id=sample_dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 2, 1),
+            period_end=date(2025, 2, 28),
+            orguser=other_orguser,
+        )
+        result = ReportService.delete_snapshot(snapshot.id, org, other_orguser)
+        assert result is True
+        assert not ReportSnapshot.objects.filter(id=snapshot.id).exists()
+
+    def test_delete_admin_can_delete_others_snapshot(
+        self, org, orguser, other_orguser, sample_dashboard, sample_filter, sample_chart, seed_db
+    ):
+        """An admin can delete a snapshot created by someone else (admin override)"""
+        snapshot = ReportService.create_snapshot(
+            title="Analyst Report",
+            dashboard_id=sample_dashboard.id,
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 3, 1),
+            period_end=date(2025, 3, 31),
+            orguser=other_orguser,
+        )
+        result = ReportService.delete_snapshot(snapshot.id, org, orguser)
+        assert result is True
+        assert not ReportSnapshot.objects.filter(id=snapshot.id).exists()
 
     def test_delete_not_found(self, org, orguser):
         """Deleting nonexistent snapshot raises SnapshotNotFoundError"""

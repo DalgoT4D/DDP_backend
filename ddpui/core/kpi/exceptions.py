@@ -14,3 +14,8 @@ class KPINotFoundError(KPIServiceError):
 class KPIValidationError(KPIServiceError):
     def __init__(self, message: str):
         super().__init__(message, "VALIDATION_ERROR")
+
+
+class KPIPermissionError(KPIServiceError):
+    def __init__(self, message: str):
+        super().__init__(message, "PERMISSION_DENIED")

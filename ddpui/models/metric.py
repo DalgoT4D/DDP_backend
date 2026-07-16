@@ -60,7 +60,7 @@ class Metric(models.Model):
     # Org scoping + ownership (same pattern as Chart)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_by = models.ForeignKey(
-        OrgUser, on_delete=models.CASCADE, related_name="metrics_created"
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="metrics_created"
     )
     last_modified_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="metrics_modified"
@@ -119,7 +119,9 @@ class KPI(models.Model):
 
     # Org scoping + ownership
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="kpis_created")
+    created_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="kpis_created"
+    )
     last_modified_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="kpis_modified"
     )

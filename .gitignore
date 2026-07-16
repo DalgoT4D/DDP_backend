@@ -159,3 +159,4 @@ Docker/.env*
 platform-notifications/
 
 .vscode/
+.claude/worktrees/

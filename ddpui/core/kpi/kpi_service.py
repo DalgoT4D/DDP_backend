@@ -83,7 +83,9 @@ from ddpui.core.kpi.exceptions import (
     KPIServiceError,
     KPINotFoundError,
     KPIValidationError,
+    KPIPermissionError,
 )
+from ddpui.core.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────
@@ -140,7 +142,7 @@ class KPIService:
                 column=m.column,
                 aggregation=m.aggregation,
                 column_expression=m.column_expression,
-                created_by=m.created_by.user.email,
+                created_by=m.created_by.user.email if m.created_by else None,
                 created_at=m.created_at,
                 updated_at=m.updated_at,
             ),
@@ -154,7 +156,7 @@ class KPIService:
             program_tags=kpi.program_tags,
             display_order=kpi.display_order,
             extra_config=KPIExtraConfig(**(kpi.extra_config or {})),
-            created_by=kpi.created_by.user.email,
+            created_by=kpi.created_by.user.email if kpi.created_by else None,
             created_at=kpi.created_at,
             updated_at=kpi.updated_at,
         )
@@ -317,6 +319,11 @@ class KPIService:
     @staticmethod
     def delete_kpi(kpi_id: int, org: Org, orguser: OrgUser) -> bool:
         kpi = KPIService.get_kpi(kpi_id, org)
+
+        # Authorize before computing dashboard usage so a non-owner is denied
+        # without learning which dashboards depend on the KPI
+        if not can_delete_resource(orguser, kpi):
+            raise KPIPermissionError("Only the owner or an admin can delete this KPI.")
 
         dashboards = KPIService.get_kpi_dashboards(kpi_id, org)
         if dashboards:

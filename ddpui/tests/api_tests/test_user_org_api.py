@@ -39,6 +39,11 @@ from ddpui.api.user_org_api import (
     delete_logo,
 )
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.visualization import Chart
+from ddpui.models.metric import Metric, KPI
+from ddpui.models.alert import Alert
+from ddpui.services.dashboard_service import DashboardService, DashboardPermissionError
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import (
     OrgUser,
@@ -64,7 +69,7 @@ from ddpui.core.org_logo.exceptions import (
 )
 from ddpui.auth import (
     ACCOUNT_MANAGER_ROLE,
-    PIPELINE_MANAGER_ROLE,
+    ADMIN_ROLE,
     GUEST_ROLE,
     SUPER_ADMIN_ROLE,
 )
@@ -173,7 +178,7 @@ def mock_request(orguser: OrgUser = None):
 
 def test_seed_data(seed_db):
     """a test to seed the database"""
-    assert Role.objects.count() == 5
+    assert Role.objects.count() == 4
     assert RolePermission.objects.count() > 5
     assert Permission.objects.count() > 5
 
@@ -189,6 +194,7 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
         user=authuser,
         org=org_without_workspace,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        has_seen_rbac_notice=True,
     )
 
     request = mock_request(orguser2)
@@ -204,10 +210,15 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     if response[0].org.slug == org_with_workspace.slug:
         assert response[0].new_role_slug == orguser1.new_role.slug
         assert response[1].new_role_slug == orguser2.new_role.slug
+        # the one-time RBAC notice flag is surfaced per-orguser on login
+        assert response[0].has_seen_rbac_notice is False
+        assert response[1].has_seen_rbac_notice is True
 
     elif response[1].org.slug == org_with_workspace.slug:
         assert response[1].new_role_slug == orguser1.new_role.slug
         assert response[0].new_role_slug == orguser2.new_role.slug
+        assert response[1].has_seen_rbac_notice is False
+        assert response[0].has_seen_rbac_notice is True
 
 
 # ================================================================================
@@ -415,6 +426,143 @@ def test_delete_organization_users_success_v1(orguser):
     user.delete()
 
 
+def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db, orguser):
+    """deleting an orguser must not delete the dashboards and charts they created"""
+    request = mock_request(orguser)
+    payload = DeleteOrgUserPayload(email="useremail")
+    user = User.objects.create(email=payload.email, username=payload.email)
+    orguser_to_delete = OrgUser.objects.create(
+        org=orguser.org,
+        user=user,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    dashboard = Dashboard.objects.create(
+        title="their-dashboard",
+        org=orguser.org,
+        created_by=orguser_to_delete,
+        last_modified_by=orguser_to_delete,
+    )
+    chart = Chart.objects.create(
+        title="their-chart",
+        chart_type="bar",
+        schema_name="schema",
+        table_name="table",
+        org=orguser.org,
+        created_by=orguser_to_delete,
+    )
+    # a dashboard created by someone else but last modified by the deleted user
+    others_dashboard = Dashboard.objects.create(
+        title="others-dashboard",
+        org=orguser.org,
+        created_by=orguser,
+        last_modified_by=orguser_to_delete,
+    )
+
+    delete_organization_users_v1(request, payload)
+
+    assert Dashboard.objects.filter(id=dashboard.id).exists()
+    assert Chart.objects.filter(id=chart.id).exists()
+    assert Dashboard.objects.filter(id=others_dashboard.id).exists()
+    dashboard.refresh_from_db()
+    assert dashboard.created_by is None
+    assert dashboard.last_modified_by is None
+    others_dashboard.refresh_from_db()
+    assert others_dashboard.created_by == orguser
+    assert others_dashboard.last_modified_by is None
+    user.delete()
+
+
+def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, orguser):
+    """deleting an orguser must not delete the metrics, kpis and alerts they created"""
+    request = mock_request(orguser)
+    payload = DeleteOrgUserPayload(email="useremail")
+    user = User.objects.create(email=payload.email, username=payload.email)
+    orguser_to_delete = OrgUser.objects.create(
+        org=orguser.org,
+        user=user,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    metric = Metric.objects.create(
+        name="their-metric",
+        schema_name="schema",
+        table_name="table",
+        column="col",
+        aggregation="sum",
+        org=orguser.org,
+        created_by=orguser_to_delete,
+    )
+    kpi = KPI.objects.create(
+        metric=metric,
+        name="their-kpi",
+        direction="increase",
+        time_grain="monthly",
+        org=orguser.org,
+        created_by=orguser_to_delete,
+    )
+    alert = Alert.objects.create(
+        org=orguser.org,
+        name="their-alert",
+        alert_type="metric_threshold",
+        metric=metric,
+        condition={"operator": "gt", "value": 100},
+        schedule_cron="0 0 * * *",
+        message_template="alert fired",
+        created_by=orguser_to_delete,
+    )
+
+    delete_organization_users_v1(request, payload)
+
+    for obj in [metric, kpi, alert]:
+        assert type(obj).objects.filter(id=obj.id).exists()
+        obj.refresh_from_db()
+        assert obj.created_by is None
+
+    # KPI.metric is PROTECT, so clean up in dependency order for fixture teardown
+    alert.delete()
+    kpi.delete()
+    metric.delete()
+    user.delete()
+
+
+def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1(seed_db, orguser):
+    """after a creator is deleted, their dashboard can be deleted by an admin but not a member"""
+    request = mock_request(orguser)
+    payload = DeleteOrgUserPayload(email="useremail")
+    user = User.objects.create(email=payload.email, username=payload.email)
+    creator = OrgUser.objects.create(
+        org=orguser.org,
+        user=user,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    dashboard = Dashboard.objects.create(
+        title="orphaned-dashboard", org=orguser.org, created_by=creator
+    )
+    # a second dashboard so the orphaned one isn't the org's last (deleting
+    # the last dashboard is blocked by a separate rule)
+    Dashboard.objects.create(title="other-dashboard", org=orguser.org, created_by=orguser)
+
+    delete_organization_users_v1(request, payload)
+    dashboard.refresh_from_db()
+    assert dashboard.created_by is None
+
+    # a non-admin member of the org cannot delete the orphaned dashboard
+    member_user = User.objects.create(email="member-email", username="member-email")
+    member = OrgUser.objects.create(
+        org=orguser.org,
+        user=member_user,
+        new_role=Role.objects.filter(slug=GUEST_ROLE).first(),
+    )
+    with pytest.raises(DashboardPermissionError):
+        DashboardService.delete_dashboard(dashboard.id, orguser.org, member)
+    assert Dashboard.objects.filter(id=dashboard.id).exists()
+
+    # an admin can delete it (the requestor orguser fixture holds the admin role)
+    assert DashboardService.delete_dashboard(dashboard.id, orguser.org, orguser) is True
+    assert not Dashboard.objects.filter(id=dashboard.id).exists()
+    member_user.delete()
+    user.delete()
+
+
 # ================================================================================
 
 
@@ -433,6 +581,23 @@ def test_put_organization_user_self_v1(orguser):
 
     assert response.email == "newemail"
     assert response.active is new_active_status
+
+
+def test_put_organization_user_self_v1_marks_rbac_notice_seen(orguser):
+    """the requestor can flip the one-time RBAC notice flag on their own OrgUser"""
+    request = mock_request(orguser)
+    assert orguser.has_seen_rbac_notice is False
+
+    payload = OrgUserUpdatev1(
+        toupdate_email="unused-param",
+        has_seen_rbac_notice=True,
+    )
+
+    response = put_organization_user_self_v1(request, payload)
+
+    assert response.has_seen_rbac_notice is True
+    orguser.refresh_from_db()
+    assert orguser.has_seen_rbac_notice is True
 
 
 # ================================================================================
@@ -655,7 +820,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
     another_user = User.objects.create(username="anotheruser", email="anotheruser")
-    new_role = Role.objects.filter(slug=PIPELINE_MANAGER_ROLE).first()
+    new_role = Role.objects.filter(slug=ADMIN_ROLE).first()
     another_org_user = OrgUser.objects.create(org=another_org, user=another_user, new_role=new_role)
     Invitation.objects.create(
         invited_email="inivted_email",
