@@ -98,6 +98,40 @@ def _dashboard(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=Acce
     )
 
 
+def _metric(
+    org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE, name=None
+):
+    return Metric.objects.create(
+        org=org_obj,
+        name=name or f"metric-{Metric.objects.filter(org=org_obj).count()}",
+        schema_name="s",
+        table_name="t",
+        column="c",
+        aggregation="sum",
+        created_by=owner,
+        owner=owner,
+        analyst_level=analyst_level,
+        member_level=member_level,
+    )
+
+
+def _kpi(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE, name=None):
+    metric = _metric(
+        org_obj, owner, name=f"backing-metric-{KPI.objects.filter(org=org_obj).count()}"
+    )
+    return KPI.objects.create(
+        name=name or f"kpi-{KPI.objects.filter(org=org_obj).count()}",
+        metric=metric,
+        direction="increase",
+        time_grain="monthly",
+        org=org_obj,
+        owner=owner,
+        created_by=owner,
+        analyst_level=analyst_level,
+        member_level=member_level,
+    )
+
+
 def _grant(org_obj, rtype, resource, principal_orguser, permission="view", status="active"):
     return ResourceShare.objects.create(
         org=org_obj,
@@ -219,6 +253,9 @@ class TestGetAccess:
         assert excinfo.value.status_code == 403
 
     def test_capability_flags_echoed_for_metric(self, org, analyst):
+        """M5: metric/kpi flip `grants=True` in the registry -- the modal's
+        People-with-access section (gated on `capabilities.grants`) now
+        renders for these rtypes too."""
         from ddpui.api.access_api import get_access
 
         metric = Metric.objects.create(
@@ -235,7 +272,7 @@ class TestGetAccess:
         )
         response = get_access(mock_request(analyst), "metric", str(metric.pk))
         data = response["data"]
-        assert data["capabilities"]["grants"] is False
+        assert data["capabilities"]["grants"] is True
         assert data["viewer"] == {"effective_permission": "edit", "is_owner": True}
 
     def test_unknown_rtype_404(self, org, admin):
@@ -377,20 +414,93 @@ class TestCreateGrant:
             )
         assert excinfo.value.status_code == 404
 
-    def test_grant_on_grantless_rtype_400_via_capability_flag(self, org, analyst, member):
-        metric = Metric.objects.create(
-            org=org,
-            name="m2",
-            schema_name="s",
-            table_name="t",
-            column="c",
-            aggregation="sum",
-            created_by=analyst,
-            owner=analyst,
-        )
+    def test_grant_on_capability_blocked_rtype_400_via_registry_monkeypatch(
+        self, org, analyst, analyst2
+    ):
+        """No REAL rtype is `grants=False` any more after M5's flip (metric
+        and kpi were the last two) -- this pins the `if not entry.grants`
+        branch in `upsert_grant` still 400s for a hypothetical grantless
+        rtype, via a temporarily patched registry entry, so the branch stays
+        covered even though no live rtype exercises it today."""
+        import dataclasses
+
+        from ddpui.core.sharing.shareable_types import RESOURCE_TYPES
+
+        dashboard = _dashboard(org, analyst)
+        grantless_entry = dataclasses.replace(RESOURCE_TYPES["dashboard"], grants=False)
+        with patch.dict(RESOURCE_TYPES, {"dashboard": grantless_entry}):
+            with pytest.raises(HttpError) as excinfo:
+                _post_grant(analyst, "dashboard", dashboard, analyst2, "view")
+        assert excinfo.value.status_code == 400
+
+    def test_metric_grant_to_analyst_now_succeeds(self, org, analyst, analyst2):
+        """M5: metric flips `grants=True` -- an Analyst/Admin principal can
+        now be granted directly (Member principals stay blocked, see below)."""
+        metric = _metric(org, analyst)
+
+        response = _post_grant(analyst, "metric", metric, analyst2, "view")
+
+        assert response["success"] is True
+        assert response["data"]["principal_id"] == analyst2.id
+        assert response["data"]["permission"] == "view"
+        assert response["data"]["status"] == "active"
+
+    def test_kpi_grant_to_analyst_now_succeeds(self, org, analyst, analyst2):
+        kpi = _kpi(org, analyst)
+
+        response = _post_grant(analyst, "kpi", kpi, analyst2, "edit")
+
+        assert response["success"] is True
+        assert response["data"]["principal_id"] == analyst2.id
+        assert response["data"]["permission"] == "edit"
+
+    def test_metric_grant_to_member_principal_blocked_400(self, org, analyst, member):
+        """M5 consistency rule (mirrors the plan's chart rule): direct
+        grants to a Member principal are deferred v1.1-wide for metric/kpi."""
+        metric = _metric(org, analyst)
+
         with pytest.raises(HttpError) as excinfo:
             _post_grant(analyst, "metric", metric, member, "view")
         assert excinfo.value.status_code == 400
+        assert "Member" in excinfo.value.message
+        assert not ResourceShare.objects.filter(
+            resource_type="metric", resource_id=str(metric.pk), principal_id=member.id
+        ).exists()
+
+    def test_kpi_grant_to_member_principal_blocked_400(self, org, analyst, member):
+        kpi = _kpi(org, analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst, "kpi", kpi, member, "view")
+        assert excinfo.value.status_code == 400
+        assert "Member" in excinfo.value.message
+
+    def test_metric_email_share_with_existing_member_orguser_blocked_400(
+        self, org, analyst, member
+    ):
+        """The email path that resolves to an EXISTING org user (not the
+        invite path) hits the same Member-principal block."""
+        metric = _metric(org, analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant_email(analyst, "metric", metric, member.user.email, "view")
+        assert excinfo.value.status_code == 400
+
+    def test_metric_group_grant_still_allowed_even_though_group_may_hold_members(
+        self, org, analyst
+    ):
+        """Group grants are untouched by the Member-principal block -- a
+        group's membership can mix roles; any Member reached through it
+        still resolves capped at "view" (see TestMemberCapOnMetricKpiGrants
+        below), which is a resolver-level rule, not a write-time block."""
+        metric = _metric(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Funders", created_by=analyst)
+
+        response = _post_grant(analyst, "metric", metric, group, "edit", principal_type="group")
+
+        assert response["success"] is True
+        assert response["data"]["principal_type"] == "group"
+        assert response["data"]["permission"] == "edit"
 
     def test_cross_org_principal_404(self, org, analyst):
         dashboard = _dashboard(org, analyst)
@@ -533,6 +643,66 @@ class TestCreateGrantByEmail:
             )
         assert excinfo.value.status_code == 400
         assert not Invitation.objects.filter(invited_email__iexact="x@test.com").exists()
+
+    # ---- M5: metric/kpi Member-invite deferral ----
+
+    def test_metric_unknown_email_default_invite_blocked_400(self, org, analyst):
+        """Default invite_role (Member) on a member-grants-deferred rtype
+        400s BEFORE any Invitation/pending-grant row is written -- unlike
+        dashboard, where this same call succeeds as a Member invite."""
+        metric = _metric(org, analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant_email(analyst, "metric", metric, "future-metric@test.com", "view")
+        assert excinfo.value.status_code == 400
+        assert not Invitation.objects.filter(
+            invited_email__iexact="future-metric@test.com"
+        ).exists()
+        assert not ResourceShare.objects.filter(
+            pending_email__iexact="future-metric@test.com"
+        ).exists()
+
+    def test_kpi_unknown_email_explicit_member_invite_still_blocked_400(self, org, admin):
+        """Even an admin explicitly asking for invite_role='member' is
+        blocked -- the deferral isn't an escalation-privilege gap, Member
+        invites just aren't available yet for this rtype."""
+        kpi = _kpi(org, admin)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant_email(
+                admin, "kpi", kpi, "future-kpi@test.com", "view", invite_role="member"
+            )
+        assert excinfo.value.status_code == 400
+        assert not Invitation.objects.filter(invited_email__iexact="future-kpi@test.com").exists()
+
+    @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+    def test_metric_admin_invite_role_analyst_succeeds(self, org, admin):
+        """An admin asking for invite_role='analyst'/'admin' is unaffected
+        by the deferral -- it only blocks a Member-resolved invite."""
+        metric = _metric(org, admin)
+
+        response = _post_grant_email(
+            admin, "metric", metric, "future-metric-analyst@test.com", "view", invite_role="analyst"
+        )
+
+        assert response["data"]["status"] == "pending"
+        invitation = Invitation.objects.get(invited_email="future-metric-analyst@test.com")
+        assert invitation.invited_new_role.slug == ANALYST_ROLE
+
+    def test_metric_non_admin_invite_role_analyst_403_before_the_member_check(self, org, analyst):
+        """Ordering pin: a non-admin asking for a non-Member role still hits
+        the existing escalation 403 -- the M5 deferral check doesn't relax
+        or shadow that gate."""
+        metric = _metric(org, analyst)
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant_email(
+                analyst, "metric", metric, "escalate-metric@test.com", "view", invite_role="analyst"
+            )
+        assert excinfo.value.status_code == 403
+        assert not Invitation.objects.filter(
+            invited_email__iexact="escalate-metric@test.com"
+        ).exists()
 
     @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
     def test_reinviting_same_pending_email_dedupes_and_keeps_original_role(
@@ -1054,3 +1224,140 @@ class TestResourceSharedEmail:
         assert "Access Api Dashboard · dashboard —" in message
         assert "You have been granted Edit access to this dashboard." in message
         assert f"/dashboards/{dashboard.pk}" in message
+
+
+# ================================================================================
+# M5: metric/kpi POST /grants/ regression -- owner grants, editor-via-grant
+# re-shares up to own level, viewer blocked (mirrors the dashboard versions
+# of these three tests, now that the path is genuinely open for metric/kpi).
+# ================================================================================
+
+
+class TestMetricKpiGrantRegression:
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
+    def test_owner_grants_view_then_edit_updates_in_place(self, org, analyst, analyst2):
+        metric = _metric(org, analyst)
+
+        response = _post_grant(analyst, "metric", metric, analyst2, "view")
+        assert response["data"]["permission"] == "view"
+
+        response = _post_grant(analyst, "metric", metric, analyst2, "edit")
+        rows = ResourceShare.objects.filter(
+            resource_type="metric", resource_id=str(metric.pk), principal_id=analyst2.id
+        )
+        assert rows.count() == 1
+        assert rows.first().permission == "edit"
+
+    @patch("ddpui.utils.awsses.send_resource_shared_email", Mock())
+    def test_editor_via_grant_can_reshare_up_to_own_level(self, org, analyst, analyst2):
+        """A grantee at Edit (not the owner) can re-share up to their own
+        level -- the re-share cap, unaffected by the Member-block change.
+        The re-share target must be a non-Member principal (Analyst here) --
+        Member is blocked separately (`test_metric_grant_to_member_principal_blocked_400`)."""
+        metric = _metric(org, analyst)
+        _grant(org, "metric", metric, analyst2, permission="edit")
+        third_analyst = _make_orguser(org, ANALYST_ROLE, "accessapi-metric-reshare-target")
+
+        response = _post_grant(analyst2, "metric", metric, third_analyst, "edit")
+
+        assert response["success"] is True
+        assert response["data"]["permission"] == "edit"
+        third_analyst.delete()
+
+    def test_viewer_level_sharer_is_blocked_403(self, org, analyst, analyst2):
+        """A grantee at View can't grant at all -- this goes through
+        `require_edit_access` in the `create_grant` ROUTE (403), not the
+        service-layer re-share cap (which would let View->View through)."""
+        metric = _metric(org, analyst)
+        _grant(org, "metric", metric, analyst2, permission="view")
+
+        with pytest.raises(HttpError) as excinfo:
+            _post_grant(analyst2, "metric", metric, analyst, "view")
+        assert excinfo.value.status_code == 403
+
+    def test_kpi_owner_grants_analyst_and_grant_persists(self, org, analyst, analyst2):
+        kpi = _kpi(org, analyst)
+        response = _post_grant(analyst, "kpi", kpi, analyst2, "view")
+        assert response["success"] is True
+        assert ResourceShare.objects.filter(
+            resource_type="kpi", resource_id=str(kpi.pk), principal_id=analyst2.id, status="active"
+        ).exists()
+
+
+# ================================================================================
+# M5: Member-cap resolver semantics -- a grant row can never admit a Member
+# viewer above "view" on metric/kpi, even reached via a group (the one path
+# that CAN still put a Member behind an active grant, since direct Member
+# grants are blocked at write time). This is the existing, generic
+# `effective_permission` rule (untouched by M5) -- pinned here for metric/kpi
+# specifically per the milestone brief.
+# ================================================================================
+
+
+class TestMemberCapOnMetricKpiGrants:
+    def test_member_via_group_grant_capped_at_view_on_metric(self, org, analyst, member):
+        metric = _metric(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Mixed Group", created_by=analyst)
+        UserGroupMember.objects.create(group=group, orguser=member, status="active")
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="metric",
+            resource_id=str(metric.pk),
+            principal_type="group",
+            principal_id=group.id,
+            permission="edit",  # the group grant is Edit...
+            status="active",
+        )
+
+        # ...but a Member viewer's contribution from ANY grant stays capped
+        # at "view" -- the pre-D1 rule, untouched by M5.
+        assert effective_permission(member, "metric", metric) == "view"
+
+    def test_member_via_group_grant_capped_at_view_on_kpi(self, org, analyst, member):
+        kpi = _kpi(org, analyst)
+        group = UserGroup.objects.create(org=org, name="Mixed Group 2", created_by=analyst)
+        UserGroupMember.objects.create(group=group, orguser=member, status="active")
+        ResourceShare.objects.create(
+            org=org,
+            resource_type="kpi",
+            resource_id=str(kpi.pk),
+            principal_type="group",
+            principal_id=group.id,
+            permission="edit",
+            status="active",
+        )
+
+        assert effective_permission(member, "kpi", kpi) == "view"
+
+
+# ================================================================================
+# M5: D1 "shared a resource with you" email -- NOUN_BY_RTYPE/deep links
+# already covered both rtypes before this milestone (deep_links.py); this
+# pins the grant-share email path itself now fires for them.
+# ================================================================================
+
+
+class TestMetricKpiResourceSharedEmail:
+    def test_metric_grant_email_uses_metric_noun_and_deep_link(self, org, analyst, analyst2):
+        metric = _metric(org, analyst, name="Retention Rate")
+        with patch("ddpui.utils.awsses.send_text_message") as mock_send_text:
+            _post_grant(analyst, "metric", metric, analyst2, "view")
+
+        assert mock_send_text.call_count == 1
+        to_email, subject, message = mock_send_text.call_args.args
+        assert to_email == analyst2.user.email
+        assert subject == f"{analyst.user.email} shared a metric with you"
+        assert "Retention Rate · metric —" in message
+        assert f"/metrics?highlight={metric.pk}" in message
+
+    def test_kpi_grant_email_uses_kpi_noun_and_deep_link(self, org, analyst, analyst2):
+        kpi = _kpi(org, analyst, name="Monthly Beneficiaries")
+        with patch("ddpui.utils.awsses.send_text_message") as mock_send_text:
+            _post_grant(analyst, "kpi", kpi, analyst2, "view")
+
+        assert mock_send_text.call_count == 1
+        to_email, subject, message = mock_send_text.call_args.args
+        assert to_email == analyst2.user.email
+        assert subject == f"{analyst.user.email} shared a KPI with you"
+        assert "Monthly Beneficiaries · KPI —" in message
+        assert f"/kpis?open={kpi.pk}" in message

@@ -313,8 +313,13 @@ def _insert_grant(
     """Internal grant write for approve -- bypasses `entry.grants` /
     `sharing_actions.upsert_grant` deliberately, same pattern Task 12's
     ownership transfer used: the owner deciding a request may always grant
-    up to Edit on their own resource, even for `grants=False` rtypes
-    (metric/kpi) whose public `POST /grants/` endpoint would reject this."""
+    up to Edit on their own resource, even for a hypothetical `grants=False`
+    rtype (metric/kpi held that flag before M5's registry flip) whose public
+    `POST /grants/` endpoint would reject this. Also bypasses M5's
+    Member-grants-deferred check (`sharing_actions._reject_member_principal`)
+    deliberately -- approving a Member's own access request still writes
+    their grant; that block only applies to NEW proactive shares (the share
+    modal / bulk / invites), not to deciding a request someone already made."""
     ResourceShare.objects.update_or_create(
         org_id=resource.org_id,
         resource_type=rtype,

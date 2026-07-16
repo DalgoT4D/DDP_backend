@@ -110,16 +110,39 @@ def _report(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessL
     )
 
 
-def _metric(org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE):
+def _metric(
+    org_obj,
+    owner,
+    analyst_level=AccessLevel.NONE,
+    member_level=AccessLevel.NONE,
+    name="bulk-metric",
+):
     return Metric.objects.create(
         org=org_obj,
-        name="bulk-metric",
+        name=name,
         schema_name="s",
         table_name="t",
         column="c",
         aggregation="sum",
         created_by=owner,
         owner=owner,
+        analyst_level=analyst_level,
+        member_level=member_level,
+    )
+
+
+def _kpi(
+    org_obj, owner, analyst_level=AccessLevel.NONE, member_level=AccessLevel.NONE, name="bulk-kpi"
+):
+    metric = _metric(org_obj, owner, name=f"{name}-backing-metric")
+    return KPI.objects.create(
+        name=name,
+        metric=metric,
+        direction="increase",
+        time_grain="monthly",
+        org=org_obj,
+        owner=owner,
+        created_by=owner,
         analyst_level=analyst_level,
         member_level=member_level,
     )
@@ -195,13 +218,16 @@ class TestBulkAddGrant:
         self, org, analyst, analyst2, member
     ):
         """2 editable dashboards -> applied; a view-only report ->
-        edit_access_denied; a metric (grants=False) -> grants_not_supported."""
+        edit_access_denied; a metric -> validation_error (M5: metric is
+        `grants=True` now, but a Member principal is still blocked --
+        `upsert_grant`'s `_reject_member_principal` raises, caught here as
+        the generic per-item `validation_error`, same as the re-share cap)."""
         dash1 = _dashboard(org, analyst2)
         dash2 = _dashboard(org, analyst2)
         report = _report(org, analyst)
         _grant(org, "report", report, analyst2, permission="view")
         # analyst2 resolves to edit on the metric via general access, so it
-        # passes the edit gate and is skipped by the capability flag instead
+        # passes the edit gate and is skipped by the Member-block instead
         metric = _metric(org, analyst, AccessLevel.EDIT, AccessLevel.NONE)
 
         response = _bulk(
@@ -225,7 +251,7 @@ class TestBulkAddGrant:
         skip_reasons = {(s["rtype"], s["id"]): s["reason"] for s in data["skipped"]}
         assert skip_reasons == {
             ("report", str(report.pk)): "edit_access_denied",
-            ("metric", str(metric.pk)): "grants_not_supported",
+            ("metric", str(metric.pk)): "validation_error",
         }
         assert data["applied_count"] == 2
         assert data["skipped_count"] == 2
@@ -243,6 +269,63 @@ class TestBulkAddGrant:
             ).exists()
         assert not ResourceShare.objects.filter(
             resource_type="metric", resource_id=str(metric.pk)
+        ).exists()
+
+    def test_capability_blocked_rtype_skip_via_registry_monkeypatch(self, org, analyst, analyst2):
+        """No REAL rtype is `grants=False` any more after M5's flip (metric
+        and kpi were the last two) -- pins the `grants_not_supported` bulk
+        skip via a temporarily patched registry entry, so that branch stays
+        covered even though no live rtype exercises it today."""
+        import dataclasses
+
+        from ddpui.core.sharing.shareable_types import RESOURCE_TYPES
+
+        dash = _dashboard(org, analyst)
+        grantless_entry = dataclasses.replace(RESOURCE_TYPES["dashboard"], grants=False)
+        with patch.dict(RESOURCE_TYPES, {"dashboard": grantless_entry}):
+            response = _bulk(
+                analyst,
+                [("dashboard", dash.pk)],
+                "add_grant",
+                add_grant=_grant_payload(principal=analyst2, permission="view"),
+            )
+
+        assert response["data"]["skipped"] == [
+            {"rtype": "dashboard", "id": str(dash.pk), "reason": "grants_not_supported"}
+        ]
+
+    def test_metric_kpi_member_principal_skipped_with_deferred_reason(
+        self, org, analyst, analyst2, member
+    ):
+        """The known-principal path also routes through `upsert_grant`, so a
+        Member principal on metric/kpi is skipped -- already covered above
+        via the generic `validation_error` reason (same code path as the
+        re-share cap). This test instead pins the DEDICATED
+        `member_grants_deferred` reason on the unknown-email invite branch,
+        which does its own eligibility pre-check rather than calling
+        `upsert_grant`."""
+        metric = _metric(org, analyst, AccessLevel.EDIT, AccessLevel.NONE, name="bulk-metric-2")
+        kpi = _kpi(org, analyst, AccessLevel.EDIT, AccessLevel.NONE, name="bulk-kpi-2")
+
+        with patch("ddpui.utils.awsses.send_invite_user_email", Mock()):
+            response = _bulk(
+                analyst2,
+                [("metric", metric.pk), ("kpi", kpi.pk)],
+                "add_grant",
+                add_grant=_grant_payload(
+                    email="bulk-future-deferred@test.com", permission="view"
+                ),  # invite_role defaults to Member
+            )
+
+        data = response["data"]
+        assert data["applied"] == []
+        skip_reasons = {(s["rtype"], s["id"]): s["reason"] for s in data["skipped"]}
+        assert skip_reasons == {
+            ("metric", str(metric.pk)): "member_grants_deferred",
+            ("kpi", str(kpi.pk)): "member_grants_deferred",
+        }
+        assert not Invitation.objects.filter(
+            invited_email__iexact="bulk-future-deferred@test.com"
         ).exists()
 
     def test_unknown_email_invites_once_and_creates_pending_grant_per_resource(self, org, analyst):
