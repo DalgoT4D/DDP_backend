@@ -23,6 +23,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
 from ddpui.api.charts_api import MapDataOverlayPayload
 from ddpui.core.charts import charts_service
+from ddpui.core.sharing.chart_access import _dashboard_chart_ids
 
 from ddpui.api.dashboard_native_api import (
     DashboardResponse,
@@ -57,6 +58,29 @@ def _require_report_alive(snapshot: ReportSnapshot) -> None:
     """Report-snapshot counterpart of ``_require_dashboard_alive``."""
     if not org_allows_public_sharing(snapshot.org_id):
         raise ReportSnapshot.DoesNotExist()
+
+
+def _get_public_dashboard_chart(dashboard: Dashboard, chart_id: int) -> Chart:
+    """Chart lookup for public-dashboard chart endpoints -- org-scoped AND
+    tile-scoped.
+
+    Without the tile check, an org match alone lets anyone holding a public
+    dashboard link fetch ANY chart in that org (config + data) by
+    guessing/iterating ``chart_id`` -- not just the charts actually placed
+    on that public dashboard. Reuses the same tabs->components->config.chartId
+    walk the authenticated path already gates on
+    (``ddpui.core.sharing.chart_access._dashboard_chart_ids``), so there's no
+    fourth copy of that membership walk.
+
+    Raises ``Exception`` (caught by each caller's existing generic handler)
+    if the chart isn't org-owned or isn't a tile on this dashboard.
+    """
+    if chart_id not in _dashboard_chart_ids(dashboard):
+        raise Exception("Chart not found in dashboard's organization")
+    chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
+    if not chart:
+        raise Exception("Chart not found in dashboard's organization")
+    return chart
 
 
 # Enhanced public schemas that extend existing ones with public-specific fields
@@ -188,9 +212,7 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
         from ddpui.models.visualization import Chart
 
         # Get the chart and ensure it belongs to the dashboard's org
-        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
-        if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+        chart = _get_public_dashboard_chart(dashboard, chart_id)
 
         return {
             "id": chart.id,
@@ -253,9 +275,7 @@ def get_public_chart_data(request, token: str, chart_id: int):
         from ddpui.schemas.chart_schemas import ChartDataPayload
 
         # Get the chart and org warehouse
-        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
-        if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+        chart = _get_public_dashboard_chart(dashboard, chart_id)
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
@@ -534,9 +554,7 @@ def get_public_chart_data_preview(
         _require_dashboard_alive(dashboard)
 
         # Get the chart and org warehouse
-        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
-        if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+        chart = _get_public_dashboard_chart(dashboard, chart_id)
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
@@ -677,9 +695,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         _require_dashboard_alive(dashboard)
 
         # Get the chart and org warehouse
-        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
-        if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+        chart = _get_public_dashboard_chart(dashboard, chart_id)
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
@@ -953,6 +969,9 @@ def download_public_chart_data_csv(
         _require_dashboard_alive(dashboard)
 
         # Get the chart and verify it belongs to the dashboard's organization
+        # AND is actually a tile on it (not just any chart in the org).
+        if chart_id not in _dashboard_chart_ids(dashboard):
+            raise HttpError(404, "Chart not found in dashboard's organization")
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise HttpError(404, "Chart not found in dashboard's organization")
@@ -1030,9 +1049,7 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
         _require_dashboard_alive(dashboard)
 
         # Get the chart and org warehouse
-        chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
-        if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+        chart = _get_public_dashboard_chart(dashboard, chart_id)
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
