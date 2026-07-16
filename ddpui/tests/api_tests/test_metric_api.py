@@ -105,6 +105,17 @@ class TestListMetrics:
 
         assert response.data[0].created_by == "metricapiuser@test.com"
 
+    def test_list_metrics_null_created_by(self, orguser, sample_metric, seed_db):
+        """metrics whose creator was deleted (created_by=None) still list cleanly"""
+        sample_metric.created_by = None
+        sample_metric.save()
+        request = mock_request(orguser)
+
+        response = list_metrics(request)
+
+        listed = next(m for m in response.data if m.id == sample_metric.id)
+        assert listed.created_by is None
+
     def test_list_metrics_search(self, orguser, sample_metric, seed_db):
         request = mock_request(orguser)
         response = list_metrics(request, search="API Test")

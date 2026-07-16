@@ -1,0 +1,12 @@
+Priya <b> mentioned you in a comment:
+
+  Report: Enrollments Chart - Q3 Report
+
+  Vinit: Earlier priya@example.com msg
+
+  Priya <b>: Check vinit@example.com this <script>alert(1)</script>
+
+View the report: https://app.dalgo.org/reports/7
+
+---
+You received this email because you were mentioned in a comment on Dalgo.

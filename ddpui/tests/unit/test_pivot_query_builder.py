@@ -1,0 +1,271 @@
+import pytest
+from unittest.mock import MagicMock
+from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
+from ddpui.core.charts.charts_service import (
+    build_chart_query,
+    metric_sql_alias,
+    metric_display_name,
+)
+
+
+class TestExpressionMetricAlias:
+    """metric_sql_alias / metric_display_name must handle calculated (column_expression)
+    metrics — pivot reads results by these aliases, and they used to crash on the
+    None aggregation of an expression metric."""
+
+    def test_sql_alias_uses_metric_alias(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)", alias="Ratio")
+        assert metric_sql_alias(m) == "Ratio"
+
+    def test_sql_alias_falls_back(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)")
+        assert metric_sql_alias(m) == "expression_metric"
+
+    def test_display_name_uses_metric_alias(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)", alias="Ratio")
+        assert metric_display_name(m) == "Ratio"
+
+    def test_display_name_falls_back(self):
+        m = ChartMetric(column_expression="SUM(a)/SUM(b)")
+        assert metric_display_name(m) == "expression_metric"
+
+
+class TestBuildPivotQuery:
+    def _make_org_warehouse(self, wtype="postgres"):
+        ow = MagicMock()
+        ow.wtype = wtype
+        return ow
+
+    def test_pivot_query_has_rollup(self):
+        """Pivot table query should contain GROUP BY ROLLUP"""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district", "program"],
+            column_dimensions=["enrollment_date"],
+            show_row_subtotals=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Beneficiaries"),
+                ChartMetric(column="amount", aggregation="sum", alias="Total Spend"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        stmt = qb.build()
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        sql_upper = compiled.upper()
+
+        assert "ROLLUP" in sql_upper
+        assert "GROUPING" in sql_upper
+        assert "_grp_district" in compiled
+        assert "_grp_program" in compiled
+        assert "_grp_pivot_col_0" in compiled
+
+    def test_pivot_query_no_row_grain_no_trunc(self):
+        """Without row grains the SQL must not truncate row dimensions (default path)."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=[],
+            show_row_subtotals=True,
+            metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        assert "date_trunc" not in compiled.lower()
+
+    def _rollup_payload(self, **overrides):
+        base = dict(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=[],  # no col dims → any ROLLUP in SQL is the row rollup
+            metrics=[ChartMetric(column="id", aggregation="count", alias="Count")],
+        )
+        base.update(overrides)
+        return ChartDataPayload(**base)
+
+    def _has_rollup(self, payload):
+        qb = build_chart_query(payload, self._make_org_warehouse())
+        return "ROLLUP" in str(qb.build().compile(compile_kwargs={"literal_binds": True})).upper()
+
+    def test_row_rollup_off_when_no_totals(self):
+        payload = self._rollup_payload(show_row_subtotals=False, show_column_grand_total=False)
+        assert self._has_rollup(payload) is False
+
+    def test_row_rollup_on_for_column_grand_total(self):
+        payload = self._rollup_payload(show_row_subtotals=False, show_column_grand_total=True)
+        assert self._has_rollup(payload) is True
+
+    def test_row_rollup_on_for_row_subtotals_only(self):
+        # Row subtotals alone force the rollup even when column grand total is off
+        payload = self._rollup_payload(show_row_subtotals=True, show_column_grand_total=False)
+        assert self._has_rollup(payload) is True
+
+    def test_pivot_query_multiple_column_dimensions(self):
+        """Multiple column dimensions should produce multiple pivot_col labels and GROUPING markers"""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["state", "program"],
+            show_row_subtotals=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        stmt = qb.build()
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+        assert "pivot_col_0" in compiled
+        assert "pivot_col_1" in compiled
+        assert "_grp_pivot_col_0" in compiled
+        assert "_grp_pivot_col_1" in compiled
+
+    def test_pivot_query_no_column_dimensions(self):
+        """Without column_dimensions, only row ROLLUP should be present"""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            show_row_subtotals=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        stmt = qb.build()
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        sql_upper = compiled.upper()
+
+        assert "ROLLUP" in sql_upper
+        assert "_grp_district" in compiled
+        assert "_grp_pivot_col" not in compiled
+
+    def test_pivot_query_no_subtotals(self):
+        """With subtotals off, should use plain GROUP BY instead of ROLLUP on row dims"""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["month_col"],
+            show_row_subtotals=False,
+            show_column_grand_total=False,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        stmt = qb.build()
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        sql_upper = compiled.upper()
+
+        assert "GROUP BY" in sql_upper
+
+    def test_pivot_query_compiles_for_bigquery(self):
+        """The pivot ROLLUP/GROUPING SQL must render under the BigQuery dialect.
+
+        BigQuery supports GROUP BY ROLLUP and the GROUPING() function, so the
+        dialect-agnostic builder should compile without error and still emit
+        both constructs (guards against a dialect-specific rendering regression).
+        """
+        from sqlalchemy_bigquery import BigQueryDialect
+
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district", "program"],
+            column_dimensions=["state", "enrollment_month"],
+            show_row_subtotals=True,
+            show_column_grand_total=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Beneficiaries"),
+                ChartMetric(column="amount", aggregation="sum", alias="Total Spend"),
+            ],
+        )
+        qb = build_chart_query(payload, self._make_org_warehouse(wtype="bigquery"))
+        compiled = str(
+            qb.build().compile(dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True})
+        )
+        sql_upper = compiled.upper()
+
+        assert "ROLLUP" in sql_upper
+        assert "GROUPING" in sql_upper
+        assert "_grp_pivot_col_0" in compiled
+        assert "_grp_pivot_col_1" in compiled
+
+    def test_pivot_query_supports_calculated_metric(self):
+        """A calculated (column_expression) metric appears as a raw expression in the
+        pivot SELECT with its alias — the query builder must not crash on the missing
+        aggregation/column of an expression metric."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            show_row_subtotals=True,
+            metrics=[
+                ChartMetric(
+                    column_expression="SUM(amount) / NULLIF(COUNT(id), 0)", alias="Avg Spend"
+                ),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        assert "SUM(amount)" in compiled
+        assert "Avg Spend" in compiled  # alias present in SELECT
+        assert "ROLLUP" in compiled.upper()
+
+    def test_pivot_query_supports_simple_and_calculated_together(self):
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["program"],
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+                ChartMetric(column_expression="AVG(amount)", alias="Avg"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        assert "AVG(amount)" in compiled
+        assert "Avg" in compiled
+
+    def test_pivot_query_applies_filters(self):
+        """Dashboard and chart filters should be applied as WHERE clauses"""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+            extra_config={
+                "filters": [{"column": "status", "operator": "equals", "value": "active"}]
+            },
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        stmt = qb.build()
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+        assert "status" in compiled.lower()

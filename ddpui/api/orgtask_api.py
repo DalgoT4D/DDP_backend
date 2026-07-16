@@ -13,6 +13,7 @@ from ddpui.models.org import (
     Org,
     OrgWarehouse,
     OrgPrefectBlockv1,
+    OrgDataFlowv1,
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import (
@@ -41,18 +42,18 @@ from ddpui.utils import secretsmanager
 from ddpui.utils import timezone
 from ddpui.utils.constants import (
     TASK_GITPULL,
-    TASK_DBTCLEAN,
-    TASK_DBTDEPS,
     TRANSFORM_TASKS_SEQ,
     TASK_GENERATE_EDR,
     LONG_RUNNING_TASKS,
     DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
+    TRANSFORM_TASKS_DEPENDENCIES,
 )
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.core.pipelinefunctions import (
     setup_dbt_core_task_config,
     setup_git_pull_shell_task_config,
     setup_edr_send_report_task_config,
+    fetch_pipeline_lock_v1,
 )
 from ddpui.auth import has_permission
 
@@ -186,14 +187,16 @@ def post_system_transformation_tasks(request):
                 secret=gitrepo_url,
             )
             block_response = prefect_service.upsert_secret_block(secret_block)
+            # prefect-proxy sanitizes the block name; always store what it persisted
+            stored_block_name = block_response["block_name"]
 
             if not OrgPrefectBlockv1.objects.filter(
-                org=org, block_type=SECRET, block_name=secret_block.block_name
+                org=org, block_type=SECRET, block_name=stored_block_name
             ).exists():
                 OrgPrefectBlockv1.objects.create(
                     org=org,
                     block_type=SECRET,
-                    block_name=secret_block.block_name,
+                    block_name=stored_block_name,
                     block_id=block_response["block_id"],
                 )
 
@@ -228,76 +231,69 @@ def get_elemetary_task_lock(request):
 
 @orgtask_router.get("transform/")
 @has_permission(["can_view_orgtasks"])
-def get_prefect_transformation_tasks(request, exclude_git: bool = False):
-    """Fetch all dbt tasks for an org; client or system.
-    When exclude_git=True (used by pipeline page), auto-managed tasks
-    (git, dbt-clean, dbt-deps) are excluded since they are automatically
-    added during pipeline creation/updation."""
+def get_prefect_transformation_tasks(request):
+    """Fetch manual (Transform-tab) dbt deployments for an org. Each response
+    row represents one runnable deployment; the "primary" orgtask (the last
+    one in the chain by seq, ignoring auto-managed dependencies) determines
+    the label/slug/command/lock/uuid shown."""
     orguser: OrgUser = request.orguser
 
-    task_types = [TaskType.DBT, TaskType.DBTCLOUD]
-    if not exclude_git:
-        task_types.append(TaskType.GIT)
+    auto_managed_task_slugs = set(TRANSFORM_TASKS_DEPENDENCIES)
 
-    org_tasks = (
-        OrgTask.objects.filter(
-            org=orguser.org,
-            task__type__in=task_types,
-        )
-        .order_by("-generated_by")
-        .select_related("task")
-    )
+    dataflows = OrgDataFlowv1.objects.filter(
+        org=orguser.org,
+        dataflow_type="manual",
+    ).prefetch_related("datafloworgtasks__orgtask__task")
 
-    all_org_task_ids = org_tasks.values_list("id", flat=True)
-    all_org_task_locks = TaskLock.objects.filter(orgtask_id__in=all_org_task_ids)
+    primaries = []
+    for dataflow in dataflows:
+        primary_dfot = None
+        for dfot in sorted(
+            dataflow.datafloworgtasks.all(),
+            key=lambda d: d.seq,
+            reverse=True,
+        ):
+            slug = dfot.orgtask.task.slug
+            if slug in TRANSFORM_TASKS_SEQ and slug not in auto_managed_task_slugs:
+                primary_dfot = dfot
+                break
+        if primary_dfot is None:
+            continue
+        primaries.append((dataflow, primary_dfot.orgtask))
 
-    all_dataflow_orgtasks = DataflowOrgTask.objects.filter(
-        orgtask_id__in=all_org_task_ids, dataflow__dataflow_type="manual"
-    ).select_related("dataflow")
+    # gather all orgtask ids across all chained deployments so a lock held on
+    # any chain orgtask (including shared prep tasks locked by other dataflows)
+    # surfaces on the deployment — matches orchestrated pipeline lock behavior
+    all_orgtask_ids = set()
+    for dataflow, _ in primaries:
+        for dfot in dataflow.datafloworgtasks.all():
+            all_orgtask_ids.add(dfot.orgtask_id)
+
+    all_locks = list(TaskLock.objects.filter(orgtask_id__in=all_orgtask_ids))
 
     res = []
-
-    auto_managed_task_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
-
-    for org_task in org_tasks:
-        if org_task.task.slug not in TRANSFORM_TASKS_SEQ:
-            continue
-
-        if exclude_git and org_task.task.slug in auto_managed_task_slugs:
-            continue
-
-        # git pull               : "git" + " " + "pull"
-        # dbt run --full-refresh : "dbt" + " " + "run --full-refresh"
+    for dataflow, primary in primaries:
         command = None
-        if org_task.task.type != TaskType.DBTCLOUD:
-            command = org_task.task.type + " " + org_task.get_task_parameters()
+        if primary.task.type != TaskType.DBTCLOUD:
+            command = primary.task.type + " " + primary.get_task_parameters()
 
-        lock = None
-        all_locks = [lock for lock in all_org_task_locks if lock.orgtask_id == org_task.id]
-        if len(all_locks) > 0:
-            lock = all_locks[0]
+        chain_ids = {dfot.orgtask_id for dfot in dataflow.datafloworgtasks.all()}
+        matching_locks = [lock for lock in all_locks if lock.orgtask_id in chain_ids]
+        lock = matching_locks[0] if matching_locks else None
 
         res.append(
             {
-                "label": org_task.task.label,
-                "slug": org_task.task.slug,
-                "id": org_task.id,
-                "uuid": org_task.uuid,
-                "deploymentId": None,
-                "lock": fetch_orgtask_lock_v1(org_task, lock),
+                "label": primary.task.label,
+                "slug": primary.task.slug,
+                "id": primary.id,
+                "uuid": primary.uuid,
+                "deploymentId": dataflow.deployment_id,
+                "lock": fetch_pipeline_lock_v1(dataflow, lock),
                 "command": command,
-                "generated_by": org_task.generated_by,
-                "seq": TRANSFORM_TASKS_SEQ[org_task.task.slug],
-                "pipeline_default": org_task.task.slug in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
+                "generated_by": primary.generated_by,
+                "seq": TRANSFORM_TASKS_SEQ[primary.task.slug],
+                "pipeline_default": primary.task.slug in DEFAULT_TRANSFORM_TASKS_IN_PIPELINE,
             }
-        )
-
-        # fetch the manual deploymentId for the long running dbt tasks
-        dataflow_orgtasks = [
-            dfot for dfot in all_dataflow_orgtasks if dfot.orgtask_id == org_task.id
-        ]
-        res[-1]["deploymentId"] = (
-            dataflow_orgtasks[0].dataflow.deployment_id if len(dataflow_orgtasks) > 0 else None
         )
 
     return sorted(res, key=lambda x: x["seq"])

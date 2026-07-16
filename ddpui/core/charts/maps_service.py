@@ -6,7 +6,7 @@ from ddpui.models.org import OrgWarehouse
 from ddpui.models.georegion import GeoRegion
 from ddpui.models.geojson import GeoJSON
 from ddpui.core.charts import charts_service
-from ddpui.schemas.chart_schemas import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.maps")
@@ -160,7 +160,7 @@ def transform_data_for_map(
     geographic_column: str,
     value_column: str = None,
     customizations: Dict = None,
-    metrics: List = None,
+    metrics: Optional[List[ChartMetric]] = None,
     selected_metric_index: int = 0,
 ) -> Dict[str, Any]:
     """Transform query results to map-specific format
@@ -185,19 +185,21 @@ def transform_data_for_map(
         )
 
         # Generate the column alias for the selected metric
-        if (
-            selected_metric.get("aggregation", "").lower() == "count"
-            and selected_metric.get("column") is None
-        ):
-            if selected_metric.get("alias"):
-                agg_col_name = f"count_all_{selected_metric['alias']}"
+        if selected_metric.column_expression:
+            # Expression metric: alias matches the query's label (metric.alias or fallback).
+            agg_col_name = selected_metric.alias or "expression_metric"
+        elif (
+            selected_metric.aggregation or ""
+        ).lower() == "count" and selected_metric.column is None:
+            if selected_metric.alias:
+                agg_col_name = f"count_all_{selected_metric.alias}"
             else:
                 agg_col_name = "count_all"
         else:
-            if selected_metric.get("alias"):
-                agg_col_name = selected_metric["alias"]
+            if selected_metric.alias:
+                agg_col_name = selected_metric.alias
             else:
-                agg_col_name = f"{selected_metric['aggregation']}_{selected_metric['column']}"
+                agg_col_name = f"{selected_metric.aggregation}_{selected_metric.column}"
 
     # Create normalized lookup for user data
     data_lookup_normalized = {}
@@ -250,18 +252,20 @@ def transform_data_for_map(
     available_metrics = []
     if metrics and len(metrics) > 0:
         for i, metric in enumerate(metrics):
-            if metric.get("aggregation", "").lower() == "count" and metric.get("column") is None:
-                display_name = metric.get("alias") or "Total Count"
+            if metric.column_expression:
+                display_name = metric.alias or "Expression"
+            elif (metric.aggregation or "").lower() == "count" and metric.column is None:
+                display_name = metric.alias or "Total Count"
             else:
-                display_name = metric.get("alias") or f"{metric['aggregation']}({metric['column']})"
+                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
 
             available_metrics.append(
                 {
                     "index": i,
                     "display_name": display_name,
-                    "column": metric.get("column"),
-                    "aggregation": metric.get("aggregation"),
-                    "alias": metric.get("alias"),
+                    "column": metric.column,
+                    "aggregation": metric.aggregation,
+                    "alias": metric.alias,
                     "is_selected": i == selected_metric_index,
                 }
             )

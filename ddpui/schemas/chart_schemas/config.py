@@ -181,6 +181,32 @@ class TableChartConfig(_ChartConfigBase):
         return self
 
 
+class PivotTableChartConfig(_ChartConfigBase):
+    """extra_config payload for chart_type='pivot_table'.
+
+    Cross-tabulates row dimensions against column dimensions. Requires at least
+    one row dimension and one metric (matches build_pivot_table_query). Reuses the
+    table display-formatting options, so customizations are typed as
+    TableChartCustomizations (columnFormatting / dateColumnFormatting; the sparse
+    conditionalFormatting / zebraRows / theme / freezeFirstColumn keys pass through
+    via extra="allow").
+    """
+
+    row_dimensions: List[str] = Field(..., min_length=1)
+    column_dimensions: Optional[List[str]] = None
+    metrics: List[ChartMetric] = Field(..., min_length=1)
+
+    show_row_subtotals: bool = False
+    show_column_subtotals: bool = False
+    show_row_grand_total: bool = False
+    show_column_grand_total: bool = False
+    row_subtotal_label: Optional[str] = None
+    column_subtotal_label: Optional[str] = None
+    row_grand_total_label: Optional[str] = None
+    column_grand_total_label: Optional[str] = None
+    customizations: Optional[TableChartCustomizations] = None
+
+
 ChartExtraConfig = Union[
     BarChartConfig,
     LineChartConfig,
@@ -188,6 +214,7 @@ ChartExtraConfig = Union[
     NumberChartConfig,
     MapChartConfig,
     TableChartConfig,
+    PivotTableChartConfig,
 ]
 
 _CHART_CONFIG_BY_TYPE: dict[str, type] = {
@@ -197,4 +224,5 @@ _CHART_CONFIG_BY_TYPE: dict[str, type] = {
     "number": NumberChartConfig,
     "map": MapChartConfig,
     "table": TableChartConfig,
+    "pivot_table": PivotTableChartConfig,
 }
