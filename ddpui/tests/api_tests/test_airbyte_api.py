@@ -237,6 +237,31 @@ def test_post_airbyte_source_success(orguser_workspace):
 # ================================================================================
 # Google Sheets OAuth flow (Variant A — Dalgo performs the token exchange)
 # ================================================================================
+class FakePipeline:
+    """Minimal MULTI/EXEC pipeline stand-in: queues get/delete, runs them on execute()"""
+
+    def __init__(self, redis):
+        self._redis = redis
+        self._ops = []
+
+    def get(self, key):
+        self._ops.append(("get", key))
+        return self
+
+    def delete(self, key):
+        self._ops.append(("delete", key))
+        return self
+
+    def execute(self):
+        results = []
+        for op, key in self._ops:
+            if op == "get":
+                results.append(self._redis.store.get(key))
+            else:
+                results.append(1 if self._redis.store.pop(key, None) is not None else 0)
+        return results
+
+
 class FakeRedis:
     """Minimal in-memory stand-in for RedisClient.get_instance() in tests"""
 
@@ -252,8 +277,8 @@ class FakeRedis:
     def delete(self, key):
         self.store.pop(key, None)
 
-    def getdel(self, key):
-        return self.store.pop(key, None)
+    def pipeline(self, transaction=True):  # pylint: disable=unused-argument
+        return FakePipeline(self)
 
 
 class FakeResponse:

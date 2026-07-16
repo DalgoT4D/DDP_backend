@@ -74,11 +74,22 @@ def _store_oauth_state(orguser: OrgUser, source_def_id: str) -> str:
     return state
 
 
+def _atomic_pop(key: str):
+    """Atomically read and delete a key, returning its value (or None). Uses a MULTI/EXEC
+    pipeline rather than GETDEL so it works on Redis < 6.2 while keeping the single-use /
+    replay guarantee (the get and delete run as one transaction)."""
+    pipe = RedisClient.get_instance().pipeline()
+    pipe.get(key)
+    pipe.delete(key)
+    value, _ = pipe.execute()
+    return value
+
+
 def _pop_oauth_state(state: str) -> dict:
     """Validate + consume a state nonce on the (JWT-less) backend callback. The unguessable
     nonce IS the authentication — it identifies the orguser that started the flow. Rejects
-    missing/expired/reused states; the atomic getdel closes the replay window."""
-    raw = RedisClient.get_instance().getdel(f"{OAUTH_STATE_REDIS_PREFIX}:{state}")
+    missing/expired/reused states; the atomic pop closes the replay window."""
+    raw = _atomic_pop(f"{OAUTH_STATE_REDIS_PREFIX}:{state}")
     if raw is None:
         raise HttpError(400, "invalid or expired oauth state")
     return json.loads(raw)
@@ -105,7 +116,7 @@ def _store_oauth_ref(orguser_id: int, source_def_id: str, refresh_token: str) ->
 def redeem_ref(orguser: OrgUser, ref: str, source_def_id: str) -> str:
     """Redeem a ref at create-source time; return the stashed refresh_token. Rejects a
     missing/expired ref, or one minted for a different orguser or source definition."""
-    raw = RedisClient.get_instance().getdel(f"{OAUTH_REF_REDIS_PREFIX}:{ref}")
+    raw = _atomic_pop(f"{OAUTH_REF_REDIS_PREFIX}:{ref}")
     if raw is None:
         raise HttpError(400, "invalid or expired oauth session")
     stored = json.loads(raw)
