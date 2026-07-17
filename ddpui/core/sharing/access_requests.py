@@ -197,7 +197,8 @@ def create_access_request(
     # requesting Edit is a legitimate upgrade request.
     current = effective_permission(requester, rtype, resource)
     if current == GeneralLevel.EDIT or current == payload.requested_permission:
-        raise SharingValidationError("you already have this access to this resource")
+        # Exact wording is a contract: the webapp reloads on /already have access/.
+        raise SharingValidationError("you already have access to this resource")
 
     existing = AccessRequest.objects.filter(
         org_id=requester.org_id,
