@@ -17,9 +17,16 @@ NOT NULL unique field with no model-level default, so it must always be supplied
 import copy
 import uuid
 
-from ddpui.models.canvas_models import CanvasEdge, CanvasNode
-from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtOperation
-from ddpui.models.org import OrgDbt
+from ddpui.core.dbtautomation_service import (
+    create_or_update_dbt_model_in_project_v2,
+    ensure_source_yml_definition_in_project,
+    tranverse_graph_and_return_operations_list,
+)
+from ddpui.core.git_manager import GitManager
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.models.canvas_models import CanvasEdge, CanvasNode, CanvasNodeType
+from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtModelType, OrgDbtOperation
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.dbt_clone")
@@ -130,3 +137,130 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
         f"copied dbt dag: {len(model_map)} models from orgdbt={template_dbt.id} to orgdbt={trial_dbt.id}"
     )
     return model_map
+
+
+def _topological_model_order(trial_dbt: OrgDbt) -> list[OrgDbtModel]:
+    """Kahn's-algorithm topological order of `trial_dbt`'s OrgDbtModel rows (SOURCE and MODEL),
+    derived from the copied `DbtEdge` graph, filtered down to the MODEL-type rows (SOURCE rows
+    need no `.sql` regeneration — `sources.yml` handles those separately).
+
+    Any row a `DbtEdge` never touches (no recorded dependency) is appended at the end so nothing
+    is silently skipped."""
+    all_models = list(OrgDbtModel.objects.filter(orgdbt=trial_dbt))
+    by_id = {m.id: m for m in all_models}
+    edges = list(
+        DbtEdge.objects.filter(from_node__orgdbt=trial_dbt).select_related("from_node", "to_node")
+    )
+
+    indegree = {m.id: 0 for m in all_models}
+    adjacency: dict = {m.id: [] for m in all_models}
+    for e in edges:
+        if e.from_node_id in adjacency and e.to_node_id in indegree:
+            adjacency[e.from_node_id].append(e.to_node_id)
+            indegree[e.to_node_id] += 1
+
+    queue = [model_id for model_id, deg in indegree.items() if deg == 0]
+    ordered_ids: list = []
+    while queue:
+        node_id = queue.pop(0)
+        ordered_ids.append(node_id)
+        for neighbour in adjacency[node_id]:
+            indegree[neighbour] -= 1
+            if indegree[neighbour] == 0:
+                queue.append(neighbour)
+
+    # DbtEdge cycles should never happen, but never silently drop a model if one does.
+    for model_id in indegree:
+        if model_id not in ordered_ids:
+            ordered_ids.append(model_id)
+
+    return [by_id[mid] for mid in ordered_ids if by_id[mid].type == OrgDbtModelType.MODEL]
+
+
+def _regenerate_source(model: OrgDbtModel, trial_dbt: OrgDbt) -> None:
+    """Materialize `sources.yml` for a copied SOURCE-type OrgDbtModel and set its `sql_path`
+    from the return — mirrors `transform_api.py`'s `post_create_src_model_node` handling of
+    SOURCE nodes (the only other caller of `ensure_source_yml_definition_in_project`)."""
+    source_yml_def = ensure_source_yml_definition_in_project(trial_dbt, model.schema, model.name)
+    model.sql_path = source_yml_def.sql_path
+    model.source_name = source_yml_def.source_name
+    model.name = source_yml_def.table
+    model.schema = source_yml_def.source_schema
+    model.save()
+
+
+def _terminal_operation_node(trial_dbt: OrgDbt, model: OrgDbtModel) -> CanvasNode:
+    """The OPERATION CanvasNode feeding the given MODEL-type OrgDbtModel's CanvasNode. The v2
+    regen path (`create_or_update_dbt_model_in_project_v2`) always builds a model's SQL from an
+    upstream operation chain — every MODEL row this codebase creates is the result of
+    terminating one (see `transform_api.py:post_terminate_operation_node`), so a copied MODEL
+    with no such upstream chain indicates a DAG the clone cannot regenerate and must fail loud
+    on rather than silently skip."""
+    model_node = CanvasNode.objects.filter(
+        orgdbt=trial_dbt, dbtmodel=model, node_type=CanvasNodeType.MODEL
+    ).first()
+    if model_node is None:
+        raise RuntimeError(f"no canvas node found for copied model {model.name}")
+
+    incoming = CanvasEdge.objects.filter(to_node=model_node).select_related("from_node").first()
+    if incoming is None or incoming.from_node.node_type != CanvasNodeType.OPERATION:
+        raise RuntimeError(
+            f"copied model {model.name} has no upstream operation chain to regenerate from"
+        )
+    return incoming.from_node
+
+
+def _regenerate_model(model: OrgDbtModel, trial_dbt: OrgDbt, org_warehouse: OrgWarehouse) -> None:
+    """Regenerate a copied MODEL-type OrgDbtModel's `.sql` from its copied operation chain and
+    set its `sql_path` from the return — mirrors `transform_api.py:post_terminate_operation_node`'s
+    call shape (`operations`/`dest_schema`/`output_name`/`rel_dir_to_models` config keys, as
+    consumed by `dbt_automation.operations.mergeoperations.merge_operations_v2`)."""
+    terminal_op_node = _terminal_operation_node(trial_dbt, model)
+    operations_list = tranverse_graph_and_return_operations_list(terminal_op_node)
+    config = {
+        "operations": operations_list,
+        "dest_schema": model.schema,
+        "output_name": model.name,
+        "rel_dir_to_models": None,
+    }
+    model_sql_path, _output_cols = create_or_update_dbt_model_in_project_v2(
+        org_warehouse, config, trial_dbt
+    )
+    model.sql_path = str(model_sql_path)
+    model.save()
+
+
+def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
+    """Regenerate every `.sql` model + `sources.yml` on the trial dbt project (an empty scaffold
+    at this point — `copy_dbt_dag` deliberately leaves `sql_path=None`), then commit + push the
+    result to the trial's Dalgo-managed GitHub repo.
+
+    Uses the org-admin PAT (`GitManager.get_org_admin_pat()`) for the push, matching how
+    `setup_managed_git_workspace` authenticates all git operations against Dalgo-managed repos
+    (as opposed to a per-org secret, which managed repos don't store).
+
+    Returns the number of MODEL-type OrgDbtModel rows regenerated.
+    """
+    org_warehouse = OrgWarehouse.objects.filter(org=trial_org).first()
+    if org_warehouse is None:
+        raise RuntimeError(
+            f"trial org {trial_org.slug} has no warehouse to regenerate dbt models against"
+        )
+
+    for source_model in OrgDbtModel.objects.filter(orgdbt=trial_dbt, type=OrgDbtModelType.SOURCE):
+        _regenerate_source(source_model, trial_dbt)
+
+    ordered_models = _topological_model_order(trial_dbt)
+    for model in ordered_models:
+        _regenerate_model(model, trial_dbt, org_warehouse)
+
+    repo_dir = DbtProjectManager.get_dbt_project_dir(trial_dbt)
+    pat = GitManager.get_org_admin_pat()
+    git_manager = GitManager(repo_dir, pat)
+    git_manager.commit_changes("clone template dbt models")
+    git_manager.push_changes()
+
+    logger.info(
+        f"regenerated {len(ordered_models)} dbt models and pushed to {trial_dbt.gitrepo_url}"
+    )
+    return len(ordered_models)

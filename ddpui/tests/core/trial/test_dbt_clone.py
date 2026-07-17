@@ -1,8 +1,9 @@
 import uuid as uuid_module
+from unittest.mock import patch
 
 import pytest
 
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import (
     OrgDbtModel,
     OrgDbtModelType,
@@ -10,6 +11,7 @@ from ddpui.models.dbt_workflow import (
     DbtEdge,
 )
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
+from ddpui.core.dbtautomation_service import SourceYmlDefinition
 from ddpui.core.trial import dbt_clone
 
 pytestmark = pytest.mark.django_db
@@ -282,3 +284,133 @@ def test_copy_dbt_dag_handles_missing_or_none_config():
 
     op2 = OrgDbtOperation.objects.get(dbtmodel=new_no_input_models_model)
     assert op2.config == {"type": "rename"}
+
+
+def _make_warehouse(org: Org) -> OrgWarehouse:
+    return OrgWarehouse.objects.create(org=org, wtype="postgres", credentials="secret")
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.core.trial.dbt_clone.ensure_source_yml_definition_in_project")
+def test_regenerate_and_push_regenerates_sources_and_models(
+    mock_ensure_source, mock_regen_model, mock_git_manager_cls
+):
+    trial_org = Org.objects.create(name="trial-regen", slug="trial-regen")
+    trial_dbt = _make_orgdbt(trial_org)
+    trial_org.dbt = trial_dbt
+    trial_org.save()
+    _make_warehouse(trial_org)
+
+    source_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="raw_customers",
+        display_name="raw_customers",
+        schema="raw",
+        type=OrgDbtModelType.SOURCE,
+        source_name="raw",
+    )
+    dest_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="customers",
+        display_name="customers",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    DbtEdge.objects.create(from_node=source_model, to_node=dest_model)
+
+    source_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="raw_customers",
+        dbtmodel=source_model,
+    )
+    op_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="rename-op",
+        operation_config={"type": "rename", "config": {}},
+    )
+    dest_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="customers",
+        dbtmodel=dest_model,
+    )
+    CanvasEdge.objects.create(from_node=source_node, to_node=op_node, seq=1)
+    CanvasEdge.objects.create(from_node=op_node, to_node=dest_node, seq=1)
+
+    mock_ensure_source.return_value = SourceYmlDefinition(
+        source_name="raw",
+        source_schema="raw",
+        table="raw_customers",
+        sql_path="models/sources/sources.yml",
+    )
+    mock_regen_model.return_value = ("models/analytics/customers.sql", ["id", "name"])
+    mock_git_instance = mock_git_manager_cls.return_value
+
+    count = dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    assert count == 1
+    mock_ensure_source.assert_called_once_with(trial_dbt, "raw", "raw_customers")
+
+    source_model.refresh_from_db()
+    dest_model.refresh_from_db()
+    assert source_model.sql_path == "models/sources/sources.yml"
+    assert dest_model.sql_path == "models/analytics/customers.sql"
+
+    mock_regen_model.assert_called_once()
+    call_args = mock_regen_model.call_args.args
+    assert call_args[0].id == OrgWarehouse.objects.get(org=trial_org).id
+    config = call_args[1]
+    assert config["dest_schema"] == "analytics"
+    assert config["output_name"] == "customers"
+    assert isinstance(config["operations"], list) and len(config["operations"]) == 1
+    assert call_args[2] == trial_dbt
+
+    mock_git_manager_cls.assert_called_once()
+    mock_git_instance.commit_changes.assert_called_once_with("clone template dbt models")
+    mock_git_instance.push_changes.assert_called_once()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_raises_without_warehouse(mock_regen_model, mock_git_manager_cls):
+    trial_org = Org.objects.create(name="trial-nowh", slug="trial-nowh")
+    trial_dbt = _make_orgdbt(trial_org)
+
+    with pytest.raises(RuntimeError, match="no warehouse"):
+        dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    mock_regen_model.assert_not_called()
+    mock_git_manager_cls.assert_not_called()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_raises_when_model_has_no_operation_chain(
+    mock_regen_model, mock_git_manager_cls
+):
+    trial_org = Org.objects.create(name="trial-noop", slug="trial-noop")
+    trial_dbt = _make_orgdbt(trial_org)
+    _make_warehouse(trial_org)
+
+    dest_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="orphan_model",
+        display_name="orphan_model",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="orphan_model",
+        dbtmodel=dest_model,
+    )
+
+    with pytest.raises(RuntimeError, match="no upstream operation chain"):
+        dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    mock_regen_model.assert_not_called()
+    mock_git_manager_cls.assert_not_called()
