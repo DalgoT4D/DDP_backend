@@ -2,9 +2,11 @@ from unittest.mock import patch, Mock
 
 import pytest
 from django.contrib.auth.models import User
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.trial_clone import TrialCloneStatus
+from ddpui.models.trial_clone import TrialCloneStatus, TrialClone
+from ddpui.models.role_based_access import Role
+from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.trial import clone_service
 
 pytestmark = pytest.mark.django_db
@@ -32,7 +34,6 @@ def test_clone_marks_failed_and_reraises(mock_s1):
     template = Org.objects.create(name="tmpl2", slug="tmpl2")
     with pytest.raises(RuntimeError):
         clone_service.clone_template_org(template.id, "a@b.org")
-    from ddpui.models.trial_clone import TrialClone
 
     tc = TrialClone.objects.filter(template_org=template).first()
     assert tc.status == TrialCloneStatus.FAILED.value
@@ -42,11 +43,6 @@ def test_clone_marks_failed_and_reraises(mock_s1):
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_plan):
-    from ddpui.models.role_based_access import Role
-    from ddpui.models.trial_clone import TrialClone
-    from ddpui.core.trial import clone_service
-    from ddpui.auth import ACCOUNT_MANAGER_ROLE
-
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="tmpl", slug="tmpl")
     trial_org = Org.objects.create(
@@ -74,10 +70,6 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
 def test_step_warehouse_registers_trial_warehouse(
     mock_provision, mock_retrieve, mock_ab, mock_create_wh
 ):
-    from ddpui.models.org import OrgWarehouse
-    from ddpui.models.trial_clone import TrialClone
-    from ddpui.core.trial import clone_service
-
     template = Org.objects.create(name="tmpl", slug="tmpl", airbyte_workspace_id="ws-tmpl")
     OrgWarehouse.objects.create(
         org=template, wtype="postgres", airbyte_destination_id="dest-tmpl", credentials="x"
@@ -114,10 +106,6 @@ def test_step_warehouse_registers_trial_warehouse(
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
-    from ddpui.models.org import OrgWarehouse
-    from ddpui.models.trial_clone import TrialClone
-    from ddpui.core.trial import clone_service
-
     template = Org.objects.create(name="tmpl", slug="tmpl")
     trial_org = Org.objects.create(name="Trial 1 tmpl", slug="trial-1")
     OrgWarehouse.objects.create(org=template, wtype="postgres", credentials="tmpl-sec")

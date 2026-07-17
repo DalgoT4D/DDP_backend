@@ -1,5 +1,7 @@
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from ddpui.core.trial import warehouse_data
 
 
@@ -28,7 +30,6 @@ def test_copy_raises_on_dump_failure(mock_subprocess):
     mock_subprocess.run.return_value = MagicMock(returncode=1, stderr="boom")
     src = {"host": "sh", "port": 5432, "database": "sdb", "username": "su", "password": "sp"}
     dst = {"host": "dh", "port": 5432, "database": "ddb", "username": "du", "password": "dp"}
-    import pytest
 
     with pytest.raises(RuntimeError, match="pg_dump failed"):
         warehouse_data.copy_warehouse_data(src, dst, "/tmp/dump.pgc")
