@@ -1,0 +1,142 @@
+"""Rebuild the template org's Prefect orchestrate deployments (pipelines) on the trial org.
+
+`OrgTask.connection_id`, prefect block names, and `deployment_id` are all fresh-per-org — so a
+template `OrgDataFlowv1(dataflow_type="orchestrate")` row is never id-copied. Instead, for each
+template orchestrate dataflow, this module reconstructs a `PrefectDataFlowCreateSchema4` payload
+that references the TRIAL org's own connections/OrgTasks and hands it to
+`PipelineService.create_pipeline`, which mints a fresh prefect deployment + `OrgDataFlowv1` +
+`DataflowOrgTask` rows on the trial org.
+
+Payload shape (`ddpui/ddpprefect/schema.py`), confirmed by reading `PipelineService` before
+writing this module:
+- `connections`: `PrefectFlowAirbyteConnection2(id, seq)` — `id` is an Airbyte **connection id**
+  (not an OrgTask id); `PipelineService._build_sync_tasks` resolves it via
+  `OrgTask.objects.filter(org=org, connection_id=connection.id, task__slug=TASK_AIRBYTESYNC)`.
+- `transformTasks`: `PrefectDataFlowOrgTasks(uuid, seq)` — `uuid` is an **OrgTask.uuid**;
+  `PipelineService._build_transform_tasks` resolves it via
+  `OrgTask.objects.filter(uuid=transform_task.uuid, org=org)` and requires that OrgTask to
+  already exist on `org`. git/dbt-clean/dbt-deps tasks are the exception: those are auto-managed
+  and auto-created on demand by `PipelineService._get_or_create_*`, so this module never puts
+  them in the payload at all — including them would just make `_build_transform_tasks` log a
+  warning and skip them.
+
+Gap this module papers over: `_step_dbt` (P4) copies the template's dbt DAG rows
+(OrgDbtModel/CanvasNode/etc.) but — same as any org that hasn't opened the Transform page yet —
+does NOT create the org's transform OrgTasks (git-pull/dbt-clean/dbt-deps/dbt-run); those are
+normally minted by `create_default_transform_tasks` (`ddpui/core/orgtaskfunctions.py`) the first
+time a user hits that page (`orgtask_api.py`). So the trial org has no `dbt-run` OrgTask yet when
+this step runs, and `dbt-run` (unlike git-pull/dbt-clean/dbt-deps) is NOT one of the tasks
+`PipelineService` mints on demand. This module therefore mints the trial org's equivalent
+transform OrgTask itself — get-or-create by task slug, mirroring the exact
+`OrgTask.objects.get_or_create(org=org, task=task, dbt=orgdbt, defaults={"parameters": {}})`
+pattern `PipelineService._get_or_create_dbt_clean_orgtask` (etc.) already use for the
+auto-managed ones.
+"""
+
+from ddpui.core.orchestrate.pipeline_service import PipelineService
+from ddpui.ddpprefect.schema import (
+    PrefectDataFlowCreateSchema4,
+    PrefectDataFlowOrgTasks,
+    PrefectFlowAirbyteConnection2,
+)
+from ddpui.models.org import Org, OrgDataFlowv1
+from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskType
+from ddpui.utils.constants import TASK_DBTCLEAN, TASK_DBTDEPS
+from ddpui.utils.custom_logger import CustomLogger
+
+logger = CustomLogger("ddpui.core.trial.prefect_clone")
+
+# these are minted on demand by PipelineService._build_transform_tasks itself (and git tasks are
+# filtered out there entirely) — never put them in a built payload.
+_AUTO_MANAGED_TRANSFORM_SLUGS = {TASK_DBTCLEAN, TASK_DBTDEPS}
+
+
+def _resolve_trial_transform_orgtask(template_orgtask: OrgTask, trial_org: Org) -> OrgTask:
+    """Get-or-create the trial org's equivalent transform OrgTask for a template transform
+    OrgTask, matched by `task` (i.e. task slug/type — `Task` rows are shared system-wide, not
+    per-org, so the FK itself is the match key). See module docstring for why this must mint
+    rather than assume the row already exists.
+    """
+    trial_dbt = trial_org.dbt
+    if trial_dbt is None:
+        raise RuntimeError(
+            f"trial org {trial_org.slug} has no dbt workspace to attach transform tasks to"
+        )
+    org_task, created = OrgTask.objects.get_or_create(
+        org=trial_org,
+        task=template_orgtask.task,
+        dbt=trial_dbt,
+        defaults={"parameters": template_orgtask.parameters},
+    )
+    if created:
+        logger.info(
+            f"minted trial transform OrgTask {org_task.uuid} (slug={template_orgtask.task.slug}) "
+            f"for org {trial_org.slug}"
+        )
+    return org_task
+
+
+def build_pipeline_payload(
+    template_dataflow: OrgDataFlowv1, trial_org: Org, connection_map: dict
+) -> PrefectDataFlowCreateSchema4:
+    """Build the `PrefectDataFlowCreateSchema4` payload to recreate `template_dataflow` on
+    `trial_org`: sync-task connections remapped via `connection_map`
+    (`{template_connection_id: trial_connection_id}`, built by `_step_connections`/P3), transform
+    tasks resolved/minted on the trial org by task slug. Never copies the template's connection
+    ids, OrgTask uuids, or deployment id — those are all per-org/per-workspace.
+    """
+    linked = (
+        DataflowOrgTask.objects.filter(dataflow=template_dataflow)
+        .select_related("orgtask", "orgtask__task")
+        .order_by("seq")
+    )
+
+    connections: list[PrefectFlowAirbyteConnection2] = []
+    transform_tasks: list[PrefectDataFlowOrgTasks] = []
+
+    for link in linked:
+        template_orgtask = link.orgtask
+        if template_orgtask.connection_id:
+            trial_connection_id = connection_map.get(template_orgtask.connection_id)
+            if not trial_connection_id:
+                raise RuntimeError(
+                    f"no remapped trial connection for template connection "
+                    f"{template_orgtask.connection_id} (dataflow {template_dataflow.name})"
+                )
+            connections.append(
+                PrefectFlowAirbyteConnection2(id=trial_connection_id, seq=len(connections))
+            )
+        elif (
+            template_orgtask.task.type == TaskType.DBT
+            and template_orgtask.task.slug not in _AUTO_MANAGED_TRANSFORM_SLUGS
+        ):
+            trial_orgtask = _resolve_trial_transform_orgtask(template_orgtask, trial_org)
+            transform_tasks.append(
+                PrefectDataFlowOrgTasks(uuid=str(trial_orgtask.uuid), seq=len(transform_tasks))
+            )
+        # git-pull/git-clone and dbt-clean/dbt-deps template links are auto-managed —
+        # PipelineService re-adds its own copies of these; skip them here.
+
+    return PrefectDataFlowCreateSchema4(
+        name=template_dataflow.name,
+        connections=connections,
+        cron=template_dataflow.cron or "",
+        transformTasks=transform_tasks,
+        continueOnSyncFailure=False,
+    )
+
+
+def clone_orchestrate_dataflows(template: Org, trial_org: Org, connection_map: dict) -> list[str]:
+    """Rebuild every template orchestrate `OrgDataFlowv1` on `trial_org` via
+    `PipelineService.create_pipeline`. Returns the list of newly-minted deployment ids."""
+    deployment_ids: list[str] = []
+    template_dataflows = OrgDataFlowv1.objects.filter(org=template, dataflow_type="orchestrate")
+    for dataflow in template_dataflows:
+        payload = build_pipeline_payload(dataflow, trial_org, connection_map)
+        result = PipelineService.create_pipeline(trial_org, payload)
+        deployment_ids.append(result["deploymentId"])
+        logger.info(
+            f"recreated orchestrate pipeline '{dataflow.name}' on trial org {trial_org.slug}: "
+            f"deployment_id={result['deploymentId']}"
+        )
+    return deployment_ids

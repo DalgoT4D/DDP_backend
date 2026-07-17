@@ -31,6 +31,7 @@ from ddpui.core.trial.source_config import (
     validate_template_source_configs,
 )
 from ddpui.core.trial.dbt_clone import copy_dbt_dag, regenerate_and_push
+from ddpui.core.trial.prefect_clone import clone_orchestrate_dataflows
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
@@ -350,6 +351,23 @@ def _step_dbt(run: CloneRun) -> None:
     run.manifest["dbt_regenerated"] = regenerated
 
 
+def _step_prefect(run: CloneRun) -> None:
+    """Step 7 — rebuild the template's orchestrate Prefect deployments on the trial org.
+
+    Delegates to `ddpui.core.trial.prefect_clone.clone_orchestrate_dataflows`, which reconstructs
+    each template `OrgDataFlowv1(dataflow_type="orchestrate")` as a fresh
+    `PrefectDataFlowCreateSchema4` payload — connections remapped via
+    `run.manifest["connection_map"]` (built by `_step_connections`), transform tasks resolved
+    against the trial org — and hands it to `PipelineService.create_pipeline`, which mints the
+    new deployment + `OrgDataFlowv1` + `DataflowOrgTask` rows. Must run LAST: it needs both the
+    trial connections (P3) and the trial dbt workspace (P4) to already exist.
+    """
+    deployment_ids = clone_orchestrate_dataflows(
+        run.template, run.trial_org, run.manifest.get("connection_map", {})
+    )
+    run.manifest["deployment_ids"] = deployment_ids
+
+
 def _teardown(run: CloneRun) -> None:
     """Best-effort teardown of whatever got created before a mid-run failure.
 
@@ -371,11 +389,11 @@ def _teardown(run: CloneRun) -> None:
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
-    """Deep-clone a template org into a new trial org (Steps 1–6), timing each step.
+    """Deep-clone a template org into a new trial org (Steps 1–7), timing each step.
 
-    Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt. State for
-    the run lives only in the returned in-memory `CloneRun` — nothing is persisted for it. On
-    any failure the exception is re-raised (after best-effort teardown) so the caller
+    Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt → prefect.
+    State for the run lives only in the returned in-memory `CloneRun` — nothing is persisted for
+    it. On any failure the exception is re-raised (after best-effort teardown) so the caller
     (management command / future Celery task) sees it.
     """
     if account_exists_for_email(trial_email):
@@ -399,6 +417,8 @@ def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
             _step_connections(run)
         with step_timer(run, "step6_dbt"):
             _step_dbt(run)
+        with step_timer(run, "step7_prefect"):
+            _step_prefect(run)
     except Exception as err:
         logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a
