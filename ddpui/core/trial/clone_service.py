@@ -6,8 +6,9 @@ from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.trial_clone import TrialClone, TrialCloneStatus
 from ddpui.core.trial.timing import step_timer
-from ddpui.core.trial.warehouse_provision import provision_trial_database
+from ddpui.core.trial.warehouse_provision import provision_trial_database, drop_trial_database
 from ddpui.core.trial.warehouse_data import copy_warehouse_data
+from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
@@ -182,6 +183,17 @@ def clone_template_org(template_org_id: int, trial_email: str) -> TrialClone:
         trialclone.error = str(err)
         trialclone.save(update_fields=["status", "error", "updated_at"])
         logger.error(f"clone {trialclone.id} failed: {err}")
+        # best-effort teardown of whatever got created before the failure — never let a
+        # teardown problem mask the original exception, which must still propagate.
+        try:
+            if trialclone.trial_org:
+                logger.info(f"tearing down org+workspace for failed clone {trialclone.id}")
+                OrgCleanupService(trialclone.trial_org, dry_run=False).delete_org()
+            if trialclone.manifest.get("trial_warehouse_db"):
+                logger.info(f"dropping trial database for failed clone {trialclone.id}")
+                drop_trial_database(trialclone.id)
+        except Exception as cleanup_err:
+            logger.error(f"best-effort teardown failed for clone {trialclone.id}: {cleanup_err}")
         raise
     trialclone.status = TrialCloneStatus.COMPLETED.value
     trialclone.save(update_fields=["status", "updated_at"])

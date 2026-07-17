@@ -37,3 +37,28 @@ def provision_trial_database(trialclone_id: int) -> dict:
         "username": settings.TRIALS_RDS_ADMIN_USER,
         "password": settings.TRIALS_RDS_ADMIN_PASSWORD,
     }
+
+
+def drop_trial_database(trialclone_id: int) -> None:
+    """Drop the trials-RDS database for a trial clone (best-effort teardown on failure).
+
+    Mirrors provision_trial_database: DROP DATABASE cannot run inside a transaction, so we
+    connect with autocommit against the admin 'postgres' db.
+    """
+    db_name = f"trial_{trialclone_id}"
+    admin_params = {
+        "host": settings.TRIALS_RDS_HOST,
+        "port": settings.TRIALS_RDS_PORT,
+        "user": settings.TRIALS_RDS_ADMIN_USER,
+        "password": settings.TRIALS_RDS_ADMIN_PASSWORD,
+        "dbname": "postgres",
+    }
+    conn = psycopg2.connect(**admin_params)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            cursor.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
+    finally:
+        conn.close()
+
+    logger.info(f"dropped trial database {db_name} on {settings.TRIALS_RDS_HOST}")

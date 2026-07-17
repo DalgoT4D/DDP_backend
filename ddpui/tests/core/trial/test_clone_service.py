@@ -30,8 +30,10 @@ def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3):
     }
 
 
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
 @patch("ddpui.core.trial.clone_service._step_org_and_user", side_effect=RuntimeError("kaboom"))
-def test_clone_marks_failed_and_reraises(mock_s1):
+def test_clone_marks_failed_and_reraises(mock_s1, mock_cleanup_cls, mock_drop):
     template = Org.objects.create(name="tmpl2", slug="tmpl2")
     with pytest.raises(RuntimeError):
         clone_service.clone_template_org(template.id, "a@b.org")
@@ -39,6 +41,71 @@ def test_clone_marks_failed_and_reraises(mock_s1):
     tc = TrialClone.objects.filter(template_org=template).first()
     assert tc.status == TrialCloneStatus.FAILED.value
     assert "kaboom" in tc.error
+    # step1 (org+user) never got far enough to create a trial_org or warehouse — nothing to
+    # tear down.
+    mock_cleanup_cls.assert_not_called()
+    mock_drop.assert_not_called()
+
+
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse_data", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_tears_down_created_resources_on_later_failure(
+    mock_s1, mock_s2, mock_s3, mock_cleanup_cls, mock_drop
+):
+    template = Org.objects.create(name="tmpl3", slug="tmpl3")
+    trial_org = Org.objects.create(name="Trial X", slug="trial-x")
+
+    def fake_step1(template_arg, trialclone):
+        trialclone.trial_org = trial_org
+        trialclone.save(update_fields=["trial_org", "updated_at"])
+
+    def fake_step2(template_arg, trialclone):
+        trialclone.manifest["trial_warehouse_db"] = "trial_123"
+        trialclone.save(update_fields=["manifest", "updated_at"])
+
+    mock_s1.side_effect = fake_step1
+    mock_s2.side_effect = fake_step2
+    mock_cleanup_instance = mock_cleanup_cls.return_value
+
+    with pytest.raises(RuntimeError):
+        clone_service.clone_template_org(template.id, "a@b.org")
+
+    tc = TrialClone.objects.filter(template_org=template).first()
+    assert tc.status == TrialCloneStatus.FAILED.value
+    assert "boom" in tc.error
+
+    mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
+    mock_cleanup_instance.delete_org.assert_called_once()
+    mock_drop.assert_called_once_with(tc.id)
+
+
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_teardown_failure_does_not_mask_original_error(mock_s1, mock_cleanup_cls, mock_drop):
+    """Teardown itself blowing up must never hide the original exception."""
+    template = Org.objects.create(name="tmpl4", slug="tmpl4")
+    trial_org = Org.objects.create(name="Trial Y", slug="trial-y")
+
+    def fake_step1(template_arg, trialclone):
+        trialclone.trial_org = trial_org
+        trialclone.save(update_fields=["trial_org", "updated_at"])
+        raise RuntimeError("original failure")
+
+    mock_s1.side_effect = fake_step1
+    mock_cleanup_cls.return_value.delete_org.side_effect = Exception("teardown exploded")
+
+    with pytest.raises(RuntimeError, match="original failure"):
+        clone_service.clone_template_org(template.id, "a@b.org")
+
+    tc = TrialClone.objects.filter(template_org=template).first()
+    assert tc.status == TrialCloneStatus.FAILED.value
+    assert "original failure" in tc.error
+    mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
+    mock_drop.assert_not_called()
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
