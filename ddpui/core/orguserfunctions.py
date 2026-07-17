@@ -193,13 +193,13 @@ def delete_orguser_from_org(
     skipped — a platform admin acting cross-org has no role in target_org to compare
     against. See features/admin-portal/v1/plan.md §4.4.
 
-    WARNING: deleting the OrgUser cascade-deletes the content it created
-    (Dashboard/Chart via created_by). Callers must surface the removal-impact count
-    first (see the admin removal-impact endpoint, plan.md §4.6 / research §5).
+    NOTE: deleting the OrgUser ORPHANS the content it created rather than deleting it —
+    Dashboard / Chart / ReportSnapshot.created_by are SET_NULL, so the content is kept
+    and only the creator link is cleared. Callers should still surface the
+    removal-impact count first (see the admin removal-impact endpoint, plan.md §4.6 /
+    research §5).
     """
-    orguser_to_delete = OrgUser.objects.filter(
-        org=target_org, user__email=payload.email
-    ).first()
+    orguser_to_delete = OrgUser.objects.filter(org=target_org, user__email=payload.email).first()
 
     if requestor_orguser == orguser_to_delete:
         return None, "user cannot delete themselves"
@@ -214,11 +214,9 @@ def delete_orguser_from_org(
         return None, "cannot delete user having higher role"
 
     # remove the pending invitations for this email in the target org
-    Invitation.objects.filter(
-        invited_in_org=target_org, invited_email=payload.email
-    ).delete()
+    Invitation.objects.filter(invited_in_org=target_org, invited_email=payload.email).delete()
 
-    # delete the org user (cascades their created content)
+    # delete the org user; their created content is orphaned (created_by SET_NULL), not deleted
     orguser_to_delete.delete()
 
     return None, None
@@ -399,9 +397,7 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
         if user is None:
             if payload.password is None:
                 return None, "password is required"
-            logger.info(
-                f"creating invited user {invitation.invited_email} for {target_org.name}"
-            )
+            logger.info(f"creating invited user {invitation.invited_email} for {target_org.name}")
             user = User.objects.create_user(
                 username=invitation.invited_email.lower().strip(),
                 email=invitation.invited_email.lower().strip(),

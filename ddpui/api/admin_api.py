@@ -408,7 +408,9 @@ def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
 @platform_admin_required
 def delete_admin_org_user(request, org_id: int, orguser_id: int):
     """
-    Remove a user from the org (hard delete; cascades their Dashboards/Charts). The
+    Remove a user from the org. This deletes the OrgUser row but ORPHANS the content
+    they created rather than deleting it: Dashboard / Chart / ReportSnapshot.created_by
+    are SET_NULL, so the content is kept and only the creator link is cleared. The
     role-level cap is skipped for the platform admin. Callers should have shown the
     removal-impact warning first.
     """
