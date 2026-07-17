@@ -341,7 +341,12 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
         org, request.orguser, orguser.user.email, payload.role_uuid, is_platform_admin=True
     )
     if error:
-        raise HttpError(403 if error == "Insufficient permissions" else 400, error)
+        # is_platform_admin=True skips the role-level cap inside change_orguser_role_in_org
+        # — both of its "Insufficient permissions" returns are guarded by `not
+        # is_platform_admin` — so a 403 is structurally unreachable on this path. Every
+        # error it can still return here ("Invalid role", "User does not exist") is a bad
+        # request, so we map to 400 without matching on the (fragile) error string.
+        raise HttpError(400, error)
 
     orguser.refresh_from_db()
     return AdminOrgUserSchema(
