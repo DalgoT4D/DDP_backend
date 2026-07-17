@@ -12,6 +12,7 @@ from ddpui.models.dbt_workflow import (
 )
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
 from ddpui.core.dbtautomation_service import SourceYmlDefinition
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.trial import dbt_clone
 
 pytestmark = pytest.mark.django_db
@@ -369,6 +370,9 @@ def test_regenerate_and_push_regenerates_sources_and_models(
     assert call_args[2] == trial_dbt
 
     mock_git_manager_cls.assert_called_once()
+    git_call_args = mock_git_manager_cls.call_args.args
+    assert git_call_args[0] == DbtProjectManager.get_dbt_project_dir(trial_dbt)
+    assert git_call_args[1] == mock_git_manager_cls.get_org_admin_pat.return_value
     mock_git_instance.commit_changes.assert_called_once_with("clone template dbt models")
     mock_git_instance.push_changes.assert_called_once()
 
@@ -410,6 +414,123 @@ def test_regenerate_and_push_raises_when_model_has_no_operation_chain(
     )
 
     with pytest.raises(RuntimeError, match="no upstream operation chain"):
+        dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    mock_regen_model.assert_not_called()
+    mock_git_manager_cls.assert_not_called()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_regenerates_models_in_topological_order(
+    mock_regen_model, mock_git_manager_cls
+):
+    """model_b depends on model_a via a DbtEdge; each has its own canvas operation chain so
+    regen can find a terminal node for both. The topological sort must regenerate model_a
+    (the dependency) before model_b (the dependent)."""
+    trial_org = Org.objects.create(name="trial-topo", slug="trial-topo")
+    trial_dbt = _make_orgdbt(trial_org)
+    _make_warehouse(trial_org)
+
+    model_a = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="model_a",
+        display_name="model_a",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    model_b = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="model_b",
+        display_name="model_b",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    DbtEdge.objects.create(from_node=model_a, to_node=model_b)
+
+    op_node_a = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-a",
+        operation_config={"type": "rename", "config": {}},
+    )
+    model_node_a = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="model_a",
+        dbtmodel=model_a,
+    )
+    CanvasEdge.objects.create(from_node=op_node_a, to_node=model_node_a, seq=1)
+
+    op_node_b = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-b",
+        operation_config={"type": "rename", "config": {}},
+    )
+    model_node_b = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="model_b",
+        dbtmodel=model_b,
+    )
+    CanvasEdge.objects.create(from_node=op_node_b, to_node=model_node_b, seq=1)
+
+    mock_regen_model.side_effect = [
+        ("models/analytics/model_a.sql", []),
+        ("models/analytics/model_b.sql", []),
+    ]
+
+    count = dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    assert count == 2
+    assert mock_regen_model.call_count == 2
+    first_call_config = mock_regen_model.call_args_list[0].args[1]
+    second_call_config = mock_regen_model.call_args_list[1].args[1]
+    assert first_call_config["output_name"] == "model_a"
+    assert second_call_config["output_name"] == "model_b"
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_raises_on_ambiguous_terminal(mock_regen_model, mock_git_manager_cls):
+    """A MODEL canvas node with TWO incoming CanvasEdges (e.g. a stale edge left behind by
+    re-terminating the model from a different operation chain during editing) must raise a
+    loud, clear error rather than silently regenerating from whichever edge `.first()` happens
+    to return."""
+    trial_org = Org.objects.create(name="trial-ambig", slug="trial-ambig")
+    trial_dbt = _make_orgdbt(trial_org)
+    _make_warehouse(trial_org)
+
+    dest_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="ambiguous_model",
+        display_name="ambiguous_model",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    dest_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="ambiguous_model",
+        dbtmodel=dest_model,
+    )
+    op_node_1 = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-1-stale",
+        operation_config={"type": "rename", "config": {}},
+    )
+    op_node_2 = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-2-current",
+        operation_config={"type": "rename", "config": {}},
+    )
+    CanvasEdge.objects.create(from_node=op_node_1, to_node=dest_node, seq=1)
+    CanvasEdge.objects.create(from_node=op_node_2, to_node=dest_node, seq=1)
+
+    with pytest.raises(RuntimeError, match="ambiguous terminal node"):
         dbt_clone.regenerate_and_push(trial_org, trial_dbt)
 
     mock_regen_model.assert_not_called()
