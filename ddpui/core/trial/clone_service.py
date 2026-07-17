@@ -1,3 +1,4 @@
+import os
 import tempfile
 
 from django.contrib.auth.models import User
@@ -131,7 +132,13 @@ def _step_warehouse_data(template: Org, trialclone: TrialClone) -> None:
 
     with tempfile.NamedTemporaryFile(suffix=".pgc", delete=False) as tmp:
         dump_path = tmp.name
-    copy_warehouse_data(src, dst, dump_path)
+    try:
+        copy_warehouse_data(src, dst, dump_path)
+    finally:
+        # the dump is a full copy of the template warehouse's data sitting on local disk —
+        # remove it regardless of success/failure so nothing is left at rest.
+        if os.path.exists(dump_path):
+            os.remove(dump_path)
 
     trialclone.manifest["warehouse_dump_path"] = dump_path
     trialclone.save(update_fields=["manifest", "updated_at"])

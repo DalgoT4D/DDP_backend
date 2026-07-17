@@ -1,3 +1,4 @@
+import os
 from unittest.mock import patch, Mock
 
 import pytest
@@ -125,6 +126,36 @@ def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
     clone_service._step_warehouse_data(template, tc)
 
     mock_copy.assert_called_once()
-    src, dst, _path = mock_copy.call_args.args
+    src, dst, dump_path = mock_copy.call_args.args
     assert src["database"] == "sdb"
     assert dst["database"] == "trial_1"
+
+    tc.refresh_from_db()
+    assert tc.manifest["warehouse_dump_path"] == dump_path
+    # the pg_dump temp file must be removed after the (mocked) copy, success or failure —
+    # it's a full copy of the template warehouse's data sitting on local disk.
+    assert not os.path.exists(dump_path)
+
+
+@patch("ddpui.core.trial.clone_service.copy_warehouse_data")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mock_copy):
+    template = Org.objects.create(name="tmpl", slug="tmpl")
+    trial_org = Org.objects.create(name="Trial 1 tmpl", slug="trial-1")
+    OrgWarehouse.objects.create(org=template, wtype="postgres", credentials="tmpl-sec")
+    OrgWarehouse.objects.create(org=trial_org, wtype="postgres", credentials="trial-sec")
+
+    mock_retrieve.side_effect = [
+        {"host": "sh", "port": 5432, "database": "sdb", "username": "su", "password": "sp"},
+        {"host": "dh", "port": 5432, "database": "trial_1", "username": "du", "password": "dp"},
+    ]
+    mock_copy.side_effect = RuntimeError("pg_restore failed")
+
+    tc = TrialClone.objects.create(
+        template_org=template, trial_email="a@b.org", trial_org=trial_org
+    )
+    with pytest.raises(RuntimeError):
+        clone_service._step_warehouse_data(template, tc)
+
+    dump_path = mock_copy.call_args.args[2]
+    assert not os.path.exists(dump_path)
