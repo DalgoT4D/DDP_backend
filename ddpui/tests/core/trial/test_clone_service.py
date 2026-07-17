@@ -3,7 +3,8 @@ from unittest.mock import patch, Mock
 
 import pytest
 from django.contrib.auth.models import User
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -14,12 +15,13 @@ from ddpui.core.trial.exceptions import TrialAccountExistsError
 pytestmark = pytest.mark.django_db
 
 
+@patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
 @patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
-def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3, mock_s4, mock_s5):
+def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6):
     template = Org.objects.create(name="tmpl", slug="tmpl")
     run = clone_service.clone_template_org(template.id, "a@b.org")
     assert isinstance(run, CloneRun)
@@ -30,12 +32,14 @@ def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3, mock_s4, 
     mock_s3.assert_called_once()
     mock_s4.assert_called_once()
     mock_s5.assert_called_once()
+    mock_s6.assert_called_once()
     assert set(run.timings.keys()) == {
         "step1_org_user",
         "step2_warehouse",
         "step3_warehouse_data",
         "step4_sources",
         "step5_connections",
+        "step6_dbt",
     }
 
 
@@ -590,3 +594,73 @@ def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mo
 
     dump_path = mock_copy.call_args.args[2]
     assert not os.path.exists(dump_path)
+
+
+def _make_orgdbt(slug: str) -> OrgDbt:
+    return OrgDbt.objects.create(
+        gitrepo_url=f"https://github.com/dalgo/{slug}.git",
+        project_dir=f"test_project_dir_{slug}",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="github",
+    )
+
+
+@patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
+def test_step_dbt_sets_up_workspace_then_copies(mock_setup):
+    template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
+    trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
+
+    template_dbt = _make_orgdbt("tmpl-dbt")
+    template.dbt = template_dbt
+    template.save()
+    OrgDbtModel.objects.create(
+        orgdbt=template_dbt,
+        name="customers",
+        display_name="customers",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+
+    trial_dbt = _make_orgdbt("trial-dbt")
+
+    def fake_setup(org, project_name, default_schema):
+        # mirror setup_managed_git_workspace's real behaviour: mutate org.dbt in place.
+        org.dbt = trial_dbt
+        org.save()
+
+    mock_setup.side_effect = fake_setup
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_dbt(run)
+
+    mock_setup.assert_called_once_with(
+        trial_org, project_name=trial_org.slug, default_schema="default_schema"
+    )
+    assert OrgDbtModel.objects.filter(orgdbt=trial_dbt).count() == 1
+    assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
+    assert run.manifest["dbt_models"] == 1
+
+
+def test_step_dbt_raises_when_template_has_no_dbt():
+    template = Org.objects.create(name="tmpl-nodbt", slug="tmpl-nodbt")
+    trial_org = Org.objects.create(name="Trial nodbt", slug="trial-nodbt")
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    with pytest.raises(RuntimeError, match="no dbt workspace"):
+        clone_service._step_dbt(run)
+
+
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse_data")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_wires_step_dbt_after_connections(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6
+):
+    template = Org.objects.create(name="tmpl-wire", slug="tmpl-wire")
+    run = clone_service.clone_template_org(template.id, "a@b.org")
+    mock_s6.assert_called_once()
+    assert "step6_dbt" in run.timings

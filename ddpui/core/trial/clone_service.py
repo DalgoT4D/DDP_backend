@@ -30,6 +30,8 @@ from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
 )
+from ddpui.core.trial.dbt_clone import copy_dbt_dag
+from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -308,6 +310,42 @@ def _step_connections(run: CloneRun) -> None:
     run.manifest["connection_ids"] = list(connection_map.values())
 
 
+def _step_dbt(run: CloneRun) -> None:
+    """Step 6 — set up a fresh managed dbt workspace on the trial org and deep-copy the
+    template's transform DAG (legacy OrgDbtModel/Operation/Edge rows + the active-path
+    CanvasNode/Edge rows) onto it.
+
+    `setup_managed_git_workspace` creates a brand-new managed GitHub repo, an `OrgDbt` row (with
+    an EMPTY dbt scaffold — no `.sql` files yet), and the cli-profile block, then sets
+    `run.trial_org.dbt`. Regenerating `.sql`/`sources.yml` and pushing to the new repo happens in
+    a later step — this one only rebuilds the DB-side DAG so that step has something to walk.
+    """
+    template_dbt = run.template.dbt
+    if template_dbt is None:
+        raise RuntimeError(f"template org {run.template.slug} has no dbt workspace")
+
+    setup_managed_git_workspace(
+        run.trial_org,
+        project_name=run.trial_org.slug,
+        default_schema=template_dbt.default_schema,
+    )
+
+    trial_dbt = run.trial_org.dbt
+    if trial_dbt is None:
+        # setup_managed_git_workspace mutates the passed-in org in place on success, but fall
+        # back to a DB refresh in case a caller only persisted the FK without updating this
+        # in-memory instance.
+        run.trial_org.refresh_from_db()
+        trial_dbt = run.trial_org.dbt
+    if trial_dbt is None:
+        raise RuntimeError("setup_managed_git_workspace did not set the trial org's dbt workspace")
+
+    model_map = copy_dbt_dag(template_dbt, trial_dbt)
+
+    run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
+    run.manifest["dbt_models"] = len(model_map)
+
+
 def _teardown(run: CloneRun) -> None:
     """Best-effort teardown of whatever got created before a mid-run failure.
 
@@ -329,9 +367,9 @@ def _teardown(run: CloneRun) -> None:
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
-    """Deep-clone a template org into a new trial org (Steps 1–5), timing each step.
+    """Deep-clone a template org into a new trial org (Steps 1–6), timing each step.
 
-    Serial chain: org+user → warehouse → warehouse-data → sources → connections. State for
+    Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt. State for
     the run lives only in the returned in-memory `CloneRun` — nothing is persisted for it. On
     any failure the exception is re-raised (after best-effort teardown) so the caller
     (management command / future Celery task) sees it.
@@ -355,6 +393,8 @@ def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
             _step_sources(run)
         with step_timer(run, "step5_connections"):
             _step_connections(run)
+        with step_timer(run, "step6_dbt"):
+            _step_dbt(run)
     except Exception as err:
         logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a
