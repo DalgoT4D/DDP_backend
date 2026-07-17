@@ -3,7 +3,7 @@ from unittest.mock import patch, Mock
 import pytest
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.trial_clone import TrialCloneStatus, TrialClone
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -61,6 +61,9 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
     assert orguser.user.email == "admin@b.org"
     assert orguser.new_role.slug == ACCOUNT_MANAGER_ROLE
     assert not orguser.user.has_usable_password()
+    user_attrs = UserAttributes.objects.filter(user=orguser.user).first()
+    assert user_attrs is not None
+    assert user_attrs.email_verified is False
 
 
 @patch("ddpui.core.trial.clone_service.create_warehouse")

@@ -11,7 +11,7 @@ from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.models.org_plans import OrgPlanType
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -60,6 +60,7 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
     orguser = OrgUser.objects.create(
         user=user, org=trial_org, new_role=admin_role, email_verified=False
     )
+    UserAttributes.objects.create(user=user, email_verified=False)
     UserPreferences.objects.get_or_create(
         orguser=orguser, defaults={"enable_email_notifications": True}
     )
