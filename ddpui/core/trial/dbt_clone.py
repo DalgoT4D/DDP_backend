@@ -195,19 +195,44 @@ def _terminal_operation_node(trial_dbt: OrgDbt, model: OrgDbtModel) -> CanvasNod
     upstream operation chain — every MODEL row this codebase creates is the result of
     terminating one (see `transform_api.py:post_terminate_operation_node`), so a copied MODEL
     with no such upstream chain indicates a DAG the clone cannot regenerate and must fail loud
-    on rather than silently skip."""
+    on rather than silently skip.
+
+    KNOWN LIMITATION: this whole regeneration path assumes every template MODEL was built via
+    the UI operation-builder, i.e. each MODEL canvas node is terminated from an OPERATION chain.
+    Templates whose dbt was git-imported (`parse_dbt_manifest_to_canvas` — MODEL nodes fed
+    directly by SOURCE/MODEL edges with no OPERATION node) are NOT supported here and will raise
+    below. A trial TEMPLATE org must therefore have a UI-operation-built dbt project.
+
+    A MODEL canvas node may have more than one incoming CanvasEdge (e.g. the model was
+    re-terminated from a different operation chain during editing, leaving a stale edge behind).
+    Picking an arbitrary one (e.g. via an unordered `.first()`) risks silently regenerating from
+    the wrong (stale) operation chain, so ambiguity is treated as a hard failure instead of a
+    guess."""
     model_node = CanvasNode.objects.filter(
         orgdbt=trial_dbt, dbtmodel=model, node_type=CanvasNodeType.MODEL
     ).first()
     if model_node is None:
         raise RuntimeError(f"no canvas node found for copied model {model.name}")
 
-    incoming = CanvasEdge.objects.filter(to_node=model_node).select_related("from_node").first()
-    if incoming is None or incoming.from_node.node_type != CanvasNodeType.OPERATION:
+    incoming = list(
+        CanvasEdge.objects.filter(to_node=model_node).select_related("from_node").order_by("-id")
+    )
+    if len(incoming) == 0:
         raise RuntimeError(
             f"copied model {model.name} has no upstream operation chain to regenerate from"
         )
-    return incoming.from_node
+    if len(incoming) > 1:
+        raise RuntimeError(
+            f"model canvas node {model_node.uuid} has {len(incoming)} incoming operation "
+            "edges; ambiguous terminal node — cannot safely regenerate"
+        )
+
+    from_node = incoming[0].from_node
+    if from_node.node_type != CanvasNodeType.OPERATION:
+        raise RuntimeError(
+            f"copied model {model.name} has no upstream operation chain to regenerate from"
+        )
+    return from_node
 
 
 def _regenerate_model(model: OrgDbtModel, trial_dbt: OrgDbt, org_warehouse: OrgWarehouse) -> None:
@@ -238,6 +263,13 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
     Uses the org-admin PAT (`GitManager.get_org_admin_pat()`) for the push, matching how
     `setup_managed_git_workspace` authenticates all git operations against Dalgo-managed repos
     (as opposed to a per-org secret, which managed repos don't store).
+
+    KNOWN LIMITATION: model regeneration (`_regenerate_model` -> `_terminal_operation_node`)
+    assumes every template MODEL was built via the UI operation-builder, i.e. each MODEL canvas
+    node is terminated from an OPERATION chain. Templates whose dbt was git-imported
+    (`parse_dbt_manifest_to_canvas` — MODEL nodes fed directly by SOURCE/MODEL edges with no
+    OPERATION node) are NOT supported by this path and will raise. A trial TEMPLATE org must
+    therefore have a UI-operation-built dbt project; the git-import clone path is not implemented.
 
     Returns the number of MODEL-type OrgDbtModel rows regenerated.
     """
