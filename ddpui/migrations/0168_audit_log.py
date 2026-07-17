@@ -43,6 +43,7 @@ class Migration(migrations.Migration):
                             ("kpi", "KPI"),
                             ("report", "Report"),
                             ("comment", "Comment"),
+                            ("alert", "Alert"),
                         ],
                     ),
                 ),

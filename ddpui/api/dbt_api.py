@@ -6,7 +6,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
-from ddpui.core.audit_log_service import create_audit_log
+from ddpui.core.audit_log_service import create_audit_log, compute_changes
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
@@ -54,6 +54,11 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
     if orgdbt is None:
         raise HttpError(400, "Create a dbt workspace first")
 
+    # Capture old state for audit log
+    old_state = {
+        "gitrepo_url": orgdbt.gitrepo_url,
+    }
+
     try:
         # Determine which PAT to use
         is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")
@@ -80,6 +85,15 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
                 f"Failed to create git pull OrgTask for org {org.slug}: {str(e)}. Git operation was successful."
             )
 
+        # Refresh orgdbt to get updated values
+        orgdbt.refresh_from_db()
+
+        # Capture new state and compute changes
+        new_state = {
+            "gitrepo_url": orgdbt.gitrepo_url,
+        }
+        field_changes = compute_changes(old_state, new_state)
+
         create_audit_log(
             org=org,
             orguser=orguser,
@@ -87,6 +101,7 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
             resource_id=str(orgdbt.id),
             resource_name=org.slug,
             action=AuditLogAction.UPDATE,
+            field_changes=field_changes,
         )
 
         return result
@@ -175,6 +190,12 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
         "commit_result": commit_result,
     }
 
+    # Record what was published in the audit log
+    field_changes = {
+        "commit_message": {"old": None, "new": payload.commit_message},
+        "pushed_to_remote": {"old": None, "new": pushed},
+    }
+
     create_audit_log(
         org=org,
         orguser=orguser,
@@ -182,6 +203,7 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
         resource_id=str(orgdbt.id),
         resource_name=org.slug,
         action=AuditLogAction.UPDATE,
+        field_changes=field_changes,
     )
 
     return result
@@ -358,9 +380,20 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     if warehouse is None:
         raise HttpError(400, "No warehouse configuration found for this organization")
 
+    # Capture old state for audit log
+    old_state = {
+        "default_schema": org.dbt.default_schema,
+    }
+
     org.dbt.default_schema = payload.target_configs_schema
     org.dbt.save()
     logger.info("updated orgdbt")
+
+    # Capture new state and compute changes
+    new_state = {
+        "default_schema": org.dbt.default_schema,
+    }
+    field_changes = compute_changes(old_state, new_state)
 
     create_audit_log(
         org=org,
@@ -369,6 +402,7 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
         resource_id=str(org.dbt.id),
         resource_name=org.slug,
         action=AuditLogAction.UPDATE,
+        field_changes=field_changes,
     )
 
     cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block

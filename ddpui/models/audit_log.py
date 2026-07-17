@@ -27,6 +27,7 @@ class AuditLogResourceType(models.TextChoices):
     KPI = "kpi", "KPI"
     REPORT = "report", "Report"
     COMMENT = "comment", "Comment"
+    ALERT = "alert", "Alert"
 
 
 class AuditLogAction(models.TextChoices):

@@ -14,7 +14,9 @@ from ddpui.core.alerts.exceptions import (
     AlertPermissionError,
     AlertValidationError,
 )
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.alert import Alert, AlertLog, AlertType
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.alert_schema import (
     AlertCreate,
@@ -231,6 +233,16 @@ def create_alert(request, payload: AlertCreate):
         alert = AlertService.create_alert(payload, orguser)
     except AlertValidationError as e:
         raise HttpError(400, e.message) from None
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ALERT,
+        resource_id=str(alert.id),
+        resource_name=alert.name,
+        action=AuditLogAction.CREATE,
+    )
+
     return _build_alert_response(alert)
 
 
@@ -279,6 +291,16 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
         raise HttpError(404, "Alert not found") from None
     except AlertValidationError as e:
         raise HttpError(400, e.message) from None
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ALERT,
+        resource_id=str(alert.id),
+        resource_name=alert.name,
+        action=AuditLogAction.UPDATE,
+    )
+
     return _build_alert_response(alert)
 
 
@@ -291,6 +313,17 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         alert = AlertService.toggle_alert(alert_id, orguser.org, orguser, payload.is_active)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ALERT,
+        resource_id=str(alert.id),
+        resource_name=alert.name,
+        action=AuditLogAction.UPDATE,
+        field_changes={"is_active": payload.is_active},
+    )
+
     return _build_alert_response(alert)
 
 
@@ -299,11 +332,22 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
 def delete_alert(request, alert_id: int):
     orguser: OrgUser = request.orguser
     try:
+        alert = AlertService.get_alert(alert_id, orguser.org)
         AlertService.delete_alert(alert_id, orguser.org, orguser)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
     except AlertPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ALERT,
+        resource_id=str(alert_id),
+        resource_name=alert.name,
+        action=AuditLogAction.DELETE,
+    )
+
     return api_response(success=True)
 
 
