@@ -14,10 +14,12 @@ from ddpui.core.trial.exceptions import TrialAccountExistsError
 pytestmark = pytest.mark.django_db
 
 
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
 @patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
-def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3):
+def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3, mock_s4, mock_s5):
     template = Org.objects.create(name="tmpl", slug="tmpl")
     run = clone_service.clone_template_org(template.id, "a@b.org")
     assert isinstance(run, CloneRun)
@@ -26,10 +28,14 @@ def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3):
     mock_s1.assert_called_once()
     mock_s2.assert_called_once()
     mock_s3.assert_called_once()
+    mock_s4.assert_called_once()
+    mock_s5.assert_called_once()
     assert set(run.timings.keys()) == {
         "step1_org_user",
         "step2_warehouse",
         "step3_warehouse_data",
+        "step4_sources",
+        "step5_connections",
     }
 
 

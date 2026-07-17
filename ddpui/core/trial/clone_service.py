@@ -291,6 +291,11 @@ def _teardown(run: CloneRun) -> None:
     caller in its own try/except so a teardown problem never masks the original exception.
     """
     if run.trial_org:
+        # sources+connections (Steps 4-5) are never torn down individually here: they live in
+        # the trial org's Airbyte workspace, and OrgCleanupService.delete_org() ->
+        # delete_airbyte_workspace() already deletes every source in that workspace and then
+        # the workspace itself (which cascades the connections) — so no extra Airbyte teardown
+        # is needed as long as run.trial_org exists.
         logger.info(f"tearing down org+workspace for failed clone (template={run.template.slug})")
         OrgCleanupService(run.trial_org, dry_run=False).delete_org()
     if run.manifest.get("trial_warehouse_db"):
@@ -299,12 +304,12 @@ def _teardown(run: CloneRun) -> None:
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
-    """Deep-clone a template org into a new trial org (Steps 1–3), timing each step.
+    """Deep-clone a template org into a new trial org (Steps 1–5), timing each step.
 
-    Serial chain: org+user → warehouse → warehouse-data. State for the run lives only in
-    the returned in-memory `CloneRun` — nothing is persisted for it. On any failure the
-    exception is re-raised (after best-effort teardown) so the caller (management command /
-    future Celery task) sees it.
+    Serial chain: org+user → warehouse → warehouse-data → sources → connections. State for
+    the run lives only in the returned in-memory `CloneRun` — nothing is persisted for it. On
+    any failure the exception is re-raised (after best-effort teardown) so the caller
+    (management command / future Celery task) sees it.
     """
     if account_exists_for_email(trial_email):
         raise TrialAccountExistsError(
@@ -321,6 +326,10 @@ def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
             _step_warehouse(run)
         with step_timer(run, "step3_warehouse_data"):
             _step_warehouse_data(run)
+        with step_timer(run, "step4_sources"):
+            _step_sources(run)
+        with step_timer(run, "step5_connections"):
+            _step_connections(run)
     except Exception as err:
         logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a
