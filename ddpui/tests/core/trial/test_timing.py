@@ -1,27 +1,26 @@
 import pytest
-from ddpui.models.org import Org
-from ddpui.models.trial_clone import TrialClone
+from ddpui.core.trial.clone_service import CloneRun
 from ddpui.core.trial.timing import step_timer
 
-pytestmark = pytest.mark.django_db
+
+def _run():
+    # `.template`/`.trial_email` aren't touched by step_timer — a bare CloneRun with
+    # placeholder values is enough to exercise the timings/current_step carrier.
+    return CloneRun(template=None, trial_email="a@b.org")
 
 
 def test_step_timer_records_elapsed_and_step():
-    org = Org.objects.create(name="t", slug="t")
-    tc = TrialClone.objects.create(template_org=org, trial_email="a@b.org")
-    with step_timer(tc, "mystep"):
+    run = _run()
+    with step_timer(run, "mystep"):
         pass
-    tc.refresh_from_db()
-    assert "mystep" in tc.timings
-    assert tc.timings["mystep"] >= 0
-    assert tc.current_step == "mystep"
+    assert "mystep" in run.timings
+    assert run.timings["mystep"] >= 0
+    assert run.current_step == "mystep"
 
 
 def test_step_timer_records_even_on_exception():
-    org = Org.objects.create(name="t2", slug="t2")
-    tc = TrialClone.objects.create(template_org=org, trial_email="a@b.org")
+    run = _run()
     with pytest.raises(ValueError):
-        with step_timer(tc, "boom"):
+        with step_timer(run, "boom"):
             raise ValueError("x")
-    tc.refresh_from_db()
-    assert "boom" in tc.timings
+    assert "boom" in run.timings

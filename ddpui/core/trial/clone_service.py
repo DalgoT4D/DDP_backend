@@ -1,10 +1,11 @@
 import os
 import tempfile
+import uuid
+from dataclasses import dataclass, field
 
 from django.contrib.auth.models import User
 
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.trial_clone import TrialClone, TrialCloneStatus
 from ddpui.core.trial.exceptions import TrialAccountExistsError
 from ddpui.core.trial.timing import step_timer
 from ddpui.core.trial.warehouse_provision import provision_trial_database, drop_trial_database
@@ -26,6 +27,22 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.core.trial.clone_service")
 
 
+@dataclass
+class CloneRun:
+    """in-memory state carrier for a single template→trial clone run — no DB row.
+
+    Per-run state (timings, manifest of created resource ids, the trial org once it
+    exists) lives only for the lifetime of this call; nothing is persisted for it.
+    """
+
+    template: Org
+    trial_email: str
+    trial_org: Org | None = None
+    current_step: str | None = None
+    timings: dict = field(default_factory=dict)
+    manifest: dict = field(default_factory=dict)
+
+
 def account_exists_for_email(email: str) -> bool:
     """True if a Dalgo User already exists for this email (real customer OR prior trial).
 
@@ -35,9 +52,10 @@ def account_exists_for_email(email: str) -> bool:
     return User.objects.filter(username=email).exists()
 
 
-def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
+def _step_org_and_user(run: CloneRun) -> None:
     """Step 1 — create the trial org (+ Airbyte workspace + plan) and an admin user."""
-    trial_name = f"Trial {trialclone.id} {template.name}"
+    template = run.template
+    trial_name = f"Trial {uuid.uuid4().hex[:8]} {template.name}"[:50]
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,
@@ -49,10 +67,9 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
     if err:
         raise RuntimeError(f"create_organization failed: {err}")
 
-    # persist the teardown marker immediately — the Org + Airbyte workspace already exist at
+    # record the teardown marker immediately — the Org + Airbyte workspace already exist at
     # this point, so any failure below must still trigger OrgCleanupService on the way out.
-    trialclone.trial_org = trial_org
-    trialclone.save(update_fields=["trial_org", "updated_at"])
+    run.trial_org = trial_org
 
     _, plan_err = create_org_plan(org_payload, trial_org)
     if plan_err:
@@ -63,8 +80,8 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
     # "usable" (only None / the "!"-prefixed sentinel count as unusable), so we key off the
     # get_or_create `created` flag rather than has_usable_password() to decide when to reset it.
     user, created = User.objects.get_or_create(
-        username=trialclone.trial_email,
-        defaults={"email": trialclone.trial_email},
+        username=run.trial_email,
+        defaults={"email": run.trial_email},
     )
     if created:
         user.set_unusable_password()
@@ -82,28 +99,27 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
         orguser=orguser, defaults={"enable_email_notifications": True}
     )
 
-    trialclone.manifest["trial_org_slug"] = trial_org.slug
-    trialclone.manifest["trial_workspace_id"] = trial_org.airbyte_workspace_id
-    trialclone.manifest["trial_orguser_id"] = orguser.id
-    trialclone.manifest["custom_connectors"] = "queued_async_not_awaited"
-    trialclone.save(update_fields=["manifest", "updated_at"])
+    run.manifest["trial_org_slug"] = trial_org.slug
+    run.manifest["trial_workspace_id"] = trial_org.airbyte_workspace_id
+    run.manifest["trial_orguser_id"] = orguser.id
+    run.manifest["custom_connectors"] = "queued_async_not_awaited"
 
 
-def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
+def _step_warehouse(run: CloneRun) -> None:
     """Step 2 — provision a trial warehouse db and register it via create_warehouse."""
+    template = run.template
     template_wh = OrgWarehouse.objects.filter(org=template).first()
     if template_wh is None:
         raise RuntimeError("template org has no warehouse")
     if template_wh.wtype != "postgres":
         raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
 
-    trial_db_params = provision_trial_database(trialclone.trial_email)
+    trial_db_params = provision_trial_database(run.trial_email)
 
-    # persist the teardown marker immediately — the RDS database already exists at this point,
+    # record the teardown marker immediately — the RDS database already exists at this point,
     # so any failure below must still trigger drop_trial_database on the way out.
-    trialclone.manifest["trial_warehouse_db"] = trial_db_params["database"]
-    trialclone.manifest["trial_warehouse_role"] = trial_db_params["username"]
-    trialclone.save(update_fields=["manifest", "updated_at"])
+    run.manifest["trial_warehouse_db"] = trial_db_params["database"]
+    run.manifest["trial_warehouse_role"] = trial_db_params["username"]
 
     # reuse the template destination's definition id (not stored on OrgWarehouse)
     template_dest = airbyte_service.get_destination(
@@ -142,18 +158,17 @@ def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
         destinationDefId=dest_def_id,
         airbyteConfig=airbyte_config,
     )
-    _, err = create_warehouse(trialclone.trial_org, wh_payload)
+    _, err = create_warehouse(run.trial_org, wh_payload)
     if err:
         raise RuntimeError(f"create_warehouse failed: {err}")
 
-    trialclone.manifest["trial_destination_defid"] = dest_def_id
-    trialclone.save(update_fields=["manifest", "updated_at"])
+    run.manifest["trial_destination_defid"] = dest_def_id
 
 
-def _step_warehouse_data(template: Org, trialclone: TrialClone) -> None:
+def _step_warehouse_data(run: CloneRun) -> None:
     """Step 3 — pg_dump the template warehouse and restore into the trial warehouse."""
-    template_wh = OrgWarehouse.objects.filter(org=template).first()
-    trial_wh = OrgWarehouse.objects.filter(org=trialclone.trial_org).first()
+    template_wh = OrgWarehouse.objects.filter(org=run.template).first()
+    trial_wh = OrgWarehouse.objects.filter(org=run.trial_org).first()
     if template_wh is None or trial_wh is None:
         raise RuntimeError("missing template or trial warehouse for data copy")
 
@@ -172,16 +187,30 @@ def _step_warehouse_data(template: Org, trialclone: TrialClone) -> None:
         if os.path.exists(dump_path):
             os.remove(dump_path)
 
-    trialclone.manifest["warehouse_dump_path"] = dump_path
-    trialclone.save(update_fields=["manifest", "updated_at"])
+    run.manifest["warehouse_dump_path"] = dump_path
 
 
-def clone_template_org(template_org_id: int, trial_email: str) -> TrialClone:
+def _teardown(run: CloneRun) -> None:
+    """Best-effort teardown of whatever got created before a mid-run failure.
+
+    Guarded on what actually exists (run.trial_org / manifest markers). Wrapped by the
+    caller in its own try/except so a teardown problem never masks the original exception.
+    """
+    if run.trial_org:
+        logger.info(f"tearing down org+workspace for failed clone (template={run.template.slug})")
+        OrgCleanupService(run.trial_org, dry_run=False).delete_org()
+    if run.manifest.get("trial_warehouse_db"):
+        logger.info(f"dropping trial database for failed clone {run.trial_email}")
+        drop_trial_database(run.trial_email)
+
+
+def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
     """Deep-clone a template org into a new trial org (Steps 1–3), timing each step.
 
-    Serial chain: org+user → warehouse → warehouse-data. On any failure the run is
-    marked FAILED (with the error) and the exception is re-raised so the caller
-    (management command / future Celery task) sees it.
+    Serial chain: org+user → warehouse → warehouse-data. State for the run lives only in
+    the returned in-memory `CloneRun` — nothing is persisted for it. On any failure the
+    exception is re-raised (after best-effort teardown) so the caller (management command /
+    future Celery task) sees it.
     """
     if account_exists_for_email(trial_email):
         raise TrialAccountExistsError(
@@ -189,37 +218,23 @@ def clone_template_org(template_org_id: int, trial_email: str) -> TrialClone:
         )
 
     template = Org.objects.get(id=template_org_id)
-    trialclone = TrialClone.objects.create(
-        template_org=template,
-        trial_email=trial_email,
-        status=TrialCloneStatus.RUNNING.value,
-    )
-    logger.info(f"starting clone {trialclone.id} from template {template.slug}")
+    run = CloneRun(template=template, trial_email=trial_email)
+    logger.info(f"starting clone from template {template.slug} for {trial_email}")
     try:
-        with step_timer(trialclone, "step1_org_user"):
-            _step_org_and_user(template, trialclone)
-        with step_timer(trialclone, "step2_warehouse"):
-            _step_warehouse(template, trialclone)
-        with step_timer(trialclone, "step3_warehouse_data"):
-            _step_warehouse_data(template, trialclone)
+        with step_timer(run, "step1_org_user"):
+            _step_org_and_user(run)
+        with step_timer(run, "step2_warehouse"):
+            _step_warehouse(run)
+        with step_timer(run, "step3_warehouse_data"):
+            _step_warehouse_data(run)
     except Exception as err:
-        trialclone.status = TrialCloneStatus.FAILED.value
-        trialclone.error = str(err)
-        trialclone.save(update_fields=["status", "error", "updated_at"])
-        logger.error(f"clone {trialclone.id} failed: {err}")
+        logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a
         # teardown problem mask the original exception, which must still propagate.
         try:
-            if trialclone.trial_org:
-                logger.info(f"tearing down org+workspace for failed clone {trialclone.id}")
-                OrgCleanupService(trialclone.trial_org, dry_run=False).delete_org()
-            if trialclone.manifest.get("trial_warehouse_db"):
-                logger.info(f"dropping trial database for failed clone {trialclone.id}")
-                drop_trial_database(trialclone.trial_email)
+            _teardown(run)
         except Exception as cleanup_err:
-            logger.error(f"best-effort teardown failed for clone {trialclone.id}: {cleanup_err}")
+            logger.error(f"best-effort teardown failed for template {template.slug}: {cleanup_err}")
         raise
-    trialclone.status = TrialCloneStatus.COMPLETED.value
-    trialclone.save(update_fields=["status", "updated_at"])
-    logger.info(f"clone {trialclone.id} completed; timings={trialclone.timings}")
-    return trialclone
+    logger.info(f"clone from template {template.slug} completed; timings={run.timings}")
+    return run

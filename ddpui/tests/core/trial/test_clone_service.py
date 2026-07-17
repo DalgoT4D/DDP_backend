@@ -5,10 +5,10 @@ import pytest
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser, UserAttributes
-from ddpui.models.trial_clone import TrialCloneStatus, TrialClone
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.trial import clone_service
+from ddpui.core.trial.clone_service import CloneRun
 from ddpui.core.trial.exceptions import TrialAccountExistsError
 
 pytestmark = pytest.mark.django_db
@@ -19,12 +19,14 @@ pytestmark = pytest.mark.django_db
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3):
     template = Org.objects.create(name="tmpl", slug="tmpl")
-    tc = clone_service.clone_template_org(template.id, "a@b.org")
-    assert tc.status == TrialCloneStatus.COMPLETED.value
+    run = clone_service.clone_template_org(template.id, "a@b.org")
+    assert isinstance(run, CloneRun)
+    assert run.template == template
+    assert run.trial_email == "a@b.org"
     mock_s1.assert_called_once()
     mock_s2.assert_called_once()
     mock_s3.assert_called_once()
-    assert set(tc.timings.keys()) == {
+    assert set(run.timings.keys()) == {
         "step1_org_user",
         "step2_warehouse",
         "step3_warehouse_data",
@@ -34,14 +36,13 @@ def test_clone_runs_all_steps_and_completes(mock_s1, mock_s2, mock_s3):
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
 @patch("ddpui.core.trial.clone_service._step_org_and_user", side_effect=RuntimeError("kaboom"))
-def test_clone_marks_failed_and_reraises(mock_s1, mock_cleanup_cls, mock_drop):
+def test_clone_reraises_and_skips_teardown_when_step1_fails_immediately(
+    mock_s1, mock_cleanup_cls, mock_drop
+):
     template = Org.objects.create(name="tmpl2", slug="tmpl2")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="kaboom"):
         clone_service.clone_template_org(template.id, "a@b.org")
 
-    tc = TrialClone.objects.filter(template_org=template).first()
-    assert tc.status == TrialCloneStatus.FAILED.value
-    assert "kaboom" in tc.error
     # step1 (org+user) never got far enough to create a trial_org or warehouse — nothing to
     # tear down.
     mock_cleanup_cls.assert_not_called()
@@ -59,28 +60,22 @@ def test_clone_tears_down_created_resources_on_later_failure(
     template = Org.objects.create(name="tmpl3", slug="tmpl3")
     trial_org = Org.objects.create(name="Trial X", slug="trial-x")
 
-    def fake_step1(template_arg, trialclone):
-        trialclone.trial_org = trial_org
-        trialclone.save(update_fields=["trial_org", "updated_at"])
+    def fake_step1(run):
+        run.trial_org = trial_org
 
-    def fake_step2(template_arg, trialclone):
-        trialclone.manifest["trial_warehouse_db"] = "trial_123"
-        trialclone.save(update_fields=["manifest", "updated_at"])
+    def fake_step2(run):
+        run.manifest["trial_warehouse_db"] = "trial_123"
 
     mock_s1.side_effect = fake_step1
     mock_s2.side_effect = fake_step2
     mock_cleanup_instance = mock_cleanup_cls.return_value
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="boom"):
         clone_service.clone_template_org(template.id, "a@b.org")
-
-    tc = TrialClone.objects.filter(template_org=template).first()
-    assert tc.status == TrialCloneStatus.FAILED.value
-    assert "boom" in tc.error
 
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
-    mock_drop.assert_called_once_with(tc.trial_email)
+    mock_drop.assert_called_once_with("a@b.org")
 
 
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
@@ -91,9 +86,8 @@ def test_clone_teardown_failure_does_not_mask_original_error(mock_s1, mock_clean
     template = Org.objects.create(name="tmpl4", slug="tmpl4")
     trial_org = Org.objects.create(name="Trial Y", slug="trial-y")
 
-    def fake_step1(template_arg, trialclone):
-        trialclone.trial_org = trial_org
-        trialclone.save(update_fields=["trial_org", "updated_at"])
+    def fake_step1(run):
+        run.trial_org = trial_org
         raise RuntimeError("original failure")
 
     mock_s1.side_effect = fake_step1
@@ -102,9 +96,6 @@ def test_clone_teardown_failure_does_not_mask_original_error(mock_s1, mock_clean
     with pytest.raises(RuntimeError, match="original failure"):
         clone_service.clone_template_org(template.id, "a@b.org")
 
-    tc = TrialClone.objects.filter(template_org=template).first()
-    assert tc.status == TrialCloneStatus.FAILED.value
-    assert "original failure" in tc.error
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_drop.assert_not_called()
 
@@ -117,9 +108,9 @@ def test_clone_tears_down_org_on_step1_mid_failure(
     mock_create_org, mock_create_plan, mock_cleanup_cls, mock_drop
 ):
     """create_organization succeeds (the Org + Airbyte workspace now exist), but the
-    subsequent create_org_plan call fails. FIX 1 requires trialclone.trial_org to be
-    persisted right after create_organization returns, so the teardown guard still fires
-    even though the failure happened later in the same step."""
+    subsequent create_org_plan call fails. FIX 1 requires run.trial_org to be set right
+    after create_organization returns, so the teardown guard still fires even though the
+    failure happened later in the same step."""
     template = Org.objects.create(name="tmpl6", slug="tmpl6")
     trial_org = Org.objects.create(
         name="Trial 1 tmpl6", slug="trial-1-tmpl6", airbyte_workspace_id="ws-6"
@@ -130,10 +121,6 @@ def test_clone_tears_down_org_on_step1_mid_failure(
 
     with pytest.raises(RuntimeError, match="create_org_plan failed"):
         clone_service.clone_template_org(template.id, "a@b.org")
-
-    tc = TrialClone.objects.filter(template_org=template).first()
-    assert tc.status == TrialCloneStatus.FAILED.value
-    assert tc.trial_org_id == trial_org.id
 
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
@@ -158,17 +145,19 @@ def test_clone_tears_down_db_on_step2_mid_failure(
 ):
     """provision_trial_database succeeds (the RDS database now exists), but the
     subsequent create_warehouse call fails. FIX 2 requires manifest["trial_warehouse_db"]
-    to be persisted right after provision_trial_database returns, so drop_trial_database
-    still fires even though the failure happened later in the same step."""
+    to be set right after provision_trial_database returns, so drop_trial_database still
+    fires even though the failure happened later in the same step."""
     template = Org.objects.create(name="tmpl7", slug="tmpl7", airbyte_workspace_id="ws-tmpl7")
     OrgWarehouse.objects.create(
         org=template, wtype="postgres", airbyte_destination_id="dest-tmpl7", credentials="x"
     )
     trial_org = Org.objects.create(name="Trial Z", slug="trial-z", airbyte_workspace_id="ws-z")
 
-    def fake_step1(template_arg, trialclone):
-        trialclone.trial_org = trial_org
-        trialclone.save(update_fields=["trial_org", "updated_at"])
+    captured = {}
+
+    def fake_step1(run):
+        run.trial_org = trial_org
+        captured["run"] = run
 
     mock_s1.side_effect = fake_step1
     mock_provision.return_value = {
@@ -186,11 +175,9 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     with pytest.raises(RuntimeError, match="create_warehouse failed"):
         clone_service.clone_template_org(template.id, "a@b.org")
 
-    tc = TrialClone.objects.filter(template_org=template).first()
-    assert tc.status == TrialCloneStatus.FAILED.value
-    assert tc.manifest["trial_warehouse_db"] == "trial_z_db"
+    assert captured["run"].manifest["trial_warehouse_db"] == "trial_z_db"
 
-    mock_drop.assert_called_once_with(tc.trial_email)
+    mock_drop.assert_called_once_with("a@b.org")
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
 
@@ -206,11 +193,10 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
     mock_create_org.return_value = (trial_org, None)
     mock_create_plan.return_value = (Mock(), None)
 
-    tc = TrialClone.objects.create(template_org=template, trial_email="admin@b.org")
-    clone_service._step_org_and_user(template, tc)
+    run = CloneRun(template=template, trial_email="admin@b.org")
+    clone_service._step_org_and_user(run)
 
-    tc.refresh_from_db()
-    assert tc.trial_org_id == trial_org.id
+    assert run.trial_org == trial_org
     orguser = OrgUser.objects.filter(org=trial_org).first()
     assert orguser is not None
     assert orguser.user.email == "admin@b.org"
@@ -237,8 +223,8 @@ def test_step_org_and_user_is_idempotent_for_userattributes(mock_create_org, moc
     mock_create_org.return_value = (trial_org, None)
     mock_create_plan.return_value = (Mock(), None)
 
-    tc = TrialClone.objects.create(template_org=template, trial_email="repeat@b.org")
-    clone_service._step_org_and_user(template, tc)
+    run = CloneRun(template=template, trial_email="repeat@b.org")
+    clone_service._step_org_and_user(run)
 
     rows = UserAttributes.objects.filter(user=existing_user)
     assert rows.count() == 1
@@ -271,20 +257,17 @@ def test_step_warehouse_registers_trial_warehouse(
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_create_wh.return_value = (None, None)
 
-    tc = TrialClone.objects.create(
-        template_org=template, trial_email="a@b.org", trial_org=trial_org
-    )
-    clone_service._step_warehouse(template, tc)
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_warehouse(run)
 
-    mock_provision.assert_called_once_with(tc.trial_email)
+    mock_provision.assert_called_once_with(run.trial_email)
     # create_warehouse called with the trial org + a schema carrying the new db + def id
     args, _ = mock_create_wh.call_args
     assert args[0] == trial_org
     assert args[1].destinationDefId == "pg-def-1"
     assert args[1].airbyteConfig["database"] == "trial_1"
-    tc.refresh_from_db()
-    assert tc.manifest["trial_warehouse_db"] == "trial_1"
-    assert tc.manifest["trial_warehouse_role"] == "u"
+    assert run.manifest["trial_warehouse_db"] == "trial_1"
+    assert run.manifest["trial_warehouse_role"] == "u"
 
 
 @patch("ddpui.core.trial.clone_service.create_warehouse")
@@ -331,10 +314,8 @@ def test_step_warehouse_drops_template_ssh_tunnel_config(
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_create_wh.return_value = (None, None)
 
-    tc = TrialClone.objects.create(
-        template_org=template, trial_email="a@b.org", trial_org=trial_org
-    )
-    clone_service._step_warehouse(template, tc)
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_warehouse(run)
 
     args, _ = mock_create_wh.call_args
     config = args[1].airbyteConfig
@@ -357,18 +338,15 @@ def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
         {"host": "dh", "port": 5432, "database": "trial_1", "username": "du", "password": "dp"},
     ]
 
-    tc = TrialClone.objects.create(
-        template_org=template, trial_email="a@b.org", trial_org=trial_org
-    )
-    clone_service._step_warehouse_data(template, tc)
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_warehouse_data(run)
 
     mock_copy.assert_called_once()
     src, dst, dump_path = mock_copy.call_args.args
     assert src["database"] == "sdb"
     assert dst["database"] == "trial_1"
 
-    tc.refresh_from_db()
-    assert tc.manifest["warehouse_dump_path"] == dump_path
+    assert run.manifest["warehouse_dump_path"] == dump_path
     # the pg_dump temp file must be removed after the (mocked) copy, success or failure —
     # it's a full copy of the template warehouse's data sitting on local disk.
     assert not os.path.exists(dump_path)
@@ -389,7 +367,8 @@ def test_clone_rejects_existing_account(mock_step1):
         clone_service.clone_template_org(template.id, "dup@x.org")
 
     mock_step1.assert_not_called()
-    assert TrialClone.objects.filter(template_org=template).count() == 0
+    # the guard fires before any resource (trial org, etc.) is created
+    assert Org.objects.exclude(id=template.id).count() == 0
 
 
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")
@@ -406,11 +385,9 @@ def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mo
     ]
     mock_copy.side_effect = RuntimeError("pg_restore failed")
 
-    tc = TrialClone.objects.create(
-        template_org=template, trial_email="a@b.org", trial_org=trial_org
-    )
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
     with pytest.raises(RuntimeError):
-        clone_service._step_warehouse_data(template, tc)
+        clone_service._step_warehouse_data(run)
 
     dump_path = mock_copy.call_args.args[2]
     assert not os.path.exists(dump_path)

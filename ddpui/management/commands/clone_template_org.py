@@ -20,7 +20,7 @@ class Command(BaseCommand):
             raise CommandError(f"no org with slug {options['template']}")
 
         try:
-            trialclone = clone_template_org(template.id, options["email"])
+            run = clone_template_org(template.id, options["email"])
         except TrialAccountExistsError:
             self.stdout.write(
                 self.style.WARNING(
@@ -29,9 +29,9 @@ class Command(BaseCommand):
             )
             return
 
-        self.stdout.write(self.style.SUCCESS(f"clone {trialclone.id}: {trialclone.status}"))
-        self.stdout.write(f"trial org: {trialclone.trial_org and trialclone.trial_org.slug}")
-        total = round(sum(trialclone.timings.values()), 3)
-        for step, secs in trialclone.timings.items():
+        self.stdout.write(self.style.SUCCESS("clone completed"))
+        self.stdout.write(f"trial org: {run.trial_org and run.trial_org.slug}")
+        total = round(sum(run.timings.values()), 3)
+        for step, secs in run.timings.items():
             self.stdout.write(f"  {step}: {secs}s")
         self.stdout.write(self.style.SUCCESS(f"total: {total}s"))
