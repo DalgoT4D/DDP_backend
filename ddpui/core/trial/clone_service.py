@@ -30,7 +30,7 @@ from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
 )
-from ddpui.core.trial.dbt_clone import copy_dbt_dag
+from ddpui.core.trial.dbt_clone import copy_dbt_dag, regenerate_and_push
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
@@ -311,14 +311,15 @@ def _step_connections(run: CloneRun) -> None:
 
 
 def _step_dbt(run: CloneRun) -> None:
-    """Step 6 — set up a fresh managed dbt workspace on the trial org and deep-copy the
-    template's transform DAG (legacy OrgDbtModel/Operation/Edge rows + the active-path
-    CanvasNode/Edge rows) onto it.
+    """Step 6 — set up a fresh managed dbt workspace on the trial org, deep-copy the template's
+    transform DAG (legacy OrgDbtModel/Operation/Edge rows + the active-path CanvasNode/Edge
+    rows) onto it, then regenerate every `.sql`/`sources.yml` file and push to the new repo.
 
     `setup_managed_git_workspace` creates a brand-new managed GitHub repo, an `OrgDbt` row (with
     an EMPTY dbt scaffold — no `.sql` files yet), and the cli-profile block, then sets
-    `run.trial_org.dbt`. Regenerating `.sql`/`sources.yml` and pushing to the new repo happens in
-    a later step — this one only rebuilds the DB-side DAG so that step has something to walk.
+    `run.trial_org.dbt`. `copy_dbt_dag` rebuilds the DB-side DAG (with `sql_path=None` on every
+    copied model, since the scaffold has no files yet); `regenerate_and_push` then walks that DAG
+    to write real `.sql`/`sources.yml` files and pushes them to the managed repo.
     """
     template_dbt = run.template.dbt
     if template_dbt is None:
@@ -342,8 +343,11 @@ def _step_dbt(run: CloneRun) -> None:
 
     model_map = copy_dbt_dag(template_dbt, trial_dbt)
 
+    regenerated = regenerate_and_push(run.trial_org, trial_dbt)
+
     run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
     run.manifest["dbt_models"] = len(model_map)
+    run.manifest["dbt_regenerated"] = regenerated
 
 
 def _teardown(run: CloneRun) -> None:

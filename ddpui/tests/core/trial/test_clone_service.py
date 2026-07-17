@@ -607,8 +607,9 @@ def _make_orgdbt(slug: str) -> OrgDbt:
     )
 
 
+@patch("ddpui.core.trial.clone_service.regenerate_and_push")
 @patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
-def test_step_dbt_sets_up_workspace_then_copies(mock_setup):
+def test_step_dbt_sets_up_workspace_then_copies(mock_setup, mock_regen):
     template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
     trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
 
@@ -631,6 +632,7 @@ def test_step_dbt_sets_up_workspace_then_copies(mock_setup):
         org.save()
 
     mock_setup.side_effect = fake_setup
+    mock_regen.return_value = 1
 
     run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
     clone_service._step_dbt(run)
@@ -638,9 +640,11 @@ def test_step_dbt_sets_up_workspace_then_copies(mock_setup):
     mock_setup.assert_called_once_with(
         trial_org, project_name=trial_org.slug, default_schema="default_schema"
     )
+    mock_regen.assert_called_once_with(trial_org, trial_dbt)
     assert OrgDbtModel.objects.filter(orgdbt=trial_dbt).count() == 1
     assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
     assert run.manifest["dbt_models"] == 1
+    assert run.manifest["dbt_regenerated"] == 1
 
 
 def test_step_dbt_raises_when_template_has_no_dbt():
