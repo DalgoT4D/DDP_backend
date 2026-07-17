@@ -107,6 +107,63 @@ def test_step_warehouse_registers_trial_warehouse(
     assert tc.manifest["trial_warehouse_db"] == "trial_1"
 
 
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+def test_step_warehouse_drops_template_ssh_tunnel_config(
+    mock_provision, mock_retrieve, mock_ab, mock_create_wh
+):
+    """The template's SSH-tunnel config points at the template's bastion — it must not be
+    carried into the trial warehouse's Airbyte destination, which points at the trials-RDS
+    host with no such tunnel."""
+    template = Org.objects.create(name="tmpl", slug="tmpl", airbyte_workspace_id="ws-tmpl")
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-tmpl", credentials="x"
+    )
+    trial_org = Org.objects.create(
+        name="Trial 1 tmpl", slug="trial-1", airbyte_workspace_id="ws-tr"
+    )
+
+    mock_provision.return_value = {
+        "host": "h",
+        "port": 5432,
+        "database": "trial_1",
+        "username": "u",
+        "password": "p",
+    }
+    mock_retrieve.return_value = {
+        "host": "tmpl-host",
+        "port": 5432,
+        "database": "tmpl_db",
+        "username": "tmpl_u",
+        "password": "tmpl_p",
+        "schema": "public",
+        "ssl_mode": {"mode": "require"},
+        "tunnel_method": {
+            "tunnel_method": "SSH_KEY_AUTH",
+            "tunnel_host": "bastion.tmpl",
+            "tunnel_port": 22,
+            "tunnel_user": "ec2-user",
+            "ssh_key": "-----BEGIN...",
+        },
+    }
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_create_wh.return_value = (None, None)
+
+    tc = TrialClone.objects.create(
+        template_org=template, trial_email="a@b.org", trial_org=trial_org
+    )
+    clone_service._step_warehouse(template, tc)
+
+    args, _ = mock_create_wh.call_args
+    config = args[1].airbyteConfig
+    assert "tunnel_method" not in config
+    assert config["schema"] == "public"
+    assert config["host"] == "h"
+    assert config["database"] == "trial_1"
+
+
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 def test_step_warehouse_data_copies(mock_retrieve, mock_copy):

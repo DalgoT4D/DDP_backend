@@ -102,6 +102,18 @@ def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
             "password": trial_db_params["password"],
         }
     )
+    # the template's SSH-tunnel config points at the template's own bastion — the trial
+    # warehouse lives on the trials-RDS host with no such tunnel, so none of this can carry
+    # over. ssl_mode/schema are left as-is (same-instance measurement keeps those valid).
+    for tunnel_key in (
+        "tunnel_method",
+        "tunnel_host",
+        "tunnel_port",
+        "tunnel_user",
+        "ssh_key",
+        "tunnel_user_password",
+    ):
+        airbyte_config.pop(tunnel_key, None)
 
     wh_payload = OrgWarehouseSchema(
         wtype="postgres",
