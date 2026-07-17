@@ -79,7 +79,7 @@ def test_clone_tears_down_created_resources_on_later_failure(
 
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
-    mock_drop.assert_called_once_with(tc.id)
+    mock_drop.assert_called_once_with(tc.trial_email)
 
 
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
@@ -189,7 +189,7 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     assert tc.status == TrialCloneStatus.FAILED.value
     assert tc.manifest["trial_warehouse_db"] == "trial_z_db"
 
-    mock_drop.assert_called_once_with(tc.id)
+    mock_drop.assert_called_once_with(tc.trial_email)
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
 
@@ -275,7 +275,7 @@ def test_step_warehouse_registers_trial_warehouse(
     )
     clone_service._step_warehouse(template, tc)
 
-    mock_provision.assert_called_once_with(tc.id)
+    mock_provision.assert_called_once_with(tc.trial_email)
     # create_warehouse called with the trial org + a schema carrying the new db + def id
     args, _ = mock_create_wh.call_args
     assert args[0] == trial_org
@@ -283,6 +283,7 @@ def test_step_warehouse_registers_trial_warehouse(
     assert args[1].airbyteConfig["database"] == "trial_1"
     tc.refresh_from_db()
     assert tc.manifest["trial_warehouse_db"] == "trial_1"
+    assert tc.manifest["trial_warehouse_role"] == "u"
 
 
 @patch("ddpui.core.trial.clone_service.create_warehouse")

@@ -87,11 +87,12 @@ def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
     if template_wh.wtype != "postgres":
         raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
 
-    trial_db_params = provision_trial_database(trialclone.id)
+    trial_db_params = provision_trial_database(trialclone.trial_email)
 
     # persist the teardown marker immediately — the RDS database already exists at this point,
     # so any failure below must still trigger drop_trial_database on the way out.
     trialclone.manifest["trial_warehouse_db"] = trial_db_params["database"]
+    trialclone.manifest["trial_warehouse_role"] = trial_db_params["username"]
     trialclone.save(update_fields=["manifest", "updated_at"])
 
     # reuse the template destination's definition id (not stored on OrgWarehouse)
@@ -199,7 +200,7 @@ def clone_template_org(template_org_id: int, trial_email: str) -> TrialClone:
                 OrgCleanupService(trialclone.trial_org, dry_run=False).delete_org()
             if trialclone.manifest.get("trial_warehouse_db"):
                 logger.info(f"dropping trial database for failed clone {trialclone.id}")
-                drop_trial_database(trialclone.id)
+                drop_trial_database(trialclone.trial_email)
         except Exception as cleanup_err:
             logger.error(f"best-effort teardown failed for clone {trialclone.id}: {cleanup_err}")
         raise
