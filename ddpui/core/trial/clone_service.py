@@ -39,6 +39,11 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
     if err:
         raise RuntimeError(f"create_organization failed: {err}")
 
+    # persist the teardown marker immediately — the Org + Airbyte workspace already exist at
+    # this point, so any failure below must still trigger OrgCleanupService on the way out.
+    trialclone.trial_org = trial_org
+    trialclone.save(update_fields=["trial_org", "updated_at"])
+
     _, plan_err = create_org_plan(org_payload, trial_org)
     if plan_err:
         raise RuntimeError(f"create_org_plan failed: {plan_err}")
@@ -62,17 +67,16 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
     orguser = OrgUser.objects.create(
         user=user, org=trial_org, new_role=admin_role, email_verified=False
     )
-    UserAttributes.objects.create(user=user, email_verified=False)
+    UserAttributes.objects.get_or_create(user=user, defaults={"email_verified": False})
     UserPreferences.objects.get_or_create(
         orguser=orguser, defaults={"enable_email_notifications": True}
     )
 
-    trialclone.trial_org = trial_org
     trialclone.manifest["trial_org_slug"] = trial_org.slug
     trialclone.manifest["trial_workspace_id"] = trial_org.airbyte_workspace_id
     trialclone.manifest["trial_orguser_id"] = orguser.id
     trialclone.manifest["custom_connectors"] = "queued_async_not_awaited"
-    trialclone.save(update_fields=["trial_org", "manifest", "updated_at"])
+    trialclone.save(update_fields=["manifest", "updated_at"])
 
 
 def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
@@ -84,6 +88,11 @@ def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
         raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
 
     trial_db_params = provision_trial_database(trialclone.id)
+
+    # persist the teardown marker immediately — the RDS database already exists at this point,
+    # so any failure below must still trigger drop_trial_database on the way out.
+    trialclone.manifest["trial_warehouse_db"] = trial_db_params["database"]
+    trialclone.save(update_fields=["manifest", "updated_at"])
 
     # reuse the template destination's definition id (not stored on OrgWarehouse)
     template_dest = airbyte_service.get_destination(
@@ -126,7 +135,6 @@ def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
     if err:
         raise RuntimeError(f"create_warehouse failed: {err}")
 
-    trialclone.manifest["trial_warehouse_db"] = trial_db_params["database"]
     trialclone.manifest["trial_destination_defid"] = dest_def_id
     trialclone.save(update_fields=["manifest", "updated_at"])
 

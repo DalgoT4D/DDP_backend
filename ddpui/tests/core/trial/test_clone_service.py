@@ -108,6 +108,92 @@ def test_clone_teardown_failure_does_not_mask_original_error(mock_s1, mock_clean
     mock_drop.assert_not_called()
 
 
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_clone_tears_down_org_on_step1_mid_failure(
+    mock_create_org, mock_create_plan, mock_cleanup_cls, mock_drop
+):
+    """create_organization succeeds (the Org + Airbyte workspace now exist), but the
+    subsequent create_org_plan call fails. FIX 1 requires trialclone.trial_org to be
+    persisted right after create_organization returns, so the teardown guard still fires
+    even though the failure happened later in the same step."""
+    template = Org.objects.create(name="tmpl6", slug="tmpl6")
+    trial_org = Org.objects.create(
+        name="Trial 1 tmpl6", slug="trial-1-tmpl6", airbyte_workspace_id="ws-6"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (None, "plan blew up")
+    mock_cleanup_instance = mock_cleanup_cls.return_value
+
+    with pytest.raises(RuntimeError, match="create_org_plan failed"):
+        clone_service.clone_template_org(template.id, "a@b.org")
+
+    tc = TrialClone.objects.filter(template_org=template).first()
+    assert tc.status == TrialCloneStatus.FAILED.value
+    assert tc.trial_org_id == trial_org.id
+
+    mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
+    mock_cleanup_instance.delete_org.assert_called_once()
+    mock_drop.assert_not_called()
+
+
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_tears_down_db_on_step2_mid_failure(
+    mock_s1,
+    mock_provision,
+    mock_retrieve,
+    mock_ab,
+    mock_create_wh,
+    mock_cleanup_cls,
+    mock_drop,
+):
+    """provision_trial_database succeeds (the RDS database now exists), but the
+    subsequent create_warehouse call fails. FIX 2 requires manifest["trial_warehouse_db"]
+    to be persisted right after provision_trial_database returns, so drop_trial_database
+    still fires even though the failure happened later in the same step."""
+    template = Org.objects.create(name="tmpl7", slug="tmpl7", airbyte_workspace_id="ws-tmpl7")
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-tmpl7", credentials="x"
+    )
+    trial_org = Org.objects.create(name="Trial Z", slug="trial-z", airbyte_workspace_id="ws-z")
+
+    def fake_step1(template_arg, trialclone):
+        trialclone.trial_org = trial_org
+        trialclone.save(update_fields=["trial_org", "updated_at"])
+
+    mock_s1.side_effect = fake_step1
+    mock_provision.return_value = {
+        "host": "h",
+        "port": 5432,
+        "database": "trial_z_db",
+        "username": "u",
+        "password": "p",
+    }
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_retrieve.return_value = {}
+    mock_create_wh.return_value = (None, "create_warehouse blew up")
+    mock_cleanup_instance = mock_cleanup_cls.return_value
+
+    with pytest.raises(RuntimeError, match="create_warehouse failed"):
+        clone_service.clone_template_org(template.id, "a@b.org")
+
+    tc = TrialClone.objects.filter(template_org=template).first()
+    assert tc.status == TrialCloneStatus.FAILED.value
+    assert tc.manifest["trial_warehouse_db"] == "trial_z_db"
+
+    mock_drop.assert_called_once_with(tc.id)
+    mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
+    mock_cleanup_instance.delete_org.assert_called_once()
+
+
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_plan):
@@ -132,6 +218,31 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
     user_attrs = UserAttributes.objects.filter(user=orguser.user).first()
     assert user_attrs is not None
     assert user_attrs.email_verified is False
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_is_idempotent_for_userattributes(mock_create_org, mock_create_plan):
+    """A recurring trial_email makes User.objects.get_or_create return an existing User —
+    UserAttributes.objects.create would then raise/duplicate; get_or_create must not."""
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-idem", slug="tmpl-idem")
+    existing_user = User.objects.create(username="repeat@b.org", email="repeat@b.org")
+    UserAttributes.objects.create(user=existing_user, email_verified=True)
+
+    trial_org = Org.objects.create(
+        name="Trial 2 tmpl", slug="trial-2-tmpl", airbyte_workspace_id="ws-10"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    tc = TrialClone.objects.create(template_org=template, trial_email="repeat@b.org")
+    clone_service._step_org_and_user(template, tc)
+
+    rows = UserAttributes.objects.filter(user=existing_user)
+    assert rows.count() == 1
+    # get_or_create must not overwrite the pre-existing row's fields via `defaults`.
+    assert rows.first().email_verified is True
 
 
 @patch("ddpui.core.trial.clone_service.create_warehouse")
