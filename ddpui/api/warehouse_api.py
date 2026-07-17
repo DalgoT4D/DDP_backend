@@ -164,8 +164,15 @@ def get_table_count(request, schema_name: str, table_name: str):
         org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
 
         client = dbtautomation_service._get_wclient(org_warehouse)
+
+        tables = client.get_tables(schema_name)
+        if table_name not in tables:
+            raise HttpError(404, f"Table {schema_name}.{table_name} not found")
+
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
+    except HttpError:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
         raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
