@@ -1,9 +1,12 @@
+import tempfile
+
 from django.contrib.auth.models import User
 
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.trial_clone import TrialClone, TrialCloneStatus
 from ddpui.core.trial.timing import step_timer
 from ddpui.core.trial.warehouse_provision import provision_trial_database
+from ddpui.core.trial.warehouse_data import copy_warehouse_data
 from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
@@ -114,8 +117,23 @@ def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
 
 
 def _step_warehouse_data(template: Org, trialclone: TrialClone) -> None:
-    """Step 3 — pg_dump/restore template warehouse → trial. Real body lands in Task 5."""
-    return None
+    """Step 3 — pg_dump the template warehouse and restore into the trial warehouse."""
+    template_wh = OrgWarehouse.objects.filter(org=template).first()
+    trial_wh = OrgWarehouse.objects.filter(org=trialclone.trial_org).first()
+    if template_wh is None or trial_wh is None:
+        raise RuntimeError("missing template or trial warehouse for data copy")
+
+    src = retrieve_warehouse_credentials(template_wh)
+    dst = retrieve_warehouse_credentials(trial_wh)
+    if not src or not dst:
+        raise RuntimeError("could not retrieve warehouse credentials for data copy")
+
+    with tempfile.NamedTemporaryFile(suffix=".pgc", delete=False) as tmp:
+        dump_path = tmp.name
+    copy_warehouse_data(src, dst, dump_path)
+
+    trialclone.manifest["warehouse_dump_path"] = dump_path
+    trialclone.save(update_fields=["manifest", "updated_at"])
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> TrialClone:

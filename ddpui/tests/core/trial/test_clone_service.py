@@ -109,3 +109,31 @@ def test_step_warehouse_registers_trial_warehouse(
     assert args[1].airbyteConfig["database"] == "trial_1"
     tc.refresh_from_db()
     assert tc.manifest["trial_warehouse_db"] == "trial_1"
+
+
+@patch("ddpui.core.trial.clone_service.copy_warehouse_data")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
+    from ddpui.models.org import OrgWarehouse
+    from ddpui.models.trial_clone import TrialClone
+    from ddpui.core.trial import clone_service
+
+    template = Org.objects.create(name="tmpl", slug="tmpl")
+    trial_org = Org.objects.create(name="Trial 1 tmpl", slug="trial-1")
+    OrgWarehouse.objects.create(org=template, wtype="postgres", credentials="tmpl-sec")
+    OrgWarehouse.objects.create(org=trial_org, wtype="postgres", credentials="trial-sec")
+
+    mock_retrieve.side_effect = [
+        {"host": "sh", "port": 5432, "database": "sdb", "username": "su", "password": "sp"},
+        {"host": "dh", "port": 5432, "database": "trial_1", "username": "du", "password": "dp"},
+    ]
+
+    tc = TrialClone.objects.create(
+        template_org=template, trial_email="a@b.org", trial_org=trial_org
+    )
+    clone_service._step_warehouse_data(template, tc)
+
+    mock_copy.assert_called_once()
+    src, dst, _path = mock_copy.call_args.args
+    assert src["database"] == "sdb"
+    assert dst["database"] == "trial_1"
