@@ -15,6 +15,7 @@ from ddpui.core.trial.exceptions import TrialAccountExistsError
 pytestmark = pytest.mark.django_db
 
 
+@patch("ddpui.core.trial.clone_service._step_viz")
 @patch("ddpui.core.trial.clone_service._step_prefect")
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
@@ -23,7 +24,7 @@ pytestmark = pytest.mark.django_db
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_runs_all_steps_and_completes(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
 ):
     template = Org.objects.create(name="tmpl", slug="tmpl")
     run = clone_service.clone_template_org(template.id, "a@b.org")
@@ -37,6 +38,7 @@ def test_clone_runs_all_steps_and_completes(
     mock_s5.assert_called_once()
     mock_s6.assert_called_once()
     mock_s7.assert_called_once()
+    mock_s8.assert_called_once()
     assert set(run.timings.keys()) == {
         "step1_org_user",
         "step2_warehouse",
@@ -45,6 +47,7 @@ def test_clone_runs_all_steps_and_completes(
         "step5_connections",
         "step6_dbt",
         "step7_prefect",
+        "step8_viz",
     }
 
 
@@ -601,6 +604,11 @@ def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mo
     assert not os.path.exists(dump_path)
 
 
+def _make_orguser(org: Org, email: str) -> OrgUser:
+    user = User.objects.create(username=email, email=email)
+    return OrgUser.objects.create(user=user, org=org, email_verified=False)
+
+
 def _make_orgdbt(slug: str) -> OrgDbt:
     return OrgDbt.objects.create(
         gitrepo_url=f"https://github.com/dalgo/{slug}.git",
@@ -660,6 +668,8 @@ def test_step_dbt_raises_when_template_has_no_dbt():
         clone_service._step_dbt(run)
 
 
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
@@ -667,7 +677,7 @@ def test_step_dbt_raises_when_template_has_no_dbt():
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_wires_step_dbt_after_connections(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
 ):
     template = Org.objects.create(name="tmpl-wire", slug="tmpl-wire")
     run = clone_service.clone_template_org(template.id, "a@b.org")
@@ -691,6 +701,7 @@ def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows)
     assert run.manifest["deployment_ids"] == ["dep-new"]
 
 
+@patch("ddpui.core.trial.clone_service._step_viz")
 @patch("ddpui.core.trial.clone_service._step_prefect")
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
@@ -698,11 +709,46 @@ def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows)
 @patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
-def test_clone_wires_step_prefect_last(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
+def test_clone_wires_step_prefect_after_dbt(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
 ):
     template = Org.objects.create(name="tmpl-wire-pf", slug="tmpl-wire-pf")
     run = clone_service.clone_template_org(template.id, "a@b.org")
     mock_s7.assert_called_once()
     assert "step7_prefect" in run.timings
-    assert list(run.timings.keys())[-1] == "step7_prefect"
+    timing_keys = list(run.timings.keys())
+    assert timing_keys.index("step7_prefect") == timing_keys.index("step6_dbt") + 1
+
+
+@patch("ddpui.core.trial.clone_service.clone_viz")
+def test_step_viz_delegates_and_records_manifest(mock_clone_viz):
+    template = Org.objects.create(name="tmpl-viz", slug="tmpl-viz")
+    trial_org = Org.objects.create(name="Trial viz", slug="trial-viz")
+    trial_user = _make_orguser(trial_org, "trial-viz-admin@x.org")
+    mock_clone_viz.return_value = {"metrics": 2, "kpis": 1}
+
+    run = CloneRun(
+        template=template, trial_email="a@b.org", trial_org=trial_org, trial_orguser=trial_user
+    )
+    clone_service._step_viz(run)
+
+    mock_clone_viz.assert_called_once_with(template, trial_org, trial_user)
+    assert run.manifest["viz"] == {"metrics": 2, "kpis": 1}
+
+
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse_data")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_wires_step_viz_last(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+):
+    template = Org.objects.create(name="tmpl-wire-viz", slug="tmpl-wire-viz")
+    run = clone_service.clone_template_org(template.id, "a@b.org")
+    mock_s8.assert_called_once()
+    assert "step8_viz" in run.timings
+    assert list(run.timings.keys())[-1] == "step8_viz"

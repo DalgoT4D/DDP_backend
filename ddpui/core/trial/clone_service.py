@@ -32,6 +32,7 @@ from ddpui.core.trial.source_config import (
 )
 from ddpui.core.trial.dbt_clone import copy_dbt_dag, regenerate_and_push
 from ddpui.core.trial.prefect_clone import clone_orchestrate_dataflows
+from ddpui.core.trial.viz_clone import clone_viz
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
@@ -368,6 +369,17 @@ def _step_prefect(run: CloneRun) -> None:
     run.manifest["deployment_ids"] = deployment_ids
 
 
+def _step_viz(run: CloneRun) -> None:
+    """Step 8 — clone native viz objects (metrics/KPIs/charts/dashboards/filters/alerts/report
+    snapshots) onto the trial org, rewriting cross-object id references via old->new maps.
+
+    Delegates to `ddpui.core.trial.viz_clone.clone_viz`. Only needs the trial org + admin
+    OrgUser from Step 1 — independent of Steps 4-7 (Airbyte/dbt/Prefect); cloned charts/dashboards
+    only render real data once Step 3's warehouse copy has run.
+    """
+    run.manifest["viz"] = clone_viz(run.template, run.trial_org, run.trial_orguser)
+
+
 def _teardown(run: CloneRun) -> None:
     """Best-effort teardown of whatever got created before a mid-run failure.
 
@@ -375,6 +387,10 @@ def _teardown(run: CloneRun) -> None:
     caller in its own try/except so a teardown problem never masks the original exception.
     """
     if run.trial_org:
+        # viz rows (Step 8: Metric/KPI/Chart/Dashboard/DashboardFilter/Alert/ReportSnapshot) all
+        # have org=CASCADE (Metric/KPI/Chart/Dashboard/Alert/ReportSnapshot directly;
+        # DashboardFilter via its dashboard FK) or no org FK at all — every one is reaped by
+        # OrgCleanupService.delete_org() below without any extra teardown here.
         # sources+connections (Steps 4-5) are never torn down individually here:
         # OrgCleanupService.delete_org() -> delete_warehouse() explicitly deletes every
         # connection (via each airbyte OrgTask) before delete_airbyte_workspace() deletes the
@@ -389,11 +405,11 @@ def _teardown(run: CloneRun) -> None:
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
-    """Deep-clone a template org into a new trial org (Steps 1–7), timing each step.
+    """Deep-clone a template org into a new trial org (Steps 1–8), timing each step.
 
-    Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt → prefect.
-    State for the run lives only in the returned in-memory `CloneRun` — nothing is persisted for
-    it. On any failure the exception is re-raised (after best-effort teardown) so the caller
+    Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt → prefect →
+    viz. State for the run lives only in the returned in-memory `CloneRun` — nothing is persisted
+    for it. On any failure the exception is re-raised (after best-effort teardown) so the caller
     (management command / future Celery task) sees it.
     """
     if account_exists_for_email(trial_email):
@@ -419,6 +435,8 @@ def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
             _step_dbt(run)
         with step_timer(run, "step7_prefect"):
             _step_prefect(run)
+        with step_timer(run, "step8_viz"):
+            _step_viz(run)
     except Exception as err:
         logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a
