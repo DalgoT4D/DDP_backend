@@ -1,15 +1,20 @@
 from django.contrib.auth.models import User
 
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.trial_clone import TrialClone, TrialCloneStatus
 from ddpui.core.trial.timing import step_timer
+from ddpui.core.trial.warehouse_provision import provision_trial_database
 from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.schemas.org_schema import CreateOrgSchema
+from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.ddpairbyte import airbyte_service
+from ddpui.ddpairbyte.airbytehelpers import create_warehouse
+from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
@@ -65,8 +70,47 @@ def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
 
 
 def _step_warehouse(template: Org, trialclone: TrialClone) -> None:
-    """Step 2 — provision trial warehouse. Real body lands in Task 4."""
-    return None
+    """Step 2 — provision a trial warehouse db and register it via create_warehouse."""
+    template_wh = OrgWarehouse.objects.filter(org=template).first()
+    if template_wh is None:
+        raise RuntimeError("template org has no warehouse")
+    if template_wh.wtype != "postgres":
+        raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
+
+    trial_db_params = provision_trial_database(trialclone.id)
+
+    # reuse the template destination's definition id (not stored on OrgWarehouse)
+    template_dest = airbyte_service.get_destination(
+        template.airbyte_workspace_id, template_wh.airbyte_destination_id
+    )
+    dest_def_id = template_dest["destinationDefinitionId"]
+
+    # carry the template's non-connection config forward (schema/ssl), overriding host/db creds
+    template_creds = retrieve_warehouse_credentials(template_wh) or {}
+    airbyte_config = dict(template_creds)
+    airbyte_config.update(
+        {
+            "host": trial_db_params["host"],
+            "port": trial_db_params["port"],
+            "database": trial_db_params["database"],
+            "username": trial_db_params["username"],
+            "password": trial_db_params["password"],
+        }
+    )
+
+    wh_payload = OrgWarehouseSchema(
+        wtype="postgres",
+        name=template_wh.name or "trial warehouse",
+        destinationDefId=dest_def_id,
+        airbyteConfig=airbyte_config,
+    )
+    _, err = create_warehouse(trialclone.trial_org, wh_payload)
+    if err:
+        raise RuntimeError(f"create_warehouse failed: {err}")
+
+    trialclone.manifest["trial_warehouse_db"] = trial_db_params["database"]
+    trialclone.manifest["trial_destination_defid"] = dest_def_id
+    trialclone.save(update_fields=["manifest", "updated_at"])
 
 
 def _step_warehouse_data(template: Org, trialclone: TrialClone) -> None:

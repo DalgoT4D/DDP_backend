@@ -343,4 +343,11 @@ COOKIE_SECURE = True
 COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
 COOKIE_HTTPONLY = True
 
+# Trials RDS instance — hosts per-trial databases provisioned for the "Try Now" clone flow
+# (Postgres-only for v1; BigQuery/Snowflake deferred).
+TRIALS_RDS_HOST = os.getenv("TRIALS_RDS_HOST")
+TRIALS_RDS_PORT = int(os.getenv("TRIALS_RDS_PORT", "5432"))
+TRIALS_RDS_ADMIN_USER = os.getenv("TRIALS_RDS_ADMIN_USER")
+TRIALS_RDS_ADMIN_PASSWORD = os.getenv("TRIALS_RDS_ADMIN_PASSWORD")
+
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB

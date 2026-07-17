@@ -65,3 +65,47 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
     assert orguser.user.email == "admin@b.org"
     assert orguser.new_role.slug == ACCOUNT_MANAGER_ROLE
     assert not orguser.user.has_usable_password()
+
+
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+def test_step_warehouse_registers_trial_warehouse(
+    mock_provision, mock_retrieve, mock_ab, mock_create_wh
+):
+    from ddpui.models.org import OrgWarehouse
+    from ddpui.models.trial_clone import TrialClone
+    from ddpui.core.trial import clone_service
+
+    template = Org.objects.create(name="tmpl", slug="tmpl", airbyte_workspace_id="ws-tmpl")
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-tmpl", credentials="x"
+    )
+    trial_org = Org.objects.create(
+        name="Trial 1 tmpl", slug="trial-1", airbyte_workspace_id="ws-tr"
+    )
+
+    mock_provision.return_value = {
+        "host": "h",
+        "port": 5432,
+        "database": "trial_1",
+        "username": "u",
+        "password": "p",
+    }
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_create_wh.return_value = (None, None)
+
+    tc = TrialClone.objects.create(
+        template_org=template, trial_email="a@b.org", trial_org=trial_org
+    )
+    clone_service._step_warehouse(template, tc)
+
+    mock_provision.assert_called_once_with(tc.id)
+    # create_warehouse called with the trial org + a schema carrying the new db + def id
+    args, _ = mock_create_wh.call_args
+    assert args[0] == trial_org
+    assert args[1].destinationDefId == "pg-def-1"
+    assert args[1].airbyteConfig["database"] == "trial_1"
+    tc.refresh_from_db()
+    assert tc.manifest["trial_warehouse_db"] == "trial_1"
