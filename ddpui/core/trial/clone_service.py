@@ -227,20 +227,43 @@ def _step_sources(run: CloneRun) -> None:
     run.manifest["source_ids"] = list(source_map.values())
 
 
-def _normalize_streams_overwrite(catalog: dict) -> list:
-    """flatten the discovered catalog to the selection list, all streams full_refresh|overwrite.
+def _selected_stream_names(connection: dict) -> set:
+    """the set of stream names the TEMPLATE connection had selected.
 
-    The trial's first sync must be a full read against an empty Airbyte state (no prior sync
-    history in the trial workspace) landing on top of the pg_dump'd warehouse rows copied in
-    Step 3 — Full Refresh|Overwrite is the only mode that's safe there regardless of what sync
-    mode the template connection used.
+    Used to mirror the template's curated scope onto the trial connection instead of
+    over-syncing every stream discovered on the (freshly-created) trial source.
+    """
+    names = set()
+    for entry in connection.get("syncCatalog", {}).get("streams", []):
+        if entry.get("config", {}).get("selected"):
+            names.add(entry["stream"]["name"])
+    return names
+
+
+def _normalize_streams_overwrite(catalog: dict, selected_names: set) -> list:
+    """flatten the discovered catalog to the selection list, restricted to the streams the
+    TEMPLATE connection had selected, all still forced to full_refresh|overwrite.
+
+    A clone must mirror the template's scope: if the template curated only a subset of the
+    source's streams, the trial connection must select that same subset — not every stream in
+    the freshly-discovered catalog. The trial's first sync must be a full read against an empty
+    Airbyte state (no prior sync history in the trial workspace) landing on top of the
+    pg_dump'd warehouse rows copied in Step 3 — Full Refresh|Overwrite is the only mode that's
+    safe there regardless of what sync mode the template connection used.
+
+    If `selected_names` is empty (the template connection exposed no syncCatalog selection
+    info to key off of), fall back to selecting every discovered stream so the clone never ends
+    up with zero streams selected.
     """
     streams = []
     for entry in catalog.get("streams", []):
         stream = entry["stream"]
+        name = stream["name"]
+        if selected_names and name not in selected_names:
+            continue
         streams.append(
             {
-                "name": stream["name"],
+                "name": name,
                 "selected": True,
                 "syncMode": "full_refresh",
                 "destinationSyncMode": "overwrite",
@@ -268,10 +291,11 @@ def _step_connections(run: CloneRun) -> None:
         if not new_source_id:
             raise RuntimeError(f"no remapped source for template source {old_source_id}")
         discovered = airbyte_service.get_source_schema_catalog(trial_ws, new_source_id)
+        selected = _selected_stream_names(conn)
         payload = AirbyteConnectionCreate(
             name=conn["name"],
             sourceId=new_source_id,
-            streams=_normalize_streams_overwrite(discovered["catalog"]),
+            streams=_normalize_streams_overwrite(discovered["catalog"], selected),
             catalogId=discovered["catalogId"],
             syncCatalog=discovered["catalog"],
             destinationSchema=conn.get("namespaceFormat") or None,
@@ -291,11 +315,12 @@ def _teardown(run: CloneRun) -> None:
     caller in its own try/except so a teardown problem never masks the original exception.
     """
     if run.trial_org:
-        # sources+connections (Steps 4-5) are never torn down individually here: they live in
-        # the trial org's Airbyte workspace, and OrgCleanupService.delete_org() ->
-        # delete_airbyte_workspace() already deletes every source in that workspace and then
-        # the workspace itself (which cascades the connections) — so no extra Airbyte teardown
-        # is needed as long as run.trial_org exists.
+        # sources+connections (Steps 4-5) are never torn down individually here:
+        # OrgCleanupService.delete_org() -> delete_warehouse() explicitly deletes every
+        # connection (via each airbyte OrgTask) before delete_airbyte_workspace() deletes the
+        # sources and then the workspace itself — both are reaped by delete_org(), just not
+        # purely by workspace-delete cascade — so no extra Airbyte teardown is needed here as
+        # long as run.trial_org exists.
         logger.info(f"tearing down org+workspace for failed clone (template={run.template.slug})")
         OrgCleanupService(run.trial_org, dry_run=False).delete_org()
     if run.manifest.get("trial_warehouse_db"):

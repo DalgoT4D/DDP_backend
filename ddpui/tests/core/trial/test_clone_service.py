@@ -418,10 +418,13 @@ def test_step_sources_fails_on_missing_config(mock_ab, mock_validate):
 
 @patch("ddpui.core.trial.clone_service.ab_create_connection")
 @patch("ddpui.core.trial.clone_service.airbyte_service")
-def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_create_conn):
+def test_step_connections_mirrors_template_stream_selection(mock_ab, mock_create_conn):
     """template connection's sourceId must be remapped via source_map, the catalog must be
-    re-discovered on the NEW source, every selected stream normalized to
-    full_refresh/overwrite, and connection_map built from the (res, err) tuple."""
+    re-discovered on the NEW source, but the built payload must select ONLY the streams the
+    TEMPLATE connection had selected (here: "table_a", not "table_b") even though the freshly
+    discovered catalog contains both — a clone must mirror the template's scope, not over-sync
+    the source's whole schema. Selected streams are still normalized to full_refresh/overwrite,
+    and connection_map is built from the (res, err) tuple."""
     template = Org.objects.create(name="tmpl-conn", slug="tmpl-conn", airbyte_workspace_id="ws-t")
     trial_org = Org.objects.create(
         name="Trial conn", slug="trial-conn", airbyte_workspace_id="ws-r"
@@ -432,6 +435,18 @@ def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_cre
             "name": "PG -> warehouse",
             "source": {"sourceId": "old-1"},
             "namespaceFormat": None,
+            "syncCatalog": {
+                "streams": [
+                    {
+                        "stream": {"name": "table_a"},
+                        "config": {"selected": True},
+                    },
+                    {
+                        "stream": {"name": "table_b"},
+                        "config": {"selected": False},
+                    },
+                ]
+            },
         }
     ]
     mock_ab.get_source_schema_catalog.return_value = {
@@ -439,7 +454,7 @@ def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_cre
         "catalog": {
             "streams": [
                 {
-                    "stream": {"name": "orders"},
+                    "stream": {"name": "table_a"},
                     "config": {
                         "selected": True,
                         "syncMode": "incremental",
@@ -447,7 +462,17 @@ def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_cre
                         "cursorField": ["updated_at"],
                         "primaryKey": [["id"]],
                     },
-                }
+                },
+                {
+                    "stream": {"name": "table_b"},
+                    "config": {
+                        "selected": True,
+                        "syncMode": "full_refresh",
+                        "destinationSyncMode": "overwrite",
+                        "cursorField": [],
+                        "primaryKey": [],
+                    },
+                },
             ]
         },
     }
@@ -467,7 +492,7 @@ def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_cre
     assert payload.catalogId == "cat-new-1"
     assert payload.streams == [
         {
-            "name": "orders",
+            "name": "table_a",
             "selected": True,
             "syncMode": "full_refresh",
             "destinationSyncMode": "overwrite",
@@ -477,6 +502,55 @@ def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_cre
     ]
     assert run.manifest["connection_map"] == {"old-conn-1": "new-conn-1"}
     assert run.manifest["connection_ids"] == ["new-conn-1"]
+
+
+@patch("ddpui.core.trial.clone_service.ab_create_connection")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+def test_step_connections_falls_back_to_all_streams_when_template_has_no_selection(
+    mock_ab, mock_create_conn
+):
+    """If the template connection exposes no syncCatalog selection info at all (empty set),
+    fall back to selecting every discovered stream so a clone never ends up with zero
+    streams selected."""
+    template = Org.objects.create(
+        name="tmpl-conn-noselect", slug="tmpl-conn-noselect", airbyte_workspace_id="ws-t"
+    )
+    trial_org = Org.objects.create(
+        name="Trial conn noselect", slug="trial-conn-noselect", airbyte_workspace_id="ws-r"
+    )
+    mock_ab.get_webbackend_connections.return_value = [
+        {
+            "connectionId": "old-conn-1",
+            "name": "PG -> warehouse",
+            "source": {"sourceId": "old-1"},
+            "namespaceFormat": None,
+            "syncCatalog": {"streams": []},
+        }
+    ]
+    mock_ab.get_source_schema_catalog.return_value = {
+        "catalogId": "cat-new-1",
+        "catalog": {
+            "streams": [
+                {"stream": {"name": "table_a"}, "config": {"selected": True}},
+                {"stream": {"name": "table_b"}, "config": {"selected": True}},
+            ]
+        },
+    }
+    mock_create_conn.return_value = ({"connectionId": "new-conn-1"}, None)
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    run.manifest["source_map"] = {"old-1": "new-1"}
+
+    clone_service._step_connections(run)
+
+    args, _ = mock_create_conn.call_args
+    payload = args[1]
+    stream_names = {s["name"] for s in payload.streams}
+    assert stream_names == {"table_a", "table_b"}
+    for s in payload.streams:
+        assert s["selected"] is True
+        assert s["syncMode"] == "full_refresh"
+        assert s["destinationSyncMode"] == "overwrite"
 
 
 @patch("ddpui.core.trial.clone_service.ab_create_connection")
