@@ -24,6 +24,10 @@ from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.airbytehelpers import create_warehouse
+from ddpui.core.trial.source_config import (
+    load_template_source_config,
+    validate_template_source_configs,
+)
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -195,6 +199,30 @@ def _step_warehouse_data(run: CloneRun) -> None:
             os.remove(dump_path)
 
     run.manifest["warehouse_dump_path"] = dump_path
+
+
+def _step_sources(run: CloneRun) -> None:
+    """Step 4 — recreate the template's Airbyte sources in the trial workspace.
+
+    Validates that every template source has a config entry in the (gitignored)
+    TEMPLATE_SOURCE_CREDS_FILE before creating anything — Airbyte masks source configs on
+    read-back, so the only source of real credentials is that Dalgo-controlled store.
+    """
+    template_sources = airbyte_service.get_sources(run.template.airbyte_workspace_id)["sources"]
+    names = [s["name"] for s in template_sources]
+    missing = validate_template_source_configs(names)
+    if missing:
+        raise RuntimeError(f"missing source config for template sources: {missing}")
+
+    source_map: dict = {}
+    for src in template_sources:
+        config = load_template_source_config(src["name"])
+        created = airbyte_service.create_source(
+            run.trial_org.airbyte_workspace_id, src["name"], src["sourceDefinitionId"], config
+        )
+        source_map[src["sourceId"]] = created["sourceId"]
+    run.manifest["source_map"] = source_map
+    run.manifest["source_ids"] = list(source_map.values())
 
 
 def _teardown(run: CloneRun) -> None:

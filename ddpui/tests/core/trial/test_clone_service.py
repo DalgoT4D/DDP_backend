@@ -373,6 +373,43 @@ def test_clone_rejects_existing_account(mock_step1):
     assert Org.objects.exclude(id=template.id).count() == 0
 
 
+@patch("ddpui.core.trial.clone_service.validate_template_source_configs", return_value=[])
+@patch("ddpui.core.trial.clone_service.load_template_source_config")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+def test_step_sources_recreates_from_config(mock_ab, mock_load, mock_validate):
+    template = Org.objects.create(name="tmpl-src", slug="tmpl-src", airbyte_workspace_id="ws-t")
+    trial_org = Org.objects.create(name="Trial src", slug="trial-src", airbyte_workspace_id="ws-r")
+    mock_ab.get_sources.return_value = {
+        "sources": [
+            {"sourceId": "old-1", "name": "PG", "sourceDefinitionId": "def-pg"},
+        ]
+    }
+    mock_load.return_value = {"host": "h", "password": "real"}
+    mock_ab.create_source.return_value = {"sourceId": "new-1"}
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_sources(run)
+    mock_ab.create_source.assert_called_once_with(
+        "ws-r", "PG", "def-pg", {"host": "h", "password": "real"}
+    )
+    assert run.manifest["source_map"] == {"old-1": "new-1"}
+    assert run.manifest["source_ids"] == ["new-1"]
+
+
+@patch("ddpui.core.trial.clone_service.validate_template_source_configs", return_value=["PG"])
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+def test_step_sources_fails_on_missing_config(mock_ab, mock_validate):
+    template = Org.objects.create(name="tmpl-src2", slug="tmpl-src2", airbyte_workspace_id="ws-t")
+    trial_org = Org.objects.create(
+        name="Trial src2", slug="trial-src2", airbyte_workspace_id="ws-r"
+    )
+    mock_ab.get_sources.return_value = {
+        "sources": [{"sourceId": "o", "name": "PG", "sourceDefinitionId": "d"}]
+    }
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    with pytest.raises(RuntimeError, match="missing source config"):
+        clone_service._step_sources(run)
+
+
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mock_copy):
