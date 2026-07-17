@@ -24,6 +24,8 @@ from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.airbytehelpers import create_warehouse
+from ddpui.ddpairbyte.airbytehelpers import create_connection as ab_create_connection
+from ddpui.ddpairbyte.schema import AirbyteConnectionCreate
 from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
@@ -223,6 +225,63 @@ def _step_sources(run: CloneRun) -> None:
         source_map[src["sourceId"]] = created["sourceId"]
     run.manifest["source_map"] = source_map
     run.manifest["source_ids"] = list(source_map.values())
+
+
+def _normalize_streams_overwrite(catalog: dict) -> list:
+    """flatten the discovered catalog to the selection list, all streams full_refresh|overwrite.
+
+    The trial's first sync must be a full read against an empty Airbyte state (no prior sync
+    history in the trial workspace) landing on top of the pg_dump'd warehouse rows copied in
+    Step 3 — Full Refresh|Overwrite is the only mode that's safe there regardless of what sync
+    mode the template connection used.
+    """
+    streams = []
+    for entry in catalog.get("streams", []):
+        stream = entry["stream"]
+        streams.append(
+            {
+                "name": stream["name"],
+                "selected": True,
+                "syncMode": "full_refresh",
+                "destinationSyncMode": "overwrite",
+                "cursorField": [],
+                "primaryKey": [],
+            }
+        )
+    return streams
+
+
+def _step_connections(run: CloneRun) -> None:
+    """Step 5 — recreate connections on remapped sources; first-sync Full Refresh|Overwrite.
+
+    Catalog ids are workspace-scoped, so the catalog is re-discovered on the NEW source rather
+    than reusing the template connection's catalogId. Uses the airbytehelpers wrapper (not the
+    raw airbyte_service call) so OrgTasks/dataflows/ConnectionMeta get created too.
+    """
+    source_map = run.manifest.get("source_map", {})
+    template_conns = airbyte_service.get_webbackend_connections(run.template.airbyte_workspace_id)
+    trial_ws = run.trial_org.airbyte_workspace_id
+    connection_map: dict = {}
+    for conn in template_conns:
+        old_source_id = conn["source"]["sourceId"]
+        new_source_id = source_map.get(old_source_id)
+        if not new_source_id:
+            raise RuntimeError(f"no remapped source for template source {old_source_id}")
+        discovered = airbyte_service.get_source_schema_catalog(trial_ws, new_source_id)
+        payload = AirbyteConnectionCreate(
+            name=conn["name"],
+            sourceId=new_source_id,
+            streams=_normalize_streams_overwrite(discovered["catalog"]),
+            catalogId=discovered["catalogId"],
+            syncCatalog=discovered["catalog"],
+            destinationSchema=conn.get("namespaceFormat") or None,
+        )
+        res, err = ab_create_connection(run.trial_org, payload)
+        if err:
+            raise RuntimeError(f"create_connection failed for {conn['name']}: {err}")
+        connection_map[conn["connectionId"]] = res["connectionId"]
+    run.manifest["connection_map"] = connection_map
+    run.manifest["connection_ids"] = list(connection_map.values())
 
 
 def _teardown(run: CloneRun) -> None:

@@ -410,6 +410,86 @@ def test_step_sources_fails_on_missing_config(mock_ab, mock_validate):
         clone_service._step_sources(run)
 
 
+@patch("ddpui.core.trial.clone_service.ab_create_connection")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+def test_step_connections_normalizes_streams_and_remaps_source(mock_ab, mock_create_conn):
+    """template connection's sourceId must be remapped via source_map, the catalog must be
+    re-discovered on the NEW source, every selected stream normalized to
+    full_refresh/overwrite, and connection_map built from the (res, err) tuple."""
+    template = Org.objects.create(name="tmpl-conn", slug="tmpl-conn", airbyte_workspace_id="ws-t")
+    trial_org = Org.objects.create(
+        name="Trial conn", slug="trial-conn", airbyte_workspace_id="ws-r"
+    )
+    mock_ab.get_webbackend_connections.return_value = [
+        {
+            "connectionId": "old-conn-1",
+            "name": "PG -> warehouse",
+            "source": {"sourceId": "old-1"},
+            "namespaceFormat": None,
+        }
+    ]
+    mock_ab.get_source_schema_catalog.return_value = {
+        "catalogId": "cat-new-1",
+        "catalog": {
+            "streams": [
+                {
+                    "stream": {"name": "orders"},
+                    "config": {
+                        "selected": True,
+                        "syncMode": "incremental",
+                        "destinationSyncMode": "append_dedup",
+                        "cursorField": ["updated_at"],
+                        "primaryKey": [["id"]],
+                    },
+                }
+            ]
+        },
+    }
+    mock_create_conn.return_value = ({"connectionId": "new-conn-1"}, None)
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    run.manifest["source_map"] = {"old-1": "new-1"}
+
+    clone_service._step_connections(run)
+
+    mock_ab.get_source_schema_catalog.assert_called_once_with("ws-r", "new-1")
+    mock_create_conn.assert_called_once()
+    args, _ = mock_create_conn.call_args
+    assert args[0] == trial_org
+    payload = args[1]
+    assert payload.sourceId == "new-1"
+    assert payload.catalogId == "cat-new-1"
+    assert payload.streams == [
+        {
+            "name": "orders",
+            "selected": True,
+            "syncMode": "full_refresh",
+            "destinationSyncMode": "overwrite",
+            "cursorField": [],
+            "primaryKey": [],
+        }
+    ]
+    assert run.manifest["connection_map"] == {"old-conn-1": "new-conn-1"}
+    assert run.manifest["connection_ids"] == ["new-conn-1"]
+
+
+@patch("ddpui.core.trial.clone_service.ab_create_connection")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+def test_step_connections_raises_when_source_not_remapped(mock_ab, mock_create_conn):
+    template = Org.objects.create(name="tmpl-conn2", slug="tmpl-conn2", airbyte_workspace_id="ws-t")
+    trial_org = Org.objects.create(
+        name="Trial conn2", slug="trial-conn2", airbyte_workspace_id="ws-r"
+    )
+    mock_ab.get_webbackend_connections.return_value = [
+        {"connectionId": "old-conn-1", "name": "PG -> wh", "source": {"sourceId": "unmapped"}}
+    ]
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    run.manifest["source_map"] = {}
+    with pytest.raises(RuntimeError, match="no remapped source"):
+        clone_service._step_connections(run)
+    mock_create_conn.assert_not_called()
+
+
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mock_copy):
