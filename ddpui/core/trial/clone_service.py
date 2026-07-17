@@ -386,6 +386,17 @@ def _teardown(run: CloneRun) -> None:
     Guarded on what actually exists (run.trial_org / manifest markers). Wrapped by the
     caller in its own try/except so a teardown problem never masks the original exception.
     """
+    # The two teardown actions are INDEPENDENTLY guarded: the trial RDS db+role live OUTSIDE
+    # the org/Airbyte/Prefect graph, so if delete_org() throws mid-teardown (e.g. Airbyte
+    # unreachable) the RDS drop must still run — otherwise that db+role leak. Drop the RDS
+    # resources first (isolated, cheap) so they can't be stranded by a delete_org() failure.
+    if run.manifest.get("trial_warehouse_db"):
+        try:
+            logger.info(f"dropping trial database for failed clone {run.trial_email}")
+            drop_trial_database(run.trial_email)
+        except Exception as rds_err:  # skipcq PYL-W0703
+            logger.error(f"failed to drop trial database for {run.trial_email}: {rds_err}")
+
     if run.trial_org:
         # viz rows (Step 8: Metric/KPI/Chart/Dashboard/DashboardFilter/Alert/ReportSnapshot) all
         # have org=CASCADE (Metric/KPI/Chart/Dashboard/Alert/ReportSnapshot directly;
@@ -397,11 +408,13 @@ def _teardown(run: CloneRun) -> None:
         # sources and then the workspace itself — both are reaped by delete_org(), just not
         # purely by workspace-delete cascade — so no extra Airbyte teardown is needed here as
         # long as run.trial_org exists.
-        logger.info(f"tearing down org+workspace for failed clone (template={run.template.slug})")
-        OrgCleanupService(run.trial_org, dry_run=False).delete_org()
-    if run.manifest.get("trial_warehouse_db"):
-        logger.info(f"dropping trial database for failed clone {run.trial_email}")
-        drop_trial_database(run.trial_email)
+        try:
+            logger.info(
+                f"tearing down org+workspace for failed clone (template={run.template.slug})"
+            )
+            OrgCleanupService(run.trial_org, dry_run=False).delete_org()
+        except Exception as org_err:  # skipcq PYL-W0703
+            logger.error(f"failed to delete_org during teardown ({run.template.slug}): {org_err}")
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:

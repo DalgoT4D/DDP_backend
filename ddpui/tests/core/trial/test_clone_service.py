@@ -200,6 +200,56 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     mock_cleanup_instance.delete_org.assert_called_once()
 
 
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_rds_drop_independent_of_delete_org_failure(
+    mock_s1,
+    mock_provision,
+    mock_retrieve,
+    mock_ab,
+    mock_create_wh,
+    mock_cleanup_cls,
+    mock_drop,
+):
+    """The trial RDS db+role live outside the org/Airbyte graph, so if delete_org() throws
+    mid-teardown the RDS drop must STILL run (independent guards) — otherwise the db leaks.
+    The original exception must still propagate."""
+    template = Org.objects.create(name="tmpl8", slug="tmpl8", airbyte_workspace_id="ws-tmpl8")
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-tmpl8", credentials="x"
+    )
+    trial_org = Org.objects.create(name="Trial Q", slug="trial-q", airbyte_workspace_id="ws-q")
+
+    def fake_step1(run):
+        run.trial_org = trial_org
+
+    mock_s1.side_effect = fake_step1
+    mock_provision.return_value = {
+        "host": "h",
+        "port": 5432,
+        "database": "trial_q_db",
+        "username": "u",
+        "password": "p",
+    }
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_retrieve.return_value = {}
+    mock_create_wh.return_value = (None, "create_warehouse blew up")
+    # delete_org() itself explodes during teardown
+    mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
+
+    with pytest.raises(RuntimeError, match="create_warehouse failed"):
+        clone_service.clone_template_org(template.id, "a@b.org")
+
+    # RDS drop still fired despite delete_org blowing up — no stranded db
+    mock_drop.assert_called_once_with("a@b.org")
+    mock_cleanup_cls.return_value.delete_org.assert_called_once()
+
+
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_plan):
