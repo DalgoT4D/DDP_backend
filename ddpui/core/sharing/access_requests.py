@@ -193,8 +193,11 @@ def create_access_request(
     if payload.requested_permission not in GeneralLevel.values:
         raise SharingValidationError(f"invalid permission '{payload.requested_permission}'")
 
-    if effective_permission(requester, rtype, resource) is not None:
-        raise SharingValidationError("you already have access to this resource")
+    # Reject only when current access already covers the ask — a View holder
+    # requesting Edit is a legitimate upgrade request.
+    current = effective_permission(requester, rtype, resource)
+    if current == GeneralLevel.EDIT or current == payload.requested_permission:
+        raise SharingValidationError("you already have this access to this resource")
 
     existing = AccessRequest.objects.filter(
         org_id=requester.org_id,

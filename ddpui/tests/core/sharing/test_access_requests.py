@@ -143,6 +143,28 @@ class TestCreateAccessRequest:
         assert excinfo.value.status_code == 400
         assert AccessRequest.objects.count() == 0
 
+    def test_viewer_can_request_edit_upgrade(self, org, analyst, analyst2):
+        """A View holder asking for Edit is an upgrade request, not a duplicate —
+        the embed-time 'request Edit access' flow depends on this."""
+        dashboard = _dashboard(org, analyst)
+        _grant(org, "dashboard", dashboard, analyst2, permission="view")
+        assert effective_permission(analyst2, "dashboard", dashboard) == "view"
+
+        response = _create_request(analyst2, "dashboard", dashboard, permission="edit")
+
+        assert response["success"] is True
+        assert response["data"]["requested_permission"] == "edit"
+        assert AccessRequest.objects.count() == 1
+
+    def test_editor_requesting_edit_400(self, org, analyst, analyst2):
+        dashboard = _dashboard(org, analyst)
+        _grant(org, "dashboard", dashboard, analyst2, permission="edit")
+
+        with pytest.raises(HttpError) as excinfo:
+            _create_request(analyst2, "dashboard", dashboard, permission="edit")
+        assert excinfo.value.status_code == 400
+        assert AccessRequest.objects.count() == 0
+
     def test_duplicate_pending_request_refreshes_instead_of_stacking(self, org, analyst, member):
         dashboard = _dashboard(org, analyst)
 
