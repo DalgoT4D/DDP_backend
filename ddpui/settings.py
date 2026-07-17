@@ -350,4 +350,8 @@ TRIALS_RDS_PORT = int(os.getenv("TRIALS_RDS_PORT", "5432"))
 TRIALS_RDS_ADMIN_USER = os.getenv("TRIALS_RDS_ADMIN_USER")
 TRIALS_RDS_ADMIN_PASSWORD = os.getenv("TRIALS_RDS_ADMIN_PASSWORD")
 
+# gitignored JSON file, keyed by template source name, holding the real (unmasked) Airbyte
+# source configs used to recreate sources in a trial workspace (Task P3.0a).
+TEMPLATE_SOURCE_CREDS_FILE = os.getenv("TEMPLATE_SOURCE_CREDS_FILE")
+
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB
