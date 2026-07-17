@@ -19,16 +19,13 @@ from ddpui.auth import platform_admin_required
 from ddpui.models.org import Org
 from ddpui.models.org_user import (
     OrgUser,
-    Invitation,
     NewInvitationSchema,
     DeleteOrgUserPayload,
 )
-from ddpui.models.org_plans import OrgPlans, OrgPlanType
-from ddpui.models.dashboard import Dashboard
-from ddpui.models.visualization import Chart
-from ddpui.models.report import ReportSnapshot
+from ddpui.models.org_plans import OrgPlanType
 from ddpui.schemas.org_schema import CreateOrgSchema
-from ddpui.core import orgfunctions, orguserfunctions
+from ddpui.core import orguserfunctions
+from ddpui.core.admin import admin_service
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -85,7 +82,7 @@ def _admin_org_response(org: Org) -> AdminOrgSchema:
         viz_url=org.viz_url,
         base_plan=org.base_plan(),
         is_active=org.is_active,
-        user_count=OrgUser.objects.filter(org=org).count(),
+        user_count=admin_service.org_user_count(org),
     )
 
 
@@ -108,17 +105,15 @@ def get_admin_stats(request):
     total_users counts distinct users who belong to at least one org (via OrgUser),
     consistent with total_orgs being real orgs — not every User row.
     """
-    return AdminStatsSchema(
-        total_orgs=Org.objects.count(),
-        total_users=OrgUser.objects.values("user").distinct().count(),
-    )
+    total_orgs, total_users = admin_service.get_platform_stats()
+    return AdminStatsSchema(total_orgs=total_orgs, total_users=total_users)
 
 
 @admin_router.get("/orgs", response=List[AdminOrgSchema])
 @platform_admin_required
 def get_admin_orgs(request):
     """List every org (active and inactive) with its user count."""
-    return [_admin_org_response(org) for org in Org.objects.all().order_by("name")]
+    return [_admin_org_response(org) for org in admin_service.list_orgs()]
 
 
 @admin_router.post("/orgs", response=AdminOrgSchema)
@@ -138,16 +133,11 @@ def post_admin_org(request, payload: AdminCreateOrgSchema):
         subscription_duration=payload.subscription_duration,
         superset_included=payload.superset_included,
     )
-    org, error = orgfunctions.create_organization(create_payload)
+    org, error = admin_service.create_org(create_payload)
     if error:
-        # create_organization already deleted the org on Airbyte failure; nothing persists.
+        # create_org already rolled back on Airbyte / plan failure; nothing persists.
         raise HttpError(400, error)
 
-    _, plan_error = orgfunctions.create_org_plan(create_payload, org)
-    if plan_error:
-        raise HttpError(400, plan_error)
-
-    logger.info(f"admin created new org {org.name}")
     return _admin_org_response(org)
 
 
@@ -155,9 +145,7 @@ def post_admin_org(request, payload: AdminCreateOrgSchema):
 @platform_admin_required
 def get_admin_org(request, org_id: int):
     """Org detail (Overview facts)."""
-    org = Org.objects.filter(id=org_id).first()
-    if org is None:
-        raise HttpError(404, "org not found")
+    org = _get_org_or_404(org_id)
     return _admin_org_response(org)
 
 
@@ -165,22 +153,13 @@ def get_admin_org(request, org_id: int):
 @platform_admin_required
 def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
     """Edit an org's name / viz_url / base_plan. slug is never touched (locked)."""
-    org = Org.objects.filter(id=org_id).first()
-    if org is None:
-        raise HttpError(404, "org not found")
-
-    if payload.name is not None:
-        org.name = payload.name
-    if payload.viz_url is not None:
-        org.viz_url = str(payload.viz_url)
-    org.save()  # slug intentionally excluded from the update
-
-    if payload.base_plan is not None:
-        org_plans = OrgPlans.objects.filter(org=org).first()
-        if org_plans:
-            org_plans.base_plan = payload.base_plan
-            org_plans.save()
-
+    org = _get_org_or_404(org_id)
+    org = admin_service.update_org(
+        org,
+        name=payload.name,
+        viz_url=str(payload.viz_url) if payload.viz_url is not None else None,
+        base_plan=payload.base_plan,
+    )
     return _admin_org_response(org)
 
 
@@ -188,26 +167,16 @@ def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
 @platform_admin_required
 def post_admin_org_deactivate(request, org_id: int):
     """Deactivate an org (reversible). Its users are then blocked at permission-load."""
-    org = Org.objects.filter(id=org_id).first()
-    if org is None:
-        raise HttpError(404, "org not found")
-    org.is_active = False
-    org.save()
-    logger.info(f"admin deactivated org {org.slug}")
-    return _admin_org_response(org)
+    org = _get_org_or_404(org_id)
+    return _admin_org_response(admin_service.set_org_active(org, False))
 
 
 @admin_router.post("/orgs/{org_id}/reactivate", response=AdminOrgSchema)
 @platform_admin_required
 def post_admin_org_reactivate(request, org_id: int):
     """Reactivate a deactivated org — its users can use the app again."""
-    org = Org.objects.filter(id=org_id).first()
-    if org is None:
-        raise HttpError(404, "org not found")
-    org.is_active = True
-    org.save()
-    logger.info(f"admin reactivated org {org.slug}")
-    return _admin_org_response(org)
+    org = _get_org_or_404(org_id)
+    return _admin_org_response(admin_service.set_org_active(org, True))
 
 
 # ======================= Users tab (M4) ======================================
@@ -273,7 +242,7 @@ class RemovalImpactSchema(Schema):
 
 
 def _get_org_or_404(org_id: int) -> Org:
-    org = Org.objects.filter(id=org_id).first()
+    org = admin_service.get_org(org_id)
     if org is None:
         raise HttpError(404, "org not found")
     return org
@@ -281,7 +250,7 @@ def _get_org_or_404(org_id: int) -> Org:
 
 def _get_orguser_or_404(org: Org, orguser_id: int) -> OrgUser:
     """resolve an OrgUser by id, scoped to the target org (404 if it belongs elsewhere)"""
-    orguser = OrgUser.objects.filter(id=orguser_id, org=org).first()
+    orguser = admin_service.get_orguser_in_org(org, orguser_id)
     if orguser is None:
         raise HttpError(404, "user not found in this org")
     return orguser
@@ -300,7 +269,7 @@ def get_admin_org_users(request, org_id: int):
             new_role_slug=ou.new_role.slug if ou.new_role else None,
             is_active=ou.is_active,
         )
-        for ou in OrgUser.objects.filter(org=org).select_related("user", "new_role")
+        for ou in admin_service.list_org_users(org)
     ]
 
     # pending invites are scoped by the explicit target org, so an invite a platform
@@ -312,9 +281,7 @@ def get_admin_org_users(request, org_id: int):
             invited_role_slug=inv.invited_new_role.slug if inv.invited_new_role else None,
             invited_on=inv.invited_on,
         )
-        for inv in Invitation.objects.filter(invited_in_org=org).select_related(
-            "invited_new_role"
-        )
+        for inv in admin_service.list_org_invitations(org)
     ]
 
     return AdminOrgUsersResponse(users=users, invitations=invitations)
@@ -341,14 +308,7 @@ def post_admin_org_user_invite(request, org_id: int, payload: AdminInviteUserSch
     if error:
         raise HttpError(400, error)
 
-    invitation = (
-        Invitation.objects.filter(
-            invited_email__iexact=payload.invited_email.lower().strip(),
-            invited_in_org=org,
-        )
-        .select_related("invited_new_role")
-        .first()
-    )
+    invitation = admin_service.get_pending_invitation(org, payload.invited_email)
     if invitation is None:
         # the invitee already had a platform account, so they were added directly as an
         # OrgUser (no pending Invitation row). Report that with a 200-style stub.
@@ -402,9 +362,7 @@ def post_admin_org_user_deactivate(request, org_id: int, orguser_id: int):
     """
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
-    orguser.is_active = False
-    orguser.save(update_fields=["is_active"])
-    logger.info(f"admin deactivated {orguser.user.email} in org {org.slug}")
+    orguser = admin_service.set_orguser_active(orguser, False)
     return AdminOrgUserSchema(
         orguser_id=orguser.id,
         email=orguser.user.email,
@@ -419,9 +377,7 @@ def post_admin_org_user_reactivate(request, org_id: int, orguser_id: int):
     """Reactivate a user in this org (OrgUser.is_active=True)."""
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
-    orguser.is_active = True
-    orguser.save(update_fields=["is_active"])
-    logger.info(f"admin reactivated {orguser.user.email} in org {org.slug}")
+    orguser = admin_service.set_orguser_active(orguser, True)
     return AdminOrgUserSchema(
         orguser_id=orguser.id,
         email=orguser.user.email,
@@ -430,9 +386,7 @@ def post_admin_org_user_reactivate(request, org_id: int, orguser_id: int):
     )
 
 
-@admin_router.get(
-    "/orgs/{org_id}/users/{orguser_id}/removal-impact", response=RemovalImpactSchema
-)
+@admin_router.get("/orgs/{org_id}/users/{orguser_id}/removal-impact", response=RemovalImpactSchema)
 @platform_admin_required
 def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
     """
@@ -442,10 +396,11 @@ def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
     """
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
+    dashboards_orphaned, charts_orphaned, reports_orphaned = admin_service.removal_impact(orguser)
     return RemovalImpactSchema(
-        dashboards_orphaned=Dashboard.objects.filter(created_by=orguser).count(),
-        charts_orphaned=Chart.objects.filter(created_by=orguser).count(),
-        reports_orphaned=ReportSnapshot.objects.filter(created_by=orguser).count(),
+        dashboards_orphaned=dashboards_orphaned,
+        charts_orphaned=charts_orphaned,
+        reports_orphaned=reports_orphaned,
     )
 
 
@@ -483,9 +438,9 @@ def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
     filter requires invited_in_org == this org, so a wrong-org id yields 404.
     """
     org = _get_org_or_404(org_id)
-    invitation = Invitation.objects.filter(id=invitation_id, invited_in_org=org).first()
+    invitation = admin_service.get_invitation_in_org(org, invitation_id)
     if invitation is None:
         raise HttpError(404, "invitation not found in this org")
-    invitation.delete()
+    admin_service.delete_invitation(invitation)
     logger.info(f"admin cancelled invitation {invitation_id} in org {org.slug}")
     return {"success": 1}
