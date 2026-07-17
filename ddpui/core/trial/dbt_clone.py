@@ -14,6 +14,7 @@ return value. `uuid` is never copied from the template row — every copy mints 
 NOT NULL unique field with no model-level default, so it must always be supplied explicitly.
 """
 
+import copy
 import uuid
 
 from ddpui.models.canvas_models import CanvasEdge, CanvasNode
@@ -30,6 +31,13 @@ def _copy_canvas(template_dbt: OrgDbt, trial_dbt: OrgDbt, model_map: dict) -> No
     carry `dbtmodel=None` already and are copied as-is."""
     node_map: dict = {}
     for node in CanvasNode.objects.filter(orgdbt=template_dbt):
+        new_dbtmodel = None
+        if node.dbtmodel_id:
+            if node.dbtmodel_id not in model_map:
+                raise RuntimeError(
+                    f"canvas node {node.uuid} references a dbtmodel outside the template dbt"
+                )
+            new_dbtmodel = model_map[node.dbtmodel_id]
         new_node = CanvasNode.objects.create(
             orgdbt=trial_dbt,
             uuid=uuid.uuid4(),
@@ -37,7 +45,7 @@ def _copy_canvas(template_dbt: OrgDbt, trial_dbt: OrgDbt, model_map: dict) -> No
             name=node.name,
             operation_config=node.operation_config,
             output_cols=node.output_cols,
-            dbtmodel=model_map[node.dbtmodel_id] if node.dbtmodel_id else None,
+            dbtmodel=new_dbtmodel,
         )
         node_map[node.id] = new_node
 
@@ -49,6 +57,31 @@ def _copy_canvas(template_dbt: OrgDbt, trial_dbt: OrgDbt, model_map: dict) -> No
         )
 
 
+def _remap_operation_config(config, uuid_map: dict):
+    """Deep-copy `config` (an `OrgDbtOperation.config`) and, for seq==1 operations whose config
+    is a dict with an `input_models` list, remap each entry's `uuid` (a reference to a parent
+    `OrgDbtModel.uuid`) via `uuid_map`. Never mutates the caller's `config`. Defensive against
+    `config` being None/non-dict, `input_models` being absent, and entries lacking a `uuid` or
+    referencing a uuid outside `uuid_map` (e.g. a cross-org/legacy reference) — those are left
+    untouched."""
+    new_config = copy.deepcopy(config)
+    if not isinstance(new_config, dict):
+        return new_config
+
+    input_models = new_config.get("input_models")
+    if not isinstance(input_models, list):
+        return new_config
+
+    for entry in input_models:
+        if not isinstance(entry, dict):
+            continue
+        old_uuid = entry.get("uuid")
+        if old_uuid is not None and str(old_uuid) in uuid_map:
+            entry["uuid"] = uuid_map[str(old_uuid)]
+
+    return new_config
+
+
 def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
     """Deep-copy every OrgDbtModel/OrgDbtOperation/DbtEdge (legacy) AND CanvasNode/CanvasEdge
     (active v2) row from `template_dbt` onto `trial_dbt`, re-parenting FKs to the new rows via
@@ -58,6 +91,7 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
     `.sql` regeneration step) can walk the copied DAG.
     """
     model_map: dict = {}
+    uuid_map: dict = {}
     for m in OrgDbtModel.objects.filter(orgdbt=template_dbt):
         new_m = OrgDbtModel.objects.create(
             orgdbt=trial_dbt,
@@ -72,6 +106,8 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
             under_construction=m.under_construction,
         )
         model_map[m.id] = new_m
+        if m.uuid is not None:
+            uuid_map[str(m.uuid)] = str(new_m.uuid)
 
     for op in OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt):
         OrgDbtOperation.objects.create(
@@ -79,7 +115,7 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
             uuid=uuid.uuid4(),
             seq=op.seq,
             output_cols=op.output_cols,
-            config=op.config,
+            config=_remap_operation_config(op.config, uuid_map),
         )
 
     for e in DbtEdge.objects.filter(from_node__orgdbt=template_dbt):
