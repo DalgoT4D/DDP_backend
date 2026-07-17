@@ -205,6 +205,8 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
     user_attrs = UserAttributes.objects.filter(user=orguser.user).first()
     assert user_attrs is not None
     assert user_attrs.email_verified is False
+    assert run.trial_orguser is not None
+    assert run.trial_orguser.id == orguser.id
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")

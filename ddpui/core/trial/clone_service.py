@@ -41,6 +41,7 @@ class CloneRun:
     template: Org
     trial_email: str
     trial_org: Org | None = None
+    trial_orguser: OrgUser | None = None
     current_step: str | None = None
     timings: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
@@ -99,6 +100,7 @@ def _step_org_and_user(run: CloneRun) -> None:
     orguser = OrgUser.objects.create(
         user=user, org=trial_org, new_role=admin_role, email_verified=False
     )
+    run.trial_orguser = orguser
     UserAttributes.objects.get_or_create(user=user, defaults={"email_verified": False})
     UserPreferences.objects.get_or_create(
         orguser=orguser, defaults={"enable_email_notifications": True}
