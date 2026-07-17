@@ -1,6 +1,5 @@
 import os
 import tempfile
-import uuid
 from dataclasses import dataclass, field
 
 from django.contrib.auth.models import User
@@ -8,7 +7,11 @@ from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.core.trial.exceptions import TrialAccountExistsError
 from ddpui.core.trial.timing import step_timer
-from ddpui.core.trial.warehouse_provision import provision_trial_database, drop_trial_database
+from ddpui.core.trial.warehouse_provision import (
+    provision_trial_database,
+    drop_trial_database,
+    email_hash8,
+)
 from ddpui.core.trial.warehouse_data import copy_warehouse_data
 from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.core.orgfunctions import create_organization, create_org_plan
@@ -55,7 +58,9 @@ def account_exists_for_email(email: str) -> bool:
 def _step_org_and_user(run: CloneRun) -> None:
     """Step 1 — create the trial org (+ Airbyte workspace + plan) and an admin user."""
     template = run.template
-    trial_name = f"Trial {uuid.uuid4().hex[:8]} {template.name}"[:50]
+    # deterministic-from-email name (unique per email via the sha8 hash) so the trial org
+    # is re-derivable/idempotent like the ft_ warehouse db/role names
+    trial_name = f"Trial {email_hash8(run.trial_email)} {template.name}"[:50]
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,

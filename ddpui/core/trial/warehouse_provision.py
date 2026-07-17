@@ -11,6 +11,15 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.core.trial.warehouse_provision")
 
 
+def email_hash8(email: str) -> str:
+    """Deterministic 8-hex-char slice of the email's sha256 digest.
+
+    Shared disambiguator so trial resource names (db, role, org) all derive from the same
+    per-email hash.
+    """
+    return hashlib.sha256(email.lower().encode()).hexdigest()[:8]
+
+
 def _ft_key(email: str) -> str:
     """Deterministic, Postgres-identifier-safe key derived from a trial email.
 
@@ -19,8 +28,7 @@ def _ft_key(email: str) -> str:
     emails distinct even when their sanitized forms collide.
     """
     local = re.sub(r"[^a-z0-9]+", "_", email.lower()).strip("_")
-    digest = hashlib.sha256(email.lower().encode()).hexdigest()[:8]
-    return f"{local[:40]}_{digest}"
+    return f"{local[:40]}_{email_hash8(email)}"
 
 
 def ft_database_name(email: str) -> str:
