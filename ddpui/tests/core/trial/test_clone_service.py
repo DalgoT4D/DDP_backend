@@ -9,6 +9,7 @@ from ddpui.models.trial_clone import TrialCloneStatus, TrialClone
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.core.trial import clone_service
+from ddpui.core.trial.exceptions import TrialAccountExistsError
 
 pytestmark = pytest.mark.django_db
 
@@ -371,6 +372,24 @@ def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
     # the pg_dump temp file must be removed after the (mocked) copy, success or failure —
     # it's a full copy of the template warehouse's data sitting on local disk.
     assert not os.path.exists(dump_path)
+
+
+def test_account_exists_for_email_true_when_user_exists():
+    User.objects.create(username="dup@x.org", email="dup@x.org")
+    assert clone_service.account_exists_for_email("dup@x.org") is True
+    assert clone_service.account_exists_for_email("new@x.org") is False
+
+
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_rejects_existing_account(mock_step1):
+    User.objects.create(username="dup@x.org", email="dup@x.org")
+    template = Org.objects.create(name="tmpl-guard", slug="tmpl-guard")
+
+    with pytest.raises(TrialAccountExistsError):
+        clone_service.clone_template_org(template.id, "dup@x.org")
+
+    mock_step1.assert_not_called()
+    assert TrialClone.objects.filter(template_org=template).count() == 0
 
 
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")

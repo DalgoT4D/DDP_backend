@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from ddpui.models.org import Org
 from ddpui.core.trial.clone_service import clone_template_org
+from ddpui.core.trial.exceptions import TrialAccountExistsError
 
 
 class Command(BaseCommand):
@@ -18,7 +19,15 @@ class Command(BaseCommand):
         if template is None:
             raise CommandError(f"no org with slug {options['template']}")
 
-        trialclone = clone_template_org(template.id, options["email"])
+        try:
+            trialclone = clone_template_org(template.id, options["email"])
+        except TrialAccountExistsError:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"account already exists for {options['email']} — route to login"
+                )
+            )
+            return
 
         self.stdout.write(self.style.SUCCESS(f"clone {trialclone.id}: {trialclone.status}"))
         self.stdout.write(f"trial org: {trialclone.trial_org and trialclone.trial_org.slug}")

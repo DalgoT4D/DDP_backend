@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.trial_clone import TrialClone, TrialCloneStatus
+from ddpui.core.trial.exceptions import TrialAccountExistsError
 from ddpui.core.trial.timing import step_timer
 from ddpui.core.trial.warehouse_provision import provision_trial_database, drop_trial_database
 from ddpui.core.trial.warehouse_data import copy_warehouse_data
@@ -23,6 +24,15 @@ from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
+
+
+def account_exists_for_email(email: str) -> bool:
+    """True if a Dalgo User already exists for this email (real customer OR prior trial).
+
+    Dalgo creates users with username == email, so this is the account-existence check the
+    Try Now entry flow uses to route existing users to the login screen instead of cloning.
+    """
+    return User.objects.filter(username=email).exists()
 
 
 def _step_org_and_user(template: Org, trialclone: TrialClone) -> None:
@@ -173,6 +183,11 @@ def clone_template_org(template_org_id: int, trial_email: str) -> TrialClone:
     marked FAILED (with the error) and the exception is re-raised so the caller
     (management command / future Celery task) sees it.
     """
+    if account_exists_for_email(trial_email):
+        raise TrialAccountExistsError(
+            f"an account already exists for {trial_email}; direct the user to log in"
+        )
+
     template = Org.objects.get(id=template_org_id)
     trialclone = TrialClone.objects.create(
         template_org=template,
