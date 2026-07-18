@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
+import psycopg2.errors
 import sqlalchemy
 from unittest.mock import _Call
 
@@ -19,6 +20,7 @@ from ddpui.api.warehouse_api import (
     get_table,
     get_table_columns,
     get_table_data,
+    get_table_count,
     post_data_insights,
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
@@ -106,6 +108,59 @@ def test_get_table_data_success(orguser):
 
     assert response is not None
     assert response == [{"column_1": "value_1"}, {"column2": "value2}"}]
+
+
+def test_get_table_count_success(orguser):
+    """Success case for get_table_count"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.return_value = 42
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        response = get_table_count(request, "test_schema", "test_table")
+        assert response == {"total_rows": 42}
+
+
+def test_get_table_count_table_not_found(orguser):
+    """get_table_count returns 404 when the table does not exist"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = psycopg2.errors.UndefinedTable(
+        "relation \"test_schema.test_table\" does not exist"
+    )
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "test_schema", "test_table")
+        assert exc.value.status_code == 404
+        assert str(exc.value) == "Table test_schema.test_table not found"
+
+
+def test_get_table_count_generic_error(orguser):
+    """get_table_count returns 500 for unexpected errors"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = Exception("connection lost")
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "test_schema", "test_table")
+        assert exc.value.status_code == 500
 
 
 def test_data_insights_without_warehouse(orguser, data_insights_payload):

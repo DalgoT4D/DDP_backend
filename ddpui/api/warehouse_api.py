@@ -6,6 +6,7 @@ from io import StringIO
 import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
+import psycopg2.errors
 import sqlalchemy
 from ninja import Router
 from ninja.errors import HttpError
@@ -166,6 +167,8 @@ def get_table_count(request, schema_name: str, table_name: str):
         client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
+    except psycopg2.errors.UndefinedTable:
+        raise HttpError(404, f"Table {schema_name}.{table_name} not found")
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
         raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
