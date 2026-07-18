@@ -201,7 +201,7 @@ class StringLengthStats(ColInsight):
             .add_column(select([mode_subquery.c[f"{col.name}_len"]]).limit(1).label("mode"))
             .add_column(
                 select([func.array_agg(mode_subquery.c[f"{col.name}_len"])])
-                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1))
+                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1).scalar_subquery())
                 .label("other_modes")
             )
         )
