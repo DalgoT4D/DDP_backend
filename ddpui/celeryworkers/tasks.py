@@ -114,6 +114,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
     # Lock all dbt tasks that will be run
     task_locks: list[TaskLock] = []
+    taskprogress = None
 
     try:
         orgtasks = OrgTask.objects.filter(
@@ -301,12 +302,13 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         # done
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
-        taskprogress.add(
-            {
-                "message": "Job finished with a failure",
-                "status": "failed",
-            }
-        )
+        if taskprogress is not None:
+            taskprogress.add(
+                {
+                    "message": "Job finished with a failure",
+                    "status": "failed",
+                }
+            )
 
     finally:
         for task_lock in task_locks:
