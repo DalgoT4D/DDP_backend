@@ -115,6 +115,27 @@ def test_abreq_success():
     assert isinstance(result["workspaces"], list)
 
 
+def test_abreq_empty_response():
+    """Successful response with empty body (e.g. DELETE) should return {} without warning"""
+    endpoint = "sources/delete"
+
+    with patch("ddpui.ddpairbyte.airbyte_service.requests.post") as mock_post:
+        mock_response = Mock()
+        mock_response.status_code = 204
+        mock_response.headers = {}
+        mock_response.content = b""
+        mock_response.text = ""
+        mock_response.json.side_effect = ValueError("No JSON")
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        with patch("ddpui.ddpairbyte.airbyte_service.logger") as mock_logger:
+            result = abreq(endpoint, {"sourceId": "test-source-id"})
+            mock_logger.warning.assert_not_called()
+
+    assert result == {}
+
+
 def test_abreq_connection_error():
     endpoint = "my_endpoint"
 
