@@ -803,8 +803,8 @@ class TestMultipleDimensionsMultipleMetrics:
 class TestMultipleDimensionsErrorCases:
     """Tests for error handling with multiple dimensions"""
 
-    def test_table_chart_no_dimensions(self, orguser, org_warehouse, seed_db):
-        """Test table chart with no dimensions should raise error"""
+    def test_table_chart_no_dimensions_at_all(self, orguser, org_warehouse, seed_db):
+        """Test table chart with no dimension sources at all should raise 400 error"""
         request = mock_request(orguser)
 
         payload = ChartDataPayload(
@@ -812,16 +812,18 @@ class TestMultipleDimensionsErrorCases:
             schema_name="public",
             table_name="test_table",
             dimensions=None,
+            dimension_col=None,
+            extra_dimension=None,
             metrics=[ChartMetric(aggregation="count", column=None)],
         )
 
         with pytest.raises(HttpError) as excinfo:
             get_chart_data(request, payload)
 
-        assert excinfo.value.status_code in [400, 500]  # Should be validation or server error
+        assert excinfo.value.status_code == 400
 
-    def test_table_chart_empty_dimensions(self, orguser, org_warehouse, seed_db):
-        """Test table chart with empty dimensions array should raise error"""
+    def test_table_chart_empty_dimensions_no_fallback(self, orguser, org_warehouse, seed_db):
+        """Test table chart with empty dimensions and no fallback should raise 400 error"""
         request = mock_request(orguser)
 
         payload = ChartDataPayload(
@@ -829,10 +831,39 @@ class TestMultipleDimensionsErrorCases:
             schema_name="public",
             table_name="test_table",
             dimensions=[],
+            dimension_col=None,
+            extra_dimension=None,
             metrics=[ChartMetric(aggregation="count", column=None)],
         )
 
         with pytest.raises(HttpError) as excinfo:
             get_chart_data(request, payload)
 
-        assert excinfo.value.status_code in [400, 500]
+        assert excinfo.value.status_code == 400
+
+    @patch("ddpui.api.charts_api.generate_chart_data_and_config")
+    def test_table_chart_no_dimensions_with_dimension_col_fallback(
+        self, mock_generate, orguser, org_warehouse, seed_db
+    ):
+        """Test table chart with dimensions=None but dimension_col set should succeed"""
+        mock_generate.return_value = {
+            "data": {
+                "tableData": [{"KEY": "key1", "Total Count": 100}],
+                "columns": ["KEY", "Total Count"],
+            },
+            "echarts_config": {},
+        }
+
+        request = mock_request(orguser)
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=None,
+            dimension_col="KEY",
+            metrics=[ChartMetric(aggregation="count", column=None, alias="Total Count")],
+        )
+
+        response = get_chart_data(request, payload)
+        assert response.data is not None

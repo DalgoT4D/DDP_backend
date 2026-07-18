@@ -519,6 +519,15 @@ def get_chart_data(request, payload: ChartDataPayload):
     if not org_warehouse:
         raise HttpError(404, "Warehouse not configured")
 
+    # Validate that at least one dimension source is provided for chart types that need them
+    if payload.chart_type not in ("number", "map", "pivot_table"):
+        has_dimensions = payload.dimensions and any(d and d.strip() for d in payload.dimensions)
+        if not has_dimensions and not payload.dimension_col and not payload.extra_dimension:
+            raise HttpError(
+                400,
+                "At least one dimension is required: provide dimensions, dimension_col, or extra_dimension",
+            )
+
     # Log payload details for debugging
     logger.info(
         f"Chart data endpoint - payload dimensions: {payload.dimensions}, dimension_col: {payload.dimension_col}, extra_dimension: {payload.extra_dimension}"
@@ -582,6 +591,15 @@ def get_chart_data_preview(
                 payload.schema_name,
                 payload.table_name,
                 warehouse_client,
+            )
+
+    # Validate that at least one dimension source is provided for chart types that need them
+    if payload.chart_type not in ("number", "map", "pivot_table"):
+        has_dimensions = payload.dimensions and any(d and d.strip() for d in payload.dimensions)
+        if not has_dimensions and not payload.dimension_col and not payload.extra_dimension:
+            raise HttpError(
+                400,
+                "At least one dimension is required: provide dimensions, dimension_col, or extra_dimension",
             )
 
     # Create a modified payload with dashboard filters
