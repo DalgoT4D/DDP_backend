@@ -140,6 +140,9 @@ def get_pagination_params(payload: ChartDataPayload):
     return None, None
 
 
+DIMENSIONLESS_CHART_TYPES = {"number"}
+
+
 def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
     """
     Normalize dimensions from payload, handling backward compatibility.
@@ -164,7 +167,7 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
         if payload.extra_dimension:
             final_dims.append(payload.extra_dimension)
 
-    if not final_dims:
+    if not final_dims and payload.chart_type not in DIMENSIONLESS_CHART_TYPES:
         logger.warning(f"No valid dimensions found {payload.dimensions}")
 
     return final_dims

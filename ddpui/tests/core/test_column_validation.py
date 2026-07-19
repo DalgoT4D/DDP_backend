@@ -91,6 +91,20 @@ class TestNormalizeDimensions:
         dims = normalize_dimensions(payload)
         assert dims == []
 
+    def test_normalize_dimensions_number_chart_no_warning(self, caplog):
+        """Test that number charts do not emit a warning for empty dimensions"""
+        import logging
+
+        payload = ChartDataPayload(
+            chart_type="number",
+            schema_name="test_schema",
+            table_name="test_table",
+        )
+        with caplog.at_level(logging.WARNING, logger="ddpui"):
+            dims = normalize_dimensions(payload)
+        assert dims == []
+        assert "No valid dimensions found" not in caplog.text
+
 
 class TestSQLAlchemyHandlesColumnNames:
     """
