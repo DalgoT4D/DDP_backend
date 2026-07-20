@@ -97,6 +97,16 @@ If you did not request a password reset you may safely ignore this email.
     send_text_message(to_email, "You've requested a password reset", message)
 
 
+def send_trial_verification_email(to_email: str, verify_url: str) -> None:
+    """send an email to verify a free-trial signup and set a password"""
+    subject = "Verify your email to start your Dalgo trial"
+    message = (
+        f"Welcome to Dalgo!\n\nClick to verify your email and set your password:\n{verify_url}\n\n"
+        "This link expires in 24 hours."
+    )
+    send_text_message(to_email, subject, message)
+
+
 def send_signup_email(to_email: str, verification_url: str) -> None:
     """send a signup email with an email verification link"""
     message = f"""Hello,

@@ -6,6 +6,7 @@ from ddpui.utils.awsses import (
     send_signup_email,
     send_invite_user_email,
     send_youve_been_added_email,
+    send_trial_verification_email,
 )
 
 
@@ -70,3 +71,13 @@ You've been added to org_name by added_by.
 Open your dashboard at https://test-frontend.com
     """
         mock_send_text_message.assert_called_once_with("to_email", "Added to Dalgo Org", message)
+
+
+def test_send_trial_verification_email():
+    """tests send_trial_verification_email"""
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
+        send_trial_verification_email("to_email", "verify_url")
+        mock_send_text_message.assert_called_once()
+        args, _ = mock_send_text_message.call_args
+        assert args[0] == "to_email"
+        assert "verify_url" in args[2]
