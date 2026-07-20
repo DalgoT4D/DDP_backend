@@ -353,12 +353,14 @@ def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
             pat=template_pat,
         )
         template_models_dir = Path(template_clone.repo_local_path) / "models"
-        if template_models_dir.exists():
-            shutil.copytree(template_models_dir, trial_repo_dir / "models", dirs_exist_ok=True)
-        else:
-            logger.warning(
+        if not template_models_dir.exists():
+            # copy_dbt_dag has already created trial OrgDbtModel rows with sql_path set — if we
+            # copy no .sql files, the trial dbt project is half-populated (DAG metadata but no
+            # backing files). Fail loud rather than ship a broken transform layer.
+            raise RuntimeError(
                 f"template dbt repo {template_dbt.gitrepo_url} has no models/ directory to copy"
             )
+        shutil.copytree(template_models_dir, trial_repo_dir / "models", dirs_exist_ok=True)
 
     trial_pat = GitManager.get_org_admin_pat()
     git_manager = GitManager(repo_local_path=str(trial_repo_dir), pat=trial_pat)

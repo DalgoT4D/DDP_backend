@@ -640,6 +640,46 @@ def test_copy_dbt_repo_files_clones_and_pushes(mock_git_manager_cls, mock_retrie
 
 @patch("ddpui.core.trial.dbt_clone.retrieve_github_pat")
 @patch("ddpui.core.trial.dbt_clone.GitManager")
+def test_copy_dbt_repo_files_raises_when_template_has_no_models_dir(
+    mock_git_manager_cls, mock_retrieve_pat, tmp_path
+):
+    """copy_dbt_dag has already created trial OrgDbtModel rows with sql_path set; if the template
+    repo has no models/ dir to copy, the trial dbt would be half-populated (metadata, no .sql).
+    Must raise loudly, not silently continue."""
+    template_org = Org.objects.create(name="tmpl-nomodels", slug="tmpl-nomodels")
+    trial_org = Org.objects.create(name="trial-nomodels", slug="trial-nomodels")
+
+    template_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/some-ngo/empty.git",
+        gitrepo_access_token_secret="template-pat-secret",
+        is_repo_managed_by_system=False,
+        project_dir="tmpl-nomodels/dbtrepo",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="github",
+    )
+    trial_dbt = _make_trial_dbt_with_scaffold(trial_org, tmp_path)
+
+    # cloned template repo has NO models/ dir
+    fake_clone_dir = tmp_path / "cloned_empty_repo"
+    fake_clone_dir.mkdir(parents=True)
+
+    mock_clone_instance = MagicMock()
+    mock_clone_instance.repo_local_path = str(fake_clone_dir)
+    mock_git_manager_cls.clone.return_value = mock_clone_instance
+    mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+    mock_retrieve_pat.return_value = "template-pat"
+
+    with pytest.raises(RuntimeError, match="no models/ directory"):
+        dbt_clone.copy_dbt_repo_files(template_dbt, trial_dbt)
+
+    # never pushed a half-populated repo
+    mock_git_manager_cls.return_value.push_changes.assert_not_called()
+
+
+@patch("ddpui.core.trial.dbt_clone.retrieve_github_pat")
+@patch("ddpui.core.trial.dbt_clone.GitManager")
 def test_copy_dbt_repo_files_uses_admin_pat_for_managed_template(
     mock_git_manager_cls, mock_retrieve_pat, tmp_path
 ):
