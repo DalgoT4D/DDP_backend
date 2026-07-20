@@ -1,4 +1,4 @@
-"""Tests for apply_chart_filters — timestamp day-range filter handling"""
+"""Tests for apply_chart_filters — timestamp day-range filter handling and empty value skipping"""
 
 import os
 import django
@@ -8,7 +8,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 import pytest
-from ddpui.core.charts.charts_service import apply_chart_filters
+from ddpui.core.charts.charts_service import apply_chart_filters, apply_dashboard_filters
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 
 pytestmark = pytest.mark.django_db
@@ -110,3 +110,89 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+
+class TestEmptyValueFiltersSkipped:
+    """Filters with empty string values must be silently skipped to avoid
+    invalid SQL such as ``WHERE meeting_date = ''`` on date columns."""
+
+    def test_chart_filter_empty_string_equals_skipped(self):
+        """equals filter with empty string value produces no WHERE clause"""
+        sql = get_where_sql([make_filter("meeting_date", "equals", "", "date")])
+        assert len(sql) == 0
+
+    def test_chart_filter_whitespace_only_equals_skipped(self):
+        """equals filter with whitespace-only value is also skipped"""
+        sql = get_where_sql([make_filter("meeting_date", "equals", "   ", "date")])
+        assert len(sql) == 0
+
+    def test_chart_filter_empty_string_timestamp_skipped(self):
+        """timestamp column with empty string value is skipped"""
+        sql = get_where_sql([make_filter("created_at", "equals", "", "timestamp")])
+        assert len(sql) == 0
+
+    def test_chart_filter_empty_string_comparison_operators_skipped(self):
+        """comparison operators with empty string value are all skipped"""
+        for op in ["not_equals", "greater_than", "less_than", "greater_than_equal", "less_than_equal"]:
+            sql = get_where_sql([make_filter("meeting_date", op, "", "date")])
+            assert len(sql) == 0, f"operator {op} should skip empty value"
+
+    def test_chart_filter_empty_string_like_skipped(self):
+        """like/contains with empty string value are skipped"""
+        for op in ["like", "like_case_insensitive", "contains", "not_contains"]:
+            sql = get_where_sql([make_filter("name", op, "", "varchar")])
+            assert len(sql) == 0, f"operator {op} should skip empty value"
+
+    def test_chart_filter_is_null_with_empty_value_still_works(self):
+        """is_null / is_not_null must NOT be skipped even when value is empty"""
+        for op in ["is_null", "is_not_null"]:
+            sql = get_where_sql([make_filter("meeting_date", op, "", "date")])
+            assert len(sql) == 1, f"operator {op} should not be skipped"
+
+    def test_chart_filter_non_empty_value_still_applied(self):
+        """non-empty value on date column still produces a WHERE clause"""
+        sql = get_where_sql([make_filter("meeting_date", "equals", "2026-06-15", "date")])
+        assert len(sql) == 1
+        assert "2026-06-15" in sql[0]
+
+    def test_dashboard_filter_empty_string_value_skipped(self):
+        """dashboard filter with empty string value is skipped"""
+        qb = AggQueryBuilder()
+        apply_dashboard_filters(qb, [
+            {"column": "meeting_date", "type": "value", "value": ""},
+        ])
+        assert len(qb.where_clauses) == 0
+
+    def test_dashboard_filter_empty_string_datetime_skipped(self):
+        """dashboard datetime filter with empty string value is skipped"""
+        qb = AggQueryBuilder()
+        apply_dashboard_filters(qb, [
+            {"column": "meeting_date", "type": "datetime", "value": ""},
+        ])
+        assert len(qb.where_clauses) == 0
+
+    def test_dashboard_filter_none_value_skipped(self):
+        """dashboard filter with None value is still skipped (existing behavior)"""
+        qb = AggQueryBuilder()
+        apply_dashboard_filters(qb, [
+            {"column": "meeting_date", "type": "datetime", "value": None},
+        ])
+        assert len(qb.where_clauses) == 0
+
+    def test_dashboard_filter_list_with_empty_strings_cleaned(self):
+        """dashboard value filter with list containing empty strings drops them"""
+        qb = AggQueryBuilder()
+        apply_dashboard_filters(qb, [
+            {"column": "status", "type": "value", "value": ["active", "", "  "]},
+        ])
+        assert len(qb.where_clauses) == 1
+        compiled = str(qb.where_clauses[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "active" in compiled
+
+    def test_dashboard_filter_list_all_empty_strings_skipped(self):
+        """dashboard value filter where all list items are empty produces no clause"""
+        qb = AggQueryBuilder()
+        apply_dashboard_filters(qb, [
+            {"column": "status", "type": "value", "value": ["", "  "]},
+        ])
+        assert len(qb.where_clauses) == 0

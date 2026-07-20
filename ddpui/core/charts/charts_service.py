@@ -725,12 +725,13 @@ def apply_dashboard_filters(
         filter_type = filter_config["type"]
         value = filter_config["value"]
 
-        if value is None:
+        if value is None or (isinstance(value, str) and value.strip() == ""):
             continue
 
         if filter_type == "value":
             if isinstance(value, list):
-                # Multiple values - use IN clause
+                # Multiple values - use IN clause; drop empty strings
+                value = [v for v in value if not (isinstance(v, str) and v.strip() == "")]
                 if len(value) > 0:
                     # Convert list values to proper SQL format
                     query_builder.where_clause(column(column_name).in_(value))
@@ -834,6 +835,13 @@ def apply_chart_filters(
         operator = filter_config["operator"]
 
         if not column_name or operator is None:
+            continue
+
+        # Skip filters with empty string values (except is_null/is_not_null
+        # which don't use the value). An empty string on a date/timestamp
+        # column produces invalid SQL (e.g. WHERE meeting_date = '').
+        value = filter_config.get("value")
+        if operator not in ("is_null", "is_not_null") and isinstance(value, str) and value.strip() == "":
             continue
 
         # Timestamp date filters need day-range logic — keep full config
