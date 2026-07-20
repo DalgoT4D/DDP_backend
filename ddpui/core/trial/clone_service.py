@@ -35,6 +35,8 @@ from ddpui.models.dbt_workflow import OrgDbtOperation
 from ddpui.core.trial.prefect_clone import clone_orchestrate_dataflows
 from ddpui.core.trial.viz_clone import clone_viz
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
+from ddpui.core.orgtaskfunctions import create_default_transform_tasks
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -334,6 +336,11 @@ def _step_dbt(run: CloneRun) -> None:
       as-is (the files will land at those same project-relative paths); `copy_dbt_repo_files`
       then clones the template's own repo and copies its `models/` directory straight into the
       trial repo, then commits + pushes.
+
+    After EITHER branch completes, creates the dbt system OrgTasks (git-pull/dbt-clean/
+    dbt-deps/...) for the trial org via `create_default_transform_tasks`, mirroring what a
+    normal dbt-enabled org gets — otherwise the trial org has a dbt project but no OrgTasks for
+    the UI to run dbt with.
     """
     template_dbt = run.template.dbt
     if template_dbt is None:
@@ -373,6 +380,27 @@ def _step_dbt(run: CloneRun) -> None:
 
     run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
     run.manifest["dbt_models"] = len(model_map)
+
+    # Create the dbt system OrgTasks (git-pull/dbt-clean/dbt-deps/dbt-run/...) for the trial
+    # org, same as the normal Dalgo dbt setup flow (transform_api.py) does — without this the
+    # trial dbt project exists on disk/in the DB but has no OrgTasks for the UI to run. Runs
+    # AFTER both the copy and regen branches above, once the trial dbt project is fully set up
+    # and pushed.
+    run.trial_org.refresh_from_db()
+    trial_dbt = run.trial_org.dbt
+    if trial_dbt is None:
+        raise RuntimeError(
+            "trial org lost its dbt workspace before transform tasks could be created"
+        )
+    if trial_dbt.cli_profile_block is None:
+        raise RuntimeError(
+            "trial org's dbt workspace has no cli_profile_block; "
+            "setup_managed_git_workspace should have set it"
+        )
+
+    dbt_project_params = DbtProjectManager.gather_dbt_project_params(run.trial_org, trial_dbt)
+    create_default_transform_tasks(run.trial_org, trial_dbt.cli_profile_block, dbt_project_params)
+    run.manifest["dbt_transform_tasks_created"] = True
 
 
 def _step_prefect(run: CloneRun) -> None:
