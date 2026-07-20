@@ -24,7 +24,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter, DashboardLock
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.services.dashboard_service import (
     DashboardService,
     DashboardData,
@@ -97,7 +97,7 @@ def orguser2(authuser2, org):
     orguser = OrgUser.objects.create(
         user=authuser2,
         org=org,
-        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -223,7 +223,7 @@ class TestDeleteDashboardPermissions:
         with pytest.raises(DashboardPermissionError) as excinfo:
             DashboardService.delete_dashboard(dashboard.id, org, orguser2)
 
-        assert "only delete dashboards you created" in excinfo.value.message
+        assert "Only the owner or an admin can delete this dashboard." in excinfo.value.message
 
         # Cleanup
         dashboard.delete()

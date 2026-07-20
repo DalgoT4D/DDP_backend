@@ -1,8 +1,79 @@
-"""HTML email templates for Dalgo notifications"""
+"""HTML email templates for Dalgo notifications.
+
+All outbound Dalgo emails share the same visual shell — teal header with the
+Dalgo wordmark, 600-px container on a light-gray page, and a footer strip. The
+shell is defined once in ``_render_email_shell``. Every render_* function in
+this module builds its body_html fragment and hands it to the shell. Do not
+inline the shell markup anywhere else — the ``test_shell_is_single_source``
+test enforces this.
+"""
 
 import html
+import os
 import re
 from typing import Optional
+
+
+# ── One shell to rule them all ────────────────────────────────────────────
+
+
+def _render_email_shell(body_html: str, footer_note: str) -> str:
+    """Wrap body_html in the shared Dalgo email chrome.
+
+    The shell owns: html/head boilerplate, page padding, the 600-px card,
+    the teal header bar with the Dalgo wordmark, the 32-px body cell padding,
+    and the footer strip. Callers own everything inside the body cell
+    (headline, content, CTA button) via ``body_html``.
+
+    This is the ONLY place the Dalgo email chrome lives. If you find yourself
+    copy-pasting `#00897B` or a Dalgo header markup fragment, stop and use
+    this helper instead.
+    """
+    return f"""\
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5; padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#00897B; padding:20px 32px;">
+              <h1 style="color:#ffffff; margin:0; font-size:18px; font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+{body_html}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
+              <p style="margin:0; font-size:12px; color:#9ca3af; line-height:1.5;">
+                {footer_note}
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+# ── Comment/mention utilities ─────────────────────────────────────────────
 
 
 def _strip_mentions(content: str) -> str:
@@ -111,30 +182,7 @@ def render_mention_email(
         f"You received this email because you were mentioned in a comment on Dalgo.\n"
     )
 
-    html_body = f"""\
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5; padding:32px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#00897B; padding:20px 32px;">
-              <h1 style="color:#ffffff; margin:0; font-size:18px; font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
-            </td>
-          </tr>
-
-          <!-- Body -->
-          <tr>
-            <td style="padding:32px;">
-
+    body_html = f"""\
               <!-- Headline -->
               <p style="margin:0 0 6px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
                 {safe_author_name} mentioned you in a comment
@@ -170,28 +218,13 @@ def render_mention_email(
                     </a>
                   </td>
                 </tr>
-              </table>
-            </td>
-          </tr>
+              </table>"""
 
-          <!-- Footer -->
-          <tr>
-            <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
-              <p style="margin:0; font-size:12px; color:#9ca3af; line-height:1.5;">
-                You received this email because you were mentioned in a comment on Dalgo.
-                You can manage your notification preferences in your account settings.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
-
-    return plain_text, html_body
+    return plain_text, _render_email_shell(
+        body_html,
+        "You received this email because you were mentioned in a comment on Dalgo."
+        " You can manage your notification preferences in your account settings.",
+    )
 
 
 def render_share_report_email(
@@ -239,55 +272,21 @@ def render_share_report_email(
     public_link_html = ""
     if public_url:
         safe_public_url = html.escape(public_url)
-        public_link_html = f"""\
+        public_link_html = f"""
 
               <!-- Public link -->
-              <p style="margin:16px 0 0; font-size:13px; color:#6b7280; \
-line-height:1.5;">
-                Or view without logging in: \
-<a href="{safe_public_url}" style="color:#00897B; text-decoration:underline;">\
-Public Link</a>
+              <p style="margin:16px 0 0; font-size:13px; color:#6b7280; line-height:1.5;">
+                Or view without logging in: <a href="{safe_public_url}" style="color:#00897B; text-decoration:underline;">Public Link</a>
               </p>"""
 
-    html_body = f"""\
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0; padding:0; background-color:#f4f4f5; \
-font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" \
-style="background-color:#f4f4f5; padding:32px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" \
-style="background-color:#ffffff; border-radius:8px; overflow:hidden; \
-box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#00897B; padding:20px 32px;">
-              <h1 style="color:#ffffff; margin:0; font-size:18px; \
-font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
-            </td>
-          </tr>
-
-          <!-- Body -->
-          <tr>
-            <td style="padding:32px;">
-
+    body_html = f"""\
               <!-- Headline -->
-              <p style="margin:0 0 8px; font-size:17px; color:#111827; \
-font-weight:600; line-height:1.4;">
-                {safe_sender} has shared \
-&ldquo;{safe_title}&rdquo; with you &#10024;
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                {safe_sender} has shared &ldquo;{safe_title}&rdquo; with you &#10024;
               </p>
 
               <!-- Web experience note -->
-              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; \
-line-height:1.5;">
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; line-height:1.5;">
                 Check it out on <strong>Dalgo</strong> web for the best experience &#128187;
               </p>
 
@@ -296,9 +295,7 @@ line-height:1.5;">
                 <tr>
                   <td>
                     <a href="{safe_private_url}"
-                       style="display:inline-block; background-color:#00897B; \
-color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; \
-font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                       style="display:inline-block; background-color:#00897B; color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:600; letter-spacing:0.3px;">
                       View Report
                     </a>
                   </td>
@@ -306,35 +303,80 @@ font-size:14px; font-weight:600; letter-spacing:0.3px;">
               </table>{public_link_html}
 
               <!-- OR separator -->
-              <p style="margin:20px 0; font-size:13px; color:#9ca3af; \
-text-align:center; font-weight:600;">
+              <p style="margin:20px 0; font-size:13px; color:#9ca3af; text-align:center; font-weight:600;">
                 OR
               </p>
 
               <!-- Attachment note -->
-              <p style="margin:0; font-size:13px; color:#6b7280; \
-line-height:1.5;">
+              <p style="margin:0; font-size:13px; color:#6b7280; line-height:1.5;">
                 Download attached <strong>PDF</strong> to peruse at your own pace &#128196;
+              </p>"""
+
+    return plain_text, _render_email_shell(
+        body_html,
+        "You received this email because someone shared a Dalgo report with you.",
+    )
+
+
+# ── Alert email ──────────────────────────────────────────────────────────
+
+
+def _escape_and_break(user_body: str) -> str:
+    """HTML-escape a user-authored plain-text body, then convert newlines to <br>."""
+    return html.escape(user_body).replace("\n", "<br>\n")
+
+
+def render_alert_email(alert, rendered_body: str) -> tuple:
+    """Wrap a Mustache-rendered alert body in the shared Dalgo email shell.
+
+    ``alert`` is a ddpui.models.alert.Alert instance. The user's template body
+    (already Mustache-substituted by ddpui.core.alerts.rendering.render) is
+    escaped, newlines become ``<br>``, and the result sits inside the Dalgo
+    shell with a "View alert" CTA pointing at the alerts listing.
+
+    Slack delivery does NOT use this path — Slack posts get the raw body.
+    """
+    safe_alert_name = html.escape(alert.name)
+    frontend_url = os.getenv("FRONTEND_URL", "").rstrip("/")
+    cta_url = f"{frontend_url}/alerts"
+    safe_cta_url = html.escape(cta_url)
+    body_fragment = _escape_and_break(rendered_body)
+
+    plain_text = (
+        f"Alert fired: {alert.name}\n"
+        f"\n"
+        f"{rendered_body}\n"
+        f"\n"
+        f"View alert: {cta_url}\n"
+        f"\n"
+        f"---\n"
+        f"You received this email because you are a recipient on this Dalgo alert.\n"
+    )
+
+    body_html = f"""\
+              <!-- Headline -->
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                Alert fired: {safe_alert_name}
               </p>
-            </td>
-          </tr>
 
-          <!-- Footer -->
-          <tr>
-            <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
-              <p style="margin:0; font-size:12px; color:#9ca3af; \
-line-height:1.5;">
-                You received this email because someone shared \
-a Dalgo report with you.
+              <!-- User-authored body -->
+              <p style="margin:0 0 24px; font-size:14px; color:#374151; line-height:1.6;">
+                {body_fragment}
               </p>
-            </td>
-          </tr>
 
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <a href="{safe_cta_url}"
+                       style="display:inline-block; background-color:#00897B; color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                      View alert
+                    </a>
+                  </td>
+                </tr>
+              </table>"""
 
-    return plain_text, html_body
+    return plain_text, _render_email_shell(
+        body_html,
+        "You received this email because you are a recipient on this Dalgo alert.",
+    )

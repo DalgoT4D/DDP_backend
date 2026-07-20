@@ -17,6 +17,7 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
+from ddpui.core.ownership import is_creator_or_admin
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -402,10 +403,11 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Check permissions - only dashboard creator or org admin can modify sharing
-    if dashboard.created_by != orguser:
-        # TODO: Add org admin check if needed
-        raise HttpError(403, "Only dashboard creators can modify sharing settings")
+    # Only the dashboard creator or an org admin can modify sharing
+    if not is_creator_or_admin(orguser, dashboard):
+        raise HttpError(
+            403, "Only the dashboard creator or an org admin can modify sharing settings"
+        )
 
     is_public = payload.is_public
 
@@ -462,10 +464,9 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    # Check permissions - only dashboard creator or org admin can view sharing status
-    if dashboard.created_by != orguser:
-        # TODO: Add org admin check if needed
-        raise HttpError(403, "Only dashboard creators can view sharing settings")
+    # Only the dashboard creator or an org admin can view sharing status
+    if not is_creator_or_admin(orguser, dashboard):
+        raise HttpError(403, "Only the dashboard creator or an org admin can view sharing settings")
 
     response_data = {
         "is_public": dashboard.is_public,
