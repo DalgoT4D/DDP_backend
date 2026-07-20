@@ -253,6 +253,72 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
 
 
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_deletes_dangling_trial_user(mock_s1, mock_s2, mock_cleanup_cls, mock_drop):
+    """Step1 (in real life) creates the Django User BEFORE the OrgUser's org is torn down.
+    Here we simulate step1 having created the User + trial_org (and its OrgUser, which
+    OrgCleanupService.delete_org — mocked out — would remove), then a later step fails.
+    Teardown must delete the now-accountless dangling User so retries for that email are not
+    permanently blocked by account_exists_for_email."""
+    template = Org.objects.create(name="tmpl-dangle", slug="tmpl-dangle")
+    trial_org = Org.objects.create(name="Trial Dangle", slug="trial-dangle")
+
+    def fake_step1(run):
+        user = User.objects.create(username=run.trial_email, email=run.trial_email)
+        orguser = OrgUser.objects.create(user=user, org=trial_org, email_verified=False)
+        run.trial_org = trial_org
+        run.trial_orguser = orguser
+
+    mock_s1.side_effect = fake_step1
+
+    # OrgCleanupService.delete_org is mocked out (no real infra) — but it WOULD remove the
+    # OrgUser in real life, so mimic that side effect here.
+    def fake_delete_org():
+        OrgUser.objects.filter(org=trial_org).delete()
+
+    mock_cleanup_cls.return_value.delete_org.side_effect = fake_delete_org
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(template.id, "dangle@x.org")
+
+    mock_cleanup_cls.return_value.delete_org.assert_called_once()
+    assert not User.objects.filter(username="dangle@x.org").exists()
+
+
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_keeps_user_that_still_has_an_orguser(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop
+):
+    """Safety: if the trial email's User still has an OrgUser after delete_org() (e.g. a
+    pre-existing real user whose email collided with the trial email), teardown must NOT
+    delete that User."""
+    template = Org.objects.create(name="tmpl-collide", slug="tmpl-collide")
+    trial_org = Org.objects.create(name="Trial Collide", slug="trial-collide")
+    other_org = Org.objects.create(name="Other Org", slug="other-org")
+
+    def fake_step1(run):
+        # the trial email already has a real account on a DIFFERENT org — delete_org() on
+        # the trial_org won't touch that OrgUser.
+        user = User.objects.create(username=run.trial_email, email=run.trial_email)
+        OrgUser.objects.create(user=user, org=other_org, email_verified=False)
+        run.trial_org = trial_org
+
+    mock_s1.side_effect = fake_step1
+    mock_cleanup_cls.return_value.delete_org.return_value = None
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(template.id, "collide@x.org")
+
+    mock_cleanup_cls.return_value.delete_org.assert_called_once()
+    assert User.objects.filter(username="collide@x.org").exists()
+
+
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_plan):
@@ -426,22 +492,39 @@ def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
 
 
 def test_account_exists_for_email_true_when_user_exists():
-    User.objects.create(username="dup@x.org", email="dup@x.org")
+    """A real account = a User WITH at least one OrgUser."""
+    org = Org.objects.create(name="guard-org", slug="guard-org")
+    _make_orguser(org, "dup@x.org")
     assert clone_service.account_exists_for_email("dup@x.org") is True
     assert clone_service.account_exists_for_email("new@x.org") is False
 
 
+def test_account_exists_true_only_with_orguser():
+    """A bare Django User with zero OrgUsers (e.g. left dangling by a failed/reaped trial
+    clone) must NOT count as an existing account — only a User WITH an OrgUser does."""
+    org = Org.objects.create(name="guard-org2", slug="guard-org2")
+    _make_orguser(org, "has-account@x.org")
+    assert clone_service.account_exists_for_email("has-account@x.org") is True
+
+    User.objects.create(username="dangling@x.org", email="dangling@x.org")
+    assert clone_service.account_exists_for_email("dangling@x.org") is False
+
+    assert clone_service.account_exists_for_email("never-existed@x.org") is False
+
+
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_rejects_existing_account(mock_step1):
-    User.objects.create(username="dup@x.org", email="dup@x.org")
+    org = Org.objects.create(name="guard-existing-org", slug="guard-existing-org")
+    _make_orguser(org, "dup@x.org")
     template = Org.objects.create(name="tmpl-guard", slug="tmpl-guard")
 
     with pytest.raises(TrialAccountExistsError):
         clone_service.clone_template_org(template.id, "dup@x.org")
 
     mock_step1.assert_not_called()
-    # the guard fires before any resource (trial org, etc.) is created
-    assert Org.objects.exclude(id=template.id).count() == 0
+    # the guard fires before any resource (trial org, etc.) is created beyond the
+    # pre-existing template + guard orgs.
+    assert Org.objects.exclude(id__in=[template.id, org.id]).count() == 0
 
 
 @patch("ddpui.core.trial.clone_service.validate_template_source_configs", return_value=[])

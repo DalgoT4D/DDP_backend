@@ -61,12 +61,13 @@ class CloneRun:
 
 
 def account_exists_for_email(email: str) -> bool:
-    """True if a Dalgo User already exists for this email (real customer OR prior trial).
+    """True if a real Dalgo account exists for this email — a User WITH at least one OrgUser.
 
-    Dalgo creates users with username == email, so this is the account-existence check the
-    Try Now entry flow uses to route existing users to the login screen instead of cloning.
+    A bare User row with zero OrgUsers (e.g. left dangling by a failed/reaped trial clone,
+    since teardown/deleteorg remove the OrgUser but not the Django User) is NOT an account and
+    must not block a retry.
     """
-    return User.objects.filter(username=email).exists()
+    return OrgUser.objects.filter(user__username=email).exists()
 
 
 def _step_org_and_user(run: CloneRun) -> None:
@@ -466,6 +467,15 @@ def _teardown(run: CloneRun) -> None:
             OrgCleanupService(run.trial_org, dry_run=False).delete_org()
         except Exception as org_err:  # skipcq PYL-W0703
             logger.error(f"failed to delete_org during teardown ({run.template.slug}): {org_err}")
+
+    # the Django User is created before the OrgUser in step 1; delete_org removes the OrgUser
+    # but not the User, so clean up an accountless trial User to keep retries unblocked.
+    try:
+        user = User.objects.filter(username=run.trial_email).first()
+        if user and not OrgUser.objects.filter(user=user).exists():
+            user.delete()
+    except Exception as user_err:  # skipcq PYL-W0703
+        logger.error(f"failed to delete dangling trial user {run.trial_email}: {user_err}")
 
 
 def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
