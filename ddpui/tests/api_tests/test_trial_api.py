@@ -131,6 +131,7 @@ class TestTrialActivate:
         result = trial_activate(None, payload)
 
         assert "task_id" in result
+        assert result["email"] == "new@b.org"  # echoed back for the progress screen's auto-login
         user = User.objects.get(username="new@b.org")
         assert user.check_password(STRONG_PASSWORD)
         mock_redis.set.assert_called_once_with("trial-activating:new@b.org", "1", nx=True, ex=600)

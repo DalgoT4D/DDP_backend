@@ -109,7 +109,9 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     task_id = str(uuid4())
     clone_trial_org_task.delay(task_id, template.id, email, data["org_name"], data["role"])
 
-    return {"task_id": task_id}
+    # email is echoed back so the progress screen can auto-login (POST /login) once the clone
+    # completes — the frontend never learns it any other way from this token-opened page.
+    return {"task_id": task_id, "email": email}
 
 
 @trial_router.get("/status/{task_id}")
