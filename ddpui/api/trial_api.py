@@ -16,6 +16,7 @@ from ddpui.core.trial.tasks import clone_trial_org_task
 from ddpui.models.org import Org
 from ddpui.models.org_user import UserAttributes
 from ddpui.utils.awsses import send_trial_verification_email
+from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.api.trial_api")
@@ -81,3 +82,21 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     clone_trial_org_task.delay(task_id, template.id, email, data["org_name"], data["role"])
 
     return {"task_id": task_id}
+
+
+@trial_router.get("/status/{task_id}")
+def trial_status(request, task_id: str):  # pylint: disable=unused-argument
+    """poll the redis-backed progress for a clone task"""
+    progress = TaskProgress.fetch(task_id, f"trial-clone-{task_id}")
+    if not progress:
+        return {"task_id": task_id, "progress": [], "status": "pending"}
+
+    last = progress[-1]
+    result = {
+        "task_id": task_id,
+        "progress": progress,
+        "status": last.get("status", "pending"),
+    }
+    if "org_slug" in last:
+        result["org_slug"] = last["org_slug"]
+    return result

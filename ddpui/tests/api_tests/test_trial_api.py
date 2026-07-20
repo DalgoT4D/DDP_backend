@@ -3,6 +3,7 @@
 Tests:
 1. POST /trial/signup — valid new email, existing account (409), invalid email (400)
 2. POST /trial/activate — valid token, invalid/used token (400)
+3. GET /trial/status/{task_id} — progress present, empty/None progress
 """
 
 import os
@@ -20,7 +21,13 @@ from django.contrib.auth.models import User
 from django.conf import settings
 
 from ddpui.models.org import Org
-from ddpui.api.trial_api import trial_signup, trial_activate, TrialSignupSchema, TrialActivateSchema
+from ddpui.api.trial_api import (
+    trial_signup,
+    trial_activate,
+    trial_status,
+    TrialSignupSchema,
+    TrialActivateSchema,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -103,3 +110,28 @@ class TestTrialActivate:
             trial_activate(None, payload)
 
         assert exc.value.status_code == 400
+
+
+class TestTrialStatus:
+    @patch("ddpui.api.trial_api.TaskProgress")
+    def test_status_with_progress(self, mock_taskprogress_cls):
+        mock_taskprogress_cls.fetch.return_value = [
+            {"message": "queued", "status": "queued"},
+            {"message": "done", "status": "completed", "org_slug": "trial-abc"},
+        ]
+
+        result = trial_status(None, "task-1")
+
+        mock_taskprogress_cls.fetch.assert_called_once_with("task-1", "trial-clone-task-1")
+        assert result["task_id"] == "task-1"
+        assert result["status"] == "completed"
+        assert result["org_slug"] == "trial-abc"
+        assert len(result["progress"]) == 2
+
+    @patch("ddpui.api.trial_api.TaskProgress")
+    def test_status_empty_progress_is_pending(self, mock_taskprogress_cls):
+        mock_taskprogress_cls.fetch.return_value = None
+
+        result = trial_status(None, "task-2")
+
+        assert result == {"task_id": "task-2", "progress": [], "status": "pending"}
