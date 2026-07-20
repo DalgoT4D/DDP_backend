@@ -1,5 +1,7 @@
+import os
 import uuid as uuid_module
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -95,6 +97,33 @@ def test_copy_dbt_dag_copies_models_operations_edges():
 
     # template rows are untouched
     assert OrgDbtModel.objects.filter(orgdbt=template_dbt).count() == 2
+
+
+def test_copy_dbt_dag_preserves_sql_path_when_requested():
+    """preserve_sql_path=True (the file-based/COPY-path branch) must carry `sql_path` forward
+    unchanged, since the copy path copies the actual .sql files to those same project-relative
+    paths in the trial repo — nulling it (the default, regen-path behaviour) would leave the
+    copied model rows pointing at nothing."""
+    template_org = Org.objects.create(name="tmpl-preserve", slug="tmpl-preserve")
+    trial_org = Org.objects.create(name="trial-preserve", slug="trial-preserve")
+    template_dbt = _make_orgdbt(template_org)
+    trial_dbt = _make_orgdbt(trial_org)
+
+    OrgDbtModel.objects.create(
+        orgdbt=template_dbt,
+        name="customers",
+        display_name="customers",
+        schema="analytics",
+        sql_path="models/marts/customers.sql",
+        type=OrgDbtModelType.MODEL,
+    )
+
+    model_map = dbt_clone.copy_dbt_dag(template_dbt, trial_dbt, preserve_sql_path=True)
+
+    trial_model = list(model_map.values())[0]
+    assert trial_model.sql_path == "models/marts/customers.sql"
+    trial_model.refresh_from_db()
+    assert trial_model.sql_path == "models/marts/customers.sql"
 
 
 def test_copy_dbt_dag_copies_canvas():
@@ -535,3 +564,111 @@ def test_regenerate_and_push_raises_on_ambiguous_terminal(mock_regen_model, mock
 
     mock_regen_model.assert_not_called()
     mock_git_manager_cls.assert_not_called()
+
+
+def _make_trial_dbt_with_scaffold(org: Org, tmp_path: Path) -> OrgDbt:
+    """A trial OrgDbt whose project dir already exists on disk with an empty `models/` dir —
+    mirrors the empty scaffold `setup_managed_git_workspace` creates before `copy_dbt_repo_files`
+    is ever called."""
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+    trial_dbt = OrgDbt.objects.create(
+        gitrepo_url=f"https://github.com/dalgo-managed/{org.slug}.git",
+        is_repo_managed_by_system=True,
+        project_dir=f"{org.slug}/dbtrepo",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="github",
+    )
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
+    (project_dir / "models").mkdir(parents=True, exist_ok=True)
+    return trial_dbt
+
+
+@patch("ddpui.core.trial.dbt_clone.retrieve_github_pat")
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+def test_copy_dbt_repo_files_clones_and_pushes(mock_git_manager_cls, mock_retrieve_pat, tmp_path):
+    """external (non-Dalgo-managed) template repo: PAT comes from
+    retrieve_github_pat(gitrepo_access_token_secret); model files land in the trial repo dir;
+    the trial repo is committed + pushed exactly once."""
+    template_org = Org.objects.create(name="tmpl-copyfiles", slug="tmpl-copyfiles")
+    trial_org = Org.objects.create(name="trial-copyfiles", slug="trial-copyfiles")
+
+    template_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/some-ngo/health_org.git",
+        gitrepo_access_token_secret="template-pat-secret",
+        is_repo_managed_by_system=False,
+        project_dir="tmpl-copyfiles/dbtrepo",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="github",
+    )
+    trial_dbt = _make_trial_dbt_with_scaffold(trial_org, tmp_path)
+
+    # fake the cloned template repo: a real dir on disk with a models/ folder to copy from
+    fake_clone_dir = tmp_path / "cloned_template_repo"
+    (fake_clone_dir / "models" / "staging").mkdir(parents=True)
+    (fake_clone_dir / "models" / "staging" / "stg_customers.sql").write_text("select 1")
+
+    mock_clone_instance = MagicMock()
+    mock_clone_instance.repo_local_path = str(fake_clone_dir)
+    mock_git_manager_cls.clone.return_value = mock_clone_instance
+    mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+    mock_push_instance = mock_git_manager_cls.return_value
+    mock_retrieve_pat.return_value = "template-pat"
+
+    dbt_clone.copy_dbt_repo_files(template_dbt, trial_dbt)
+
+    mock_retrieve_pat.assert_called_once_with("template-pat-secret")
+
+    clone_call = mock_git_manager_cls.clone.call_args
+    assert clone_call.kwargs["remote_repo_url"] == template_dbt.gitrepo_url
+    assert clone_call.kwargs["pat"] == "template-pat"
+
+    trial_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
+    copied_file = trial_repo_dir / "models" / "staging" / "stg_customers.sql"
+    assert copied_file.exists()
+    assert copied_file.read_text() == "select 1"
+
+    mock_git_manager_cls.assert_called_once_with(
+        repo_local_path=str(trial_repo_dir), pat="admin-pat"
+    )
+    mock_push_instance.commit_changes.assert_called_once_with("clone template dbt models from git")
+    mock_push_instance.push_changes.assert_called_once()
+
+
+@patch("ddpui.core.trial.dbt_clone.retrieve_github_pat")
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+def test_copy_dbt_repo_files_uses_admin_pat_for_managed_template(
+    mock_git_manager_cls, mock_retrieve_pat, tmp_path
+):
+    """Dalgo-managed template repo (is_repo_managed_by_system=True): cloning must use the
+    org-admin PAT, never retrieve_github_pat (managed repos don't store a per-org secret)."""
+    template_org = Org.objects.create(name="tmpl-managed", slug="tmpl-managed")
+    trial_org = Org.objects.create(name="trial-managed", slug="trial-managed")
+
+    template_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/dalgo-managed/tmpl-managed.git",
+        is_repo_managed_by_system=True,
+        project_dir="tmpl-managed/dbtrepo",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="github",
+    )
+    trial_dbt = _make_trial_dbt_with_scaffold(trial_org, tmp_path)
+
+    fake_clone_dir = tmp_path / "cloned_template_repo_managed"
+    (fake_clone_dir / "models").mkdir(parents=True)
+
+    mock_clone_instance = MagicMock()
+    mock_clone_instance.repo_local_path = str(fake_clone_dir)
+    mock_git_manager_cls.clone.return_value = mock_clone_instance
+    mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+
+    dbt_clone.copy_dbt_repo_files(template_dbt, trial_dbt)
+
+    mock_retrieve_pat.assert_not_called()
+    clone_call = mock_git_manager_cls.clone.call_args
+    assert clone_call.kwargs["pat"] == "admin-pat"

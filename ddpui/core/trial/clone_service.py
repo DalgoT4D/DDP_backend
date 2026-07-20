@@ -30,7 +30,8 @@ from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
 )
-from ddpui.core.trial.dbt_clone import copy_dbt_dag, regenerate_and_push
+from ddpui.core.trial.dbt_clone import copy_dbt_dag, copy_dbt_repo_files, regenerate_and_push
+from ddpui.models.dbt_workflow import OrgDbtOperation
 from ddpui.core.trial.prefect_clone import clone_orchestrate_dataflows
 from ddpui.core.trial.viz_clone import clone_viz
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
@@ -315,13 +316,24 @@ def _step_connections(run: CloneRun) -> None:
 def _step_dbt(run: CloneRun) -> None:
     """Step 6 — set up a fresh managed dbt workspace on the trial org, deep-copy the template's
     transform DAG (legacy OrgDbtModel/Operation/Edge rows + the active-path CanvasNode/Edge
-    rows) onto it, then regenerate every `.sql`/`sources.yml` file and push to the new repo.
+    rows) onto it, then materialize the trial's `.sql`/`sources.yml` files via one of two paths
+    and push to the new repo.
 
     `setup_managed_git_workspace` creates a brand-new managed GitHub repo, an `OrgDbt` row (with
     an EMPTY dbt scaffold — no `.sql` files yet), and the cli-profile block, then sets
-    `run.trial_org.dbt`. `copy_dbt_dag` rebuilds the DB-side DAG (with `sql_path=None` on every
-    copied model, since the scaffold has no files yet); `regenerate_and_push` then walks that DAG
-    to write real `.sql`/`sources.yml` files and pushes them to the managed repo.
+    `run.trial_org.dbt`.
+
+    Branches on whether the TEMPLATE dbt has any `OrgDbtOperation` rows:
+    - UI-operation-built templates (>=1 OrgDbtOperation): the REGEN path. `copy_dbt_dag` rebuilds
+      the DB-side DAG with `sql_path=None` on every copied model (the scaffold has no files yet);
+      `regenerate_and_push` then walks the copied operation chains to write real `.sql`/
+      `sources.yml` files and pushes them to the managed repo.
+    - github/file-based templates (ZERO OrgDbtOperation rows, e.g. `health_org` — models are
+      `.sql` files in a repo, canvas only displays them, no operation chain to regenerate from):
+      the COPY path. `copy_dbt_dag(preserve_sql_path=True)` keeps each copied model's `sql_path`
+      as-is (the files will land at those same project-relative paths); `copy_dbt_repo_files`
+      then clones the template's own repo and copies its `models/` directory straight into the
+      trial repo, then commits + pushes.
     """
     template_dbt = run.template.dbt
     if template_dbt is None:
@@ -343,13 +355,21 @@ def _step_dbt(run: CloneRun) -> None:
     if trial_dbt is None:
         raise RuntimeError("setup_managed_git_workspace did not set the trial org's dbt workspace")
 
-    model_map = copy_dbt_dag(template_dbt, trial_dbt)
+    is_file_based = not OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt).exists()
 
-    regenerated = regenerate_and_push(run.trial_org, trial_dbt)
+    if is_file_based:
+        model_map = copy_dbt_dag(template_dbt, trial_dbt, preserve_sql_path=True)
+        copy_dbt_repo_files(template_dbt, trial_dbt)
+        run.manifest["dbt_copy_path"] = True
+        run.manifest["dbt_regenerated"] = 0
+    else:
+        model_map = copy_dbt_dag(template_dbt, trial_dbt)
+        regenerated = regenerate_and_push(run.trial_org, trial_dbt)
+        run.manifest["dbt_copy_path"] = False
+        run.manifest["dbt_regenerated"] = regenerated
 
     run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
     run.manifest["dbt_models"] = len(model_map)
-    run.manifest["dbt_regenerated"] = regenerated
 
 
 def _step_prefect(run: CloneRun) -> None:

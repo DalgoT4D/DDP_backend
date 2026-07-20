@@ -1,10 +1,11 @@
 import os
+import uuid as uuid_module
 from unittest.mock import patch, Mock
 
 import pytest
 from django.contrib.auth.models import User
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
-from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
+from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType, OrgDbtOperation
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -672,19 +673,29 @@ def _make_orgdbt(slug: str) -> OrgDbt:
 
 @patch("ddpui.core.trial.clone_service.regenerate_and_push")
 @patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
-def test_step_dbt_sets_up_workspace_then_copies(mock_setup, mock_regen):
+def test_step_dbt_uses_regen_path_for_operation_built_template(mock_setup, mock_regen):
+    """template dbt WITH an operation -> uses the existing regen path (nulls sql_path);
+    guards the branch that must still work for UI-operation-built template orgs."""
     template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
     trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
 
     template_dbt = _make_orgdbt("tmpl-dbt")
     template.dbt = template_dbt
     template.save()
-    OrgDbtModel.objects.create(
+    dest_model = OrgDbtModel.objects.create(
         orgdbt=template_dbt,
         name="customers",
         display_name="customers",
         schema="analytics",
+        sql_path="models/analytics/customers.sql",
         type=OrgDbtModelType.MODEL,
+    )
+    OrgDbtOperation.objects.create(
+        dbtmodel=dest_model,
+        uuid=uuid_module.uuid4(),
+        seq=1,
+        output_cols=["id"],
+        config={"type": "rename"},
     )
 
     trial_dbt = _make_orgdbt("trial-dbt")
@@ -705,9 +716,54 @@ def test_step_dbt_sets_up_workspace_then_copies(mock_setup, mock_regen):
     )
     mock_regen.assert_called_once_with(trial_org, trial_dbt)
     assert OrgDbtModel.objects.filter(orgdbt=trial_dbt).count() == 1
+    # regen path nulls sql_path — the trial's scaffold has no files yet at this point
+    assert OrgDbtModel.objects.filter(orgdbt=trial_dbt).first().sql_path is None
     assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
     assert run.manifest["dbt_models"] == 1
     assert run.manifest["dbt_regenerated"] == 1
+
+
+@patch("ddpui.core.trial.clone_service.copy_dbt_repo_files")
+@patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
+def test_step_dbt_uses_copy_path_for_file_based_template(mock_setup, mock_copy_files):
+    """template dbt with models that have sql_path set and ZERO operations (github/file-based,
+    like health_org) -> uses the COPY path (copy_dbt_repo_files), NOT regenerate_and_push; DAG
+    rows are copied with sql_path PRESERVED."""
+    template = Org.objects.create(name="tmpl-filedbt", slug="tmpl-filedbt")
+    trial_org = Org.objects.create(name="Trial filedbt", slug="trial-filedbt")
+
+    template_dbt = _make_orgdbt("tmpl-filedbt")
+    template.dbt = template_dbt
+    template.save()
+    template_model = OrgDbtModel.objects.create(
+        orgdbt=template_dbt,
+        name="customers",
+        display_name="customers",
+        schema="analytics",
+        sql_path="models/analytics/customers.sql",
+        type=OrgDbtModelType.MODEL,
+    )
+
+    trial_dbt = _make_orgdbt("trial-filedbt")
+
+    def fake_setup(org, project_name, default_schema):
+        org.dbt = trial_dbt
+        org.save()
+
+    mock_setup.side_effect = fake_setup
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+
+    with patch("ddpui.core.trial.clone_service.regenerate_and_push") as mock_regen:
+        clone_service._step_dbt(run)
+
+    mock_regen.assert_not_called()
+    mock_copy_files.assert_called_once_with(template_dbt, trial_dbt)
+
+    trial_model = OrgDbtModel.objects.get(orgdbt=trial_dbt)
+    assert trial_model.sql_path == template_model.sql_path
+    assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
+    assert run.manifest["dbt_models"] == 1
 
 
 def test_step_dbt_raises_when_template_has_no_dbt():

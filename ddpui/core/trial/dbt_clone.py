@@ -15,7 +15,10 @@ NOT NULL unique field with no model-level default, so it must always be supplied
 """
 
 import copy
+import shutil
+import tempfile
 import uuid
+from pathlib import Path
 
 from ddpui.core.dbtautomation_service import (
     create_or_update_dbt_model_in_project_v2,
@@ -28,6 +31,7 @@ from ddpui.models.canvas_models import CanvasEdge, CanvasNode, CanvasNodeType
 from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtModelType, OrgDbtOperation
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.secretsmanager import retrieve_github_pat
 
 logger = CustomLogger("ddpui.core.trial.dbt_clone")
 
@@ -89,10 +93,19 @@ def _remap_operation_config(config, uuid_map: dict):
     return new_config
 
 
-def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
+def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt, preserve_sql_path: bool = False) -> dict:
     """Deep-copy every OrgDbtModel/OrgDbtOperation/DbtEdge (legacy) AND CanvasNode/CanvasEdge
     (active v2) row from `template_dbt` onto `trial_dbt`, re-parenting FKs to the new rows via
     an old-model-id -> new-model old->new map.
+
+    `preserve_sql_path` controls what happens to each copied OrgDbtModel's `sql_path`:
+    - False (default, the UI-operation-built/regen path): `sql_path` is nulled — the trial's
+      dbt project is an empty scaffold at this point, and the later `regenerate_and_push` step
+      regenerates every `.sql` file from the copied operation chains and sets `sql_path` itself.
+    - True (the github/file-based/copy path, e.g. `health_org`-style templates with zero
+      OrgDbtOperation rows): `sql_path` is copied AS-IS — the caller (`copy_dbt_repo_files`)
+      copies the actual `.sql` files to those same project-relative paths in the trial repo, so
+      the inherited `sql_path` stays valid without any regeneration.
 
     Returns `model_map` (`{old OrgDbtModel.id: new OrgDbtModel}`) so callers (e.g. the later
     `.sql` regeneration step) can walk the copied DAG.
@@ -106,7 +119,7 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
             name=m.name,
             display_name=m.display_name,
             schema=m.schema,
-            sql_path=None,
+            sql_path=m.sql_path if preserve_sql_path else None,
             type=m.type,
             source_name=m.source_name,
             output_cols=m.output_cols,
@@ -296,3 +309,60 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
         f"regenerated {len(ordered_models)} dbt models and pushed to {trial_dbt.gitrepo_url}"
     )
     return len(ordered_models)
+
+
+def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
+    """Copy the template's `.sql`/`.yml` dbt model files directly from ITS git repo into the
+    trial's freshly-created managed repo, for templates with ZERO OrgDbtOperation rows — i.e.
+    github/file-based dbt projects (e.g. `health_org`) whose canvas is parsed straight from the
+    repo rather than built via the UI operation-builder. `regenerate_and_push` cannot handle
+    these (there's no operation chain to regenerate `.sql` from), so this mirrors the existing
+    "copy Dalgo managed models to external repository" flow
+    (`dbt_service.switch_git_repository_v1`) instead: clone the source repo, copy its `models/`
+    directory onto the destination working dir, commit + push.
+
+    Auth for cloning the TEMPLATE repo depends on how it's hosted:
+    - Dalgo-managed (`is_repo_managed_by_system=True`): the org-admin PAT (managed repos don't
+      store a per-org secret — see `setup_managed_git_workspace`).
+    - External (`is_repo_managed_by_system=False`, e.g. `health_org`'s own repo): the org's
+      stored PAT via `retrieve_github_pat(template_dbt.gitrepo_access_token_secret)`.
+
+    The TRIAL repo (always Dalgo-managed — `setup_managed_git_workspace` created it just before
+    this runs) is always pushed with the org-admin PAT, matching `regenerate_and_push`.
+
+    The template repo is cloned into a throwaway temp directory (never under `CLIENTDBT_ROOT` —
+    it's only a source of files here, not a live client project) which is removed once the copy
+    is done.
+    """
+    if not template_dbt.gitrepo_url:
+        raise RuntimeError(f"template dbt (orgdbt={template_dbt.id}) has no gitrepo_url to clone")
+
+    template_pat = (
+        GitManager.get_org_admin_pat()
+        if template_dbt.is_repo_managed_by_system
+        else retrieve_github_pat(template_dbt.gitrepo_access_token_secret)
+    )
+
+    trial_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
+
+    with tempfile.TemporaryDirectory() as tmp_cwd:
+        template_clone = GitManager.clone(
+            cwd=tmp_cwd,
+            remote_repo_url=template_dbt.gitrepo_url,
+            relative_path="template_dbtrepo",
+            pat=template_pat,
+        )
+        template_models_dir = Path(template_clone.repo_local_path) / "models"
+        if template_models_dir.exists():
+            shutil.copytree(template_models_dir, trial_repo_dir / "models", dirs_exist_ok=True)
+        else:
+            logger.warning(
+                f"template dbt repo {template_dbt.gitrepo_url} has no models/ directory to copy"
+            )
+
+    trial_pat = GitManager.get_org_admin_pat()
+    git_manager = GitManager(repo_local_path=str(trial_repo_dir), pat=trial_pat)
+    git_manager.commit_changes("clone template dbt models from git")
+    git_manager.push_changes()
+
+    logger.info(f"copied dbt repo files from {template_dbt.gitrepo_url} to {trial_dbt.gitrepo_url}")
