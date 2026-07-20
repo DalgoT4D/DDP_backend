@@ -399,7 +399,7 @@ def test_step_warehouse_registers_trial_warehouse(
     run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
     clone_service._step_warehouse(run)
 
-    mock_provision.assert_called_once_with(run.trial_email)
+    mock_provision.assert_called_once_with(run.trial_email, template_db=None)
     # create_warehouse called with the trial org + a schema carrying the new db + def id
     args, _ = mock_create_wh.call_args
     assert args[0] == trial_org
@@ -407,6 +407,7 @@ def test_step_warehouse_registers_trial_warehouse(
     assert args[1].airbyteConfig["database"] == "trial_1"
     assert run.manifest["trial_warehouse_db"] == "trial_1"
     assert run.manifest["trial_warehouse_role"] == "u"
+    assert run.manifest["warehouse_copied_server_side"] is False
 
 
 @patch("ddpui.core.trial.clone_service.create_warehouse")
@@ -462,6 +463,117 @@ def test_step_warehouse_drops_template_ssh_tunnel_config(
     assert config["schema"] == "public"
     assert config["host"] == "h"
     assert config["database"] == "trial_1"
+
+
+@patch("ddpui.core.trial.clone_service.settings")
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+def test_step_warehouse_uses_server_side_copy_when_same_instance(
+    mock_provision, mock_retrieve, mock_ab, mock_create_wh, mock_settings
+):
+    """When the template warehouse and the trials-RDS live on the SAME host,
+    provision_trial_database must be called with template_db=<template's db name> so it does
+    a server-side CREATE DATABASE ... TEMPLATE ... copy, and the manifest must record that the
+    warehouse data copy was already done server-side (so step 3 can skip pg_dump/restore)."""
+    mock_settings.TRIALS_RDS_HOST = "same-host"
+    template = Org.objects.create(
+        name="tmpl-same", slug="tmpl-same", airbyte_workspace_id="ws-tmpl-same"
+    )
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-tmpl-same", credentials="x"
+    )
+    trial_org = Org.objects.create(
+        name="Trial same", slug="trial-same", airbyte_workspace_id="ws-tr-same"
+    )
+
+    mock_retrieve.return_value = {
+        "host": "same-host",
+        "port": 5432,
+        "database": "himanshu_wh",
+        "username": "tmpl_u",
+        "password": "tmpl_p",
+        "schema": "public",
+    }
+    mock_provision.return_value = {
+        "host": "same-host",
+        "port": 5432,
+        "database": "trial_same_db",
+        "username": "u",
+        "password": "p",
+    }
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_create_wh.return_value = (None, None)
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_warehouse(run)
+
+    mock_provision.assert_called_once_with(run.trial_email, template_db="himanshu_wh")
+    assert run.manifest["warehouse_copied_server_side"] is True
+
+
+@patch("ddpui.core.trial.clone_service.settings")
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+def test_step_warehouse_uses_empty_copy_when_different_instance(
+    mock_provision, mock_retrieve, mock_ab, mock_create_wh, mock_settings
+):
+    """When the template warehouse lives on a DIFFERENT host than the trials-RDS instance, the
+    server-side template copy is unsafe (cross-instance) — provision_trial_database must be
+    called with template_db=None (empty db) and the manifest flag must be False."""
+    mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
+    template = Org.objects.create(
+        name="tmpl-diff", slug="tmpl-diff", airbyte_workspace_id="ws-tmpl-diff"
+    )
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-tmpl-diff", credentials="x"
+    )
+    trial_org = Org.objects.create(
+        name="Trial diff", slug="trial-diff", airbyte_workspace_id="ws-tr-diff"
+    )
+
+    mock_retrieve.return_value = {
+        "host": "template-own-host",
+        "port": 5432,
+        "database": "himanshu_wh",
+        "username": "tmpl_u",
+        "password": "tmpl_p",
+        "schema": "public",
+    }
+    mock_provision.return_value = {
+        "host": "trials-rds-host",
+        "port": 5432,
+        "database": "trial_diff_db",
+        "username": "u",
+        "password": "p",
+    }
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_create_wh.return_value = (None, None)
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_warehouse(run)
+
+    mock_provision.assert_called_once_with(run.trial_email, template_db=None)
+    assert run.manifest["warehouse_copied_server_side"] is False
+
+
+def test_step_warehouse_data_skips_when_already_copied_server_side():
+    """_step_warehouse_data must not attempt pg_dump/restore when _step_warehouse already did
+    a server-side CREATE DATABASE ... TEMPLATE ... copy (manifest flag set)."""
+    template = Org.objects.create(name="tmpl-skip", slug="tmpl-skip")
+    trial_org = Org.objects.create(name="Trial skip", slug="trial-skip")
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    run.manifest["warehouse_copied_server_side"] = True
+
+    with patch("ddpui.core.trial.clone_service.copy_warehouse_data") as mock_copy:
+        clone_service._step_warehouse_data(run)
+        mock_copy.assert_not_called()
+
+    assert "warehouse_dump_path" not in run.manifest
 
 
 @patch("ddpui.core.trial.clone_service.copy_warehouse_data")

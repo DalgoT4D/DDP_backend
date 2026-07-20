@@ -54,10 +54,15 @@ def _admin_connect(dbname: str):
     return conn
 
 
-def provision_trial_database(email: str) -> dict:
+def provision_trial_database(email: str, template_db: str | None = None) -> dict:
     """Create a dedicated Postgres database + owner role on the trials-RDS instance for a
     trial, keyed by the trial email (not the trialclone id) so repeated trials from the same
     email land on the same, deterministically-named db/role.
+
+    When `template_db` is given (the template warehouse's db name on this SAME trials-RDS
+    instance), the new db is created as a server-side, file-level copy of it via
+    `CREATE DATABASE ... TEMPLATE ...` — a few seconds, no network transfer — instead of an
+    empty database. Requires no active sessions on template_db (it must be a frozen template).
 
     Returns connection params for the new database using the FT-USER's own credentials
     (never the admin/master credentials).
@@ -69,7 +74,10 @@ def provision_trial_database(email: str) -> dict:
     conn = _admin_connect("postgres")
     try:
         with conn.cursor() as cursor:
-            cursor.execute(f'CREATE DATABASE "{ft_db}"')
+            if template_db:
+                cursor.execute(f'CREATE DATABASE "{ft_db}" TEMPLATE "{template_db}"')
+            else:
+                cursor.execute(f'CREATE DATABASE "{ft_db}"')
             cursor.execute(f"CREATE ROLE \"{ft_role}\" LOGIN PASSWORD '{password}'")
             cursor.execute(f'GRANT "{ft_role}" TO CURRENT_USER')
             cursor.execute(f'ALTER DATABASE "{ft_db}" OWNER TO "{ft_role}"')

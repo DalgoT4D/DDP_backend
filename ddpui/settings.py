@@ -350,6 +350,9 @@ TRIALS_RDS_PORT = int(os.getenv("TRIALS_RDS_PORT", "5432"))
 TRIALS_RDS_ADMIN_USER = os.getenv("TRIALS_RDS_ADMIN_USER")
 TRIALS_RDS_ADMIN_PASSWORD = os.getenv("TRIALS_RDS_ADMIN_PASSWORD")
 
+# slug of the org used as the clone template for the "Try Now" trial flow
+TEMPLATE_ORG_SLUG = os.getenv("TEMPLATE_ORG_SLUG")
+
 # pg client binaries for the warehouse-data copy — override to point at a client version
 # matching the trials-RDS server (a newer client emits SET params an older server rejects on
 # restore, e.g. transaction_timeout on PG14). Defaults to the bare name from PATH.

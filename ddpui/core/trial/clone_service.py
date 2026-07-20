@@ -2,6 +2,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 
+from django.conf import settings
 from django.contrib.auth.models import User
 
 from ddpui.models.org import Org, OrgWarehouse
@@ -135,7 +136,16 @@ def _step_warehouse(run: CloneRun) -> None:
     if template_wh.wtype != "postgres":
         raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
 
-    trial_db_params = provision_trial_database(run.trial_email)
+    # carry the template's non-connection config forward (schema/ssl), overriding host/db creds
+    # below; also used to decide whether the template warehouse lives on the SAME trials-RDS
+    # instance, which allows a fast server-side CREATE DATABASE ... TEMPLATE ... copy instead
+    # of an empty db + pg_dump/restore in step 3.
+    template_creds = retrieve_warehouse_credentials(template_wh) or {}
+    same_instance = template_creds.get("host") == settings.TRIALS_RDS_HOST
+    trial_db_params = provision_trial_database(
+        run.trial_email, template_db=template_creds.get("database") if same_instance else None
+    )
+    run.manifest["warehouse_copied_server_side"] = same_instance
 
     # record the teardown marker immediately — the RDS database already exists at this point,
     # so any failure below must still trigger drop_trial_database on the way out.
@@ -148,8 +158,6 @@ def _step_warehouse(run: CloneRun) -> None:
     )
     dest_def_id = template_dest["destinationDefinitionId"]
 
-    # carry the template's non-connection config forward (schema/ssl), overriding host/db creds
-    template_creds = retrieve_warehouse_credentials(template_wh) or {}
     airbyte_config = dict(template_creds)
     airbyte_config.update(
         {
@@ -187,7 +195,19 @@ def _step_warehouse(run: CloneRun) -> None:
 
 
 def _step_warehouse_data(run: CloneRun) -> None:
-    """Step 3 — pg_dump the template warehouse and restore into the trial warehouse."""
+    """Step 3 — pg_dump the template warehouse and restore into the trial warehouse.
+
+    Skipped entirely when step 2 already did a server-side `CREATE DATABASE ... TEMPLATE ...`
+    copy (template warehouse + trials-RDS on the same host) — the trial db already has the
+    template's data, so pg_dump/restore here would be redundant (and much slower).
+    """
+    if run.manifest.get("warehouse_copied_server_side"):
+        logger.info(
+            "warehouse data already copied server-side (CREATE DATABASE TEMPLATE); "
+            "skipping pg_dump"
+        )
+        return
+
     template_wh = OrgWarehouse.objects.filter(org=run.template).first()
     trial_wh = OrgWarehouse.objects.filter(org=run.trial_org).first()
     if template_wh is None or trial_wh is None:
