@@ -75,6 +75,9 @@ def provision_trial_database(email: str, template_db: str | None = None) -> dict
     try:
         with conn.cursor() as cursor:
             if template_db:
+                # template_db is an ops/secrets-manager-controlled identifier (the template
+                # warehouse's own db name, retrieved via retrieve_warehouse_credentials), never
+                # raw user input — f-string interpolation here does not cross a trust boundary.
                 cursor.execute(f'CREATE DATABASE "{ft_db}" TEMPLATE "{template_db}"')
             else:
                 cursor.execute(f'CREATE DATABASE "{ft_db}"')

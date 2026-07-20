@@ -88,15 +88,15 @@ def account_exists_for_email(email: str) -> bool:
 def _step_org_and_user(run: CloneRun) -> None:
     """Step 1 — create the trial org (+ Airbyte workspace + plan) and an admin user."""
     template = run.template
-    if run.org_name:
-        # a caller-supplied org name is NOT unique per se (two trial users can both pick
-        # "Acme") — append a short email-hash suffix so create_organization's name__iexact
-        # uniqueness check can't collide across different trial users.
-        trial_name = f"{run.org_name} {email_hash8(run.trial_email)[:4]}"[:50]
-    else:
-        # deterministic-from-email name (unique per email via the sha8 hash) so the trial org
-        # is re-derivable/idempotent like the ft_ warehouse db/role names
-        trial_name = f"Trial {email_hash8(run.trial_email)} {template.name}"[:50]
+    # a caller-supplied org name is NOT unique per se (two trial users can both pick "Acme"),
+    # and create_organization derives org.slug as slugify(org.name)[:20] — the hash MUST sit
+    # near the front of the name so it survives that 20-char truncation regardless of how long
+    # org_name is (a hash appended at the end of a long name gets truncated OUT of the slug,
+    # letting two different long org names collide on slug -> Airbyte workspace name / Prefect
+    # block prefix). Putting the 8-char hash right after "Trial " (chars 6-14) guarantees it's
+    # always within the first 20 chars of the slugified name. Falls back to template.name when
+    # no org_name is given, matching the original deterministic-from-email default.
+    trial_name = f"Trial {email_hash8(run.trial_email)} {run.org_name or template.name}"[:50]
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,

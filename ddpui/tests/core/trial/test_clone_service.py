@@ -424,10 +424,15 @@ def test_step_org_and_user_uses_org_name_with_hash_suffix_for_uniqueness(
     mock_create_org, mock_create_plan
 ):
     """When org_name is given, two users choosing the same org_name ("Acme") must not collide
-    — the email hash is appended to keep the create_organization name unique."""
+    — the email hash is included to keep the create_organization name unique."""
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="tmpl-orgname", slug="tmpl-orgname")
-    trial_org = Org.objects.create(name="Acme abcd", slug="acme-abcd", airbyte_workspace_id="ws-11")
+    expected_hash = clone_service.email_hash8("acme@b.org")
+    trial_org = Org.objects.create(
+        name=f"Trial {expected_hash} Acme",
+        slug=f"trial-{expected_hash}-acm",
+        airbyte_workspace_id="ws-11",
+    )
     mock_create_org.return_value = (trial_org, None)
     mock_create_plan.return_value = (Mock(), None)
 
@@ -436,8 +441,51 @@ def test_step_org_and_user_uses_org_name_with_hash_suffix_for_uniqueness(
 
     args, _ = mock_create_org.call_args
     payload = args[0]
-    expected_hash = clone_service.email_hash8("acme@b.org")[:4]
-    assert payload.name == f"Acme {expected_hash}"
+    assert payload.name == f"Trial {expected_hash} Acme"
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_long_org_name_slug_still_contains_hash(
+    mock_create_org, mock_create_plan
+):
+    """Regression guard for the cross-tenant slug-collision bug: create_organization derives
+    org.slug as slugify(org.name)[:20]. With a long org_name, the old code put the email hash
+    at the END of the (already-long) name, so it was truncated OUT of the 20-char slug —
+    two different long org names could then produce IDENTICAL slugs (e.g. both
+    "community-health-fou"), colliding on the Airbyte workspace name / Prefect block prefix
+    that reuses org.slug. The fix puts the hash EARLY (mirroring the no-org_name default), so
+    it always survives the [:20] truncation and the slug stays unique per email."""
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-orgname-long", slug="tmpl-orgname-long")
+    email = "chf@b.org"
+    org_name = "Community Health Foundation"
+    expected_hash = clone_service.email_hash8(email)
+
+    from django.utils.text import slugify
+
+    def fake_create_org(payload):
+        trial_org = Org.objects.create(
+            name=payload.name,
+            slug=slugify(payload.name)[:20],
+            airbyte_workspace_id="ws-chf",
+        )
+        return trial_org, None
+
+    mock_create_org.side_effect = fake_create_org
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email=email, org_name=org_name)
+    clone_service._step_org_and_user(run)
+
+    args, _ = mock_create_org.call_args
+    payload = args[0]
+    assert payload.name == f"Trial {expected_hash} {org_name}"[:50]
+
+    trial_org = run.trial_org
+    assert len(trial_org.slug) <= 20
+    assert trial_org.slug.startswith(f"trial-{expected_hash}")
+    assert expected_hash in trial_org.slug
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
