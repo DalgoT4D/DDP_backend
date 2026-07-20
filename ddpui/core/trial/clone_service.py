@@ -339,9 +339,12 @@ def _step_dbt(run: CloneRun) -> None:
     if template_dbt is None:
         raise RuntimeError(f"template org {run.template.slug} has no dbt workspace")
 
+    # project_name must be a valid dbt project name (letters/digits/underscore — NO hyphens,
+    # which the trial slug has). The normal Dalgo flow (transform_api.py) uses the literal
+    # "dbtrepo"; match it.
     setup_managed_git_workspace(
         run.trial_org,
-        project_name=run.trial_org.slug,
+        project_name="dbtrepo",
         default_schema=template_dbt.default_schema,
     )
 
