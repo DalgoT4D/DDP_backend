@@ -2,6 +2,7 @@
 
 Tests:
 1. POST /trial/signup — valid new email, existing account (409), invalid email (400)
+2. POST /trial/activate — valid token, invalid/used token (400)
 """
 
 import os
@@ -15,10 +16,20 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from ninja.errors import HttpError
+from django.contrib.auth.models import User
+from django.conf import settings
 
-from ddpui.api.trial_api import trial_signup, TrialSignupSchema
+from ddpui.models.org import Org
+from ddpui.api.trial_api import trial_signup, trial_activate, TrialSignupSchema, TrialActivateSchema
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture
+def seed_template_org(monkeypatch):
+    """Org that stands in for the TEMPLATE_ORG_SLUG-configured template org."""
+    monkeypatch.setattr(settings, "TEMPLATE_ORG_SLUG", "trial-template")
+    return Org.objects.create(name="Trial Template", slug="trial-template")
 
 
 class TestTrialSignup:
@@ -57,5 +68,38 @@ class TestTrialSignup:
         payload = TrialSignupSchema(email="not-an-email", org_name="Acme", role="account-manager")
         with pytest.raises(HttpError) as exc:
             trial_signup(None, payload)
+
+        assert exc.value.status_code == 400
+
+
+class TestTrialActivate:
+    @patch("ddpui.api.trial_api.clone_trial_org_task")
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    def test_valid_token_creates_user_and_enqueues(
+        self, mock_consume, mock_clone_task, seed_template_org
+    ):
+        mock_consume.return_value = {
+            "email": "new@b.org",
+            "org_name": "Acme",
+            "role": "account-manager",
+        }
+
+        payload = TrialActivateSchema(token="tok123", password="s3cret!")
+        result = trial_activate(None, payload)
+
+        assert "task_id" in result
+        user = User.objects.get(username="new@b.org")
+        assert user.check_password("s3cret!")
+        mock_clone_task.delay.assert_called_once_with(
+            result["task_id"], seed_template_org.id, "new@b.org", "Acme", "account-manager"
+        )
+
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    def test_invalid_token_returns_400(self, mock_consume):
+        mock_consume.return_value = None
+
+        payload = TrialActivateSchema(token="bad", password="s3cret!")
+        with pytest.raises(HttpError) as exc:
+            trial_activate(None, payload)
 
         assert exc.value.status_code == 400
