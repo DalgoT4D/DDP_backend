@@ -54,6 +54,78 @@ def test_clone_runs_all_steps_and_completes(
     }
 
 
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse_data")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_invokes_progress_callback_for_all_steps_in_order(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+):
+    template = Org.objects.create(name="tmpl-progress", slug="tmpl-progress")
+    calls = []
+    clone_service.clone_template_org(
+        template.id, "progress@b.org", progress=lambda n, label: calls.append((n, label))
+    )
+    assert [n for n, _ in calls] == [1, 2, 3, 4, 5, 6, 7, 8]
+    for n, label in calls:
+        assert label == clone_service.STEP_LABELS[n]
+    # timing keys must be unaffected by the progress refactor
+    assert set(clone_service.STEP_LABELS.keys()) == {1, 2, 3, 4, 5, 6, 7, 8}
+
+
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse_data")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_without_progress_callback_still_works(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+):
+    """progress is optional — existing management-command path (no progress) must be unaffected."""
+    template = Org.objects.create(name="tmpl-noprogress", slug="tmpl-noprogress")
+    run = clone_service.clone_template_org(template.id, "noprogress@b.org")
+    assert isinstance(run, CloneRun)
+    mock_s1.assert_called_once()
+    mock_s8.assert_called_once()
+
+
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse_data")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_clone_passes_org_name_and_role_slug_onto_run(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+):
+    template = Org.objects.create(name="tmpl-orgrole", slug="tmpl-orgrole")
+
+    captured = {}
+
+    def fake_step1(run):
+        captured["org_name"] = run.org_name
+        captured["role_slug"] = run.role_slug
+
+    mock_s1.side_effect = fake_step1
+
+    run = clone_service.clone_template_org(
+        template.id, "orgrole@b.org", org_name="Acme Co", role_slug="custom-role"
+    )
+    assert run.org_name == "Acme Co"
+    assert run.role_slug == "custom-role"
+    assert captured["org_name"] == "Acme Co"
+    assert captured["role_slug"] == "custom-role"
+
+
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
 @patch("ddpui.core.trial.clone_service._step_org_and_user", side_effect=RuntimeError("kaboom"))
@@ -344,6 +416,85 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
     assert user_attrs.email_verified is False
     assert run.trial_orguser is not None
     assert run.trial_orguser.id == orguser.id
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_uses_org_name_with_hash_suffix_for_uniqueness(
+    mock_create_org, mock_create_plan
+):
+    """When org_name is given, two users choosing the same org_name ("Acme") must not collide
+    — the email hash is appended to keep the create_organization name unique."""
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-orgname", slug="tmpl-orgname")
+    trial_org = Org.objects.create(name="Acme abcd", slug="acme-abcd", airbyte_workspace_id="ws-11")
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="acme@b.org", org_name="Acme")
+    clone_service._step_org_and_user(run)
+
+    args, _ = mock_create_org.call_args
+    payload = args[0]
+    expected_hash = clone_service.email_hash8("acme@b.org")[:4]
+    assert payload.name == f"Acme {expected_hash}"
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_defaults_to_trial_name_when_no_org_name(
+    mock_create_org, mock_create_plan
+):
+    """Without org_name, existing behavior (Trial <hash> <template.name>) is unchanged."""
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-default-name", slug="tmpl-default-name")
+    trial_org = Org.objects.create(
+        name="Trial default", slug="trial-default", airbyte_workspace_id="ws-13"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="default@b.org")
+    clone_service._step_org_and_user(run)
+
+    args, _ = mock_create_org.call_args
+    payload = args[0]
+    expected_hash = clone_service.email_hash8("default@b.org")
+    assert payload.name == f"Trial {expected_hash} {template.name}"[:50]
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_uses_given_role_slug(mock_create_org, mock_create_plan):
+    Role.objects.get_or_create(slug="custom-role", defaults={"name": "custom", "level": 2})
+    template = Org.objects.create(name="tmpl-role", slug="tmpl-role")
+    trial_org = Org.objects.create(
+        name="Trial 1 tmpl-role", slug="trial-1-tmpl-role", airbyte_workspace_id="ws-12"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="role@b.org", role_slug="custom-role")
+    clone_service._step_org_and_user(run)
+
+    orguser = OrgUser.objects.filter(org=trial_org).first()
+    assert orguser is not None
+    assert orguser.new_role.slug == "custom-role"
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_raises_when_given_role_slug_not_found(mock_create_org, mock_create_plan):
+    template = Org.objects.create(name="tmpl-role-missing", slug="tmpl-role-missing")
+    trial_org = Org.objects.create(
+        name="Trial role missing", slug="trial-role-missing", airbyte_workspace_id="ws-14"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="rolemissing@b.org", role_slug="no-such-role")
+    with pytest.raises(RuntimeError, match="role"):
+        clone_service._step_org_and_user(run)
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")

@@ -54,11 +54,25 @@ class CloneRun:
 
     template: Org
     trial_email: str
+    org_name: str | None = None
+    role_slug: str | None = None
     trial_org: Org | None = None
     trial_orguser: OrgUser | None = None
     current_step: str | None = None
     timings: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
+
+
+STEP_LABELS = {
+    1: "Creating your workspace",
+    2: "Setting up your warehouse",
+    3: "Copying your data",
+    4: "Connecting your sources",
+    5: "Building your pipelines",
+    6: "Setting up transforms",
+    7: "Scheduling syncs",
+    8: "Preparing your dashboards",
+}
 
 
 def account_exists_for_email(email: str) -> bool:
@@ -74,9 +88,15 @@ def account_exists_for_email(email: str) -> bool:
 def _step_org_and_user(run: CloneRun) -> None:
     """Step 1 — create the trial org (+ Airbyte workspace + plan) and an admin user."""
     template = run.template
-    # deterministic-from-email name (unique per email via the sha8 hash) so the trial org
-    # is re-derivable/idempotent like the ft_ warehouse db/role names
-    trial_name = f"Trial {email_hash8(run.trial_email)} {template.name}"[:50]
+    if run.org_name:
+        # a caller-supplied org name is NOT unique per se (two trial users can both pick
+        # "Acme") — append a short email-hash suffix so create_organization's name__iexact
+        # uniqueness check can't collide across different trial users.
+        trial_name = f"{run.org_name} {email_hash8(run.trial_email)[:4]}"[:50]
+    else:
+        # deterministic-from-email name (unique per email via the sha8 hash) so the trial org
+        # is re-derivable/idempotent like the ft_ warehouse db/role names
+        trial_name = f"Trial {email_hash8(run.trial_email)} {template.name}"[:50]
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,
@@ -108,9 +128,10 @@ def _step_org_and_user(run: CloneRun) -> None:
         user.set_unusable_password()
         user.save(update_fields=["password"])
 
-    admin_role = Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first()
+    role_slug = run.role_slug or ACCOUNT_MANAGER_ROLE
+    admin_role = Role.objects.filter(slug=role_slug).first()
     if admin_role is None:
-        raise RuntimeError(f"role {ACCOUNT_MANAGER_ROLE} not found (load role fixtures)")
+        raise RuntimeError(f"role {role_slug} not found (load role fixtures)")
 
     orguser = OrgUser.objects.create(
         user=user, org=trial_org, new_role=admin_role, email_verified=False
@@ -498,13 +519,24 @@ def _teardown(run: CloneRun) -> None:
         logger.error(f"failed to delete dangling trial user {run.trial_email}: {user_err}")
 
 
-def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
+def clone_template_org(
+    template_org_id: int,
+    trial_email: str,
+    org_name: str | None = None,
+    role_slug: str | None = None,
+    progress=None,
+) -> CloneRun:
     """Deep-clone a template org into a new trial org (Steps 1–8), timing each step.
 
     Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt → prefect →
     viz. State for the run lives only in the returned in-memory `CloneRun` — nothing is persisted
     for it. On any failure the exception is re-raised (after best-effort teardown) so the caller
     (management command / future Celery task) sees it.
+
+    `org_name`/`role_slug` are optional overrides applied in Step 1 (see `_step_org_and_user`).
+    `progress`, if given, is called as `progress(step_number, label)` right before each of the
+    8 steps runs (labels from `STEP_LABELS`) — e.g. to stream progress to a client. Optional;
+    when None, behavior is unchanged from before this parameter existed.
     """
     if account_exists_for_email(trial_email):
         raise TrialAccountExistsError(
@@ -512,25 +544,26 @@ def clone_template_org(template_org_id: int, trial_email: str) -> CloneRun:
         )
 
     template = Org.objects.get(id=template_org_id)
-    run = CloneRun(template=template, trial_email=trial_email)
+    run = CloneRun(
+        template=template, trial_email=trial_email, org_name=org_name, role_slug=role_slug
+    )
     logger.info(f"starting clone from template {template.slug} for {trial_email}")
+
+    def _do(step_number, timing_key, step_fn):
+        if progress:
+            progress(step_number, STEP_LABELS[step_number])
+        with step_timer(run, timing_key):
+            step_fn(run)
+
     try:
-        with step_timer(run, "step1_org_user"):
-            _step_org_and_user(run)
-        with step_timer(run, "step2_warehouse"):
-            _step_warehouse(run)
-        with step_timer(run, "step3_warehouse_data"):
-            _step_warehouse_data(run)
-        with step_timer(run, "step4_sources"):
-            _step_sources(run)
-        with step_timer(run, "step5_connections"):
-            _step_connections(run)
-        with step_timer(run, "step6_dbt"):
-            _step_dbt(run)
-        with step_timer(run, "step7_prefect"):
-            _step_prefect(run)
-        with step_timer(run, "step8_viz"):
-            _step_viz(run)
+        _do(1, "step1_org_user", _step_org_and_user)
+        _do(2, "step2_warehouse", _step_warehouse)
+        _do(3, "step3_warehouse_data", _step_warehouse_data)
+        _do(4, "step4_sources", _step_sources)
+        _do(5, "step5_connections", _step_connections)
+        _do(6, "step6_dbt", _step_dbt)
+        _do(7, "step7_prefect", _step_prefect)
+        _do(8, "step8_viz", _step_viz)
     except Exception as err:
         logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a
