@@ -350,6 +350,13 @@ TRIALS_RDS_PORT = int(os.getenv("TRIALS_RDS_PORT", "5432"))
 TRIALS_RDS_ADMIN_USER = os.getenv("TRIALS_RDS_ADMIN_USER")
 TRIALS_RDS_ADMIN_PASSWORD = os.getenv("TRIALS_RDS_ADMIN_PASSWORD")
 
+# pg client binaries for the warehouse-data copy — override to point at a client version
+# matching the trials-RDS server (a newer client emits SET params an older server rejects on
+# restore, e.g. transaction_timeout on PG14). Defaults to the bare name from PATH.
+TRIALS_PG_DUMP_BIN = os.getenv("TRIALS_PG_DUMP_BIN")
+TRIALS_PG_RESTORE_BIN = os.getenv("TRIALS_PG_RESTORE_BIN")
+TRIALS_PG_LIB_DIR = os.getenv("TRIALS_PG_LIB_DIR")  # dynamic-loader path for that client's libpq
+
 # gitignored JSON file, keyed by template source name, holding the real (unmasked) Airbyte
 # source configs used to recreate sources in a trial workspace (Task P3.0a).
 TEMPLATE_SOURCE_CREDS_FILE = os.getenv("TEMPLATE_SOURCE_CREDS_FILE")

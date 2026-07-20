@@ -16,9 +16,10 @@ def test_copy_runs_dump_then_restore(mock_subprocess):
     assert mock_subprocess.run.call_count == 2
     dump_cmd = mock_subprocess.run.call_args_list[0].args[0]
     restore_cmd = mock_subprocess.run.call_args_list[1].args[0]
-    assert dump_cmd[0] == "pg_dump"
+    # binary is configurable (may be an absolute path via TRIALS_PG_DUMP_BIN); match by name
+    assert dump_cmd[0].endswith("pg_dump")
     assert "sdb" in dump_cmd
-    assert restore_cmd[0] == "pg_restore"
+    assert restore_cmd[0].endswith("pg_restore")
     assert "ddb" in restore_cmd
     # PGPASSWORD passed via env, not argv
     dump_env = mock_subprocess.run.call_args_list[0].kwargs["env"]

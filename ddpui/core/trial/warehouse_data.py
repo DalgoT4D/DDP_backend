@@ -1,14 +1,32 @@
 import os
 import subprocess
 
+from django.conf import settings
+
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.warehouse_data")
 
 
+def _pg_bin(name: str) -> str:
+    """resolve the pg_dump/pg_restore binary — configurable so ops can point at a client
+    version matching the trials-RDS server (a newer client emits SET params an older server
+    rejects on restore). Defaults to the bare name (resolved from PATH)."""
+    override = {
+        "pg_dump": getattr(settings, "TRIALS_PG_DUMP_BIN", None),
+        "pg_restore": getattr(settings, "TRIALS_PG_RESTORE_BIN", None),
+    }.get(name)
+    return override or name
+
+
 def _pg_env(password: str) -> dict:
     env = os.environ.copy()
     env["PGPASSWORD"] = password
+    # some pg client installs need their own libpq on the dynamic-loader path
+    lib_dir = getattr(settings, "TRIALS_PG_LIB_DIR", None)
+    if lib_dir:
+        env["DYLD_LIBRARY_PATH"] = lib_dir
+        env["LD_LIBRARY_PATH"] = lib_dir
     return env
 
 
@@ -19,7 +37,7 @@ def copy_warehouse_data(src: dict, dst: dict, dump_path: str) -> None:
     src/dst dicts require keys: host, port, database, username, password.
     """
     dump_cmd = [
-        "pg_dump",
+        _pg_bin("pg_dump"),
         "-h",
         str(src["host"]),
         "-p",
@@ -40,7 +58,7 @@ def copy_warehouse_data(src: dict, dst: dict, dump_path: str) -> None:
     logger.info(f"pg_dump of {src['database']} → {dump_path} ok")
 
     restore_cmd = [
-        "pg_restore",
+        _pg_bin("pg_restore"),
         "-h",
         str(dst["host"]),
         "-p",
