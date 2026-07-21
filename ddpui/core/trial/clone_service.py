@@ -522,14 +522,11 @@ def _teardown(run: CloneRun) -> None:
         except Exception as org_err:  # skipcq PYL-W0703
             logger.error(f"failed to delete_org during teardown ({run.template.slug}): {org_err}")
 
-    # the Django User is created before the OrgUser in step 1; delete_org removes the OrgUser
-    # but not the User, so clean up an accountless trial User to keep retries unblocked.
-    try:
-        user = User.objects.filter(username=run.trial_email).first()
-        if user and not OrgUser.objects.filter(user=user).exists():
-            user.delete()
-    except Exception as user_err:  # skipcq PYL-W0703
-        logger.error(f"failed to delete dangling trial user {run.trial_email}: {user_err}")
+    # The Django User (+ its UserAttributes and the password set at /activate) is deliberately
+    # KEPT across teardown. delete_org removes the OrgUser — so account_exists_for_email (which
+    # keys on OrgUser, not User) still returns False for a failed trial, leaving retry unblocked
+    # — while the person's email/password/verified state survives so "Try again" (POST
+    # /trial/retry) can re-clone without re-asking email, verification, or password.
 
 
 def clone_template_org(

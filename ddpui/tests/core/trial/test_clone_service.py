@@ -329,17 +329,18 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
 @patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
-def test_teardown_deletes_dangling_trial_user(mock_s1, mock_s2, mock_cleanup_cls, mock_drop):
-    """Step1 (in real life) creates the Django User BEFORE the OrgUser's org is torn down.
-    Here we simulate step1 having created the User + trial_org (and its OrgUser, which
-    OrgCleanupService.delete_org — mocked out — would remove), then a later step fails.
-    Teardown must delete the now-accountless dangling User so retries for that email are not
-    permanently blocked by account_exists_for_email."""
-    template = Org.objects.create(name="tmpl-dangle", slug="tmpl-dangle")
-    trial_org = Org.objects.create(name="Trial Dangle", slug="trial-dangle")
+def test_teardown_keeps_the_person_for_retry(mock_s1, mock_s2, mock_cleanup_cls, mock_drop):
+    """On failure, teardown removes the OrgUser (via delete_org) but KEEPS the Django User —
+    its password and UserAttributes — so POST /trial/retry can re-clone without re-signup. With
+    the OrgUser gone, account_exists_for_email stays False, so the retry is not blocked."""
+    template = Org.objects.create(name="tmpl-keep", slug="tmpl-keep")
+    trial_org = Org.objects.create(name="Trial Keep", slug="trial-keep")
 
     def fake_step1(run):
         user = User.objects.create(username=run.trial_email, email=run.trial_email)
+        user.set_password("kept-secret")  # set at /activate in real life
+        user.save()
+        UserAttributes.objects.create(user=user, email_verified=True)
         orguser = OrgUser.objects.create(user=user, org=trial_org, email_verified=False)
         run.trial_org = trial_org
         run.trial_orguser = orguser
@@ -354,10 +355,17 @@ def test_teardown_deletes_dangling_trial_user(mock_s1, mock_s2, mock_cleanup_cls
     mock_cleanup_cls.return_value.delete_org.side_effect = fake_delete_org
 
     with pytest.raises(RuntimeError, match="boom"):
-        clone_service.clone_template_org(template.id, "dangle@x.org")
+        clone_service.clone_template_org(template.id, "keep@x.org")
 
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
-    assert not User.objects.filter(username="dangle@x.org").exists()
+    # the OrgUser is gone → account_exists_for_email stays False → retry allowed
+    assert not OrgUser.objects.filter(user__username="keep@x.org").exists()
+    assert not clone_service.account_exists_for_email("keep@x.org")
+    # ...but the person survives: User + password + verified UserAttributes kept
+    user = User.objects.filter(username="keep@x.org").first()
+    assert user is not None
+    assert user.check_password("kept-secret")
+    assert UserAttributes.objects.filter(user=user, email_verified=True).exists()
 
 
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
@@ -389,6 +397,46 @@ def test_teardown_keeps_user_that_still_has_an_orguser(
 
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
     assert User.objects.filter(username="collide@x.org").exists()
+
+
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_timeout_tears_down_keeping_user_and_reraises(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop
+):
+    """A soft-time-limit timeout mid-clone raises SoftTimeLimitExceeded. clone_template_org's
+    `except Exception` must catch it like any failure: teardown runs (org purged, RDS dropped),
+    the person is kept, and the exception is re-raised so the task reports "failed"."""
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    template = Org.objects.create(name="tmpl-timeout", slug="tmpl-timeout")
+    trial_org = Org.objects.create(name="Trial Timeout", slug="trial-timeout")
+
+    def fake_step1(run):
+        user = User.objects.create(username=run.trial_email, email=run.trial_email)
+        UserAttributes.objects.create(user=user, email_verified=True)
+        orguser = OrgUser.objects.create(user=user, org=trial_org, email_verified=False)
+        run.trial_org = trial_org
+        run.trial_orguser = orguser
+        run.manifest["trial_warehouse_db"] = "ft_x_db"  # so the RDS drop guard fires
+
+    mock_s1.side_effect = fake_step1
+    mock_s2.side_effect = SoftTimeLimitExceeded()  # the clone blows the soft time limit at step 2
+    mock_cleanup_cls.return_value.delete_org.side_effect = lambda: OrgUser.objects.filter(
+        org=trial_org
+    ).delete()
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        clone_service.clone_template_org(template.id, "slow@x.org")
+
+    # teardown happened: org delete + RDS drop both fired
+    mock_cleanup_cls.return_value.delete_org.assert_called_once()
+    mock_drop.assert_called_once_with("slow@x.org")
+    # ...but the person survives and stays retryable
+    assert User.objects.filter(username="slow@x.org").exists()
+    assert not clone_service.account_exists_for_email("slow@x.org")
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")

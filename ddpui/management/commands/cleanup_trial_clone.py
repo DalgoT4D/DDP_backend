@@ -15,6 +15,7 @@ from django.contrib.auth.models import User
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.core.trial.clone_service import delete_trial_org
+from ddpui.core.trial.activation import CLONE_LOCK_PREFIX
 from ddpui.core.trial.warehouse_provision import drop_trial_database, email_hash8
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -61,13 +62,14 @@ class Command(BaseCommand):
         if user is not None:
             user.delete()
 
-        # clear the per-email activation lock (trial_activate sets `trial-activating:<email>`
-        # with a 10-min TTL and never releases it on success). If cleanup runs while that lock
-        # is still live, a fresh signup→activate for the same email 409s ("a trial is already
-        # being set up") until it expires. Deleting it here keeps the email immediately reusable.
+        # clear the per-email running-clone lock (acquired at activate/retry, normally released by
+        # the task in its finally). If cleanup runs while that lock is still live — e.g. a worker
+        # died mid-clone before releasing it — a fresh signup→activate (or retry) for the same
+        # email 409s ("a trial is already being set up") until the TTL expires. Deleting it here
+        # keeps the email immediately reusable.
         redis = RedisClient.get_instance()
-        lock_deleted = redis.delete(f"trial-activating:{email}")
+        lock_deleted = redis.delete(f"{CLONE_LOCK_PREFIX}{email}")
         if lock_deleted:
-            self.stdout.write("cleared stale activation lock")
+            self.stdout.write("cleared stale running-clone lock")
 
         self.stdout.write(self.style.SUCCESS(f"fully deleted trial for {email}"))

@@ -11,7 +11,13 @@ from django.core.validators import validate_email
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
-from ddpui.core.trial.activation import create_activation_token, consume_activation_token
+from ddpui.core.trial.activation import (
+    create_activation_token,
+    consume_activation_token,
+    store_clone_params,
+    fetch_clone_params,
+    acquire_clone_lock,
+)
 from ddpui.core.trial.clone_service import account_exists_for_email
 from ddpui.core.trial.tasks import clone_trial_org_task
 from ddpui.models.org import Org
@@ -86,12 +92,11 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     if account_exists_for_email(email):
         raise HttpError(409, "an account already exists for this email; please log in")
 
-    # I2: short-lived per-email lock so two concurrent activations for the same email can't
-    # both provision a trial. Not released on success — it naturally expires in 10 minutes,
-    # and by then the account-exists guard above covers any repeat.
+    # I2: per-email lifetime lock so two clones can't run for the same email at once. Acquired
+    # here before enqueue; the clone task releases it in a finally when it ends (success or fail),
+    # so a POST /trial/retry can re-run immediately after a failure. TTL is a dead-worker backstop.
     redis = RedisClient.get_instance()
-    lock_key = f"trial-activating:{email}"
-    if not redis.set(lock_key, "1", nx=True, ex=600):
+    if not acquire_clone_lock(email):
         raise HttpError(409, "a trial is already being set up for this email")
 
     # I3: reject an empty/weak password before creating anything.
@@ -117,10 +122,52 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     # record the clone's start time so the progress screen's elapsed clock is derived from a
     # fixed origin (survives page refresh) rather than counting up from when the tab mounted.
     redis.set(TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS)
+    # stash the params so POST /trial/retry/{task_id} can re-enqueue after a failure without the
+    # (now-consumed) activation token — no re-signup / re-verify / re-password on "Try again".
+    store_clone_params(task_id, email, data["org_name"], data["role"], template.id)
     clone_trial_org_task.delay(task_id, template.id, email, data["org_name"], data["role"])
 
     # email is echoed back so the progress screen can auto-login (POST /login) once the clone
     # completes — the frontend never learns it any other way from this token-opened page.
+    return {"task_id": task_id, "email": email}
+
+
+@trial_router.post("/retry/{task_id}")
+def trial_retry(request, task_id: str):  # pylint: disable=unused-argument
+    """Re-run a failed trial clone from scratch, reusing the same task_id — no re-signup.
+
+    Reachable only after a failure: the frontend shows "Try again" once /status reports "failed",
+    which the backend writes only AFTER teardown has purged the failed run's resources and the
+    task's finally has released the running-clone lock. This endpoint therefore starts from a
+    clean slate (org/warehouse/workspace/dbt/viz gone) while the person — email, password, and
+    verified state — was deliberately kept by teardown, so the clone re-runs with no user input.
+    """
+    data = fetch_clone_params(task_id)
+    if data is None:
+        # params gone (expired, or never a real task_id) — nothing to retry.
+        raise HttpError(400, "no trial setup found to retry")
+
+    email = data["email"]
+
+    # a completed clone (or a normal signup in the meantime) is a real account now — don't
+    # re-provision over it; send the user to log in. Keys on OrgUser, so a failed trial (User
+    # kept, OrgUser removed by teardown) is NOT treated as an account and stays retryable.
+    if account_exists_for_email(email):
+        raise HttpError(409, "an account already exists for this email; please log in")
+
+    # 409 if a clone is still running for this email — guards the timeout / double-click path
+    # where "Try again" could fire while the original clone hasn't finished (and torn down) yet.
+    if not acquire_clone_lock(email):
+        raise HttpError(409, "your workspace is still being set up; please wait a moment")
+
+    redis = RedisClient.get_instance()
+    # re-anchor the elapsed clock to now so the progress screen counts from this retry, not the
+    # original attempt.
+    redis.set(TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS)
+    clone_trial_org_task.delay(
+        task_id, data["template_org_id"], email, data["org_name"], data["role"]
+    )
+
     return {"task_id": task_id, "email": email}
 
 

@@ -64,12 +64,14 @@ def test_cleanup_reaps_orphaned_org_by_email_slug(mock_delete_org, mock_drop):
 @patch("ddpui.management.commands.cleanup_trial_clone.RedisClient")
 @patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
 @patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
-def test_cleanup_clears_activation_lock(mock_delete_org, mock_drop, mock_redis_cls):
-    """cleanup must delete the per-email `trial-activating:<email>` lock so the email is
-    immediately reusable for a fresh signup→activate (otherwise it 409s until the 10-min TTL)."""
+def test_cleanup_clears_running_clone_lock(mock_delete_org, mock_drop, mock_redis_cls):
+    """cleanup must delete the per-email running-clone lock so the email is immediately reusable
+    for a fresh signup→activate (otherwise it 409s until the TTL backstop expires)."""
+    from ddpui.core.trial.activation import CLONE_LOCK_PREFIX
+
     redis = Mock()
     mock_redis_cls.get_instance.return_value = redis
 
     call_command("cleanup_trial_clone", "--email", "gone@x.org")
 
-    redis.delete.assert_called_once_with("trial-activating:gone@x.org")
+    redis.delete.assert_called_once_with(f"{CLONE_LOCK_PREFIX}gone@x.org")

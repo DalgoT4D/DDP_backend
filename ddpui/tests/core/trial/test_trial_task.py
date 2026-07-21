@@ -86,3 +86,65 @@ def test_clone_trial_org_task_failure_records_progress(mock_clone, mock_taskprog
     assert len(failed_calls) == 1
     assert failed_calls[0]["message"] == "clone failed"
     assert "boom" not in failed_calls[0]["message"]
+
+
+@patch("ddpui.core.trial.tasks.release_clone_lock")
+@patch("ddpui.core.trial.tasks.TaskProgress")
+@patch("ddpui.core.trial.tasks.clone_template_org")
+def test_clone_task_releases_lock_on_success(mock_clone, mock_taskprogress_cls, mock_release):
+    """The per-email running-clone lock must be freed when the clone finishes, so a later
+    retry (or a fresh trial for that email) isn't blocked until the TTL backstop expires."""
+    from ddpui.core.trial.tasks import clone_trial_org_task
+
+    mock_taskprogress_cls.return_value = MagicMock()
+    mock_run = MagicMock()
+    mock_run.trial_org.slug = "trial-ok"
+    mock_clone.return_value = mock_run
+
+    clone_trial_org_task("task-ok", 5, "ok@b.org", "Acme", "account-manager")
+
+    mock_release.assert_called_once_with("ok@b.org")
+
+
+@patch("ddpui.core.trial.tasks.release_clone_lock")
+@patch("ddpui.core.trial.tasks.TaskProgress")
+@patch("ddpui.core.trial.tasks.clone_template_org")
+def test_clone_task_releases_lock_on_failure(mock_clone, mock_taskprogress_cls, mock_release):
+    """Lock freed on the failure path too (finally) — otherwise "Try again" would hit a held
+    lock and 409 until the TTL expired."""
+    from ddpui.core.trial.tasks import clone_trial_org_task
+
+    mock_taskprogress_cls.return_value = MagicMock()
+    mock_clone.side_effect = RuntimeError("boom")
+
+    clone_trial_org_task("task-fail", 5, "fail@b.org", "Acme", "account-manager")
+
+    mock_release.assert_called_once_with("fail@b.org")
+
+
+@patch("ddpui.core.trial.tasks.release_clone_lock")
+@patch("ddpui.core.trial.tasks.TaskProgress")
+@patch("ddpui.core.trial.tasks.clone_template_org")
+def test_clone_task_timeout_records_failed_and_releases_lock(
+    mock_clone, mock_taskprogress_cls, mock_release
+):
+    """The soft_time_limit path: a clone that runs past CLONE_SOFT_TIME_LIMIT raises
+    SoftTimeLimitExceeded inside the task. It must be handled exactly like any other failure —
+    generic "clone failed" progress (no raw leak), no re-raise, and the lock released — so a
+    wedged clone still lets the user "Try again"."""
+    from celery.exceptions import SoftTimeLimitExceeded
+    from ddpui.core.trial.tasks import clone_trial_org_task
+
+    mock_progress = MagicMock()
+    mock_taskprogress_cls.return_value = mock_progress
+    mock_clone.side_effect = SoftTimeLimitExceeded()
+
+    # must not propagate — the task swallows it into a "failed" progress entry
+    clone_trial_org_task("task-timeout", 5, "slow@b.org", "Acme", "account-manager")
+
+    failed_calls = [
+        c.args[0] for c in mock_progress.add.call_args_list if c.args[0].get("status") == "failed"
+    ]
+    assert len(failed_calls) == 1
+    assert failed_calls[0]["message"] == "clone failed"
+    mock_release.assert_called_once_with("slow@b.org")
