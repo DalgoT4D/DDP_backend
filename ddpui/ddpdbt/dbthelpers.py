@@ -7,9 +7,10 @@ from ninja.errors import HttpError
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
 from ddpui.ddpprefect.schema import PrefectSecretBlockEdit
-from ddpui.core.dbtfunctions import map_airbyte_destination_spec_to_dbtcli_profile
+from ddpui.core.dbtfunctions import build_profile_dict, preprocess_airbyte_creds_for_dbt
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
+from ddpui.utils import secretsmanager
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddphelpers")
@@ -17,17 +18,6 @@ logger = CustomLogger("ddphelpers")
 
 def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
     """Create/update the block in db and also in prefect"""
-    bqlocation = None
-    priority = None  # whether to run in "batch" mode or "interactive" mode for bigquery
-    if warehouse.wtype == "bigquery":
-        if "dataset_location" in airbyte_creds:
-            bqlocation = airbyte_creds["dataset_location"]
-            del airbyte_creds["dataset_location"]
-
-        if "transformation_priority" in airbyte_creds:
-            priority = airbyte_creds["transformation_priority"]
-            del airbyte_creds["transformation_priority"]
-
     profile_name = None
     target = None
     dbt_project_params: DbtProjectParams = None
@@ -51,10 +41,13 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
         )
         logger.error(err)
 
-    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds, dbt_project_params)
-
-    dbt_creds.pop("ssl_mode", None)
-    dbt_creds.pop("ssl", None)
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(
+        warehouse, airbyte_creds, dbt_project_params
+    )
+    # CLI-block writer takes location / priority as separate kwargs (Prefect's
+    # block API expects them that way); pull them back out from wh_extras.
+    bqlocation = wh_extras.get("location")
+    priority = wh_extras.get("priority")
 
     orgdbt = org.dbt
 
@@ -139,75 +132,149 @@ def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_cr
 
     # Mirror creds to the runner-flow Secret block. Non-fatal on failure so
     # the CLI-profile-block path (authoritative until cutover) still wins.
-    create_or_update_wh_secret_block(
-        org, warehouse, dbt_creds, bqlocation=bqlocation, priority=priority
-    )
+    create_or_update_dbt_profile_secret_blk(org, warehouse, dbt_creds, wh_extras)
 
     return (cli_profile_block, dbt_project_params), None
 
 
-def create_or_update_wh_secret_block(
+def create_or_update_dbt_profile_secret_blk(
     org: Org,
     warehouse: OrgWarehouse,
     dbt_creds: dict,
-    bqlocation: str = None,
-    priority: str = None,
+    profile_extras: dict,
 ):
-    """Upsert the warehouse's Prefect Secret block — the runner-flow artifact
-    read by proxy/prefect_flows_runner.py at flow-run start.
+    """Upsert the org's dbt-profile Prefect Secret block — the runner-flow
+    artifact read by proxy/prefect_flows_runner.py at flow-run start.
 
-    Block name is deterministic: `dalgo-wh-<org.slug>`.
-    Value is JSON-encoded {"creds": ..., "extras": ...}:
-      creds  = airbyte destination fields the runner uses to shape profiles.yml
-               (host, port, user, password, database, SSL bits; or keyfile_json
-               for BigQuery).
-      extras = profile-shaping settings that aren't credentials:
-                 bigquery → {"location": bqlocation, "priority": priority}
-                 postgres → {} (all settings live in creds)
+    Block name is deterministic: `dbt-profile-<org.slug>`.
+    Value is JSON-encoded:
+      {
+        "wtype":          warehouse.wtype,
+        "default_schema": org.dbt.default_schema,
+        "creds":          dbt_creds,
+        "extras":         profile_extras,
+      }
+    - dbt_creds:       airbyte destination fields mapped to dbt-postgres /
+                       dbt-bigquery field names (via
+                       preprocess_airbyte_creds_for_dbt).
+    - profile_extras:  profile-shaping settings that aren't credentials:
+                       bigquery → {"location": ..., "priority": ...}
+                       postgres → {}
 
-    Also upserts an OrgPrefectBlockv1 row and sets `warehouse.secret_block`.
+    Also upserts an OrgPrefectBlockv1 row and sets
+    `org.dbt.dbt_profile_secret_block`. Requires `org.dbt` to be set; the block
+    is a dbt-lifecycle artifact.
+
     Errors are logged and swallowed — the caller's CLI-profile-block path stays
     authoritative during the transition.
 
-    Returns the OrgPrefectBlockv1 row on success, None on failure.
+    Returns the OrgPrefectBlockv1 row on success, None on failure / no orgdbt.
     """
-    wh_extras = {}
-    if warehouse.wtype == "bigquery":
-        if bqlocation:
-            wh_extras["location"] = bqlocation
-        if priority:
-            wh_extras["priority"] = priority
+    if not org.dbt:
+        logger.info("Skipping dbt-profile secret block for org=%s — no OrgDbt", org.slug)
+        return None
 
-    wh_secret_block_name = f"dalgo-wh-{org.slug}"
+    dbt_profile_secret_block_name = f"dbt-profile-{org.slug}"
+    block_value = {
+        "wtype": warehouse.wtype,
+        "default_schema": org.dbt.default_schema,
+        "creds": dbt_creds,
+        "extras": profile_extras,
+    }
     try:
-        wh_secret_response = prefect_service.upsert_secret_block(
+        dbt_profile_secret_response = prefect_service.upsert_secret_block(
             PrefectSecretBlockEdit(
-                block_name=wh_secret_block_name,
-                secret=json.dumps({"creds": dbt_creds, "extras": wh_extras}),
+                block_name=dbt_profile_secret_block_name,
+                secret=json.dumps(block_value),
             )
         )
     except Exception as error:  # pylint: disable=broad-exception-caught
         logger.error(
-            "Failed to upsert warehouse secret block %s for org=%s , err=%s",
-            wh_secret_block_name,
+            "Failed to upsert dbt-profile secret block %s for org=%s , err=%s",
+            dbt_profile_secret_block_name,
             org.slug,
             str(error),
         )
         return None
 
-    wh_block_row, _ = OrgPrefectBlockv1.objects.update_or_create(
-        block_name=wh_secret_response["block_name"],
+    dbt_profile_secret_block_row, _ = OrgPrefectBlockv1.objects.update_or_create(
+        block_name=dbt_profile_secret_response["block_name"],
         defaults={
             "org": org,
             "block_type": SECRET,
-            "block_id": wh_secret_response["block_id"],
+            "block_id": dbt_profile_secret_response["block_id"],
         },
     )
-    warehouse.secret_block = wh_block_row
-    warehouse.save(update_fields=["secret_block"])
+    org.dbt.dbt_profile_secret_block = dbt_profile_secret_block_row
+    org.dbt.save(update_fields=["dbt_profile_secret_block"])
     logger.info(
-        "Upserted warehouse secret block %s for org=%s",
-        wh_secret_response["block_name"],
+        "Upserted dbt-profile secret block %s for org=%s",
+        dbt_profile_secret_response["block_name"],
         org.slug,
     )
-    return wh_block_row
+    return dbt_profile_secret_block_row
+
+
+def write_dbt_profiles_yml(org: Org) -> Path:
+    """Write <project_dir>/profiles/profiles.yml for the org, matching the shape
+    proxy/prefect_flows_runner.py:dbtjob_v2_runner writes at flow-run time.
+
+    Same source of truth (airbyte destination creds) + same preprocessing
+    + same build_profile_dict, so backend-generated and runner-generated
+    profiles.yml are structurally identical.
+
+    Returns the absolute Path of the written profiles.yml.
+    """
+    if not org.dbt:
+        raise HttpError(400, "dbt is not configured for this org")
+
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    if not warehouse:
+        raise HttpError(400, "warehouse not found for org")
+
+    airbyte_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    if not airbyte_creds:
+        raise HttpError(400, "warehouse credentials not found")
+
+    dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(
+        warehouse, airbyte_creds, dbt_project_params
+    )
+
+    dbt_project_filename = Path(dbt_project_params.project_dir) / "dbt_project.yml"
+    if not dbt_project_filename.exists():
+        raise HttpError(400, f"{dbt_project_filename} is missing")
+    with open(dbt_project_filename, "r", encoding="utf-8") as f:
+        dbt_project = yaml.safe_load(f)
+    if "profile" not in dbt_project:
+        raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
+    profile_name = dbt_project["profile"]
+
+    profile_dict = build_profile_dict(
+        profile_name=profile_name,
+        wtype=warehouse.wtype,
+        schema=org.dbt.default_schema,
+        creds=dbt_creds,
+        extras=wh_extras,
+    )
+
+    profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
+    os.makedirs(profile_dirname, exist_ok=True)
+
+    # Mirror the runner's SSL cert handling (prefect_flows_runner.py:258-265).
+    if warehouse.wtype == "postgres" and dbt_creds.get("sslrootcert_content"):
+        cert_path = dbt_creds.get("sslrootcert") or os.path.join(
+            dbt_project_params.project_dir, "..", "sslrootcert.pem"
+        )
+        os.makedirs(os.path.dirname(cert_path), exist_ok=True)
+        with open(cert_path, "w", encoding="utf-8") as f:
+            f.write(dbt_creds["sslrootcert_content"])
+        target_key = profile_dict[profile_name]["target"]
+        profile_dict[profile_name]["outputs"][target_key]["sslrootcert"] = cert_path
+
+    profile_filename = profile_dirname / "profiles.yml"
+    logger.info("writing dbt profile to %s", profile_filename)
+    with open(profile_filename, "w", encoding="utf-8") as f:
+        yaml.safe_dump(profile_dict, f)
+    return profile_filename

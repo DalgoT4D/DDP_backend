@@ -17,7 +17,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
+from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block, write_dbt_profiles_yml
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
     TASK_DOCSGENERATE,
@@ -237,14 +237,26 @@ def delete_dbt_workspace(org: Org):
             pass
         dbt_cli_profile_block.delete()
 
-    logger.info("deleting git secret block")
-    # remove git token uri block
-    for secret_block in OrgPrefectBlockv1.objects.filter(org=org, block_type=SECRET).all():
+    logger.info("deleting git-pull secret block(s)")
+    for secret_block in OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name__contains="git-pull"
+    ).all():
         try:
             prefect_service.delete_secret_block(secret_block.block_id)
         except Exception:  # pylint:disable=broad-exception-caught
             pass
         secret_block.delete()
+
+    # Delete the dbt-profile secret block (dbt-profile-<slug>). FK lives on
+    # OrgDbt so deleting OrgDbt below would orphan the Prefect block +
+    # OrgPrefectBlockv1 row — clean them up explicitly here.
+    if org.dbt and org.dbt.dbt_profile_secret_block:
+        dbt_profile_secret_block = org.dbt.dbt_profile_secret_block
+        try:
+            prefect_service.delete_secret_block(dbt_profile_secret_block.block_id)
+        except Exception:  # pylint:disable=broad-exception-caught
+            pass
+        dbt_profile_secret_block.delete()
 
     # delete github PAT if exists
     if org.dbt and org.dbt.gitrepo_access_token_secret:
@@ -471,22 +483,8 @@ def check_repo_exists(gitrepo_url: str, gitrepo_access_token: str | None) -> boo
 
 def generate_manifest_json_for_dbt_project(org: Org, orgdbt: OrgDbt) -> dict:
     """Generates the manifest.json for a given OrgDbt project."""
-    # we need to make sure the profiles.yml exists in the profiles dir
-    dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
-    dbt_cli_profile_block: OrgPrefectBlockv1 = orgdbt.cli_profile_block
-    if not dbt_cli_profile_block:
-        raise Exception("DBT CLI profile block not found for the OrgDbt project")
-
     try:
-        profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile_block.block_name)[
-            "profile"
-        ]
-        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
-        profile_filename = profile_dirname / "profiles.yml"
-        logger.info("writing dbt profile to " + str(profile_filename))
-        with open(profile_filename, "w", encoding="utf-8") as f:
-            yaml.safe_dump(profile, f)
+        write_dbt_profiles_yml(org)
     except Exception as err:
         logger.error(f"failed to write profiles.yml: {str(err)}")
         raise Exception(f"Something went wrong while writing profiles.yml: {str(err)}") from err
