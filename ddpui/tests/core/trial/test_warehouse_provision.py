@@ -4,6 +4,7 @@ import pytest
 from ddpui.core.trial import warehouse_provision
 from ddpui.core.trial.warehouse_provision import (
     _ft_key,
+    _reassign_copied_objects,
     ft_database_name,
     ft_role_name,
     provision_trial_database,
@@ -195,3 +196,108 @@ def test_drop_trial_database(mock_settings, mock_psycopg2):
 
     assert conn.autocommit is True
     conn.close.assert_called_once()
+
+
+@patch("ddpui.core.trial.warehouse_provision.psycopg2")
+@patch("ddpui.core.trial.warehouse_provision.settings")
+def test_drop_terminates_active_sessions_before_dropping(mock_settings, mock_psycopg2):
+    """When the db still exists, block new connections + terminate live sessions BEFORE the
+    DROP, so an in-use db (recent clone / pooled connection) can't strand the db+role."""
+    mock_settings.TRIALS_RDS_HOST = "rds-host"
+    mock_settings.TRIALS_RDS_PORT = 5432
+    mock_settings.TRIALS_RDS_ADMIN_USER = "admin"
+    mock_settings.TRIALS_RDS_ADMIN_PASSWORD = "adminpass"
+
+    conn = MagicMock()
+    cursor = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.return_value = (1,)  # db exists
+    cursor.rowcount = 2
+    mock_psycopg2.connect.return_value = conn
+
+    email = "someone@example.com"
+    expected_db = ft_database_name(email)
+
+    drop_trial_database(email)
+
+    executed = [str(c.args[0]) for c in cursor.execute.call_args_list]
+    joined = " ".join(executed)
+    assert f'REVOKE CONNECT ON DATABASE "{expected_db}" FROM PUBLIC' in joined
+    assert "pg_terminate_backend" in joined
+    # terminate must happen before the DROP DATABASE
+    terminate_idx = next(i for i, s in enumerate(executed) if "pg_terminate_backend" in s)
+    drop_idx = next(i for i, s in enumerate(executed) if "DROP DATABASE" in s)
+    assert terminate_idx < drop_idx
+
+
+@patch("ddpui.core.trial.warehouse_provision.psycopg2")
+@patch("ddpui.core.trial.warehouse_provision.settings")
+def test_drop_skips_terminate_when_db_absent(mock_settings, mock_psycopg2):
+    """If the db is already gone, don't REVOKE/terminate (REVOKE has no IF-EXISTS and would
+    raise) — just run the idempotent DROP ... IF EXISTS statements."""
+    mock_settings.TRIALS_RDS_HOST = "rds-host"
+    mock_settings.TRIALS_RDS_PORT = 5432
+    mock_settings.TRIALS_RDS_ADMIN_USER = "admin"
+    mock_settings.TRIALS_RDS_ADMIN_PASSWORD = "adminpass"
+
+    conn = MagicMock()
+    cursor = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.return_value = None  # db already gone
+    mock_psycopg2.connect.return_value = conn
+
+    drop_trial_database("gone@example.com")
+
+    joined = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
+    assert "REVOKE CONNECT" not in joined
+    assert "pg_terminate_backend" not in joined
+    assert "DROP DATABASE IF EXISTS" in joined
+    assert "DROP ROLE IF EXISTS" in joined
+
+
+# --------------------------------------------------------------------------
+# _reassign_copied_objects
+# --------------------------------------------------------------------------
+
+
+def test_reassign_copied_objects_transfers_only_non_system_owners():
+    """Objects copied from the template keep the template's owner role; ownership must move to
+    the ft role so the trial's chart queries + dbt rebuild work. ft_role/postgres/pg_* are skipped
+    (ft owns its own objects; public is handled separately; pg_* are system roles)."""
+    ft_role = "ft_x_user"
+    cursor = MagicMock()
+    # discovery query returns a mix of owners
+    cursor.fetchall.return_value = [
+        ("template_wh",),
+        (ft_role,),
+        ("postgres",),
+        ("pg_monitor",),
+    ]
+
+    _reassign_copied_objects(cursor, ft_role)
+
+    stmts = [str(c.args[0]) for c in cursor.execute.call_args_list]
+    joined = " ".join(stmts)
+
+    # the template owner is fully transferred (grant → reassign → revoke)
+    assert 'GRANT "template_wh" TO CURRENT_USER' in joined
+    assert f'REASSIGN OWNED BY "template_wh" TO "{ft_role}"' in joined
+    assert 'REVOKE "template_wh" FROM CURRENT_USER' in joined
+
+    # ft_role / postgres / pg_* are never reassigned
+    assert 'REASSIGN OWNED BY "postgres"' not in joined
+    assert 'REASSIGN OWNED BY "pg_monitor"' not in joined
+    assert f'REASSIGN OWNED BY "{ft_role}"' not in joined
+
+
+def test_reassign_copied_objects_noop_when_no_foreign_owners():
+    """Only ft_role/postgres present (e.g. nothing copied) → no GRANT/REASSIGN/REVOKE issued."""
+    ft_role = "ft_x_user"
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [(ft_role,), ("postgres",)]
+
+    _reassign_copied_objects(cursor, ft_role)
+
+    joined = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
+    assert "REASSIGN OWNED BY" not in joined
+    assert "GRANT" not in joined

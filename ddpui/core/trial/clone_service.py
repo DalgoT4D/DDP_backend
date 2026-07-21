@@ -93,8 +93,10 @@ def _step_org_and_user(run: CloneRun) -> None:
     # `create_organization` derives org.slug = slugify(org.name)[:20], so the 8-char email hash
     # sits right after "Trial " (chars 6-14) to guarantee it survives the 20-char slug truncation
     # → the slug (and the Airbyte workspace name / Prefect block prefix built from it) is unique
-    # per email. The caller-supplied org_name is intentionally NOT used for the org identity.
-    trial_name = f"Trial {email_hash8(run.trial_email)} {template.name}"[:50]
+    # per email. The email's local part follows the hash so the name is human-identifiable (mirrors
+    # the ft_<local>_<hash>_db warehouse name). The caller-supplied org_name is NOT used.
+    email_local = run.trial_email.split("@")[0]
+    trial_name = f"Trial {email_hash8(run.trial_email)} {email_local} {template.name}"[:50]
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,
@@ -471,6 +473,23 @@ def _step_viz(run: CloneRun) -> None:
     run.manifest["viz"] = clone_viz(run.template, run.trial_org, run.trial_orguser)
 
 
+def delete_trial_org(org: Org) -> None:
+    """Fully delete a trial org, including the viz rows OrgCleanupService can't.
+
+    `OrgCleanupService.delete_org()` does NOT delete `Metric`/`KPI` rows, and `Metric.org` is an
+    on_delete=PROTECT FK (KPIs in turn PROTECT their Metric) — so the moment a trial is cloned
+    from a template that has metrics/KPIs (they get copied by viz_clone), the final `org.delete()`
+    inside `delete_org()` raises ProtectedError, leaving the org row + OrgUser half-removed and the
+    org NAME still taken (which then blocks the next clone for that email). Reap KPIs, then Metrics
+    (Alerts CASCADE off Metric), before handing the rest to OrgCleanupService.
+    """
+    from ddpui.models.metric import Metric, KPI  # local import: avoid a heavy import at module load
+
+    KPI.objects.filter(org=org).delete()  # KPI.metric is PROTECT → KPIs must go before Metrics
+    Metric.objects.filter(org=org).delete()  # Metric.org is PROTECT; Alerts CASCADE off the Metric
+    OrgCleanupService(org, dry_run=False).delete_org()
+
+
 def _teardown(run: CloneRun) -> None:
     """Best-effort teardown of whatever got created before a mid-run failure.
 
@@ -489,21 +508,17 @@ def _teardown(run: CloneRun) -> None:
             logger.error(f"failed to drop trial database for {run.trial_email}: {rds_err}")
 
     if run.trial_org:
-        # viz rows (Step 8: Metric/KPI/Chart/Dashboard/DashboardFilter/Alert/ReportSnapshot) all
-        # have org=CASCADE (Metric/KPI/Chart/Dashboard/Alert/ReportSnapshot directly;
-        # DashboardFilter via its dashboard FK) or no org FK at all — every one is reaped by
-        # OrgCleanupService.delete_org() below without any extra teardown here.
-        # sources+connections (Steps 4-5) are never torn down individually here:
-        # OrgCleanupService.delete_org() -> delete_warehouse() explicitly deletes every
-        # connection (via each airbyte OrgTask) before delete_airbyte_workspace() deletes the
-        # sources and then the workspace itself — both are reaped by delete_org(), just not
-        # purely by workspace-delete cascade — so no extra Airbyte teardown is needed here as
-        # long as run.trial_org exists.
+        # Metric/KPI have PROTECT FKs that OrgCleanupService.delete_org() doesn't handle — so
+        # delete_trial_org() reaps those first (see its docstring). Chart/Dashboard/DashboardFilter/
+        # Alert/ReportSnapshot are org=CASCADE (or have no org FK) and are reaped by delete_org().
+        # sources+connections (Steps 4-5) are also reaped by delete_org() -> delete_warehouse()
+        # (deletes each connection's airbyte OrgTask) -> delete_airbyte_workspace() (sources +
+        # workspace) — no extra Airbyte teardown needed here as long as run.trial_org exists.
         try:
             logger.info(
                 f"tearing down org+workspace for failed clone (template={run.template.slug})"
             )
-            OrgCleanupService(run.trial_org, dry_run=False).delete_org()
+            delete_trial_org(run.trial_org)
         except Exception as org_err:  # skipcq PYL-W0703
             logger.error(f"failed to delete_org during teardown ({run.template.slug}): {org_err}")
 

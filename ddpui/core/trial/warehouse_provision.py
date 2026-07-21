@@ -54,6 +54,44 @@ def _admin_connect(dbname: str):
     return conn
 
 
+def _reassign_copied_objects(cursor, ft_role: str) -> None:
+    """Hand ownership of every object copied from the template db over to the trial's ft role.
+
+    `CREATE DATABASE ... TEMPLATE ...` clones the template's schemas/tables verbatim, keeping the
+    TEMPLATE's owner role (e.g. the template warehouse role) on each object. The trial's ft role
+    then has no rights on those schemas (`intermediate`, `staging`, …), so the app's chart queries
+    fail with "permission denied for schema intermediate" and dbt can't rebuild the models.
+
+    For each distinct non-system owner found in the copied db we make the admin a temporary member
+    of that role (rds_superuser is allowed to grant any role to itself, but REASSIGN still requires
+    actual membership in the source role), REASSIGN OWNED its objects to the ft role, then drop the
+    membership again. REASSIGN OWNED is db-scoped, so this only touches the trial db. `public`
+    (owned by `postgres`) is handled separately by the caller and skipped here.
+
+    Owner names come from the copied template db's own catalog — controlled template content, never
+    user input — so interpolating them as identifiers does not cross a trust boundary.
+    """
+    cursor.execute(
+        """
+        SELECT DISTINCT owner FROM (
+            SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace
+            WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema'
+            UNION
+            SELECT tableowner FROM pg_tables
+            WHERE schemaname NOT LIKE 'pg\\_%' AND schemaname <> 'information_schema'
+        ) owners
+        """
+    )
+    owners = [row[0] for row in cursor.fetchall()]
+    for owner in owners:
+        if owner == ft_role or owner == "postgres" or owner.startswith("pg_"):
+            continue
+        cursor.execute(f'GRANT "{owner}" TO CURRENT_USER')
+        cursor.execute(f'REASSIGN OWNED BY "{owner}" TO "{ft_role}"')
+        cursor.execute(f'REVOKE "{owner}" FROM CURRENT_USER')
+        logger.info(f"reassigned template objects owned by {owner} to {ft_role}")
+
+
 def provision_trial_database(email: str, template_db: str | None = None) -> dict:
     """Create a dedicated Postgres database + owner role on the trials-RDS instance for a
     trial, keyed by the trial email (not the trialclone id) so repeated trials from the same
@@ -95,6 +133,8 @@ def provision_trial_database(email: str, template_db: str | None = None) -> dict
         with ft_db_conn.cursor() as cursor:
             cursor.execute(f'GRANT ALL ON SCHEMA public TO "{ft_role}"')
             cursor.execute(f'ALTER SCHEMA public OWNER TO "{ft_role}"')
+            if template_db:
+                _reassign_copied_objects(cursor, ft_role)
     finally:
         ft_db_conn.close()
 
@@ -121,11 +161,30 @@ def drop_trial_database(email: str) -> None:
     ft_role = ft_role_name(email)
 
     conn = _admin_connect("postgres")
+    terminated = 0
     try:
         with conn.cursor() as cursor:
+            # A bare DROP DATABASE fails with "database is being accessed by other users" if any
+            # session is still connected (a recent clone, a pooled backend/Airbyte connection).
+            # Block new connections and terminate the live ones first so teardown is idempotent
+            # and never leaves the db+role stranded. Only touch the db while it still exists —
+            # REVOKE has no IF-EXISTS form and would raise if the db is already gone, breaking
+            # the "safe to run even if already gone" contract.
+            cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", [ft_db])
+            if cursor.fetchone():
+                cursor.execute(f'REVOKE CONNECT ON DATABASE "{ft_db}" FROM PUBLIC')
+                cursor.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()",
+                    [ft_db],
+                )
+                terminated = cursor.rowcount
             cursor.execute(f'DROP DATABASE IF EXISTS "{ft_db}"')
             cursor.execute(f'DROP ROLE IF EXISTS "{ft_role}"')
     finally:
         conn.close()
 
-    logger.info(f"dropped trial database {ft_db} (role {ft_role}) on {settings.TRIALS_RDS_HOST}")
+    logger.info(
+        f"dropped trial database {ft_db} (role {ft_role}) on {settings.TRIALS_RDS_HOST} "
+        f"(terminated {terminated} active session(s))"
+    )

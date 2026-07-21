@@ -134,7 +134,16 @@ class TestTrialActivate:
         assert result["email"] == "new@b.org"  # echoed back for the progress screen's auto-login
         user = User.objects.get(username="new@b.org")
         assert user.check_password(STRONG_PASSWORD)
-        mock_redis.set.assert_called_once_with("trial-activating:new@b.org", "1", nx=True, ex=600)
+        mock_redis.set.assert_any_call("trial-activating:new@b.org", "1", nx=True, ex=600)
+        # start time recorded so the progress screen's elapsed clock survives a refresh
+        start_calls = [
+            c
+            for c in mock_redis.set.call_args_list
+            if c.args and c.args[0] == f"trial-clone-start:{result['task_id']}"
+        ]
+        assert len(start_calls) == 1
+        assert isinstance(start_calls[0].args[1], int)
+        assert start_calls[0].kwargs.get("ex") == 86400
         mock_clone_task.delay.assert_called_once_with(
             result["task_id"], seed_template_org.id, "new@b.org", "Acme", "account-manager"
         )
@@ -244,12 +253,14 @@ class TestTrialActivate:
 
 
 class TestTrialStatus:
+    @patch("ddpui.api.trial_api.RedisClient")
     @patch("ddpui.api.trial_api.TaskProgress")
-    def test_status_with_progress(self, mock_taskprogress_cls):
+    def test_status_with_progress(self, mock_taskprogress_cls, mock_redis_cls):
         mock_taskprogress_cls.fetch.return_value = [
             {"message": "queued", "status": "queued"},
             {"message": "done", "status": "completed", "org_slug": "trial-abc"},
         ]
+        mock_redis_cls.get_instance.return_value.get.return_value = b"1700000000"
 
         result = trial_status(None, "task-1")
 
@@ -258,11 +269,20 @@ class TestTrialStatus:
         assert result["status"] == "completed"
         assert result["org_slug"] == "trial-abc"
         assert len(result["progress"]) == 2
+        # start time from redis is surfaced so the frontend elapsed clock survives a refresh
+        assert result["started_at"] == 1700000000
 
+    @patch("ddpui.api.trial_api.RedisClient")
     @patch("ddpui.api.trial_api.TaskProgress")
-    def test_status_empty_progress_is_pending(self, mock_taskprogress_cls):
+    def test_status_empty_progress_is_pending(self, mock_taskprogress_cls, mock_redis_cls):
         mock_taskprogress_cls.fetch.return_value = None
+        mock_redis_cls.get_instance.return_value.get.return_value = None
 
         result = trial_status(None, "task-2")
 
-        assert result == {"task_id": "task-2", "progress": [], "status": "pending"}
+        assert result == {
+            "task_id": "task-2",
+            "progress": [],
+            "status": "pending",
+            "started_at": None,
+        }

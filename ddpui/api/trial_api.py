@@ -1,5 +1,6 @@
 """Public free-trial signup/activation/status endpoints — no authentication required."""
 
+import time
 from uuid import uuid4
 
 from django.conf import settings
@@ -23,6 +24,12 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.api.trial_api")
 
 trial_router = Router()
+
+# redis key holding the clone's start time (unix seconds), so the progress screen can show an
+# elapsed clock that survives a page refresh instead of restarting from 0. Keyed by task_id; TTL
+# comfortably outlives the ~90s clone so a slow/queued run still reports a correct elapsed.
+TRIAL_START_KEY = "trial-clone-start:{task_id}"
+TRIAL_START_TTL_SECONDS = 86400  # 1 day
 
 
 class TrialSignupSchema(Schema):
@@ -107,6 +114,9 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
         raise HttpError(500, "template org not configured")
 
     task_id = str(uuid4())
+    # record the clone's start time so the progress screen's elapsed clock is derived from a
+    # fixed origin (survives page refresh) rather than counting up from when the tab mounted.
+    redis.set(TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS)
     clone_trial_org_task.delay(task_id, template.id, email, data["org_name"], data["role"])
 
     # email is echoed back so the progress screen can auto-login (POST /login) once the clone
@@ -117,15 +127,22 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
 @trial_router.get("/status/{task_id}")
 def trial_status(request, task_id: str):  # pylint: disable=unused-argument
     """poll the redis-backed progress for a clone task"""
+    redis = RedisClient.get_instance()
+    # start time (unix seconds) recorded at activate; lets the frontend show an elapsed clock
+    # anchored to a fixed origin so it doesn't reset when the user refreshes the progress page.
+    raw_start = redis.get(TRIAL_START_KEY.format(task_id=task_id))
+    started_at = int(raw_start) if raw_start else None
+
     progress = TaskProgress.fetch(task_id, f"trial-clone-{task_id}")
     if not progress:
-        return {"task_id": task_id, "progress": [], "status": "pending"}
+        return {"task_id": task_id, "progress": [], "status": "pending", "started_at": started_at}
 
     last = progress[-1]
     result = {
         "task_id": task_id,
         "progress": progress,
         "status": last.get("status", "pending"),
+        "started_at": started_at,
     }
     if "org_slug" in last:
         result["org_slug"] = last["org_slug"]

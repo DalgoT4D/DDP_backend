@@ -425,7 +425,8 @@ def test_step_org_and_user_name_is_email_derived_ignores_org_name(
 ):
     """The trial org name/slug is derived from the EMAIL only — the caller-supplied org_name is
     NOT unique (two users can both type "test") and must NOT be used for the org identity. Name
-    = f"Trial {email_hash8} {template.name}", so even a garbage/duplicate org_name is ignored."""
+    = f"Trial {email_hash8} {email_local} {template.name}", so even a garbage/duplicate org_name
+    is ignored, while the email's local part keeps the name human-identifiable."""
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="Health Demo", slug="tmpl-orgname")
     expected_hash = clone_service.email_hash8("acme@b.org")
@@ -443,7 +444,7 @@ def test_step_org_and_user_name_is_email_derived_ignores_org_name(
 
     args, _ = mock_create_org.call_args
     payload = args[0]
-    assert payload.name == f"Trial {expected_hash} Health Demo"
+    assert payload.name == f"Trial {expected_hash} acme Health Demo"
     assert "test" not in payload.name
 
 
@@ -474,7 +475,7 @@ def test_step_org_and_user_slug_is_email_hash_unique(mock_create_org, mock_creat
     clone_service._step_org_and_user(run)
 
     payload = mock_create_org.call_args.args[0]
-    assert payload.name == f"Trial {expected_hash} Health Demo Org"[:50]
+    assert payload.name == f"Trial {expected_hash} chf Health Demo Org"[:50]
     trial_org = run.trial_org
     assert len(trial_org.slug) <= 20
     assert trial_org.slug.startswith(f"trial-{expected_hash}")
@@ -485,7 +486,7 @@ def test_step_org_and_user_slug_is_email_hash_unique(mock_create_org, mock_creat
 def test_step_org_and_user_defaults_to_trial_name_when_no_org_name(
     mock_create_org, mock_create_plan
 ):
-    """Without org_name, existing behavior (Trial <hash> <template.name>) is unchanged."""
+    """Without org_name, name is Trial <hash> <email_local> <template.name>."""
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="tmpl-default-name", slug="tmpl-default-name")
     trial_org = Org.objects.create(
@@ -500,7 +501,7 @@ def test_step_org_and_user_defaults_to_trial_name_when_no_org_name(
     args, _ = mock_create_org.call_args
     payload = args[0]
     expected_hash = clone_service.email_hash8("default@b.org")
-    assert payload.name == f"Trial {expected_hash} {template.name}"[:50]
+    assert payload.name == f"Trial {expected_hash} default {template.name}"[:50]
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
@@ -1289,3 +1290,24 @@ def test_clone_wires_step_viz_last(
     mock_s8.assert_called_once()
     assert "step8_viz" in run.timings
     assert list(run.timings.keys())[-1] == "step8_viz"
+
+
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+def test_delete_trial_org_reaps_kpis_metrics_before_delete_org(mock_cleanup_cls):
+    """Metric.org is PROTECT and KPIs PROTECT their Metric, so delete_trial_org must remove KPIs
+    then Metrics before OrgCleanupService.delete_org() — otherwise org.delete() raises
+    ProtectedError and leaves an orphan whose name blocks the next clone."""
+    from ddpui.models.metric import Metric, KPI
+
+    org = Org.objects.create(name="Trial reap", slug="trial-reap")
+    metric = Metric.objects.create(
+        org=org, name="m1", schema_name="s", table_name="t", column="c", aggregation="sum"
+    )
+    KPI.objects.create(org=org, metric=metric, name="k1", extra_config={})
+
+    clone_service.delete_trial_org(org)
+
+    assert KPI.objects.filter(org=org).count() == 0
+    assert Metric.objects.filter(org=org).count() == 0
+    mock_cleanup_cls.assert_called_once_with(org, dry_run=False)
+    mock_cleanup_cls.return_value.delete_org.assert_called_once()
