@@ -992,6 +992,16 @@ def download_chart_data_csv(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{chart_type}_{table_name}_{timestamp}.csv"
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CHART,
+        resource_id=f"{payload.schema_name}.{payload.table_name}",
+        resource_name=payload.table_name,
+        action=AuditLogAction.EXPORT,
+        field_changes={"format": "csv"},
+    )
+
     # Stream response using common function
     response = StreamingHttpResponse(
         stream_chart_data_csv(org_warehouse, payload, page_size=5000),

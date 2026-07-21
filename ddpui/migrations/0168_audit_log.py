@@ -62,6 +62,7 @@ class Migration(migrations.Migration):
                             ("delete", "Delete"),
                             ("execute", "Execute"),
                             ("share", "Share"),
+                            ("export", "Export"),
                             ("login", "Login"),
                             ("logout", "Logout"),
                         ],

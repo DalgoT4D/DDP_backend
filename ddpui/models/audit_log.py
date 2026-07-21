@@ -41,6 +41,7 @@ class AuditLogAction(models.TextChoices):
     DELETE = "delete", "Delete"
     EXECUTE = "execute", "Execute"
     SHARE = "share", "Share"
+    EXPORT = "export", "Export"
     LOGIN = "login", "Login"
     LOGOUT = "logout", "Logout"
 
