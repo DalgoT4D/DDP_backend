@@ -1,5 +1,4 @@
 import json
-import pytest
 from unittest.mock import patch
 from ddpui.core.trial import source_config
 

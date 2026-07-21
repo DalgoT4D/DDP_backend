@@ -5,7 +5,7 @@ from ddpui.core.trial.timing import step_timer
 
 def _run():
     # `.template`/`.trial_email` aren't touched by step_timer — a bare CloneRun with
-    # placeholder values is enough to exercise the timings/current_step carrier.
+    # placeholder values is enough to exercise the timings carrier.
     return CloneRun(template=None, trial_email="a@b.org")
 
 
@@ -15,7 +15,6 @@ def test_step_timer_records_elapsed_and_step():
         pass
     assert "mystep" in run.timings
     assert run.timings["mystep"] >= 0
-    assert run.current_step == "mystep"
 
 
 def test_step_timer_records_even_on_exception():

@@ -211,8 +211,11 @@ def _clone_alerts(
             org=trial_org,
             name=a.name,
             alert_type=a.alert_type,
-            metric=metric_map.get(a.metric_id) if a.metric_id else None,
-            kpi=kpi_map.get(a.kpi_id) if a.kpi_id else None,
+            # fail-loud indexing (like the KPI/Chart remaps): a metric_id/kpi_id that is set but
+            # absent from the map means a broken clone — surface it instead of silently producing
+            # a sourceless alert.
+            metric=metric_map[a.metric_id] if a.metric_id else None,
+            kpi=kpi_map[a.kpi_id] if a.kpi_id else None,
             standalone_config=a.standalone_config,
             condition=a.condition,
             schedule_cron=a.schedule_cron,

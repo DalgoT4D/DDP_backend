@@ -39,7 +39,8 @@ def clone_trial_org_task(
     hashkey = f"trial-clone-{task_id}"
     # a fresh TaskProgress starts with an empty list and OVERWRITES the redis key on its first
     # add() — so a retry reusing this task_id gets a clean progress history, not the failed run's.
-    progress = TaskProgress(task_id, hashkey)
+    # 24h TTL so the polled progress hash doesn't leak in redis forever after the clone ends.
+    progress = TaskProgress(task_id, hashkey, 24 * 3600)
     progress.add({"message": "queued", "status": "queued"})
 
     try:

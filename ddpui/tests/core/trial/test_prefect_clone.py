@@ -82,6 +82,31 @@ def test_build_pipeline_payload_remaps_connection_and_resolves_transform_task():
     assert payload.transformTasks[0].seq == 0
 
 
+def test_resolve_transform_orgtask_copies_template_parameters_onto_existing():
+    """Step 6 (create_default_transform_tasks) mints the trial dbt-run OrgTask param-less before
+    Step 7 runs, so get_or_create finds it and its `defaults` never apply — resolve must copy the
+    template's parameters onto the existing row, else the cloned deployment drops --select etc."""
+    template, trial_org = _make_orgs()
+    template.dbt = _make_orgdbt("tmpl-pf")
+    template.save()
+    dbt_task = Task.objects.create(
+        type=TaskType.DBT, slug="dbt-run", label="DBT run", command="run"
+    )
+    template_orgtask = OrgTask.objects.create(
+        org=template, task=dbt_task, dbt=template.dbt, parameters={"flags": ["--select", "foo"]}
+    )
+    # simulate Step 6 having already minted the trial org's dbt-run OrgTask, param-less
+    existing = OrgTask.objects.create(
+        org=trial_org, task=dbt_task, dbt=trial_org.dbt, parameters={}
+    )
+
+    resolved = prefect_clone._resolve_trial_transform_orgtask(template_orgtask, trial_org)
+
+    assert resolved.id == existing.id  # reused the existing row, not a fresh mint
+    existing.refresh_from_db()
+    assert existing.parameters == {"flags": ["--select", "foo"]}
+
+
 def test_build_pipeline_payload_raises_when_connection_not_remapped():
     template, trial_org = _make_orgs()
     dataflow, sync_orgtask, dbt_orgtask = _make_template_dataflow_with_tasks(template)

@@ -52,10 +52,14 @@ _AUTO_MANAGED_TRANSFORM_SLUGS = {TASK_DBTCLEAN, TASK_DBTDEPS}
 
 
 def _resolve_trial_transform_orgtask(template_orgtask: OrgTask, trial_org: Org) -> OrgTask:
-    """Get-or-create the trial org's equivalent transform OrgTask for a template transform
-    OrgTask, matched by `task` (i.e. task slug/type — `Task` rows are shared system-wide, not
-    per-org, so the FK itself is the match key). See module docstring for why this must mint
-    rather than assume the row already exists.
+    """Resolve the trial org's equivalent transform OrgTask for a template transform OrgTask,
+    matched by `task` (i.e. task slug/type — `Task` rows are shared system-wide, not per-org,
+    so the FK itself is the match key).
+
+    In practice Step 6 (`create_default_transform_tasks`) has already minted this OrgTask
+    param-less before Step 7 runs, so this get-or-creates and — when the row already exists —
+    syncs the template's `parameters` onto it so the cloned deployment keeps the template's
+    dbt-run flags. The create branch remains as a safety net if step ordering ever changes.
     """
     trial_dbt = trial_org.dbt
     if trial_dbt is None:
@@ -72,6 +76,17 @@ def _resolve_trial_transform_orgtask(template_orgtask: OrgTask, trial_org: Org) 
         logger.info(
             f"minted trial transform OrgTask {org_task.uuid} (slug={template_orgtask.task.slug}) "
             f"for org {trial_org.slug}"
+        )
+    elif org_task.parameters != template_orgtask.parameters:
+        # Step 6 (create_default_transform_tasks) already minted this OrgTask param-less, so
+        # get_or_create found the existing row and its `defaults` never applied. Copy the
+        # template's parameters (e.g. --select / --full-refresh) onto it explicitly, otherwise
+        # the cloned deployment silently runs the param-less task.
+        org_task.parameters = template_orgtask.parameters
+        org_task.save(update_fields=["parameters"])
+        logger.info(
+            f"copied template parameters onto existing trial OrgTask {org_task.uuid} "
+            f"(slug={template_orgtask.task.slug}) for org {trial_org.slug}"
         )
     return org_task
 

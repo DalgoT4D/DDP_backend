@@ -25,9 +25,6 @@ from ddpui.models.org_user import UserAttributes
 from ddpui.utils.awsses import send_trial_verification_email
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.taskprogress import TaskProgress
-from ddpui.utils.custom_logger import CustomLogger
-
-logger = CustomLogger("ddpui.api.trial_api")
 
 trial_router = Router()
 

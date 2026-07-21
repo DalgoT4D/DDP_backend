@@ -227,9 +227,7 @@ def _terminal_operation_node(trial_dbt: OrgDbt, model: OrgDbtModel) -> CanvasNod
     if model_node is None:
         raise RuntimeError(f"no canvas node found for copied model {model.name}")
 
-    incoming = list(
-        CanvasEdge.objects.filter(to_node=model_node).select_related("from_node").order_by("-id")
-    )
+    incoming = list(CanvasEdge.objects.filter(to_node=model_node).select_related("from_node"))
     if len(incoming) == 0:
         raise RuntimeError(
             f"copied model {model.name} has no upstream operation chain to regenerate from"

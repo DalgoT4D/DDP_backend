@@ -19,7 +19,7 @@ def test_clone_trial_org_task_success(mock_clone, mock_taskprogress_cls):
 
     clone_trial_org_task("task-1", 5, "a@b.org", "Acme", "account-manager")
 
-    mock_taskprogress_cls.assert_called_once_with("task-1", "trial-clone-task-1")
+    mock_taskprogress_cls.assert_called_once_with("task-1", "trial-clone-task-1", 86400)
 
     mock_clone.assert_called_once()
     args, kwargs = mock_clone.call_args

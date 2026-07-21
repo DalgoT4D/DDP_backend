@@ -837,7 +837,6 @@ def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
     assert src["database"] == "sdb"
     assert dst["database"] == "trial_1"
 
-    assert run.manifest["warehouse_dump_path"] == dump_path
     # the pg_dump temp file must be removed after the (mocked) copy, success or failure —
     # it's a full copy of the template warehouse's data sitting on local disk.
     assert not os.path.exists(dump_path)

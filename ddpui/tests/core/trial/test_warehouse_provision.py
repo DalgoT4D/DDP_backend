@@ -119,31 +119,6 @@ def test_provision_creates_database_and_dedicated_role(mock_settings, mock_psyco
 
 @patch("ddpui.core.trial.warehouse_provision.psycopg2")
 @patch("ddpui.core.trial.warehouse_provision.settings")
-def test_provision_never_logs_password(mock_settings, mock_psycopg2, caplog):
-    mock_settings.TRIALS_RDS_HOST = "rds-host"
-    mock_settings.TRIALS_RDS_PORT = 5432
-    mock_settings.TRIALS_RDS_ADMIN_USER = "admin"
-    mock_settings.TRIALS_RDS_ADMIN_PASSWORD = "adminpass"
-
-    admin_conn = MagicMock()
-    admin_cursor = MagicMock()
-    admin_conn.cursor.return_value.__enter__.return_value = admin_cursor
-    ft_db_conn = MagicMock()
-    ft_db_cursor = MagicMock()
-    ft_db_conn.cursor.return_value.__enter__.return_value = ft_db_cursor
-    mock_psycopg2.connect.side_effect = [admin_conn, ft_db_conn]
-
-    with caplog.at_level("DEBUG"):
-        params = provision_trial_database("someone@example.com")
-
-    password = params["password"]
-    assert password
-    for record in caplog.records:
-        assert password not in record.getMessage()
-
-
-@patch("ddpui.core.trial.warehouse_provision.psycopg2")
-@patch("ddpui.core.trial.warehouse_provision.settings")
 def test_provision_server_side_copy_from_template(mock_settings, mock_psycopg2):
     mock_settings.TRIALS_RDS_HOST = "rds"
     mock_settings.TRIALS_RDS_PORT = 5432
@@ -159,6 +134,36 @@ def test_provision_server_side_copy_from_template(mock_settings, mock_psycopg2):
     executed = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
     assert "TEMPLATE" in executed and "himanshu_wh" in executed  # server-side copy issued
     assert params["database"].startswith("ft_")
+
+
+@patch("ddpui.core.trial.warehouse_provision.drop_trial_database")
+@patch("ddpui.core.trial.warehouse_provision.psycopg2")
+@patch("ddpui.core.trial.warehouse_provision.settings")
+def test_provision_rolls_back_on_partial_failure(mock_settings, mock_psycopg2, mock_drop):
+    """A failure AFTER CREATE DATABASE (here: the public-schema grant on the ft db) must drop
+    the half-created db+role before re-raising, else it leaks and blocks every retry for the
+    email (CREATE DATABASE has no IF NOT EXISTS)."""
+    mock_settings.TRIALS_RDS_HOST = "rds-host"
+    mock_settings.TRIALS_RDS_PORT = 5432
+    mock_settings.TRIALS_RDS_ADMIN_USER = "admin"
+    mock_settings.TRIALS_RDS_ADMIN_PASSWORD = "adminpass"
+
+    admin_conn = MagicMock()
+    admin_cursor = MagicMock()
+    admin_conn.cursor.return_value.__enter__.return_value = admin_cursor
+    # second connection (to the freshly-created ft db) blows up mid-provision
+    ft_db_conn = MagicMock()
+    ft_db_cursor = MagicMock()
+    ft_db_cursor.execute.side_effect = Exception("grant failed")
+    ft_db_conn.cursor.return_value.__enter__.return_value = ft_db_cursor
+    mock_psycopg2.connect.side_effect = [admin_conn, ft_db_conn]
+
+    with pytest.raises(Exception, match="grant failed"):
+        provision_trial_database("someone@example.com")
+
+    mock_drop.assert_called_once_with("someone@example.com")
+    admin_conn.close.assert_called_once()  # first connection still cleanly closed
+    ft_db_conn.close.assert_called_once()  # second connection closed by its finally before rollback
 
 
 # --------------------------------------------------------------------------

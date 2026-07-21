@@ -10,10 +10,9 @@ logger = CustomLogger("ddpui.core.trial.timing")
 def step_timer(run, step_name: str):
     """time a clone step; record elapsed seconds into run.timings (even on error)
 
-    `run` is any plain object exposing `.timings` (dict) and `.current_step` (str|None)
-    attributes — no DB writes here, it's an in-memory carrier for a single clone run.
+    `run` is any plain object exposing a `.timings` (dict) attribute — no DB writes here, it's
+    an in-memory carrier for a single clone run.
     """
-    run.current_step = step_name
     start = time.perf_counter()
     try:
         yield

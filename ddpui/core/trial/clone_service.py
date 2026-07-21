@@ -33,6 +33,7 @@ from ddpui.core.trial.source_config import (
 )
 from ddpui.core.trial.dbt_clone import copy_dbt_dag, copy_dbt_repo_files, regenerate_and_push
 from ddpui.models.dbt_workflow import OrgDbtOperation
+from ddpui.models.metric import Metric, KPI
 from ddpui.core.trial.prefect_clone import clone_orchestrate_dataflows
 from ddpui.core.trial.viz_clone import clone_viz
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
@@ -58,7 +59,6 @@ class CloneRun:
     role_slug: str | None = None
     trial_org: Org | None = None
     trial_orguser: OrgUser | None = None
-    current_step: str | None = None
     timings: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
 
@@ -248,8 +248,6 @@ def _step_warehouse_data(run: CloneRun) -> None:
         # remove it regardless of success/failure so nothing is left at rest.
         if os.path.exists(dump_path):
             os.remove(dump_path)
-
-    run.manifest["warehouse_dump_path"] = dump_path
 
 
 def _step_sources(run: CloneRun) -> None:
@@ -483,8 +481,6 @@ def delete_trial_org(org: Org) -> None:
     org NAME still taken (which then blocks the next clone for that email). Reap KPIs, then Metrics
     (Alerts CASCADE off Metric), before handing the rest to OrgCleanupService.
     """
-    from ddpui.models.metric import Metric, KPI  # local import: avoid a heavy import at module load
-
     KPI.objects.filter(org=org).delete()  # KPI.metric is PROTECT → KPIs must go before Metrics
     Metric.objects.filter(org=org).delete()  # Metric.org is PROTECT; Alerts CASCADE off the Metric
     OrgCleanupService(org, dry_run=False).delete_org()

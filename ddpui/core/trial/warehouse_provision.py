@@ -109,34 +109,46 @@ def provision_trial_database(email: str, template_db: str | None = None) -> dict
     ft_role = ft_role_name(email)
     password = secrets.token_urlsafe(24)
 
-    conn = _admin_connect("postgres")
+    # A partial provision must not leak: CREATE DATABASE has no IF NOT EXISTS, so a db+role left
+    # behind by a failure between CREATE DATABASE and the return would both leak AND block every
+    # retry for this email (the next CREATE DATABASE errors "already exists"). drop_trial_database
+    # is idempotent, so on any failure below we roll back whatever got created before re-raising.
     try:
-        with conn.cursor() as cursor:
-            if template_db:
-                # template_db is an ops/secrets-manager-controlled identifier (the template
-                # warehouse's own db name, retrieved via retrieve_warehouse_credentials), never
-                # raw user input — f-string interpolation here does not cross a trust boundary.
-                cursor.execute(f'CREATE DATABASE "{ft_db}" TEMPLATE "{template_db}"')
-            else:
-                cursor.execute(f'CREATE DATABASE "{ft_db}"')
-            cursor.execute(f"CREATE ROLE \"{ft_role}\" LOGIN PASSWORD '{password}'")
-            cursor.execute(f'GRANT "{ft_role}" TO CURRENT_USER')
-            cursor.execute(f'ALTER DATABASE "{ft_db}" OWNER TO "{ft_role}"')
-    finally:
-        conn.close()
+        conn = _admin_connect("postgres")
+        try:
+            with conn.cursor() as cursor:
+                if template_db:
+                    # template_db is an ops/secrets-manager-controlled identifier (the template
+                    # warehouse's own db name, retrieved via retrieve_warehouse_credentials),
+                    # never raw user input — f-string interpolation does not cross a trust boundary.
+                    cursor.execute(f'CREATE DATABASE "{ft_db}" TEMPLATE "{template_db}"')
+                else:
+                    cursor.execute(f'CREATE DATABASE "{ft_db}"')
+                cursor.execute(f"CREATE ROLE \"{ft_role}\" LOGIN PASSWORD '{password}'")
+                cursor.execute(f'GRANT "{ft_role}" TO CURRENT_USER')
+                cursor.execute(f'ALTER DATABASE "{ft_db}" OWNER TO "{ft_role}"')
+        finally:
+            conn.close()
 
-    # reconnect to the freshly-created db to hand the `public` schema over to the ft role too —
-    # PG15 makes `public` non-writable by non-owners by default, so this must be explicit and
-    # cannot be done from the 'postgres' maintenance connection.
-    ft_db_conn = _admin_connect(ft_db)
-    try:
-        with ft_db_conn.cursor() as cursor:
-            cursor.execute(f'GRANT ALL ON SCHEMA public TO "{ft_role}"')
-            cursor.execute(f'ALTER SCHEMA public OWNER TO "{ft_role}"')
-            if template_db:
-                _reassign_copied_objects(cursor, ft_role)
-    finally:
-        ft_db_conn.close()
+        # reconnect to the freshly-created db to hand the `public` schema over to the ft role too —
+        # PG15 makes `public` non-writable by non-owners by default, so this must be explicit and
+        # cannot be done from the 'postgres' maintenance connection.
+        ft_db_conn = _admin_connect(ft_db)
+        try:
+            with ft_db_conn.cursor() as cursor:
+                cursor.execute(f'GRANT ALL ON SCHEMA public TO "{ft_role}"')
+                cursor.execute(f'ALTER SCHEMA public OWNER TO "{ft_role}"')
+                if template_db:
+                    _reassign_copied_objects(cursor, ft_role)
+        finally:
+            ft_db_conn.close()
+    except Exception as err:  # skipcq PYL-W0703
+        logger.error(f"provision failed for {email}; rolling back partial db/role: {err}")
+        try:
+            drop_trial_database(email)
+        except Exception as cleanup_err:  # skipcq PYL-W0703
+            logger.error(f"rollback after failed provision also failed for {email}: {cleanup_err}")
+        raise
 
     logger.info(
         f"provisioned trial database {ft_db} (role {ft_role}) on {settings.TRIALS_RDS_HOST}"
