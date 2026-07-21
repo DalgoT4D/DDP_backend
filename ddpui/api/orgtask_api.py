@@ -280,11 +280,8 @@ def get_prefect_transformation_tasks(request, include_edr: bool = False):
     res = []
     for dataflow, primary in primaries:
         command = None
-        if primary.task.type != TaskType.DBTCLOUD:
-            if primary.task.slug == TASK_GENERATE_EDR:
-                command = f"{primary.task.type} {primary.task.command}"
-            else:
-                command = primary.task.type + " " + primary.get_task_parameters()
+        if primary.task.type not in (TaskType.DBTCLOUD, TaskType.EDR):
+            command = primary.task.type + " " + primary.get_task_parameters()
 
         chain_ids = {dfot.orgtask_id for dfot in dataflow.datafloworgtasks.all()}
         matching_locks = [lock for lock in all_locks if lock.orgtask_id in chain_ids]
