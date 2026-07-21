@@ -107,6 +107,16 @@ def send_trial_verification_email(to_email: str, verify_url: str) -> None:
     send_text_message(to_email, subject, message)
 
 
+def send_trial_welcome_email(to_email: str, login_url: str) -> None:
+    """sent once a free-trial clone finishes — so the user gets in even if they closed the tab"""
+    subject = "Welcome to Dalgo — your trial workspace is ready"
+    message = (
+        "Welcome to Dalgo!\n\nYour trial workspace is set up and ready to explore.\n"
+        f"Log in to get started:\n{login_url}\n"
+    )
+    send_text_message(to_email, subject, message)
+
+
 def send_signup_email(to_email: str, verification_url: str) -> None:
     """send a signup email with an email verification link"""
     message = f"""Hello,
