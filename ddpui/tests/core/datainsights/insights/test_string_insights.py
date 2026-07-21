@@ -230,6 +230,24 @@ def test_string_length_stats_query_validate_results(
     assert string_length_stats_query.validate_query_results(result_to_be_validated)
 
 
+def test_string_length_stats_query_parse_results_null_other_modes(
+    string_length_stats_query: StringLengthStats,
+):
+    """When the DB returns NULL for other_modes, parse_results should return an empty list"""
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "mode": Decimal(2),
+            "other_modes": None,
+        }
+    ]
+    output = string_length_stats_query.parse_results(mock_results)
+
+    assert string_length_stats_query.columns[0].name in output
+    assert output[string_length_stats_query.columns[0].name]["other_modes"] == []
+
+
 def test_string_length_stats_query_uniqueness_of_query_id(
     string_length_stats_query: StringLengthStats,
 ):
