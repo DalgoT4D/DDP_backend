@@ -468,41 +468,66 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
-def test_step_org_and_user_name_is_email_derived_ignores_org_name(
+def test_step_org_and_user_copies_template_feature_flags(mock_create_org, mock_create_plan):
+    """The trial must inherit the template's feature flags — REPORTS in particular gates the
+    Reports nav in the frontend, so without the copy the cloned report snapshots are invisible."""
+    from ddpui.models.org import OrgFeatureFlag
+
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-ff", slug="tmpl-ff")
+    OrgFeatureFlag.objects.create(org=template, flag_name="REPORTS", flag_value=True)
+    OrgFeatureFlag.objects.create(org=template, flag_name="DATA_QUALITY", flag_value=False)
+    trial_org = Org.objects.create(
+        name="Trial ff tmpl", slug="trial-ff-tmpl", airbyte_workspace_id="ws-ff"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="ff@b.org")
+    clone_service._step_org_and_user(run)
+
+    trial_flags = {f.flag_name: f.flag_value for f in OrgFeatureFlag.objects.filter(org=trial_org)}
+    assert trial_flags == {"REPORTS": True, "DATA_QUALITY": False}
+    assert run.manifest["feature_flags_copied"] == 2
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_name_uses_org_name_prefixed_by_email_hash(
     mock_create_org, mock_create_plan
 ):
-    """The trial org name/slug is derived from the EMAIL only — the caller-supplied org_name is
-    NOT unique (two users can both type "test") and must NOT be used for the org identity. Name
-    = f"Trial {email_hash8} {email_local} {template.name}", so even a garbage/duplicate org_name
-    is ignored, while the email's local part keeps the name human-identifiable."""
+    """Name shape is "Trial {email_hash8} {org_name}". The user-supplied org_name IS used (for
+    human readability), but the per-email hash sits right after "Trial" so two users typing the
+    SAME org_name still get unique names/slugs — the backend auto-uniquifies, no frontend error."""
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="Health Demo", slug="tmpl-orgname")
     expected_hash = clone_service.email_hash8("acme@b.org")
     trial_org = Org.objects.create(
-        name=f"Trial {expected_hash} Health Demo",
-        slug=f"trial-{expected_hash}-hea",
+        name=f"Trial {expected_hash} test",
+        slug=f"trial-{expected_hash}-tes",
         airbyte_workspace_id="ws-11",
     )
     mock_create_org.return_value = (trial_org, None)
     mock_create_plan.return_value = (Mock(), None)
 
-    # org_name is deliberately a non-unique/garbage value — it must be ignored for naming
     run = CloneRun(template=template, trial_email="acme@b.org", org_name="test")
     clone_service._step_org_and_user(run)
 
     args, _ = mock_create_org.call_args
     payload = args[0]
-    assert payload.name == f"Trial {expected_hash} acme Health Demo"
-    assert "test" not in payload.name
+    assert payload.name == f"Trial {expected_hash} test"
+    # a DIFFERENT email typing the same org_name "test" gets a different hash → unique name
+    other_hash = clone_service.email_hash8("other@b.org")
+    assert other_hash != expected_hash
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_slug_is_email_hash_unique(mock_create_org, mock_create_plan):
     """create_organization derives org.slug = slugify(org.name)[:20]. The email hash sits right
-    after "Trial " so it always survives the 20-char truncation → the slug (and the Airbyte
-    workspace name / Prefect block prefix built from it) is unique per email, regardless of the
-    (ignored) org_name a user typed."""
+    after "Trial " so it always survives the 20-char truncation → the slug stays unique per email
+    even when a LONG org_name would otherwise push everything else out of the 20-char window. This
+    is why the hash must lead the name and not trail it."""
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="Health Demo Org", slug="tmpl-long")
     email = "chf@b.org"
@@ -523,9 +548,10 @@ def test_step_org_and_user_slug_is_email_hash_unique(mock_create_org, mock_creat
     clone_service._step_org_and_user(run)
 
     payload = mock_create_org.call_args.args[0]
-    assert payload.name == f"Trial {expected_hash} chf Health Demo Org"[:50]
+    assert payload.name == f"Trial {expected_hash} A Very Long Org Name Here"[:50]
     trial_org = run.trial_org
     assert len(trial_org.slug) <= 20
+    # hash survives the 20-char slug cut despite the long org_name → slug unique per email
     assert trial_org.slug.startswith(f"trial-{expected_hash}")
 
 
@@ -534,7 +560,7 @@ def test_step_org_and_user_slug_is_email_hash_unique(mock_create_org, mock_creat
 def test_step_org_and_user_defaults_to_trial_name_when_no_org_name(
     mock_create_org, mock_create_plan
 ):
-    """Without org_name, name is Trial <hash> <email_local> <template.name>."""
+    """Without org_name, the name falls back to Trial <hash> <template.name>."""
     Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
     template = Org.objects.create(name="tmpl-default-name", slug="tmpl-default-name")
     trial_org = Org.objects.create(
@@ -549,7 +575,7 @@ def test_step_org_and_user_defaults_to_trial_name_when_no_org_name(
     args, _ = mock_create_org.call_args
     payload = args[0]
     expected_hash = clone_service.email_hash8("default@b.org")
-    assert payload.name == f"Trial {expected_hash} default {template.name}"[:50]
+    assert payload.name == f"Trial {expected_hash} {template.name}"[:50]
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")

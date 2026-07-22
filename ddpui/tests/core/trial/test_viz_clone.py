@@ -200,7 +200,7 @@ def test_clone_charts_keeps_system_default_geojson_id_unchanged():
 # ---------------------------------------------------------------------------
 
 
-def test_clone_dashboards_remaps_chart_and_kpi_ids_and_resets_sharing_flags():
+def test_clone_dashboards_remaps_ids_preserves_public_state_with_fresh_token_and_org_default():
     template_org = _make_org("tmpl-dash")
     trial_org = _make_org("trial-dash")
     template_user = _make_orguser(template_org, "tmpl-dash@x.org")
@@ -246,6 +246,7 @@ def test_clone_dashboards_remaps_chart_and_kpi_ids_and_resets_sharing_flags():
     d = Dashboard.objects.create(
         title="Dash1",
         tabs=original_tabs,
+        is_published=True,
         is_public=True,
         public_share_token="abc123",
         is_org_default=True,
@@ -264,9 +265,15 @@ def test_clone_dashboards_remaps_chart_and_kpi_ids_and_resets_sharing_flags():
     new_kpi_id = new_d.tabs[0]["components"]["comp2"]["config"]["kpiId"]
     assert new_chart_id == chart_map[c.id].id
     assert new_kpi_id == kpi_map[k.id].id
-    assert new_d.is_public is False
-    assert new_d.public_share_token is None
-    assert new_d.is_org_default is False
+    # public state PRESERVED, but with a fresh unique token (never the template's) so the unique
+    # constraint holds and the public-view .get(token, is_public=True) stays unambiguous
+    assert new_d.is_public is True
+    assert new_d.public_share_token is not None
+    assert new_d.public_share_token != "abc123"
+    assert new_d.public_shared_at is not None
+    assert new_d.public_access_count == 0  # analytics start clean
+    assert new_d.is_org_default is True  # org-default PRESERVED so the Impact page shows it
+    assert new_d.is_published is True  # publish state preserved (drives the "Published" badge)
 
     # template dashboard untouched
     d.refresh_from_db()
@@ -395,6 +402,62 @@ def test_clone_report_snapshots_remaps_org_and_resets_public_share():
 
 
 # ---------------------------------------------------------------------------
+# List ordering preservation
+# ---------------------------------------------------------------------------
+
+
+def test_clone_preserves_list_order_by_copying_timestamps():
+    """List pages sort by -updated_at; the clone must copy the template's timestamps so the trial
+    shows the SAME order. Without the copy every clone gets ~equal clone-time stamps and the order
+    is lost. Uses 3 charts with distinct, deliberately non-insertion-order timestamps."""
+    from datetime import datetime, timezone
+
+    template_org = _make_org("tmpl-order")
+    trial_org = _make_org("trial-order")
+    template_user = _make_orguser(template_org, "tmpl-order@x.org")
+    trial_user = _make_orguser(trial_org, "trial-order@x.org")
+
+    # Insertion order (Alpha, Bravo, Charlie) is intentionally DIFFERENT from the desired display
+    # order — Bravo is newest, then Alpha, then Charlie — so a passing test can only come from the
+    # copied timestamps, not from incidental pk/insertion order.
+    stamps = {
+        "Alpha": datetime(2026, 2, 1, tzinfo=timezone.utc),
+        "Bravo": datetime(2026, 3, 1, tzinfo=timezone.utc),
+        "Charlie": datetime(2026, 1, 1, tzinfo=timezone.utc),
+    }
+    for title in ("Alpha", "Bravo", "Charlie"):
+        c = Chart.objects.create(
+            title=title,
+            chart_type="bar",
+            schema_name="analytics",
+            table_name="t",
+            org=template_org,
+            created_by=template_user,
+            last_modified_by=template_user,
+        )
+        Chart.objects.filter(pk=c.pk).update(created_at=stamps[title], updated_at=stamps[title])
+
+    template_order = list(
+        Chart.objects.filter(org=template_org)
+        .order_by("-updated_at")
+        .values_list("title", flat=True)
+    )
+    assert template_order == ["Bravo", "Alpha", "Charlie"]  # sanity: not insertion order
+
+    viz_clone._clone_charts(template_org, trial_org, trial_user, {})
+
+    trial_order = list(
+        Chart.objects.filter(org=trial_org).order_by("-updated_at").values_list("title", flat=True)
+    )
+    assert trial_order == template_order  # arrangement preserved
+
+    for title in ("Alpha", "Bravo", "Charlie"):
+        trial_chart = Chart.objects.get(org=trial_org, title=title)
+        assert trial_chart.updated_at == stamps[title]  # real template stamp, not clone-time
+        assert trial_chart.created_at == stamps[title]
+
+
+# ---------------------------------------------------------------------------
 # Full integration
 # ---------------------------------------------------------------------------
 
@@ -499,6 +562,9 @@ def test_clone_viz_builds_full_graph_and_returns_manifest_counts():
     assert trial_chart.extra_config["metrics"][0]["saved_metric_id"] == trial_metric.id
 
     trial_dashboard = Dashboard.objects.get(org=trial_org)
+    # this template dashboard is private → clone stays private, no share token
+    assert trial_dashboard.is_public is False
+    assert trial_dashboard.public_share_token is None
     trial_kpi = KPI.objects.get(org=trial_org)
     comps = trial_dashboard.tabs[0]["components"]
     assert comps["comp1"]["config"]["chartId"] == trial_chart.id

@@ -136,6 +136,74 @@ def test_provision_server_side_copy_from_template(mock_settings, mock_psycopg2):
     assert params["database"].startswith("ft_")
 
 
+@patch("ddpui.core.trial.warehouse_provision.time.sleep")
+@patch("ddpui.core.trial.warehouse_provision.psycopg2")
+@patch("ddpui.core.trial.warehouse_provision.settings")
+def test_template_copy_terminates_blocking_sessions_before_create(
+    mock_settings, mock_psycopg2, _mock_sleep
+):
+    """The copy must terminate other sessions on the template db first, else Postgres raises
+    ObjectInUse on `CREATE DATABASE ... TEMPLATE` (the real-world step-2 failure this fixes)."""
+    mock_settings.TRIALS_RDS_HOST = "rds"
+    mock_settings.TRIALS_RDS_PORT = 5432
+    mock_settings.TRIALS_RDS_ADMIN_USER = "admin"
+    mock_settings.TRIALS_RDS_ADMIN_PASSWORD = "pw"
+    conn = MagicMock()
+    cursor = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cursor
+    mock_psycopg2.connect.return_value = conn
+
+    warehouse_provision.provision_trial_database("a@b.org", template_db="himanshu_wh")
+
+    executed = [str(c.args[0]) for c in cursor.execute.call_args_list]
+    terminate_idx = next(i for i, s in enumerate(executed) if "pg_terminate_backend" in s)
+    create_idx = next(
+        i for i, s in enumerate(executed) if "CREATE DATABASE" in s and "TEMPLATE" in s
+    )
+    assert terminate_idx < create_idx  # sessions cleared BEFORE the copy
+
+
+@patch("ddpui.core.trial.warehouse_provision.time.sleep")
+@patch("ddpui.core.trial.warehouse_provision.psycopg2")
+@patch("ddpui.core.trial.warehouse_provision.settings")
+def test_template_copy_retries_when_a_session_races_back_in(
+    mock_settings, mock_psycopg2, mock_sleep
+):
+    """If a new session connects between terminate and CREATE, the copy raises ObjectInUse; the
+    helper terminates + retries until it wins (here: fails once, then succeeds)."""
+    mock_settings.TRIALS_RDS_HOST = "rds"
+    mock_settings.TRIALS_RDS_PORT = 5432
+    mock_settings.TRIALS_RDS_ADMIN_USER = "admin"
+    mock_settings.TRIALS_RDS_ADMIN_PASSWORD = "pw"
+
+    class FakeObjectInUse(Exception):
+        pass
+
+    mock_psycopg2.errors.ObjectInUse = FakeObjectInUse
+
+    conn = MagicMock()
+    cursor = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cursor
+    mock_psycopg2.connect.return_value = conn
+
+    create_attempts = {"n": 0}
+
+    def exec_side_effect(sql, *args, **kwargs):
+        text = str(sql)
+        if "CREATE DATABASE" in text and "TEMPLATE" in text:
+            create_attempts["n"] += 1
+            if create_attempts["n"] == 1:
+                raise FakeObjectInUse("database is being accessed by other users")
+        return MagicMock()
+
+    cursor.execute.side_effect = exec_side_effect
+
+    warehouse_provision.provision_trial_database("a@b.org", template_db="himanshu_wh")
+
+    assert create_attempts["n"] == 2  # first raced, second won
+    mock_sleep.assert_called()  # backed off between attempts
+
+
 @patch("ddpui.core.trial.warehouse_provision.drop_trial_database")
 @patch("ddpui.core.trial.warehouse_provision.psycopg2")
 @patch("ddpui.core.trial.warehouse_provision.settings")

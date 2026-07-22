@@ -16,6 +16,9 @@ ReportSnapshot (verified by grep) — plain `.create()` is safe here.
 """
 
 import copy
+import secrets
+
+from django.utils import timezone
 
 from ddpui.models.alert import Alert
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -28,6 +31,25 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.viz_clone")
+
+
+def _preserve_ordering_timestamps(instance, template_row) -> None:
+    """Copy the template row's created_at/updated_at onto the freshly-created clone.
+
+    The trial's list pages sort by `-updated_at` (charts, dashboards, metrics, kpis, alerts) or
+    `-created_at` (report snapshots). `.create()` stamps auto_now_add/auto_now at clone time, so
+    every cloned row lands within the same ~second — that DESC sort then collapses to an arbitrary
+    tiebreak and the template's on-screen arrangement is lost. Writing the template's real
+    timestamps via a queryset `.update()` (which bypasses auto_now/auto_now_add, unlike save())
+    makes the trial list order match the template exactly. Fields absent on a model are skipped.
+    """
+    fields = {
+        name: getattr(template_row, name)
+        for name in ("created_at", "updated_at")
+        if hasattr(template_row, name)
+    }
+    if fields:
+        type(instance).objects.filter(pk=instance.pk).update(**fields)
 
 
 def _clone_metrics(template_org: Org, trial_org: Org, trial_orguser: OrgUser) -> dict:
@@ -46,6 +68,7 @@ def _clone_metrics(template_org: Org, trial_org: Org, trial_orguser: OrgUser) ->
             created_by=trial_orguser,
             last_modified_by=trial_orguser,
         )
+        _preserve_ordering_timestamps(new_m, m)
         metric_map[m.id] = new_m
     return metric_map
 
@@ -75,6 +98,7 @@ def _clone_kpis(
             created_by=trial_orguser,
             last_modified_by=trial_orguser,
         )
+        _preserve_ordering_timestamps(new_k, k)
         kpi_map[k.id] = new_k
     return kpi_map
 
@@ -125,6 +149,7 @@ def _clone_charts(
             created_by=trial_orguser,
             last_modified_by=trial_orguser,
         )
+        _preserve_ordering_timestamps(new_c, c)
         chart_map[c.id] = new_c
     return chart_map
 
@@ -151,11 +176,21 @@ def _remap_dashboard_tabs(tabs: list, chart_map: dict, kpi_map: dict) -> list:
 def _clone_dashboards(
     template_org: Org, trial_org: Org, trial_orguser: OrgUser, chart_map: dict, kpi_map: dict
 ) -> dict:
-    """Copy every template Dashboard onto the trial org, remapping `tabs` chart/kpi refs and
-    resetting sharing/landing-page flags (a fresh clone must not inherit the template's public
-    link or its org-default-dashboard status). Returns {old Dashboard.id: new Dashboard}."""
+    """Copy every template Dashboard onto the trial org, remapping `tabs` chart/kpi refs.
+
+    Preserves the template's private/public state AND its org-default flag so the trial looks like
+    the template:
+    - A PUBLIC template dashboard clones as public too, but with a FRESH unique share token —
+      `public_share_token` is `unique=True` and the public view does
+      `Dashboard.objects.get(token, is_public=True)`, so reusing the template's token would both
+      violate the unique constraint and make that lookup ambiguous. A private one clones private
+      (no token). Public-access analytics (count / last-accessed) start clean.
+    - `is_org_default` is copied (scoped per-org; template has at most one True), so the Impact
+      page shows the same landing dashboard.
+    Returns {old Dashboard.id: new Dashboard}."""
     dash_map: dict = {}
     for d in Dashboard.objects.filter(org=template_org):
+        is_public = d.is_public
         new_d = Dashboard.objects.create(
             title=d.title,
             description=d.description,
@@ -165,13 +200,15 @@ def _clone_dashboards(
             tabs=_remap_dashboard_tabs(d.tabs, chart_map, kpi_map),
             filter_layout=d.filter_layout,
             is_published=d.is_published,
-            is_public=False,
-            public_share_token=None,
-            is_org_default=False,
+            is_public=is_public,
+            public_share_token=(secrets.token_urlsafe(48) if is_public else None),
+            public_shared_at=(timezone.now() if is_public else None),
+            is_org_default=d.is_org_default,
             org=trial_org,
             created_by=trial_orguser,
             last_modified_by=trial_orguser,
         )
+        _preserve_ordering_timestamps(new_d, d)
         dash_map[d.id] = new_d
     return dash_map
 
@@ -207,7 +244,7 @@ def _clone_alerts(
     external recipients, and has no evaluation history yet. Returns the number of alerts copied."""
     count = 0
     for a in Alert.objects.filter(org=template_org):
-        Alert.objects.create(
+        new_a = Alert.objects.create(
             org=trial_org,
             name=a.name,
             alert_type=a.alert_type,
@@ -228,6 +265,7 @@ def _clone_alerts(
             created_by=trial_orguser,
             last_modified_by=trial_orguser,
         )
+        _preserve_ordering_timestamps(new_a, a)
         count += 1
     return count
 
@@ -240,7 +278,7 @@ def _clone_report_snapshots(template_org: Org, trial_org: Org, trial_orguser: Or
     the number of snapshots copied."""
     count = 0
     for r in ReportSnapshot.objects.filter(org=template_org):
-        ReportSnapshot.objects.create(
+        new_r = ReportSnapshot.objects.create(
             title=r.title,
             date_column=r.date_column,
             period_start=r.period_start,
@@ -254,6 +292,7 @@ def _clone_report_snapshots(template_org: Org, trial_org: Org, trial_orguser: Or
             created_by=trial_orguser,
             last_modified_by=trial_orguser,
         )
+        _preserve_ordering_timestamps(new_r, r)
         count += 1
     return count
 

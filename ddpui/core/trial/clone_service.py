@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from django.conf import settings
 from django.contrib.auth.models import User
 
-from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse, OrgFeatureFlag
 from ddpui.core.trial.exceptions import TrialAccountExistsError
 from ddpui.core.trial.timing import step_timer
 from ddpui.core.trial.warehouse_provision import (
@@ -88,15 +88,18 @@ def account_exists_for_email(email: str) -> bool:
 def _step_org_and_user(run: CloneRun) -> None:
     """Step 1 — create the trial org (+ Airbyte workspace + plan) and an admin user."""
     template = run.template
-    # The org name/slug is derived from the EMAIL only — the email is the single unique thing a
-    # trial user supplies (org_name is free-text and NOT unique: two users can both type "test").
-    # `create_organization` derives org.slug = slugify(org.name)[:20], so the 8-char email hash
-    # sits right after "Trial " (chars 6-14) to guarantee it survives the 20-char slug truncation
-    # → the slug (and the Airbyte workspace name / Prefect block prefix built from it) is unique
-    # per email. The email's local part follows the hash so the name is human-identifiable (mirrors
-    # the ft_<local>_<hash>_db warehouse name). The caller-supplied org_name is NOT used.
-    email_local = run.trial_email.split("@")[0]
-    trial_name = f"Trial {email_hash8(run.trial_email)} {email_local} {template.name}"[:50]
+    # Org name shape: "Trial {email_hash8} {org_name}", truncated to Org.name's 50-char limit.
+    # The 8-char email hash sits RIGHT AFTER "Trial " (chars 6-14) on purpose: create_organization
+    # derives org.slug = slugify(org.name)[:20], and the org is resolved by slug on every request
+    # (auth.py, x-dalgo-org header) while Org.slug is NOT DB-unique — so the slug MUST be unique
+    # per trial or two trials silently collide. Keeping the hash inside the first 20 chars
+    # guarantees the slug (e.g. "trial-a1b2c3d4-acme-") stays unique per email regardless of how
+    # long the org name is. The user-supplied org_name follows the hash for human readability; a
+    # long name simply truncates at 50 (no error). Falls back to the template name if org_name is
+    # blank. The hash CANNOT go at the end — a long org name would push it past the 20-char cut and
+    # break slug uniqueness.
+    org_label = (run.org_name or template.name).strip()
+    trial_name = f"Trial {email_hash8(run.trial_email)} {org_label}"[:50]
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,
@@ -141,6 +144,18 @@ def _step_org_and_user(run: CloneRun) -> None:
     UserPreferences.objects.get_or_create(
         orguser=orguser, defaults={"enable_email_notifications": True}
     )
+
+    # Copy the template's feature flags so the trial unlocks the SAME features. Critically,
+    # REPORTS gates the Reports nav in the frontend (main-layout hides it when the flag is off) —
+    # without this the cloned report snapshots would exist but be invisible. get_or_create keeps
+    # it idempotent on a retry.
+    flags_copied = 0
+    for ff in OrgFeatureFlag.objects.filter(org=template):
+        OrgFeatureFlag.objects.get_or_create(
+            org=trial_org, flag_name=ff.flag_name, defaults={"flag_value": ff.flag_value}
+        )
+        flags_copied += 1
+    run.manifest["feature_flags_copied"] = flags_copied
 
     run.manifest["trial_org_slug"] = trial_org.slug
     run.manifest["trial_workspace_id"] = trial_org.airbyte_workspace_id

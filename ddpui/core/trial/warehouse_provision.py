@@ -1,6 +1,7 @@
 import hashlib
 import re
 import secrets
+import time
 
 import psycopg2
 
@@ -9,6 +10,53 @@ from django.conf import settings
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.warehouse_provision")
+
+# Postgres refuses `CREATE DATABASE ... TEMPLATE src` while any OTHER session is connected to
+# `src`. The template warehouse isn't truly frozen — a just-finished clone, a pooled/Airbyte
+# backend, or someone viewing the template org's charts can hold an idle session on it. So we
+# terminate those sessions right before the copy; a fresh session can still race in between the
+# terminate and the CREATE, so we retry the terminate+create a few times before giving up.
+_TEMPLATE_COPY_MAX_ATTEMPTS = 5
+_TEMPLATE_COPY_RETRY_SLEEP_SECONDS = 1.0
+
+
+def _create_database_from_template(cursor, ft_db: str, template_db: str) -> None:
+    """CREATE DATABASE ft_db as a server-side copy of template_db, clearing blocking sessions.
+
+    Kills every other session on template_db first (idle pooled/Airbyte/chart-query connections
+    that would otherwise raise ObjectInUse), then runs the copy. If a new session slips in during
+    that window the copy still raises ObjectInUse — we retry the whole terminate+create a bounded
+    number of times. The cursor's connection is autocommit (see _admin_connect), so each statement
+    commits immediately. Only idle/foreign sessions on the TEMPLATE are terminated; no trial data
+    is at risk.
+    """
+    last_err: Exception | None = None
+    for attempt in range(1, _TEMPLATE_COPY_MAX_ATTEMPTS + 1):
+        cursor.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = %s AND pid <> pg_backend_pid()",
+            [template_db],
+        )
+        terminated = cursor.rowcount
+        if terminated:
+            logger.info(
+                f"terminated {terminated} session(s) on template db {template_db} "
+                f"before copy (attempt {attempt})"
+            )
+        try:
+            cursor.execute(f'CREATE DATABASE "{ft_db}" TEMPLATE "{template_db}"')
+            return
+        except psycopg2.errors.ObjectInUse as err:  # a session raced back in — retry
+            last_err = err
+            logger.warning(
+                f"template db {template_db} still in use on attempt {attempt}/"
+                f"{_TEMPLATE_COPY_MAX_ATTEMPTS}; retrying"
+            )
+            time.sleep(_TEMPLATE_COPY_RETRY_SLEEP_SECONDS)
+    raise RuntimeError(
+        f"could not copy template db {template_db} after {_TEMPLATE_COPY_MAX_ATTEMPTS} attempts: "
+        f"{last_err}"
+    )
 
 
 def email_hash8(email: str) -> str:
@@ -121,7 +169,8 @@ def provision_trial_database(email: str, template_db: str | None = None) -> dict
                     # template_db is an ops/secrets-manager-controlled identifier (the template
                     # warehouse's own db name, retrieved via retrieve_warehouse_credentials),
                     # never raw user input — f-string interpolation does not cross a trust boundary.
-                    cursor.execute(f'CREATE DATABASE "{ft_db}" TEMPLATE "{template_db}"')
+                    # Copy clears any blocking sessions on the template first (see helper).
+                    _create_database_from_template(cursor, ft_db, template_db)
                 else:
                     cursor.execute(f'CREATE DATABASE "{ft_db}"')
                 cursor.execute(f"CREATE ROLE \"{ft_role}\" LOGIN PASSWORD '{password}'")
