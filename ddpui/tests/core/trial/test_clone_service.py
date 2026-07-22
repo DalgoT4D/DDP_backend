@@ -3,6 +3,7 @@ from unittest.mock import patch, Mock
 
 import pytest
 from django.contrib.auth.models import User
+from django.test import override_settings
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType, OrgDbtOperation
 from ddpui.models.org_user import OrgUser, UserAttributes
@@ -1278,19 +1279,21 @@ def _make_orgdbt(slug: str) -> OrgDbt:
 
 @patch("ddpui.core.trial.clone_service.DbtProjectManager")
 @patch("ddpui.core.trial.clone_service.create_default_transform_tasks")
-@patch("ddpui.core.trial.clone_service.regenerate_and_push")
 @patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
-def test_step_dbt_uses_regen_path_for_operation_built_template(
-    mock_setup, mock_regen, mock_create_transform_tasks, mock_dbt_project_manager
+def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
+    mock_setup, mock_create_transform_tasks, mock_dbt_project_manager
 ):
-    """template dbt WITH an operation -> uses the existing regen path (nulls sql_path);
-    guards the branch that must still work for UI-operation-built template orgs. The dbt
-    system OrgTasks (git-pull/dbt-clean/dbt-deps/...) must still be created for the trial
-    org afterwards, mirroring how a normal org's dbt setup wires transform tasks."""
+    """v1: _step_dbt runs the NORMAL workspace setup (setup_managed_git_workspace — repo
+    scaffold + cli block) and copies the template's UI4T DAG rows via copy_dbt_dag, but does
+    NOT clone the template's dbt content (no copy_dbt_repo_files / regenerate_and_push calls
+    exist in _step_dbt anymore). sql_path is nulled on copies (no files exist on the trial).
+    transform_type mirrors the template ('ui'), and the dbt system OrgTasks are still created."""
     template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
     trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
 
     template_dbt = _make_orgdbt("tmpl-dbt")
+    template_dbt.transform_type = "ui"
+    template_dbt.save()
     template.dbt = template_dbt
     template.save()
     dest_model = OrgDbtModel.objects.create(
@@ -1316,6 +1319,7 @@ def test_step_dbt_uses_regen_path_for_operation_built_template(
         block_name="trial-dbt-cli-block-name",
     )
     trial_dbt = _make_orgdbt("trial-dbt")
+    trial_dbt.transform_type = "github"  # setup hardcodes GIT; _step_dbt must mirror 'ui'
     trial_dbt.cli_profile_block = cli_profile_block
     trial_dbt.save()
 
@@ -1325,7 +1329,6 @@ def test_step_dbt_uses_regen_path_for_operation_built_template(
         org.save()
 
     mock_setup.side_effect = fake_setup
-    mock_regen.return_value = 1
     gathered_params = Mock(spec=DbtProjectParams)
     mock_dbt_project_manager.gather_dbt_project_params.return_value = gathered_params
 
@@ -1335,75 +1338,16 @@ def test_step_dbt_uses_regen_path_for_operation_built_template(
     mock_setup.assert_called_once_with(
         trial_org, project_name="dbtrepo", default_schema="default_schema"
     )
-    mock_regen.assert_called_once_with(trial_org, trial_dbt)
-    assert OrgDbtModel.objects.filter(orgdbt=trial_dbt).count() == 1
-    # regen path nulls sql_path — the trial's scaffold has no files yet at this point
-    assert OrgDbtModel.objects.filter(orgdbt=trial_dbt).first().sql_path is None
-    assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
-    assert run.manifest["dbt_models"] == 1
-    assert run.manifest["dbt_regenerated"] == 1
+    trial_dbt.refresh_from_db()
+    assert trial_dbt.transform_type == "ui"  # mirrored from template, not left GIT
 
-    mock_dbt_project_manager.gather_dbt_project_params.assert_called_once_with(trial_org, trial_dbt)
-    mock_create_transform_tasks.assert_called_once_with(
-        trial_org, cli_profile_block, gathered_params
-    )
-    assert run.manifest["dbt_transform_tasks_created"] is True
-
-
-@patch("ddpui.core.trial.clone_service.DbtProjectManager")
-@patch("ddpui.core.trial.clone_service.create_default_transform_tasks")
-@patch("ddpui.core.trial.clone_service.copy_dbt_repo_files")
-@patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
-def test_step_dbt_uses_copy_path_for_file_based_template(
-    mock_setup, mock_copy_files, mock_create_transform_tasks, mock_dbt_project_manager
-):
-    """template dbt with models that have sql_path set and ZERO operations (github/file-based,
-    like health_org) -> uses the COPY path (copy_dbt_repo_files), NOT regenerate_and_push; DAG
-    rows are copied with sql_path PRESERVED. The dbt system OrgTasks must still be created for
-    the trial org afterwards, same as the regen path."""
-    template = Org.objects.create(name="tmpl-filedbt", slug="tmpl-filedbt")
-    trial_org = Org.objects.create(name="Trial filedbt", slug="trial-filedbt")
-
-    template_dbt = _make_orgdbt("tmpl-filedbt")
-    template.dbt = template_dbt
-    template.save()
-    template_model = OrgDbtModel.objects.create(
-        orgdbt=template_dbt,
-        name="customers",
-        display_name="customers",
-        schema="analytics",
-        sql_path="models/analytics/customers.sql",
-        type=OrgDbtModelType.MODEL,
-    )
-
-    cli_profile_block = OrgPrefectBlockv1.objects.create(
-        org=trial_org,
-        block_type=DBTCLIPROFILE,
-        block_id="trial-filedbt-cli-block-id",
-        block_name="trial-filedbt-cli-block-name",
-    )
-    trial_dbt = _make_orgdbt("trial-filedbt")
-    trial_dbt.cli_profile_block = cli_profile_block
-    trial_dbt.save()
-
-    def fake_setup(org, project_name, default_schema):
-        org.dbt = trial_dbt
-        org.save()
-
-    mock_setup.side_effect = fake_setup
-    gathered_params = Mock(spec=DbtProjectParams)
-    mock_dbt_project_manager.gather_dbt_project_params.return_value = gathered_params
-
-    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
-
-    with patch("ddpui.core.trial.clone_service.regenerate_and_push") as mock_regen:
-        clone_service._step_dbt(run)
-
-    mock_regen.assert_not_called()
-    mock_copy_files.assert_called_once_with(template_dbt, trial_dbt)
-
+    # DAG rows copied; sql_path nulled (no files exist on the trial — content NOT cloned)
     trial_model = OrgDbtModel.objects.get(orgdbt=trial_dbt)
-    assert trial_model.sql_path == template_model.sql_path
+    assert trial_model.name == "customers"
+    assert trial_model.sql_path is None
+    assert OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt).count() == 1
+
+    assert run.manifest["dbt_mode"] == "ui4t_rows_only"
     assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
     assert run.manifest["dbt_models"] == 1
 

@@ -32,8 +32,7 @@ from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
 )
-from ddpui.core.trial.dbt_clone import copy_dbt_dag, copy_dbt_repo_files, regenerate_and_push
-from ddpui.models.dbt_workflow import OrgDbtOperation
+from ddpui.core.trial.dbt_clone import copy_dbt_dag
 from ddpui.models.metric import Metric, KPI
 from ddpui.core.trial.prefect_clone import (
     clone_orchestrate_dataflows,
@@ -446,31 +445,22 @@ def _step_connections(run: CloneRun) -> None:
 
 
 def _step_dbt(run: CloneRun) -> None:
-    """Step 5 — set up a fresh managed dbt workspace on the trial org, deep-copy the template's
-    transform DAG (legacy OrgDbtModel/Operation/Edge rows + the active-path CanvasNode/Edge
-    rows) onto it, then materialize the trial's `.sql`/`sources.yml` files via one of two paths
-    and push to the new repo.
+    """Step 5 — fresh managed dbt workspace + the template's UI4T DAG rows. No dbt-content copy.
 
-    `setup_managed_git_workspace` creates a brand-new managed GitHub repo, an `OrgDbt` row (with
-    an EMPTY dbt scaffold — no `.sql` files yet), and the cli-profile block, then sets
-    `run.trial_org.dbt`.
+    `setup_managed_git_workspace` gives the trial the SAME dbt setup every new org gets: a
+    managed GitHub repo with an empty scaffold, the cli-profile block, `org.dbt` set. Then
+    `copy_dbt_dag` copies the template's UI4T transform DAG as Django DB rows (legacy
+    OrgDbtModel/Operation/Edge rows AND the active CanvasNode/Edge rows, `sql_path=None` —
+    no files exist for them) so the trial's transform canvas renders the template's DAG.
+    Charts/dashboards read the warehouse tables Step 2 already copied server-side.
 
-    Branches on whether the TEMPLATE dbt has any `OrgDbtOperation` rows:
-    - UI-operation-built templates (>=1 OrgDbtOperation): the REGEN path. `copy_dbt_dag` rebuilds
-      the DB-side DAG with `sql_path=None` on every copied model (the scaffold has no files yet);
-      `regenerate_and_push` then walks the copied operation chains to write real `.sql`/
-      `sources.yml` files and pushes them to the managed repo.
-    - github/file-based templates (ZERO OrgDbtOperation rows, e.g. `health_org` — models are
-      `.sql` files in a repo, canvas only displays them, no operation chain to regenerate from):
-      the COPY path. `copy_dbt_dag(preserve_sql_path=True)` keeps each copied model's `sql_path`
-      as-is (the files will land at those same project-relative paths); `copy_dbt_repo_files`
-      then clones the template's own repo and copies its `models/` directory straight into the
-      trial repo, then commits + pushes.
+    The template's dbt CONTENT is deliberately NOT cloned in v1 — no repo-file copy, no
+    `.sql`/`sources.yml` regeneration. `copy_dbt_repo_files` / `regenerate_and_push` stay
+    implemented in `dbt_clone.py` for when dbt-content cloning is added later.
 
-    After EITHER branch completes, creates the dbt system OrgTasks (git-pull/dbt-clean/
-    dbt-deps/...) for the trial org via `create_default_transform_tasks`, mirroring what a
-    normal dbt-enabled org gets — otherwise the trial org has a dbt project but no OrgTasks for
-    the UI to run dbt with.
+    Finishes by creating the dbt system OrgTasks (git-pull/dbt-clean/dbt-deps/dbt-run/...)
+    via `create_default_transform_tasks`, mirroring the normal dbt-enabled-org setup, so the
+    Transform page works like any other org's (dbt runs against the empty scaffold).
     """
     template_dbt = run.template.dbt
     if template_dbt is None:
@@ -498,46 +488,23 @@ def _step_dbt(run: CloneRun) -> None:
         )
 
     # setup_managed_git_workspace hardcodes transform_type=GIT; mirror the TEMPLATE's value
-    # instead — a UI-operation-built template must stay `ui` on the trial, otherwise the
-    # repo-to-canvas sync path (`sync_remote_dbtproject_to_canvas`, gated on GIT) becomes active
-    # and can re-parse the scaffold repo right over the copied CanvasNode/CanvasEdge rows.
+    # instead — a UI4T template must stay `ui` on the trial, otherwise the repo-to-canvas sync
+    # path (`sync_remote_dbtproject_to_canvas`, gated on GIT) becomes active and can re-parse
+    # the empty scaffold repo right over the copied CanvasNode/CanvasEdge rows.
     if trial_dbt.transform_type != template_dbt.transform_type:
         trial_dbt.transform_type = template_dbt.transform_type
         trial_dbt.save(update_fields=["transform_type"])
 
-    is_file_based = not OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt).exists()
-
-    if is_file_based:
-        model_map = copy_dbt_dag(template_dbt, trial_dbt, preserve_sql_path=True)
-        copy_dbt_repo_files(template_dbt, trial_dbt)
-        run.manifest["dbt_copy_path"] = True
-        run.manifest["dbt_regenerated"] = 0
-    else:
-        model_map = copy_dbt_dag(template_dbt, trial_dbt)
-        regenerated = regenerate_and_push(run.trial_org, trial_dbt)
-        run.manifest["dbt_copy_path"] = False
-        run.manifest["dbt_regenerated"] = regenerated
-
+    model_map = copy_dbt_dag(template_dbt, trial_dbt)
+    run.manifest["dbt_mode"] = "ui4t_rows_only"
     run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
     run.manifest["dbt_models"] = len(model_map)
 
-    # Create the dbt system OrgTasks (git-pull/dbt-clean/dbt-deps/dbt-run/...) for the trial
-    # org, same as the normal Dalgo dbt setup flow (transform_api.py) does — without this the
-    # trial dbt project exists on disk/in the DB but has no OrgTasks for the UI to run. Runs
-    # AFTER both the copy and regen branches above, once the trial dbt project is fully set up
-    # and pushed.
-    run.trial_org.refresh_from_db()
-    trial_dbt = run.trial_org.dbt
-    if trial_dbt is None:
-        raise TrialCloneError(
-            "trial org lost its dbt workspace before transform tasks could be created"
-        )
     if trial_dbt.cli_profile_block is None:
         raise TrialCloneError(
             "trial org's dbt workspace has no cli_profile_block; "
             "setup_managed_git_workspace should have set it"
         )
-
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(run.trial_org, trial_dbt)
     create_default_transform_tasks(run.trial_org, trial_dbt.cli_profile_block, dbt_project_params)
     run.manifest["dbt_transform_tasks_created"] = True

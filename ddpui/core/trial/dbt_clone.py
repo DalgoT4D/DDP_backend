@@ -314,11 +314,11 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
 
 # template repo directories copied wholesale onto the trial repo (merged over the scaffold,
 # template files win on collision). `models/` is required — the rest are copied only if present.
-_TEMPLATE_REPO_DIRS = ("models", "macros", "seeds", "snapshots", "tests", "analyses")
-# template repo top-level files copied over the scaffold's versions if present. packages.yml in
-# particular: the scaffold ships the Dalgo-assets version (dbt_utils only) — a template pinning a
-# different dbt_utils or adding packages (codegen, …) must carry its own.
-_TEMPLATE_REPO_FILES = ("packages.yml", "selectors.yml")
+_TEMPLATE_REPO_DIRS = ("models", "macros", "seeds", "snapshots", "tests")
+# template repo top-level files copied over the scaffold's versions if present. packages.yml:
+# the scaffold ships the Dalgo-assets version (dbt_utils only) — a template pinning a different
+# dbt_utils or adding packages (codegen, …) must carry its own.
+_TEMPLATE_REPO_FILES = ("packages.yml",)
 
 
 def _merge_template_project_config(template_repo_dir: Path, trial_repo_dir: Path) -> None:
@@ -371,11 +371,11 @@ def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
     files onto the destination working dir, commit + push.
 
     What gets copied (over the `setup_managed_git_workspace` scaffold, template files winning):
-    - directories: `models/` (required) plus `macros/`, `seeds/`, `snapshots/`, `tests/`,
-      `analyses/` when present — a template model calling its own macro, seeding a lookup table,
-      or shipping singular tests would otherwise fail/degrade silently on the trial;
-    - files: `packages.yml` / `selectors.yml` when present (template's pinned deps win over the
-      scaffold's asset copy);
+    - directories: `models/` (required) plus `macros/`, `seeds/`, `snapshots/`, `tests/` when
+      present — a template model calling its own macro, seeding a lookup table, or shipping
+      singular tests would otherwise fail/degrade silently on the trial;
+    - files: `packages.yml` when present (template's pinned deps win over the scaffold's
+      asset copy);
     - `dbt_project.yml` config, re-keyed to the scaffold's project name/profile — see
       `_merge_template_project_config` (folder-level +materialized/+schema/vars/hooks survive).
 
