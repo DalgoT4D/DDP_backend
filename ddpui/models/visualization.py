@@ -3,7 +3,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.postgres.fields import ArrayField
-from ddpui.models.general_access import AccessLevel
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
@@ -60,18 +59,6 @@ class Chart(models.Model):
         default=dict, help_text="Create chart form config including customizations"
     )
 
-    # General access, with one deliberate difference from Dashboard:
-    # analyst_level defaults to EDIT — the behavior-preserving value for rows
-    # created without explicit levels (the create path overrides with org
-    # defaults). member_level is pinned to "none" (Member chart sharing is
-    # deferred); clean() and the sharing API both reject any other value.
-    analyst_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.EDIT
-    )
-    member_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
-
     # Metadata
     created_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, db_column="created_by"
@@ -86,16 +73,6 @@ class Chart(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    def clean(self):
-        """Best-effort backstop keeping ``member_level`` at "none" — the real
-        enforcement lives in the sharing API and resolver. Django doesn't call
-        ``clean()`` on plain save()/update(), so write paths must not rely on it."""
-        super().clean()
-        if self.member_level != AccessLevel.NONE:
-            raise ValidationError(
-                {"member_level": "charts cannot be shared with Members yet (v1.1)"}
-            )
 
     def __str__(self):
         return f"{self.title} ({self.chart_type})"

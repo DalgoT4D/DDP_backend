@@ -4,7 +4,6 @@
 
 from typing import Tuple
 
-from ddpui.models.general_access import AccessLevel
 from ddpui.models.org_preferences import OrgPreferences
 
 

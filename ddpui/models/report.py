@@ -3,7 +3,6 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import AccessLevel
 
 
 class ReportSnapshot(models.Model):
@@ -61,15 +60,6 @@ class ReportSnapshot(models.Model):
     public_disabled_at = models.DateTimeField(null=True, blank=True)
     public_access_count = models.IntegerField(default=0)
     last_public_accessed = models.DateTimeField(null=True, blank=True)
-
-    # General access — per-role sharing levels. Admins are never stored here;
-    # Analysts and Members each get an independent level.
-    analyst_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
-    member_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
 
     # Metadata
     created_by = models.ForeignKey(

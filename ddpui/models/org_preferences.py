@@ -1,7 +1,7 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import AccessLevel
+from ddpui.models.resource_share import AccessLevel
 from django.utils import timezone
 
 
@@ -21,9 +21,6 @@ class OrgPreferences(models.Model):
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
 
-    # Org-level defaults for newly created shareable resources. VIEW/VIEW
-    # (not NONE/NONE) preserves the pre-existing product default for orgs
-    # whose row is auto-created before they ever configure these levels.
     default_analyst_level = models.CharField(
         max_length=5, choices=AccessLevel.choices, default=AccessLevel.VIEW
     )

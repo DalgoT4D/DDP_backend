@@ -5,7 +5,6 @@ from django.db import models
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import AccessLevel
 
 
 class AlertType(models.TextChoices):
@@ -89,15 +88,6 @@ class Alert(models.Model):
     # State
     is_active = models.BooleanField(default=True)
     last_evaluated_at = models.DateTimeField(null=True, blank=True)  # UTC
-
-    # General access — per-role sharing levels. Admins are never stored here;
-    # Analysts and Members each get an independent level.
-    analyst_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
-    member_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
 
     # Audit
     created_by = models.ForeignKey(

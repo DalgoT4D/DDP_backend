@@ -25,7 +25,6 @@ from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
-from ddpui.models.user_group import UserGroup
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertTestRequest,
@@ -33,7 +32,6 @@ from ddpui.schemas.alert_schema import (
     AlertUpdate,
 )
 from ddpui.utils.custom_logger import CustomLogger
-
 
 logger = CustomLogger("ddpui.alert_service")
 

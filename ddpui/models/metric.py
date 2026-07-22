@@ -3,8 +3,6 @@
 from django.db import models
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import AccessLevel
-
 
 AGGREGATION_CHOICES = [
     ("sum", "SUM"),
@@ -57,15 +55,6 @@ class Metric(models.Model):
     # e.g. "SUM(col_a - col_b) / COUNT(DISTINCT id)"
     # Validated on save by executing a test query against the warehouse
     column_expression = models.TextField(null=True, blank=True)
-
-    # General access — per-role sharing levels. Admins are never stored here;
-    # Analysts and Members each get an independent level.
-    analyst_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
-    member_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
 
     # Org scoping + ownership (same pattern as Chart)
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
@@ -126,15 +115,6 @@ class KPI(models.Model):
 
     # Display order on KPI page
     display_order = models.IntegerField(default=0)
-
-    # General access — per-role sharing levels. Admins are never stored here;
-    # Analysts and Members each get an independent level.
-    analyst_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
-    member_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
 
     # Org scoping + ownership
     org = models.ForeignKey(Org, on_delete=models.CASCADE)

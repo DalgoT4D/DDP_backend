@@ -5,7 +5,6 @@ from django.db import models
 from django.utils import timezone
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
-from ddpui.models.general_access import AccessLevel
 
 
 class DashboardType(str, Enum):
@@ -106,15 +105,6 @@ class Dashboard(models.Model):
     is_org_default = models.BooleanField(
         default=False,
         help_text="If True, this dashboard is the organization's default landing page",
-    )
-
-    # General access — per-role sharing levels. Admins are never stored here;
-    # Analysts and Members each get an independent level.
-    analyst_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
-    )
-    member_level = models.CharField(
-        max_length=5, choices=AccessLevel.choices, default=AccessLevel.NONE
     )
 
     # Metadata
