@@ -16,12 +16,11 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
-from ddpui.auth import has_permission
+from ddpui.auth import extract_resource, has_permission, has_resource_permission
 from ddpui.core.sharing import coverage, sharing_actions
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.chart_access import chart_ids_in_tabs, dashboard_chart_ids
 from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
-from ddpui.core.sharing.decorators import extract_resource, has_resource_permission
 from ddpui.schemas.access_schema import DashboardChartCoverageResponse, EmbedCoverageConfirmation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (

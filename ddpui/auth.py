@@ -60,6 +60,95 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
+# 403/404 noun per rtype for the resource gates below — same wording contract
+# as gates.py (the webapp matches on these strings).
+_NOUN_BY_RTYPE = {
+    "chart": "chart",
+    "dashboard": "dashboard",
+    "report": "report",
+    "alert": "alert",
+    "metric": "metric",
+    "kpi": "KPI",
+}
+
+
+def extract_resource(rtype: str, param: str = None):
+    """② Fetch the org-scoped resource named by the route param (default
+    ``{rtype}_id``) and attach it as ``request.resource``. Cross-org is
+    indistinguishable from missing: 404. Stack order (top = runs first):
+    ``@has_permission`` ①, this ②, ``@has_resource_permission`` ③.
+
+    Sharing imports are deferred to decoration time — this module loads
+    before the sharing package (which imports role constants from here)."""
+    import inspect
+
+    from ddpui.core.sharing.shareable_types import get_resource_type
+
+    entry = get_resource_type(rtype)
+    if entry is None:
+        raise ValueError(f"extract_resource: unknown rtype '{rtype}'")
+    param = param or f"{rtype}_id"
+    noun = _NOUN_BY_RTYPE.get(rtype, rtype)
+    not_found = f"{noun[0].upper()}{noun[1:]} not found"
+
+    def decorator(api_endpoint):
+        sig = inspect.signature(api_endpoint)
+
+        @wraps(api_endpoint)
+        def wrapper(*args, **kwargs):
+            request = args[0]
+            bound = sig.bind(*args, **kwargs)
+            if param not in bound.arguments:
+                raise HttpError(404, not_found)
+            resource = entry.model.objects.filter(
+                pk=bound.arguments[param], org=request.orguser.org
+            ).first()
+            if resource is None:
+                raise HttpError(404, not_found)
+            request.resource = resource
+            request.resource_rtype = rtype
+            return api_endpoint(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def has_resource_permission(slug: str):
+    """③ Deny with 403 unless ``slug`` is in the viewer's resource
+    permissions (``access_resolver.get_resource_permissions``) for
+    ``request.resource``. Attaches the set as
+    ``request.resource_permissions`` for body reads."""
+    from ddpui.core.sharing.permission_map import RTYPE_LEVEL_SLUG, slug_for
+
+    if slug not in set(RTYPE_LEVEL_SLUG.values()):
+        # Fail at import time, not per request — typos never ship.
+        raise ValueError(f"has_resource_permission: unknown resource slug '{slug}'")
+
+    def decorator(api_endpoint):
+        @wraps(api_endpoint)
+        def wrapper(*args, **kwargs):
+            from ddpui.core.sharing.access_resolver import get_resource_permissions
+
+            request = args[0]
+            resource = getattr(request, "resource", None)
+            rtype = getattr(request, "resource_rtype", None)
+            if resource is None or rtype is None:
+                raise RuntimeError("has_resource_permission requires @extract_resource above it")
+            permissions = get_resource_permissions(request.orguser, rtype, resource)
+            if slug not in permissions:
+                noun = _NOUN_BY_RTYPE.get(rtype, rtype)
+                if slug == slug_for(rtype, "edit"):
+                    raise HttpError(403, f"You do not have edit access to this {noun}")
+                raise HttpError(403, f"You do not have access to this {noun}")
+            request.resource_permissions = permissions
+            return api_endpoint(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def set_roles_and_permissions_in_redis(
     redis_client: RedisClient, role_permissions_key: str
 ) -> dict:

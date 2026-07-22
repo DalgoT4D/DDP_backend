@@ -26,6 +26,7 @@ from django.db.models import BigIntegerField, Q
 from django.db.models.functions import Cast
 
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE, SUPER_ADMIN_ROLE
+from ddpui.core.sharing.permission_map import implied_closure, slug_for
 from ddpui.core.sharing.shareable_types import get_resource_type
 from ddpui.models.general_access import AccessLevel
 from ddpui.models.resource_share import ResourceShare
@@ -181,6 +182,59 @@ def effective_permission(
 
     # Step 5: best of steps 3-4.
     return _best_permission(general, grant)
+
+
+def get_resource_permissions(orguser, rtype: str, resource) -> Set[str]:
+    """Permission slugs `orguser` holds on this specific resource (v1.2):
+    grant rows ∪ the role's floor ∪ owner/admin, closed under implication
+    (edit slugs include their view slug).
+
+    `effective_permission` above answers the same question in view/edit
+    vocabulary; this is the slug vocabulary the decorator gates check.
+    Role slugs are deliberately NOT a source — they answer Layer 2 ("may you
+    use this area of the app"); the role's per-resource contribution is the
+    floor columns. Empty set = no access (default-deny)."""
+    permissions: Set[str] = set()
+    entry = get_resource_type(rtype)
+    role_slug = _role_slug(orguser)
+    view_slug = slug_for(rtype, "view")
+    edit_slug = slug_for(rtype, "edit")
+
+    rank = ROLE_RANK.get(role_slug)
+    is_admin = rank is not None and rank >= ROLE_RANK[ADMIN_ROLE]
+    if is_admin or _is_owner(orguser, resource):
+        permissions.update(s for s in (view_slug, edit_slug) if s)
+
+    if not _member_excluded(role_slug, rtype):
+        floor_field = GENERAL_LEVEL_FIELD_BY_ROLE.get(role_slug)
+        if floor_field is not None:
+            level = getattr(resource, floor_field, None)
+            if level and level != AccessLevel.NONE:
+                floor_slug = slug_for(rtype, level)
+                if floor_slug:
+                    permissions.add(floor_slug)
+
+        # One query: active grant rows for this viewer (user + groups) on this
+        # resource, FK slug joined in; the varchar level covers null-FK rows.
+        grant_rows = ResourceShare.objects.filter(
+            principal_match_q(orguser),
+            org_id=getattr(resource, "org_id", None),
+            resource_type=rtype,
+            resource_id=str(resource.pk),
+        ).values_list("granted_permission__slug", "permission")
+        for fk_slug, level in grant_rows:
+            grant_slug = fk_slug or slug_for(rtype, level)
+            if (
+                grant_slug == edit_slug
+                and role_slug == MEMBER_ROLE
+                and not (entry and entry.member_edit_grants)
+            ):
+                # rtype hasn't opted into Member real-edit yet (plan v1.2 §5)
+                grant_slug = view_slug
+            if grant_slug:
+                permissions.add(grant_slug)
+
+    return implied_closure(permissions)
 
 
 def accessible_filter(

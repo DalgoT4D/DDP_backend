@@ -13,11 +13,8 @@ import pytest
 from ninja.errors import HttpError
 
 from ddpui.auth import ADMIN_ROLE, ANALYST_ROLE, MEMBER_ROLE
-from ddpui.core.sharing.decorators import (
-    build_permission_pool,
-    extract_resource,
-    has_resource_permission,
-)
+from ddpui.auth import extract_resource, has_resource_permission
+from ddpui.core.sharing.access_resolver import get_resource_permissions
 from ddpui.models.general_access import AccessLevel
 from ddpui.models.resource_share import ResourceShare
 from ddpui.tests.api_tests.test_user_org_api import mock_request, seed_db
@@ -45,8 +42,8 @@ def _grant(org_obj, orguser, resource, level, rtype="dashboard"):
     )
 
 
-def _pool(orguser, resource, rtype="dashboard"):
-    return build_permission_pool(orguser, rtype, resource)
+def _perms(orguser, resource, rtype="dashboard"):
+    return get_resource_permissions(orguser, rtype, resource)
 
 
 # ---------------------------------------------------------------- pool truth-table
@@ -59,14 +56,14 @@ def test_member_edit_grant_puts_edit_in_pool_only_on_that_dashboard(org, member,
     dash_b = _dashboard(org, owner=analyst)
     _grant(org, member, dash_a, "edit")
 
-    assert "can_edit_dashboards" in _pool(member, dash_a)
-    assert "can_edit_dashboards" not in _pool(member, dash_b)
+    assert "can_edit_dashboards" in _perms(member, dash_a)
+    assert "can_edit_dashboards" not in _perms(member, dash_b)
 
 
 def test_view_grant_contributes_view_not_edit(org, member, analyst):
     dash = _dashboard(org, owner=analyst)
     _grant(org, member, dash, "view")
-    pool = _pool(member, dash)
+    pool = _perms(member, dash)
     assert "can_view_dashboards" in pool
     assert "can_edit_dashboards" not in pool
 
@@ -74,7 +71,7 @@ def test_view_grant_contributes_view_not_edit(org, member, analyst):
 def test_edit_grant_implies_view(org, member, analyst):
     dash = _dashboard(org, owner=analyst)
     _grant(org, member, dash, "edit")
-    pool = _pool(member, dash)
+    pool = _perms(member, dash)
     assert {"can_edit_dashboards", "can_view_dashboards"} <= pool
 
 
@@ -82,15 +79,15 @@ def test_member_floor_contributes_its_level(org, analyst, member):
     """Floors are a pool source too: member_level="edit" gives every Member
     edit on this dashboard, no grant row needed."""
     dash = _dashboard(org, owner=analyst, member_level=AccessLevel.EDIT)
-    assert "can_edit_dashboards" in _pool(member, dash)
+    assert "can_edit_dashboards" in _perms(member, dash)
     dash_none = _dashboard(org, owner=analyst, member_level=AccessLevel.NONE)
-    assert "can_edit_dashboards" not in _pool(member, dash_none)
+    assert "can_edit_dashboards" not in _perms(member, dash_none)
 
 
 def test_owner_and_admin_hold_view_and_edit(org, admin, member, analyst):
     dash = _dashboard(org, owner=member, analyst_level=AccessLevel.NONE)
-    assert {"can_view_dashboards", "can_edit_dashboards"} <= _pool(member, dash)
-    assert {"can_view_dashboards", "can_edit_dashboards"} <= _pool(admin, dash)
+    assert {"can_view_dashboards", "can_edit_dashboards"} <= _perms(member, dash)
+    assert {"can_view_dashboards", "can_edit_dashboards"} <= _perms(admin, dash)
 
 
 def test_member_edit_grant_still_capped_on_report_rtype(org, member, analyst):
@@ -105,7 +102,7 @@ def test_member_edit_grant_still_capped_on_report_rtype(org, member, analyst):
         member_level=AccessLevel.NONE,
     )
     _grant(org, member, report, "edit", rtype="report")
-    pool = build_permission_pool(member, "report", report)
+    pool = get_resource_permissions(member, "report", report)
     # report has no view/edit slugs in seeds; the capped fallback maps to the
     # view slug, which is None for reports — so nothing enters the pool.
     assert pool == set()
@@ -115,7 +112,7 @@ def test_role_slugs_are_not_a_pool_source(org, member, analyst):
     """Role slugs answer ① only. If they pooled, every Member would hold
     can_view_dashboards on every dashboard, erasing floors and list scoping."""
     dash = _dashboard(org, owner=analyst, member_level=AccessLevel.NONE)
-    assert _pool(member, dash) == set()
+    assert _perms(member, dash) == set()
 
 
 # ---------------------------------------------------------------- decorators
