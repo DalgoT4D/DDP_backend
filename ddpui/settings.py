@@ -343,4 +343,13 @@ COOKIE_SECURE = True
 COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
 COOKIE_HTTPONLY = True
 
+# Admin portal session — deliberately shorter-lived than the normal app because it
+# is a higher-privilege, cross-org surface. Access 15 min, refresh 8 h (one work day).
+JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES = int(
+    os.getenv("JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES", "15")
+)
+JWT_ADMIN_REFRESH_TOKEN_EXPIRY_HOURS = int(
+    os.getenv("JWT_ADMIN_REFRESH_TOKEN_EXPIRY_HOURS", "8")
+)
+
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB

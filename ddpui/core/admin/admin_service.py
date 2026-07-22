@@ -10,8 +10,10 @@ admin_api response schemas — it returns models / primitive values, and the API
 layer builds the response and maps errors to status codes.
 """
 
+from datetime import timedelta
 from typing import List, Optional, Tuple
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 
 from ddpui.auth import CustomTokenObtainSerializer
@@ -54,7 +56,9 @@ def issue_admin_session(username: str, password: str) -> Tuple[Optional[dict], O
     # it to both.
     refresh = CustomTokenObtainSerializer.get_token(user)
     refresh["session"] = "admin"
+    refresh.set_exp(lifetime=timedelta(hours=settings.JWT_ADMIN_REFRESH_TOKEN_EXPIRY_HOURS))
     access = refresh.access_token
+    access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
 
     return {"access": str(access), "refresh": str(refresh)}, None
 
