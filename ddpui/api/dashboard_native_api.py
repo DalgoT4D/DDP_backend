@@ -58,6 +58,13 @@ logger = CustomLogger("ddpui")
 dashboard_native_router = Router()
 
 
+def _pool_level(request) -> Optional[str]:
+    """Viewer's level on ``request.resource``, read off the pool ③ attached —
+    no extra query. "edit" beats "view"; ③ passing guarantees at least view."""
+    pool = getattr(request, "resource_permissions", None) or set()
+    return "edit" if "can_edit_dashboards" in pool else "view" if pool else None
+
+
 # Endpoints
 @dashboard_native_router.get("/", response=List[DashboardResponse])
 @has_permission(["can_view_dashboards"])
@@ -93,7 +100,10 @@ def get_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
     dashboard = request.resource
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard, orguser=orguser),
+        user_permission=_pool_level(request),
+    )
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -247,7 +257,10 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 
     # plain (not `200, ...`) so ninja still infers 200 and direct-call tests
     # keep receiving the DashboardResponse itself
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard, orguser=orguser),
+        user_permission=_pool_level(request),
+    )
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")

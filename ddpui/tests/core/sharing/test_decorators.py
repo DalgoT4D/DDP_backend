@@ -212,6 +212,19 @@ def test_decorator_stack_costs_two_queries(org, member, analyst, django_assert_n
         endpoint(request, dashboard_id=dash.id)
 
 
+def test_detail_response_carries_pool_level(org, member, analyst):
+    """The webapp's edit affordance reads `user_permission` off the detail
+    GET — "edit" for a Member holding an edit grant, "view" via floor only."""
+    from ddpui.api.dashboard_native_api import get_dashboard
+
+    granted = _dashboard(org, owner=analyst, created_by=analyst)
+    _grant(org, member, granted, "edit")
+    floor_only = _dashboard(org, owner=analyst, created_by=analyst, member_level=AccessLevel.VIEW)
+
+    assert get_dashboard(mock_request(member), dashboard_id=granted.id).user_permission == "edit"
+    assert get_dashboard(mock_request(member), dashboard_id=floor_only.id).user_permission == "view"
+
+
 def test_unknown_slug_fails_at_decoration_time():
     with pytest.raises(ValueError):
         has_resource_permission("can_edit_dashbords")  # typo

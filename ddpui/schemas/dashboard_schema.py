@@ -96,6 +96,9 @@ class DashboardResponse(Schema):
     member_level: Optional[str] = None
     is_owner: bool = False
     is_creator: bool = False
+    # Viewer's per-resource level ("view"|"edit") from the v1.2 pool — set on
+    # the detail GET and update PUT only (lists would pay a query per row).
+    user_permission: Optional[str] = None
 
 
 # =============================================================================
