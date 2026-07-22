@@ -13,6 +13,7 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.trial import clone_service
 from ddpui.core.trial.clone_service import CloneRun
 from ddpui.core.trial.exceptions import TrialAccountExistsError
+from ddpui.schemas.trial_schema import TrialCloneRequest, TrialDbParams
 
 pytestmark = pytest.mark.django_db
 
@@ -28,7 +29,9 @@ def test_clone_runs_all_steps_and_completes(
     mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl", slug="tmpl")
-    run = clone_service.clone_template_org(template.id, "a@b.org")
+    run = clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+    )
     assert isinstance(run, CloneRun)
     assert run.template == template
     assert run.trial_email == "a@b.org"
@@ -63,7 +66,8 @@ def test_clone_invokes_progress_callback_for_all_steps_in_order(
     template = Org.objects.create(name="tmpl-progress", slug="tmpl-progress")
     calls = []
     clone_service.clone_template_org(
-        template.id, "progress@b.org", progress=lambda n, label: calls.append((n, label))
+        TrialCloneRequest(template_org_id=template.id, trial_email="progress@b.org"),
+        progress=lambda n, label: calls.append((n, label)),
     )
     assert [n for n, _ in calls] == [1, 2, 3, 4, 5, 6, 7]
     for n, label in calls:
@@ -84,7 +88,9 @@ def test_clone_without_progress_callback_still_works(
 ):
     """progress is optional — existing management-command path (no progress) must be unaffected."""
     template = Org.objects.create(name="tmpl-noprogress", slug="tmpl-noprogress")
-    run = clone_service.clone_template_org(template.id, "noprogress@b.org")
+    run = clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="noprogress@b.org")
+    )
     assert isinstance(run, CloneRun)
     mock_s1.assert_called_once()
     mock_s7.assert_called_once()
@@ -111,7 +117,12 @@ def test_clone_passes_org_name_and_role_slug_onto_run(
     mock_s1.side_effect = fake_step1
 
     run = clone_service.clone_template_org(
-        template.id, "orgrole@b.org", org_name="Acme Co", role_slug="custom-role"
+        TrialCloneRequest(
+            template_org_id=template.id,
+            trial_email="orgrole@b.org",
+            org_name="Acme Co",
+            role_slug="custom-role",
+        )
     )
     assert run.org_name == "Acme Co"
     assert run.role_slug == "custom-role"
@@ -127,7 +138,9 @@ def test_clone_reraises_and_skips_teardown_when_step1_fails_immediately(
 ):
     template = Org.objects.create(name="tmpl2", slug="tmpl2")
     with pytest.raises(RuntimeError, match="kaboom"):
-        clone_service.clone_template_org(template.id, "a@b.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
 
     # step1 (org+user) never got far enough to create a trial_org or warehouse — nothing to
     # tear down.
@@ -157,7 +170,9 @@ def test_clone_tears_down_created_resources_on_later_failure(
     mock_cleanup_instance = mock_cleanup_cls.return_value
 
     with pytest.raises(RuntimeError, match="boom"):
-        clone_service.clone_template_org(template.id, "a@b.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
 
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
@@ -180,7 +195,9 @@ def test_clone_teardown_failure_does_not_mask_original_error(mock_s1, mock_clean
     mock_cleanup_cls.return_value.delete_org.side_effect = Exception("teardown exploded")
 
     with pytest.raises(RuntimeError, match="original failure"):
-        clone_service.clone_template_org(template.id, "a@b.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
 
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_drop.assert_not_called()
@@ -206,7 +223,9 @@ def test_clone_tears_down_org_on_step1_mid_failure(
     mock_cleanup_instance = mock_cleanup_cls.return_value
 
     with pytest.raises(RuntimeError, match="create_org_plan failed"):
-        clone_service.clone_template_org(template.id, "a@b.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
 
     mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
     mock_cleanup_instance.delete_org.assert_called_once()
@@ -248,13 +267,13 @@ def test_clone_tears_down_db_on_step2_mid_failure(
         captured["run"] = run
 
     mock_s1.side_effect = fake_step1
-    mock_provision.return_value = {
-        "host": "h",
-        "port": 5432,
-        "database": "trial_z_db",
-        "username": "u",
-        "password": "p",
-    }
+    mock_provision.return_value = TrialDbParams(
+        host="h",
+        port=5432,
+        database="trial_z_db",
+        username="u",
+        password="p",
+    )
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
     mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
@@ -262,7 +281,9 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     mock_cleanup_instance = mock_cleanup_cls.return_value
 
     with pytest.raises(RuntimeError, match="create_warehouse failed"):
-        clone_service.clone_template_org(template.id, "a@b.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
 
     assert captured["run"].manifest["trial_warehouse_db"] == "trial_z_db"
 
@@ -302,13 +323,13 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
         run.trial_org = trial_org
 
     mock_s1.side_effect = fake_step1
-    mock_provision.return_value = {
-        "host": "h",
-        "port": 5432,
-        "database": "trial_q_db",
-        "username": "u",
-        "password": "p",
-    }
+    mock_provision.return_value = TrialDbParams(
+        host="h",
+        port=5432,
+        database="trial_q_db",
+        username="u",
+        password="p",
+    )
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
     mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
@@ -317,7 +338,9 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
     mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
 
     with pytest.raises(RuntimeError, match="create_warehouse failed"):
-        clone_service.clone_template_org(template.id, "a@b.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
 
     # RDS drop still fired despite delete_org blowing up — no stranded db
     mock_drop.assert_called_once_with("a@b.org")
@@ -354,7 +377,9 @@ def test_teardown_keeps_the_person_for_retry(mock_s1, mock_s2, mock_cleanup_cls,
     mock_cleanup_cls.return_value.delete_org.side_effect = fake_delete_org
 
     with pytest.raises(RuntimeError, match="boom"):
-        clone_service.clone_template_org(template.id, "keep@x.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="keep@x.org")
+        )
 
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
     # the OrgUser is gone → account_exists_for_email stays False → retry allowed
@@ -392,7 +417,9 @@ def test_teardown_keeps_user_that_still_has_an_orguser(
     mock_cleanup_cls.return_value.delete_org.return_value = None
 
     with pytest.raises(RuntimeError, match="boom"):
-        clone_service.clone_template_org(template.id, "collide@x.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="collide@x.org")
+        )
 
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
     assert User.objects.filter(username="collide@x.org").exists()
@@ -428,7 +455,9 @@ def test_timeout_tears_down_keeping_user_and_reraises(
     ).delete()
 
     with pytest.raises(SoftTimeLimitExceeded):
-        clone_service.clone_template_org(template.id, "slow@x.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="slow@x.org")
+        )
 
     # teardown happened: org delete + RDS drop both fired
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
@@ -476,6 +505,9 @@ def test_step_org_and_user_copies_template_feature_flags(mock_create_org, mock_c
     template = Org.objects.create(name="tmpl-ff", slug="tmpl-ff")
     OrgFeatureFlag.objects.create(org=template, flag_name="REPORTS", flag_value=True)
     OrgFeatureFlag.objects.create(org=template, flag_name="DATA_QUALITY", flag_value=False)
+    # a stale/unknown flag on the template must NOT be copied — the feature_flags helper
+    # validates against the FEATURE_FLAGS allowlist
+    OrgFeatureFlag.objects.create(org=template, flag_name="NOT_A_REAL_FLAG", flag_value=True)
     trial_org = Org.objects.create(
         name="Trial ff tmpl", slug="trial-ff-tmpl", airbyte_workspace_id="ws-ff"
     )
@@ -660,13 +692,13 @@ def test_step_warehouse_registers_trial_warehouse(
         "username": "tmpl_u",
         "password": "tmpl_p",
     }
-    mock_provision.return_value = {
-        "host": "h",
-        "port": 5432,
-        "database": "trial_1",
-        "username": "u",
-        "password": "p",
-    }
+    mock_provision.return_value = TrialDbParams(
+        host="h",
+        port=5432,
+        database="trial_1",
+        username="u",
+        password="p",
+    )
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_create_wh.return_value = (None, None)
 
@@ -703,13 +735,13 @@ def test_step_warehouse_drops_template_ssh_tunnel_config(
         name="Trial 1 tmpl", slug="trial-1", airbyte_workspace_id="ws-tr"
     )
 
-    mock_provision.return_value = {
-        "host": "h",
-        "port": 5432,
-        "database": "trial_1",
-        "username": "u",
-        "password": "p",
-    }
+    mock_provision.return_value = TrialDbParams(
+        host="h",
+        port=5432,
+        database="trial_1",
+        username="u",
+        password="p",
+    )
     mock_retrieve.return_value = {
         "host": "tmpl-host",
         "port": 5432,
@@ -769,13 +801,13 @@ def test_step_warehouse_uses_server_side_copy_when_same_instance(
         "password": "tmpl_p",
         "schema": "public",
     }
-    mock_provision.return_value = {
-        "host": "same-host",
-        "port": 5432,
-        "database": "trial_same_db",
-        "username": "u",
-        "password": "p",
-    }
+    mock_provision.return_value = TrialDbParams(
+        host="same-host",
+        port=5432,
+        database="trial_same_db",
+        username="u",
+        password="p",
+    )
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_create_wh.return_value = (None, None)
 
@@ -851,7 +883,9 @@ def test_clone_rejects_existing_account(mock_step1):
     template = Org.objects.create(name="tmpl-guard", slug="tmpl-guard")
 
     with pytest.raises(TrialAccountExistsError):
-        clone_service.clone_template_org(template.id, "dup@x.org")
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="dup@x.org")
+        )
 
     mock_step1.assert_not_called()
     # the guard fires before any resource (trial org, etc.) is created beyond the
@@ -1223,7 +1257,9 @@ def test_clone_wires_step_dbt_after_connections(
     mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl-wire", slug="tmpl-wire")
-    run = clone_service.clone_template_org(template.id, "a@b.org")
+    run = clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+    )
     mock_s5.assert_called_once()
     assert "step5_dbt" in run.timings
 
@@ -1255,7 +1291,9 @@ def test_clone_wires_step_prefect_after_dbt(
     mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl-wire-pf", slug="tmpl-wire-pf")
-    run = clone_service.clone_template_org(template.id, "a@b.org")
+    run = clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+    )
     mock_s6.assert_called_once()
     assert "step6_prefect" in run.timings
     timing_keys = list(run.timings.keys())
@@ -1287,7 +1325,9 @@ def test_step_viz_delegates_and_records_manifest(mock_clone_viz):
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_wires_step_viz_last(mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7):
     template = Org.objects.create(name="tmpl-wire-viz", slug="tmpl-wire-viz")
-    run = clone_service.clone_template_org(template.id, "a@b.org")
+    run = clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+    )
     mock_s7.assert_called_once()
     assert "step7_viz" in run.timings
     assert list(run.timings.keys())[-1] == "step7_viz"

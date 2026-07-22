@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+from ddpui.schemas.trial_schema import ActivationTokenData, TrialCloneParams
+
 
 @patch("ddpui.core.trial.activation.RedisClient")
 def test_create_and_consume_token(mock_redis_cls):
@@ -10,12 +12,12 @@ def test_create_and_consume_token(mock_redis_cls):
     r.delete.side_effect = lambda k: store.pop(k, None)
     from ddpui.core.trial import activation
 
-    tok = activation.create_activation_token("a@b.org", "Acme", "account-manager")
-    assert activation.consume_activation_token(tok) == {
-        "email": "a@b.org",
-        "org_name": "Acme",
-        "role": "account-manager",
-    }
+    tok = activation.create_activation_token(
+        ActivationTokenData(email="a@b.org", org_name="Acme", role="account-manager")
+    )
+    assert activation.consume_activation_token(tok) == ActivationTokenData(
+        email="a@b.org", org_name="Acme", role="account-manager"
+    )
     assert activation.consume_activation_token(tok) is None  # consumed once
 
 
@@ -28,13 +30,15 @@ def test_store_and_fetch_clone_params(mock_redis_cls):
     r.expire.side_effect = lambda k, ttl: None
     from ddpui.core.trial import activation
 
-    activation.store_clone_params("task-1", "a@b.org", "Acme", "account-manager", 42)
-    assert activation.fetch_clone_params("task-1") == {
-        "email": "a@b.org",
-        "org_name": "Acme",
-        "role": "account-manager",
-        "template_org_id": 42,
-    }
+    activation.store_clone_params(
+        "task-1",
+        TrialCloneParams(
+            email="a@b.org", org_name="Acme", role="account-manager", template_org_id=42
+        ),
+    )
+    assert activation.fetch_clone_params("task-1") == TrialCloneParams(
+        email="a@b.org", org_name="Acme", role="account-manager", template_org_id=42
+    )
     # unlike the activation token, params are NOT deleted on fetch — a retry may itself be retried
     assert activation.fetch_clone_params("task-1") is not None
     assert activation.fetch_clone_params("nope") is None

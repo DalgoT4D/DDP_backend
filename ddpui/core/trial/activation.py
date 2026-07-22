@@ -3,6 +3,7 @@
 import json
 from uuid import uuid4
 
+from ddpui.schemas.trial_schema import ActivationTokenData, TrialCloneParams
 from ddpui.utils.redis_client import RedisClient
 
 TOKEN_PREFIX = "trial-activation:"
@@ -23,17 +24,17 @@ CLONE_LOCK_PREFIX = "trial-clone-running:"
 CLONE_LOCK_TTL_SECONDS = 360
 
 
-def create_activation_token(email: str, org_name: str, role: str) -> str:
+def create_activation_token(data: ActivationTokenData) -> str:
     """Create and store an activation token, returning its hex value."""
     token = uuid4().hex
     redis = RedisClient.get_instance()
     key = f"{TOKEN_PREFIX}{token}"
-    redis.set(key, json.dumps({"email": email, "org_name": org_name, "role": role}))
+    redis.set(key, json.dumps(data.model_dump()))
     redis.expire(key, TOKEN_TTL_SECONDS)
     return token
 
 
-def consume_activation_token(token: str) -> dict | None:
+def consume_activation_token(token: str) -> ActivationTokenData | None:
     """Look up and delete an activation token, returning its payload if valid."""
     redis = RedisClient.get_instance()
     key = f"{TOKEN_PREFIX}{token}"
@@ -41,38 +42,26 @@ def consume_activation_token(token: str) -> dict | None:
     if raw is None:
         return None
     redis.delete(key)
-    return json.loads(raw)
+    return ActivationTokenData(**json.loads(raw))
 
 
-def store_clone_params(
-    task_id: str, email: str, org_name: str, role: str, template_org_id: int
-) -> None:
+def store_clone_params(task_id: str, params: TrialCloneParams) -> None:
     """Stash the params needed to (re)run a clone for this task_id, so POST /trial/retry can
     re-enqueue without the consumed activation token."""
     redis = RedisClient.get_instance()
     key = f"{CLONE_PARAMS_PREFIX}{task_id}"
-    redis.set(
-        key,
-        json.dumps(
-            {
-                "email": email,
-                "org_name": org_name,
-                "role": role,
-                "template_org_id": template_org_id,
-            }
-        ),
-    )
+    redis.set(key, json.dumps(params.model_dump()))
     redis.expire(key, CLONE_PARAMS_TTL_SECONDS)
 
 
-def fetch_clone_params(task_id: str) -> dict | None:
+def fetch_clone_params(task_id: str) -> TrialCloneParams | None:
     """Return the stored clone params for a task_id, or None if missing/expired. Not deleted —
     a retry may itself fail and be retried again."""
     redis = RedisClient.get_instance()
     raw = redis.get(f"{CLONE_PARAMS_PREFIX}{task_id}")
     if raw is None:
         return None
-    return json.loads(raw)
+    return TrialCloneParams(**json.loads(raw))
 
 
 def acquire_clone_lock(email: str) -> bool:

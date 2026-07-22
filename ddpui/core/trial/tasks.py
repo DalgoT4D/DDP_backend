@@ -1,11 +1,12 @@
 """Celery task wrapping clone_template_org with Redis-backed progress reporting."""
 
-import os
+from django.conf import settings
 
 from ddpui.celery import app
 from ddpui.utils.taskprogress import TaskProgress
 from ddpui.core.trial.clone_service import clone_template_org
 from ddpui.core.trial.activation import release_clone_lock
+from ddpui.schemas.trial_schema import TrialCloneRequest
 from ddpui.utils import awsses
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -45,10 +46,12 @@ def clone_trial_org_task(
 
     try:
         run = clone_template_org(
-            template_org_id,
-            email,
-            org_name=org_name,
-            role_slug=None,
+            TrialCloneRequest(
+                template_org_id=template_org_id,
+                trial_email=email,
+                org_name=org_name,
+                role_slug=None,
+            ),
             progress=lambda n, label: progress.add(
                 {"step": n, "message": label, "status": "running"}
             ),
@@ -67,7 +70,7 @@ def clone_trial_org_task(
 
     # welcome email so the user gets in even if they closed the progress tab mid-clone
     try:
-        login_url = os.getenv("FRONTEND_URL_V2") or ""
+        login_url = settings.FRONTEND_URL_V2 or ""
         awsses.send_trial_welcome_email(email, login_url)
     except Exception as err:  # skipcq PYL-W0703 — email failure must not fail the (done) clone
         logger.error(f"failed to send trial welcome email to {email}: {err}")

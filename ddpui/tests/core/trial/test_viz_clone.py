@@ -318,6 +318,59 @@ def test_clone_dashboard_filters_remaps_dashboard_fk():
     assert new_filter.column_name == "region"
 
 
+def test_clone_dashboard_filters_remaps_filter_ids_inside_tabs():
+    """Cloned DashboardFilter rows get NEW ids — the cloned dashboard's tabs must reference
+    those new ids (component keys `filter-<id>`, `layout_config[].i`, `config.filterId`), not
+    the template org's filter ids."""
+    template_org = _make_org("tmpl-filtremap")
+    trial_org = _make_org("trial-filtremap")
+    template_user = _make_orguser(template_org, "tmpl-filtremap@x.org")
+    trial_user = _make_orguser(trial_org, "trial-filtremap@x.org")
+
+    d = Dashboard.objects.create(
+        title="Dash1",
+        org=template_org,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+    f = DashboardFilter.objects.create(
+        dashboard=d,
+        name="Region filter",
+        filter_type="value",
+        schema_name="analytics",
+        table_name="t",
+        column_name="region",
+    )
+    d.tabs = [
+        {
+            "id": "tab1",
+            "layout_config": [{"i": f"filter-{f.id}", "x": 0, "y": 0}],
+            "components": {
+                f"filter-{f.id}": {"type": "filter", "config": {"filterId": f.id}},
+            },
+        }
+    ]
+    d.save()
+
+    dash_map = viz_clone._clone_dashboards(template_org, trial_org, trial_user, {}, {})
+    viz_clone._clone_dashboard_filters(template_org, dash_map)
+
+    new_d = Dashboard.objects.get(pk=dash_map[d.id].pk)
+    new_filter = DashboardFilter.objects.get(dashboard=new_d)
+    assert new_filter.id != f.id
+
+    tab = new_d.tabs[0]
+    # layout_config remapped
+    assert tab["layout_config"][0]["i"] == f"filter-{new_filter.id}"
+    # component key + config.filterId remapped; old key gone
+    assert f"filter-{f.id}" not in tab["components"]
+    assert tab["components"][f"filter-{new_filter.id}"]["config"]["filterId"] == new_filter.id
+
+    # template dashboard untouched
+    d.refresh_from_db()
+    assert d.tabs[0]["components"][f"filter-{f.id}"]["config"]["filterId"] == f.id
+
+
 # ---------------------------------------------------------------------------
 # Alert
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand, CommandError
 from ddpui.models.org import Org
 from ddpui.core.trial.clone_service import clone_template_org
 from ddpui.core.trial.exceptions import TrialAccountExistsError
+from ddpui.schemas.trial_schema import TrialCloneRequest
 
 
 class Command(BaseCommand):
@@ -20,7 +21,9 @@ class Command(BaseCommand):
             raise CommandError(f"no org with slug {options['template']}")
 
         try:
-            run = clone_template_org(template.id, options["email"])
+            run = clone_template_org(
+                TrialCloneRequest(template_org_id=template.id, trial_email=options["email"])
+            )
         except TrialAccountExistsError:
             self.stdout.write(
                 self.style.WARNING(

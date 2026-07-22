@@ -109,12 +109,12 @@ def test_provision_creates_database_and_dedicated_role(mock_settings, mock_psyco
     assert f'GRANT ALL ON SCHEMA public TO "{expected_role}"' in ft_db_statements
     assert f'ALTER SCHEMA public OWNER TO "{expected_role}"' in ft_db_statements
 
-    assert params["host"] == "rds-host"
-    assert params["port"] == 5432
-    assert params["database"] == expected_db
-    assert params["username"] == expected_role
-    assert params["password"]  # non-empty
-    assert params["password"] != "adminpass"  # NOT admin creds
+    assert params.host == "rds-host"
+    assert params.port == 5432
+    assert params.database == expected_db
+    assert params.username == expected_role
+    assert params.password  # non-empty
+    assert params.password != "adminpass"  # NOT admin creds
 
 
 @patch("ddpui.core.trial.warehouse_provision.psycopg2")
@@ -133,7 +133,7 @@ def test_provision_server_side_copy_from_template(mock_settings, mock_psycopg2):
     params = warehouse_provision.provision_trial_database("a@b.org", template_db="himanshu_wh")
     executed = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
     assert "TEMPLATE" in executed and "himanshu_wh" in executed  # server-side copy issued
-    assert params["database"].startswith("ft_")
+    assert params.database.startswith("ft_")
 
 
 def test_provision_requires_template_db():

@@ -23,12 +23,14 @@ def test_clone_trial_org_task_success(mock_clone, mock_taskprogress_cls):
 
     mock_clone.assert_called_once()
     args, kwargs = mock_clone.call_args
-    assert args == (5, "a@b.org")
-    assert kwargs["org_name"] == "Acme"
+    payload = args[0]
+    assert payload.template_org_id == 5
+    assert payload.trial_email == "a@b.org"
+    assert payload.org_name == "Acme"
     # C1: the client-supplied "role" is job-title metadata only — it must never be forwarded
     # as the RBAC role_slug. role_slug=None lets clone_template_org apply its own default
     # (ACCOUNT_MANAGER_ROLE).
-    assert kwargs["role_slug"] is None
+    assert payload.role_slug is None
     assert callable(kwargs["progress"])
 
     # exercise the progress callback passed to clone_template_org
@@ -61,9 +63,10 @@ def test_clone_trial_org_task_never_forwards_client_role_as_rbac_role(
 
     clone_trial_org_task("task-3", 5, "attacker@b.org", "Acme", "super-admin")
 
-    _, kwargs = mock_clone.call_args
-    assert kwargs["role_slug"] != "super-admin"
-    assert kwargs["role_slug"] is None
+    args, _ = mock_clone.call_args
+    payload = args[0]
+    assert payload.role_slug != "super-admin"
+    assert payload.role_slug is None
 
 
 @patch("ddpui.core.trial.tasks.TaskProgress")

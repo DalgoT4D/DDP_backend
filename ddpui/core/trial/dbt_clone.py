@@ -27,6 +27,7 @@ from ddpui.core.dbtautomation_service import (
 )
 from ddpui.core.git_manager import GitManager
 from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.trial.exceptions import TrialCloneError
 from ddpui.models.canvas_models import CanvasEdge, CanvasNode, CanvasNodeType
 from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtModelType, OrgDbtOperation
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
@@ -45,7 +46,7 @@ def _copy_canvas(template_dbt: OrgDbt, trial_dbt: OrgDbt, model_map: dict) -> No
         new_dbtmodel = None
         if node.dbtmodel_id:
             if node.dbtmodel_id not in model_map:
-                raise RuntimeError(
+                raise TrialCloneError(
                     f"canvas node {node.uuid} references a dbtmodel outside the template dbt"
                 )
             new_dbtmodel = model_map[node.dbtmodel_id]
@@ -225,22 +226,22 @@ def _terminal_operation_node(trial_dbt: OrgDbt, model: OrgDbtModel) -> CanvasNod
         orgdbt=trial_dbt, dbtmodel=model, node_type=CanvasNodeType.MODEL
     ).first()
     if model_node is None:
-        raise RuntimeError(f"no canvas node found for copied model {model.name}")
+        raise TrialCloneError(f"no canvas node found for copied model {model.name}")
 
     incoming = list(CanvasEdge.objects.filter(to_node=model_node).select_related("from_node"))
     if len(incoming) == 0:
-        raise RuntimeError(
+        raise TrialCloneError(
             f"copied model {model.name} has no upstream operation chain to regenerate from"
         )
     if len(incoming) > 1:
-        raise RuntimeError(
+        raise TrialCloneError(
             f"model canvas node {model_node.uuid} has {len(incoming)} incoming operation "
             "edges; ambiguous terminal node — cannot safely regenerate"
         )
 
     from_node = incoming[0].from_node
     if from_node.node_type != CanvasNodeType.OPERATION:
-        raise RuntimeError(
+        raise TrialCloneError(
             f"copied model {model.name} has no upstream operation chain to regenerate from"
         )
     return from_node
@@ -286,7 +287,7 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
     """
     org_warehouse = OrgWarehouse.objects.filter(org=trial_org).first()
     if org_warehouse is None:
-        raise RuntimeError(
+        raise TrialCloneError(
             f"trial org {trial_org.slug} has no warehouse to regenerate dbt models against"
         )
 
@@ -333,7 +334,9 @@ def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
     is done.
     """
     if not template_dbt.gitrepo_url:
-        raise RuntimeError(f"template dbt (orgdbt={template_dbt.id}) has no gitrepo_url to clone")
+        raise TrialCloneError(
+            f"template dbt (orgdbt={template_dbt.id}) has no gitrepo_url to clone"
+        )
 
     template_pat = (
         GitManager.get_org_admin_pat()
@@ -355,7 +358,7 @@ def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
             # copy_dbt_dag has already created trial OrgDbtModel rows with sql_path set — if we
             # copy no .sql files, the trial dbt project is half-populated (DAG metadata but no
             # backing files). Fail loud rather than ship a broken transform layer.
-            raise RuntimeError(
+            raise TrialCloneError(
                 f"template dbt repo {template_dbt.gitrepo_url} has no models/ directory to copy"
             )
         shutil.copytree(template_models_dir, trial_repo_dir / "models", dirs_exist_ok=True)

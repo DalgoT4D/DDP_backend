@@ -7,6 +7,8 @@ import psycopg2
 
 from django.conf import settings
 
+from ddpui.core.trial.exceptions import TrialCloneError
+from ddpui.schemas.trial_schema import TrialDbParams
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.warehouse_provision")
@@ -53,10 +55,10 @@ def _create_database_from_template(cursor, ft_db: str, template_db: str) -> None
                 f"{_TEMPLATE_COPY_MAX_ATTEMPTS}; retrying"
             )
             time.sleep(_TEMPLATE_COPY_RETRY_SLEEP_SECONDS)
-    raise RuntimeError(
+    raise TrialCloneError(
         f"could not copy template db {template_db} after {_TEMPLATE_COPY_MAX_ATTEMPTS} attempts: "
         f"{last_err}"
-    )
+    ) from last_err
 
 
 def email_hash8(email: str) -> str:
@@ -140,7 +142,7 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
         logger.info(f"reassigned template objects owned by {owner} to {ft_role}")
 
 
-def provision_trial_database(email: str, template_db: str) -> dict:
+def provision_trial_database(email: str, template_db: str) -> TrialDbParams:
     """Create a dedicated Postgres database + owner role on the trials-RDS instance for a
     trial, keyed by the trial email (not the trialclone id) so repeated trials from the same
     email land on the same, deterministically-named db/role.
@@ -200,13 +202,13 @@ def provision_trial_database(email: str, template_db: str) -> dict:
     logger.info(
         f"provisioned trial database {ft_db} (role {ft_role}) on {settings.TRIALS_RDS_HOST}"
     )
-    return {
-        "host": settings.TRIALS_RDS_HOST,
-        "port": settings.TRIALS_RDS_PORT,
-        "database": ft_db,
-        "username": ft_role,
-        "password": password,
-    }
+    return TrialDbParams(
+        host=settings.TRIALS_RDS_HOST,
+        port=settings.TRIALS_RDS_PORT,
+        database=ft_db,
+        username=ft_role,
+        password=password,
+    )
 
 
 def drop_trial_database(email: str) -> None:

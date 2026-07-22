@@ -26,8 +26,12 @@ from ddpui.api.trial_api import (
     trial_activate,
     trial_retry,
     trial_status,
-    TrialSignupSchema,
+)
+from ddpui.schemas.trial_schema import (
+    ActivationTokenData,
     TrialActivateSchema,
+    TrialCloneParams,
+    TrialSignupSchema,
 )
 
 pytestmark = pytest.mark.django_db
@@ -52,7 +56,9 @@ class TestTrialSignup:
         result = trial_signup(None, payload)
 
         assert result == {"status": "verification_sent"}
-        mock_create_token.assert_called_once_with("a@b.org", "Acme", "account-manager")
+        mock_create_token.assert_called_once_with(
+            ActivationTokenData(email="a@b.org", org_name="Acme", role="account-manager")
+        )
         mock_send_email.assert_called_once()
         args, _ = mock_send_email.call_args
         assert args[0] == "a@b.org"
@@ -126,11 +132,11 @@ class TestTrialActivate:
         mock_clone_task,
         seed_template_org,
     ):
-        mock_consume.return_value = {
-            "email": "new@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-        }
+        mock_consume.return_value = ActivationTokenData(
+            email="new@b.org",
+            org_name="Acme",
+            role="account-manager",
+        )
         mock_exists.return_value = False
         mock_lock.return_value = True
         mock_redis = _mock_redis(mock_redis_cls)
@@ -146,7 +152,13 @@ class TestTrialActivate:
         mock_lock.assert_called_once_with("new@b.org")
         # clone params stashed so POST /trial/retry can re-enqueue without the consumed token
         mock_store.assert_called_once_with(
-            result["task_id"], "new@b.org", "Acme", "account-manager", seed_template_org.id
+            result["task_id"],
+            TrialCloneParams(
+                email="new@b.org",
+                org_name="Acme",
+                role="account-manager",
+                template_org_id=seed_template_org.id,
+            ),
         )
         # start time recorded so the progress screen's elapsed clock survives a refresh
         start_calls = [
@@ -178,11 +190,11 @@ class TestTrialActivate:
         self, mock_consume, mock_exists, mock_clone_task
     ):
         """I1: activate must re-check account-exists before touching the User."""
-        mock_consume.return_value = {
-            "email": "existing@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-        }
+        mock_consume.return_value = ActivationTokenData(
+            email="existing@b.org",
+            org_name="Acme",
+            role="account-manager",
+        )
         mock_exists.return_value = True
 
         payload = TrialActivateSchema(token="tok123", password=STRONG_PASSWORD)
@@ -201,11 +213,11 @@ class TestTrialActivate:
         self, mock_consume, mock_exists, mock_lock, mock_clone_task
     ):
         """I2: a second concurrent activate for the same email must be rejected (409)."""
-        mock_consume.return_value = {
-            "email": "dup@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-        }
+        mock_consume.return_value = ActivationTokenData(
+            email="dup@b.org",
+            org_name="Acme",
+            role="account-manager",
+        )
         mock_exists.return_value = False
         mock_lock.return_value = False
 
@@ -226,11 +238,11 @@ class TestTrialActivate:
         self, mock_consume, mock_exists, mock_redis_cls, mock_lock, mock_clone_task
     ):
         """I3: an empty/short password must be rejected before the user is created."""
-        mock_consume.return_value = {
-            "email": "weak@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-        }
+        mock_consume.return_value = ActivationTokenData(
+            email="weak@b.org",
+            org_name="Acme",
+            role="account-manager",
+        )
         mock_exists.return_value = False
         mock_lock.return_value = True
         _mock_redis(mock_redis_cls)
@@ -251,11 +263,11 @@ class TestTrialActivate:
     def test_empty_password_returns_400_and_no_user_created(
         self, mock_consume, mock_exists, mock_redis_cls, mock_lock, mock_clone_task
     ):
-        mock_consume.return_value = {
-            "email": "empty@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-        }
+        mock_consume.return_value = ActivationTokenData(
+            email="empty@b.org",
+            org_name="Acme",
+            role="account-manager",
+        )
         mock_exists.return_value = False
         mock_lock.return_value = True
         _mock_redis(mock_redis_cls)
@@ -280,12 +292,12 @@ class TestTrialRetry:
         self, mock_fetch, mock_exists, mock_lock, mock_redis_cls, mock_clone_task, mock_progress_cls
     ):
         """Happy path: stored params re-drive the clone under the SAME task_id, no user input."""
-        mock_fetch.return_value = {
-            "email": "r@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-            "template_org_id": 42,
-        }
+        mock_fetch.return_value = TrialCloneParams(
+            email="r@b.org",
+            org_name="Acme",
+            role="account-manager",
+            template_org_id=42,
+        )
         mock_exists.return_value = False
         mock_lock.return_value = True
         mock_redis = _mock_redis(mock_redis_cls)
@@ -332,12 +344,12 @@ class TestTrialRetry:
         self, mock_fetch, mock_exists, mock_lock, mock_clone_task
     ):
         """A completed clone (or a real signup since) is an account now → don't re-provision."""
-        mock_fetch.return_value = {
-            "email": "done@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-            "template_org_id": 42,
-        }
+        mock_fetch.return_value = TrialCloneParams(
+            email="done@b.org",
+            org_name="Acme",
+            role="account-manager",
+            template_org_id=42,
+        )
         mock_exists.return_value = True
 
         with pytest.raises(HttpError) as exc:
@@ -356,12 +368,12 @@ class TestTrialRetry:
     ):
         """Guards the timeout/double-click path: lock held → the first clone is still running,
         so refuse to start a second one for the same email."""
-        mock_fetch.return_value = {
-            "email": "busy@b.org",
-            "org_name": "Acme",
-            "role": "account-manager",
-            "template_org_id": 42,
-        }
+        mock_fetch.return_value = TrialCloneParams(
+            email="busy@b.org",
+            org_name="Acme",
+            role="account-manager",
+            template_org_id=42,
+        )
         mock_exists.return_value = False
         mock_lock.return_value = False
 

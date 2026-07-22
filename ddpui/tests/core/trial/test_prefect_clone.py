@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from ddpui.core.trial import prefect_clone
+from ddpui.core.trial.exceptions import TrialCloneError
 from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, Task, TaskType
 
@@ -57,7 +58,11 @@ def _make_template_dataflow_with_tasks(template: Org):
     return dataflow, sync_orgtask, dbt_orgtask
 
 
-def test_build_pipeline_payload_remaps_connection_and_resolves_transform_task():
+@patch("ddpui.core.trial.prefect_clone.prefect_service")
+def test_build_pipeline_payload_remaps_connection_and_resolves_transform_task(
+    mock_prefect_service,
+):
+    mock_prefect_service.get_deployment.return_value = {"parameters": {}}
     template, trial_org = _make_orgs()
     template.dbt = _make_orgdbt("tmpl-pf")
     template.save()
@@ -107,15 +112,55 @@ def test_resolve_transform_orgtask_copies_template_parameters_onto_existing():
     assert existing.parameters == {"flags": ["--select", "foo"]}
 
 
+def test_resolve_transform_orgtask_keeps_parameterized_variants_distinct():
+    """Production supports multiple OrgTask rows per task slug with different `parameters`
+    (e.g. a dbt-run per pipeline with different --select). Resolving must NOT collapse them
+    onto one trial row (last-processed template task would clobber the earlier pipeline's
+    params) — each distinct template `parameters` maps to its own trial OrgTask."""
+    template, trial_org = _make_orgs()
+    template.dbt = _make_orgdbt("tmpl-pf")
+    template.save()
+    dbt_task = Task.objects.create(
+        type=TaskType.DBT, slug="dbt-run", label="DBT run", command="run"
+    )
+    template_a = OrgTask.objects.create(
+        org=template, task=dbt_task, dbt=template.dbt, parameters={"flags": ["--select", "a"]}
+    )
+    template_b = OrgTask.objects.create(
+        org=template, task=dbt_task, dbt=template.dbt, parameters={"flags": ["--select", "b"]}
+    )
+    # Step 6 pre-seeded one param-less row
+    OrgTask.objects.create(org=trial_org, task=dbt_task, dbt=trial_org.dbt, parameters={})
+
+    resolved_a = prefect_clone._resolve_trial_transform_orgtask(template_a, trial_org)
+    resolved_b = prefect_clone._resolve_trial_transform_orgtask(template_b, trial_org)
+
+    assert resolved_a.id != resolved_b.id
+    resolved_a.refresh_from_db()
+    resolved_b.refresh_from_db()
+    assert resolved_a.parameters == {"flags": ["--select", "a"]}
+    assert resolved_b.parameters == {"flags": ["--select", "b"]}
+    assert OrgTask.objects.filter(org=trial_org, task=dbt_task).count() == 2
+
+    # resolving again is idempotent — no third row
+    again_a = prefect_clone._resolve_trial_transform_orgtask(template_a, trial_org)
+    assert again_a.id == resolved_a.id
+    assert OrgTask.objects.filter(org=trial_org, task=dbt_task).count() == 2
+
+
 def test_build_pipeline_payload_raises_when_connection_not_remapped():
     template, trial_org = _make_orgs()
     dataflow, sync_orgtask, dbt_orgtask = _make_template_dataflow_with_tasks(template)
 
-    with pytest.raises(RuntimeError, match="no remapped trial connection"):
+    # TrialCloneError subclasses RuntimeError, so callers catching RuntimeError still work —
+    # but the feature's own exception type is what the module raises.
+    with pytest.raises(TrialCloneError, match="no remapped trial connection"):
         prefect_clone.build_pipeline_payload(dataflow, trial_org, connection_map={})
 
 
-def test_build_pipeline_payload_skips_auto_managed_dbt_tasks():
+@patch("ddpui.core.trial.prefect_clone.prefect_service")
+def test_build_pipeline_payload_skips_auto_managed_dbt_tasks(mock_prefect_service):
+    mock_prefect_service.get_deployment.return_value = {"parameters": {}}
     template, trial_org = _make_orgs()
     template.dbt = _make_orgdbt("tmpl-pf2")
     template.save()
@@ -141,10 +186,51 @@ def test_build_pipeline_payload_skips_auto_managed_dbt_tasks():
     assert not OrgTask.objects.filter(org=trial_org, task__slug="dbt-clean").exists()
 
 
+@patch("ddpui.core.trial.prefect_clone.prefect_service")
+def test_build_pipeline_payload_carries_template_continue_on_sync_failure(mock_prefect_service):
+    """The template's continueOnSyncFailure lives in its Prefect deployment parameters (same
+    place get_pipeline_details reads it) — the cloned pipeline must inherit it, not a hardcoded
+    False."""
+    template, trial_org = _make_orgs()
+    template.dbt = _make_orgdbt("tmpl-pf")
+    template.save()
+    dataflow, _, _ = _make_template_dataflow_with_tasks(template)
+    mock_prefect_service.get_deployment.return_value = {
+        "parameters": {"config": {"continue_on_sync_failure": True}}
+    }
+
+    payload = prefect_clone.build_pipeline_payload(
+        dataflow, trial_org, connection_map={"tmpl-conn-1": "trial-conn-1"}
+    )
+
+    mock_prefect_service.get_deployment.assert_called_once_with("tmpl-dep-1")
+    assert payload.continueOnSyncFailure is True
+
+
+@patch("ddpui.core.trial.prefect_clone.prefect_service")
+def test_build_pipeline_payload_defaults_continue_on_sync_failure_false(mock_prefect_service):
+    """Deployment parameters without the config key default to False — same default as
+    get_pipeline_details."""
+    template, trial_org = _make_orgs()
+    template.dbt = _make_orgdbt("tmpl-pf")
+    template.save()
+    dataflow, _, _ = _make_template_dataflow_with_tasks(template)
+    mock_prefect_service.get_deployment.return_value = {"parameters": {}}
+
+    payload = prefect_clone.build_pipeline_payload(
+        dataflow, trial_org, connection_map={"tmpl-conn-1": "trial-conn-1"}
+    )
+
+    assert payload.continueOnSyncFailure is False
+
+
+@patch("ddpui.core.trial.prefect_clone.prefect_service")
 @patch("ddpui.core.trial.prefect_clone.PipelineService")
 def test_clone_orchestrate_dataflows_calls_create_pipeline_per_template_dataflow(
     mock_pipeline_service,
+    mock_prefect_service,
 ):
+    mock_prefect_service.get_deployment.return_value = {"parameters": {}}
     template, trial_org = _make_orgs()
     template.dbt = _make_orgdbt("tmpl-pf3")
     template.save()

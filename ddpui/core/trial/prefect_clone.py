@@ -34,6 +34,8 @@ auto-managed ones.
 """
 
 from ddpui.core.orchestrate.pipeline_service import PipelineService
+from ddpui.core.trial.exceptions import TrialCloneError
+from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema4,
     PrefectDataFlowOrgTasks,
@@ -53,41 +55,54 @@ _AUTO_MANAGED_TRANSFORM_SLUGS = {TASK_DBTCLEAN, TASK_DBTDEPS}
 
 def _resolve_trial_transform_orgtask(template_orgtask: OrgTask, trial_org: Org) -> OrgTask:
     """Resolve the trial org's equivalent transform OrgTask for a template transform OrgTask,
-    matched by `task` (i.e. task slug/type — `Task` rows are shared system-wide, not per-org,
-    so the FK itself is the match key).
+    matched by `task` (shared system-wide `Task` FK) AND `parameters` — production supports
+    multiple OrgTask rows per slug with different parameters (e.g. one dbt-run per pipeline
+    with different --select), so matching on the FK alone would collapse them onto one trial
+    row and the last-processed template task would clobber the earlier pipeline's flags.
 
-    In practice Step 6 (`create_default_transform_tasks`) has already minted this OrgTask
-    param-less before Step 7 runs, so this get-or-creates and — when the row already exists —
-    syncs the template's `parameters` onto it so the cloned deployment keeps the template's
-    dbt-run flags. The create branch remains as a safety net if step ordering ever changes.
+    Resolution order:
+    1. exact match on (task, parameters) — idempotent re-resolve;
+    2. adopt a param-less row (Step 6 `create_default_transform_tasks` mints one before this
+       step runs) by copying the template's parameters onto it — keeps the Transform page from
+       showing a stray param-less task alongside the parameterized one;
+    3. mint a fresh row (second/third parameter variant, or step ordering changed).
     """
     trial_dbt = trial_org.dbt
     if trial_dbt is None:
-        raise RuntimeError(
+        raise TrialCloneError(
             f"trial org {trial_org.slug} has no dbt workspace to attach transform tasks to"
         )
-    org_task, created = OrgTask.objects.get_or_create(
+    slug = template_orgtask.task.slug
+    template_params = template_orgtask.parameters
+
+    org_task = OrgTask.objects.filter(
+        org=trial_org, task=template_orgtask.task, dbt=trial_dbt, parameters=template_params
+    ).first()
+    if org_task is not None:
+        return org_task
+
+    if template_params:
+        org_task = OrgTask.objects.filter(
+            org=trial_org, task=template_orgtask.task, dbt=trial_dbt, parameters={}
+        ).first()
+        if org_task is not None:
+            org_task.parameters = template_params
+            org_task.save(update_fields=["parameters"])
+            logger.info(
+                f"copied template parameters onto existing trial OrgTask {org_task.uuid} "
+                f"(slug={slug}) for org {trial_org.slug}"
+            )
+            return org_task
+
+    org_task = OrgTask.objects.create(
         org=trial_org,
         task=template_orgtask.task,
         dbt=trial_dbt,
-        defaults={"parameters": template_orgtask.parameters},
+        parameters=template_params,
     )
-    if created:
-        logger.info(
-            f"minted trial transform OrgTask {org_task.uuid} (slug={template_orgtask.task.slug}) "
-            f"for org {trial_org.slug}"
-        )
-    elif org_task.parameters != template_orgtask.parameters:
-        # Step 6 (create_default_transform_tasks) already minted this OrgTask param-less, so
-        # get_or_create found the existing row and its `defaults` never applied. Copy the
-        # template's parameters (e.g. --select / --full-refresh) onto it explicitly, otherwise
-        # the cloned deployment silently runs the param-less task.
-        org_task.parameters = template_orgtask.parameters
-        org_task.save(update_fields=["parameters"])
-        logger.info(
-            f"copied template parameters onto existing trial OrgTask {org_task.uuid} "
-            f"(slug={template_orgtask.task.slug}) for org {trial_org.slug}"
-        )
+    logger.info(
+        f"minted trial transform OrgTask {org_task.uuid} (slug={slug}) " f"for org {trial_org.slug}"
+    )
     return org_task
 
 
@@ -114,7 +129,7 @@ def build_pipeline_payload(
         if template_orgtask.connection_id:
             trial_connection_id = connection_map.get(template_orgtask.connection_id)
             if not trial_connection_id:
-                raise RuntimeError(
+                raise TrialCloneError(
                     f"no remapped trial connection for template connection "
                     f"{template_orgtask.connection_id} (dataflow {template_dataflow.name})"
                 )
@@ -132,12 +147,22 @@ def build_pipeline_payload(
         # git-pull/git-clone and dbt-clean/dbt-deps template links are auto-managed —
         # PipelineService re-adds its own copies of these; skip them here.
 
+    # continueOnSyncFailure lives in the template's Prefect deployment parameters, not on
+    # OrgDataFlowv1 — read it the same way PipelineService.get_pipeline_details does
+    # (parameters.config.continue_on_sync_failure, default False).
+    template_deployment = prefect_service.get_deployment(template_dataflow.deployment_id)
+    continue_on_sync_failure = (
+        template_deployment.get("parameters", {})
+        .get("config", {})
+        .get("continue_on_sync_failure", False)
+    )
+
     return PrefectDataFlowCreateSchema4(
         name=template_dataflow.name,
         connections=connections,
         cron=template_dataflow.cron or "",
         transformTasks=transform_tasks,
-        continueOnSyncFailure=False,
+        continueOnSyncFailure=continue_on_sync_failure,
     )
 
 

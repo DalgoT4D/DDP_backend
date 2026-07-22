@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from ninja import Router, Schema
+from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.core.trial.activation import (
@@ -22,6 +22,12 @@ from ddpui.core.trial.clone_service import account_exists_for_email
 from ddpui.core.trial.tasks import clone_trial_org_task
 from ddpui.models.org import Org
 from ddpui.models.org_user import UserAttributes
+from ddpui.schemas.trial_schema import (
+    ActivationTokenData,
+    TrialActivateSchema,
+    TrialCloneParams,
+    TrialSignupSchema,
+)
 from ddpui.utils.awsses import send_trial_verification_email
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.taskprogress import TaskProgress
@@ -33,21 +39,6 @@ trial_router = Router()
 # comfortably outlives the ~90s clone so a slow/queued run still reports a correct elapsed.
 TRIAL_START_KEY = "trial-clone-start:{task_id}"
 TRIAL_START_TTL_SECONDS = 86400  # 1 day
-
-
-class TrialSignupSchema(Schema):
-    """payload for POST /trial/signup"""
-
-    email: str
-    org_name: str
-    role: str
-
-
-class TrialActivateSchema(Schema):
-    """payload for POST /trial/activate"""
-
-    token: str
-    password: str
 
 
 @trial_router.post("/signup")
@@ -66,7 +57,9 @@ def trial_signup(request, payload: TrialSignupSchema):  # pylint: disable=unused
     if not settings.FRONTEND_URL_V2:
         raise HttpError(500, "frontend url not configured")
 
-    token = create_activation_token(payload.email, payload.org_name, payload.role)
+    token = create_activation_token(
+        ActivationTokenData(email=payload.email, org_name=payload.org_name, role=payload.role)
+    )
     verify_url = f"{settings.FRONTEND_URL_V2}/free-trial/activate?token={token}"
     send_trial_verification_email(payload.email, verify_url)
 
@@ -80,7 +73,7 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     if data is None:
         raise HttpError(400, "invalid or expired link")
 
-    email = data["email"]
+    email = data.email
 
     # I1: re-check for a real account AFTER the token is consumed — the token may be old
     # (up to 24h TTL) and the email may have since become a real account (e.g. the user
@@ -121,8 +114,13 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     redis.set(TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS)
     # stash the params so POST /trial/retry/{task_id} can re-enqueue after a failure without the
     # (now-consumed) activation token — no re-signup / re-verify / re-password on "Try again".
-    store_clone_params(task_id, email, data["org_name"], data["role"], template.id)
-    clone_trial_org_task.delay(task_id, template.id, email, data["org_name"], data["role"])
+    store_clone_params(
+        task_id,
+        TrialCloneParams(
+            email=email, org_name=data.org_name, role=data.role, template_org_id=template.id
+        ),
+    )
+    clone_trial_org_task.delay(task_id, template.id, email, data.org_name, data.role)
 
     # email is echoed back so the progress screen can auto-login (POST /login) once the clone
     # completes — the frontend never learns it any other way from this token-opened page.
@@ -144,7 +142,7 @@ def trial_retry(request, task_id: str):  # pylint: disable=unused-argument
         # params gone (expired, or never a real task_id) — nothing to retry.
         raise HttpError(400, "no trial setup found to retry")
 
-    email = data["email"]
+    email = data.email
 
     # a completed clone (or a normal signup in the meantime) is a real account now — don't
     # re-provision over it; send the user to log in. Keys on OrgUser, so a failed trial (User
@@ -166,9 +164,7 @@ def trial_retry(request, task_id: str):  # pylint: disable=unused-argument
     # enqueue→pickup gap and the progress screen flashes "all steps done" before resetting.
     progress = TaskProgress(task_id, f"trial-clone-{task_id}", 24 * 3600)
     progress.add({"message": "queued", "status": "queued"})
-    clone_trial_org_task.delay(
-        task_id, data["template_org_id"], email, data["org_name"], data["role"]
-    )
+    clone_trial_org_task.delay(task_id, data.template_org_id, email, data.org_name, data.role)
 
     return {"task_id": task_id, "email": email}
 

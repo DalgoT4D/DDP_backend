@@ -28,6 +28,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.visualization import Chart
+from ddpui.services.dashboard_service import DashboardService
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.viz_clone")
@@ -215,10 +216,20 @@ def _clone_dashboards(
 
 def _clone_dashboard_filters(template_org: Org, dash_map: dict) -> int:
     """Copy every DashboardFilter belonging to a template Dashboard, remapping `.dashboard` via
-    `dash_map`. Returns the number of filters copied."""
+    `dash_map`, then rewrite each cloned dashboard's `tabs` so filter references
+    (`filter-<id>` component keys, `layout_config[].i`, `config.filterId`) point at the NEW
+    filter ids — via the same `DashboardService.copy_tabs_with_filter_remapping` the
+    duplicate-dashboard flow uses. Without the rewrite the cloned tabs keep the TEMPLATE org's
+    filter ids and every dashboard filter is broken on the trial.
+
+    The rewritten tabs are written with a queryset `.update()` (not `.save()`) so the
+    template timestamps applied by `_preserve_ordering_timestamps` survive (save() would
+    re-stamp auto_now). Returns the number of filters copied."""
     count = 0
+    # old dashboard id -> {old filter id (str) -> new filter id (str)}
+    filter_maps: dict = {}
     for f in DashboardFilter.objects.filter(dashboard__org=template_org):
-        DashboardFilter.objects.create(
+        new_f = DashboardFilter.objects.create(
             dashboard=dash_map[f.dashboard_id],
             name=f.name,
             filter_type=f.filter_type,
@@ -228,7 +239,16 @@ def _clone_dashboard_filters(template_org: Org, dash_map: dict) -> int:
             settings=f.settings,
             order=f.order,
         )
+        filter_maps.setdefault(f.dashboard_id, {})[str(f.id)] = str(new_f.id)
         count += 1
+
+    for old_dash_id, filter_id_mapping in filter_maps.items():
+        new_d = dash_map[old_dash_id]
+        new_tabs = DashboardService.copy_tabs_with_filter_remapping(
+            new_d.tabs or [], filter_id_mapping
+        )
+        Dashboard.objects.filter(pk=new_d.pk).update(tabs=new_tabs)
+        new_d.tabs = new_tabs  # keep the in-memory instance consistent
     return count
 
 

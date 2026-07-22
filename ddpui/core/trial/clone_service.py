@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 
 from ddpui.models.org import Org, OrgWarehouse, OrgFeatureFlag
-from ddpui.core.trial.exceptions import TrialAccountExistsError
+from ddpui.core.trial.exceptions import TrialAccountExistsError, TrialCloneError
 from ddpui.core.trial.timing import step_timer
 from ddpui.core.trial.warehouse_provision import (
     provision_trial_database,
@@ -15,6 +15,7 @@ from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
+from ddpui.schemas.trial_schema import TrialCloneRequest
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.userpreferences import UserPreferences
@@ -37,6 +38,7 @@ from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.core.orgtaskfunctions import create_default_transform_tasks
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
+from ddpui.utils import feature_flags
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
@@ -105,7 +107,7 @@ def _step_org_and_user(run: CloneRun) -> None:
     )
     trial_org, err = create_organization(org_payload)
     if err:
-        raise RuntimeError(f"create_organization failed: {err}")
+        raise TrialCloneError(f"create_organization failed: {err}")
 
     # record the teardown marker immediately — the Org + Airbyte workspace already exist at
     # this point, so any failure below must still trigger OrgCleanupService on the way out.
@@ -113,7 +115,7 @@ def _step_org_and_user(run: CloneRun) -> None:
 
     _, plan_err = create_org_plan(org_payload, trial_org)
     if plan_err:
-        raise RuntimeError(f"create_org_plan failed: {plan_err}")
+        raise TrialCloneError(f"create_org_plan failed: {plan_err}")
 
     # admin user — password is set later via the activation flow (Try Now), so unusable now.
     # NB: a brand-new Django User has password == "" which has_usable_password() treats as
@@ -130,7 +132,7 @@ def _step_org_and_user(run: CloneRun) -> None:
     role_slug = run.role_slug or ACCOUNT_MANAGER_ROLE
     admin_role = Role.objects.filter(slug=role_slug).first()
     if admin_role is None:
-        raise RuntimeError(f"role {role_slug} not found (load role fixtures)")
+        raise TrialCloneError(f"role {role_slug} not found (load role fixtures)")
 
     orguser = OrgUser.objects.create(
         user=user, org=trial_org, new_role=admin_role, email_verified=False
@@ -143,14 +145,19 @@ def _step_org_and_user(run: CloneRun) -> None:
 
     # Copy the template's feature flags so the trial unlocks the SAME features. Critically,
     # REPORTS gates the Reports nav in the frontend (main-layout hides it when the flag is off) —
-    # without this the cloned report snapshots would exist but be invisible. get_or_create keeps
-    # it idempotent on a retry.
+    # without this the cloned report snapshots would exist but be invisible. The feature_flags
+    # helpers validate against the FEATURE_FLAGS allowlist (a stale/unknown flag_name on the
+    # template returns None and is skipped) and are idempotent on a retry.
     flags_copied = 0
     for ff in OrgFeatureFlag.objects.filter(org=template):
-        OrgFeatureFlag.objects.get_or_create(
-            org=trial_org, flag_name=ff.flag_name, defaults={"flag_value": ff.flag_value}
-        )
-        flags_copied += 1
+        if ff.flag_value:
+            copied = feature_flags.enable_feature_flag(ff.flag_name, trial_org)
+        else:
+            copied = feature_flags.disable_feature_flag(ff.flag_name, trial_org)
+        if copied:
+            flags_copied += 1
+        else:
+            logger.warning(f"template flag {ff.flag_name} not in FEATURE_FLAGS allowlist; skipped")
     run.manifest["feature_flags_copied"] = flags_copied
 
     run.manifest["trial_org_slug"] = trial_org.slug
@@ -164,9 +171,9 @@ def _step_warehouse(run: CloneRun) -> None:
     template = run.template
     template_wh = OrgWarehouse.objects.filter(org=template).first()
     if template_wh is None:
-        raise RuntimeError("template org has no warehouse")
+        raise TrialCloneError("template org has no warehouse")
     if template_wh.wtype != "postgres":
-        raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
+        raise TrialCloneError(f"v1 supports postgres only; template is {template_wh.wtype}")
 
     # carry the template's non-connection config forward (schema/ssl), overriding host/db creds
     # below. The template warehouse MUST live on the trials-RDS instance itself — the data copy
@@ -174,7 +181,7 @@ def _step_warehouse(run: CloneRun) -> None:
     # blocking sessions first); there is no cross-host dump/restore path.
     template_creds = retrieve_warehouse_credentials(template_wh) or {}
     if template_creds.get("host") != settings.TRIALS_RDS_HOST:
-        raise RuntimeError(
+        raise TrialCloneError(
             f"template warehouse host {template_creds.get('host')!r} is not the trials-RDS "
             f"instance {settings.TRIALS_RDS_HOST!r}; the template org's warehouse must live "
             "on the trials RDS for the server-side CREATE DATABASE ... TEMPLATE copy"
@@ -185,8 +192,8 @@ def _step_warehouse(run: CloneRun) -> None:
 
     # record the teardown marker immediately — the RDS database already exists at this point,
     # so any failure below must still trigger drop_trial_database on the way out.
-    run.manifest["trial_warehouse_db"] = trial_db_params["database"]
-    run.manifest["trial_warehouse_role"] = trial_db_params["username"]
+    run.manifest["trial_warehouse_db"] = trial_db_params.database
+    run.manifest["trial_warehouse_role"] = trial_db_params.username
 
     # reuse the template destination's definition id (not stored on OrgWarehouse)
     template_dest = airbyte_service.get_destination(
@@ -197,11 +204,11 @@ def _step_warehouse(run: CloneRun) -> None:
     airbyte_config = dict(template_creds)
     airbyte_config.update(
         {
-            "host": trial_db_params["host"],
-            "port": trial_db_params["port"],
-            "database": trial_db_params["database"],
-            "username": trial_db_params["username"],
-            "password": trial_db_params["password"],
+            "host": trial_db_params.host,
+            "port": trial_db_params.port,
+            "database": trial_db_params.database,
+            "username": trial_db_params.username,
+            "password": trial_db_params.password,
         }
     )
     # the template's SSH-tunnel config points at the template's own bastion — the trial
@@ -225,7 +232,7 @@ def _step_warehouse(run: CloneRun) -> None:
     )
     _, err = create_warehouse(run.trial_org, wh_payload)
     if err:
-        raise RuntimeError(f"create_warehouse failed: {err}")
+        raise TrialCloneError(f"create_warehouse failed: {err}")
 
     run.manifest["trial_destination_defid"] = dest_def_id
 
@@ -241,7 +248,7 @@ def _step_sources(run: CloneRun) -> None:
     names = [s["name"] for s in template_sources]
     missing = validate_template_source_configs(names)
     if missing:
-        raise RuntimeError(f"missing source config for template sources: {missing}")
+        raise TrialCloneError(f"missing source config for template sources: {missing}")
 
     source_map: dict = {}
     for src in template_sources:
@@ -316,7 +323,7 @@ def _step_connections(run: CloneRun) -> None:
         old_source_id = conn["source"]["sourceId"]
         new_source_id = source_map.get(old_source_id)
         if not new_source_id:
-            raise RuntimeError(f"no remapped source for template source {old_source_id}")
+            raise TrialCloneError(f"no remapped source for template source {old_source_id}")
         discovered = airbyte_service.get_source_schema_catalog(trial_ws, new_source_id)
         selected = _selected_stream_names(conn)
         payload = AirbyteConnectionCreate(
@@ -329,7 +336,7 @@ def _step_connections(run: CloneRun) -> None:
         )
         res, err = ab_create_connection(run.trial_org, payload)
         if err:
-            raise RuntimeError(f"create_connection failed for {conn['name']}: {err}")
+            raise TrialCloneError(f"create_connection failed for {conn['name']}: {err}")
         connection_map[conn["connectionId"]] = res["connectionId"]
     run.manifest["connection_map"] = connection_map
     run.manifest["connection_ids"] = list(connection_map.values())
@@ -364,7 +371,7 @@ def _step_dbt(run: CloneRun) -> None:
     """
     template_dbt = run.template.dbt
     if template_dbt is None:
-        raise RuntimeError(f"template org {run.template.slug} has no dbt workspace")
+        raise TrialCloneError(f"template org {run.template.slug} has no dbt workspace")
 
     # project_name must be a valid dbt project name (letters/digits/underscore — NO hyphens,
     # which the trial slug has). The normal Dalgo flow (transform_api.py) uses the literal
@@ -383,7 +390,9 @@ def _step_dbt(run: CloneRun) -> None:
         run.trial_org.refresh_from_db()
         trial_dbt = run.trial_org.dbt
     if trial_dbt is None:
-        raise RuntimeError("setup_managed_git_workspace did not set the trial org's dbt workspace")
+        raise TrialCloneError(
+            "setup_managed_git_workspace did not set the trial org's dbt workspace"
+        )
 
     is_file_based = not OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt).exists()
 
@@ -409,11 +418,11 @@ def _step_dbt(run: CloneRun) -> None:
     run.trial_org.refresh_from_db()
     trial_dbt = run.trial_org.dbt
     if trial_dbt is None:
-        raise RuntimeError(
+        raise TrialCloneError(
             "trial org lost its dbt workspace before transform tasks could be created"
         )
     if trial_dbt.cli_profile_block is None:
-        raise RuntimeError(
+        raise TrialCloneError(
             "trial org's dbt workspace has no cli_profile_block; "
             "setup_managed_git_workspace should have set it"
         )
@@ -505,13 +514,7 @@ def _teardown(run: CloneRun) -> None:
     # /trial/retry) can re-clone without re-asking email, verification, or password.
 
 
-def clone_template_org(
-    template_org_id: int,
-    trial_email: str,
-    org_name: str | None = None,
-    role_slug: str | None = None,
-    progress=None,
-) -> CloneRun:
+def clone_template_org(payload: TrialCloneRequest, progress=None) -> CloneRun:
     """Deep-clone a template org into a new trial org (Steps 1–7), timing each step.
 
     Serial chain: org+user → warehouse (incl. server-side data copy) → sources → connections →
@@ -519,21 +522,24 @@ def clone_template_org(
     nothing is persisted for it. On any failure the exception is re-raised (after best-effort
     teardown) so the caller (management command / Celery task) sees it.
 
-    `org_name`/`role_slug` are optional overrides applied in Step 1 (see `_step_org_and_user`).
-    `progress`, if given, is called as `progress(step_number, label)` right before each of the
-    7 steps runs (labels from `STEP_LABELS`) — e.g. to stream progress to a client. Optional;
-    when None, behavior is unchanged from before this parameter existed.
+    `payload.org_name`/`payload.role_slug` are optional overrides applied in Step 1 (see
+    `_step_org_and_user`). `progress`, if given, is called as `progress(step_number, label)`
+    right before each of the 7 steps runs (labels from `STEP_LABELS`) — e.g. to stream progress
+    to a client. Optional; when None, behavior is unchanged from before this parameter existed.
     """
-    if account_exists_for_email(trial_email):
+    if account_exists_for_email(payload.trial_email):
         raise TrialAccountExistsError(
-            f"an account already exists for {trial_email}; direct the user to log in"
+            f"an account already exists for {payload.trial_email}; direct the user to log in"
         )
 
-    template = Org.objects.get(id=template_org_id)
+    template = Org.objects.get(id=payload.template_org_id)
     run = CloneRun(
-        template=template, trial_email=trial_email, org_name=org_name, role_slug=role_slug
+        template=template,
+        trial_email=payload.trial_email,
+        org_name=payload.org_name,
+        role_slug=payload.role_slug,
     )
-    logger.info(f"starting clone from template {template.slug} for {trial_email}")
+    logger.info(f"starting clone from template {template.slug} for {payload.trial_email}")
 
     def _do(step_number, timing_key, step_fn):
         if progress:
