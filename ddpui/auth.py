@@ -111,8 +111,12 @@ def blacklist_jti_in_redis(token_str, token_class):
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
+    # the cookie this middleware reads the access token from; subclasses (e.g. the admin
+    # portal) override it to read a separate, independent session cookie instead.
+    cookie_name = "access_token"
+
     def __call__(self, request):
-        cookie_token = request.COOKIES.get("access_token")
+        cookie_token = request.COOKIES.get(self.cookie_name)
 
         if not cookie_token:
             return super().__call__(request)
@@ -233,6 +237,29 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 return request
 
         raise HttpError(401, "Invalid or expired token")
+
+
+class AdminJwtAuthMiddleware(CustomJwtAuthMiddleware):
+    """
+    Auth for the admin portal — an independent session.
+
+    Reads a SEPARATE `admin_access_token` cookie and requires the token to carry the
+    custom claim `session="admin"`. Everything else (orguser loading, JTI blacklist,
+    498/401 handling) is inherited from CustomJwtAuthMiddleware, so
+    `@platform_admin_required` works unchanged. A normal `access_token` — even a valid
+    one — never satisfies this, because it lacks the claim.
+    """
+
+    cookie_name = "admin_access_token"
+
+    def authenticate(self, request, token=None):
+        if token is not None:
+            try:
+                if AccessToken(token).payload.get("session") != "admin":
+                    raise HttpError(401, "not an admin session")
+            except TokenError as err:
+                raise HttpError(401, "Invalid token") from err
+        return super().authenticate(request, token)
 
 
 class CustomTokenObtainSerializer(TokenObtainPairSerializer):
