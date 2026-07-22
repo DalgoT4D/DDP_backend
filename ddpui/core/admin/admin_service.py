@@ -12,8 +12,11 @@ layer builds the response and maps errors to status codes.
 
 from typing import List, Optional, Tuple
 
+from django.contrib.auth import authenticate
+
+from ddpui.auth import CustomTokenObtainSerializer
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser, Invitation
+from ddpui.models.org_user import OrgUser, Invitation, UserAttributes
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
@@ -23,6 +26,37 @@ from ddpui.core import orgfunctions
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.admin")
+
+
+# --------------------------------------------------------------------------- #
+# Independent admin session
+# --------------------------------------------------------------------------- #
+
+
+def issue_admin_session(username: str, password: str) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Verify credentials AND platform-admin privilege, then mint a distinct admin
+    token. Returns (token_data, None) on success, or (None, error) when the
+    credentials are wrong or the user is not a platform admin. The API layer sets
+    the cookies; this function knows nothing about HTTP.
+    """
+    user = authenticate(username=username, password=password)
+    if user is None:
+        return None, "invalid credentials"
+
+    user_attributes = UserAttributes.objects.filter(user=user).first()
+    if not (user_attributes and user_attributes.is_platform_admin):
+        return None, "not a platform admin"
+
+    # A distinct admin token: the session="admin" claim is what AdminJwtAuthMiddleware
+    # requires, so a normal login token (which lacks it) can never satisfy the admin API.
+    # Setting the claim on the refresh token before deriving the access token propagates
+    # it to both.
+    refresh = CustomTokenObtainSerializer.get_token(user)
+    refresh["session"] = "admin"
+    access = refresh.access_token
+
+    return {"access": str(access), "refresh": str(refresh)}, None
 
 
 # --------------------------------------------------------------------------- #
