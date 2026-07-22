@@ -1,8 +1,9 @@
 from django.db import models
-from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
 from django.utils import timezone
 
+from ddpui.models.org import Org
+from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import AccessLevel
 
 class OrgPreferences(models.Model):
     """Model to store org preferences for settings panel"""
@@ -19,6 +20,13 @@ class OrgPreferences(models.Model):
     )
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
+    default_analyst_level = models.CharField(
+        max_length=10, choices=AccessLevel.choices, default=AccessLevel.VIEW
+    )
+    default_member_level = models.CharField(
+        max_length=10, choices=AccessLevel.choices, default=AccessLevel.VIEW
+    )
+    allow_public_sharing = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
