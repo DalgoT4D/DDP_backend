@@ -14,10 +14,13 @@ django.setup()
 import pytest
 from unittest.mock import MagicMock, patch
 from sqlalchemy import text
-from ddpui.core.charts import charts_service
+from django.contrib.auth.models import User
+from ddpui.core.charts import charts_service, maps_service
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
-from ddpui.models.org import OrgWarehouse
+from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org_user import OrgUser
+from ddpui.models.metric import Metric
 
 pytestmark = pytest.mark.django_db
 
@@ -372,3 +375,128 @@ class TestQueryColumnOrdering:
 
         if key_index != -1 and count_index != -1:
             assert key_index < count_index, "Dimensions should appear before metrics in SELECT"
+
+
+@pytest.fixture
+def metric_org():
+    org = Org.objects.create(name="Metric Matrix Org", slug="metric-matrix-org")
+    yield org
+    org.delete()
+
+
+@pytest.fixture
+def metric_orguser(metric_org):
+    user = User.objects.create(username="metricmatrix", email="metricmatrix@test.com")
+    orguser = OrgUser.objects.create(user=user, org=metric_org)
+    yield orguser
+    orguser.delete()
+    user.delete()
+
+
+class TestMetricKindsPerChartType:
+    """Every chart type must accept all three metric kinds: simple (column+aggregation),
+    calculated (column_expression), and saved (Metric row resolved via saved_metric_id).
+
+    Regression guard: pie and number once used a legacy single-metric path that ignored
+    `column_expression`, raising 'Column is required for None aggregation'. bar/line/table/map
+    go through build_multi_metric_query. This matrix keeps the paths from drifting again.
+
+    Column names use "population"/"state_name"; the calculated expression is verbatim SQL.
+    """
+
+    CHART_TYPES = ["bar", "line", "pie", "number", "table", "map"]
+    METRIC_KINDS = ["simple", "calculated", "saved_simple", "saved_calculated"]
+
+    # SQL fragment each kind must produce in the compiled query (lowercased).
+    EXPECTED_SQL = {
+        "simple": "sum(population)",
+        "calculated": "sum(population) / count(*)",
+        "saved_simple": "sum(population)",
+        "saved_calculated": "sum(population) / count(*)",
+    }
+
+    @staticmethod
+    def _warehouse():
+        wh = MagicMock(spec=OrgWarehouse)
+        wh.wtype = "postgres"
+        return wh
+
+    @staticmethod
+    def _metrics(kind, org, orguser):
+        """Build the metrics list for a kind. Saved kinds create a Metric row and resolve
+        it through _resolve_saved_metrics, exactly like the chart-render path does."""
+        if kind == "simple":
+            return [ChartMetric(column="population", aggregation="sum", alias="Total Pop")]
+        if kind == "calculated":
+            return [
+                ChartMetric(
+                    column=None,
+                    aggregation=None,
+                    column_expression="sum(population) / count(*)",
+                    alias="Avg Pop",
+                )
+            ]
+        if kind == "saved_simple":
+            metric = Metric.objects.create(
+                name="saved simple",
+                schema_name="public",
+                table_name="district_population",
+                column="population",
+                aggregation="sum",
+                org=org,
+                created_by=orguser,
+            )
+            return charts_service._resolve_saved_metrics([{"saved_metric_id": metric.id}])
+        if kind == "saved_calculated":
+            metric = Metric.objects.create(
+                name="saved calculated",
+                schema_name="public",
+                table_name="district_population",
+                column_expression="sum(population) / count(*)",
+                org=org,
+                created_by=orguser,
+            )
+            return charts_service._resolve_saved_metrics([{"saved_metric_id": metric.id}])
+        raise ValueError(f"unknown metric kind {kind}")
+
+    def _build(self, chart_type, metrics, warehouse):
+        if chart_type == "map":
+            payload = ChartDataPayload(
+                chart_type="map",
+                schema_name="public",
+                table_name="district_population",
+                geographic_column="state_name",
+                value_column="population",
+                metrics=metrics,
+            )
+            return maps_service.build_map_query(payload, org_warehouse=warehouse)
+
+        kwargs = dict(
+            chart_type=chart_type,
+            schema_name="public",
+            table_name="district_population",
+            metrics=metrics,
+        )
+        if chart_type == "table":
+            kwargs["dimensions"] = ["state_name"]
+        elif chart_type != "number":  # number has no dimension
+            kwargs["dimension_col"] = "state_name"
+
+        return charts_service.build_chart_query(ChartDataPayload(**kwargs), warehouse)
+
+    @pytest.mark.parametrize("metric_kind", METRIC_KINDS)
+    @pytest.mark.parametrize("chart_type", CHART_TYPES)
+    def test_metric_kind_per_chart_type(self, chart_type, metric_kind, metric_org, metric_orguser):
+        metrics = self._metrics(metric_kind, metric_org, metric_orguser)
+
+        query_builder = self._build(chart_type, metrics, self._warehouse())
+        compiled = str(
+            query_builder.build().compile(compile_kwargs={"literal_binds": True})
+        ).lower()
+
+        # Metric SQL must be present for every chart-type/metric-kind combination.
+        assert self.EXPECTED_SQL[metric_kind] in compiled
+
+        # Dimension must be grouped/selected for every type except number (single value).
+        if chart_type != "number":
+            assert "state_name" in compiled

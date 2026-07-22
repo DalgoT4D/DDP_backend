@@ -29,7 +29,7 @@ from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.general_access import AccessLevel
 from ddpui.models.visualization import Chart
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
     get_dashboard,
@@ -46,6 +46,7 @@ from ddpui.api.dashboard_native_api import (
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
+    DashboardShareToggle,
     FilterCreate,
     FilterUpdate,
     DashboardShareToggle,
@@ -842,222 +843,63 @@ class TestDuplicateDashboardTabs:
 
 
 # ================================================================================
-# Test toggle_dashboard_sharing endpoint — public-sharing kill switch
+# Test sharing permission gates (creator-or-admin, incl. orphaned dashboards)
 # ================================================================================
 
 
-class TestToggleDashboardSharingKillSwitch:
-    """Org-level `allow_public_sharing` gates the enable/re-enable direction
-    of the dashboard share toggle; disabling a link always stays allowed."""
+class TestSharingPermissions:
+    """Sharing is manageable by the creator or an org admin — including
+    dashboards whose creator was deleted (created_by=None)."""
 
-    def test_enable_allowed_when_no_preferences_row(self, orguser, sample_dashboard, seed_db):
-        assert not OrgPreferences.objects.filter(org=orguser.org).exists()
+    def test_admin_can_toggle_sharing_on_orphaned_dashboard(self, orguser, org, seed_db):
+        """an admin can make an orphaned dashboard public"""
+        dashboard = Dashboard.objects.create(title="Orphaned", org=org, created_by=None)
         request = mock_request(orguser)
+
         response = toggle_dashboard_sharing(
-            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+            request, dashboard.id, DashboardShareToggle(is_public=True)
         )
+
+        dashboard.refresh_from_db()
+        assert dashboard.is_public is True
+        assert dashboard.public_share_token
         assert response.is_public is True
+        dashboard.delete()
 
-    def test_enable_blocked_when_switch_off(self, orguser, sample_dashboard, seed_db):
-        OrgPreferences.objects.create(org=orguser.org, allow_public_sharing=False)
+    def test_admin_can_view_sharing_status_of_orphaned_dashboard(self, orguser, org, seed_db):
+        """an admin can read the sharing status of an orphaned dashboard"""
+        dashboard = Dashboard.objects.create(
+            title="Orphaned", org=org, created_by=None, is_public=True
+        )
         request = mock_request(orguser)
-        with pytest.raises(HttpError) as exc_info:
-            toggle_dashboard_sharing(
-                request, sample_dashboard.id, DashboardShareToggle(is_public=True)
-            )
-        assert exc_info.value.status_code == 403
 
-        sample_dashboard.refresh_from_db()
-        assert sample_dashboard.is_public is False
-
-    def test_enable_allowed_when_switch_on(self, orguser, sample_dashboard, seed_db):
-        OrgPreferences.objects.create(org=orguser.org, allow_public_sharing=True)
-        request = mock_request(orguser)
-        response = toggle_dashboard_sharing(
-            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
-        )
-        assert response.is_public is True
-
-    def test_disable_allowed_even_when_switch_off(self, orguser, sample_dashboard, seed_db):
-        # First publish while the switch is on...
-        request = mock_request(orguser)
-        toggle_dashboard_sharing(request, sample_dashboard.id, DashboardShareToggle(is_public=True))
-
-        # ...then flip the org switch off. Turning the link OFF must still work.
-        OrgPreferences.objects.filter(org=orguser.org).update(allow_public_sharing=False)
-        response = toggle_dashboard_sharing(
-            request, sample_dashboard.id, DashboardShareToggle(is_public=False)
-        )
-        assert response.is_public is False
-
-
-class TestToggleDashboardSharingAuthorization:
-    """Task 11b: `toggle_dashboard_sharing` gates the same way the bulk
-    `toggle_public` action does (Task 17) -- the `can_share_dashboards` slug
-    (checked by the `@has_permission` decorator) plus resolver **edit** on
-    the dashboard -- instead of the old creator-only check. This widens who
-    may toggle: any editor (grant or general access) with the slug, not just
-    the creator."""
-
-    def test_non_creator_view_only_forbidden(self, analyst_orguser, sample_dashboard, seed_db):
-        """An Analyst with the slug but only the org's default general
-        access (all_users/view, no explicit grant) resolves to "view", not
-        "edit" -- still forbidden."""
-        request = mock_request(analyst_orguser)
-        with pytest.raises(HttpError) as exc_info:
-            toggle_dashboard_sharing(
-                request, sample_dashboard.id, DashboardShareToggle(is_public=True)
-            )
-        assert exc_info.value.status_code == 403
-
-        sample_dashboard.refresh_from_db()
-        assert sample_dashboard.is_public is False
-
-    def test_non_creator_with_edit_grant_allowed(self, analyst_orguser, sample_dashboard, seed_db):
-        """New-behavior pin: a non-creator Analyst with an explicit **edit**
-        `ResourceShare` grant (and the `can_share_dashboards` slug) CAN
-        toggle sharing -- the widening from creator-only to "any editor with
-        the slug" that bulk toggle_public already allowed (Task 17)."""
-        ResourceShare.objects.create(
-            org=sample_dashboard.org,
-            resource_type="dashboard",
-            resource_id=str(sample_dashboard.pk),
-            principal_type="user",
-            principal_id=analyst_orguser.id,
-            permission="edit",
-            status="active",
-        )
-        request = mock_request(analyst_orguser)
-        response = toggle_dashboard_sharing(
-            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
-        )
+        response = get_dashboard_sharing_status(request, dashboard.id)
 
         assert response.is_public is True
-        sample_dashboard.refresh_from_db()
-        assert sample_dashboard.is_public is True
+        dashboard.delete()
 
-    def test_member_without_slug_forbidden(self, member_orguser, sample_dashboard, seed_db):
-        """A Member has neither `can_share_dashboards` nor an edit grant --
-        the `@has_permission` decorator blocks the request before the
-        resolver is consulted (mirrors the bulk path's
-        `share_permission_denied` skip reason)."""
-        request = mock_request(member_orguser)
-        with pytest.raises(HttpError) as exc_info:
-            toggle_dashboard_sharing(
-                request, sample_dashboard.id, DashboardShareToggle(is_public=True)
-            )
-        assert exc_info.value.status_code in (403, 404)
-
-    def test_creator_still_allowed(self, orguser, sample_dashboard, seed_db):
-        """The creator keeps toggling -- ownership resolves to "edit"
-        regardless of the slug-plus-grant path."""
-        request = mock_request(orguser)
-        response = toggle_dashboard_sharing(
-            request, sample_dashboard.id, DashboardShareToggle(is_public=True)
+    def test_non_admin_still_cannot_toggle_sharing_of_others_dashboard(self, orguser, org, seed_db):
+        """an analyst (has the share permission, not an admin) can neither toggle
+        nor view sharing of a dashboard they didn't create"""
+        dashboard = Dashboard.objects.create(title="Not theirs", org=org, created_by=orguser)
+        analyst_user = User.objects.create(username="analyst-share", email="analyst-share")
+        analyst = OrgUser.objects.create(
+            user=analyst_user, org=org, new_role=Role.objects.filter(slug=ANALYST_ROLE).first()
         )
-        assert response.is_public is True
+        request = mock_request(analyst)
 
+        with pytest.raises(HttpError) as excinfo:
+            toggle_dashboard_sharing(request, dashboard.id, DashboardShareToggle(is_public=True))
+        assert "creator or an org admin" in str(excinfo.value)
 
-# ================================================================================
-# Test get_dashboard_sharing_status endpoint — view-gate
-# ================================================================================
+        with pytest.raises(HttpError) as excinfo:
+            get_dashboard_sharing_status(request, dashboard.id)
+        assert "creator or an org admin" in str(excinfo.value)
 
-
-class TestGetDashboardSharingStatus:
-    """Task 11c: `get_dashboard_sharing_status` was creator-only (an inline
-    `dashboard.created_by != orguser` check) -- widened to gate on the
-    `can_view_dashboards` slug (has the `@has_permission` decorator) plus
-    resolver **view**, mirroring the report side. Reads only need view (the
-    status GET just reveals whether an already-visible resource is public);
-    the toggle above stays edit-gated."""
-
-    def test_creator_allowed(self, orguser, sample_dashboard, seed_db):
-        request = mock_request(orguser)
-        response = get_dashboard_sharing_status(request, sample_dashboard.id)
-        assert response.is_public is False
-
-    def test_not_found(self, orguser, seed_db):
-        request = mock_request(orguser)
-        with pytest.raises(HttpError) as exc_info:
-            get_dashboard_sharing_status(request, 99999)
-        assert exc_info.value.status_code == 404
-
-    def test_public_status_includes_url(self, orguser, sample_dashboard, seed_db):
-        request = mock_request(orguser)
-        toggle_dashboard_sharing(request, sample_dashboard.id, DashboardShareToggle(is_public=True))
-
-        response = get_dashboard_sharing_status(request, sample_dashboard.id)
-        assert response.is_public is True
-        assert response.public_url is not None
-
-    def test_non_creator_general_view_allowed(self, analyst_orguser, sample_dashboard, seed_db):
-        """New-behavior pin: an Analyst with only the org's default general
-        access (all_users/view, no explicit grant, not the creator) CAN now
-        read sharing status -- previously this was a hard creator-only 403."""
-        request = mock_request(analyst_orguser)
-        response = get_dashboard_sharing_status(request, sample_dashboard.id)
-        assert response.is_public is False
-
-    def test_member_view_allowed_no_slug_needed(self, member_orguser, sample_dashboard, seed_db):
-        """New-behavior pin: a Member -- who lacks `can_share_dashboards`
-        entirely (see `test_member_without_slug_forbidden` above) -- CAN
-        read sharing status on the org's default general-view dashboard.
-        The status GET only needs `can_view_dashboards` + resolver view,
-        never the share slug."""
-        request = mock_request(member_orguser)
-        response = get_dashboard_sharing_status(request, sample_dashboard.id)
-        assert response.is_public is False
-
-    def test_no_access_still_forbidden(self, analyst_orguser, member_orguser, org):
-        """New-behavior pin: a viewer with genuinely NO access (private
-        dashboard, no grant, not the owner) still gets 403 -- the gate is
-        real, just no longer creator-only. Owned by `analyst_orguser` (not
-        the account-manager `orguser`) so no admin override masks the
-        check."""
-        private_dashboard = Dashboard.objects.create(
-            title="Private Dashboard",
-            dashboard_type="native",
-            grid_columns=12,
-            created_by=analyst_orguser,
-            org=org,
-            analyst_level=AccessLevel.NONE,
-            member_level=AccessLevel.NONE,
-        )
-        try:
-            request = mock_request(member_orguser)
-            with pytest.raises(HttpError) as exc_info:
-                get_dashboard_sharing_status(request, private_dashboard.id)
-            assert exc_info.value.status_code == 403
-        finally:
-            private_dashboard.delete()
-
-    def test_non_creator_with_view_grant_allowed(self, analyst_orguser, member_orguser, org):
-        """A viewer denied by general access (private dashboard) but holding
-        an explicit **view** `ResourceShare` grant CAN read sharing status."""
-        private_dashboard = Dashboard.objects.create(
-            title="Grant-Gated Dashboard",
-            dashboard_type="native",
-            grid_columns=12,
-            created_by=analyst_orguser,
-            org=org,
-            analyst_level=AccessLevel.NONE,
-            member_level=AccessLevel.NONE,
-        )
-        ResourceShare.objects.create(
-            org=org,
-            resource_type="dashboard",
-            resource_id=str(private_dashboard.pk),
-            principal_type="user",
-            principal_id=member_orguser.id,
-            permission="view",
-            status="active",
-        )
-        try:
-            request = mock_request(member_orguser)
-            response = get_dashboard_sharing_status(request, private_dashboard.id)
-            assert response.is_public is False
-        finally:
-            private_dashboard.delete()
+        dashboard.refresh_from_db()
+        assert dashboard.is_public is False
+        dashboard.delete()
+        analyst_user.delete()
 
 
 # ================================================================================

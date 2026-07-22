@@ -15,6 +15,8 @@ from ddpui.models.dashboard import (
     DashboardFilterType,
 )
 from ddpui.models.org_user import OrgUser
+from ddpui.auth import has_permission
+from ddpui.core.ownership import is_creator_or_admin
 from ddpui.models.visualization import Chart
 from ddpui.auth import extract_resource, has_permission, has_resource_permission
 from ddpui.core.sharing import coverage, sharing_actions
@@ -546,7 +548,17 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
     """Toggle public sharing for a dashboard. Any editor with the share slug
     may toggle, not just the creator."""
     orguser: OrgUser = request.orguser
-    dashboard = request.resource
+
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    # Only the dashboard creator or an org admin can modify sharing
+    if not is_creator_or_admin(orguser, dashboard):
+        raise HttpError(
+            403, "Only the dashboard creator or an org admin can modify sharing settings"
+        )
 
     is_public = payload.is_public
 
@@ -603,7 +615,15 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     """Get dashboard sharing status. View access suffices: the status GET
     only reveals whether a resource the viewer can already see is public."""
     orguser: OrgUser = request.orguser
-    dashboard = request.resource
+
+    try:
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+    except Dashboard.DoesNotExist as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    # Only the dashboard creator or an org admin can view sharing status
+    if not is_creator_or_admin(orguser, dashboard):
+        raise HttpError(403, "Only the dashboard creator or an org admin can view sharing settings")
 
     response_data = {
         "is_public": dashboard.is_public,

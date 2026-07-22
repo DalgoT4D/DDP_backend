@@ -67,9 +67,7 @@ class KPIResponse(Schema):
     program_tags: List[str]
     display_order: int
     extra_config: KPIExtraConfig  # always present — DB column has default=dict, null=False
-    created_by: Optional[
-        str
-    ] = None  # creator's email; None if the creating user was deleted (SET_NULL)
+    created_by: Optional[str]  # creator's email; None if the creator was deleted
     created_at: datetime
     updated_at: datetime
 

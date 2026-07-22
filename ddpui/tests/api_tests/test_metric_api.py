@@ -105,16 +105,16 @@ class TestListMetrics:
 
         assert response.data[0].created_by == "metricapiuser@test.com"
 
-    def test_list_metrics_with_null_created_by(self, orguser, sample_metric, seed_db):
-        """created_by is SET_NULL when the creating user is deleted; list_metrics
-        must still return 200 with created_by=None instead of 500ing on the
-        now-null FK dereference."""
-        Metric.objects.filter(id=sample_metric.id).update(created_by=None)
+    def test_list_metrics_null_created_by(self, orguser, sample_metric, seed_db):
+        """metrics whose creator was deleted (created_by=None) still list cleanly"""
+        sample_metric.created_by = None
+        sample_metric.save()
         request = mock_request(orguser)
 
         response = list_metrics(request)
 
-        assert response.data[0].created_by is None
+        listed = next(m for m in response.data if m.id == sample_metric.id)
+        assert listed.created_by is None
 
     def test_list_metrics_search(self, orguser, sample_metric, seed_db):
         request = mock_request(orguser)

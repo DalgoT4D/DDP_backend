@@ -20,22 +20,19 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.schemas.org_task_schema import TaskParameters, ClearSelectedStreams
 from ddpui.ddpairbyte import airbyte_service
-from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.utils.constants import (
     TASK_AIRBYTESYNC,
-    TASK_DBTRUN,
     TASK_DBTCLEAN,
     TASK_DBTDEPS,
     TASK_GITPULL,
-    TASK_AIRBYTECLEAR,
     TASK_GITCLONE,
+    TASK_AIRBYTECLEAR,
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.helpers import generate_hash_id
 from ddpui.core.pipelinefunctions import (
     pipeline_with_orgtasks,
     lock_tasks_for_dataflow,
-    setup_dbt_core_task_config,
     setup_airbyte_clear_streams_task_config,
     fetch_pipeline_lock_v1,
 )
@@ -139,19 +136,19 @@ class PipelineService:
 
         # Auto-add git and dbt-clean/dbt-deps steps when there are DBT tasks
         if len(dbt_orgtasks) > 0:
-            if PipelineService._is_workpool_eks(org):
+            if PipelineService.is_workpool_eks(org):
                 logger.info("EKS workpool detected, adding git clone step before DBT tasks")
-                git_clone_orgtask = PipelineService._get_or_create_git_clone_orgtask(org)
+                git_clone_orgtask = PipelineService.get_or_create_git_clone_orgtask(org)
                 git_orgtasks.insert(0, git_clone_orgtask)
             else:
                 logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
-                git_pull_orgtask = PipelineService._get_or_create_git_pull_orgtask(org)
+                git_pull_orgtask = PipelineService.get_or_create_git_pull_orgtask(org)
                 git_orgtasks.insert(0, git_pull_orgtask)
 
             # Auto-add dbt clean and dbt deps before other DBT tasks
             logger.info("Adding dbt clean and dbt deps steps before DBT tasks")
-            dbt_clean_orgtask = PipelineService._get_or_create_dbt_clean_orgtask(org)
-            dbt_deps_orgtask = PipelineService._get_or_create_dbt_deps_orgtask(org)
+            dbt_clean_orgtask = PipelineService.get_or_create_dbt_clean_orgtask(org)
+            dbt_deps_orgtask = PipelineService.get_or_create_dbt_deps_orgtask(org)
             auto_managed_dbt_orgtasks = [dbt_clean_orgtask, dbt_deps_orgtask]
 
         # dbt cli profile block - only needed if we have DBT tasks
@@ -553,8 +550,6 @@ class PipelineService:
         if dataflow_orgtasks.count() == 0:
             raise PipelineConfigurationError("no org task mapped to the deployment")
 
-        orgdbt = org.dbt
-
         # ordered
         org_tasks: list[OrgTask] = [
             dataflow_orgtask.orgtask for dataflow_orgtask in dataflow_orgtasks
@@ -563,44 +558,7 @@ class PipelineService:
         locks = lock_tasks_for_dataflow(orguser=orguser, dataflow=dataflow, org_tasks=org_tasks)
 
         try:
-            # allow parameter passing only for manual dbt runs and if there are parameters being passed
-            flow_run_params = None
-            if (
-                len(org_tasks) == 1
-                and dataflow.dataflow_type == "manual"
-                and org_tasks[0].task.slug == TASK_DBTRUN
-                and payload
-                and (payload.flags or payload.options)
-            ):
-                logger.info("sending custom flow run params to the deployment run")
-                orgtask = org_tasks[0]
-
-                # save orgtask params to memory and not db
-                orgtask.parameters = dict(payload)
-
-                # fetch cli block
-                cli_profile_block = orgdbt.cli_profile_block if orgdbt else None
-                dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
-                    org, orgdbt
-                )
-
-                # dont set any parameters if cli block is not present or there is an error
-                if cli_profile_block:
-                    logger.info("found cli profile block")
-                    flow_run_params = {
-                        "config": {
-                            "tasks": [
-                                setup_dbt_core_task_config(
-                                    orgtask,
-                                    cli_profile_block,
-                                    dbt_project_params,
-                                ).to_json()
-                            ],
-                            "org_slug": org.slug,
-                        }
-                    }
-
-            res = prefect_service.create_deployment_flow_run(deployment_id, flow_run_params)
+            res = prefect_service.create_deployment_flow_run(deployment_id)
             PrefectFlowRun.objects.create(
                 deployment_id=deployment_id,
                 flow_run_id=res["flow_run_id"],
@@ -727,14 +685,14 @@ class PipelineService:
         return res
 
     @staticmethod
-    def _is_workpool_eks(org: Org) -> bool:
+    def is_workpool_eks(org: Org) -> bool:
         """Check if the scheduled pipeline queue workpool is EKS"""
         queue_config = org.get_queue_config()
         scheduled_queue = queue_config.scheduled_pipeline_queue
         return getattr(scheduled_queue, "is_workpool_eks", False)
 
     @staticmethod
-    def _get_or_create_git_clone_orgtask(org: Org) -> OrgTask:
+    def get_or_create_git_clone_orgtask(org: Org) -> OrgTask:
         """Get or create git clone OrgTask for the organization"""
         git_clone_task = Task.objects.filter(slug=TASK_GITCLONE).first()
         if not git_clone_task:
@@ -754,7 +712,7 @@ class PipelineService:
         return git_clone_orgtask
 
     @staticmethod
-    def _get_or_create_git_pull_orgtask(org: Org) -> OrgTask:
+    def get_or_create_git_pull_orgtask(org: Org) -> OrgTask:
         """Get or create git pull OrgTask for the organization"""
         git_pull_task = Task.objects.filter(slug=TASK_GITPULL).first()
         if not git_pull_task:
@@ -774,7 +732,7 @@ class PipelineService:
         return git_pull_orgtask
 
     @staticmethod
-    def _get_or_create_dbt_clean_orgtask(org: Org) -> OrgTask:
+    def get_or_create_dbt_clean_orgtask(org: Org) -> OrgTask:
         """Get or create dbt clean OrgTask for the organization"""
         dbt_clean_task = Task.objects.filter(slug=TASK_DBTCLEAN).first()
         if not dbt_clean_task:
@@ -794,7 +752,7 @@ class PipelineService:
         return dbt_clean_orgtask
 
     @staticmethod
-    def _get_or_create_dbt_deps_orgtask(org: Org) -> OrgTask:
+    def get_or_create_dbt_deps_orgtask(org: Org) -> OrgTask:
         """Get or create dbt deps OrgTask for the organization"""
         dbt_deps_task = Task.objects.filter(slug=TASK_DBTDEPS).first()
         if not dbt_deps_task:

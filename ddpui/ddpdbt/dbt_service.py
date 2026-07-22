@@ -138,13 +138,16 @@ def update_github_pat_storage(
     )
 
     response = prefect_service.upsert_secret_block(secret_block_edit_params)
+    # prefect-proxy sanitizes the block name (lowercase, strips characters that
+    # aren't a-z/0-9/dash) — always store the name it actually persisted
+    stored_block_name = response["block_name"]
     if not OrgPrefectBlockv1.objects.filter(
-        org=org, block_type=SECRET, block_name=secret_block_edit_params.block_name
+        org=org, block_type=SECRET, block_name=stored_block_name
     ).exists():
         OrgPrefectBlockv1.objects.create(
             org=org,
             block_type=SECRET,
-            block_name=secret_block_edit_params.block_name,
+            block_name=stored_block_name,
             block_id=response["block_id"],
         )
 

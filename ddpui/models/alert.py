@@ -103,9 +103,6 @@ class Alert(models.Model):
     created_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, related_name="alerts_created"
     )
-    owner = models.ForeignKey(
-        OrgUser, on_delete=models.SET_NULL, null=True, related_name="owned_%(class)ss"
-    )
     last_modified_by = models.ForeignKey(
         OrgUser,
         on_delete=models.SET_NULL,
