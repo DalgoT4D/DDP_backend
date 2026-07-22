@@ -1,4 +1,6 @@
 import os
+
+import yaml
 import uuid as uuid_module
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -636,6 +638,73 @@ def test_copy_dbt_repo_files_clones_and_pushes(mock_git_manager_cls, mock_retrie
     )
     mock_push_instance.commit_changes.assert_called_once_with("clone template dbt models from git")
     mock_push_instance.push_changes.assert_called_once()
+
+
+@patch("ddpui.core.trial.dbt_clone.retrieve_github_pat")
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+def test_copy_dbt_repo_files_carries_project_config_macros_and_packages(
+    mock_git_manager_cls, mock_retrieve_pat, tmp_path
+):
+    """the full-project copy: macros/, seeds/, packages.yml must land in the trial repo, and the
+    template's dbt_project.yml folder-level config (+materialized etc.) must be merged over the
+    scaffold's — re-keyed from the template's project name to the scaffold's, with the
+    scaffold's name/profile preserved (they must keep matching the cli profile block)."""
+    template_org = Org.objects.create(name="tmpl-fullcopy", slug="tmpl-fullcopy")
+    trial_org = Org.objects.create(name="trial-fullcopy", slug="trial-fullcopy")
+
+    template_dbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/some-ngo/health_org.git",
+        gitrepo_access_token_secret="template-pat-secret",
+        is_repo_managed_by_system=False,
+        project_dir="tmpl-fullcopy/dbtrepo",
+        dbt_venv="test_venv",
+        target_type="postgres",
+        default_schema="default_schema",
+        transform_type="github",
+    )
+    trial_dbt = _make_trial_dbt_with_scaffold(trial_org, tmp_path)
+    trial_repo_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
+    # scaffold's stock dbt_project.yml (what `dbt init` + setup_managed_git_workspace leave)
+    (trial_repo_dir / "dbt_project.yml").write_text(
+        "name: dbtrepo\nprofile: dbtrepo\nmodels:\n  dbtrepo:\n    example:\n"
+        "      +materialized: view\n"
+    )
+
+    fake_clone_dir = tmp_path / "cloned_template_repo_full"
+    (fake_clone_dir / "models").mkdir(parents=True)
+    (fake_clone_dir / "models" / "mart.sql").write_text("select 1")
+    (fake_clone_dir / "macros").mkdir()
+    (fake_clone_dir / "macros" / "unpivot_custom.sql").write_text("{% macro m() %}{% endmacro %}")
+    (fake_clone_dir / "seeds").mkdir()
+    (fake_clone_dir / "seeds" / "lookup.csv").write_text("id\n1")
+    (fake_clone_dir / "packages.yml").write_text(
+        "packages:\n  - package: dbt-labs/dbt_utils\n    version: 1.3.0\n"
+    )
+    # template project named differently, with folder-level config that must survive re-keyed
+    (fake_clone_dir / "dbt_project.yml").write_text(
+        "name: health_org\nprofile: health_org\nmodels:\n  health_org:\n    marts:\n"
+        "      +materialized: table\nvars:\n  start_year: 2020\n"
+    )
+
+    mock_clone_instance = MagicMock()
+    mock_clone_instance.repo_local_path = str(fake_clone_dir)
+    mock_git_manager_cls.clone.return_value = mock_clone_instance
+    mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+    mock_retrieve_pat.return_value = "template-pat"
+
+    dbt_clone.copy_dbt_repo_files(template_dbt, trial_dbt)
+
+    assert (trial_repo_dir / "models" / "mart.sql").exists()
+    assert (trial_repo_dir / "macros" / "unpivot_custom.sql").exists()
+    assert (trial_repo_dir / "seeds" / "lookup.csv").exists()
+    assert "1.3.0" in (trial_repo_dir / "packages.yml").read_text()
+
+    merged = yaml.safe_load((trial_repo_dir / "dbt_project.yml").read_text())
+    assert merged["name"] == "dbtrepo"  # scaffold identity preserved
+    assert merged["profile"] == "dbtrepo"
+    assert merged["models"]["dbtrepo"]["marts"]["+materialized"] == "table"  # re-keyed
+    assert "health_org" not in merged["models"]
+    assert merged["vars"] == {"start_year": 2020}  # template vars survive
 
 
 @patch("ddpui.core.trial.dbt_clone.retrieve_github_pat")

@@ -290,12 +290,40 @@ def _clone_alerts(
     return count
 
 
-def _clone_report_snapshots(template_org: Org, trial_org: Org, trial_orguser: OrgUser) -> int:
+def _remap_frozen_chart_configs(frozen_chart_configs: dict, metric_map: dict) -> dict:
+    """Deep-copy a snapshot's `frozen_chart_configs` and remap each CHART entry's
+    `extra_config` saved-metric refs via `metric_map`.
+
+    The frozen blobs are mostly historical, BUT `saved_metric_id` inside a frozen chart's
+    `extra_config` is resolved LIVE at every render: `get_report_chart_data` feeds the frozen
+    config through `build_chart_data_payload` → `_resolve_saved_metrics`, which does
+    `Metric.objects.get(id=...)` with no org filter — so an un-remapped id makes every render of
+    the trial snapshot read (and depend on) the TEMPLATE org's live Metric row: template edits
+    silently change trial reports, template deletion silently drops the series. Remapping via
+    `metric_map` points the frozen config at the trial's own cloned Metric instead.
+
+    Chart entries are the values carrying an `extra_config` key; frozen KPI entries capture
+    computed values with no live refs and are copied untouched. `_remap_chart_extra_config`
+    (shared with `_clone_charts`) does the per-entry work, including the org-owned-geojson
+    warning."""
+    remapped: dict = {}
+    for key, entry in (frozen_chart_configs or {}).items():
+        if isinstance(entry, dict) and "extra_config" in entry:
+            entry = dict(entry)
+            entry["extra_config"] = _remap_chart_extra_config(entry["extra_config"], metric_map)
+        else:
+            entry = copy.deepcopy(entry)
+        remapped[key] = entry
+    return remapped
+
+
+def _clone_report_snapshots(
+    template_org: Org, trial_org: Org, trial_orguser: OrgUser, metric_map: dict
+) -> int:
     """Copy every template ReportSnapshot onto the trial org, resetting public sharing. The
-    frozen JSON blobs (`frozen_dashboard`/`frozen_chart_configs`) are historical — copied as-is,
-    ids inside them are never remapped (ReportSnapshot has no FK to Dashboard/Chart; ids embedded
-    there describe what the template looked like at freeze time, not the trial clone). Returns
-    the number of snapshots copied."""
+    frozen JSON blobs are copied verbatim EXCEPT the live-resolved saved-metric refs inside
+    `frozen_chart_configs`, which are remapped onto the trial's cloned Metrics — see
+    `_remap_frozen_chart_configs`. Returns the number of snapshots copied."""
     count = 0
     for r in ReportSnapshot.objects.filter(org=template_org):
         new_r = ReportSnapshot.objects.create(
@@ -304,7 +332,7 @@ def _clone_report_snapshots(template_org: Org, trial_org: Org, trial_orguser: Or
             period_start=r.period_start,
             period_end=r.period_end,
             frozen_dashboard=r.frozen_dashboard,
-            frozen_chart_configs=r.frozen_chart_configs,
+            frozen_chart_configs=_remap_frozen_chart_configs(r.frozen_chart_configs, metric_map),
             summary=r.summary,
             is_public=False,
             public_share_token=None,
@@ -327,7 +355,7 @@ def clone_viz(template_org: Org, trial_org: Org, trial_orguser: OrgUser) -> dict
     dash_map = _clone_dashboards(template_org, trial_org, trial_orguser, chart_map, kpi_map)
     filter_count = _clone_dashboard_filters(template_org, dash_map)
     alert_count = _clone_alerts(template_org, trial_org, trial_orguser, metric_map, kpi_map)
-    report_count = _clone_report_snapshots(template_org, trial_org, trial_orguser)
+    report_count = _clone_report_snapshots(template_org, trial_org, trial_orguser, metric_map)
 
     manifest = {
         "metrics": len(metric_map),

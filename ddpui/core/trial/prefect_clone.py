@@ -34,16 +34,20 @@ auto-managed ones.
 """
 
 from ddpui.core.orchestrate.pipeline_service import PipelineService
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.orgtaskfunctions import create_prefect_deployment_for_dbtcore_task
+from ddpui.core.pipelinefunctions import pipeline_with_orgtasks
 from ddpui.core.trial.exceptions import TrialCloneError
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema4,
     PrefectDataFlowOrgTasks,
+    PrefectDataFlowUpdateSchema3,
     PrefectFlowAirbyteConnection2,
 )
 from ddpui.models.org import Org, OrgDataFlowv1
 from ddpui.models.tasks import DataflowOrgTask, OrgTask, TaskType
-from ddpui.utils.constants import TASK_DBTCLEAN, TASK_DBTDEPS
+from ddpui.utils.constants import LONG_RUNNING_TASKS, TASK_DBTCLEAN, TASK_DBTDEPS
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.prefect_clone")
@@ -164,6 +168,110 @@ def build_pipeline_payload(
         transformTasks=transform_tasks,
         continueOnSyncFailure=continue_on_sync_failure,
     )
+
+
+def _rebake_manual_deployment_params(
+    dataflow: OrgDataFlowv1, org: Org, cli_block, dbt_project_params
+) -> None:
+    """Rebuild a manual (Transform-page) deployment's baked `deployment_params` from its linked
+    OrgTasks' CURRENT parameters and push them to Prefect.
+
+    `create_default_transform_tasks` (Step 5) bakes `org_task.get_task_parameters()` into each
+    LONG_RUNNING manual deployment at creation time — while the OrgTask still has `parameters={}`.
+    Step 6's dataflow pass then copies the template's parameters (e.g. `dbt run --select X`) onto
+    that OrgTask, leaving the already-created deployment running bare `dbt run`. This re-runs the
+    exact task-config build the creation path used (`pipeline_with_orgtasks` over the deployment's
+    own git→clean→deps→primary chain) and updates the deployment in place.
+    """
+    links = (
+        DataflowOrgTask.objects.filter(dataflow=dataflow)
+        .select_related("orgtask", "orgtask__task")
+        .order_by("seq")
+    )
+    chain = [link.orgtask for link in links]
+    task_configs, err = pipeline_with_orgtasks(
+        org,
+        chain,
+        cli_block=cli_block,
+        dbt_project_params=dbt_project_params,
+        gitrepo_url=org.dbt.gitrepo_url if org.dbt else None,
+    )
+    if err:
+        raise TrialCloneError(
+            f"failed to rebuild task configs for manual deployment "
+            f"{dataflow.deployment_name}: {err}"
+        )
+    prefect_service.update_dataflow_v1(
+        dataflow.deployment_id,
+        PrefectDataFlowUpdateSchema3(
+            deployment_params={"config": {"tasks": task_configs, "org_slug": org.slug}},
+            cron=dataflow.cron,
+        ),
+    )
+    logger.info(f"rebaked params for manual deployment {dataflow.deployment_name}")
+
+
+def sync_transform_tasks_and_deployments(template: Org, trial_org: Org) -> dict:
+    """Step 6b — run AFTER `clone_orchestrate_dataflows`. Closes two gaps the dataflow pass
+    leaves:
+
+    (a) STANDALONE template transform OrgTasks: the dataflow pass only sees OrgTasks linked into
+        an orchestrate dataflow via `DataflowOrgTask` — a template transform task living outside
+        every pipeline (e.g. a client-created `dbt run --select X` used only from the Transform
+        page) would otherwise never reach the trial. Resolved through the same
+        `_resolve_trial_transform_orgtask` (idempotent on the ones the dataflow pass already
+        handled).
+
+    (b) MANUAL deployment params: ensures every LONG_RUNNING trial transform OrgTask has a manual
+        deployment whose baked params match the OrgTask's — creating deployments for freshly
+        minted parameter-variant rows (Step 5 only creates them for its own param-less rows) and
+        rebaking deployments created before the template's parameters were copied on (see
+        `_rebake_manual_deployment_params`).
+
+    Returns counts for the run manifest.
+    """
+    trial_dbt = trial_org.dbt
+    if trial_dbt is None or trial_dbt.cli_profile_block is None:
+        raise TrialCloneError(
+            f"trial org {trial_org.slug} has no dbt workspace/cli profile block; "
+            "step 5 must run before transform-task sync"
+        )
+
+    standalone_seen = 0
+    for template_orgtask in (
+        OrgTask.objects.filter(org=template, task__type=TaskType.DBT)
+        .exclude(task__slug__in=_AUTO_MANAGED_TRANSFORM_SLUGS)
+        .select_related("task")
+    ):
+        _resolve_trial_transform_orgtask(template_orgtask, trial_org)
+        standalone_seen += 1
+
+    cli_block = trial_dbt.cli_profile_block
+    dbt_project_params = DbtProjectManager.gather_dbt_project_params(trial_org, trial_dbt)
+    deployments_created = 0
+    deployments_rebaked = 0
+    for org_task in OrgTask.objects.filter(
+        org=trial_org, task__type=TaskType.DBT, task__slug__in=LONG_RUNNING_TASKS
+    ).select_related("task"):
+        manual_link = (
+            DataflowOrgTask.objects.filter(orgtask=org_task, dataflow__dataflow_type="manual")
+            .select_related("dataflow")
+            .first()
+        )
+        if manual_link is None:
+            create_prefect_deployment_for_dbtcore_task(org_task, cli_block, dbt_project_params)
+            deployments_created += 1
+        elif org_task.parameters:
+            _rebake_manual_deployment_params(
+                manual_link.dataflow, trial_org, cli_block, dbt_project_params
+            )
+            deployments_rebaked += 1
+
+    return {
+        "transform_orgtasks_synced": standalone_seen,
+        "manual_deployments_created": deployments_created,
+        "manual_deployments_rebaked": deployments_rebaked,
+    }
 
 
 def clone_orchestrate_dataflows(template: Org, trial_org: Org, connection_map: dict) -> list[str]:

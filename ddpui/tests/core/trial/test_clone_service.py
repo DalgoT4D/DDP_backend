@@ -496,6 +496,89 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_sets_trial_plan_validity_window(mock_create_org, mock_create_plan):
+    """The plan payload must carry a real validity window — start now, end +TRIAL_DURATION_DAYS —
+    so the trial actually expires (None/None would mean a forever-trial)."""
+    from datetime import datetime
+
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-exp", slug="tmpl-exp")
+    trial_org = Org.objects.create(
+        name="Trial exp tmpl", slug="trial-exp-tmpl", airbyte_workspace_id="ws-exp"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="exp@b.org")
+    clone_service._step_org_and_user(run)
+
+    payload = mock_create_org.call_args.args[0]
+    assert payload.start_date is not None and payload.end_date is not None
+    start = datetime.fromisoformat(payload.start_date)
+    end = datetime.fromisoformat(payload.end_date)
+    assert (end - start).days == clone_service.TRIAL_DURATION_DAYS
+    # same payload flows into create_org_plan
+    assert mock_create_plan.call_args.args[0] is payload
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_copies_llm_preferences_not_discord(mock_create_org, mock_create_plan):
+    """OrgPreferences llm opt-in must carry over (AI features stay usable on the trial) while
+    the discord webhook/notification settings must NOT (a trial must never post to the
+    template's Discord). Approver is the trial's own admin, not a template identity."""
+    from ddpui.models.org_preferences import OrgPreferences
+
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-prefs", slug="tmpl-prefs")
+    OrgPreferences.objects.create(
+        org=template,
+        llm_optin=True,
+        enable_llm_request=True,
+        enable_discord_notifications=True,
+        discord_webhook="https://discord.example/hook",
+    )
+    trial_org = Org.objects.create(
+        name="Trial prefs tmpl", slug="trial-prefs-tmpl", airbyte_workspace_id="ws-pr"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="prefs@b.org")
+    clone_service._step_org_and_user(run)
+
+    prefs = OrgPreferences.objects.get(org=trial_org)
+    assert prefs.llm_optin is True
+    assert prefs.enable_llm_request is True
+    assert prefs.llm_optin_approved_by_id == run.trial_orguser.id
+    assert prefs.llm_optin_date is not None
+    assert prefs.enable_discord_notifications is False
+    assert prefs.discord_webhook is None
+    assert run.manifest["org_preferences_copied"] is True
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_no_prefs_row_when_template_has_none(mock_create_org, mock_create_plan):
+    from ddpui.models.org_preferences import OrgPreferences
+
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    template = Org.objects.create(name="tmpl-noprefs", slug="tmpl-noprefs")
+    trial_org = Org.objects.create(
+        name="Trial noprefs", slug="trial-noprefs", airbyte_workspace_id="ws-np"
+    )
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="np@b.org")
+    clone_service._step_org_and_user(run)
+
+    assert not OrgPreferences.objects.filter(org=trial_org).exists()
+    assert "org_preferences_copied" not in run.manifest
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_copies_template_feature_flags(mock_create_org, mock_create_plan):
     """The trial must inherit the template's feature flags — REPORTS in particular gates the
     Reports nav in the frontend, so without the copy the cloned report snapshots are invisible."""
@@ -904,6 +987,19 @@ def test_step_sources_recreates_from_config(mock_ab, mock_load, mock_validate):
             {"sourceId": "old-1", "name": "PG", "sourceDefinitionId": "def-pg"},
         ]
     }
+    # def-pg is a public (grid) definition — same id exists in both workspaces, no remap
+    mock_ab.get_source_definitions.side_effect = lambda ws: {
+        "ws-t": {
+            "sourceDefinitions": [
+                {"sourceDefinitionId": "def-pg", "dockerRepository": "airbyte/source-postgres"}
+            ]
+        },
+        "ws-r": {
+            "sourceDefinitions": [
+                {"sourceDefinitionId": "def-pg", "dockerRepository": "airbyte/source-postgres"}
+            ]
+        },
+    }[ws]
     mock_load.return_value = {"host": "h", "password": "real"}
     mock_ab.create_source.return_value = {"sourceId": "new-1"}
     run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
@@ -911,8 +1007,88 @@ def test_step_sources_recreates_from_config(mock_ab, mock_load, mock_validate):
     mock_ab.create_source.assert_called_once_with(
         "ws-r", "PG", "def-pg", {"host": "h", "password": "real"}
     )
+    mock_ab.create_custom_source_definition.assert_not_called()
     assert run.manifest["source_map"] == {"old-1": "new-1"}
     assert run.manifest["source_ids"] == ["new-1"]
+
+
+@patch("ddpui.core.trial.clone_service.validate_template_source_configs", return_value=[])
+@patch("ddpui.core.trial.clone_service.load_template_source_config")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+def test_step_sources_remaps_custom_definitions(mock_ab, mock_load, mock_validate):
+    """custom (workspace-scoped) source definitions must be remapped by dockerRepository:
+    - def-kobo already exists in the trial workspace under a DIFFERENT id (the async Celery
+      task registered it) -> reuse the trial's id, no create;
+    - def-commcare doesn't exist in the trial workspace at all -> create it synchronously from
+      the template definition's own repo/tag and use the fresh id."""
+    template = Org.objects.create(name="tmpl-cst", slug="tmpl-cst", airbyte_workspace_id="ws-t")
+    trial_org = Org.objects.create(name="Trial cst", slug="trial-cst", airbyte_workspace_id="ws-r")
+    mock_ab.get_sources.return_value = {
+        "sources": [
+            {"sourceId": "old-k", "name": "Kobo", "sourceDefinitionId": "def-kobo-tmpl"},
+            {"sourceId": "old-c", "name": "CommCare", "sourceDefinitionId": "def-cc-tmpl"},
+        ]
+    }
+    mock_ab.get_source_definitions.side_effect = lambda ws: {
+        "ws-t": {
+            "sourceDefinitions": [
+                {
+                    "sourceDefinitionId": "def-kobo-tmpl",
+                    "name": "KoboToolbox",
+                    "dockerRepository": "tech4dev/source-kobotoolbox",
+                    "dockerImageTag": "0.3.0",
+                    "documentationUrl": "",
+                },
+                {
+                    "sourceDefinitionId": "def-cc-tmpl",
+                    "name": "CommCare T4D",
+                    "dockerRepository": "tech4dev/source-commcare",
+                    "dockerImageTag": "0.3.0",
+                    "documentationUrl": "",
+                },
+            ]
+        },
+        "ws-r": {
+            "sourceDefinitions": [
+                # kobo already registered in the trial ws (different, workspace-scoped id)
+                {
+                    "sourceDefinitionId": "def-kobo-trial",
+                    "name": "KoboToolbox",
+                    "dockerRepository": "tech4dev/source-kobotoolbox",
+                    "dockerImageTag": "0.3.0",
+                    "documentationUrl": "",
+                },
+            ]
+        },
+    }[ws]
+    mock_load.return_value = {"token": "x"}
+    mock_ab.create_custom_source_definition.return_value = {"sourceDefinitionId": "def-cc-trial"}
+    mock_ab.create_source.side_effect = [{"sourceId": "new-k"}, {"sourceId": "new-c"}]
+
+    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
+    clone_service._step_sources(run)
+
+    mock_ab.create_custom_source_definition.assert_called_once_with(
+        workspace_id="ws-r",
+        name="CommCare T4D",
+        docker_repository="tech4dev/source-commcare",
+        docker_image_tag="0.3.0",
+        documentation_url="",
+    )
+    assert mock_ab.create_source.call_args_list[0].args == (
+        "ws-r",
+        "Kobo",
+        "def-kobo-trial",
+        {"token": "x"},
+    )
+    assert mock_ab.create_source.call_args_list[1].args == (
+        "ws-r",
+        "CommCare",
+        "def-cc-trial",
+        {"token": "x"},
+    )
+    assert run.manifest["custom_definitions_created"] == ["tech4dev/source-commcare"]
+    assert run.manifest["source_map"] == {"old-k": "new-k", "old-c": "new-c"}
 
 
 @patch("ddpui.core.trial.clone_service.validate_template_source_configs", return_value=["PG"])
@@ -1264,11 +1440,17 @@ def test_clone_wires_step_dbt_after_connections(
     assert "step5_dbt" in run.timings
 
 
+@patch("ddpui.core.trial.clone_service.sync_transform_tasks_and_deployments")
 @patch("ddpui.core.trial.clone_service.clone_orchestrate_dataflows")
-def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows):
+def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows, mock_sync):
     template = Org.objects.create(name="tmpl-pf", slug="tmpl-pf")
     trial_org = Org.objects.create(name="Trial pf", slug="trial-pf")
     mock_clone_dataflows.return_value = ["dep-new"]
+    mock_sync.return_value = {
+        "transform_orgtasks_synced": 2,
+        "manual_deployments_created": 1,
+        "manual_deployments_rebaked": 1,
+    }
 
     run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
     run.manifest["connection_map"] = {"tmpl-conn-1": "trial-conn-1"}
@@ -1277,7 +1459,9 @@ def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows)
     mock_clone_dataflows.assert_called_once_with(
         template, trial_org, {"tmpl-conn-1": "trial-conn-1"}
     )
+    mock_sync.assert_called_once_with(template, trial_org)
     assert run.manifest["deployment_ids"] == ["dep-new"]
+    assert run.manifest["transform_task_sync"]["manual_deployments_rebaked"] == 1
 
 
 @patch("ddpui.core.trial.clone_service._step_viz")

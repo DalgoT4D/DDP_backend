@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from ddpui.models.org import Org, OrgWarehouse, OrgFeatureFlag
 from ddpui.core.trial.exceptions import TrialAccountExistsError, TrialCloneError
@@ -18,6 +20,7 @@ from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.schemas.trial_schema import TrialCloneRequest
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_user import OrgUser, UserAttributes
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
@@ -32,7 +35,10 @@ from ddpui.core.trial.source_config import (
 from ddpui.core.trial.dbt_clone import copy_dbt_dag, copy_dbt_repo_files, regenerate_and_push
 from ddpui.models.dbt_workflow import OrgDbtOperation
 from ddpui.models.metric import Metric, KPI
-from ddpui.core.trial.prefect_clone import clone_orchestrate_dataflows
+from ddpui.core.trial.prefect_clone import (
+    clone_orchestrate_dataflows,
+    sync_transform_tasks_and_deployments,
+)
 from ddpui.core.trial.viz_clone import clone_viz
 from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.core.orgtaskfunctions import create_default_transform_tasks
@@ -42,6 +48,11 @@ from ddpui.utils import feature_flags
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
+
+# every trial expires this many days after the clone; OrgPlans.start_date/end_date are set from
+# this at clone time so plan-expiry checks (and any expiry-based reaping) have real dates to work
+# with instead of the None/None an unbounded plan would get.
+TRIAL_DURATION_DAYS = 14
 
 
 @dataclass
@@ -98,12 +109,18 @@ def _step_org_and_user(run: CloneRun) -> None:
     # break slug uniqueness.
     org_label = (run.org_name or template.name).strip()
     trial_name = f"Trial {email_hash8(run.trial_email)} {org_label}"[:50]
+    # the trial plan gets a real validity window (now → now + TRIAL_DURATION_DAYS) — ISO strings
+    # because CreateOrgSchema types these as str; Django parses them into the DateTimeFields on
+    # the OrgPlans row `create_org_plan` creates.
+    trial_start = timezone.now()
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,
         can_upgrade_plan=False,
         subscription_duration="trial",
         superset_included=False,
+        start_date=trial_start.isoformat(),
+        end_date=(trial_start + timedelta(days=TRIAL_DURATION_DAYS)).isoformat(),
     )
     trial_org, err = create_organization(org_payload)
     if err:
@@ -160,10 +177,26 @@ def _step_org_and_user(run: CloneRun) -> None:
             logger.warning(f"template flag {ff.flag_name} not in FEATURE_FLAGS allowlist; skipped")
     run.manifest["feature_flags_copied"] = flags_copied
 
+    # Copy the template's OrgPreferences LLM opt-in state — without this the trial gets the
+    # lazily-created default row (llm_optin=False) and the AI-analysis features stay dead even
+    # though the AI feature FLAGS above were copied enabled. Deliberately NOT copied: the
+    # discord webhook + notification toggle (a trial must never post to the template's Discord)
+    # and the template's approved-by/requested-by OrgUsers (template-org identities) — the
+    # trial's own admin is stamped as approver instead.
+    template_prefs = OrgPreferences.objects.filter(org=template).first()
+    if template_prefs is not None:
+        OrgPreferences.objects.create(
+            org=trial_org,
+            llm_optin=template_prefs.llm_optin,
+            llm_optin_approved_by=orguser if template_prefs.llm_optin else None,
+            llm_optin_date=timezone.now() if template_prefs.llm_optin else None,
+            enable_llm_request=template_prefs.enable_llm_request,
+        )
+        run.manifest["org_preferences_copied"] = True
+
     run.manifest["trial_org_slug"] = trial_org.slug
     run.manifest["trial_workspace_id"] = trial_org.airbyte_workspace_id
     run.manifest["trial_orguser_id"] = orguser.id
-    run.manifest["custom_connectors"] = "queued_async_not_awaited"
 
 
 def _step_warehouse(run: CloneRun) -> None:
@@ -223,6 +256,10 @@ def _step_warehouse(run: CloneRun) -> None:
         "tunnel_user_password",
     ):
         airbyte_config.pop(tunnel_key, None)
+    # legacy secrets-manager blobs sometimes carry a stale `dbname` key alongside `database`
+    # (see airbytehelpers.update_destination's dbname/database handling) — carried verbatim it
+    # would point the trial destination at the TEMPLATE's db. `database` above is authoritative.
+    airbyte_config.pop("dbname", None)
 
     wh_payload = OrgWarehouseSchema(
         wtype="postgres",
@@ -237,25 +274,91 @@ def _step_warehouse(run: CloneRun) -> None:
     run.manifest["trial_destination_defid"] = dest_def_id
 
 
+def _remap_source_definition_id(run: CloneRun, template_defid: str, defs_cache: dict) -> str:
+    """Return the TRIAL workspace's sourceDefinitionId equivalent to a template source's.
+
+    Public (grid) connector definitions share one global id across workspaces, so the template's
+    id usually exists in the trial workspace as-is. CUSTOM definitions (Kobo/CommCare/Avni —
+    `source_definitions/create_custom`) are WORKSPACE-SCOPED: Airbyte mints a fresh id per
+    workspace, so the template's id does NOT exist in the trial workspace and `create_source`
+    with it would 500 ("could not find spec for this source type"). `create_organization` queues
+    `add_custom_connectors_to_workspace` async (fire-and-forget Celery), so by the time this step
+    runs the trial's custom definitions may exist, partially exist, or not exist at all — and
+    even when they exist their ids differ from the template's.
+
+    Resolution, matched by dockerRepository (the stable identity of a connector):
+    1. template id already known to the trial workspace → use as-is (public connectors);
+    2. a trial definition with the same dockerRepository exists (the Celery task already
+       registered it) → use ITS id;
+    3. otherwise create the custom definition in the trial workspace SYNCHRONOUSLY, from the
+       template definition's own repo/tag (not settings — the template's pinned version wins),
+       and use the fresh id. Also removes the Celery-task race entirely for this source.
+
+    `defs_cache` (built once per run) holds `trial_def_ids` (set), `trial_by_repo`
+    ({dockerRepository: trial defid}) and `template_def_by_id`; step 3 updates it as
+    definitions get created so repeated sources of the same type reuse one definition.
+    """
+    if template_defid in defs_cache["trial_def_ids"]:
+        return template_defid
+
+    template_def = defs_cache["template_def_by_id"].get(template_defid)
+    if template_def is None:
+        raise TrialCloneError(
+            f"template source definition {template_defid} not found in the template workspace's "
+            "definition list; cannot remap it onto the trial workspace"
+        )
+
+    repo = template_def["dockerRepository"]
+    if repo in defs_cache["trial_by_repo"]:
+        return defs_cache["trial_by_repo"][repo]
+
+    created_def = airbyte_service.create_custom_source_definition(
+        workspace_id=run.trial_org.airbyte_workspace_id,
+        name=template_def["name"],
+        docker_repository=repo,
+        docker_image_tag=template_def["dockerImageTag"],
+        documentation_url=template_def.get("documentationUrl") or "",
+    )
+    new_defid = created_def["sourceDefinitionId"]
+    defs_cache["trial_def_ids"].add(new_defid)
+    defs_cache["trial_by_repo"][repo] = new_defid
+    run.manifest.setdefault("custom_definitions_created", []).append(repo)
+    logger.info(f"registered custom source definition {repo} in trial workspace as {new_defid}")
+    return new_defid
+
+
 def _step_sources(run: CloneRun) -> None:
     """Step 3 — recreate the template's Airbyte sources in the trial workspace.
 
     Validates that every template source has a config entry in the (gitignored)
     TEMPLATE_SOURCE_CREDS_FILE before creating anything — Airbyte masks source configs on
     read-back, so the only source of real credentials is that Dalgo-controlled store.
+
+    Source definition ids are remapped per-source via `_remap_source_definition_id` — custom
+    connector definitions are workspace-scoped in Airbyte, so the template's id cannot be
+    reused blindly (see that helper's docstring).
     """
-    template_sources = airbyte_service.get_sources(run.template.airbyte_workspace_id)["sources"]
+    template_ws = run.template.airbyte_workspace_id
+    trial_ws = run.trial_org.airbyte_workspace_id
+    template_sources = airbyte_service.get_sources(template_ws)["sources"]
     names = [s["name"] for s in template_sources]
     missing = validate_template_source_configs(names)
     if missing:
         raise TrialCloneError(f"missing source config for template sources: {missing}")
 
+    template_defs = airbyte_service.get_source_definitions(template_ws)["sourceDefinitions"]
+    trial_defs = airbyte_service.get_source_definitions(trial_ws)["sourceDefinitions"]
+    defs_cache = {
+        "trial_def_ids": {d["sourceDefinitionId"] for d in trial_defs},
+        "trial_by_repo": {d["dockerRepository"]: d["sourceDefinitionId"] for d in trial_defs},
+        "template_def_by_id": {d["sourceDefinitionId"]: d for d in template_defs},
+    }
+
     source_map: dict = {}
     for src in template_sources:
         config = load_template_source_config(src["name"])
-        created = airbyte_service.create_source(
-            run.trial_org.airbyte_workspace_id, src["name"], src["sourceDefinitionId"], config
-        )
+        trial_defid = _remap_source_definition_id(run, src["sourceDefinitionId"], defs_cache)
+        created = airbyte_service.create_source(trial_ws, src["name"], trial_defid, config)
         source_map[src["sourceId"]] = created["sourceId"]
     run.manifest["source_map"] = source_map
     run.manifest["source_ids"] = list(source_map.values())
@@ -394,6 +497,14 @@ def _step_dbt(run: CloneRun) -> None:
             "setup_managed_git_workspace did not set the trial org's dbt workspace"
         )
 
+    # setup_managed_git_workspace hardcodes transform_type=GIT; mirror the TEMPLATE's value
+    # instead — a UI-operation-built template must stay `ui` on the trial, otherwise the
+    # repo-to-canvas sync path (`sync_remote_dbtproject_to_canvas`, gated on GIT) becomes active
+    # and can re-parse the scaffold repo right over the copied CanvasNode/CanvasEdge rows.
+    if trial_dbt.transform_type != template_dbt.transform_type:
+        trial_dbt.transform_type = template_dbt.transform_type
+        trial_dbt.save(update_fields=["transform_type"])
+
     is_file_based = not OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt).exists()
 
     if is_file_based:
@@ -447,6 +558,13 @@ def _step_prefect(run: CloneRun) -> None:
         run.template, run.trial_org, run.manifest.get("connection_map", {})
     )
     run.manifest["deployment_ids"] = deployment_ids
+
+    # then carry standalone template transform OrgTasks (not linked into any pipeline) and make
+    # every manual Transform-page deployment's baked params match the copied OrgTask parameters —
+    # see sync_transform_tasks_and_deployments.
+    run.manifest["transform_task_sync"] = sync_transform_tasks_and_deployments(
+        run.template, run.trial_org
+    )
 
 
 def _step_viz(run: CloneRun) -> None:

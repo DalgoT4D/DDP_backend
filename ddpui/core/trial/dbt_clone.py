@@ -20,6 +20,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import yaml
+
 from ddpui.core.dbtautomation_service import (
     create_or_update_dbt_model_in_project_v2,
     ensure_source_yml_definition_in_project,
@@ -310,15 +312,72 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
     return len(ordered_models)
 
 
+# template repo directories copied wholesale onto the trial repo (merged over the scaffold,
+# template files win on collision). `models/` is required — the rest are copied only if present.
+_TEMPLATE_REPO_DIRS = ("models", "macros", "seeds", "snapshots", "tests", "analyses")
+# template repo top-level files copied over the scaffold's versions if present. packages.yml in
+# particular: the scaffold ships the Dalgo-assets version (dbt_utils only) — a template pinning a
+# different dbt_utils or adding packages (codegen, …) must carry its own.
+_TEMPLATE_REPO_FILES = ("packages.yml", "selectors.yml")
+
+
+def _merge_template_project_config(template_repo_dir: Path, trial_repo_dir: Path) -> None:
+    """Carry the TEMPLATE's `dbt_project.yml` config onto the trial repo, re-keyed to the trial's
+    scaffold project identity.
+
+    The scaffold's `dbt_project.yml` is stock `dbt init` output — any template folder-level
+    config (`models: {..., +materialized/+schema}`, `vars:`, `seeds:`, `on-run-start/end` hooks)
+    would silently be LOST and the trial's dbt builds would materialize differently (e.g. every
+    un-inline-configured model falling back to `view`). So the template's file is taken as the
+    base, with the scaffold's own `name:`/`profile:` preserved (the trial project is always
+    `dbtrepo` and its profile must keep matching the cli-profile block `setup_managed_git_workspace`
+    created) — and the per-resource config sections re-keyed from the template's project name to
+    the scaffold's, since dbt scopes those sections by project name.
+
+    A template repo without a `dbt_project.yml` (not a valid dbt project, but conceivable for a
+    bare models dump) keeps the scaffold's file untouched.
+    """
+    template_yml = template_repo_dir / "dbt_project.yml"
+    trial_yml = trial_repo_dir / "dbt_project.yml"
+    if not template_yml.exists():
+        logger.warning(f"template repo has no dbt_project.yml; trial keeps the scaffold default")
+        return
+
+    template_cfg = yaml.safe_load(template_yml.read_text(encoding="utf-8")) or {}
+    scaffold_cfg = yaml.safe_load(trial_yml.read_text(encoding="utf-8")) or {}
+
+    template_name = template_cfg.get("name")
+    scaffold_name = scaffold_cfg.get("name")
+    template_cfg["name"] = scaffold_name
+    template_cfg["profile"] = scaffold_cfg.get("profile")
+    if template_name and scaffold_name and template_name != scaffold_name:
+        for section_key in ("models", "seeds", "snapshots", "tests"):
+            section = template_cfg.get(section_key)
+            if isinstance(section, dict) and template_name in section:
+                section[scaffold_name] = section.pop(template_name)
+
+    trial_yml.write_text(yaml.safe_dump(template_cfg, sort_keys=False), encoding="utf-8")
+    logger.info("merged template dbt_project.yml config onto trial repo")
+
+
 def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
-    """Copy the template's `.sql`/`.yml` dbt model files directly from ITS git repo into the
-    trial's freshly-created managed repo, for templates with ZERO OrgDbtOperation rows — i.e.
+    """Copy the template's dbt project files directly from ITS git repo into the trial's
+    freshly-created managed repo, for templates with ZERO OrgDbtOperation rows — i.e.
     github/file-based dbt projects (e.g. `health_org`) whose canvas is parsed straight from the
     repo rather than built via the UI operation-builder. `regenerate_and_push` cannot handle
     these (there's no operation chain to regenerate `.sql` from), so this mirrors the existing
     "copy Dalgo managed models to external repository" flow
-    (`dbt_service.switch_git_repository_v1`) instead: clone the source repo, copy its `models/`
-    directory onto the destination working dir, commit + push.
+    (`dbt_service.switch_git_repository_v1`) instead: clone the source repo, copy its project
+    files onto the destination working dir, commit + push.
+
+    What gets copied (over the `setup_managed_git_workspace` scaffold, template files winning):
+    - directories: `models/` (required) plus `macros/`, `seeds/`, `snapshots/`, `tests/`,
+      `analyses/` when present — a template model calling its own macro, seeding a lookup table,
+      or shipping singular tests would otherwise fail/degrade silently on the trial;
+    - files: `packages.yml` / `selectors.yml` when present (template's pinned deps win over the
+      scaffold's asset copy);
+    - `dbt_project.yml` config, re-keyed to the scaffold's project name/profile — see
+      `_merge_template_project_config` (folder-level +materialized/+schema/vars/hooks survive).
 
     Auth for cloning the TEMPLATE repo depends on how it's hosted:
     - Dalgo-managed (`is_repo_managed_by_system=True`): the org-admin PAT (managed repos don't
@@ -353,7 +412,8 @@ def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
             relative_path="template_dbtrepo",
             pat=template_pat,
         )
-        template_models_dir = Path(template_clone.repo_local_path) / "models"
+        template_repo_dir = Path(template_clone.repo_local_path)
+        template_models_dir = template_repo_dir / "models"
         if not template_models_dir.exists():
             # copy_dbt_dag has already created trial OrgDbtModel rows with sql_path set — if we
             # copy no .sql files, the trial dbt project is half-populated (DAG metadata but no
@@ -361,7 +421,15 @@ def copy_dbt_repo_files(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> None:
             raise TrialCloneError(
                 f"template dbt repo {template_dbt.gitrepo_url} has no models/ directory to copy"
             )
-        shutil.copytree(template_models_dir, trial_repo_dir / "models", dirs_exist_ok=True)
+        for dirname in _TEMPLATE_REPO_DIRS:
+            src_dir = template_repo_dir / dirname
+            if src_dir.exists():
+                shutil.copytree(src_dir, trial_repo_dir / dirname, dirs_exist_ok=True)
+        for filename in _TEMPLATE_REPO_FILES:
+            src_file = template_repo_dir / filename
+            if src_file.exists():
+                shutil.copy(src_file, trial_repo_dir / filename)
+        _merge_template_project_config(template_repo_dir, trial_repo_dir)
 
     trial_pat = GitManager.get_org_admin_pat()
     git_manager = GitManager(repo_local_path=str(trial_repo_dir), pat=trial_pat)

@@ -246,3 +246,94 @@ def test_clone_orchestrate_dataflows_calls_create_pipeline_per_template_dataflow
     assert called_org == trial_org
     assert called_payload.connections[0].id == "trial-conn-1"
     assert deployment_ids == ["dep-new"]
+
+
+# ---------------------------------------------------------------------------
+# sync_transform_tasks_and_deployments (Step 6b)
+# ---------------------------------------------------------------------------
+
+
+def _make_trial_with_cli_block():
+    """trial org whose OrgDbt has a cli_profile_block, as step 5 guarantees before step 6."""
+    from ddpui.models.org import OrgPrefectBlockv1
+
+    template = Org.objects.create(name="tmpl-sync", slug="tmpl-sync")
+    template.dbt = _make_orgdbt("tmpl-sync")
+    template.save()
+    trial_org = Org.objects.create(name="Trial sync", slug="trial-sync")
+    trial_dbt = _make_orgdbt("trial-sync")
+    cli_block = OrgPrefectBlockv1.objects.create(
+        org=trial_org, block_type="dbt cli profile", block_name="trial-sync-cli", block_id="b-1"
+    )
+    trial_dbt.cli_profile_block = cli_block
+    trial_dbt.save()
+    trial_org.dbt = trial_dbt
+    trial_org.save()
+    return template, trial_org
+
+
+@patch("ddpui.core.trial.prefect_clone.prefect_service")
+@patch("ddpui.core.trial.prefect_clone.pipeline_with_orgtasks")
+@patch("ddpui.core.trial.prefect_clone.create_prefect_deployment_for_dbtcore_task")
+@patch("ddpui.core.trial.prefect_clone.DbtProjectManager")
+def test_sync_transform_tasks_copies_standalone_params_and_fixes_deployments(
+    mock_dbt_mgr, mock_create_deployment, mock_pipeline_with, mock_prefect_service
+):
+    """(a) a template dbt-run OrgTask with parameters that sits in NO dataflow must still reach
+    the trial (adopting the param-less step-5 row); (b) the manual deployment that step 5 baked
+    with empty params must be rebaked with the copied params; (c) a second parameter variant
+    minted fresh must get a manual deployment created (step 5 never made one for it)."""
+    template, trial_org = _make_trial_with_cli_block()
+    dbt_task = Task.objects.create(
+        type=TaskType.DBT, slug="dbt-run", label="DBT run", command="run"
+    )
+
+    # template: standalone parameterized dbt-run (linked to no dataflow) + a second variant
+    OrgTask.objects.create(
+        org=template, task=dbt_task, dbt=template.dbt, parameters={"options": {"select": "marts"}}
+    )
+    OrgTask.objects.create(
+        org=template, task=dbt_task, dbt=template.dbt, parameters={"options": {"select": "staging"}}
+    )
+
+    # trial: the param-less dbt-run row step 5 created, with its manual deployment already baked
+    trial_run_task = OrgTask.objects.create(org=trial_org, task=dbt_task, dbt=trial_org.dbt)
+    manual_flow = OrgDataFlowv1.objects.create(
+        org=trial_org,
+        name="manual-run",
+        deployment_name="manual-trial-sync-dbt-run-abc",
+        deployment_id="manual-dep-1",
+        dataflow_type="manual",
+    )
+    DataflowOrgTask.objects.create(dataflow=manual_flow, orgtask=trial_run_task, seq=0)
+
+    mock_pipeline_with.return_value = ([{"slug": "dbt-run", "seq": 0}], None)
+    mock_dbt_mgr.gather_dbt_project_params.return_value = object()
+
+    result = prefect_clone.sync_transform_tasks_and_deployments(template, trial_org)
+
+    # (a) adoption: the step-5 row now carries the first template variant's params
+    trial_run_task.refresh_from_db()
+    assert trial_run_task.parameters == {"options": {"select": "marts"}}
+    # second variant minted as its own trial row
+    trial_variants = OrgTask.objects.filter(org=trial_org, task=dbt_task)
+    assert trial_variants.count() == 2
+    assert {str(t.parameters) for t in trial_variants} == {
+        str({"options": {"select": "marts"}}),
+        str({"options": {"select": "staging"}}),
+    }
+
+    # (b) existing manual deployment rebaked with the adopted params
+    mock_prefect_service.update_dataflow_v1.assert_called_once()
+    dep_id, update_payload = mock_prefect_service.update_dataflow_v1.call_args[0]
+    assert dep_id == "manual-dep-1"
+    assert update_payload.deployment_params["config"]["tasks"] == [{"slug": "dbt-run", "seq": 0}]
+
+    # (c) fresh variant got a manual deployment created
+    mock_create_deployment.assert_called_once()
+    created_orgtask = mock_create_deployment.call_args[0][0]
+    assert created_orgtask.parameters == {"options": {"select": "staging"}}
+
+    assert result["manual_deployments_created"] == 1
+    assert result["manual_deployments_rebaked"] == 1
+    assert result["transform_orgtasks_synced"] == 2

@@ -426,6 +426,71 @@ def test_clone_alerts_remaps_metric_kpi_and_resets_delivery_state():
 # ---------------------------------------------------------------------------
 
 
+def test_clone_report_snapshots_remaps_frozen_saved_metric_ids():
+    """`saved_metric_id` inside a frozen chart config is resolved LIVE at render time with no
+    org filter — the clone must remap it onto the trial's cloned Metric, or every trial snapshot
+    render reads the TEMPLATE org's live Metric row. Frozen KPI entries (no `extra_config`) must
+    be copied untouched."""
+    template_org = Org.objects.create(name="tmpl-fz", slug="tmpl-fz")
+    trial_org = Org.objects.create(name="trial-fz", slug="trial-fz")
+    t_user = User.objects.create(username="tfz@x.org", email="tfz@x.org")
+    r_user = User.objects.create(username="rfz@x.org", email="rfz@x.org")
+    template_user = OrgUser.objects.create(user=t_user, org=template_org)
+    trial_user = OrgUser.objects.create(user=r_user, org=trial_org)
+
+    old_metric = Metric.objects.create(
+        name="m1",
+        schema_name="s",
+        table_name="t",
+        column="c",
+        aggregation="sum",
+        org=template_org,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+    new_metric = Metric.objects.create(
+        name="m1",
+        schema_name="s",
+        table_name="t",
+        column="c",
+        aggregation="sum",
+        org=trial_org,
+        created_by=trial_user,
+        last_modified_by=trial_user,
+    )
+    ReportSnapshot.objects.create(
+        title="frozen",
+        frozen_dashboard={"title": "d", "tabs": []},
+        frozen_chart_configs={
+            "10": {
+                "title": "chart entry",
+                "extra_config": {"metrics": [{"saved_metric_id": old_metric.id}]},
+            },
+            "kpi-3": {"title": "kpi entry", "current_value": 42},
+        },
+        org=template_org,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+
+    count = viz_clone._clone_report_snapshots(
+        template_org, trial_org, trial_user, {old_metric.id: new_metric}
+    )
+    assert count == 1
+    cloned = ReportSnapshot.objects.get(org=trial_org)
+    assert (
+        cloned.frozen_chart_configs["10"]["extra_config"]["metrics"][0]["saved_metric_id"]
+        == new_metric.id
+    )
+    assert cloned.frozen_chart_configs["kpi-3"] == {"title": "kpi entry", "current_value": 42}
+    # template snapshot untouched
+    tmpl = ReportSnapshot.objects.get(org=template_org)
+    assert (
+        tmpl.frozen_chart_configs["10"]["extra_config"]["metrics"][0]["saved_metric_id"]
+        == old_metric.id
+    )
+
+
 def test_clone_report_snapshots_remaps_org_and_resets_public_share():
     template_org = _make_org("tmpl-report")
     trial_org = _make_org("trial-report")
@@ -443,7 +508,7 @@ def test_clone_report_snapshots_remaps_org_and_resets_public_share():
         last_modified_by=template_user,
     )
 
-    count = viz_clone._clone_report_snapshots(template_org, trial_org, trial_user)
+    count = viz_clone._clone_report_snapshots(template_org, trial_org, trial_user, {})
 
     assert count == 1
     new_r = ReportSnapshot.objects.get(org=trial_org, title="Q1 report")
