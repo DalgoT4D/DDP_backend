@@ -1,5 +1,3 @@
-import os
-import tempfile
 from dataclasses import dataclass, field
 
 from django.conf import settings
@@ -13,7 +11,6 @@ from ddpui.core.trial.warehouse_provision import (
     drop_trial_database,
     email_hash8,
 )
-from ddpui.core.trial.warehouse_data import copy_warehouse_data
 from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.schemas.org_schema import CreateOrgSchema
@@ -66,12 +63,11 @@ class CloneRun:
 STEP_LABELS = {
     1: "Creating your workspace",
     2: "Setting up your warehouse",
-    3: "Copying your data",
-    4: "Connecting your sources",
-    5: "Building your pipelines",
-    6: "Setting up transforms",
-    7: "Scheduling syncs",
-    8: "Preparing your dashboards",
+    3: "Connecting your sources",
+    4: "Building your pipelines",
+    5: "Setting up transforms",
+    6: "Scheduling syncs",
+    7: "Preparing your dashboards",
 }
 
 
@@ -173,15 +169,19 @@ def _step_warehouse(run: CloneRun) -> None:
         raise RuntimeError(f"v1 supports postgres only; template is {template_wh.wtype}")
 
     # carry the template's non-connection config forward (schema/ssl), overriding host/db creds
-    # below; also used to decide whether the template warehouse lives on the SAME trials-RDS
-    # instance, which allows a fast server-side CREATE DATABASE ... TEMPLATE ... copy instead
-    # of an empty db + pg_dump/restore in step 3.
+    # below. The template warehouse MUST live on the trials-RDS instance itself — the data copy
+    # is a server-side `CREATE DATABASE ... TEMPLATE ...` (warehouse_provision terminates any
+    # blocking sessions first); there is no cross-host dump/restore path.
     template_creds = retrieve_warehouse_credentials(template_wh) or {}
-    same_instance = template_creds.get("host") == settings.TRIALS_RDS_HOST
+    if template_creds.get("host") != settings.TRIALS_RDS_HOST:
+        raise RuntimeError(
+            f"template warehouse host {template_creds.get('host')!r} is not the trials-RDS "
+            f"instance {settings.TRIALS_RDS_HOST!r}; the template org's warehouse must live "
+            "on the trials RDS for the server-side CREATE DATABASE ... TEMPLATE copy"
+        )
     trial_db_params = provision_trial_database(
-        run.trial_email, template_db=template_creds.get("database") if same_instance else None
+        run.trial_email, template_db=template_creds.get("database")
     )
-    run.manifest["warehouse_copied_server_side"] = same_instance
 
     # record the teardown marker immediately — the RDS database already exists at this point,
     # so any failure below must still trigger drop_trial_database on the way out.
@@ -230,43 +230,8 @@ def _step_warehouse(run: CloneRun) -> None:
     run.manifest["trial_destination_defid"] = dest_def_id
 
 
-def _step_warehouse_data(run: CloneRun) -> None:
-    """Step 3 — pg_dump the template warehouse and restore into the trial warehouse.
-
-    Skipped entirely when step 2 already did a server-side `CREATE DATABASE ... TEMPLATE ...`
-    copy (template warehouse + trials-RDS on the same host) — the trial db already has the
-    template's data, so pg_dump/restore here would be redundant (and much slower).
-    """
-    if run.manifest.get("warehouse_copied_server_side"):
-        logger.info(
-            "warehouse data already copied server-side (CREATE DATABASE TEMPLATE); "
-            "skipping pg_dump"
-        )
-        return
-
-    template_wh = OrgWarehouse.objects.filter(org=run.template).first()
-    trial_wh = OrgWarehouse.objects.filter(org=run.trial_org).first()
-    if template_wh is None or trial_wh is None:
-        raise RuntimeError("missing template or trial warehouse for data copy")
-
-    src = retrieve_warehouse_credentials(template_wh)
-    dst = retrieve_warehouse_credentials(trial_wh)
-    if not src or not dst:
-        raise RuntimeError("could not retrieve warehouse credentials for data copy")
-
-    with tempfile.NamedTemporaryFile(suffix=".pgc", delete=False) as tmp:
-        dump_path = tmp.name
-    try:
-        copy_warehouse_data(src, dst, dump_path)
-    finally:
-        # the dump is a full copy of the template warehouse's data sitting on local disk —
-        # remove it regardless of success/failure so nothing is left at rest.
-        if os.path.exists(dump_path):
-            os.remove(dump_path)
-
-
 def _step_sources(run: CloneRun) -> None:
-    """Step 4 — recreate the template's Airbyte sources in the trial workspace.
+    """Step 3 — recreate the template's Airbyte sources in the trial workspace.
 
     Validates that every template source has a config entry in the (gitignored)
     TEMPLATE_SOURCE_CREDS_FILE before creating anything — Airbyte masks source configs on
@@ -310,8 +275,8 @@ def _normalize_streams_overwrite(catalog: dict, selected_names: set) -> list:
     source's streams, the trial connection must select that same subset — not every stream in
     the freshly-discovered catalog. The trial's first sync must be a full read against an empty
     Airbyte state (no prior sync history in the trial workspace) landing on top of the
-    pg_dump'd warehouse rows copied in Step 3 — Full Refresh|Overwrite is the only mode that's
-    safe there regardless of what sync mode the template connection used.
+    warehouse rows copied server-side in Step 2 — Full Refresh|Overwrite is the only mode
+    that's safe there regardless of what sync mode the template connection used.
 
     If `selected_names` is empty (the template connection exposed no syncCatalog selection
     info to key off of), fall back to selecting every discovered stream so the clone never ends
@@ -337,7 +302,7 @@ def _normalize_streams_overwrite(catalog: dict, selected_names: set) -> list:
 
 
 def _step_connections(run: CloneRun) -> None:
-    """Step 5 — recreate connections on remapped sources; first-sync Full Refresh|Overwrite.
+    """Step 4 — recreate connections on remapped sources; first-sync Full Refresh|Overwrite.
 
     Catalog ids are workspace-scoped, so the catalog is re-discovered on the NEW source rather
     than reusing the template connection's catalogId. Uses the airbytehelpers wrapper (not the
@@ -371,7 +336,7 @@ def _step_connections(run: CloneRun) -> None:
 
 
 def _step_dbt(run: CloneRun) -> None:
-    """Step 6 — set up a fresh managed dbt workspace on the trial org, deep-copy the template's
+    """Step 5 — set up a fresh managed dbt workspace on the trial org, deep-copy the template's
     transform DAG (legacy OrgDbtModel/Operation/Edge rows + the active-path CanvasNode/Edge
     rows) onto it, then materialize the trial's `.sql`/`sources.yml` files via one of two paths
     and push to the new repo.
@@ -459,7 +424,7 @@ def _step_dbt(run: CloneRun) -> None:
 
 
 def _step_prefect(run: CloneRun) -> None:
-    """Step 7 — rebuild the template's orchestrate Prefect deployments on the trial org.
+    """Step 6 — rebuild the template's orchestrate Prefect deployments on the trial org.
 
     Delegates to `ddpui.core.trial.prefect_clone.clone_orchestrate_dataflows`, which reconstructs
     each template `OrgDataFlowv1(dataflow_type="orchestrate")` as a fresh
@@ -476,12 +441,12 @@ def _step_prefect(run: CloneRun) -> None:
 
 
 def _step_viz(run: CloneRun) -> None:
-    """Step 8 — clone native viz objects (metrics/KPIs/charts/dashboards/filters/alerts/report
+    """Step 7 — clone native viz objects (metrics/KPIs/charts/dashboards/filters/alerts/report
     snapshots) onto the trial org, rewriting cross-object id references via old->new maps.
 
     Delegates to `ddpui.core.trial.viz_clone.clone_viz`. Only needs the trial org + admin
-    OrgUser from Step 1 — independent of Steps 4-7 (Airbyte/dbt/Prefect); cloned charts/dashboards
-    only render real data once Step 3's warehouse copy has run.
+    OrgUser from Step 1 — independent of Steps 3-6 (Airbyte/dbt/Prefect); cloned charts/dashboards
+    only render real data once Step 2's server-side warehouse copy has run.
     """
     run.manifest["viz"] = clone_viz(run.template, run.trial_org, run.trial_orguser)
 
@@ -547,16 +512,16 @@ def clone_template_org(
     role_slug: str | None = None,
     progress=None,
 ) -> CloneRun:
-    """Deep-clone a template org into a new trial org (Steps 1–8), timing each step.
+    """Deep-clone a template org into a new trial org (Steps 1–7), timing each step.
 
-    Serial chain: org+user → warehouse → warehouse-data → sources → connections → dbt → prefect →
-    viz. State for the run lives only in the returned in-memory `CloneRun` — nothing is persisted
-    for it. On any failure the exception is re-raised (after best-effort teardown) so the caller
-    (management command / future Celery task) sees it.
+    Serial chain: org+user → warehouse (incl. server-side data copy) → sources → connections →
+    dbt → prefect → viz. State for the run lives only in the returned in-memory `CloneRun` —
+    nothing is persisted for it. On any failure the exception is re-raised (after best-effort
+    teardown) so the caller (management command / Celery task) sees it.
 
     `org_name`/`role_slug` are optional overrides applied in Step 1 (see `_step_org_and_user`).
     `progress`, if given, is called as `progress(step_number, label)` right before each of the
-    8 steps runs (labels from `STEP_LABELS`) — e.g. to stream progress to a client. Optional;
+    7 steps runs (labels from `STEP_LABELS`) — e.g. to stream progress to a client. Optional;
     when None, behavior is unchanged from before this parameter existed.
     """
     if account_exists_for_email(trial_email):
@@ -579,12 +544,11 @@ def clone_template_org(
     try:
         _do(1, "step1_org_user", _step_org_and_user)
         _do(2, "step2_warehouse", _step_warehouse)
-        _do(3, "step3_warehouse_data", _step_warehouse_data)
-        _do(4, "step4_sources", _step_sources)
-        _do(5, "step5_connections", _step_connections)
-        _do(6, "step6_dbt", _step_dbt)
-        _do(7, "step7_prefect", _step_prefect)
-        _do(8, "step8_viz", _step_viz)
+        _do(3, "step3_sources", _step_sources)
+        _do(4, "step4_connections", _step_connections)
+        _do(5, "step5_dbt", _step_dbt)
+        _do(6, "step6_prefect", _step_prefect)
+        _do(7, "step7_viz", _step_viz)
     except Exception as err:
         logger.error(f"clone from template {template.slug} failed: {err}")
         # best-effort teardown of whatever got created before the failure — never let a

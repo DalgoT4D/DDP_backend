@@ -140,19 +140,21 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
         logger.info(f"reassigned template objects owned by {owner} to {ft_role}")
 
 
-def provision_trial_database(email: str, template_db: str | None = None) -> dict:
+def provision_trial_database(email: str, template_db: str) -> dict:
     """Create a dedicated Postgres database + owner role on the trials-RDS instance for a
     trial, keyed by the trial email (not the trialclone id) so repeated trials from the same
     email land on the same, deterministically-named db/role.
 
-    When `template_db` is given (the template warehouse's db name on this SAME trials-RDS
-    instance), the new db is created as a server-side, file-level copy of it via
-    `CREATE DATABASE ... TEMPLATE ...` — a few seconds, no network transfer — instead of an
-    empty database. Requires no active sessions on template_db (it must be a frozen template).
+    The new db is created as a server-side, file-level copy of `template_db` (the template
+    warehouse's db name on this SAME trials-RDS instance) via
+    `CREATE DATABASE ... TEMPLATE ...` — a few seconds, no network transfer. Any sessions
+    still connected to template_db are terminated first (see _create_database_from_template).
 
     Returns connection params for the new database using the FT-USER's own credentials
     (never the admin/master credentials).
     """
+    if not template_db:
+        raise ValueError("template_db is required — the trial db is always a template copy")
     ft_db = ft_database_name(email)
     ft_role = ft_role_name(email)
     password = secrets.token_urlsafe(24)
@@ -165,14 +167,11 @@ def provision_trial_database(email: str, template_db: str | None = None) -> dict
         conn = _admin_connect("postgres")
         try:
             with conn.cursor() as cursor:
-                if template_db:
-                    # template_db is an ops/secrets-manager-controlled identifier (the template
-                    # warehouse's own db name, retrieved via retrieve_warehouse_credentials),
-                    # never raw user input — f-string interpolation does not cross a trust boundary.
-                    # Copy clears any blocking sessions on the template first (see helper).
-                    _create_database_from_template(cursor, ft_db, template_db)
-                else:
-                    cursor.execute(f'CREATE DATABASE "{ft_db}"')
+                # template_db is an ops/secrets-manager-controlled identifier (the template
+                # warehouse's own db name, retrieved via retrieve_warehouse_credentials),
+                # never raw user input — f-string interpolation does not cross a trust boundary.
+                # Copy clears any blocking sessions on the template first (see helper).
+                _create_database_from_template(cursor, ft_db, template_db)
                 cursor.execute(f"CREATE ROLE \"{ft_role}\" LOGIN PASSWORD '{password}'")
                 cursor.execute(f'GRANT "{ft_role}" TO CURRENT_USER')
                 cursor.execute(f'ALTER DATABASE "{ft_db}" OWNER TO "{ft_role}"')
@@ -187,8 +186,7 @@ def provision_trial_database(email: str, template_db: str | None = None) -> dict
             with ft_db_conn.cursor() as cursor:
                 cursor.execute(f'GRANT ALL ON SCHEMA public TO "{ft_role}"')
                 cursor.execute(f'ALTER SCHEMA public OWNER TO "{ft_role}"')
-                if template_db:
-                    _reassign_copied_objects(cursor, ft_role)
+                _reassign_copied_objects(cursor, ft_role)
         finally:
             ft_db_conn.close()
     except Exception as err:  # skipcq PYL-W0703

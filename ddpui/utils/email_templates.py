@@ -318,6 +318,112 @@ def render_share_report_email(
     )
 
 
+# ── Trial emails ─────────────────────────────────────────────────────────
+
+
+def render_trial_verification_email(verify_url: str) -> tuple:
+    """Render HTML + plain-text email for verifying a free-trial signup.
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    safe_url = html.escape(verify_url)
+
+    plain_text = (
+        "Welcome to Dalgo!\n"
+        "\n"
+        "Click to verify your email and set your password:\n"
+        f"{verify_url}\n"
+        "\n"
+        "This link expires in 24 hours.\n"
+        "\n"
+        "---\n"
+        "You received this email because you signed up for a Dalgo trial.\n"
+    )
+
+    body_html = f"""\
+              <!-- Headline -->
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                Welcome to Dalgo! &#127881;
+              </p>
+
+              <!-- Intro -->
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; line-height:1.5;">
+                You're one step away from your trial workspace. Verify your email and set your password to get started.
+              </p>
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <a href="{safe_url}"
+                       style="display:inline-block; background-color:#00897B; color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                      Verify email
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Expiry note -->
+              <p style="margin:20px 0 0; font-size:13px; color:#9ca3af; line-height:1.5;">
+                This link expires in 24 hours.
+              </p>"""
+
+    return plain_text, _render_email_shell(
+        body_html,
+        "You received this email because you signed up for a Dalgo trial."
+        " If this wasn't you, you can safely ignore it.",
+    )
+
+
+def render_trial_welcome_email(login_url: str) -> tuple:
+    """Render HTML + plain-text email sent once a free-trial workspace is ready.
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    safe_url = html.escape(login_url)
+
+    plain_text = (
+        "Welcome to Dalgo!\n"
+        "\n"
+        "Your trial workspace is set up and ready to explore.\n"
+        "\n"
+        f"Log in to get started:\n{login_url}\n"
+        "\n"
+        "---\n"
+        "You received this email because you signed up for a Dalgo trial.\n"
+    )
+
+    body_html = f"""\
+              <!-- Headline -->
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                Your trial workspace is ready &#10024;
+              </p>
+
+              <!-- Intro -->
+              <p style="margin:0 0 24px; font-size:14px; color:#6b7280; line-height:1.5;">
+                Your Dalgo trial workspace is set up with sample data, pipelines, and dashboards — ready to explore.
+              </p>
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <a href="{safe_url}"
+                       style="display:inline-block; background-color:#00897B; color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                      Log in to Dalgo
+                    </a>
+                  </td>
+                </tr>
+              </table>"""
+
+    return plain_text, _render_email_shell(
+        body_html,
+        "You received this email because you signed up for a Dalgo trial.",
+    )
+
+
 # ── Alert email ──────────────────────────────────────────────────────────
 
 

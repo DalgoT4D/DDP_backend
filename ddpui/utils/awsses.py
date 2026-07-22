@@ -6,6 +6,10 @@ import email.mime.text
 import email.mime.application
 
 from ddpui.utils.aws_client import AWSClient
+from ddpui.utils.email_templates import (
+    render_trial_verification_email,
+    render_trial_welcome_email,
+)
 
 
 def _get_ses_client():
@@ -98,23 +102,17 @@ If you did not request a password reset you may safely ignore this email.
 
 
 def send_trial_verification_email(to_email: str, verify_url: str) -> None:
-    """send an email to verify a free-trial signup and set a password"""
+    """send a branded HTML email to verify a free-trial signup and set a password"""
     subject = "Verify your email to start your Dalgo trial"
-    message = (
-        f"Welcome to Dalgo!\n\nClick to verify your email and set your password:\n{verify_url}\n\n"
-        "This link expires in 24 hours."
-    )
-    send_text_message(to_email, subject, message)
+    text_body, html_body = render_trial_verification_email(verify_url)
+    send_html_message(to_email, subject, text_body, html_body)
 
 
 def send_trial_welcome_email(to_email: str, login_url: str) -> None:
     """sent once a free-trial clone finishes — so the user gets in even if they closed the tab"""
     subject = "Welcome to Dalgo — your trial workspace is ready"
-    message = (
-        "Welcome to Dalgo!\n\nYour trial workspace is set up and ready to explore.\n"
-        f"Log in to get started:\n{login_url}\n"
-    )
-    send_text_message(to_email, subject, message)
+    text_body, html_body = render_trial_welcome_email(login_url)
+    send_html_message(to_email, subject, text_body, html_body)
 
 
 def send_signup_email(to_email: str, verification_url: str) -> None:

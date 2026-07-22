@@ -84,7 +84,7 @@ def test_provision_creates_database_and_dedicated_role(mock_settings, mock_psyco
     expected_db = ft_database_name(email)
     expected_role = ft_role_name(email)
 
-    params = provision_trial_database(email)
+    params = provision_trial_database(email, template_db="tmpl_db")
 
     # two connections: one to maintenance 'postgres' db, one to the freshly created ft db
     assert mock_psycopg2.connect.call_count == 2
@@ -134,6 +134,12 @@ def test_provision_server_side_copy_from_template(mock_settings, mock_psycopg2):
     executed = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
     assert "TEMPLATE" in executed and "himanshu_wh" in executed  # server-side copy issued
     assert params["database"].startswith("ft_")
+
+
+def test_provision_requires_template_db():
+    """The trial db is always a server-side copy — an empty/None template_db must fail fast."""
+    with pytest.raises(ValueError, match="template_db"):
+        provision_trial_database("a@b.org", template_db=None)
 
 
 @patch("ddpui.core.trial.warehouse_provision.time.sleep")
@@ -227,7 +233,7 @@ def test_provision_rolls_back_on_partial_failure(mock_settings, mock_psycopg2, m
     mock_psycopg2.connect.side_effect = [admin_conn, ft_db_conn]
 
     with pytest.raises(Exception, match="grant failed"):
-        provision_trial_database("someone@example.com")
+        provision_trial_database("someone@example.com", template_db="tmpl_db")
 
     mock_drop.assert_called_once_with("someone@example.com")
     admin_conn.close.assert_called_once()  # first connection still cleanly closed

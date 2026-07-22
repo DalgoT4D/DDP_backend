@@ -7,6 +7,7 @@ from ddpui.utils.awsses import (
     send_invite_user_email,
     send_youve_been_added_email,
     send_trial_verification_email,
+    send_trial_welcome_email,
 )
 
 
@@ -74,10 +75,24 @@ Open your dashboard at https://test-frontend.com
 
 
 def test_send_trial_verification_email():
-    """tests send_trial_verification_email"""
-    with patch("ddpui.utils.awsses.send_text_message") as mock_send_text_message:
+    """tests send_trial_verification_email — sends branded HTML with plain-text fallback"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send_html_message:
         send_trial_verification_email("to_email", "verify_url")
-        mock_send_text_message.assert_called_once()
-        args, _ = mock_send_text_message.call_args
+        mock_send_html_message.assert_called_once()
+        args, _ = mock_send_html_message.call_args
         assert args[0] == "to_email"
-        assert "verify_url" in args[2]
+        assert "verify_url" in args[2]  # plain-text body
+        assert "verify_url" in args[3]  # html body
+        assert "#00897B" in args[3]  # Dalgo shell
+
+
+def test_send_trial_welcome_email():
+    """tests send_trial_welcome_email — sends branded HTML with plain-text fallback"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send_html_message:
+        send_trial_welcome_email("to_email", "login_url")
+        mock_send_html_message.assert_called_once()
+        args, _ = mock_send_html_message.call_args
+        assert args[0] == "to_email"
+        assert "login_url" in args[2]  # plain-text body
+        assert "login_url" in args[3]  # html body
+        assert "#00897B" in args[3]  # Dalgo shell

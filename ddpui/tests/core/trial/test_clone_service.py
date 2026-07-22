@@ -1,4 +1,3 @@
-import os
 import uuid as uuid_module
 from unittest.mock import patch, Mock
 
@@ -23,11 +22,10 @@ pytestmark = pytest.mark.django_db
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_runs_all_steps_and_completes(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl", slug="tmpl")
     run = clone_service.clone_template_org(template.id, "a@b.org")
@@ -41,16 +39,14 @@ def test_clone_runs_all_steps_and_completes(
     mock_s5.assert_called_once()
     mock_s6.assert_called_once()
     mock_s7.assert_called_once()
-    mock_s8.assert_called_once()
     assert set(run.timings.keys()) == {
         "step1_org_user",
         "step2_warehouse",
-        "step3_warehouse_data",
-        "step4_sources",
-        "step5_connections",
-        "step6_dbt",
-        "step7_prefect",
-        "step8_viz",
+        "step3_sources",
+        "step4_connections",
+        "step5_dbt",
+        "step6_prefect",
+        "step7_viz",
     }
 
 
@@ -59,22 +55,21 @@ def test_clone_runs_all_steps_and_completes(
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_invokes_progress_callback_for_all_steps_in_order(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl-progress", slug="tmpl-progress")
     calls = []
     clone_service.clone_template_org(
         template.id, "progress@b.org", progress=lambda n, label: calls.append((n, label))
     )
-    assert [n for n, _ in calls] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert [n for n, _ in calls] == [1, 2, 3, 4, 5, 6, 7]
     for n, label in calls:
         assert label == clone_service.STEP_LABELS[n]
     # timing keys must be unaffected by the progress refactor
-    assert set(clone_service.STEP_LABELS.keys()) == {1, 2, 3, 4, 5, 6, 7, 8}
+    assert set(clone_service.STEP_LABELS.keys()) == {1, 2, 3, 4, 5, 6, 7}
 
 
 @patch("ddpui.core.trial.clone_service._step_viz")
@@ -82,18 +77,17 @@ def test_clone_invokes_progress_callback_for_all_steps_in_order(
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_without_progress_callback_still_works(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     """progress is optional — existing management-command path (no progress) must be unaffected."""
     template = Org.objects.create(name="tmpl-noprogress", slug="tmpl-noprogress")
     run = clone_service.clone_template_org(template.id, "noprogress@b.org")
     assert isinstance(run, CloneRun)
     mock_s1.assert_called_once()
-    mock_s8.assert_called_once()
+    mock_s7.assert_called_once()
 
 
 @patch("ddpui.core.trial.clone_service._step_viz")
@@ -101,11 +95,10 @@ def test_clone_without_progress_callback_still_works(
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_passes_org_name_and_role_slug_onto_run(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl-orgrole", slug="tmpl-orgrole")
 
@@ -144,7 +137,7 @@ def test_clone_reraises_and_skips_teardown_when_step1_fails_immediately(
 
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_sources", side_effect=RuntimeError("boom"))
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_tears_down_created_resources_on_later_failure(
@@ -220,6 +213,7 @@ def test_clone_tears_down_org_on_step1_mid_failure(
     mock_drop.assert_not_called()
 
 
+@patch("ddpui.core.trial.clone_service.settings")
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
 @patch("ddpui.core.trial.clone_service.create_warehouse")
@@ -235,6 +229,7 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     mock_create_wh,
     mock_cleanup_cls,
     mock_drop,
+    mock_settings,
 ):
     """provision_trial_database succeeds (the RDS database now exists), but the
     subsequent create_warehouse call fails. FIX 2 requires manifest["trial_warehouse_db"]
@@ -261,7 +256,8 @@ def test_clone_tears_down_db_on_step2_mid_failure(
         "password": "p",
     }
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
-    mock_retrieve.return_value = {}
+    mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
+    mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
     mock_create_wh.return_value = (None, "create_warehouse blew up")
     mock_cleanup_instance = mock_cleanup_cls.return_value
 
@@ -275,6 +271,7 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     mock_cleanup_instance.delete_org.assert_called_once()
 
 
+@patch("ddpui.core.trial.clone_service.settings")
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
 @patch("ddpui.core.trial.clone_service.create_warehouse")
@@ -290,6 +287,7 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
     mock_create_wh,
     mock_cleanup_cls,
     mock_drop,
+    mock_settings,
 ):
     """The trial RDS db+role live outside the org/Airbyte graph, so if delete_org() throws
     mid-teardown the RDS drop must STILL run (independent guards) — otherwise the db leaks.
@@ -312,7 +310,8 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
         "password": "p",
     }
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
-    mock_retrieve.return_value = {}
+    mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
+    mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
     mock_create_wh.return_value = (None, "create_warehouse blew up")
     # delete_org() itself explodes during teardown
     mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
@@ -637,13 +636,15 @@ def test_step_org_and_user_is_idempotent_for_userattributes(mock_create_org, moc
     assert rows.first().email_verified is True
 
 
+@patch("ddpui.core.trial.clone_service.settings")
 @patch("ddpui.core.trial.clone_service.create_warehouse")
 @patch("ddpui.core.trial.clone_service.airbyte_service")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 @patch("ddpui.core.trial.clone_service.provision_trial_database")
 def test_step_warehouse_registers_trial_warehouse(
-    mock_provision, mock_retrieve, mock_ab, mock_create_wh
+    mock_provision, mock_retrieve, mock_ab, mock_create_wh, mock_settings
 ):
+    mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
     template = Org.objects.create(name="tmpl", slug="tmpl", airbyte_workspace_id="ws-tmpl")
     OrgWarehouse.objects.create(
         org=template, wtype="postgres", airbyte_destination_id="dest-tmpl", credentials="x"
@@ -652,6 +653,13 @@ def test_step_warehouse_registers_trial_warehouse(
         name="Trial 1 tmpl", slug="trial-1", airbyte_workspace_id="ws-tr"
     )
 
+    mock_retrieve.return_value = {
+        "host": "trials-rds-host",
+        "port": 5432,
+        "database": "tmpl_db",
+        "username": "tmpl_u",
+        "password": "tmpl_p",
+    }
     mock_provision.return_value = {
         "host": "h",
         "port": 5432,
@@ -665,7 +673,7 @@ def test_step_warehouse_registers_trial_warehouse(
     run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
     clone_service._step_warehouse(run)
 
-    mock_provision.assert_called_once_with(run.trial_email, template_db=None)
+    mock_provision.assert_called_once_with(run.trial_email, template_db="tmpl_db")
     # create_warehouse called with the trial org + a schema carrying the new db + def id
     args, _ = mock_create_wh.call_args
     assert args[0] == trial_org
@@ -673,19 +681,20 @@ def test_step_warehouse_registers_trial_warehouse(
     assert args[1].airbyteConfig["database"] == "trial_1"
     assert run.manifest["trial_warehouse_db"] == "trial_1"
     assert run.manifest["trial_warehouse_role"] == "u"
-    assert run.manifest["warehouse_copied_server_side"] is False
 
 
+@patch("ddpui.core.trial.clone_service.settings")
 @patch("ddpui.core.trial.clone_service.create_warehouse")
 @patch("ddpui.core.trial.clone_service.airbyte_service")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 @patch("ddpui.core.trial.clone_service.provision_trial_database")
 def test_step_warehouse_drops_template_ssh_tunnel_config(
-    mock_provision, mock_retrieve, mock_ab, mock_create_wh
+    mock_provision, mock_retrieve, mock_ab, mock_create_wh, mock_settings
 ):
     """The template's SSH-tunnel config points at the template's bastion — it must not be
     carried into the trial warehouse's Airbyte destination, which points at the trials-RDS
     host with no such tunnel."""
+    mock_settings.TRIALS_RDS_HOST = "tmpl-host"
     template = Org.objects.create(name="tmpl", slug="tmpl", airbyte_workspace_id="ws-tmpl")
     OrgWarehouse.objects.create(
         org=template, wtype="postgres", airbyte_destination_id="dest-tmpl", credentials="x"
@@ -739,10 +748,8 @@ def test_step_warehouse_drops_template_ssh_tunnel_config(
 def test_step_warehouse_uses_server_side_copy_when_same_instance(
     mock_provision, mock_retrieve, mock_ab, mock_create_wh, mock_settings
 ):
-    """When the template warehouse and the trials-RDS live on the SAME host,
-    provision_trial_database must be called with template_db=<template's db name> so it does
-    a server-side CREATE DATABASE ... TEMPLATE ... copy, and the manifest must record that the
-    warehouse data copy was already done server-side (so step 3 can skip pg_dump/restore)."""
+    """provision_trial_database must be called with template_db=<template's db name> so it does
+    a server-side CREATE DATABASE ... TEMPLATE ... copy of the template warehouse."""
     mock_settings.TRIALS_RDS_HOST = "same-host"
     template = Org.objects.create(
         name="tmpl-same", slug="tmpl-same", airbyte_workspace_id="ws-tmpl-same"
@@ -776,7 +783,6 @@ def test_step_warehouse_uses_server_side_copy_when_same_instance(
     clone_service._step_warehouse(run)
 
     mock_provision.assert_called_once_with(run.trial_email, template_db="himanshu_wh")
-    assert run.manifest["warehouse_copied_server_side"] is True
 
 
 @patch("ddpui.core.trial.clone_service.settings")
@@ -784,12 +790,11 @@ def test_step_warehouse_uses_server_side_copy_when_same_instance(
 @patch("ddpui.core.trial.clone_service.airbyte_service")
 @patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
 @patch("ddpui.core.trial.clone_service.provision_trial_database")
-def test_step_warehouse_uses_empty_copy_when_different_instance(
+def test_step_warehouse_raises_when_template_on_different_instance(
     mock_provision, mock_retrieve, mock_ab, mock_create_wh, mock_settings
 ):
-    """When the template warehouse lives on a DIFFERENT host than the trials-RDS instance, the
-    server-side template copy is unsafe (cross-instance) — provision_trial_database must be
-    called with template_db=None (empty db) and the manifest flag must be False."""
+    """The template warehouse MUST live on the trials-RDS instance — there is no cross-host
+    dump/restore fallback, so a different host must fail loudly before provisioning anything."""
     mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
     template = Org.objects.create(
         name="tmpl-diff", slug="tmpl-diff", airbyte_workspace_id="ws-tmpl-diff"
@@ -809,63 +814,13 @@ def test_step_warehouse_uses_empty_copy_when_different_instance(
         "password": "tmpl_p",
         "schema": "public",
     }
-    mock_provision.return_value = {
-        "host": "trials-rds-host",
-        "port": 5432,
-        "database": "trial_diff_db",
-        "username": "u",
-        "password": "p",
-    }
-    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
-    mock_create_wh.return_value = (None, None)
 
     run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
-    clone_service._step_warehouse(run)
+    with pytest.raises(RuntimeError, match="trials-RDS"):
+        clone_service._step_warehouse(run)
 
-    mock_provision.assert_called_once_with(run.trial_email, template_db=None)
-    assert run.manifest["warehouse_copied_server_side"] is False
-
-
-def test_step_warehouse_data_skips_when_already_copied_server_side():
-    """_step_warehouse_data must not attempt pg_dump/restore when _step_warehouse already did
-    a server-side CREATE DATABASE ... TEMPLATE ... copy (manifest flag set)."""
-    template = Org.objects.create(name="tmpl-skip", slug="tmpl-skip")
-    trial_org = Org.objects.create(name="Trial skip", slug="trial-skip")
-
-    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
-    run.manifest["warehouse_copied_server_side"] = True
-
-    with patch("ddpui.core.trial.clone_service.copy_warehouse_data") as mock_copy:
-        clone_service._step_warehouse_data(run)
-        mock_copy.assert_not_called()
-
-    assert "warehouse_dump_path" not in run.manifest
-
-
-@patch("ddpui.core.trial.clone_service.copy_warehouse_data")
-@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
-def test_step_warehouse_data_copies(mock_retrieve, mock_copy):
-    template = Org.objects.create(name="tmpl", slug="tmpl")
-    trial_org = Org.objects.create(name="Trial 1 tmpl", slug="trial-1")
-    OrgWarehouse.objects.create(org=template, wtype="postgres", credentials="tmpl-sec")
-    OrgWarehouse.objects.create(org=trial_org, wtype="postgres", credentials="trial-sec")
-
-    mock_retrieve.side_effect = [
-        {"host": "sh", "port": 5432, "database": "sdb", "username": "su", "password": "sp"},
-        {"host": "dh", "port": 5432, "database": "trial_1", "username": "du", "password": "dp"},
-    ]
-
-    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
-    clone_service._step_warehouse_data(run)
-
-    mock_copy.assert_called_once()
-    src, dst, dump_path = mock_copy.call_args.args
-    assert src["database"] == "sdb"
-    assert dst["database"] == "trial_1"
-
-    # the pg_dump temp file must be removed after the (mocked) copy, success or failure —
-    # it's a full copy of the template warehouse's data sitting on local disk.
-    assert not os.path.exists(dump_path)
+    mock_provision.assert_not_called()
+    mock_create_wh.assert_not_called()
 
 
 def test_account_exists_for_email_true_when_user_exists():
@@ -1095,28 +1050,6 @@ def test_step_connections_raises_when_source_not_remapped(mock_ab, mock_create_c
     mock_create_conn.assert_not_called()
 
 
-@patch("ddpui.core.trial.clone_service.copy_warehouse_data")
-@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
-def test_step_warehouse_data_removes_dump_file_even_on_failure(mock_retrieve, mock_copy):
-    template = Org.objects.create(name="tmpl", slug="tmpl")
-    trial_org = Org.objects.create(name="Trial 1 tmpl", slug="trial-1")
-    OrgWarehouse.objects.create(org=template, wtype="postgres", credentials="tmpl-sec")
-    OrgWarehouse.objects.create(org=trial_org, wtype="postgres", credentials="trial-sec")
-
-    mock_retrieve.side_effect = [
-        {"host": "sh", "port": 5432, "database": "sdb", "username": "su", "password": "sp"},
-        {"host": "dh", "port": 5432, "database": "trial_1", "username": "du", "password": "dp"},
-    ]
-    mock_copy.side_effect = RuntimeError("pg_restore failed")
-
-    run = CloneRun(template=template, trial_email="a@b.org", trial_org=trial_org)
-    with pytest.raises(RuntimeError):
-        clone_service._step_warehouse_data(run)
-
-    dump_path = mock_copy.call_args.args[2]
-    assert not os.path.exists(dump_path)
-
-
 def _make_orguser(org: Org, email: str) -> OrgUser:
     user = User.objects.create(username=email, email=email)
     return OrgUser.objects.create(user=user, org=org, email_verified=False)
@@ -1284,16 +1217,15 @@ def test_step_dbt_raises_when_template_has_no_dbt():
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_wires_step_dbt_after_connections(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl-wire", slug="tmpl-wire")
     run = clone_service.clone_template_org(template.id, "a@b.org")
-    mock_s6.assert_called_once()
-    assert "step6_dbt" in run.timings
+    mock_s5.assert_called_once()
+    assert "step5_dbt" in run.timings
 
 
 @patch("ddpui.core.trial.clone_service.clone_orchestrate_dataflows")
@@ -1317,18 +1249,17 @@ def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows)
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
 def test_clone_wires_step_prefect_after_dbt(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
 ):
     template = Org.objects.create(name="tmpl-wire-pf", slug="tmpl-wire-pf")
     run = clone_service.clone_template_org(template.id, "a@b.org")
-    mock_s7.assert_called_once()
-    assert "step7_prefect" in run.timings
+    mock_s6.assert_called_once()
+    assert "step6_prefect" in run.timings
     timing_keys = list(run.timings.keys())
-    assert timing_keys.index("step7_prefect") == timing_keys.index("step6_dbt") + 1
+    assert timing_keys.index("step6_prefect") == timing_keys.index("step5_dbt") + 1
 
 
 @patch("ddpui.core.trial.clone_service.clone_viz")
@@ -1352,17 +1283,14 @@ def test_step_viz_delegates_and_records_manifest(mock_clone_viz):
 @patch("ddpui.core.trial.clone_service._step_dbt")
 @patch("ddpui.core.trial.clone_service._step_connections")
 @patch("ddpui.core.trial.clone_service._step_sources")
-@patch("ddpui.core.trial.clone_service._step_warehouse_data")
 @patch("ddpui.core.trial.clone_service._step_warehouse")
 @patch("ddpui.core.trial.clone_service._step_org_and_user")
-def test_clone_wires_step_viz_last(
-    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_s8
-):
+def test_clone_wires_step_viz_last(mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7):
     template = Org.objects.create(name="tmpl-wire-viz", slug="tmpl-wire-viz")
     run = clone_service.clone_template_org(template.id, "a@b.org")
-    mock_s8.assert_called_once()
-    assert "step8_viz" in run.timings
-    assert list(run.timings.keys())[-1] == "step8_viz"
+    mock_s7.assert_called_once()
+    assert "step7_viz" in run.timings
+    assert list(run.timings.keys())[-1] == "step7_viz"
 
 
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
