@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from ninja import Router
 from ninja.errors import HttpError
+from django.utils import timezone
 from django.db import transaction
 from django.db.models import Prefetch
 
@@ -17,13 +18,6 @@ from ddpui.models.dashboard import (
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
 from ddpui.core.ownership import is_creator_or_admin
-from ddpui.models.visualization import Chart
-from ddpui.auth import extract_resource, has_permission, has_resource_permission
-from ddpui.core.sharing import coverage, sharing_actions
-from ddpui.core.sharing.access_resolver import effective_permission
-from ddpui.core.sharing.chart_access import chart_ids_in_tabs, dashboard_chart_ids
-from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
-from ddpui.schemas.access_schema import DashboardChartCoverageResponse, EmbedCoverageConfirmation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -59,13 +53,6 @@ logger = CustomLogger("ddpui")
 dashboard_native_router = Router()
 
 
-def _pool_level(request) -> Optional[str]:
-    """Viewer's level on ``request.resource``, read off the pool ③ attached —
-    no extra query. "edit" beats "view"; ③ passing guarantees at least view."""
-    pool = getattr(request, "resource_permissions", None) or set()
-    return "edit" if "can_edit_dashboards" in pool else "view" if pool else None
-
-
 # Endpoints
 @dashboard_native_router.get("/", response=List[DashboardResponse])
 @has_permission(["can_view_dashboards"])
@@ -80,31 +67,26 @@ def list_dashboards(
 
     dashboards = DashboardService.list_dashboards(
         org=orguser.org,
-        orguser=orguser,
         dashboard_type=dashboard_type,
         search=search,
         is_published=is_published,
     )
 
-    return [
-        DashboardResponse(**DashboardService.get_dashboard_response(d, orguser=orguser))
-        for d in dashboards
-    ]
+    return [DashboardResponse(**DashboardService.get_dashboard_response(d)) for d in dashboards]
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
 @has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_view_dashboards")
 def get_dashboard(request, dashboard_id: int):
     """Get a specific dashboard"""
     orguser: OrgUser = request.orguser
-    dashboard = request.resource
 
-    return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard, orguser=orguser),
-        user_permission=_pool_level(request),
-    )
+    try:
+        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -134,107 +116,14 @@ def create_dashboard(request, payload: DashboardCreate):
                 orguser.landing_dashboard = dashboard
                 orguser.save(update_fields=["landing_dashboard"])
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
+    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 
 
-@dashboard_native_router.get(
-    "/{dashboard_id}/chart-coverage/", response=DashboardChartCoverageResponse
-)
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
-def get_dashboard_chart_coverage(request, dashboard_id: int, chart_id: Optional[int] = None):
-    """Chart-coverage verdicts for this dashboard. With ``chart_id``: that one
-    chart's verdict (the embed pre-flight — the chart need not be a tile yet).
-    Without: every under-covering tile. Gate: dashboard edit."""
-    orguser: OrgUser = request.orguser
-    dashboard = request.resource
-
-    if chart_id is not None:
-        chart = Chart.objects.filter(id=chart_id, org=orguser.org).first()
-        if chart is None:
-            raise HttpError(404, "Chart not found")
-        verdicts = coverage.coverage_for_charts(orguser, dashboard, [chart])
-    else:
-        verdicts = coverage.dashboard_under_covering_charts(orguser, dashboard)
-
-    return DashboardChartCoverageResponse(
-        dashboard_id=dashboard.id,
-        covered=all(v.covered for v in verdicts),
-        charts=verdicts,
-    )
-
-
-def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpdate):
-    """`update_dashboard` overwrites `tabs` as raw JSON — without this, any
-    chart id could be embedded blind. Every chart id newly present in the
-    incoming tabs must be org-owned (400), viewable by the caller (403), and —
-    if it under-covers the dashboard's audience — confirmed via
-    `extend_chart_ids`/`proceed`, else the coverage verdicts come back in a
-    409 and nothing saves. A confirmed embed is never blocked.
-
-    Returns (confirmation, charts_to_extend): a non-None confirmation means
-    "reply 409, save nothing"; otherwise charts_to_extend is the confirmed
-    subset to extend after the save commits.
-    """
-    if payload.tabs is None:
-        return None, []
-
-    incoming_ids = chart_ids_in_tabs([tab.model_dump() for tab in payload.tabs])
-    new_ids = incoming_ids - dashboard_chart_ids(dashboard)
-    if not new_ids:
-        return None, []
-
-    charts = {c.id: c for c in Chart.objects.filter(id__in=new_ids, org=orguser.org)}
-    missing = sorted(new_ids - charts.keys())
-    if missing:
-        # cross-org ids are indistinguishable from nonexistent ones
-        raise HttpError(400, f"unknown chart ids in tabs payload: {missing}")
-
-    for chart in charts.values():
-        if effective_permission(orguser, "chart", chart) is None:
-            raise HttpError(403, "You do not have access to this chart")
-
-    verdicts = coverage.coverage_for_charts(orguser, dashboard, list(charts.values()))
-    under_covering = [v for v in verdicts if not v.covered]
-    if not under_covering:
-        # Clean coverage returns before any subset check — unlike
-        # `sharing_actions._validate_extend_subset`, which 400s a garbage
-        # extend_chart_ids even when clean. Mind this before unifying the two.
-        return None, []
-
-    confirmed = payload.extend_chart_ids is not None or bool(payload.proceed)
-    if not confirmed:
-        # 409, not a 200-with-flag: the 200 response shape (DashboardResponse)
-        # stays stable for every already-working save path.
-        return EmbedCoverageConfirmation(under_covering_charts=under_covering), []
-
-    # Inline copy of `sharing_actions._validate_extend_subset` — the embed path
-    # runs before the dashboard save, off a different shape. Once here,
-    # under_covering is non-empty and both copies validate identically.
-    extend_ids = set(payload.extend_chart_ids or [])
-    warned_ids = {v.chart_id for v in under_covering}
-    if not extend_ids <= warned_ids:
-        raise HttpError(400, "extend_chart_ids must be a subset of the under-covering charts")
-    return None, [charts[chart_id] for chart_id in sorted(extend_ids)]
-
-
-@dashboard_native_router.put(
-    "/{dashboard_id}/", response={200: DashboardResponse, 409: EmbedCoverageConfirmation}
-)
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
+@has_permission(["can_edit_dashboards"])
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
-    """Update dashboard with auto-save support. Chart ids newly present in
-    ``tabs`` are validated, and under-covering embeds 409 with the coverage
-    verdicts unless the request carries the embed confirmation."""
+    """Update dashboard with auto-save support"""
     orguser: OrgUser = request.orguser
-    dashboard = request.resource
-
-    confirmation, charts_to_extend = _validate_new_tile_charts(orguser, dashboard, payload)
-    if confirmation is not None:
-        return 409, confirmation
 
     try:
         dashboard = DashboardService.update_dashboard(
@@ -248,20 +137,7 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
 
-    if charts_to_extend:
-        try:
-            sharing_actions.extend_charts_to_cover_dashboard(orguser, dashboard, charts_to_extend)
-        except SharingPermissionError as err:
-            # The embed itself is saved (never blocked once confirmed); the
-            # extend half needs Edit on each chart and fails loudly.
-            raise HttpError(403, err.message) from err
-
-    # plain (not `200, ...`) so ninja still infers 200 and direct-call tests
-    # keep receiving the DashboardResponse itself
-    return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard, orguser=orguser),
-        user_permission=_pool_level(request),
-    )
+    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")
@@ -284,25 +160,19 @@ def delete_dashboard(request, dashboard_id: int):
 
 @dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
 @has_permission(["can_create_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_view_dashboards")
 def duplicate_dashboard(request, dashboard_id: int):
-    """Duplicate a dashboard with all its configurations, filters, and tabs.
-    The copy inherits the source's general access — a same-or-narrower audience
-    by construction, so no coverage warning is needed. Grants and public-link
-    state are not copied.
-
-    Gate: view on the original — duplicating clones its full content, same
-    exposure as reading it directly. The create slug stays in ①."""
+    """Duplicate a dashboard with all its configurations and filters"""
     orguser: OrgUser = request.orguser
-    original_dashboard = request.resource
 
-    # The copy inherits the source's general access, not the org's defaults:
-    # seeding at wider defaults would silently broaden a deliberately
-    # narrowed source around the same tiles, bypassing the coverage warnings.
-    analyst_level = original_dashboard.analyst_level
-    member_level = original_dashboard.member_level
+    # Get the original dashboard
+    try:
+        original_dashboard = Dashboard.objects.prefetch_related("filters").get(
+            id=dashboard_id, org=orguser.org
+        )
+    except Dashboard.DoesNotExist as err:
+        raise HttpError(404, "Dashboard not found") from err
 
+    # Create a copy of the dashboard
     with transaction.atomic():
         new_dashboard = Dashboard.objects.create(
             title=f"Copy of {original_dashboard.title}",
@@ -313,8 +183,6 @@ def duplicate_dashboard(request, dashboard_id: int):
             created_by=orguser,
             org=orguser.org,
             last_modified_by=orguser,
-            analyst_level=analyst_level,
-            member_level=member_level,
         )
 
         # Copy all filters and create ID mapping
@@ -342,16 +210,12 @@ def duplicate_dashboard(request, dashboard_id: int):
             f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {orguser.org.id}"
         )
 
-    return DashboardResponse(
-        **DashboardService.get_dashboard_response(new_dashboard, orguser=orguser)
-    )
+    return DashboardResponse(**DashboardService.get_dashboard_response(new_dashboard))
 
 
 # Dashboard Lock endpoints
 @dashboard_native_router.post("/{dashboard_id}/lock/", response=LockResponse)
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@has_permission(["can_edit_dashboards"])
 def lock_dashboard(request, dashboard_id: int):
     """Lock dashboard for editing"""
     orguser: OrgUser = request.orguser
@@ -371,9 +235,7 @@ def lock_dashboard(request, dashboard_id: int):
 
 
 @dashboard_native_router.put("/{dashboard_id}/lock/refresh/")
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@has_permission(["can_edit_dashboards"])
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
     orguser: OrgUser = request.orguser
@@ -399,9 +261,7 @@ def refresh_dashboard_lock(request, dashboard_id: int):
 
 
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@has_permission(["can_edit_dashboards"])
 def unlock_dashboard(request, dashboard_id: int):
     """Unlock dashboard"""
     orguser: OrgUser = request.orguser
@@ -418,9 +278,7 @@ def unlock_dashboard(request, dashboard_id: int):
 
 # Filter endpoints
 @dashboard_native_router.post("/{dashboard_id}/filters/", response=DashboardFilterResponse)
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@has_permission(["can_edit_dashboards"])
 def create_filter(request, dashboard_id: int, payload: FilterCreate):
     """Add a filter to dashboard"""
     orguser: OrgUser = request.orguser
@@ -448,8 +306,6 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
 @has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_view_dashboards")
 def get_filter(request, dashboard_id: int, filter_id: int):
     """Get a specific dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -467,9 +323,7 @@ def get_filter(request, dashboard_id: int, filter_id: int):
 @dashboard_native_router.put(
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@has_permission(["can_edit_dashboards"])
 def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpdate):
     """Update a dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -492,9 +346,7 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 
 
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
-@has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
+@has_permission(["can_edit_dashboards"])
 def delete_filter(request, dashboard_id: int, filter_id: int):
     """Delete a dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -542,11 +394,8 @@ def get_filter_options(
 
 @dashboard_native_router.put("/{dashboard_id}/share/")
 @has_permission(["can_share_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_edit_dashboards")
 def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
-    """Toggle public sharing for a dashboard. Any editor with the share slug
-    may toggle, not just the creator."""
+    """Toggle public sharing for a dashboard"""
     orguser: OrgUser = request.orguser
 
     try:
@@ -562,23 +411,20 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
 
     is_public = payload.is_public
 
-    # The actual flip lives in `sharing_actions.set_public` (shared with the
-    # bulk toggle). Enabling without `proceed` returns the under-covering
-    # charts and flips nothing; the client re-sends with proceed=true.
-    try:
-        under_covering = sharing_actions.set_public(
-            orguser, "dashboard", dashboard, is_public, proceed=bool(payload.proceed)
-        )
-    except SharingValidationError as err:
-        raise HttpError(403, err.message) from err
+    if is_public:
+        # Generate token if making public
+        if not dashboard.public_share_token:
+            import secrets
 
-    if under_covering:
-        return DashboardShareResponse(
-            is_public=dashboard.is_public,
-            message="Confirmation required: enabling the public link exposes charts inline",
-            requires_confirmation=True,
-            under_covering_charts=under_covering,
-        )
+            dashboard.public_share_token = secrets.token_urlsafe(48)
+        dashboard.public_shared_at = timezone.now()
+        dashboard.public_disabled_at = None
+    else:
+        # Disable public sharing but keep token for audit
+        dashboard.public_disabled_at = timezone.now()
+
+    dashboard.is_public = is_public
+    dashboard.save()
 
     # Build response
     response_data = {
@@ -593,9 +439,9 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
         # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
         FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
         frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
-        response_data[
-            "public_url"
-        ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
+        response_data["public_url"] = (
+            f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
+        )
         response_data["public_share_token"] = dashboard.public_share_token
 
     # Audit logging
@@ -609,11 +455,8 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
 
 @dashboard_native_router.get("/{dashboard_id}/share/")
 @has_permission(["can_view_dashboards"])
-@extract_resource("dashboard")
-@has_resource_permission("can_view_dashboards")
 def get_dashboard_sharing_status(request, dashboard_id: int):
-    """Get dashboard sharing status. View access suffices: the status GET
-    only reveals whether a resource the viewer can already see is public."""
+    """Get dashboard sharing status"""
     orguser: OrgUser = request.orguser
 
     try:
@@ -638,9 +481,9 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
         # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
         FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
         frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
-        response_data[
-            "public_url"
-        ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
+        response_data["public_url"] = (
+            f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
+        )
 
     return DashboardShareStatus(**response_data)
 
