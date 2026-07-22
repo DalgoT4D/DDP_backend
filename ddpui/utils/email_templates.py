@@ -267,30 +267,7 @@ def render_invite_user_email(
         f"You received this email because {invited_by_email} invited you to join Dalgo.\n"
     )
 
-    html_body = f"""\
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0; padding:0; background-color:#f4f4f5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5; padding:32px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#00897B; padding:20px 32px;">
-              <h1 style="color:#ffffff; margin:0; font-size:18px; font-weight:700; letter-spacing:0.5px;">Dalgo</h1>
-            </td>
-          </tr>
-
-          <!-- Body -->
-          <tr>
-            <td style="padding:32px;">
-
+    body_html = f"""\
               <!-- Headline -->
               <p style="margin:0 0 6px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
                 {safe_inviter} has invited you to join Dalgo
@@ -324,25 +301,11 @@ def render_invite_user_email(
                     </a>
                   </td>
                 </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding:16px 32px; border-top:1px solid #e5e7eb;">
-              <p style="margin:0; font-size:12px; color:#9ca3af; line-height:1.5;">
-                You received this email because {safe_inviter} invited you to join Dalgo.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
+              </table>"""
+    html_body = _render_email_shell(
+        body_html,
+        f"You received this email because {safe_inviter} invited you to join Dalgo.",
+    )
 
     return plain_text, html_body
 
