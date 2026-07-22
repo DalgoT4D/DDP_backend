@@ -208,7 +208,9 @@ def test_general_access_grants_the_resources_own_level_not_a_hardcoded_view(org,
 # ================================================================================
 
 
-def test_member_grant_capped_at_view_even_when_grant_permission_is_edit(org, member, analyst):
+def test_member_edit_grant_is_honored_on_dashboards(org, member, analyst):
+    """Deliberate v1.2 flip (plan §5): dashboards have member_edit_grants=True,
+    so a Member's edit grant is real edit — no silent cap."""
     resource = _dashboard(org, owner=analyst)
     ResourceShare.objects.create(
         org=org,
@@ -219,7 +221,32 @@ def test_member_grant_capped_at_view_even_when_grant_permission_is_edit(org, mem
         permission="edit",
         status="active",
     )
-    assert effective_permission(member, "dashboard", resource) == "view"
+    assert effective_permission(member, "dashboard", resource) == "edit"
+
+
+def test_member_edit_grant_still_capped_on_reports(org, member, analyst):
+    """Reports have member_edit_grants=False — the v1 cap holds until that
+    rtype opts into the flat pool."""
+    from ddpui.models.report import ReportSnapshot
+
+    resource = ReportSnapshot.objects.create(
+        title="Capped Report",
+        org=org,
+        owner=analyst,
+        created_by=analyst,
+        analyst_level=AccessLevel.NONE,
+        member_level=AccessLevel.NONE,
+    )
+    ResourceShare.objects.create(
+        org=org,
+        resource_type="report",
+        resource_id=str(resource.pk),
+        principal_type="user",
+        principal_id=member.id,
+        permission="edit",
+        status="active",
+    )
+    assert effective_permission(member, "report", resource) == "view"
 
 
 def test_analyst_grant_is_not_capped(org, analyst, member):

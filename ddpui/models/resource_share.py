@@ -32,6 +32,17 @@ class ResourceShare(models.Model):
     principal_value = models.CharField(max_length=50, null=True)
 
     permission = models.CharField(max_length=5)
+    # FK twin of the varchar above (v1.2 pilot): the grant's meaning as a real
+    # Permission row. Synced from (resource_type, permission) on every save;
+    # PROTECT because grants make permission rows load-bearing. Nullable while
+    # rtypes without view/edit slugs (report) and unseeded test DBs exist.
+    granted_permission = models.ForeignKey(
+        "ddpui.Permission",
+        on_delete=models.PROTECT,
+        null=True,
+        db_column="permission_id",
+        related_name="+",
+    )
     status = models.CharField(max_length=10, default="active")
     pending_email = models.CharField(max_length=255, null=True)
 
@@ -50,6 +61,20 @@ class ResourceShare(models.Model):
             models.Index(fields=["principal_type", "principal_id"]),
             models.Index(fields=["org", "status"]),
         ]
+
+    def save(self, *args, **kwargs):
+        # Keep the FK in lockstep with the varchar no matter who writes
+        # (create, update_or_create, level upgrades). Unmappable rows
+        # (report rtype, unseeded DBs) keep their current value.
+        from ddpui.core.sharing.permission_map import permission_id_for
+
+        pk = permission_id_for(self.resource_type, self.permission)
+        if pk is not None and pk != self.granted_permission_id:
+            self.granted_permission_id = pk
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = list(update_fields) + ["granted_permission"]
+        super().save(*args, **kwargs)
 
     def __str__(self):
         principal = self.principal_id if self.principal_id is not None else self.principal_value

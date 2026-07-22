@@ -32,6 +32,9 @@ class ShareableType:
     # to "none", Member grants/invites/requests rejected, and the resolver
     # gives Member viewers nothing beyond ownership.
     member_sharing: bool = True
+    # v1.2 flat-pool flip (plan §5), rolled out per rtype: True = a Member's
+    # edit grant is honored as real edit; False = capped at view (v1 behavior).
+    member_edit_grants: bool = False
 
 
 RESOURCE_TYPES: dict[str, ShareableType] = {
@@ -53,6 +56,7 @@ RESOURCE_TYPES: dict[str, ShareableType] = {
         public_link=True,
         requests=True,
         share_permission_slug="can_share_dashboards",
+        member_edit_grants=True,
     ),
     "report": ShareableType(
         rtype="report",

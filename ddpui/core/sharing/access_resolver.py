@@ -10,7 +10,8 @@ Decision ladder:
     2. Owner (owner_id, falling back to created_by)?  -> edit
     3. The viewer's role's general-access level, if set
     4. Grant rows matching the viewer -> best level; a Member's grant
-       contribution is capped at "view"
+       contribution is capped at "view" except on rtypes with
+       ``member_edit_grants=True`` (v1.2 flat pool — dashboards first)
     5. Best of steps 3-4; nothing matched -> None (default-deny, never raise)
 
 Role reads are getattr-safe: a null/unknown role is denied, never raises.
@@ -169,10 +170,14 @@ def effective_permission(
     # Step 3: this role's own general-access level.
     general = _general_permission(role_slug, resource)
 
-    # Step 4: explicit grants; a Member's grant contribution is capped at "view".
+    # Step 4: explicit grants. A Member's grant contribution is capped at
+    # "view" unless the rtype has opted into the v1.2 flat-pool behavior
+    # (member_edit_grants=True — dashboards first, plan v1.2 §5).
     grant = _grant_permission(viewer, rtype, resource, get_group_ids)
     if role_slug == MEMBER_ROLE and grant == "edit":
-        grant = "view"
+        entry = get_resource_type(rtype)
+        if entry is None or not entry.member_edit_grants:
+            grant = "view"
 
     # Step 5: best of steps 3-4.
     return _best_permission(general, grant)

@@ -21,7 +21,7 @@ from ddpui.core.sharing import coverage, sharing_actions
 from ddpui.core.sharing.access_resolver import effective_permission
 from ddpui.core.sharing.chart_access import chart_ids_in_tabs, dashboard_chart_ids
 from ddpui.core.sharing.exceptions import SharingPermissionError, SharingValidationError
-from ddpui.core.sharing.gates import require_edit_access, require_view_access
+from ddpui.core.sharing.decorators import extract_resource, has_resource_permission
 from ddpui.schemas.access_schema import DashboardChartCoverageResponse, EmbedCoverageConfirmation
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
@@ -86,17 +86,12 @@ def list_dashboards(
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
 @has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_view_dashboards")
 def get_dashboard(request, dashboard_id: int):
     """Get a specific dashboard"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-
-    if effective_permission(orguser, "dashboard", dashboard) is None:
-        raise HttpError(403, "You do not have access to this dashboard")
+    dashboard = request.resource
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard, orguser=orguser))
 
@@ -134,18 +129,15 @@ def create_dashboard(request, payload: DashboardCreate):
 @dashboard_native_router.get(
     "/{dashboard_id}/chart-coverage/", response=DashboardChartCoverageResponse
 )
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def get_dashboard_chart_coverage(request, dashboard_id: int, chart_id: Optional[int] = None):
     """Chart-coverage verdicts for this dashboard. With ``chart_id``: that one
     chart's verdict (the embed pre-flight — the chart need not be a tile yet).
     Without: every under-covering tile. Gate: dashboard edit."""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
+    dashboard = request.resource
 
     if chart_id is not None:
         chart = Chart.objects.filter(id=chart_id, org=orguser.org).first()
@@ -219,18 +211,15 @@ def _validate_new_tile_charts(orguser: OrgUser, dashboard, payload: DashboardUpd
 @dashboard_native_router.put(
     "/{dashboard_id}/", response={200: DashboardResponse, 409: EmbedCoverageConfirmation}
 )
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support. Chart ids newly present in
     ``tabs`` are validated, and under-covering embeds 409 with the coverage
     verdicts unless the request carries the embed confirmation."""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
+    dashboard = request.resource
 
     confirmation, charts_to_extend = _validate_new_tile_charts(orguser, dashboard, payload)
     if confirmation is not None:
@@ -281,24 +270,18 @@ def delete_dashboard(request, dashboard_id: int):
 
 @dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
 @has_permission(["can_create_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_view_dashboards")
 def duplicate_dashboard(request, dashboard_id: int):
     """Duplicate a dashboard with all its configurations, filters, and tabs.
     The copy inherits the source's general access — a same-or-narrower audience
     by construction, so no coverage warning is needed. Grants and public-link
-    state are not copied."""
+    state are not copied.
+
+    Gate: view on the original — duplicating clones its full content, same
+    exposure as reading it directly. The create slug stays in ①."""
     orguser: OrgUser = request.orguser
-
-    # Get the original dashboard
-    try:
-        original_dashboard = Dashboard.objects.prefetch_related("filters").get(
-            id=dashboard_id, org=orguser.org
-        )
-    except Dashboard.DoesNotExist as err:
-        raise HttpError(404, "Dashboard not found") from err
-
-    # Duplicating clones the original's full content, so gate on the
-    # original's view permission — same as reading it directly.
-    require_view_access(orguser, "dashboard", original_dashboard)
+    original_dashboard = request.resource
 
     # The copy inherits the source's general access, not the org's defaults:
     # seeding at wider defaults would silently broaden a deliberately
@@ -352,16 +335,12 @@ def duplicate_dashboard(request, dashboard_id: int):
 
 # Dashboard Lock endpoints
 @dashboard_native_router.post("/{dashboard_id}/lock/", response=LockResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def lock_dashboard(request, dashboard_id: int):
     """Lock dashboard for editing"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         lock_info = DashboardService.lock_dashboard(dashboard_id, orguser.org, orguser)
@@ -378,16 +357,12 @@ def lock_dashboard(request, dashboard_id: int):
 
 
 @dashboard_native_router.put("/{dashboard_id}/lock/refresh/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         lock_info = DashboardService.refresh_lock(dashboard_id, orguser.org, orguser)
@@ -410,16 +385,12 @@ def refresh_dashboard_lock(request, dashboard_id: int):
 
 
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def unlock_dashboard(request, dashboard_id: int):
     """Unlock dashboard"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         DashboardService.unlock_dashboard(dashboard_id, orguser.org, orguser)
@@ -433,16 +404,12 @@ def unlock_dashboard(request, dashboard_id: int):
 
 # Filter endpoints
 @dashboard_native_router.post("/{dashboard_id}/filters/", response=DashboardFilterResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def create_filter(request, dashboard_id: int, payload: FilterCreate):
     """Add a filter to dashboard"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         filter_data = FilterData(
@@ -467,15 +434,11 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
 @has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_view_dashboards")
 def get_filter(request, dashboard_id: int, filter_id: int):
     """Get a specific dashboard filter"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_view_access(orguser, "dashboard", dashboard)
 
     try:
         filter_obj = DashboardService.get_filter(dashboard_id, filter_id, orguser.org)
@@ -490,16 +453,12 @@ def get_filter(request, dashboard_id: int, filter_id: int):
 @dashboard_native_router.put(
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpdate):
     """Update a dashboard filter"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         filter_obj = DashboardService.update_filter(
@@ -519,16 +478,12 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 
 
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def delete_filter(request, dashboard_id: int, filter_id: int):
     """Delete a dashboard filter"""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
-    except DashboardNotFoundError as err:
-        raise HttpError(404, "Dashboard not found") from err
-    require_edit_access(orguser, "dashboard", dashboard)
 
     try:
         DashboardService.delete_filter(dashboard_id, filter_id, orguser.org)
@@ -573,17 +528,13 @@ def get_filter_options(
 
 @dashboard_native_router.put("/{dashboard_id}/share/")
 @has_permission(["can_share_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_edit_dashboards")
 def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
-    """Toggle public sharing for a dashboard"""
+    """Toggle public sharing for a dashboard. Any editor with the share slug
+    may toggle, not just the creator."""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist as err:
-        raise HttpError(404, "Dashboard not found") from err
-
-    # Any editor with the share slug may toggle, not just the creator.
-    require_edit_access(orguser, "dashboard", dashboard)
+    dashboard = request.resource
 
     is_public = payload.is_public
 
@@ -634,18 +585,13 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
 
 @dashboard_native_router.get("/{dashboard_id}/share/")
 @has_permission(["can_view_dashboards"])
+@extract_resource("dashboard")
+@has_resource_permission("can_view_dashboards")
 def get_dashboard_sharing_status(request, dashboard_id: int):
-    """Get dashboard sharing status"""
+    """Get dashboard sharing status. View access suffices: the status GET
+    only reveals whether a resource the viewer can already see is public."""
     orguser: OrgUser = request.orguser
-
-    try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
-    except Dashboard.DoesNotExist as err:
-        raise HttpError(404, "Dashboard not found") from err
-
-    # View access suffices: the status GET only reveals whether a resource
-    # the viewer can already see is public.
-    require_view_access(orguser, "dashboard", dashboard)
+    dashboard = request.resource
 
     response_data = {
         "is_public": dashboard.is_public,

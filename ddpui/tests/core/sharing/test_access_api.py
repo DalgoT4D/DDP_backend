@@ -867,10 +867,10 @@ class TestCreateGrantByEmail:
         assert pending_member.orguser_id == new_orguser_obj.id
         assert pending_member.pending_email is None
 
-        # the grant row itself is "edit" (asserted above), but the resolver
-        # caps Members at "view" regardless of grant level (Step 5) -- the
-        # invited user's role is Member (Part C), so that's what they see
-        assert effective_permission(new_orguser_obj, "dashboard", dashboard) == "view"
+        # v1.2 flip (plan §5): dashboards honor Member edit grants
+        # (member_edit_grants=True), so the invited Member's activated
+        # "edit" grant resolves to real edit — no silent cap.
+        assert effective_permission(new_orguser_obj, "dashboard", dashboard) == "edit"
 
         # and the list-scoping path (the sharing modal's "the new user sees
         # the resource in their list" case) admits the dashboard too
