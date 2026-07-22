@@ -68,13 +68,6 @@ class ReportSnapshot(models.Model):
         null=True,
         help_text="User who created this snapshot",
     )
-    owner = models.ForeignKey(
-        OrgUser,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="owned_%(class)ss",
-        help_text="Current owner of this snapshot for delete/transfer purposes",
-    )
     last_modified_by = models.ForeignKey(
         OrgUser,
         on_delete=models.SET_NULL,
