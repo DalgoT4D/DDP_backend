@@ -455,8 +455,9 @@ def _step_dbt(run: CloneRun) -> None:
     Charts/dashboards read the warehouse tables Step 2 already copied server-side.
 
     The template's dbt CONTENT is deliberately NOT cloned in v1 — no repo-file copy, no
-    `.sql`/`sources.yml` regeneration. `copy_dbt_repo_files` / `regenerate_and_push` stay
-    implemented in `dbt_clone.py` for when dbt-content cloning is added later.
+    `.sql`/`sources.yml` regeneration. The content-cloning paths (`copy_dbt_repo_files` /
+    `regenerate_and_push`) were removed as dead code; recover them from git history if
+    dbt-content cloning is added later.
 
     Finishes by creating the dbt system OrgTasks (git-pull/dbt-clean/dbt-deps/dbt-run/...)
     via `create_default_transform_tasks`, mirroring the normal dbt-enabled-org setup, so the
