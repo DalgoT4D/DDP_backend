@@ -270,13 +270,14 @@ class TestTrialActivate:
 
 
 class TestTrialRetry:
+    @patch("ddpui.api.trial_api.TaskProgress")
     @patch("ddpui.api.trial_api.clone_trial_org_task")
     @patch("ddpui.api.trial_api.RedisClient")
     @patch("ddpui.api.trial_api.acquire_clone_lock")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     @patch("ddpui.api.trial_api.fetch_clone_params")
     def test_retry_reenqueues_same_task_id(
-        self, mock_fetch, mock_exists, mock_lock, mock_redis_cls, mock_clone_task
+        self, mock_fetch, mock_exists, mock_lock, mock_redis_cls, mock_clone_task, mock_progress_cls
     ):
         """Happy path: stored params re-drive the clone under the SAME task_id, no user input."""
         mock_fetch.return_value = {
@@ -303,6 +304,13 @@ class TestTrialRetry:
             if c.args and c.args[0] == "trial-clone-start:task-9"
         ]
         assert len(start_calls) == 1
+        # the failed run's progress history is overwritten AT retry time (not when the worker
+        # starts) so /status never serves the old fully-advanced step list during the
+        # enqueue→pickup gap.
+        mock_progress_cls.assert_called_once_with("task-9", "trial-clone-task-9", 24 * 3600)
+        mock_progress_cls.return_value.add.assert_called_once_with(
+            {"message": "queued", "status": "queued"}
+        )
 
     @patch("ddpui.api.trial_api.clone_trial_org_task")
     @patch("ddpui.api.trial_api.fetch_clone_params")

@@ -161,6 +161,11 @@ def trial_retry(request, task_id: str):  # pylint: disable=unused-argument
     # re-anchor the elapsed clock to now so the progress screen counts from this retry, not the
     # original attempt.
     redis.set(TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS)
+    # overwrite the failed run's progress history RIGHT NOW, not when the worker picks the task
+    # up — otherwise /status keeps serving the old run's fully-advanced step list during the
+    # enqueue→pickup gap and the progress screen flashes "all steps done" before resetting.
+    progress = TaskProgress(task_id, f"trial-clone-{task_id}", 24 * 3600)
+    progress.add({"message": "queued", "status": "queued"})
     clone_trial_org_task.delay(
         task_id, data["template_org_id"], email, data["org_name"], data["role"]
     )
