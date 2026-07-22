@@ -15,3 +15,9 @@ from ddpui.models.metric import Metric, KPI
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.resource_share import ResourceShare
 from ddpui.models.org_user import OrgUser, OrgUserRole, OrgUserGroup
+from ddpui.models.notifications import Notification, NotificationRecipient
+from ddpui.models.org_plans import OrgPlans
+from ddpui.models.orgtnc import OrgTnC
+from ddpui.models.flow_runs import PrefectFlowRun
+from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.canvaslock import CanvasLock
