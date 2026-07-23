@@ -718,5 +718,13 @@
             "name": "Can Manage Access Defaults",
             "slug": "can_manage_access_defaults"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 91,
+        "fields": {
+            "name": "Can Share Reports",
+            "slug": "can_share_reports"
+        }
     }
 ]
