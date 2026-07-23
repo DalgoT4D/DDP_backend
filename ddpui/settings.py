@@ -355,6 +355,9 @@ TEMPLATE_ORG_SLUG = os.getenv("TEMPLATE_ORG_SLUG")
 
 # gitignored JSON file, keyed by template source name, holding the real (unmasked) Airbyte
 # source configs used to recreate sources in a trial workspace (Task P3.0a).
-TEMPLATE_SOURCE_CREDS_FILE = os.getenv("TEMPLATE_SOURCE_CREDS_FILE")
+# Defaults to `.template_source_creds.json` at the repo root; override via env if needed.
+TEMPLATE_SOURCE_CREDS_FILE = os.getenv(
+    "TEMPLATE_SOURCE_CREDS_FILE", str(BASE_DIR / ".template_source_creds.json")
+)
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB

@@ -150,6 +150,7 @@ parseprefectlogs.env
 
 # trial-clone template source creds (real Airbyte source configs — never commit)
 template_source_creds*.json
+.template_source_creds*.json
 
 # yml configs
 whitelist.py
