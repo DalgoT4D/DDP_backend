@@ -387,6 +387,8 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
 
 def get_dbt_version(org: Org):
     """get dbt version"""
+    if not org.dbt:
+        return "Not available"
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
         dbt_version_command = [str(dbt_project_params.dbt_binary), "--version"]
@@ -396,12 +398,14 @@ def get_dbt_version(org: Org):
                 return line.split(":")[1].strip()
         return "Not available"
     except Exception as err:
-        logger.error("Error getting dbt version: %s", err)
+        logger.info("Error getting dbt version: %s", err)
         return "Not available"
 
 
 def get_edr_version(org: Org):
     """get elementary report version"""
+    if not org.dbt:
+        return "Not available"
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
         elementary_version_command = [
@@ -414,7 +418,7 @@ def get_edr_version(org: Org):
                 return line.split()[-1].strip()[:-1]
         return "Not available"
     except Exception as err:
-        logger.error("Error getting elementary version: %s", err)
+        logger.info("Error getting elementary version: %s", err)
         return "Not available"
 
 
