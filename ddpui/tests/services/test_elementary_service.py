@@ -686,6 +686,20 @@ def test_get_edr_version_success(mock_check_output, mock_gather_dbt_project_para
     assert response == "1"
 
 
+def test_get_dbt_version_no_dbt_workspace(org):
+    """tests get_dbt_version returns None when dbt workspace is not configured"""
+    org.dbt = None
+    response = get_dbt_version(org)
+    assert response is None
+
+
+def test_get_edr_version_no_dbt_workspace(org):
+    """tests get_edr_version returns None when dbt workspace is not configured"""
+    org.dbt = None
+    response = get_edr_version(org)
+    assert response is None
+
+
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
 @patch("ddpui.ddpdbt.elementary_service.generate_hash_id")

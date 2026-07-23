@@ -387,6 +387,8 @@ def refresh_elementary_report_via_prefect(orguser: OrgUser) -> dict:
 
 def get_dbt_version(org: Org):
     """get dbt version"""
+    if org.dbt is None:
+        return None
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
         dbt_version_command = [str(dbt_project_params.dbt_binary), "--version"]
@@ -402,6 +404,8 @@ def get_dbt_version(org: Org):
 
 def get_edr_version(org: Org):
     """get elementary report version"""
+    if org.dbt is None:
+        return None
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
         elementary_version_command = [
