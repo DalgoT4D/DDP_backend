@@ -32,7 +32,7 @@ from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
 )
-from ddpui.core.trial.dbt_clone import copy_dbt_dag, regenerate_and_push
+from ddpui.core.trial.dbt_clone import copy_dbt_dag, copy_repo_models_from_template
 from ddpui.models.metric import Metric, KPI
 from ddpui.core.trial.prefect_clone import (
     clone_orchestrate_dataflows,
@@ -498,17 +498,18 @@ def _step_dbt(run: CloneRun) -> None:
 
     model_map = copy_dbt_dag(template_dbt, trial_dbt)
 
-    # Materialize the trial repo's content FROM the copied rows (never from the template's
-    # repo): sources.yml for every SOURCE row + a regenerated .sql per MODEL row, then push.
-    # Without this the copied canvas is view-only — creating a model on a copied source/model
-    # fails dbt compilation ("depends on a source ... which was not found") and `dbt run`
-    # has nothing to build. UI4T templates only (operation chains required; else it raises).
-    regenerated = regenerate_and_push(run.trial_org, trial_dbt)
+    # Copy the template repo's models/ directory VERBATIM into the trial repo (+ push) —
+    # byte-identical dbt content (.sql files, sources.yml, model docs), guaranteed parity
+    # with the template. copy_dbt_dag preserved each row's sql_path, which stays valid
+    # because the files land at the same project-relative paths. Without this content the
+    # copied canvas is view-only — new models on copied sources fail dbt compilation and
+    # `dbt run` has nothing to build.
+    copied_files = copy_repo_models_from_template(template_dbt, trial_dbt)
 
-    run.manifest["dbt_mode"] = "ui4t_regen"
+    run.manifest["dbt_mode"] = "repo_models_copy"
     run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
     run.manifest["dbt_models"] = len(model_map)
-    run.manifest["dbt_regenerated"] = regenerated
+    run.manifest["dbt_files_copied"] = copied_files
 
     if trial_dbt.cli_profile_block is None:
         raise TrialCloneError(

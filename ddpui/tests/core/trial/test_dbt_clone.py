@@ -1,4 +1,5 @@
 import uuid as uuid_module
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -71,9 +72,13 @@ def test_copy_dbt_dag_copies_models_operations_edges():
     trial_models = list(OrgDbtModel.objects.filter(orgdbt=trial_dbt))
     assert len(trial_models) == 2
     for m in trial_models:
-        assert m.sql_path is None
         assert m.uuid is not None
         assert m.uuid not in {src_model.uuid, dest_model.uuid}
+    # sql_path preserved — copy_repo_models_from_template lands the files at the same
+    # project-relative paths, so the copied rows' paths stay valid
+    by_name = {m.name: m for m in trial_models}
+    assert by_name["stg_customers"].sql_path == src_model.sql_path
+    assert by_name["customers"].sql_path == dest_model.sql_path
 
     assert set(model_map.keys()) == {src_model.id, dest_model.id}
     new_src = model_map[src_model.id]
@@ -535,3 +540,105 @@ def test_regenerate_and_push_raises_on_ambiguous_terminal(mock_regen_model, mock
 
     mock_regen_model.assert_not_called()
     mock_git_manager_cls.assert_not_called()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.core.trial.dbt_clone.ensure_source_yml_definition_in_project")
+def test_regenerate_and_push_skips_sources_not_on_canvas(
+    mock_ensure_source, mock_regen_model, mock_git_manager_cls
+):
+    """Copied SOURCE rows include every warehouse table the template synced (raw _airbyte_tmp
+    tables etc.) — only the ones with a CANVAS NODE get a sources.yml entry. Writing all of
+    them let the repo-to-canvas sync (transform_type=github) mint canvas nodes for every entry,
+    flooding the trial canvas with nodes the template canvas never had."""
+    template_org = Org.objects.create(name="tmpl-skip", slug="tmpl-skip")
+    trial_org = Org.objects.create(name="trial-skip", slug="trial-skip")
+    trial_dbt = _make_orgdbt(trial_org)
+    trial_org.dbt = trial_dbt
+    trial_org.save()
+    OrgWarehouse.objects.create(org=trial_org, wtype="postgres", credentials="secret")
+
+    on_canvas = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="pivottest",
+        display_name="pivottest",
+        schema="staging",
+        type=OrgDbtModelType.SOURCE,
+        source_name="staging",
+    )
+    CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="staging.pivottest",
+        dbtmodel=on_canvas,
+        output_cols=[],
+    )
+    # synced raw table — copied row, NO canvas node -> must be skipped
+    OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="pivottest_airbyte_tmp",
+        display_name="pivottest_airbyte_tmp",
+        schema="staging",
+        type=OrgDbtModelType.SOURCE,
+        source_name="staging",
+    )
+
+    mock_ensure_source.return_value = SourceYmlDefinition(
+        source_name="staging",
+        source_schema="staging",
+        table="pivottest",
+        sql_path="models/sources/sources.yml",
+    )
+
+    count = dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    assert count == 0  # no MODEL rows in this fixture
+    mock_ensure_source.assert_called_once_with(trial_dbt, "staging", "pivottest")
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+def test_copy_repo_models_from_template_copies_verbatim_and_pushes(mock_git_manager_cls, tmp_path):
+    """models/ dir (sql + sources.yml + docs) copied byte-identical from the template's local
+    working dir into the trial repo; commit + push with the org-admin PAT; file count returned."""
+    import os
+
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+    template_org = Org.objects.create(name="tmpl-vc", slug="tmpl-vc")
+    trial_org = Org.objects.create(name="trial-vc", slug="trial-vc")
+    template_dbt = _make_orgdbt(template_org)
+    trial_dbt = _make_orgdbt(trial_org)
+
+    template_dir = Path(DbtProjectManager.get_dbt_project_dir(template_dbt))
+    (template_dir / "models" / "staging").mkdir(parents=True)
+    (template_dir / "models" / "staging" / "sources.yml").write_text("sources: []")
+    (template_dir / "models" / "staging" / "casted_pivottest.sql").write_text("select 1")
+    trial_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
+    (trial_dir / "models").mkdir(parents=True)  # empty scaffold
+
+    mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+
+    count = dbt_clone.copy_repo_models_from_template(template_dbt, trial_dbt)
+
+    assert count == 2
+    assert (trial_dir / "models" / "staging" / "casted_pivottest.sql").read_text() == "select 1"
+    assert (trial_dir / "models" / "staging" / "sources.yml").read_text() == "sources: []"
+    mock_git_manager_cls.assert_called_once_with(str(trial_dir), "admin-pat")
+    push_instance = mock_git_manager_cls.return_value
+    push_instance.commit_changes.assert_called_once_with("clone template dbt models")
+    push_instance.push_changes.assert_called_once()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+def test_copy_repo_models_from_template_raises_when_no_models_dir(mock_git_manager_cls, tmp_path):
+    import os
+
+    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+    template_org = Org.objects.create(name="tmpl-nm", slug="tmpl-nm")
+    trial_org = Org.objects.create(name="trial-nm", slug="trial-nm")
+    template_dbt = _make_orgdbt(template_org)
+    trial_dbt = _make_orgdbt(trial_org)
+
+    with pytest.raises(RuntimeError, match="no models/ directory"):
+        dbt_clone.copy_repo_models_from_template(template_dbt, trial_dbt)
+    mock_git_manager_cls.return_value.push_changes.assert_not_called()

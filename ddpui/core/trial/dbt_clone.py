@@ -20,7 +20,9 @@ NOT NULL unique field with no model-level default, so it must always be supplied
 """
 
 import copy
+import shutil
 import uuid
+from pathlib import Path
 
 from ddpui.core.dbtautomation_service import (
     create_or_update_dbt_model_in_project_v2,
@@ -115,8 +117,10 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
     (active v2) row from `template_dbt` onto `trial_dbt`, re-parenting FKs to the new rows via
     an old-model-id -> new-model old->new map.
 
-    `sql_path` is nulled on every copied OrgDbtModel — the trial's dbt project is an empty
-    scaffold and no `.sql` files exist for the copied rows (dbt content is not cloned in v1).
+    `sql_path` is copied AS-IS — `copy_repo_models_from_template` copies the template repo's
+    `models/` directory verbatim into the trial repo, so every copied row's project-relative
+    path stays valid. Rows whose file no longer exists in the template repo (e.g. orphaned by
+    a canvas-node delete) keep their stale path harmlessly — exactly mirroring the template.
 
     Returns `model_map` (`{old OrgDbtModel.id: new OrgDbtModel}`).
     """
@@ -129,7 +133,7 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
             name=m.name,
             display_name=m.display_name,
             schema=m.schema,
-            sql_path=None,
+            sql_path=m.sql_path,
             type=m.type,
             source_name=m.source_name,
             output_cols=m.output_cols,
@@ -315,7 +319,16 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
             f"trial org {trial_org.slug} has no warehouse to regenerate dbt models against"
         )
 
+    # sources.yml is materialized ONLY for sources actually ON the canvas. The copied
+    # OrgDbtModel SOURCE rows include every warehouse table the template ever synced
+    # (raw `_airbyte_tmp` tables included) — those are just "available tables" in the left
+    # tree. Writing them all into sources.yml made the repo-to-canvas sync (active when
+    # transform_type=github) mint a canvas node per entry, flooding the trial canvas with
+    # nodes the template canvas never had. When a trial user later adds an off-canvas
+    # source, the normal add-to-canvas flow writes its yml entry itself.
     for source_model in OrgDbtModel.objects.filter(orgdbt=trial_dbt, type=OrgDbtModelType.SOURCE):
+        if not CanvasNode.objects.filter(orgdbt=trial_dbt, dbtmodel=source_model).exists():
+            continue
         _regenerate_source(source_model, trial_dbt)
 
     ordered_models = _topological_model_order(trial_dbt)
@@ -332,3 +345,46 @@ def regenerate_and_push(trial_org: Org, trial_dbt: OrgDbt) -> int:
         f"regenerated {len(ordered_models)} dbt models and pushed to {trial_dbt.gitrepo_url}"
     )
     return len(ordered_models)
+
+
+def copy_repo_models_from_template(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> int:
+    """Copy the template repo's `models/` directory VERBATIM into the trial repo, then
+    commit + push. This is the primary dbt-content path: byte-identical parity with the
+    template (`.sql` files, `sources.yml`, model yml docs — everything under `models/`),
+    no warehouse round-trips, and template quirks (e.g. orphaned OrgDbtModel rows whose
+    file was already deleted) copy harmlessly instead of crashing a regeneration.
+
+    Both repos are Dalgo-managed scaffolds with the same project name ("dbtrepo") and
+    profile, so nothing outside `models/` needs to carry over — packages.yml and the asset
+    macros are already identical from `setup_managed_git_workspace`'s scaffold.
+
+    Reads the template's LOCAL working directory (`DbtProjectManager.get_dbt_project_dir`)
+    — the template org lives on this same instance and its working dir is the write-first
+    copy of the repo (every UI4T edit lands here before the push). Fails loud if the
+    template project or its `models/` dir is missing on disk.
+
+    `copy_dbt_dag` preserves each copied row's `sql_path`, which stays valid because the
+    files land at the same project-relative paths.
+
+    Returns the number of files copied.
+    """
+    template_dir = Path(DbtProjectManager.get_dbt_project_dir(template_dbt))
+    trial_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
+    template_models = template_dir / "models"
+    if not template_models.exists():
+        raise TrialCloneError(
+            f"template dbt project has no models/ directory on disk at {template_models}"
+        )
+
+    shutil.copytree(template_models, trial_dir / "models", dirs_exist_ok=True)
+    copied_files = sum(1 for p in (trial_dir / "models").rglob("*") if p.is_file())
+
+    pat = GitManager.get_org_admin_pat()
+    git_manager = GitManager(str(trial_dir), pat)
+    git_manager.commit_changes("clone template dbt models")
+    git_manager.push_changes()
+
+    logger.info(
+        f"copied {copied_files} model files from template repo into {trial_dbt.gitrepo_url}"
+    )
+    return copied_files

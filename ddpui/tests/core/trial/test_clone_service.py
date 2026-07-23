@@ -1277,7 +1277,7 @@ def _make_orgdbt(slug: str) -> OrgDbt:
     )
 
 
-@patch("ddpui.core.trial.clone_service.regenerate_and_push")
+@patch("ddpui.core.trial.clone_service.copy_repo_models_from_template")
 @patch("ddpui.core.trial.clone_service.DbtProjectManager")
 @patch("ddpui.core.trial.clone_service.create_default_transform_tasks")
 @patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
@@ -1286,8 +1286,8 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
 ):
     """_step_dbt runs the NORMAL workspace setup (setup_managed_git_workspace — repo scaffold +
     cli block), copies the template's UI4T DAG rows via copy_dbt_dag, then REGENERATES the trial
-    repo's content from those rows (regenerate_and_push: sources.yml + per-model .sql + push) so
-    the trial user can create/edit/run models. The template's repo is never read.
+    repo's content by copying the template repo's models/ directory verbatim
+    (copy_repo_models_from_template) so the trial user can create/edit/run models.
     transform_type mirrors the template ('ui'), and the dbt system OrgTasks are still created."""
     template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
     trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
@@ -1342,17 +1342,17 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
     trial_dbt.refresh_from_db()
     assert trial_dbt.transform_type == "ui"  # mirrored from template, not left GIT
 
-    # DAG rows copied; sql_path nulled (no files exist on the trial — content NOT cloned)
+    # DAG rows copied; sql_path preserved (repo files copied to the same relative paths)
     trial_model = OrgDbtModel.objects.get(orgdbt=trial_dbt)
     assert trial_model.name == "customers"
-    assert trial_model.sql_path is None
+    assert trial_model.sql_path == "models/analytics/customers.sql"
     assert OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt).count() == 1
 
-    mock_regen.assert_called_once_with(trial_org, trial_dbt)
-    assert run.manifest["dbt_mode"] == "ui4t_regen"
+    mock_regen.assert_called_once_with(template_dbt, trial_dbt)
+    assert run.manifest["dbt_mode"] == "repo_models_copy"
     assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
     assert run.manifest["dbt_models"] == 1
-    assert run.manifest["dbt_regenerated"] == mock_regen.return_value
+    assert run.manifest["dbt_files_copied"] == mock_regen.return_value
 
     mock_dbt_project_manager.gather_dbt_project_params.assert_called_once_with(trial_org, trial_dbt)
     mock_create_transform_tasks.assert_called_once_with(
