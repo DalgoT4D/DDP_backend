@@ -726,5 +726,13 @@
             "name": "Can Share Reports",
             "slug": "can_share_reports"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 92,
+        "fields": {
+            "name": "Can Share Charts",
+            "slug": "can_share_charts"
+        }
     }
 ]

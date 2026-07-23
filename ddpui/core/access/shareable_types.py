@@ -11,6 +11,7 @@ from django.db.models import Model
 
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
+from ddpui.models.visualization import Chart
 
 
 class ShareableTypeEntry(TypedDict):
@@ -23,7 +24,8 @@ class ShareableTypeEntry(TypedDict):
 
 RTYPES: dict[str, ShareableTypeEntry] = {
     "dashboard": {"model": Dashboard, "id_kwarg": "dashboard_id"},
-    # chart, report, kpi, alert appended as we wire each rtype.
+    "chart": {"model": Chart, "id_kwarg": "chart_id"},
+    # report, kpi, alert appended as we wire each rtype.
 }
 
 
