@@ -1,8 +1,9 @@
 import uuid as uuid_module
+from unittest.mock import patch
 
 import pytest
 
-from ddpui.models.org import Org, OrgDbt
+from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.models.dbt_workflow import (
     OrgDbtModel,
     OrgDbtModelType,
@@ -10,6 +11,8 @@ from ddpui.models.dbt_workflow import (
     DbtEdge,
 )
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
+from ddpui.core.dbtautomation_service import SourceYmlDefinition
+from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.trial import dbt_clone
 
 pytestmark = pytest.mark.django_db
@@ -282,3 +285,253 @@ def test_copy_dbt_dag_handles_missing_or_none_config():
 
     op2 = OrgDbtOperation.objects.get(dbtmodel=new_no_input_models_model)
     assert op2.config == {"type": "rename"}
+
+
+def _make_warehouse(org: Org) -> OrgWarehouse:
+    return OrgWarehouse.objects.create(org=org, wtype="postgres", credentials="secret")
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+@patch("ddpui.core.trial.dbt_clone.ensure_source_yml_definition_in_project")
+def test_regenerate_and_push_regenerates_sources_and_models(
+    mock_ensure_source, mock_regen_model, mock_git_manager_cls
+):
+    trial_org = Org.objects.create(name="trial-regen", slug="trial-regen")
+    trial_dbt = _make_orgdbt(trial_org)
+    trial_org.dbt = trial_dbt
+    trial_org.save()
+    _make_warehouse(trial_org)
+
+    source_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="raw_customers",
+        display_name="raw_customers",
+        schema="raw",
+        type=OrgDbtModelType.SOURCE,
+        source_name="raw",
+    )
+    dest_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="customers",
+        display_name="customers",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    DbtEdge.objects.create(from_node=source_model, to_node=dest_model)
+
+    source_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="raw_customers",
+        dbtmodel=source_model,
+    )
+    op_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="rename-op",
+        operation_config={"type": "rename", "config": {}},
+    )
+    dest_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="customers",
+        dbtmodel=dest_model,
+    )
+    CanvasEdge.objects.create(from_node=source_node, to_node=op_node, seq=1)
+    CanvasEdge.objects.create(from_node=op_node, to_node=dest_node, seq=1)
+
+    mock_ensure_source.return_value = SourceYmlDefinition(
+        source_name="raw",
+        source_schema="raw",
+        table="raw_customers",
+        sql_path="models/sources/sources.yml",
+    )
+    mock_regen_model.return_value = ("models/analytics/customers.sql", ["id", "name"])
+    mock_git_instance = mock_git_manager_cls.return_value
+
+    count = dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    assert count == 1
+    mock_ensure_source.assert_called_once_with(trial_dbt, "raw", "raw_customers")
+
+    source_model.refresh_from_db()
+    dest_model.refresh_from_db()
+    assert source_model.sql_path == "models/sources/sources.yml"
+    assert dest_model.sql_path == "models/analytics/customers.sql"
+
+    mock_regen_model.assert_called_once()
+    call_args = mock_regen_model.call_args.args
+    assert call_args[0].id == OrgWarehouse.objects.get(org=trial_org).id
+    config = call_args[1]
+    assert config["dest_schema"] == "analytics"
+    assert config["output_name"] == "customers"
+    assert isinstance(config["operations"], list) and len(config["operations"]) == 1
+    assert call_args[2] == trial_dbt
+
+    mock_git_manager_cls.assert_called_once()
+    git_call_args = mock_git_manager_cls.call_args.args
+    assert git_call_args[0] == DbtProjectManager.get_dbt_project_dir(trial_dbt)
+    assert git_call_args[1] == mock_git_manager_cls.get_org_admin_pat.return_value
+    mock_git_instance.commit_changes.assert_called_once_with("clone template dbt models")
+    mock_git_instance.push_changes.assert_called_once()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_raises_without_warehouse(mock_regen_model, mock_git_manager_cls):
+    trial_org = Org.objects.create(name="trial-nowh", slug="trial-nowh")
+    trial_dbt = _make_orgdbt(trial_org)
+
+    with pytest.raises(RuntimeError, match="no warehouse"):
+        dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    mock_regen_model.assert_not_called()
+    mock_git_manager_cls.assert_not_called()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_raises_when_model_has_no_operation_chain(
+    mock_regen_model, mock_git_manager_cls
+):
+    trial_org = Org.objects.create(name="trial-noop", slug="trial-noop")
+    trial_dbt = _make_orgdbt(trial_org)
+    _make_warehouse(trial_org)
+
+    dest_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="orphan_model",
+        display_name="orphan_model",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="orphan_model",
+        dbtmodel=dest_model,
+    )
+
+    with pytest.raises(RuntimeError, match="no upstream operation chain"):
+        dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    mock_regen_model.assert_not_called()
+    mock_git_manager_cls.assert_not_called()
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_regenerates_models_in_topological_order(
+    mock_regen_model, mock_git_manager_cls
+):
+    """model_b depends on model_a via a DbtEdge; each has its own canvas operation chain so
+    regen can find a terminal node for both. The topological sort must regenerate model_a
+    (the dependency) before model_b (the dependent)."""
+    trial_org = Org.objects.create(name="trial-topo", slug="trial-topo")
+    trial_dbt = _make_orgdbt(trial_org)
+    _make_warehouse(trial_org)
+
+    model_a = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="model_a",
+        display_name="model_a",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    model_b = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="model_b",
+        display_name="model_b",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    DbtEdge.objects.create(from_node=model_a, to_node=model_b)
+
+    op_node_a = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-a",
+        operation_config={"type": "rename", "config": {}},
+    )
+    model_node_a = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="model_a",
+        dbtmodel=model_a,
+    )
+    CanvasEdge.objects.create(from_node=op_node_a, to_node=model_node_a, seq=1)
+
+    op_node_b = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-b",
+        operation_config={"type": "rename", "config": {}},
+    )
+    model_node_b = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="model_b",
+        dbtmodel=model_b,
+    )
+    CanvasEdge.objects.create(from_node=op_node_b, to_node=model_node_b, seq=1)
+
+    mock_regen_model.side_effect = [
+        ("models/analytics/model_a.sql", []),
+        ("models/analytics/model_b.sql", []),
+    ]
+
+    count = dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    assert count == 2
+    assert mock_regen_model.call_count == 2
+    first_call_config = mock_regen_model.call_args_list[0].args[1]
+    second_call_config = mock_regen_model.call_args_list[1].args[1]
+    assert first_call_config["output_name"] == "model_a"
+    assert second_call_config["output_name"] == "model_b"
+
+
+@patch("ddpui.core.trial.dbt_clone.GitManager")
+@patch("ddpui.core.trial.dbt_clone.create_or_update_dbt_model_in_project_v2")
+def test_regenerate_and_push_raises_on_ambiguous_terminal(mock_regen_model, mock_git_manager_cls):
+    """A MODEL canvas node with TWO incoming CanvasEdges (e.g. a stale edge left behind by
+    re-terminating the model from a different operation chain during editing) must raise a
+    loud, clear error rather than silently regenerating from whichever edge `.first()` happens
+    to return."""
+    trial_org = Org.objects.create(name="trial-ambig", slug="trial-ambig")
+    trial_dbt = _make_orgdbt(trial_org)
+    _make_warehouse(trial_org)
+
+    dest_model = OrgDbtModel.objects.create(
+        orgdbt=trial_dbt,
+        name="ambiguous_model",
+        display_name="ambiguous_model",
+        schema="analytics",
+        type=OrgDbtModelType.MODEL,
+    )
+    dest_node = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.MODEL,
+        name="ambiguous_model",
+        dbtmodel=dest_model,
+    )
+    op_node_1 = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-1-stale",
+        operation_config={"type": "rename", "config": {}},
+    )
+    op_node_2 = CanvasNode.objects.create(
+        orgdbt=trial_dbt,
+        node_type=CanvasNodeType.OPERATION,
+        name="op-2-current",
+        operation_config={"type": "rename", "config": {}},
+    )
+    CanvasEdge.objects.create(from_node=op_node_1, to_node=dest_node, seq=1)
+    CanvasEdge.objects.create(from_node=op_node_2, to_node=dest_node, seq=1)
+
+    with pytest.raises(RuntimeError, match="ambiguous terminal node"):
+        dbt_clone.regenerate_and_push(trial_org, trial_dbt)
+
+    mock_regen_model.assert_not_called()
+    mock_git_manager_cls.assert_not_called()

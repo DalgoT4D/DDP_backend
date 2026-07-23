@@ -1277,16 +1277,17 @@ def _make_orgdbt(slug: str) -> OrgDbt:
     )
 
 
+@patch("ddpui.core.trial.clone_service.regenerate_and_push")
 @patch("ddpui.core.trial.clone_service.DbtProjectManager")
 @patch("ddpui.core.trial.clone_service.create_default_transform_tasks")
 @patch("ddpui.core.trial.clone_service.setup_managed_git_workspace")
 def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
-    mock_setup, mock_create_transform_tasks, mock_dbt_project_manager
+    mock_setup, mock_create_transform_tasks, mock_dbt_project_manager, mock_regen
 ):
-    """v1: _step_dbt runs the NORMAL workspace setup (setup_managed_git_workspace — repo
-    scaffold + cli block) and copies the template's UI4T DAG rows via copy_dbt_dag, but does
-    NOT clone the template's dbt content (no copy_dbt_repo_files / regenerate_and_push calls
-    exist in _step_dbt anymore). sql_path is nulled on copies (no files exist on the trial).
+    """_step_dbt runs the NORMAL workspace setup (setup_managed_git_workspace — repo scaffold +
+    cli block), copies the template's UI4T DAG rows via copy_dbt_dag, then REGENERATES the trial
+    repo's content from those rows (regenerate_and_push: sources.yml + per-model .sql + push) so
+    the trial user can create/edit/run models. The template's repo is never read.
     transform_type mirrors the template ('ui'), and the dbt system OrgTasks are still created."""
     template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
     trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
@@ -1347,9 +1348,11 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
     assert trial_model.sql_path is None
     assert OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt).count() == 1
 
-    assert run.manifest["dbt_mode"] == "ui4t_rows_only"
+    mock_regen.assert_called_once_with(trial_org, trial_dbt)
+    assert run.manifest["dbt_mode"] == "ui4t_regen"
     assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
     assert run.manifest["dbt_models"] == 1
+    assert run.manifest["dbt_regenerated"] == mock_regen.return_value
 
     mock_dbt_project_manager.gather_dbt_project_params.assert_called_once_with(trial_org, trial_dbt)
     mock_create_transform_tasks.assert_called_once_with(

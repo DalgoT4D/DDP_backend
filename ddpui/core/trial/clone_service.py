@@ -32,7 +32,7 @@ from ddpui.core.trial.source_config import (
     load_template_source_config,
     validate_template_source_configs,
 )
-from ddpui.core.trial.dbt_clone import copy_dbt_dag
+from ddpui.core.trial.dbt_clone import copy_dbt_dag, regenerate_and_push
 from ddpui.models.metric import Metric, KPI
 from ddpui.core.trial.prefect_clone import (
     clone_orchestrate_dataflows,
@@ -497,9 +497,18 @@ def _step_dbt(run: CloneRun) -> None:
         trial_dbt.save(update_fields=["transform_type"])
 
     model_map = copy_dbt_dag(template_dbt, trial_dbt)
-    run.manifest["dbt_mode"] = "ui4t_rows_only"
+
+    # Materialize the trial repo's content FROM the copied rows (never from the template's
+    # repo): sources.yml for every SOURCE row + a regenerated .sql per MODEL row, then push.
+    # Without this the copied canvas is view-only — creating a model on a copied source/model
+    # fails dbt compilation ("depends on a source ... which was not found") and `dbt run`
+    # has nothing to build. UI4T templates only (operation chains required; else it raises).
+    regenerated = regenerate_and_push(run.trial_org, trial_dbt)
+
+    run.manifest["dbt_mode"] = "ui4t_regen"
     run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
     run.manifest["dbt_models"] = len(model_map)
+    run.manifest["dbt_regenerated"] = regenerated
 
     if trial_dbt.cli_profile_block is None:
         raise TrialCloneError(
