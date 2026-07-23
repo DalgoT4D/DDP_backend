@@ -7,7 +7,7 @@ features/admin-portal/v1/plan.md §3 for why cross-org needs its own layer.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
 
 from ninja import Router, Schema
@@ -16,11 +16,9 @@ from pydantic import HttpUrl
 from django.conf import settings
 from django.db import transaction
 from django.http import JsonResponse
-from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from ddpui.auth import platform_admin_required, AdminJwtAuthMiddleware, blacklist_jti_in_redis
-from ddpui.utils.redis_client import RedisClient
 from ddpui.models.org import Org
 from ddpui.models.org_user import (
     OrgUser,
@@ -85,6 +83,7 @@ def post_admin_login(request, payload: AdminLoginSchema):
 
 
 @admin_router.post("/logout/")
+@platform_admin_required
 def post_admin_logout(request):
     """
     Sign out of the admin portal. Blacklists the admin tokens and deletes ONLY the admin_*
@@ -114,23 +113,12 @@ def post_admin_token_refresh(request):
     if not refresh_token:
         raise HttpError(401, "Refresh token not found")
 
-    try:
-        refresh = RefreshToken(refresh_token)
-    except TokenError as err:
-        raise HttpError(401, "Invalid token") from err
-
-    if refresh.payload.get("session") != "admin":
-        raise HttpError(401, "not an admin session")
-
-    jti = refresh.payload.get("jti")
-    if jti and RedisClient.get_instance().get(f"blacklisted_jti:{jti}"):
-        raise HttpError(401, "Refresh token has been invalidated")
-
-    access = refresh.access_token
-    access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
+    token_data, error = admin_service.refresh_admin_session(refresh_token)
+    if error:
+        raise HttpError(401, error)
 
     response = JsonResponse({"success": 1})
-    _set_admin_cookie(response, "admin_access_token", str(access))
+    _set_admin_cookie(response, "admin_access_token", token_data["access"])
     return response
 
 

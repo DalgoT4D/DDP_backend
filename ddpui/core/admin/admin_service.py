@@ -15,8 +15,11 @@ from typing import List, Optional, Tuple
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from ddpui.auth import CustomTokenObtainSerializer
+from ddpui.utils.redis_client import RedisClient
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, Invitation, UserAttributes
 from ddpui.models.org_plans import OrgPlans
@@ -61,6 +64,36 @@ def issue_admin_session(username: str, password: str) -> Tuple[Optional[dict], O
     access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
 
     return {"access": str(access), "refresh": str(refresh)}, None
+
+
+def refresh_admin_session(refresh_token: str) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Mint a fresh admin access token from an admin refresh token, preserving the
+    session="admin" claim and the short admin access lifetime. Returns
+    ({"access": ...}, None) on success, or (None, error) when the token is
+    unreadable, is not an admin session, or was blacklisted by logout.
+
+    The API layer reads the cookie and maps the error to a status code; this
+    function knows nothing about HTTP.
+    """
+    try:
+        refresh = RefreshToken(refresh_token)
+    except TokenError:
+        return None, "Invalid token"
+
+    # A normal refresh token lacks the claim, so it can never be upgraded into an
+    # admin session here.
+    if refresh.payload.get("session") != "admin":
+        return None, "not an admin session"
+
+    jti = refresh.payload.get("jti")
+    if jti and RedisClient.get_instance().get(f"blacklisted_jti:{jti}"):
+        return None, "Refresh token has been invalidated"
+
+    access = refresh.access_token
+    access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
+
+    return {"access": str(access)}, None
 
 
 # --------------------------------------------------------------------------- #
