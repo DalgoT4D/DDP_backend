@@ -14,9 +14,11 @@ from ninja.errors import HttpError
 from ddpui.core.trial.activation import (
     create_activation_token,
     consume_activation_token,
+    peek_activation_token,
     store_clone_params,
     fetch_clone_params,
     acquire_clone_lock,
+    release_clone_lock,
 )
 from ddpui.core.trial.clone_service import account_exists_for_email
 from ddpui.core.trial.tasks import clone_trial_org_task
@@ -57,6 +59,11 @@ def trial_signup(request, payload: TrialSignupSchema):  # pylint: disable=unused
     if not settings.FRONTEND_URL_V2:
         raise HttpError(500, "frontend url not configured")
 
+    # likewise fail fast on a missing template org — otherwise the misconfiguration only
+    # surfaces at /activate, after the user has received a link and chosen a password.
+    if not Org.objects.filter(slug=settings.TEMPLATE_ORG_SLUG).exists():
+        raise HttpError(500, "template org not configured")
+
     token = create_activation_token(
         ActivationTokenData(email=payload.email, org_name=payload.org_name, role=payload.role)
     )
@@ -68,59 +75,86 @@ def trial_signup(request, payload: TrialSignupSchema):  # pylint: disable=unused
 
 @trial_router.post("/activate")
 def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=unused-argument
-    """set the chosen password on the trial user and enqueue the clone task"""
-    data = consume_activation_token(payload.token)
+    """set the chosen password on the trial user and enqueue the clone task
+
+    Ordering is deliberate: EVERY validation runs against a peeked (unconsumed) token first,
+    so a failure — weak password, account-exists, missing template config — leaves the link
+    usable for a corrected resubmit. Consuming first burned the token on any downstream error
+    and every retry then hit "invalid or expired link" (seen on staging when the template org
+    was unconfigured: 500 → token burned + clone lock leaked → retries 400/409 until TTL).
+    Only after everything validates is the token consumed (atomically — one winner on a
+    double-POST) and the lock taken; any failure past that point releases the lock instead of
+    leaking it until its TTL.
+    """
+    data = peek_activation_token(payload.token)
     if data is None:
         raise HttpError(400, "invalid or expired link")
 
     email = data.email
 
-    # I1: re-check for a real account AFTER the token is consumed — the token may be old
-    # (up to 24h TTL) and the email may have since become a real account (e.g. the user
-    # signed up normally, or a previous activation already ran). Without this a replayed/
-    # stale activation link could overwrite a real account's password.
-    if account_exists_for_email(email):
-        raise HttpError(409, "an account already exists for this email; please log in")
-
-    # I2: per-email lifetime lock so two clones can't run for the same email at once. Acquired
-    # here before enqueue; the clone task releases it in a finally when it ends (success or fail),
-    # so a POST /trial/retry can re-run immediately after a failure. TTL is a dead-worker backstop.
-    redis = RedisClient.get_instance()
-    if not acquire_clone_lock(email):
-        raise HttpError(409, "a trial is already being set up for this email")
-
-    # I3: reject an empty/weak password before creating anything.
+    # I3: reject an empty/weak password before anything else — token stays valid, the user
+    # fixes their password and resubmits the same link.
     try:
         validate_password(payload.password)
     except ValidationError as err:
         raise HttpError(400, "password does not meet requirements") from err
 
-    # get_or_create doubles as the "dangling user" guard: a User may already exist here from
-    # a previous failed/reaped trial attempt (teardown removes the OrgUser but not the User) —
-    # either way we (re)set the chosen password ourselves rather than relying on the clone's
-    # own get_or_create, which only sets a password when it creates the row.
-    user, _ = User.objects.get_or_create(username=email, defaults={"email": email})
-    user.set_password(payload.password)
-    user.save()
-    UserAttributes.objects.get_or_create(user=user, defaults={"email_verified": True})
+    # I1: check for a real account — the token may be old (up to 24h TTL) and the email may
+    # have since become a real account (e.g. the user signed up normally, or a previous
+    # activation already ran). Without this a replayed/stale activation link could overwrite
+    # a real account's password.
+    if account_exists_for_email(email):
+        raise HttpError(409, "an account already exists for this email; please log in")
 
+    # fail on missing template config BEFORE consuming the token or taking the lock — a
+    # misconfigured deployment must stay retryable once fixed.
     template = Org.objects.filter(slug=settings.TEMPLATE_ORG_SLUG).first()
     if template is None:
         raise HttpError(500, "template org not configured")
 
-    task_id = str(uuid4())
-    # record the clone's start time so the progress screen's elapsed clock is derived from a
-    # fixed origin (survives page refresh) rather than counting up from when the tab mounted.
-    redis.set(TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS)
-    # stash the params so POST /trial/retry/{task_id} can re-enqueue after a failure without the
-    # (now-consumed) activation token — no re-signup / re-verify / re-password on "Try again".
-    store_clone_params(
-        task_id,
-        TrialCloneParams(
-            email=email, org_name=data.org_name, role=data.role, template_org_id=template.id
-        ),
-    )
-    clone_trial_org_task.delay(task_id, template.id, email, data.org_name, data.role)
+    # all validations passed — NOW consume. Atomic: on a double-POST both may peek, but only
+    # the request whose delete wins proceeds; the loser 400s without side-effects.
+    if consume_activation_token(payload.token) is None:
+        raise HttpError(400, "invalid or expired link")
+
+    # I2: per-email lifetime lock so two clones can't run for the same email at once. Acquired
+    # here before enqueue; the clone task releases it in a finally when it ends (success or fail),
+    # so a POST /trial/retry can re-run immediately after a failure. TTL is a dead-worker backstop.
+    if not acquire_clone_lock(email):
+        raise HttpError(409, "a trial is already being set up for this email")
+
+    try:
+        # get_or_create doubles as the "dangling user" guard: a User may already exist here from
+        # a previous failed/reaped trial attempt (teardown removes the OrgUser but not the User) —
+        # either way we (re)set the chosen password ourselves rather than relying on the clone's
+        # own get_or_create, which only sets a password when it creates the row.
+        user, _ = User.objects.get_or_create(username=email, defaults={"email": email})
+        user.set_password(payload.password)
+        user.save()
+        UserAttributes.objects.get_or_create(user=user, defaults={"email_verified": True})
+
+        task_id = str(uuid4())
+        redis = RedisClient.get_instance()
+        # record the clone's start time so the progress screen's elapsed clock is derived from a
+        # fixed origin (survives page refresh) rather than counting up from when the tab mounted.
+        redis.set(
+            TRIAL_START_KEY.format(task_id=task_id), int(time.time()), ex=TRIAL_START_TTL_SECONDS
+        )
+        # stash the params so POST /trial/retry/{task_id} can re-enqueue after a failure without
+        # the (now-consumed) activation token — no re-signup / re-verify / re-password on
+        # "Try again".
+        store_clone_params(
+            task_id,
+            TrialCloneParams(
+                email=email, org_name=data.org_name, role=data.role, template_org_id=template.id
+            ),
+        )
+        clone_trial_org_task.delay(task_id, template.id, email, data.org_name, data.role)
+    except Exception:
+        # the clone task's finally is the normal releaser — but if we never managed to enqueue,
+        # nothing else will free the lock and every retry 409s until the TTL. Release it here.
+        release_clone_lock(email)
+        raise
 
     # email is echoed back so the progress screen can auto-login (POST /login) once the clone
     # completes — the frontend never learns it any other way from this token-opened page.

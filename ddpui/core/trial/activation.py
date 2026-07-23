@@ -34,14 +34,32 @@ def create_activation_token(data: ActivationTokenData) -> str:
     return token
 
 
+def peek_activation_token(token: str) -> ActivationTokenData | None:
+    """Look up an activation token WITHOUT consuming it, returning its payload if valid.
+
+    Used by /activate to run every validation (password strength, account-exists, template
+    config) BEFORE the token is burned — a validation failure must leave the link usable for
+    a corrected resubmit, not masquerade as "invalid or expired link"."""
+    redis = RedisClient.get_instance()
+    raw = redis.get(f"{TOKEN_PREFIX}{token}")
+    if raw is None:
+        return None
+    return ActivationTokenData(**json.loads(raw))
+
+
 def consume_activation_token(token: str) -> ActivationTokenData | None:
-    """Look up and delete an activation token, returning its payload if valid."""
+    """Look up and delete an activation token, returning its payload if valid.
+
+    The delete's return value guards the double-POST race: two concurrent requests can both
+    GET the payload, but only the one whose DELETE actually removed the key wins — the loser
+    gets None, exactly as if the token were already used."""
     redis = RedisClient.get_instance()
     key = f"{TOKEN_PREFIX}{token}"
     raw = redis.get(key)
     if raw is None:
         return None
-    redis.delete(key)
+    if not redis.delete(key):
+        return None
     return ActivationTokenData(**json.loads(raw))
 
 

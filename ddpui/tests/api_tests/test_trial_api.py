@@ -48,7 +48,9 @@ class TestTrialSignup:
     @patch("ddpui.api.trial_api.send_trial_verification_email")
     @patch("ddpui.api.trial_api.create_activation_token")
     @patch("ddpui.api.trial_api.account_exists_for_email")
-    def test_valid_new_email(self, mock_exists, mock_create_token, mock_send_email):
+    def test_valid_new_email(
+        self, mock_exists, mock_create_token, mock_send_email, seed_template_org
+    ):
         mock_exists.return_value = False
         mock_create_token.return_value = "tok123"
 
@@ -103,6 +105,25 @@ class TestTrialSignup:
         mock_create_token.assert_not_called()
         mock_send_email.assert_not_called()
 
+    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.create_activation_token")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    def test_missing_template_org_returns_500(
+        self, mock_exists, mock_create_token, mock_send_email, monkeypatch
+    ):
+        """A missing template org must fail fast at signup — before minting a token / emailing —
+        not surface later at /activate after the user has chosen a password."""
+        mock_exists.return_value = False
+        monkeypatch.setattr(settings, "TEMPLATE_ORG_SLUG", "nonexistent-template")
+
+        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        with pytest.raises(HttpError) as exc:
+            trial_signup(None, payload)
+
+        assert exc.value.status_code == 500
+        mock_create_token.assert_not_called()
+        mock_send_email.assert_not_called()
+
 
 STRONG_PASSWORD = "Str0ngTr!alPassw0rd"
 
@@ -115,6 +136,10 @@ def _mock_redis(mock_redis_cls):
     return mock_redis
 
 
+def _token_data(email="new@b.org"):
+    return ActivationTokenData(email=email, org_name="Acme", role="account-manager")
+
+
 class TestTrialActivate:
     @patch("ddpui.api.trial_api.clone_trial_org_task")
     @patch("ddpui.api.trial_api.store_clone_params")
@@ -122,8 +147,10 @@ class TestTrialActivate:
     @patch("ddpui.api.trial_api.RedisClient")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
     def test_valid_token_creates_user_and_enqueues(
         self,
+        mock_peek,
         mock_consume,
         mock_exists,
         mock_redis_cls,
@@ -132,11 +159,8 @@ class TestTrialActivate:
         mock_clone_task,
         seed_template_org,
     ):
-        mock_consume.return_value = ActivationTokenData(
-            email="new@b.org",
-            org_name="Acme",
-            role="account-manager",
-        )
+        mock_peek.return_value = _token_data()
+        mock_consume.return_value = _token_data()
         mock_exists.return_value = False
         mock_lock.return_value = True
         mock_redis = _mock_redis(mock_redis_cls)
@@ -173,9 +197,9 @@ class TestTrialActivate:
             result["task_id"], seed_template_org.id, "new@b.org", "Acme", "account-manager"
         )
 
-    @patch("ddpui.api.trial_api.consume_activation_token")
-    def test_invalid_token_returns_400(self, mock_consume):
-        mock_consume.return_value = None
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_invalid_token_returns_400(self, mock_peek):
+        mock_peek.return_value = None
 
         payload = TrialActivateSchema(token="bad", password=STRONG_PASSWORD)
         with pytest.raises(HttpError) as exc:
@@ -186,15 +210,13 @@ class TestTrialActivate:
     @patch("ddpui.api.trial_api.clone_trial_org_task")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
     def test_existing_account_returns_409_and_no_mutation(
-        self, mock_consume, mock_exists, mock_clone_task
+        self, mock_peek, mock_consume, mock_exists, mock_clone_task
     ):
-        """I1: activate must re-check account-exists before touching the User."""
-        mock_consume.return_value = ActivationTokenData(
-            email="existing@b.org",
-            org_name="Acme",
-            role="account-manager",
-        )
+        """I1: activate must check account-exists before touching the User — and the token
+        must NOT be burned by the rejection."""
+        mock_peek.return_value = _token_data("existing@b.org")
         mock_exists.return_value = True
 
         payload = TrialActivateSchema(token="tok123", password=STRONG_PASSWORD)
@@ -203,21 +225,20 @@ class TestTrialActivate:
 
         assert exc.value.status_code == 409
         assert not User.objects.filter(username="existing@b.org").exists()
+        mock_consume.assert_not_called()
         mock_clone_task.delay.assert_not_called()
 
     @patch("ddpui.api.trial_api.clone_trial_org_task")
     @patch("ddpui.api.trial_api.acquire_clone_lock")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
     def test_concurrent_activation_is_locked_out(
-        self, mock_consume, mock_exists, mock_lock, mock_clone_task
+        self, mock_peek, mock_consume, mock_exists, mock_lock, mock_clone_task, seed_template_org
     ):
         """I2: a second concurrent activate for the same email must be rejected (409)."""
-        mock_consume.return_value = ActivationTokenData(
-            email="dup@b.org",
-            org_name="Acme",
-            role="account-manager",
-        )
+        mock_peek.return_value = _token_data("dup@b.org")
+        mock_consume.return_value = _token_data("dup@b.org")
         mock_exists.return_value = False
         mock_lock.return_value = False
 
@@ -234,15 +255,13 @@ class TestTrialActivate:
     @patch("ddpui.api.trial_api.RedisClient")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     @patch("ddpui.api.trial_api.consume_activation_token")
-    def test_weak_password_returns_400_and_no_user_created(
-        self, mock_consume, mock_exists, mock_redis_cls, mock_lock, mock_clone_task
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_weak_password_returns_400_and_token_not_burned(
+        self, mock_peek, mock_consume, mock_exists, mock_redis_cls, mock_lock, mock_clone_task
     ):
-        """I3: an empty/short password must be rejected before the user is created."""
-        mock_consume.return_value = ActivationTokenData(
-            email="weak@b.org",
-            org_name="Acme",
-            role="account-manager",
-        )
+        """I3: a weak password must be rejected before the user is created — and must NOT
+        consume the token or take the lock, so a corrected resubmit of the same link works."""
+        mock_peek.return_value = _token_data("weak@b.org")
         mock_exists.return_value = False
         mock_lock.return_value = True
         _mock_redis(mock_redis_cls)
@@ -253,6 +272,8 @@ class TestTrialActivate:
 
         assert exc.value.status_code == 400
         assert not User.objects.filter(username="weak@b.org").exists()
+        mock_consume.assert_not_called()
+        mock_lock.assert_not_called()
         mock_clone_task.delay.assert_not_called()
 
     @patch("ddpui.api.trial_api.clone_trial_org_task")
@@ -260,14 +281,11 @@ class TestTrialActivate:
     @patch("ddpui.api.trial_api.RedisClient")
     @patch("ddpui.api.trial_api.account_exists_for_email")
     @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
     def test_empty_password_returns_400_and_no_user_created(
-        self, mock_consume, mock_exists, mock_redis_cls, mock_lock, mock_clone_task
+        self, mock_peek, mock_consume, mock_exists, mock_redis_cls, mock_lock, mock_clone_task
     ):
-        mock_consume.return_value = ActivationTokenData(
-            email="empty@b.org",
-            org_name="Acme",
-            role="account-manager",
-        )
+        mock_peek.return_value = _token_data("empty@b.org")
         mock_exists.return_value = False
         mock_lock.return_value = True
         _mock_redis(mock_redis_cls)
@@ -278,7 +296,90 @@ class TestTrialActivate:
 
         assert exc.value.status_code == 400
         assert not User.objects.filter(username="empty@b.org").exists()
+        mock_consume.assert_not_called()
         mock_clone_task.delay.assert_not_called()
+
+    @patch("ddpui.api.trial_api.clone_trial_org_task")
+    @patch("ddpui.api.trial_api.acquire_clone_lock")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_missing_template_returns_500_without_side_effects(
+        self, mock_peek, mock_consume, mock_exists, mock_lock, mock_clone_task, monkeypatch
+    ):
+        """The staging incident: TEMPLATE_ORG_SLUG unset/missing must 500 BEFORE consuming the
+        token, taking the lock, or creating the user — so once ops fixes the config, the very
+        same activation link works. Previously the token was burned and the lock leaked."""
+        mock_peek.return_value = _token_data("tmpl@b.org")
+        mock_exists.return_value = False
+        monkeypatch.setattr(settings, "TEMPLATE_ORG_SLUG", "nonexistent-template")
+
+        payload = TrialActivateSchema(token="tok123", password=STRONG_PASSWORD)
+        with pytest.raises(HttpError) as exc:
+            trial_activate(None, payload)
+
+        assert exc.value.status_code == 500
+        mock_consume.assert_not_called()
+        mock_lock.assert_not_called()
+        assert not User.objects.filter(username="tmpl@b.org").exists()
+        mock_clone_task.delay.assert_not_called()
+
+    @patch("ddpui.api.trial_api.clone_trial_org_task")
+    @patch("ddpui.api.trial_api.acquire_clone_lock")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_double_post_loser_returns_400(
+        self, mock_peek, mock_consume, mock_exists, mock_lock, mock_clone_task, seed_template_org
+    ):
+        """Double-POST race: both requests peek successfully, but the consume loser (delete
+        returned 0) must 400 without taking the lock or enqueuing a second clone."""
+        mock_peek.return_value = _token_data("race@b.org")
+        mock_exists.return_value = False
+        mock_consume.return_value = None  # lost the atomic-delete race
+
+        payload = TrialActivateSchema(token="tok123", password=STRONG_PASSWORD)
+        with pytest.raises(HttpError) as exc:
+            trial_activate(None, payload)
+
+        assert exc.value.status_code == 400
+        mock_lock.assert_not_called()
+        mock_clone_task.delay.assert_not_called()
+
+    @patch("ddpui.api.trial_api.release_clone_lock")
+    @patch("ddpui.api.trial_api.clone_trial_org_task")
+    @patch("ddpui.api.trial_api.store_clone_params")
+    @patch("ddpui.api.trial_api.acquire_clone_lock")
+    @patch("ddpui.api.trial_api.RedisClient")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_enqueue_failure_releases_lock(
+        self,
+        mock_peek,
+        mock_consume,
+        mock_exists,
+        mock_redis_cls,
+        mock_lock,
+        mock_store,
+        mock_clone_task,
+        mock_release,
+        seed_template_org,
+    ):
+        """If anything past lock-acquisition raises (here: broker down at .delay), the lock
+        must be released — otherwise every retry 409s 'already being set up' until the TTL."""
+        mock_peek.return_value = _token_data("boom@b.org")
+        mock_consume.return_value = _token_data("boom@b.org")
+        mock_exists.return_value = False
+        mock_lock.return_value = True
+        _mock_redis(mock_redis_cls)
+        mock_clone_task.delay.side_effect = RuntimeError("broker down")
+
+        payload = TrialActivateSchema(token="tok123", password=STRONG_PASSWORD)
+        with pytest.raises(RuntimeError):
+            trial_activate(None, payload)
+
+        mock_release.assert_called_once_with("boom@b.org")
 
 
 class TestTrialRetry:
