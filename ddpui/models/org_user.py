@@ -254,11 +254,13 @@ class OrgUserGroup(models.Model):
 
 class OrgUserGroupMember(models.Model):
     """One membership row: a group has this ``OrgUser`` (active) or this
-    ``pending_email`` (invited, not yet a user) as a member."""
+    ``invitation`` (invited, not yet a user) as a member. When the invitation
+    is accepted, ``orguser`` is set and ``invitation`` becomes NULL via
+    ``on_delete=SET_NULL``."""
 
     group = models.ForeignKey(OrgUserGroup, on_delete=models.CASCADE, related_name="members")
     orguser = models.ForeignKey(OrgUser, on_delete=models.CASCADE, null=True)
-    pending_email = models.CharField(max_length=255, null=True)
+    invitation = models.ForeignKey(Invitation, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -266,10 +268,10 @@ class OrgUserGroupMember(models.Model):
         db_table = "orguser_group_member"
         constraints = [
             models.UniqueConstraint(
-                fields=["group", "pending_email"], name="uq_orguser_group_member_pending_email"
+                fields=["group", "invitation"], name="uq_orguser_group_member_invitation"
             )
         ]
 
     def __str__(self):
-        principal = self.orguser_id if self.orguser_id is not None else self.pending_email
-        return f"group={self.group_id} member={principal} ({self.status})"
+        principal = self.orguser_id if self.orguser_id is not None else f"inv:{self.invitation_id}"
+        return f"group={self.group_id} member={principal}"

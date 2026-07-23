@@ -58,7 +58,6 @@ class Migration(migrations.Migration):
                     "created_at",
                     models.DateTimeField(auto_created=True, default=django.utils.timezone.now),
                 ),
-                ("pending_email", models.CharField(max_length=255, null=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 (
                     "group",
@@ -74,6 +73,14 @@ class Migration(migrations.Migration):
                         null=True, on_delete=django.db.models.deletion.CASCADE, to="ddpui.orguser"
                     ),
                 ),
+                (
+                    "invitation",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        to="ddpui.invitation",
+                    ),
+                ),
             ],
             options={
                 "db_table": "orguser_group_member",
@@ -82,7 +89,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="orgusergroupmember",
             constraint=models.UniqueConstraint(
-                fields=("group", "pending_email"), name="uq_orguser_group_member_pending_email"
+                fields=("group", "invitation"), name="uq_orguser_group_member_invitation"
             ),
         ),
     ]

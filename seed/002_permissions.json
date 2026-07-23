@@ -678,5 +678,45 @@
             "name": "Can Delete Alerts",
             "slug": "can_delete_alerts"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 86,
+        "fields": {
+            "name": "Can View User Groups",
+            "slug": "can_view_user_groups"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 87,
+        "fields": {
+            "name": "Can Create User Group",
+            "slug": "can_create_user_group"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 88,
+        "fields": {
+            "name": "Can Edit User Group",
+            "slug": "can_edit_user_group"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 89,
+        "fields": {
+            "name": "Can Delete User Group",
+            "slug": "can_delete_user_group"
+        }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 90,
+        "fields": {
+            "name": "Can Manage Access Defaults",
+            "slug": "can_manage_access_defaults"
+        }
     }
 ]

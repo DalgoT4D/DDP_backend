@@ -314,6 +314,26 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             new_role=invitation.invited_new_role,
             work_domain=payload.work_domain,
         )
+
+    # Preserve any group memberships that were pinned to this invitation:
+    # promote each member row to point at the accepting orguser instead. If
+    # the orguser is already a direct member of that group, drop the
+    # invitation-linked row to avoid duplicates. After this, invitation.delete()
+    # nulls out any remaining invitation_id via SET_NULL.
+    from ddpui.models.org_user import OrgUserGroupMember  # local import to avoid cycles
+
+    invitation_member_rows = OrgUserGroupMember.objects.filter(invitation=invitation)
+    existing_group_ids = set(
+        OrgUserGroupMember.objects.filter(orguser=orguser).values_list("group_id", flat=True)
+    )
+    for member_row in invitation_member_rows:
+        if member_row.group_id in existing_group_ids:
+            member_row.delete()
+        else:
+            member_row.orguser = orguser
+            member_row.save(update_fields=["orguser", "updated_at"])
+            existing_group_ids.add(member_row.group_id)
+
     invitation.delete()
     return from_orguser(orguser), None
 

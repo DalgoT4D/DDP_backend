@@ -5,6 +5,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import AccessLevel
 
+
 class OrgPreferences(models.Model):
     """Model to store org preferences for settings panel"""
 
@@ -44,4 +45,7 @@ class OrgPreferences(models.Model):
             "llm_optin_date": self.llm_optin_date.isoformat() if self.llm_optin_date else None,
             "enable_discord_notifications": bool(self.enable_discord_notifications),
             "discord_webhook": self.discord_webhook,
+            "default_analyst_level": self.default_analyst_level,
+            "default_member_level": self.default_member_level,
+            "allow_public_sharing": bool(self.allow_public_sharing),
         }
