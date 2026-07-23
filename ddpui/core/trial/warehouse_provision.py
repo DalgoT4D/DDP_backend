@@ -146,6 +146,14 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
     for owner in owners:
         if owner == ft_role or owner == "postgres" or owner.startswith("pg_"):
             continue
+        # NEVER reassign away from the connecting admin itself: REASSIGN OWNED transfers
+        # cluster-wide shared objects too, and the admin owns the TEMPLATE database — a
+        # `REASSIGN OWNED BY <admin>` would hand the template db to the trial role
+        # (hijacking it and breaking the trial role's teardown). Admin-owned objects inside
+        # the trial db copy stay admin-owned; the ft role can read them via the schema/table
+        # grants issued by the caller.
+        if owner == settings.TRIALS_RDS_ADMIN_USER:
+            continue
         cursor.execute(f'GRANT "{owner}" TO CURRENT_USER')
         cursor.execute(f'REASSIGN OWNED BY "{owner}" TO "{ft_role}"')
         cursor.execute(f'REVOKE "{owner}" FROM CURRENT_USER')

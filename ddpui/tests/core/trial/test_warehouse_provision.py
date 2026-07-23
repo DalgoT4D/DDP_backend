@@ -380,3 +380,20 @@ def test_reassign_copied_objects_noop_when_no_foreign_owners():
     joined = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
     assert "REASSIGN OWNED BY" not in joined
     assert "GRANT" not in joined
+
+
+@patch("ddpui.core.trial.warehouse_provision.settings")
+def test_reassign_copied_objects_never_reassigns_the_admin_user(mock_settings):
+    """REASSIGN OWNED BY <admin> would transfer cluster-wide shared objects the admin owns —
+    including the TEMPLATE database — onto the trial role (hijacking the template and breaking
+    the trial role's teardown). The connecting admin must be skipped like postgres/pg_*."""
+    mock_settings.TRIALS_RDS_ADMIN_USER = "dalgo_admin"
+    ft_role = "ft_x_user"
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [("dalgo_admin",), ("template_wh",)]
+
+    _reassign_copied_objects(cursor, ft_role)
+
+    joined = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
+    assert 'REASSIGN OWNED BY "dalgo_admin"' not in joined
+    assert f'REASSIGN OWNED BY "template_wh" TO "{ft_role}"' in joined
