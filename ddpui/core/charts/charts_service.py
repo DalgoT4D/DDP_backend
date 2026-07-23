@@ -725,7 +725,7 @@ def apply_dashboard_filters(
         filter_type = filter_config["type"]
         value = filter_config["value"]
 
-        if value is None:
+        if value is None or (isinstance(value, str) and value.strip() == ""):
             continue
 
         if filter_type == "value":
@@ -834,6 +834,14 @@ def apply_chart_filters(
         operator = filter_config["operator"]
 
         if not column_name or operator is None:
+            continue
+
+        value = filter_config.get("value")
+
+        # Skip filters with empty/null values for operators that require a value
+        if operator not in ("is_null", "is_not_null") and (
+            value is None or (isinstance(value, str) and value.strip() == "")
+        ):
             continue
 
         # Timestamp date filters need day-range logic — keep full config

@@ -110,3 +110,24 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    def test_empty_string_value_skipped(self):
+        """Filters with empty string values should be skipped to avoid InvalidDatetimeFormat"""
+        for operator in ["equals", "not_equals", "greater_than", "less_than"]:
+            sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
+            assert len(sql) == 0, f"Empty string not skipped for operator={operator}"
+
+    def test_whitespace_only_value_skipped(self):
+        """Filters with whitespace-only values should be skipped"""
+        sql = get_where_sql([make_filter("created_at", "equals", "   ", "timestamp")])
+        assert len(sql) == 0
+
+    def test_none_value_skipped(self):
+        """Filters with None values should be skipped"""
+        sql = get_where_sql([make_filter("created_at", "equals", None, "timestamp")])
+        assert len(sql) == 0
+
+    def test_valid_value_still_applied(self):
+        """Filters with valid non-empty values should still be applied"""
+        sql = get_where_sql([make_filter("created_at", "equals", "2026-06-15", "timestamp")])
+        assert len(sql) == 1
