@@ -75,6 +75,74 @@ class TestChartMetricSchema:
         with pytest.raises(ValidationError):
             ChartMetric(column="value", aggregation="median")
 
+    def test_chart_metric_avg_without_column_rejected(self):
+        """avg aggregation without a column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="avg")
+
+    def test_chart_metric_avg_with_null_column_rejected(self):
+        """avg aggregation with explicit None column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="avg", column=None)
+
+    def test_chart_metric_avg_with_empty_column_rejected(self):
+        """avg aggregation with empty string column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="avg", column="")
+
+    def test_chart_metric_avg_with_whitespace_column_rejected(self):
+        """avg aggregation with whitespace-only column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="avg", column="   ")
+
+    def test_chart_metric_min_without_column_rejected(self):
+        """min aggregation without a column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="min", column=None)
+
+    def test_chart_metric_max_without_column_rejected(self):
+        """max aggregation without a column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="max", column="")
+
+    def test_chart_metric_count_distinct_without_column_rejected(self):
+        """count_distinct aggregation without a column must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartMetric(aggregation="count_distinct")
+
+    def test_chart_metric_saved_metric_id_accepted_without_column(self):
+        """A saved_metric_id reference is valid without column or aggregation."""
+        metric = ChartMetric(saved_metric_id=42)
+        assert metric.saved_metric_id == 42
+        assert metric.column is None
+        assert metric.aggregation is None
+
+    def test_chart_metric_saved_metric_id_accepted_with_partial_fields(self):
+        """A saved_metric_id with aggregation but no column is valid (resolved later)."""
+        metric = ChartMetric(saved_metric_id=42, aggregation="avg")
+        assert metric.saved_metric_id == 42
+        assert metric.aggregation == "avg"
+
+    def test_chart_metric_via_payload_avg_null_column_rejected(self):
+        """Invalid nested ChartMetric inside ChartDataPayload must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="bar",
+                schema_name="public",
+                table_name="sales",
+                metrics=[{"aggregation": "avg", "column": None}],
+            )
+
+    def test_chart_metric_via_payload_avg_empty_column_rejected(self):
+        """Invalid nested ChartMetric (empty column) inside ChartDataPayload must be rejected."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="bar",
+                schema_name="public",
+                table_name="sales",
+                metrics=[{"aggregation": "avg", "column": ""}],
+            )
+
 
 # ================================================================================
 # Test ChartDataPayload specific fields (NOT fully tested by API tests)

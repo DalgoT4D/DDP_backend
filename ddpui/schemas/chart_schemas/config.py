@@ -23,8 +23,9 @@ ChartMetricAggregation = Literal["sum", "avg", "count", "min", "max", "count_dis
 class ChartMetric(Schema):
     """One metric on `extra_config.metrics`.
 
-    Valid shapes: (1) `column_expression` set → raw SQL; (2) `aggregation="count"`
-    → column may be None; (3) otherwise both aggregation + column required.
+    Valid shapes: (1) `saved_metric_id` set → resolved later from DB;
+    (2) `column_expression` set → raw SQL; (3) `aggregation="count"`
+    → column may be None; (4) otherwise both aggregation + column required.
     """
 
     column: Optional[str] = None
@@ -35,14 +36,22 @@ class ChartMetric(Schema):
 
     @model_validator(mode="after")
     def check_aggregation_column_pair(self) -> "ChartMetric":
+        # Saved metrics are resolved from the DB later; skip validation here.
+        if self.saved_metric_id is not None:
+            return self
         if self.column_expression:
             return self
         if self.aggregation is None:
             raise ValueError(
-                "metric requires either `aggregation` (with optional `column`) or `column_expression`"
+                "metric requires either `aggregation` (with optional `column`), "
+                "`column_expression`, or `saved_metric_id`"
             )
-        if self.aggregation != "count" and not self.column:
-            raise ValueError(f"metric with aggregation='{self.aggregation}' requires `column`")
+        # Normalise whitespace-only column to None so the check catches " " etc.
+        col = self.column.strip() if self.column else self.column
+        if self.aggregation != "count" and not col:
+            raise ValueError(
+                f"metric with aggregation='{self.aggregation}' requires a non-empty `column`"
+            )
         return self
 
 
