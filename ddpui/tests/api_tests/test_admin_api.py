@@ -30,10 +30,16 @@ from ddpui.api.admin_api import (
     get_admin_org_user_removal_impact,
     delete_admin_org_user,
     delete_admin_org_invitation,
+    admin_router,
+    post_admin_login,
+    post_admin_logout,
+    post_admin_token_refresh,
+    get_admin_currentuser,
     AdminCreateOrgSchema,
     AdminUpdateOrgSchema,
     AdminInviteUserSchema,
     AdminChangeRoleSchema,
+    AdminLoginSchema,
 )
 from ddpui.api.user_org_api import get_current_user_v2, post_organization_user_invite_v1
 from ddpui.core import orguserfunctions
@@ -52,11 +58,13 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import (
     CustomJwtAuthMiddleware,
+    AdminJwtAuthMiddleware,
     ACCOUNT_MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
     GUEST_ROLE,
 )
+from ddpui.core.admin import admin_service
 from rest_framework_simplejwt.tokens import AccessToken
 
 pytestmark = pytest.mark.django_db
@@ -455,9 +463,7 @@ def test_admin_deactivate_user_in_org_only(platform_admin_request, akshara, bhum
     org-symmetry test.
     """
     priya_user = User.objects.create(username="priya@ngo.org", email="priya@ngo.org")
-    akshara_ou = OrgUser.objects.create(
-        user=priya_user, org=akshara, new_role=_role(GUEST_ROLE)
-    )
+    akshara_ou = OrgUser.objects.create(user=priya_user, org=akshara, new_role=_role(GUEST_ROLE))
     bhumi_ou = OrgUser.objects.create(user=priya_user, org=bhumi, new_role=_role(GUEST_ROLE))
 
     response = post_admin_org_user_deactivate(platform_admin_request, akshara.id, akshara_ou.id)
@@ -713,9 +719,7 @@ def test_week1_full_admin_lifecycle_flow(
     # Priya is also a member of a second org. Deactivating her in org1 must not touch
     # org2 at all. (Real second Org + OrgUser row, per the brief.)
     org2 = Org.objects.create(name="Bhumi", slug="bhumi")
-    priya_ou2 = OrgUser.objects.create(
-        user=priya_user, org=org2, new_role=_role(GUEST_ROLE)
-    )
+    priya_ou2 = OrgUser.objects.create(user=priya_user, org=org2, new_role=_role(GUEST_ROLE))
     # sanity: before any deactivation she can load permissions in BOTH orgs
     assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
     assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
@@ -728,9 +732,7 @@ def test_week1_full_admin_lifecycle_flow(
     assert priya_ou2.is_active is True  # the OTHER org is untouched
     assert priya_user.is_active is True  # the global User flag is never touched
     # (a) blocked in org1 at permission-load
-    _assert_blocked(
-        priya_user, org1.slug, "your access to this organization has been deactivated"
-    )
+    _assert_blocked(priya_user, org1.slug, "your access to this organization has been deactivated")
     # (b) org2 access completely unaffected
     assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
 
@@ -830,3 +832,145 @@ def test_week1_full_admin_lifecycle_flow(
     # the remove is org-scoped: Priya's Bhumi membership is untouched
     assert OrgUser.objects.filter(id=priya_ou2.id).exists()
     assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
+
+
+# ---- the independent admin session: login / logout / refresh / currentuser ----
+# Moved here from tests/core/test_admin_auth.py: these exercise admin_api view
+# functions, so they belong with the other API tests. The middleware unit tests
+# stay in tests/core/test_admin_auth.py.
+
+
+def _mock_auth_redis():
+    """mock Redis for the token mint, as the existing auth tests do"""
+    return patch("ddpui.auth.RedisClient.get_instance"), patch(
+        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
+    )
+
+
+def test_admin_login_refuses_non_platform_admin():
+    """Correct password but not a platform admin -> 403, and no cookie is set."""
+    User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_login(
+            mock_request(), AdminLoginSchema(username="ops@dalgo.org", password="Secret@123")
+        )
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_login_wrong_password_is_401():
+    """Wrong password -> 401."""
+    user = User.objects.create_user(
+        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
+    )
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_login(
+            mock_request(), AdminLoginSchema(username="admin@dalgo.org", password="nope")
+        )
+    assert excinfo.value.status_code == 401
+
+
+def test_admin_login_sets_admin_cookies_for_platform_admin():
+    """A platform admin gets admin_access_token + admin_refresh_token cookies."""
+    user = User.objects.create_user(
+        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
+    )
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
+
+    redis_patch, roles_patch = _mock_auth_redis()
+    with redis_patch as mock_redis, roles_patch:
+        mock_redis.return_value.get.return_value = None
+        response = post_admin_login(
+            mock_request(), AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+        )
+
+    assert response.status_code == 200
+    assert "admin_access_token" in response.cookies
+    assert "admin_refresh_token" in response.cookies
+
+
+def test_admin_logout_clears_admin_cookies(platform_admin_request):
+    """Admin logout deletes only the admin_* cookies (independent of the normal session)."""
+    platform_admin_request.COOKIES = {}
+    response = post_admin_logout(platform_admin_request)
+    assert response.status_code == 200
+    assert response.cookies["admin_access_token"].value == ""
+    assert response.cookies["admin_refresh_token"].value == ""
+
+
+def test_admin_logout_forbidden_for_non_platform_admin(orguser):
+    """logout is gated like every other admin route — a non-admin is refused."""
+    request = mock_request(orguser)
+    request.COOKIES = {}
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_logout(request)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_currentuser_reports_platform_admin(platform_admin_request):
+    """currentuser returns the admin's email + is_platform_admin, via the admin session."""
+    result = get_admin_currentuser(platform_admin_request)
+    assert result["is_platform_admin"] is True
+    assert result["email"] == platform_admin_request.orguser.user.email
+
+
+def test_admin_token_refresh_without_cookie_is_401():
+    request = mock_request()
+    request.COOKIES = {}
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_token_refresh(request)
+    assert excinfo.value.status_code == 401
+
+
+def test_admin_token_refresh_issues_new_admin_access():
+    """A valid admin refresh token yields a new admin_access_token carrying session='admin'."""
+    user = User.objects.create_user(
+        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
+    )
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
+
+    redis_patch, roles_patch = _mock_auth_redis()
+    with redis_patch as mock_redis, roles_patch:
+        mock_redis.return_value.get.return_value = None
+        token_data, _ = admin_service.issue_admin_session("admin@dalgo.org", "Secret@123")
+
+    request = mock_request()
+    request.COOKIES = {"admin_refresh_token": token_data["refresh"]}
+    # the blacklist lookup now lives in the service, so patch it at its import site
+    with patch("ddpui.core.admin.admin_service.RedisClient.get_instance") as mock_redis2:
+        mock_redis2.return_value.get.return_value = None
+        response = post_admin_token_refresh(request)
+
+    assert "admin_access_token" in response.cookies
+    access = AccessToken(response.cookies["admin_access_token"].value)
+    assert access["session"] == "admin"
+
+
+def test_admin_router_requires_admin_session():
+    """
+    Router-level auth: the admin router is guarded by AdminJwtAuthMiddleware, and the
+    only routes opting out are the two that cannot require a session you don't have yet.
+
+    Asserted by introspecting the router rather than issuing HTTP — this repo's testing
+    skill calls view functions directly and does not use ninja's TestClient.
+    """
+    assert isinstance(admin_router.auth, AdminJwtAuthMiddleware)
+
+    # auth_param is NOT_SET when a route inherits the router's auth, and None when a
+    # route explicitly opts out via auth=None.
+    opted_out = {
+        path
+        for path, view in admin_router.path_operations.items()
+        for op in view.operations
+        if op.auth_param is None
+    }
+    assert opted_out == {"/login/", "/token/refresh"}
+
+
+def test_admin_session_rejected_without_admin_cookie():
+    """No admin_access_token cookie and no bearer header -> the middleware does not
+    authenticate, so ninja answers 401."""
+    request = Mock()
+    request.COOKIES = {}
+    request.headers = {}
+    assert AdminJwtAuthMiddleware()(request) is None

@@ -26,9 +26,7 @@ def _mock_redis():
 
 def test_issue_admin_session_refuses_non_platform_admin():
     """Correct credentials but not a platform admin -> no session is issued."""
-    User.objects.create_user(
-        username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123"
-    )
+    User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
     # no UserAttributes row -> is_platform_admin is effectively False
 
     token_data, error = admin_service.issue_admin_session("ops@dalgo.org", "Secret@123")
