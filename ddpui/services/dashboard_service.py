@@ -17,7 +17,7 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import can_delete_resource
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,

@@ -5,7 +5,7 @@ Uses mock objects — no DB needed. Ownership is keyed off ``created_by``.
 
 from unittest.mock import MagicMock
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import can_delete_resource
 
 
 def _orguser(org_user_id: int, role_slug: str):

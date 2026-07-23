@@ -85,7 +85,7 @@ from ddpui.core.kpi.exceptions import (
     KPIValidationError,
     KPIPermissionError,
 )
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import can_delete_resource
 
 
 # ── Service ─────────────────────────────────────────────────────────────────

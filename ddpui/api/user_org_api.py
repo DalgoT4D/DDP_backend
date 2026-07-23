@@ -22,7 +22,7 @@ from ddpui.auth import (
     blacklist_jti_in_redis,
 )
 from ddpui.core import orgfunctions, orguserfunctions
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import can_delete_resource
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,

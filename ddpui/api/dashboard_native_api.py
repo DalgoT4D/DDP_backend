@@ -17,7 +17,7 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission
-from ddpui.core.ownership import is_creator_or_admin
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,

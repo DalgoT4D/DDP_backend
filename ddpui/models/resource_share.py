@@ -9,7 +9,7 @@ warehouse "schema.table" identifiers. Do not "improve" this into a FK.
 from django.db import models
 
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import Invitation, OrgUser
 
 
 class AccessLevel(models.TextChoices):
@@ -31,18 +31,26 @@ class ResourceSharePrincipalType(models.TextChoices):
 
 
 class ResourceShare(models.Model):
-    """A single access grant on a shareable resource."""
+    """A single access grant on a shareable resource.
+
+    A grant points at either a concrete principal (``principal_type`` +
+    ``principal_id``) or a pending ``invitation``. When the invitation is
+    accepted, the row is promoted to point at the new ``OrgUser`` and
+    ``invitation`` becomes NULL via ``on_delete=SET_NULL``.
+    """
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
 
     resource_type = models.CharField(max_length=20)
     resource_id = models.CharField(max_length=255)
 
-    principal_type = models.CharField(max_length=5, choices=ResourceSharePrincipalType.choices)
-    principal_id = models.BigIntegerField()
+    principal_type = models.CharField(
+        max_length=5, choices=ResourceSharePrincipalType.choices, null=True
+    )
+    principal_id = models.BigIntegerField(null=True)
 
     access_level = models.CharField(max_length=10, choices=AccessLevel.choices)
-    pending_email = models.CharField(max_length=255, null=True)
+    invitation = models.ForeignKey(Invitation, on_delete=models.SET_NULL, null=True)
 
     created_by = models.ForeignKey(
         OrgUser,
@@ -59,12 +67,12 @@ class ResourceShare(models.Model):
             models.Index(fields=["org", "resource_type", "resource_id"]),
             # "what does this principal have access to?" — tenant-scoped principal lookup
             models.Index(fields=["org", "principal_type", "principal_id"]),
-            # invitation-acceptance path: find pending grants when a new user is created
-            models.Index(fields=["pending_email"]),
         ]
 
     def __str__(self):
-        return (
-            f"{self.resource_type}:{self.resource_id} -> "
-            f"{self.principal_type}:{self.principal_id} ({self.access_level})"
+        principal = (
+            f"{self.principal_type}:{self.principal_id}"
+            if self.principal_id is not None
+            else f"inv:{self.invitation_id}"
         )
+        return f"{self.resource_type}:{self.resource_id} -> {principal} ({self.access_level})"
