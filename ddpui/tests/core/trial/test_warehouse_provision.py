@@ -345,10 +345,12 @@ def test_reassign_copied_objects_transfers_only_non_system_owners():
     (ft owns its own objects; public is handled separately; pg_* are system roles)."""
     ft_role = "ft_x_user"
     cursor = MagicMock()
-    # 1st fetchall: owner discovery; 2nd: databases owned by "template_wh" (none here)
-    cursor.fetchall.side_effect = [
-        [("template_wh",), (ft_role,), ("postgres",), ("pg_monitor",)],
-        [],
+    # discovery query returns a mix of owners
+    cursor.fetchall.return_value = [
+        ("template_wh",),
+        (ft_role,),
+        ("postgres",),
+        ("pg_monitor",),
     ]
 
     _reassign_copied_objects(cursor, ft_role)
@@ -356,7 +358,7 @@ def test_reassign_copied_objects_transfers_only_non_system_owners():
     stmts = [str(c.args[0]) for c in cursor.execute.call_args_list]
     joined = " ".join(stmts)
 
-    # the template owner is fully transferred (grant → reassign → revoke)
+    # the template owner is fully transferred (grant -> reassign -> revoke)
     assert 'GRANT "template_wh" TO CURRENT_USER' in joined
     assert f'REASSIGN OWNED BY "template_wh" TO "{ft_role}"' in joined
     assert 'REVOKE "template_wh" FROM CURRENT_USER' in joined
@@ -365,35 +367,6 @@ def test_reassign_copied_objects_transfers_only_non_system_owners():
     assert 'REASSIGN OWNED BY "postgres"' not in joined
     assert 'REASSIGN OWNED BY "pg_monitor"' not in joined
     assert f'REASSIGN OWNED BY "{ft_role}"' not in joined
-    # no databases owned by template_wh → no ownership restore needed
-    assert "ALTER DATABASE" not in joined
-
-
-def test_reassign_copied_objects_restores_database_ownership():
-    """REASSIGN OWNED also transfers cluster-wide SHARED objects — a DATABASE owned by the
-    template role (e.g. role health_demo_staging owning db health_demo_staging) would silently
-    follow the REASSIGN onto the ft role, hijacking the TEMPLATE db and blocking the ft role's
-    teardown. The db's ownership must be restored to its original owner immediately after the
-    REASSIGN, inside the temporary-membership window (before the REVOKE)."""
-    ft_role = "ft_x_user"
-    cursor = MagicMock()
-    cursor.fetchall.side_effect = [
-        [("health_demo_staging",)],  # owner discovery
-        [("health_demo_staging",)],  # databases owned by that role
-    ]
-
-    _reassign_copied_objects(cursor, ft_role)
-
-    stmts = [str(c.args[0]) for c in cursor.execute.call_args_list]
-    reassign_idx = next(i for i, s in enumerate(stmts) if s.startswith("REASSIGN OWNED"))
-    restore_idx = next(i for i, s in enumerate(stmts) if s.startswith("ALTER DATABASE"))
-    revoke_idx = next(i for i, s in enumerate(stmts) if s.startswith("REVOKE"))
-
-    assert (
-        stmts[restore_idx] == 'ALTER DATABASE "health_demo_staging" OWNER TO "health_demo_staging"'
-    )
-    # restore happens AFTER the reassign and BEFORE the membership revoke
-    assert reassign_idx < restore_idx < revoke_idx
 
 
 def test_reassign_copied_objects_noop_when_no_foreign_owners():

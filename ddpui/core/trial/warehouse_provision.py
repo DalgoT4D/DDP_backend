@@ -118,14 +118,15 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
     membership again. `public` (owned by `postgres`) is handled separately by the caller and
     skipped here.
 
-    REASSIGN OWNED is db-scoped for ordinary objects BUT also transfers cluster-wide SHARED
-    objects — ownership of DATABASES (and tablespaces) owned by the role. If the template
-    warehouse role owns the template DATABASE itself (e.g. `health_demo_staging` role owning db
-    `health_demo_staging`), a naive REASSIGN silently hands the TEMPLATE db to the trial's ft
-    role — hijacking the template and blocking the ft role's teardown (`DROP ROLE` fails with
-    "owner of database ..."). So we snapshot which databases each owner holds BEFORE the
-    REASSIGN and restore their ownership right after, inside the same temporary-membership
-    window (restoring requires membership of the target owner role too).
+    OPS REQUIREMENT: the template DATABASE itself must be owned by the trials ADMIN user, and
+    the admin must not depend on a standing membership of the template warehouse role. Two
+    Postgres gotchas otherwise bite (both happened on staging, 2026-07-23):
+    - REASSIGN OWNED also transfers cluster-wide SHARED objects — if the template warehouse
+      role owns the template db, this REASSIGN silently hands the TEMPLATE db to the trial's
+      ft role (hijacking it and making the ft role's DROP ROLE fail at teardown);
+    - the REVOKE below destroys any standing `GRANT <template-owner> TO <admin>` membership,
+      so a copy that relied on that membership fails with InsufficientPrivilege on the NEXT
+      clone.
 
     Owner names come from the copied template db's own catalog — controlled template content, never
     user input — so interpolating them as identifiers does not cross a trust boundary.
@@ -145,21 +146,8 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
     for owner in owners:
         if owner == ft_role or owner == "postgres" or owner.startswith("pg_"):
             continue
-        # snapshot the DATABASES this owner holds — REASSIGN OWNED would transfer these
-        # shared objects too (see docstring); they must be restored right after.
-        cursor.execute(
-            "SELECT datname FROM pg_database WHERE pg_get_userbyid(datdba) = %s", [owner]
-        )
-        owned_databases = [row[0] for row in cursor.fetchall()]
-
         cursor.execute(f'GRANT "{owner}" TO CURRENT_USER')
         cursor.execute(f'REASSIGN OWNED BY "{owner}" TO "{ft_role}"')
-        for owned_db in owned_databases:
-            cursor.execute(f'ALTER DATABASE "{owned_db}" OWNER TO "{owner}"')
-            logger.info(
-                f"restored database {owned_db} ownership to {owner} after REASSIGN "
-                "(shared object must not follow the trial role)"
-            )
         cursor.execute(f'REVOKE "{owner}" FROM CURRENT_USER')
         logger.info(f"reassigned template objects owned by {owner} to {ft_role}")
 
