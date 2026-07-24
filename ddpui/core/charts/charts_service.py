@@ -1623,7 +1623,8 @@ def get_chart_data_table_preview(
     dimensions = normalize_dimensions(payload)
 
     # Add all dimension columns
-    if not dimensions or len(dimensions) == 0:
+    # 'number' charts have no dimensions (only metrics), so skip the check for them
+    if (not dimensions or len(dimensions) == 0) and payload.chart_type != "number":
         error_msg = (
             f"Table preview - ERROR: No dimensions found after normalization! "
             f"Payload had: dimensions={payload.dimensions}, dimension_col={payload.dimension_col}, "
@@ -1642,8 +1643,11 @@ def get_chart_data_table_preview(
     # Handle multiple metrics (if present)
     if payload.metrics:
         for metric in payload.metrics:
+            if metric.column_expression:
+                alias = metric.alias or "expression_metric"
+                display_name = metric.alias or "Expression"
             # Handle COUNT(*) case - SQL alias includes count_all_ prefix
-            if (
+            elif (
                 metric.aggregation
                 and metric.aggregation.lower() == "count"
                 and metric.column is None
@@ -1688,7 +1692,10 @@ def get_chart_data_table_preview(
         # Transform metric columns from alias to display_name
         if payload.metrics:
             for metric in payload.metrics:
-                if (
+                if metric.column_expression:
+                    alias = metric.alias or "expression_metric"
+                    display_name = metric.alias or "Expression"
+                elif (
                     metric.aggregation
                     and metric.aggregation.lower() == "count"
                     and metric.column is None
@@ -1717,7 +1724,9 @@ def get_chart_data_table_preview(
         expected_columns = dimensions.copy()
         if payload.metrics:
             for metric in payload.metrics:
-                if (
+                if metric.column_expression:
+                    display_name = metric.alias or "Expression"
+                elif (
                     metric.aggregation
                     and metric.aggregation.lower() == "count"
                     and metric.column is None
