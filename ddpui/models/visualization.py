@@ -75,3 +75,21 @@ class Chart(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.chart_type})"
+
+
+class ChartFavorite(models.Model):
+    """Tracks which org users have favorited which charts. Favoriting is
+    personal — one user's favorite has no effect on any other user."""
+
+    chart = models.ForeignKey(Chart, on_delete=models.CASCADE, related_name="favorited_by")
+    org_user = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="favorite_charts")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chart_favorite"
+        constraints = [
+            models.UniqueConstraint(fields=["chart", "org_user"], name="unique_chart_favorite")
+        ]
+
+    def __str__(self):
+        return f"{self.org_user.user.email} favorited chart {self.chart_id}"

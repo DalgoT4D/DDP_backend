@@ -297,6 +297,10 @@ def list_charts(
 
     total_pages = (total + page_size - 1) // page_size  # Ceiling division
 
+    favorited_chart_ids = ChartService.get_favorited_chart_ids(
+        [chart.id for chart in charts], orguser
+    )
+
     # Build response for each chart
     chart_responses = [
         ChartResponse(
@@ -310,6 +314,7 @@ def list_charts(
             extra_config=chart.extra_config,
             created_at=chart.created_at,
             updated_at=chart.updated_at,
+            is_favorite=chart.id in favorited_chart_ids,
         )
         for chart in charts
     ]
@@ -1241,3 +1246,31 @@ def get_chart_dashboards(request, chart_id: int):
         raise HttpError(404, "Chart not found") from None
 
     return dashboards
+
+
+@charts_router.post("/{chart_id}/favorite/", response=dict)
+@has_permission(["can_view_charts"])
+def favorite_chart(request, chart_id: int):
+    """Mark a chart as favorited by the current user"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        ChartService.favorite_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+
+    return {"is_favorite": True}
+
+
+@charts_router.delete("/{chart_id}/favorite/", response=dict)
+@has_permission(["can_view_charts"])
+def unfavorite_chart(request, chart_id: int):
+    """Remove the current user's favorite on a chart"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        ChartService.unfavorite_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+
+    return {"is_favorite": False}
