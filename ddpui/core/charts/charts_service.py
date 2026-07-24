@@ -164,6 +164,9 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
         if payload.extra_dimension:
             final_dims.append(payload.extra_dimension)
 
+    # Deduplicate while preserving order to avoid SQLAlchemy ambiguous column errors
+    final_dims = list(dict.fromkeys(final_dims))
+
     if not final_dims:
         logger.warning(f"No valid dimensions found {payload.dimensions}")
 

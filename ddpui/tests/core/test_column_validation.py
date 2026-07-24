@@ -91,6 +91,29 @@ class TestNormalizeDimensions:
         dims = normalize_dimensions(payload)
         assert dims == []
 
+    def test_normalize_dimensions_deduplicates_table_chart(self):
+        """Test that duplicate dimensions are removed for table charts"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=["area", "area", "name", "area", "name"],
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["area", "name"]
+
+    def test_normalize_dimensions_deduplicates_non_table_chart(self):
+        """Test that duplicate dimension_col and extra_dimension are deduplicated"""
+        payload = ChartDataPayload(
+            chart_type="bar",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimension_col="area",
+            extra_dimension="area",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["area"]
+
 
 class TestSQLAlchemyHandlesColumnNames:
     """
