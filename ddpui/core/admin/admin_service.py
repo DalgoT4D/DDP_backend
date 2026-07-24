@@ -19,6 +19,12 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from ddpui.auth import CustomTokenObtainSerializer
+from ddpui.core.admin.exceptions import (
+    AdminInvalidCredentialsError,
+    AdminNotPlatformAdminError,
+    AdminSessionError,
+    AdminOrgCreateError,
+)
 from ddpui.utils.redis_client import RedisClient
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser, Invitation, UserAttributes
@@ -27,6 +33,7 @@ from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.schemas.org_schema import CreateOrgSchema
+from ddpui.schemas.admin_schema import AdminLoginSchema, AdminUpdateOrgSchema
 from ddpui.core import orgfunctions
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -38,20 +45,23 @@ logger = CustomLogger("ddpui.core.admin")
 # --------------------------------------------------------------------------- #
 
 
-def issue_admin_session(username: str, password: str) -> Tuple[Optional[dict], Optional[str]]:
+def issue_admin_session(payload: AdminLoginSchema) -> dict:
     """
-    Verify credentials AND platform-admin privilege, then mint a distinct admin
-    token. Returns (token_data, None) on success, or (None, error) when the
-    credentials are wrong or the user is not a platform admin. The API layer sets
-    the cookies; this function knows nothing about HTTP.
+    Verify credentials AND platform-admin privilege, then mint a distinct admin token.
+    Takes the AdminLoginSchema request payload (not loose username/password args), per the
+    service-signature convention. Returns {"access": ..., "refresh": ...} on success.
+    Raises AdminInvalidCredentialsError (wrong username/password) or
+    AdminNotPlatformAdminError (valid creds but not a platform admin) so the API can map
+    the exception TYPE to a status code without inspecting the message. Knows nothing
+    about HTTP.
     """
-    user = authenticate(username=username, password=password)
+    user = authenticate(username=payload.username, password=payload.password)
     if user is None:
-        return None, "invalid credentials"
+        raise AdminInvalidCredentialsError()
 
     user_attributes = UserAttributes.objects.filter(user=user).first()
     if not (user_attributes and user_attributes.is_platform_admin):
-        return None, "not a platform admin"
+        raise AdminNotPlatformAdminError()
 
     # A distinct admin token: the session="admin" claim is what AdminJwtAuthMiddleware
     # requires, so a normal login token (which lacks it) can never satisfy the admin API.
@@ -63,37 +73,34 @@ def issue_admin_session(username: str, password: str) -> Tuple[Optional[dict], O
     access = refresh.access_token
     access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
 
-    return {"access": str(access), "refresh": str(refresh)}, None
+    return {"access": str(access), "refresh": str(refresh)}
 
 
-def refresh_admin_session(refresh_token: str) -> Tuple[Optional[dict], Optional[str]]:
+def refresh_admin_session(refresh_token: str) -> dict:
     """
     Mint a fresh admin access token from an admin refresh token, preserving the
-    session="admin" claim and the short admin access lifetime. Returns
-    ({"access": ...}, None) on success, or (None, error) when the token is
-    unreadable, is not an admin session, or was blacklisted by logout.
-
-    The API layer reads the cookie and maps the error to a status code; this
-    function knows nothing about HTTP.
+    session="admin" claim and the short admin access lifetime. Returns {"access": ...}
+    on success. Raises AdminSessionError when the token is unreadable, is not an admin
+    session, or was blacklisted by logout. This function knows nothing about HTTP.
     """
     try:
         refresh = RefreshToken(refresh_token)
-    except TokenError:
-        return None, "Invalid token"
+    except TokenError as err:
+        raise AdminSessionError("Invalid token") from err
 
     # A normal refresh token lacks the claim, so it can never be upgraded into an
     # admin session here.
     if refresh.payload.get("session") != "admin":
-        return None, "not an admin session"
+        raise AdminSessionError("not an admin session")
 
     jti = refresh.payload.get("jti")
     if jti and RedisClient.get_instance().get(f"blacklisted_jti:{jti}"):
-        return None, "Refresh token has been invalidated"
+        raise AdminSessionError("Refresh token has been invalidated")
 
     access = refresh.access_token
     access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
 
-    return {"access": str(access)}, None
+    return {"access": str(access)}
 
 
 # --------------------------------------------------------------------------- #
@@ -133,48 +140,51 @@ def org_user_count(org: Org) -> int:
 # --------------------------------------------------------------------------- #
 
 
-def create_org(create_payload: CreateOrgSchema) -> Tuple[Optional[Org], Optional[str]]:
+def create_org(create_payload: CreateOrgSchema) -> Org:
     """
     Create an org and its plan. Reuses orgfunctions.create_organization (which
     provisions an Airbyte workspace and rolls the Org back if Airbyte fails) plus
     create_org_plan. No OrgUser is attached here — the first admin is invited on the
-    Users tab (M4). Returns (org, error); the caller maps a non-null error to 400.
+    Users tab (M4). Returns the Org on success; raises AdminOrgCreateError on failure so
+    the API maps the exception TYPE to 400.
+
+    Rollback differs by failure point: on Airbyte failure create_organization has
+    already deleted the Org itself, so nothing persists. On PLAN failure the Org row
+    DOES persist here — this function just raises — and it is the caller's
+    @transaction.atomic (post_admin_org) that rolls the Org back. See the M16 test.
     """
     org, error = orgfunctions.create_organization(create_payload)
     if error:
         # create_organization already deleted the org on Airbyte failure; nothing persists.
-        return None, error
+        raise AdminOrgCreateError(error)
 
     _, plan_error = orgfunctions.create_org_plan(create_payload, org)
     if plan_error:
-        return None, plan_error
+        # the Org persists at this point — the caller's @transaction.atomic rolls it back.
+        raise AdminOrgCreateError(plan_error)
 
     logger.info(f"admin created new org {org.name}")
-    return org, None
+    return org
 
 
-def update_org(
-    org: Org,
-    *,
-    name: Optional[str] = None,
-    viz_url: Optional[str] = None,
-    base_plan: Optional[str] = None,
-) -> Org:
+def update_org(org: Org, payload: AdminUpdateOrgSchema) -> Org:
     """
-    Partial-update an org's name / viz_url / base_plan. slug is never touched — it is
-    locked post-create because it is used in URLs and the Airbyte workspace. Only
-    fields passed as non-None are changed. base_plan lives on OrgPlans, not Org.
+    Partial-update an org's name / viz_url / base_plan from the AdminUpdateOrgSchema
+    payload (not loose kwargs), per the service-signature convention. slug is never
+    touched — it is locked post-create because it is used in URLs and the Airbyte
+    workspace. Only fields passed as non-None are changed. base_plan lives on OrgPlans,
+    not Org. viz_url is a pydantic HttpUrl on the schema, coerced to str for the model.
     """
-    if name is not None:
-        org.name = name
-    if viz_url is not None:
-        org.viz_url = viz_url
+    if payload.name is not None:
+        org.name = payload.name
+    if payload.viz_url is not None:
+        org.viz_url = str(payload.viz_url)
     org.save()  # slug intentionally excluded from the update
 
-    if base_plan is not None:
+    if payload.base_plan is not None:
         org_plans = OrgPlans.objects.filter(org=org).first()
         if org_plans:
-            org_plans.base_plan = base_plan
+            org_plans.base_plan = payload.base_plan
             org_plans.save()
 
     return org

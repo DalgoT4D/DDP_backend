@@ -6,16 +6,14 @@ UserAttributes.is_platform_admin flag), not by per-org permission slugs. See
 features/admin-portal/v1/plan.md §3 for why cross-org needs its own layer.
 """
 
-import uuid
-from datetime import datetime
-from typing import List, Optional
+from typing import List
 
-from ninja import Router, Schema
+from ninja import Router
 from ninja.errors import HttpError
-from pydantic import HttpUrl
 from django.conf import settings
 from django.db import transaction
 from django.http import JsonResponse
+from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from ddpui.auth import platform_admin_required, AdminJwtAuthMiddleware, blacklist_jti_in_redis
@@ -25,10 +23,28 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     DeleteOrgUserPayload,
 )
-from ddpui.models.org_plans import OrgPlanType
 from ddpui.schemas.org_schema import CreateOrgSchema
+from ddpui.schemas.admin_schema import (
+    AdminLoginSchema,
+    AdminStatsSchema,
+    AdminOrgSchema,
+    AdminCreateOrgSchema,
+    AdminUpdateOrgSchema,
+    AdminOrgUserSchema,
+    AdminInvitationSchema,
+    AdminOrgUsersResponse,
+    AdminInviteUserSchema,
+    AdminChangeRoleSchema,
+    RemovalImpactSchema,
+)
 from ddpui.core import orguserfunctions
 from ddpui.core.admin import admin_service
+from ddpui.core.admin.exceptions import (
+    AdminInvalidCredentialsError,
+    AdminNotPlatformAdminError,
+    AdminSessionError,
+    AdminOrgCreateError,
+)
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -45,13 +61,6 @@ admin_router = Router(auth=AdminJwtAuthMiddleware())
 # distinct admin_access_token cookie (see admin_service.issue_admin_session); the admin
 # router is guarded by AdminJwtAuthMiddleware, which only accepts that cookie. login and
 # refresh set auth=None because you cannot already hold an admin session while getting one.
-
-
-class AdminLoginSchema(Schema):
-    """credentials for the admin portal's own sign-in"""
-
-    username: str
-    password: str
 
 
 def _set_admin_cookie(response: JsonResponse, name: str, value: str) -> None:
@@ -72,9 +81,12 @@ def post_admin_login(request, payload: AdminLoginSchema):
     SEPARATE admin_access_token/admin_refresh_token cookie (distinct from the normal
     session). A non-admin is refused here (403) with no cookie set; a wrong password is 401.
     """
-    token_data, error = admin_service.issue_admin_session(payload.username, payload.password)
-    if error:
-        raise HttpError(403 if error == "not a platform admin" else 401, error)
+    try:
+        token_data = admin_service.issue_admin_session(payload)
+    except AdminNotPlatformAdminError as err:
+        raise HttpError(403, err.message) from err
+    except AdminInvalidCredentialsError as err:
+        raise HttpError(401, err.message) from err
 
     response = JsonResponse({"success": 1})
     _set_admin_cookie(response, "admin_access_token", token_data["access"])
@@ -113,9 +125,10 @@ def post_admin_token_refresh(request):
     if not refresh_token:
         raise HttpError(401, "Refresh token not found")
 
-    token_data, error = admin_service.refresh_admin_session(refresh_token)
-    if error:
-        raise HttpError(401, error)
+    try:
+        token_data = admin_service.refresh_admin_session(refresh_token)
+    except AdminSessionError as err:
+        raise HttpError(401, err.message) from err
 
     response = JsonResponse({"success": 1})
     _set_admin_cookie(response, "admin_access_token", token_data["access"])
@@ -133,57 +146,10 @@ def get_admin_currentuser(request):
     return {"email": user.email, "is_platform_admin": True}
 
 
-class AdminStatsSchema(Schema):
-    """platform-wide counts for the admin dashboard"""
-
-    total_orgs: int
-    total_users: int
-
-
-class AdminOrgSchema(Schema):
-    """an org as shown in the admin portal"""
-
-    id: int
-    name: str
-    slug: str | None
-    viz_url: str | None
-    base_plan: str | None
-    is_active: bool
-    user_count: int
-
-
-class AdminCreateOrgSchema(Schema):
-    """payload to create an org from the admin portal (slug is derived from name)"""
-
-    name: str
-    viz_url: Optional[HttpUrl] = None
-    base_plan: str = OrgPlanType.FREE_TRIAL.value
-    superset_included: bool = False
-    can_upgrade_plan: bool = True
-    subscription_duration: str = "Monthly"
-
-
-class AdminUpdateOrgSchema(Schema):
-    """
-    payload to edit an org. slug is intentionally absent — it is locked post-create
-    because it is used in URLs and the Airbyte workspace (plan.md §8 #4).
-    """
-
-    name: Optional[str] = None
-    viz_url: Optional[HttpUrl] = None
-    base_plan: Optional[str] = None
-
-
 def _admin_org_response(org: Org) -> AdminOrgSchema:
-    return AdminOrgSchema(
-        id=org.id,
-        name=org.name,
-        slug=org.slug,
-        viz_url=org.viz_url,
-        base_plan=org.base_plan(),
-        is_active=org.is_active,
-        user_count=admin_service.org_user_count(org),
-    )
+    # the schema owns the field mapping (from_model); the API supplies the user_count,
+    # which needs a service call and so isn't the schema's to compute.
+    return AdminOrgSchema.from_model(org, admin_service.org_user_count(org))
 
 
 @admin_router.get("/ping")
@@ -233,10 +199,13 @@ def post_admin_org(request, payload: AdminCreateOrgSchema):
         subscription_duration=payload.subscription_duration,
         superset_included=payload.superset_included,
     )
-    org, error = admin_service.create_org(create_payload)
-    if error:
-        # create_org already rolled back on Airbyte / plan failure; nothing persists.
-        raise HttpError(400, error)
+    try:
+        org = admin_service.create_org(create_payload)
+    except AdminOrgCreateError as err:
+        # On Airbyte failure create_org already deleted the Org. On plan failure the Org
+        # persists until this @transaction.atomic view unwinds — raising here triggers that
+        # rollback, so either way nothing is left behind.
+        raise HttpError(400, err.message) from err
 
     return _admin_org_response(org)
 
@@ -254,12 +223,7 @@ def get_admin_org(request, org_id: int):
 def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
     """Edit an org's name / viz_url / base_plan. slug is never touched (locked)."""
     org = _get_org_or_404(org_id)
-    org = admin_service.update_org(
-        org,
-        name=payload.name,
-        viz_url=str(payload.viz_url) if payload.viz_url is not None else None,
-        base_plan=payload.base_plan,
-    )
+    org = admin_service.update_org(org, payload)
     return _admin_org_response(org)
 
 
@@ -288,59 +252,6 @@ def post_admin_org_reactivate(request, org_id: int):
 # platform admin acting cross-org. See plan.md §4.4.
 
 
-class AdminOrgUserSchema(Schema):
-    """a user within an org, as shown in the admin portal Users tab"""
-
-    orguser_id: int
-    email: str
-    new_role_slug: str | None
-    # per-org active flag (OrgUser.is_active) — NOT the global User.is_active
-    is_active: bool
-
-
-class AdminInvitationSchema(Schema):
-    """a pending invitation within an org (a row that has not been accepted)"""
-
-    id: int
-    invited_email: str
-    invited_role_slug: str | None
-    invited_on: datetime
-
-
-class AdminOrgUsersResponse(Schema):
-    """the Users tab payload: current members plus pending invites"""
-
-    users: List[AdminOrgUserSchema]
-    invitations: List[AdminInvitationSchema]
-
-
-class AdminInviteUserSchema(Schema):
-    """payload to invite a user into an org from the admin portal"""
-
-    invited_email: str
-    invited_role_uuid: uuid.UUID
-
-
-class AdminChangeRoleSchema(Schema):
-    """payload to change an org user's role"""
-
-    role_uuid: uuid.UUID
-
-
-class RemovalImpactSchema(Schema):
-    """
-    what removing a user would orphan. Drives the confirm dialog's warning.
-    Dashboard/Chart/ReportSnapshot created_by are all SET_NULL — the content is KEPT,
-    only the creator link is cleared (its created_by becomes NULL). Nothing is deleted.
-    (Access Control v2 / PR #1428 switched Dashboard & Chart from CASCADE to SET_NULL;
-    ReportSnapshot was already SET_NULL.) See research §5.
-    """
-
-    dashboards_orphaned: int
-    charts_orphaned: int
-    reports_orphaned: int
-
-
 def _get_org_or_404(org_id: int) -> Org:
     org = admin_service.get_org(org_id)
     if org is None:
@@ -362,15 +273,7 @@ def get_admin_org_users(request, org_id: int):
     """List an org's users (with per-org Status) plus its pending invitations."""
     org = _get_org_or_404(org_id)
 
-    users = [
-        AdminOrgUserSchema(
-            orguser_id=ou.id,
-            email=ou.user.email,
-            new_role_slug=ou.new_role.slug if ou.new_role else None,
-            is_active=ou.is_active,
-        )
-        for ou in admin_service.list_org_users(org)
-    ]
+    users = [AdminOrgUserSchema.from_model(ou) for ou in admin_service.list_org_users(org)]
 
     # pending invites are scoped by the explicit target org, so an invite a platform
     # admin created into this org shows here even though invited_by is in another org.
@@ -416,7 +319,7 @@ def post_admin_org_user_invite(request, org_id: int, payload: AdminInviteUserSch
             id=0,
             invited_email=payload.invited_email.lower().strip(),
             invited_role_slug=None,
-            invited_on=datetime.now(),
+            invited_on=timezone.now(),
         )
 
     logger.info(f"admin invited {invitation.invited_email} into org {org.slug}")
@@ -449,12 +352,7 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
         raise HttpError(400, error)
 
     orguser.refresh_from_db()
-    return AdminOrgUserSchema(
-        orguser_id=orguser.id,
-        email=orguser.user.email,
-        new_role_slug=orguser.new_role.slug if orguser.new_role else None,
-        is_active=orguser.is_active,
-    )
+    return AdminOrgUserSchema.from_model(orguser)
 
 
 @admin_router.post("/orgs/{org_id}/users/{orguser_id}/deactivate", response=AdminOrgUserSchema)
@@ -468,12 +366,7 @@ def post_admin_org_user_deactivate(request, org_id: int, orguser_id: int):
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
     orguser = admin_service.set_orguser_active(orguser, False)
-    return AdminOrgUserSchema(
-        orguser_id=orguser.id,
-        email=orguser.user.email,
-        new_role_slug=orguser.new_role.slug if orguser.new_role else None,
-        is_active=orguser.is_active,
-    )
+    return AdminOrgUserSchema.from_model(orguser)
 
 
 @admin_router.post("/orgs/{org_id}/users/{orguser_id}/reactivate", response=AdminOrgUserSchema)
@@ -483,12 +376,7 @@ def post_admin_org_user_reactivate(request, org_id: int, orguser_id: int):
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
     orguser = admin_service.set_orguser_active(orguser, True)
-    return AdminOrgUserSchema(
-        orguser_id=orguser.id,
-        email=orguser.user.email,
-        new_role_slug=orguser.new_role.slug if orguser.new_role else None,
-        is_active=orguser.is_active,
-    )
+    return AdminOrgUserSchema.from_model(orguser)
 
 
 @admin_router.get("/orgs/{org_id}/users/{orguser_id}/removal-impact", response=RemovalImpactSchema)

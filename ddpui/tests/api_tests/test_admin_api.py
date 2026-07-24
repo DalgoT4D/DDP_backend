@@ -7,11 +7,19 @@ Milestone 1 acceptance (features/admin-portal/v1/plan.md §6, §7):
   - /currentuserv2 surfaces is_platform_admin
 """
 
-import pytest
+import os
 from unittest.mock import Mock, patch
-from django.core.management import call_command
-from django.contrib.auth.models import User
+
+import django
+import pytest
 from ninja.errors import HttpError
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
+os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
+django.setup()
+
+from django.conf import settings
+from django.contrib.auth.models import User
 
 from ddpui.api.admin_api import (
     get_admin_ping,
@@ -52,7 +60,7 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     AcceptInvitationSchema,
 )
-from ddpui.models.role_based_access import Role, RolePermission
+from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
@@ -65,18 +73,10 @@ from ddpui.auth import (
     GUEST_ROLE,
 )
 from ddpui.core.admin import admin_service
-from rest_framework_simplejwt.tokens import AccessToken
+from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture(scope="session")
-def seed_db(django_db_setup, django_db_blocker):
-    """load the role/permission seed data the guard and currentuserv2 need"""
-    with django_db_blocker.unblock():
-        call_command("loaddata", "001_roles.json")
-        call_command("loaddata", "002_permissions.json")
-        call_command("loaddata", "003_role_permissions.json")
 
 
 @pytest.fixture
@@ -107,19 +107,6 @@ def orguser(authuser, org, seed_db):
     )
     yield orguser
     orguser.delete()
-
-
-def mock_request(orguser: OrgUser = None):
-    """mirror the mock_request helper in test_user_org_api.py"""
-    request = Mock()
-    request.orguser = orguser
-    request.permissions = []
-    if orguser and orguser.new_role:
-        permission_slugs = RolePermission.objects.filter(role=orguser.new_role).values_list(
-            "permission__slug", flat=True
-        )
-        request.permissions = list(permission_slugs)
-    return request
 
 
 # ---- the guard: /admin/ping 403 vs 200 ----------------------------------------
@@ -263,6 +250,29 @@ def test_admin_create_org_rolls_back_on_airbyte_failure(mock_setup_airbyte, plat
     assert excinfo.value.status_code == 400
     assert Org.objects.filter(name="Bhumi").count() == 0
     assert OrgPlans.objects.filter(org__name="Bhumi").count() == 0
+
+
+@patch("ddpui.core.orgfunctions.create_org_plan")
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
+@patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
+def test_admin_create_org_rolls_back_when_plan_creation_fails(
+    mock_setup_airbyte, mock_connectors, mock_create_plan, platform_admin_request
+):
+    """
+    The Airbyte-failure rollback is covered by its sibling test; this covers the OTHER
+    failure point. If the org is created but its plan fails, the endpoint's
+    @transaction.atomic must undo the Org too — a half-created org with no plan would
+    show up in the portal's org list as a broken row.
+    """
+    mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
+    mock_create_plan.return_value = (None, "could not create plan")
+
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_org(platform_admin_request, AdminCreateOrgSchema(name="Halfway"))
+
+    assert excinfo.value.status_code == 400
+    assert Org.objects.filter(name="Halfway").count() == 0  # rolled back, no orphan
+    assert OrgPlans.objects.filter(org__name="Halfway").count() == 0
 
 
 def test_admin_org_detail_404(platform_admin_request):
@@ -482,6 +492,35 @@ def test_admin_deactivate_user_in_org_only(platform_admin_request, akshara, bhum
     bhumi_ou.refresh_from_db()
     assert akshara_ou.is_active is True
     assert bhumi_ou.is_active is True
+
+
+def test_admin_user_routes_refuse_an_orguser_from_another_org(
+    platform_admin_request, akshara, bhumi
+):
+    """
+    CROSS-ORG ISOLATION: every user route resolves the OrgUser through the target org in
+    the URL, so passing a Bhumi orguser_id down Akshara's path is 404 — never a silent
+    mutation of the other org's user. The role route has its own test; these four are the
+    remaining mutating/reading routes that take an orguser_id.
+    """
+    bhumi_member = _make_member(bhumi, "victim@bhumi.org", GUEST_ROLE)
+
+    for call in (
+        lambda: post_admin_org_user_deactivate(platform_admin_request, akshara.id, bhumi_member.id),
+        lambda: post_admin_org_user_reactivate(platform_admin_request, akshara.id, bhumi_member.id),
+        lambda: get_admin_org_user_removal_impact(
+            platform_admin_request, akshara.id, bhumi_member.id
+        ),
+        lambda: delete_admin_org_user(platform_admin_request, akshara.id, bhumi_member.id),
+    ):
+        with pytest.raises(HttpError) as excinfo:
+            call()
+        assert excinfo.value.status_code == 404
+
+    # the other org's user is untouched by any of the four attempts
+    bhumi_member.refresh_from_db()
+    assert bhumi_member.is_active is True
+    assert OrgUser.objects.filter(id=bhumi_member.id).exists()
 
 
 # ---- removal-impact count + orphaning -----------------------------------------
@@ -841,7 +880,8 @@ def test_week1_full_admin_lifecycle_flow(
 
 
 def _mock_auth_redis():
-    """mock Redis for the token mint, as the existing auth tests do"""
+    """mock Redis for the token mint — matches the inline patch pattern test_auth.py
+    uses at each call site — no shared helper exists for this pair"""
     return patch("ddpui.auth.RedisClient.get_instance"), patch(
         "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
     )
@@ -889,6 +929,32 @@ def test_admin_login_sets_admin_cookies_for_platform_admin():
     assert "admin_refresh_token" in response.cookies
 
 
+def test_admin_login_cookies_carry_security_flags():
+    """
+    The admin cookies are httponly + secure with the configured samesite policy, so the
+    higher-privilege admin token is not readable by JS and is not sent over plain HTTP.
+    The sibling test only checks the cookies EXIST; this checks how they are set.
+    """
+    user = User.objects.create_user(
+        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
+    )
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
+
+    redis_patch, roles_patch = _mock_auth_redis()
+    with redis_patch as mock_redis, roles_patch:
+        mock_redis.return_value.get.return_value = None
+        response = post_admin_login(
+            mock_request(), AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+        )
+
+    for cookie_name in ("admin_access_token", "admin_refresh_token"):
+        cookie = response.cookies[cookie_name]
+        assert cookie["httponly"] is True
+        assert cookie["secure"] is True
+        assert cookie["samesite"] == settings.COOKIE_SAMESITE
+        assert cookie["path"] == "/"
+
+
 def test_admin_logout_clears_admin_cookies(platform_admin_request):
     """Admin logout deletes only the admin_* cookies (independent of the normal session)."""
     platform_admin_request.COOKIES = {}
@@ -896,6 +962,31 @@ def test_admin_logout_clears_admin_cookies(platform_admin_request):
     assert response.status_code == 200
     assert response.cookies["admin_access_token"].value == ""
     assert response.cookies["admin_refresh_token"].value == ""
+
+
+def test_admin_logout_blacklists_both_admin_tokens(platform_admin_request):
+    """
+    Logout must actually INVALIDATE the tokens, not just drop the cookies — otherwise a
+    copied token keeps working until it expires. Both the access and the refresh JTI are
+    written to the Redis blacklist. (The sibling cookie test passes empty COOKIES, so it
+    never reaches this branch.)
+    """
+    user = platform_admin_request.orguser.user
+    access = AccessToken.for_user(user)
+    refresh = RefreshToken.for_user(user)
+    platform_admin_request.COOKIES = {
+        "admin_access_token": str(access),
+        "admin_refresh_token": str(refresh),
+    }
+
+    fake_redis = Mock()
+    with patch("ddpui.auth.RedisClient.get_instance", return_value=fake_redis):
+        response = post_admin_logout(platform_admin_request)
+
+    assert response.status_code == 200
+    blacklisted_keys = {call.args[0] for call in fake_redis.set.call_args_list}
+    assert f"blacklisted_jti:{access.payload['jti']}" in blacklisted_keys
+    assert f"blacklisted_jti:{refresh.payload['jti']}" in blacklisted_keys
 
 
 def test_admin_logout_forbidden_for_non_platform_admin(orguser):
@@ -912,6 +1003,16 @@ def test_admin_currentuser_reports_platform_admin(platform_admin_request):
     result = get_admin_currentuser(platform_admin_request)
     assert result["is_platform_admin"] is True
     assert result["email"] == platform_admin_request.orguser.user.email
+
+
+def test_admin_currentuser_forbidden_for_non_platform_admin(orguser):
+    """
+    currentuser is gated like every other admin route. It backs the frontend AdminGuard,
+    so a non-admin reaching it must 403 rather than get an identity payload.
+    """
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_currentuser(mock_request(orguser))
+    assert excinfo.value.status_code == 403
 
 
 def test_admin_token_refresh_without_cookie_is_401():
@@ -932,7 +1033,9 @@ def test_admin_token_refresh_issues_new_admin_access():
     redis_patch, roles_patch = _mock_auth_redis()
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
-        token_data, _ = admin_service.issue_admin_session("admin@dalgo.org", "Secret@123")
+        token_data = admin_service.issue_admin_session(
+            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+        )
 
     request = mock_request()
     request.COOKIES = {"admin_refresh_token": token_data["refresh"]}
