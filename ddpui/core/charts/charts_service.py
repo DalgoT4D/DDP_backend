@@ -1017,7 +1017,7 @@ def execute_query(
     # Execute query
     results: list[dict] = warehouse_client.execute(compiled_stmt)
 
-    if results and len(results) > 0:
+    if results and len(results) > 0 and results[0]:
         first_row_keys = list(results[0].keys())
 
         # Log column mapping if provided for debugging
