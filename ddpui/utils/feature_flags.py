@@ -1,5 +1,10 @@
+import logging
+
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from ddpui.models.org import OrgFeatureFlag, Org
+
+logger = logging.getLogger(__name__)
 
 FEATURE_FLAGS = {
     "DATA_QUALITY": "Elementary data quality reports",
@@ -10,6 +15,39 @@ FEATURE_FLAGS = {
     "DATA_STATISTICS": "Enable detailed data statistics in explore",
     "REPORTS": "Enable reports feature",
 }
+
+
+def _safe_update_or_create(org, flag_name, flag_value):
+    """
+    Wrapper around update_or_create that retries once on IntegrityError.
+
+    This handles the case where the PostgreSQL auto-increment sequence for
+    the primary key is out of sync with the table data (e.g. due to rows
+    inserted with explicit IDs via fixtures or manual SQL). On the first
+    attempt the sequence may generate a colliding ID; the retry succeeds
+    because the sequence advances past the conflict.
+
+    The first attempt is wrapped in a savepoint (transaction.atomic) so that
+    if it fails, the outer transaction is not aborted and the retry can proceed.
+    """
+    try:
+        with transaction.atomic():
+            return OrgFeatureFlag.objects.update_or_create(
+                org=org,
+                flag_name=flag_name,
+                defaults={"flag_value": flag_value},
+            )
+    except IntegrityError:
+        logger.warning(
+            "IntegrityError on OrgFeatureFlag for org=%s flag=%s, retrying",
+            org,
+            flag_name,
+        )
+        return OrgFeatureFlag.objects.update_or_create(
+            org=org,
+            flag_name=flag_name,
+            defaults={"flag_value": flag_value},
+        )
 
 
 def enable_feature_flag(flag_name: str, org: Org = None) -> bool:
@@ -25,14 +63,7 @@ def enable_feature_flag(flag_name: str, org: Org = None) -> bool:
     if flag_name not in FEATURE_FLAGS.keys():
         return None
 
-    flag, created = OrgFeatureFlag.objects.get_or_create(
-        org=org,
-        flag_name=flag_name,
-        defaults={"flag_value": True},
-    )
-    if not created:
-        flag.flag_value = True
-        flag.save()
+    _safe_update_or_create(org, flag_name, True)
 
     return True
 
@@ -51,13 +82,7 @@ def disable_feature_flag(flag_name: str, org: Org = None) -> bool:
     if flag_name not in FEATURE_FLAGS.keys():
         return None
 
-    try:
-        flag = OrgFeatureFlag.objects.get(org=org, flag_name=flag_name)
-        flag.flag_value = False
-        flag.save()
-    except OrgFeatureFlag.DoesNotExist:
-        # create an entry with disabling it
-        OrgFeatureFlag.objects.create(org=org, flag_name=flag_name, flag_value=False)
+    _safe_update_or_create(org, flag_name, False)
 
     return True
 
