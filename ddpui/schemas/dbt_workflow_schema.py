@@ -1,3 +1,5 @@
+import uuid
+
 from ninja import Field, Schema
 from typing import Union, Any, Literal, Optional
 from pydantic import ConfigDict
@@ -327,7 +329,7 @@ def validate_operation_config_v2(op_type: str, config: dict) -> None:
 class ModelSrcOtherInputPayload(Schema):
     """Schema to define inputs for a multi input operation. The uuid refers to the dbtmodel"""
 
-    input_model_uuid: str
+    input_model_uuid: uuid.UUID
     columns: list[str] = []
     seq: int = 1
 
@@ -359,7 +361,7 @@ class CreateOperationNodePayload(Schema):
 
     config: dict
     input_node_uuid: (
-        str  # The CanvasNode (source/model/operation) on which this operation is applied
+        uuid.UUID  # The CanvasNode (source/model/operation) on which this operation is applied
     )
     op_type: str
     source_columns: list[str]
