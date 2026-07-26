@@ -28,8 +28,8 @@ from ddpui.core.admin.exceptions import (
 )
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
-from ddpui.models.org_user import Invitation, OrgUser, UserAttributes
-from ddpui.schemas.admin_schema import AdminLoginSchema, AdminUpdateOrgSchema
+from ddpui.models.org_user import Invitation, OrgUser, UserAttributes, LoginPayload
+from ddpui.schemas.admin_schema import AdminUpdateOrgSchema
 
 pytestmark = pytest.mark.django_db
 
@@ -49,7 +49,7 @@ def test_issue_admin_session_refuses_non_platform_admin():
 
     with pytest.raises(AdminNotPlatformAdminError):
         admin_service.issue_admin_session(
-            AdminLoginSchema(username="ops@dalgo.org", password="Secret@123")
+            LoginPayload(username="ops@dalgo.org", password="Secret@123")
         )
 
 
@@ -62,7 +62,7 @@ def test_issue_admin_session_refuses_wrong_password():
 
     with pytest.raises(AdminInvalidCredentialsError):
         admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="wrong-password")
+            LoginPayload(username="admin@dalgo.org", password="wrong-password")
         )
 
 
@@ -77,7 +77,7 @@ def test_issue_admin_session_mints_admin_token_for_platform_admin():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         token_data = admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     assert "access" in token_data and "refresh" in token_data
@@ -96,7 +96,7 @@ def test_issue_admin_session_uses_short_admin_lifetimes():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         token_data = admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     access = AccessToken(token_data["access"])
@@ -142,7 +142,7 @@ def test_refresh_admin_session_rejects_blacklisted_token():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         token_data = admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     # the blacklist lookup lives in the service, so patch it at its import site
@@ -178,7 +178,7 @@ def test_refresh_admin_session_keeps_admin_claim_and_short_lifetime():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         token_data = admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     with patch("ddpui.core.admin.admin_service.RedisClient.get_instance") as mock_redis2:

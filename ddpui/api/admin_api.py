@@ -21,11 +21,12 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import (
     OrgUser,
     NewInvitationSchema,
-    DeleteOrgUserPayload,
+    LoginPayload,
 )
-from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.admin_schema import (
-    AdminLoginSchema,
+    AdminCurrentUserSchema,
+    AdminPingSchema,
+    AdminSuccessSchema,
     AdminStatsSchema,
     AdminOrgSchema,
     AdminCreateOrgSchema,
@@ -33,11 +34,9 @@ from ddpui.schemas.admin_schema import (
     AdminOrgUserSchema,
     AdminInvitationSchema,
     AdminOrgUsersResponse,
-    AdminInviteUserSchema,
     AdminChangeRoleSchema,
     RemovalImpactSchema,
 )
-from ddpui.core import orguserfunctions
 from ddpui.core.admin import admin_service
 from ddpui.core.admin.exceptions import (
     AdminInvalidCredentialsError,
@@ -75,7 +74,7 @@ def _set_admin_cookie(response: JsonResponse, name: str, value: str) -> None:
 
 
 @admin_router.post("/login/", auth=None)
-def post_admin_login(request, payload: AdminLoginSchema):
+def post_admin_login(request, payload: LoginPayload):
     """
     Sign in to the admin portal. Verifies credentials AND is_platform_admin, then sets a
     SEPARATE admin_access_token/admin_refresh_token cookie (distinct from the normal
@@ -135,7 +134,7 @@ def post_admin_token_refresh(request):
     return response
 
 
-@admin_router.get("/currentuser")
+@admin_router.get("/currentuser", response=AdminCurrentUserSchema)
 @platform_admin_required
 def get_admin_currentuser(request):
     """
@@ -146,13 +145,21 @@ def get_admin_currentuser(request):
     return {"email": user.email, "is_platform_admin": True}
 
 
+def _get_org_or_404(org_id: int) -> Org:
+    """resolve the target org from the URL (404 if it does not exist)"""
+    org = admin_service.get_org(org_id)
+    if org is None:
+        raise HttpError(404, "org not found")
+    return org
+
+
 def _admin_org_response(org: Org) -> AdminOrgSchema:
     # the schema owns the field mapping (from_model); the API supplies the user_count,
     # which needs a service call and so isn't the schema's to compute.
     return AdminOrgSchema.from_model(org, admin_service.org_user_count(org))
 
 
-@admin_router.get("/ping")
+@admin_router.get("/ping", response=AdminPingSchema)
 @platform_admin_required
 def get_admin_ping(request):
     """
@@ -191,16 +198,8 @@ def post_admin_org(request, payload: AdminCreateOrgSchema):
     and rolls the Org back if Airbyte fails) + create_org_plan. No OrgUser is attached
     here — the first admin is invited on the Users tab (M4).
     """
-    create_payload = CreateOrgSchema(
-        name=payload.name,
-        viz_url=payload.viz_url,
-        base_plan=payload.base_plan,
-        can_upgrade_plan=payload.can_upgrade_plan,
-        subscription_duration=payload.subscription_duration,
-        superset_included=payload.superset_included,
-    )
     try:
-        org = admin_service.create_org(create_payload)
+        org = admin_service.create_org(payload)
     except AdminOrgCreateError as err:
         # On Airbyte failure create_org already deleted the Org. On plan failure the Org
         # persists until this @transaction.atomic view unwinds — raising here triggers that
@@ -245,18 +244,11 @@ def post_admin_org_reactivate(request, org_id: int):
 
 # ======================= Users tab (M4) ======================================
 # Cross-org user management inside a target org. Every endpoint takes the target
-# org in the URL and reuses the org-parameterized core functions in
-# orguserfunctions (invite_user_to_org / change_orguser_role_in_org /
-# delete_orguser_from_org) with is_platform_admin=True, so the invite-cap and
-# role-cap rules that only make sense for an in-org inviter are skipped for a
-# platform admin acting cross-org. See plan.md §4.4.
-
-
-def _get_org_or_404(org_id: int) -> Org:
-    org = admin_service.get_org(org_id)
-    if org is None:
-        raise HttpError(404, "org not found")
-    return org
+# org in the URL and goes through admin_service (invite_user / change_orguser_role /
+# remove_orguser), which delegates to the org-parameterized core functions in
+# orguserfunctions with is_platform_admin=True — so the invite-cap and role-cap rules
+# that only make sense for an in-org inviter are skipped for a platform admin acting
+# cross-org. See plan.md §4.4.
 
 
 def _get_orguser_or_404(org: Org, orguser_id: int) -> OrgUser:
@@ -278,13 +270,7 @@ def get_admin_org_users(request, org_id: int):
     # pending invites are scoped by the explicit target org, so an invite a platform
     # admin created into this org shows here even though invited_by is in another org.
     invitations = [
-        AdminInvitationSchema(
-            id=inv.id,
-            invited_email=inv.invited_email,
-            invited_role_slug=inv.invited_new_role.slug if inv.invited_new_role else None,
-            invited_on=inv.invited_on,
-        )
-        for inv in admin_service.list_org_invitations(org)
+        AdminInvitationSchema.from_model(inv) for inv in admin_service.list_org_invitations(org)
     ]
 
     return AdminOrgUsersResponse(users=users, invitations=invitations)
@@ -292,7 +278,7 @@ def get_admin_org_users(request, org_id: int):
 
 @admin_router.post("/orgs/{org_id}/users/invite", response=AdminInvitationSchema)
 @platform_admin_required
-def post_admin_org_user_invite(request, org_id: int, payload: AdminInviteUserSchema):
+def post_admin_org_user_invite(request, org_id: int, payload: NewInvitationSchema):
     """
     Invite a user into the org. A platform admin may invite at ANY role — the
     inviter-level cap is skipped (is_platform_admin=True). The invitation records
@@ -301,13 +287,7 @@ def post_admin_org_user_invite(request, org_id: int, payload: AdminInviteUserSch
     """
     org = _get_org_or_404(org_id)
 
-    invite_payload = NewInvitationSchema(
-        invited_email=payload.invited_email,
-        invited_role_uuid=payload.invited_role_uuid,
-    )
-    _, error = orguserfunctions.invite_user_to_org(
-        org, request.orguser, invite_payload, is_platform_admin=True
-    )
+    _, error = admin_service.invite_user(org, request.orguser, payload)
     if error:
         raise HttpError(400, error)
 
@@ -323,14 +303,7 @@ def post_admin_org_user_invite(request, org_id: int, payload: AdminInviteUserSch
         )
 
     logger.info(f"admin invited {invitation.invited_email} into org {org.slug}")
-    return AdminInvitationSchema(
-        id=invitation.id,
-        invited_email=invitation.invited_email,
-        invited_role_slug=(
-            invitation.invited_new_role.slug if invitation.invited_new_role else None
-        ),
-        invited_on=invitation.invited_on,
-    )
+    return AdminInvitationSchema.from_model(invitation)
 
 
 @admin_router.put("/orgs/{org_id}/users/{orguser_id}/role", response=AdminOrgUserSchema)
@@ -340,9 +313,7 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
 
-    _, error = orguserfunctions.change_orguser_role_in_org(
-        org, request.orguser, orguser.user.email, payload.role_uuid, is_platform_admin=True
-    )
+    _, error = admin_service.change_orguser_role(org, request.orguser, orguser, payload.role_uuid)
     if error:
         # is_platform_admin=True skips the role-level cap inside change_orguser_role_in_org
         # — both of its "Insufficient permissions" returns are guarded by `not
@@ -397,7 +368,7 @@ def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
     )
 
 
-@admin_router.delete("/orgs/{org_id}/users/{orguser_id}")
+@admin_router.delete("/orgs/{org_id}/users/{orguser_id}", response=AdminSuccessSchema)
 @platform_admin_required
 def delete_admin_org_user(request, org_id: int, orguser_id: int):
     """
@@ -410,12 +381,7 @@ def delete_admin_org_user(request, org_id: int, orguser_id: int):
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
 
-    _, error = orguserfunctions.delete_orguser_from_org(
-        org,
-        request.orguser,
-        DeleteOrgUserPayload(email=orguser.user.email),
-        is_platform_admin=True,
-    )
+    _, error = admin_service.remove_orguser(org, request.orguser, orguser)
     if error:
         raise HttpError(400, error)
 
@@ -423,7 +389,7 @@ def delete_admin_org_user(request, org_id: int, orguser_id: int):
     return {"success": 1}
 
 
-@admin_router.delete("/orgs/{org_id}/invitations/{invitation_id}")
+@admin_router.delete("/orgs/{org_id}/invitations/{invitation_id}", response=AdminSuccessSchema)
 @platform_admin_required
 def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
     """

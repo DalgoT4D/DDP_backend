@@ -27,14 +27,21 @@ from ddpui.core.admin.exceptions import (
 )
 from ddpui.utils.redis_client import RedisClient
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser, Invitation, UserAttributes
+from ddpui.models.org_user import (
+    OrgUser,
+    Invitation,
+    UserAttributes,
+    LoginPayload,
+    NewInvitationSchema,
+    DeleteOrgUserPayload,
+)
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.schemas.org_schema import CreateOrgSchema
-from ddpui.schemas.admin_schema import AdminLoginSchema, AdminUpdateOrgSchema
-from ddpui.core import orgfunctions
+from ddpui.schemas.admin_schema import AdminCreateOrgSchema, AdminUpdateOrgSchema
+from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.admin")
@@ -45,11 +52,13 @@ logger = CustomLogger("ddpui.core.admin")
 # --------------------------------------------------------------------------- #
 
 
-def issue_admin_session(payload: AdminLoginSchema) -> dict:
+def issue_admin_session(payload: LoginPayload) -> dict:
     """
     Verify credentials AND platform-admin privilege, then mint a distinct admin token.
-    Takes the AdminLoginSchema request payload (not loose username/password args), per the
-    service-signature convention. Returns {"access": ..., "refresh": ...} on success.
+    Takes the existing LoginPayload request payload (not loose username/password args), per
+    the service-signature convention — the admin sign-in body is the same
+    {username, password} shape as the normal login, so it reuses that schema rather than
+    duplicating it. Returns {"access": ..., "refresh": ...} on success.
     Raises AdminInvalidCredentialsError (wrong username/password) or
     AdminNotPlatformAdminError (valid creds but not a platform admin) so the API can map
     the exception TYPE to a status code without inspecting the message. Knows nothing
@@ -140,19 +149,33 @@ def org_user_count(org: Org) -> int:
 # --------------------------------------------------------------------------- #
 
 
-def create_org(create_payload: CreateOrgSchema) -> Org:
+def create_org(payload: AdminCreateOrgSchema) -> Org:
     """
-    Create an org and its plan. Reuses orgfunctions.create_organization (which
-    provisions an Airbyte workspace and rolls the Org back if Airbyte fails) plus
-    create_org_plan. No OrgUser is attached here — the first admin is invited on the
-    Users tab (M4). Returns the Org on success; raises AdminOrgCreateError on failure so
-    the API maps the exception TYPE to 400.
+    Create an org and its plan. Takes the AdminCreateOrgSchema the API validated — the
+    widening to the full CreateOrgSchema that orgfunctions expects happens HERE, not in
+    the handler, so the API layer stays parse -> call service -> respond. The admin
+    payload deliberately omits slug / airbyte_workspace_id / is_demo etc.; those keep
+    CreateOrgSchema's own defaults (slug is derived downstream from name).
+
+    Reuses orgfunctions.create_organization (which provisions an Airbyte workspace and
+    rolls the Org back if Airbyte fails) plus create_org_plan. No OrgUser is attached
+    here — the first admin is invited on the Users tab (M4). Returns the Org on success;
+    raises AdminOrgCreateError on failure so the API maps the exception TYPE to 400.
 
     Rollback differs by failure point: on Airbyte failure create_organization has
     already deleted the Org itself, so nothing persists. On PLAN failure the Org row
     DOES persist here — this function just raises — and it is the caller's
     @transaction.atomic (post_admin_org) that rolls the Org back. See the M16 test.
     """
+    create_payload = CreateOrgSchema(
+        name=payload.name,
+        viz_url=payload.viz_url,
+        base_plan=payload.base_plan,
+        can_upgrade_plan=payload.can_upgrade_plan,
+        subscription_duration=payload.subscription_duration,
+        superset_included=payload.superset_included,
+    )
+
     org, error = orgfunctions.create_organization(create_payload)
     if error:
         # create_organization already deleted the org on Airbyte failure; nothing persists.
@@ -204,6 +227,50 @@ def set_org_active(org: Org, is_active: bool) -> Org:
 # --------------------------------------------------------------------------- #
 # Org users + invitations
 # --------------------------------------------------------------------------- #
+
+
+def invite_user(
+    org: Org, inviter: OrgUser, payload: NewInvitationSchema
+) -> Tuple[Optional[object], Optional[str]]:
+    """
+    Invite a user into the target org on behalf of a platform admin. Thin delegation to
+    orguserfunctions.invite_user_to_org with is_platform_admin=True, so the inviter-level
+    role cap is skipped — a platform admin acting cross-org has no role in the target org
+    to compare against. Returns orguserfunctions' (result, error) tuple; the API maps the
+    error to a status code.
+    """
+    return orguserfunctions.invite_user_to_org(org, inviter, payload, is_platform_admin=True)
+
+
+def change_orguser_role(
+    org: Org, requestor: OrgUser, orguser: OrgUser, role_uuid
+) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Change a user's role within the target org on behalf of a platform admin. Thin
+    delegation to orguserfunctions.change_orguser_role_in_org with is_platform_admin=True,
+    which skips the "can't assign a role higher than your own" cap. Returns the
+    (result, error) tuple.
+    """
+    return orguserfunctions.change_orguser_role_in_org(
+        org, requestor, orguser.user.email, role_uuid, is_platform_admin=True
+    )
+
+
+def remove_orguser(
+    org: Org, requestor: OrgUser, orguser: OrgUser
+) -> Tuple[Optional[object], Optional[str]]:
+    """
+    Remove a user from the target org on behalf of a platform admin. Thin delegation to
+    orguserfunctions.delete_orguser_from_org with is_platform_admin=True (role-level cap
+    skipped). The user's created content is ORPHANED, not deleted — Dashboard / Chart /
+    ReportSnapshot.created_by are SET_NULL. Returns the (result, error) tuple.
+    """
+    return orguserfunctions.delete_orguser_from_org(
+        org,
+        requestor,
+        DeleteOrgUserPayload(email=orguser.user.email),
+        is_platform_admin=True,
+    )
 
 
 def get_orguser_in_org(org: Org, orguser_id: int) -> Optional[OrgUser]:

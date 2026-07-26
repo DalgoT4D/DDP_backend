@@ -15,17 +15,34 @@ from pydantic import HttpUrl
 
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlanType
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import Invitation, OrgUser
 
 
 # ── Session ──────────────────────────────────────────────────────────────────
+# The admin sign-in body is the existing LoginPayload (ddpui/models/org_user.py) —
+# same {username, password} shape as the normal login, so no admin-specific schema.
 
 
-class AdminLoginSchema(Schema):
-    """credentials for the admin portal's own sign-in"""
+class AdminCurrentUserSchema(Schema):
+    """identity for the admin session — read by the frontend AdminGuard"""
 
-    username: str
-    password: str
+    email: str
+    is_platform_admin: bool
+
+
+class AdminPingSchema(Schema):
+    """stub health-check response proving the platform-admin gate works"""
+
+    detail: str
+
+
+class AdminSuccessSchema(Schema):
+    """
+    acknowledgement for admin mutations that return no entity. success is an int (1),
+    not a bool — it matches the existing {"success": 1} wire format the frontend reads.
+    """
+
+    success: int
 
 
 # ── Dashboard / org ──────────────────────────────────────────────────────────
@@ -116,19 +133,24 @@ class AdminInvitationSchema(Schema):
     invited_role_slug: str | None
     invited_on: datetime
 
+    @classmethod
+    def from_model(cls, invitation: Invitation) -> "AdminInvitationSchema":
+        """Build the response from a pending Invitation row."""
+        return cls(
+            id=invitation.id,
+            invited_email=invitation.invited_email,
+            invited_role_slug=(
+                invitation.invited_new_role.slug if invitation.invited_new_role else None
+            ),
+            invited_on=invitation.invited_on,
+        )
+
 
 class AdminOrgUsersResponse(Schema):
     """the Users tab payload: current members plus pending invites"""
 
     users: List[AdminOrgUserSchema]
     invitations: List[AdminInvitationSchema]
-
-
-class AdminInviteUserSchema(Schema):
-    """payload to invite a user into an org from the admin portal"""
-
-    invited_email: str
-    invited_role_uuid: uuid.UUID
 
 
 class AdminChangeRoleSchema(Schema):

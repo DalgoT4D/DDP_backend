@@ -45,9 +45,7 @@ from ddpui.api.admin_api import (
     get_admin_currentuser,
     AdminCreateOrgSchema,
     AdminUpdateOrgSchema,
-    AdminInviteUserSchema,
     AdminChangeRoleSchema,
-    AdminLoginSchema,
 )
 from ddpui.api.user_org_api import get_current_user_v2, post_organization_user_invite_v1
 from ddpui.core import orguserfunctions
@@ -59,6 +57,7 @@ from ddpui.models.org_user import (
     Invitation,
     NewInvitationSchema,
     AcceptInvitationSchema,
+    LoginPayload,
 )
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard
@@ -381,7 +380,7 @@ def test_admin_invite_into_org_records_target_org(platform_admin_request, akshar
     Akshara — even though invited_by (the platform admin) belongs to a different org.
     This is what lets accept/cancel resolve the correct org cross-org.
     """
-    payload = AdminInviteUserSchema(
+    payload = NewInvitationSchema(
         invited_email="newuser@akshara.org",
         invited_role_uuid=_role(GUEST_ROLE).uuid,
     )
@@ -415,7 +414,7 @@ def test_admin_invite_cap_skipped_for_platform_admin(platform_admin_request, aks
     assert regular_error == "Insufficient permissions for this operation"
 
     # via the admin portal the SAME admin may invite at super-admin (cap skipped)
-    payload = AdminInviteUserSchema(
+    payload = NewInvitationSchema(
         invited_email="bigboss@akshara.org",
         invited_role_uuid=super_admin_uuid,
     )
@@ -429,9 +428,7 @@ def test_admin_invite_cap_skipped_for_platform_admin(platform_admin_request, aks
 
 def test_admin_invite_into_missing_org_404(platform_admin_request):
     """inviting into a non-existent org is 404"""
-    payload = AdminInviteUserSchema(
-        invited_email="x@y.org", invited_role_uuid=_role(GUEST_ROLE).uuid
-    )
+    payload = NewInvitationSchema(invited_email="x@y.org", invited_role_uuid=_role(GUEST_ROLE).uuid)
     with pytest.raises(HttpError) as excinfo:
         post_admin_org_user_invite(platform_admin_request, 999999, payload)
     assert excinfo.value.status_code == 404
@@ -603,7 +600,7 @@ def test_admin_cancel_invite_is_org_scoped(platform_admin_request, akshara, bhum
     This is the fix for the loose global DELETE /users/invitations/delete/{id}.
     """
     # an invitation that belongs to Bhumi
-    payload = AdminInviteUserSchema(
+    payload = NewInvitationSchema(
         invited_email="pending@bhumi.org", invited_role_uuid=_role(GUEST_ROLE).uuid
     )
     post_admin_org_user_invite(platform_admin_request, bhumi.id, payload)
@@ -631,7 +628,7 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
     post_admin_org_user_invite(
         platform_admin_request,
         akshara.id,
-        AdminInviteUserSchema(
+        NewInvitationSchema(
             invited_email="pending@akshara.org", invited_role_uuid=_role(GUEST_ROLE).uuid
         ),
     )
@@ -724,7 +721,7 @@ def test_week1_full_admin_lifecycle_flow(
         post_admin_org_user_invite(
             admin_request,
             org1.id,
-            AdminInviteUserSchema(
+            NewInvitationSchema(
                 invited_email="priya@akshara.org",
                 invited_role_uuid=_role(ANALYST_ROLE).uuid,
             ),
@@ -804,7 +801,7 @@ def test_week1_full_admin_lifecycle_flow(
         post_admin_org_user_invite(
             admin_request,
             org1.id,
-            AdminInviteUserSchema(
+            NewInvitationSchema(
                 invited_email="raj@akshara.org", invited_role_uuid=_role(GUEST_ROLE).uuid
             ),
         )
@@ -819,7 +816,7 @@ def test_week1_full_admin_lifecycle_flow(
         post_admin_org_user_invite(
             admin_request,
             org2.id,
-            AdminInviteUserSchema(
+            NewInvitationSchema(
                 invited_email="pending@bhumi.org",
                 invited_role_uuid=_role(GUEST_ROLE).uuid,
             ),
@@ -892,7 +889,7 @@ def test_admin_login_refuses_non_platform_admin():
     User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
     with pytest.raises(HttpError) as excinfo:
         post_admin_login(
-            mock_request(), AdminLoginSchema(username="ops@dalgo.org", password="Secret@123")
+            mock_request(), LoginPayload(username="ops@dalgo.org", password="Secret@123")
         )
     assert excinfo.value.status_code == 403
 
@@ -904,9 +901,7 @@ def test_admin_login_wrong_password_is_401():
     )
     UserAttributes.objects.create(user=user, is_platform_admin=True)
     with pytest.raises(HttpError) as excinfo:
-        post_admin_login(
-            mock_request(), AdminLoginSchema(username="admin@dalgo.org", password="nope")
-        )
+        post_admin_login(mock_request(), LoginPayload(username="admin@dalgo.org", password="nope"))
     assert excinfo.value.status_code == 401
 
 
@@ -921,7 +916,7 @@ def test_admin_login_sets_admin_cookies_for_platform_admin():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         response = post_admin_login(
-            mock_request(), AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            mock_request(), LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     assert response.status_code == 200
@@ -944,7 +939,7 @@ def test_admin_login_cookies_carry_security_flags():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         response = post_admin_login(
-            mock_request(), AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            mock_request(), LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     for cookie_name in ("admin_access_token", "admin_refresh_token"):
@@ -1034,7 +1029,7 @@ def test_admin_token_refresh_issues_new_admin_access():
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         token_data = admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     request = mock_request()

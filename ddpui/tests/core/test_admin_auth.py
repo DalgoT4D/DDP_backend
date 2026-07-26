@@ -28,9 +28,8 @@ from rest_framework_simplejwt.tokens import AccessToken
 from ddpui.auth import AdminJwtAuthMiddleware, CustomJwtAuthMiddleware, ACCOUNT_MANAGER_ROLE
 from ddpui.core.admin import admin_service
 from ddpui.models.org import Org
-from ddpui.models.org_user import OrgUser, UserAttributes
+from ddpui.models.org_user import OrgUser, UserAttributes, LoginPayload
 from ddpui.models.role_based_access import Role
-from ddpui.schemas.admin_schema import AdminLoginSchema
 from ddpui.tests.api_tests.test_user_org_api import seed_db
 
 pytestmark = pytest.mark.django_db
@@ -70,7 +69,7 @@ def test_admin_middleware_admits_admin_token_and_loads_orguser(seed_db):
     with redis_patch as mock_redis, roles_patch:
         mock_redis.return_value.get.return_value = None
         token_data = admin_service.issue_admin_session(
-            AdminLoginSchema(username="admin@dalgo.org", password="Secret@123")
+            LoginPayload(username="admin@dalgo.org", password="Secret@123")
         )
 
     request = Mock()
