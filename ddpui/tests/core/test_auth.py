@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 import pytest
@@ -353,3 +354,38 @@ def test_authenticate_blacklisted_token(mock_redis_client, mock_request, mock_us
         middleware.authenticate(mock_request, token)
     assert excinfo.value.status_code == 401
     assert str(excinfo.value) == "Token has been invalidated"
+
+
+# --- cookie path (CustomJwtAuthMiddleware.__call__) ---------------------------------
+# Ported from the deleted test_admin_auth.py, retargeted from the admin cookie onto the
+# normal access_token cookie. The 401-vs-498 distinction is what tells the frontend to
+# re-login vs. silently refresh, and it is otherwise untested.
+
+
+def test_call_maps_malformed_cookie_to_401(mock_request):
+    """A garbage access_token cookie forces a re-login (401), not a refresh (498)."""
+    mock_request.COOKIES = {"access_token": "not-a-jwt"}
+
+    with pytest.raises(HttpError) as excinfo:
+        CustomJwtAuthMiddleware()(mock_request)
+
+    assert excinfo.value.status_code == 401
+    # pin the message too: a 401 raised for some OTHER reason would otherwise pass
+    assert str(excinfo.value) == "Invalid token"
+
+
+def test_call_maps_expired_cookie_to_498(mock_request, mock_user):
+    """
+    An EXPIRED access_token gets 498, the frontend's signal to call /token/refresh —
+    distinct from the 401 a malformed token gets. Without this the app would bounce the
+    user to login on every access-token expiry instead of refreshing.
+    """
+    token = AccessToken.for_user(mock_user)
+    token.set_exp(lifetime=timedelta(seconds=-10))  # already expired
+    mock_request.COOKIES = {"access_token": str(token)}
+
+    with pytest.raises(HttpError) as excinfo:
+        CustomJwtAuthMiddleware()(mock_request)
+
+    assert excinfo.value.status_code == 498
+    assert str(excinfo.value) == "Token expired"

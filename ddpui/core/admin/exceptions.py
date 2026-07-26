@@ -17,27 +17,6 @@ class AdminServiceError(Exception):
         super().__init__(self.message)
 
 
-class AdminInvalidCredentialsError(AdminServiceError):
-    """wrong username/password — maps to 401"""
-
-    def __init__(self, message: str = "invalid credentials"):
-        super().__init__(message, "ADMIN_INVALID_CREDENTIALS")
-
-
-class AdminNotPlatformAdminError(AdminServiceError):
-    """valid credentials but the user is not a platform admin — maps to 403"""
-
-    def __init__(self, message: str = "not a platform admin"):
-        super().__init__(message, "ADMIN_NOT_PLATFORM_ADMIN")
-
-
-class AdminSessionError(AdminServiceError):
-    """an admin refresh token that is unreadable, not an admin session, or blacklisted — 401"""
-
-    def __init__(self, message: str):
-        super().__init__(message, "ADMIN_SESSION_ERROR")
-
-
 class AdminOrgCreateError(AdminServiceError):
     """org creation failed (Airbyte or plan step) — maps to 400"""
 

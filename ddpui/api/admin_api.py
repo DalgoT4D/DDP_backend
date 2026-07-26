@@ -10,18 +10,14 @@ from typing import List
 
 from ninja import Router
 from ninja.errors import HttpError
-from django.conf import settings
 from django.db import transaction
-from django.http import JsonResponse
 from django.utils import timezone
-from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
-from ddpui.auth import platform_admin_required, AdminJwtAuthMiddleware, blacklist_jti_in_redis
+from ddpui.auth import platform_admin_required
 from ddpui.models.org import Org
 from ddpui.models.org_user import (
     OrgUser,
     NewInvitationSchema,
-    LoginPayload,
 )
 from ddpui.schemas.admin_schema import (
     AdminCurrentUserSchema,
@@ -38,108 +34,30 @@ from ddpui.schemas.admin_schema import (
     RemovalImpactSchema,
 )
 from ddpui.core.admin import admin_service
-from ddpui.core.admin.exceptions import (
-    AdminInvalidCredentialsError,
-    AdminNotPlatformAdminError,
-    AdminSessionError,
-    AdminOrgCreateError,
-)
+from ddpui.core.admin.exceptions import AdminOrgCreateError
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
-# Router-level auth: every admin route requires the independent admin session
-# (admin_access_token + session="admin" claim). A normal access_token never satisfies it.
-# login and token/refresh override with auth=None — you can't already hold an admin
-# session while obtaining one.
-admin_router = Router(auth=AdminJwtAuthMiddleware())
-
-
-# ======================= Independent admin session ===========================
-# The admin portal has its own login, separate from the normal product. It issues a
-# distinct admin_access_token cookie (see admin_service.issue_admin_session); the admin
-# router is guarded by AdminJwtAuthMiddleware, which only accepts that cookie. login and
-# refresh set auth=None because you cannot already hold an admin session while getting one.
-
-
-def _set_admin_cookie(response: JsonResponse, name: str, value: str) -> None:
-    response.set_cookie(
-        name,
-        value,
-        httponly=settings.COOKIE_HTTPONLY,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
-        path="/",
-    )
-
-
-@admin_router.post("/login/", auth=None)
-def post_admin_login(request, payload: LoginPayload):
-    """
-    Sign in to the admin portal. Verifies credentials AND is_platform_admin, then sets a
-    SEPARATE admin_access_token/admin_refresh_token cookie (distinct from the normal
-    session). A non-admin is refused here (403) with no cookie set; a wrong password is 401.
-    """
-    try:
-        token_data = admin_service.issue_admin_session(payload)
-    except AdminNotPlatformAdminError as err:
-        raise HttpError(403, err.message) from err
-    except AdminInvalidCredentialsError as err:
-        raise HttpError(401, err.message) from err
-
-    response = JsonResponse({"success": 1})
-    _set_admin_cookie(response, "admin_access_token", token_data["access"])
-    _set_admin_cookie(response, "admin_refresh_token", token_data["refresh"])
-    return response
-
-
-@admin_router.post("/logout/")
-@platform_admin_required
-def post_admin_logout(request):
-    """
-    Sign out of the admin portal. Blacklists the admin tokens and deletes ONLY the admin_*
-    cookies — the normal product session (if any) is untouched.
-    """
-    access_token_str = request.COOKIES.get("admin_access_token")
-    if access_token_str:
-        blacklist_jti_in_redis(access_token_str, AccessToken)
-    refresh_token_str = request.COOKIES.get("admin_refresh_token")
-    if refresh_token_str:
-        blacklist_jti_in_redis(refresh_token_str, RefreshToken)
-
-    response = JsonResponse({"success": 1})
-    response.delete_cookie("admin_access_token", path="/")
-    response.delete_cookie("admin_refresh_token", path="/")
-    return response
-
-
-@admin_router.post("/token/refresh", auth=None)
-def post_admin_token_refresh(request):
-    """
-    Mint a fresh admin_access_token from the admin_refresh_token, keeping the
-    session="admin" claim and the short admin access lifetime. Refuses a refresh token
-    that is not an admin session or has been blacklisted by logout.
-    """
-    refresh_token = request.COOKIES.get("admin_refresh_token")
-    if not refresh_token:
-        raise HttpError(401, "Refresh token not found")
-
-    try:
-        token_data = admin_service.refresh_admin_session(refresh_token)
-    except AdminSessionError as err:
-        raise HttpError(401, err.message) from err
-
-    response = JsonResponse({"success": 1})
-    _set_admin_cookie(response, "admin_access_token", token_data["access"])
-    return response
+# Router-level auth is the API-wide CustomJwtAuthMiddleware (the normal access_token
+# cookie), same as every other router. There is no separate admin session: the admin app
+# signs in through POST /api/v2/login/ and authority comes from @platform_admin_required
+# on each route.
+admin_router = Router()
 
 
 @admin_router.get("/currentuser", response=AdminCurrentUserSchema)
 @platform_admin_required
 def get_admin_currentuser(request):
     """
-    Identity for the admin session — read by the frontend AdminGuard via the admin cookie.
-    Reached only through AdminJwtAuthMiddleware, and re-checked by @platform_admin_required.
+    Identity for the admin portal — read by the frontend AdminGuard.
+
+    Authenticated by the shared session cookie, then gated by
+    @platform_admin_required, so a signed-in non-admin gets 403 and a signed-out
+    visitor gets 401. AdminGuard treats both the same: send them to the admin sign-in.
+    Kept as a dedicated route (rather than reusing /api/currentuserv2) because
+    currentuserv2 returns a LIST of OrgUsers and is gated on the per-org
+    can_view_orgusers permission, which a platform admin need not hold.
     """
     user = request.orguser.user
     return {"email": user.email, "is_platform_admin": True}

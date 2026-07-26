@@ -1,12 +1,12 @@
 """
-Tests for the admin-session service (features/admin-portal/plan.md M1).
+Tests for the admin service layer (ddpui/core/admin/admin_service.py).
 
-issue_admin_session verifies BOTH valid credentials AND is_platform_admin=True
-before minting a distinct admin token carrying a session="admin" claim.
+The admin portal has no session of its own — it authenticates through the shared
+POST /api/v2/login/ and each route is gated by @platform_admin_required. What is left
+here is the org / invitation / removal-impact business logic.
 """
 
 import os
-from unittest.mock import patch
 from uuid import uuid4
 
 import django
@@ -18,177 +18,14 @@ django.setup()
 
 from django.contrib.auth.models import User
 from django.utils import timezone
-from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from ddpui.core.admin import admin_service
-from ddpui.core.admin.exceptions import (
-    AdminInvalidCredentialsError,
-    AdminNotPlatformAdminError,
-    AdminSessionError,
-)
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
-from ddpui.models.org_user import Invitation, OrgUser, UserAttributes, LoginPayload
+from ddpui.models.org_user import Invitation, OrgUser
 from ddpui.schemas.admin_schema import AdminUpdateOrgSchema
 
 pytestmark = pytest.mark.django_db
-
-
-def _mock_redis():
-    """get_token touches Redis; mock it — matches the inline patch pattern test_auth.py
-    uses at each call site — no shared helper exists for this pair."""
-    return patch("ddpui.auth.RedisClient.get_instance"), patch(
-        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
-    )
-
-
-def test_issue_admin_session_refuses_non_platform_admin():
-    """Correct credentials but not a platform admin -> AdminNotPlatformAdminError (API 403)."""
-    User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
-    # no UserAttributes row -> is_platform_admin is effectively False
-
-    with pytest.raises(AdminNotPlatformAdminError):
-        admin_service.issue_admin_session(
-            LoginPayload(username="ops@dalgo.org", password="Secret@123")
-        )
-
-
-def test_issue_admin_session_refuses_wrong_password():
-    """Wrong password -> AdminInvalidCredentialsError (API 401), regardless of admin status."""
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    with pytest.raises(AdminInvalidCredentialsError):
-        admin_service.issue_admin_session(
-            LoginPayload(username="admin@dalgo.org", password="wrong-password")
-        )
-
-
-def test_issue_admin_session_mints_admin_token_for_platform_admin():
-    """A platform admin gets access+refresh tokens carrying a session='admin' claim."""
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    redis_patch, roles_patch = _mock_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        token_data = admin_service.issue_admin_session(
-            LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    assert "access" in token_data and "refresh" in token_data
-    access = AccessToken(token_data["access"])
-    assert access["session"] == "admin"
-
-
-def test_issue_admin_session_uses_short_admin_lifetimes():
-    """Admin tokens are shorter-lived than the normal app: 15 min access, 8 h refresh."""
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    redis_patch, roles_patch = _mock_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        token_data = admin_service.issue_admin_session(
-            LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    access = AccessToken(token_data["access"])
-    refresh = RefreshToken(token_data["refresh"])
-    assert access.payload["exp"] - access.payload["iat"] == 15 * 60
-    assert refresh.payload["exp"] - refresh.payload["iat"] == 8 * 60 * 60
-
-
-# --------------------------------------------------------------------------- #
-# refresh_admin_session
-# --------------------------------------------------------------------------- #
-# The API-level test only covers the happy path with Redis mocked clean. These
-# cover the three refusal paths, which are what stop a normal session being
-# escalated into an admin one.
-
-
-def test_refresh_admin_session_rejects_normal_refresh_token():
-    """
-    A normal login refresh token lacks session="admin", so it can never be upgraded
-    into an admin session. Refused before Redis is even consulted.
-    """
-    user = User.objects.create_user(
-        username="user@dalgo.org", email="user@dalgo.org", password="Secret@123"
-    )
-    normal_refresh = str(RefreshToken.for_user(user))
-
-    with pytest.raises(AdminSessionError) as excinfo:
-        admin_service.refresh_admin_session(normal_refresh)
-    assert str(excinfo.value) == "not an admin session"
-
-
-def test_refresh_admin_session_rejects_blacklisted_token():
-    """
-    Logout blacklists the refresh token's JTI in Redis. A refresh presented after
-    logout is refused, so signing out really ends the session.
-    """
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    redis_patch, roles_patch = _mock_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        token_data = admin_service.issue_admin_session(
-            LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    # the blacklist lookup lives in the service, so patch it at its import site
-    with patch("ddpui.core.admin.admin_service.RedisClient.get_instance") as mock_redis2:
-        mock_redis2.return_value.get.return_value = b"1"  # this JTI is blacklisted
-        with pytest.raises(AdminSessionError) as excinfo:
-            admin_service.refresh_admin_session(token_data["refresh"])
-
-    assert str(excinfo.value) == "Refresh token has been invalidated"
-    jti = RefreshToken(token_data["refresh"]).payload["jti"]
-    mock_redis2.return_value.get.assert_called_once_with(f"blacklisted_jti:{jti}")
-
-
-def test_refresh_admin_session_rejects_unreadable_token():
-    """Garbage in the cookie -> AdminSessionError, which the caller maps to a 401."""
-    with pytest.raises(AdminSessionError) as excinfo:
-        admin_service.refresh_admin_session("not-a-jwt")
-    assert str(excinfo.value) == "Invalid token"
-
-
-def test_refresh_admin_session_keeps_admin_claim_and_short_lifetime():
-    """
-    The refreshed access token is still an admin token (session="admin") and still
-    gets the SHORT 15-minute admin lifetime — refreshing must not quietly widen the
-    session to the normal app's 30 minutes.
-    """
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    redis_patch, roles_patch = _mock_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        token_data = admin_service.issue_admin_session(
-            LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    with patch("ddpui.core.admin.admin_service.RedisClient.get_instance") as mock_redis2:
-        mock_redis2.return_value.get.return_value = None  # not blacklisted
-        refreshed = admin_service.refresh_admin_session(token_data["refresh"])
-
-    assert set(refreshed.keys()) == {"access"}  # a refresh does NOT re-issue a refresh token
-    access = AccessToken(refreshed["access"])
-    assert access["session"] == "admin"
-    assert access.payload["exp"] - access.payload["iat"] == 15 * 60
 
 
 # --------------------------------------------------------------------------- #

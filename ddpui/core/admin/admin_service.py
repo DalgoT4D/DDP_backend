@@ -10,28 +10,13 @@ admin_api response schemas — it returns models / primitive values, and the API
 layer builds the response and maps errors to status codes.
 """
 
-from datetime import timedelta
 from typing import List, Optional, Tuple
 
-from django.conf import settings
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.tokens import RefreshToken
-
-from ddpui.auth import CustomTokenObtainSerializer
-from ddpui.core.admin.exceptions import (
-    AdminInvalidCredentialsError,
-    AdminNotPlatformAdminError,
-    AdminSessionError,
-    AdminOrgCreateError,
-)
-from ddpui.utils.redis_client import RedisClient
+from ddpui.core.admin.exceptions import AdminOrgCreateError
 from ddpui.models.org import Org
 from ddpui.models.org_user import (
     OrgUser,
     Invitation,
-    UserAttributes,
-    LoginPayload,
     NewInvitationSchema,
     DeleteOrgUserPayload,
 )
@@ -45,71 +30,6 @@ from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.admin")
-
-
-# --------------------------------------------------------------------------- #
-# Independent admin session
-# --------------------------------------------------------------------------- #
-
-
-def issue_admin_session(payload: LoginPayload) -> dict:
-    """
-    Verify credentials AND platform-admin privilege, then mint a distinct admin token.
-    Takes the existing LoginPayload request payload (not loose username/password args), per
-    the service-signature convention — the admin sign-in body is the same
-    {username, password} shape as the normal login, so it reuses that schema rather than
-    duplicating it. Returns {"access": ..., "refresh": ...} on success.
-    Raises AdminInvalidCredentialsError (wrong username/password) or
-    AdminNotPlatformAdminError (valid creds but not a platform admin) so the API can map
-    the exception TYPE to a status code without inspecting the message. Knows nothing
-    about HTTP.
-    """
-    user = authenticate(username=payload.username, password=payload.password)
-    if user is None:
-        raise AdminInvalidCredentialsError()
-
-    user_attributes = UserAttributes.objects.filter(user=user).first()
-    if not (user_attributes and user_attributes.is_platform_admin):
-        raise AdminNotPlatformAdminError()
-
-    # A distinct admin token: the session="admin" claim is what AdminJwtAuthMiddleware
-    # requires, so a normal login token (which lacks it) can never satisfy the admin API.
-    # Setting the claim on the refresh token before deriving the access token propagates
-    # it to both.
-    refresh = CustomTokenObtainSerializer.get_token(user)
-    refresh["session"] = "admin"
-    refresh.set_exp(lifetime=timedelta(hours=settings.JWT_ADMIN_REFRESH_TOKEN_EXPIRY_HOURS))
-    access = refresh.access_token
-    access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
-
-    return {"access": str(access), "refresh": str(refresh)}
-
-
-def refresh_admin_session(refresh_token: str) -> dict:
-    """
-    Mint a fresh admin access token from an admin refresh token, preserving the
-    session="admin" claim and the short admin access lifetime. Returns {"access": ...}
-    on success. Raises AdminSessionError when the token is unreadable, is not an admin
-    session, or was blacklisted by logout. This function knows nothing about HTTP.
-    """
-    try:
-        refresh = RefreshToken(refresh_token)
-    except TokenError as err:
-        raise AdminSessionError("Invalid token") from err
-
-    # A normal refresh token lacks the claim, so it can never be upgraded into an
-    # admin session here.
-    if refresh.payload.get("session") != "admin":
-        raise AdminSessionError("not an admin session")
-
-    jti = refresh.payload.get("jti")
-    if jti and RedisClient.get_instance().get(f"blacklisted_jti:{jti}"):
-        raise AdminSessionError("Refresh token has been invalidated")
-
-    access = refresh.access_token
-    access.set_exp(lifetime=timedelta(minutes=settings.JWT_ADMIN_ACCESS_TOKEN_EXPIRY_MINUTES))
-
-    return {"access": str(access)}
 
 
 # --------------------------------------------------------------------------- #

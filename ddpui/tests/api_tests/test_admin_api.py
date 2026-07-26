@@ -7,12 +7,14 @@ Milestone 1 acceptance (features/admin-portal/v1/plan.md §6, §7):
   - /currentuserv2 surfaces is_platform_admin
 """
 
+import json
 import os
 from unittest.mock import Mock, patch
 
 import django
 import pytest
 from ninja.errors import HttpError
+from ninja.constants import NOT_SET
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -39,15 +41,18 @@ from ddpui.api.admin_api import (
     delete_admin_org_user,
     delete_admin_org_invitation,
     admin_router,
-    post_admin_login,
-    post_admin_logout,
-    post_admin_token_refresh,
     get_admin_currentuser,
     AdminCreateOrgSchema,
     AdminUpdateOrgSchema,
     AdminChangeRoleSchema,
 )
-from ddpui.api.user_org_api import get_current_user_v2, post_organization_user_invite_v1
+from ddpui.routes import drf_authentication_failed_handler
+from rest_framework.exceptions import AuthenticationFailed
+from ddpui.api.user_org_api import (
+    get_current_user_v2,
+    post_organization_user_invite_v1,
+    post_login_v2,
+)
 from ddpui.core import orguserfunctions
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
@@ -65,7 +70,6 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import (
     CustomJwtAuthMiddleware,
-    AdminJwtAuthMiddleware,
     ACCOUNT_MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
@@ -73,7 +77,7 @@ from ddpui.auth import (
 )
 from ddpui.core.admin import admin_service
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
-from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken
 
 pytestmark = pytest.mark.django_db
 
@@ -870,205 +874,130 @@ def test_week1_full_admin_lifecycle_flow(
     assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
 
 
-# ---- the independent admin session: login / logout / refresh / currentuser ----
-# Moved here from tests/core/test_admin_auth.py: these exercise admin_api view
-# functions, so they belong with the other API tests. The middleware unit tests
-# stay in tests/core/test_admin_auth.py.
+# ---- router auth: no separate admin session ----------------------------------
+# The admin portal signs in through the shared POST /api/v2/login/ and the admin
+# router inherits the API-wide CustomJwtAuthMiddleware, exactly like every other
+# router. Authority is @platform_admin_required on each route, so the guarantee worth
+# holding is: a signed-in NON-admin is refused. Asserted by calling the view functions
+# directly, per this repo's testing skill (no ninja TestClient).
 
 
-def _mock_auth_redis():
-    """mock Redis for the token mint — matches the inline patch pattern test_auth.py
-    uses at each call site — no shared helper exists for this pair"""
-    return patch("ddpui.auth.RedisClient.get_instance"), patch(
-        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
-    )
-
-
-def test_admin_login_refuses_non_platform_admin():
-    """Correct password but not a platform admin -> 403, and no cookie is set."""
-    User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
-    with pytest.raises(HttpError) as excinfo:
-        post_admin_login(
-            mock_request(), LoginPayload(username="ops@dalgo.org", password="Secret@123")
-        )
-    assert excinfo.value.status_code == 403
-
-
-def test_admin_login_wrong_password_is_401():
-    """Wrong password -> 401."""
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-    with pytest.raises(HttpError) as excinfo:
-        post_admin_login(mock_request(), LoginPayload(username="admin@dalgo.org", password="nope"))
-    assert excinfo.value.status_code == 401
-
-
-def test_admin_login_sets_admin_cookies_for_platform_admin():
-    """A platform admin gets admin_access_token + admin_refresh_token cookies."""
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    redis_patch, roles_patch = _mock_auth_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        response = post_admin_login(
-            mock_request(), LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    assert response.status_code == 200
-    assert "admin_access_token" in response.cookies
-    assert "admin_refresh_token" in response.cookies
-
-
-def test_admin_login_cookies_carry_security_flags():
+def test_admin_router_has_no_separate_session_auth():
     """
-    The admin cookies are httponly + secure with the configured samesite policy, so the
-    higher-privilege admin token is not readable by JS and is not sent over plain HTTP.
-    The sibling test only checks the cookies EXIST; this checks how they are set.
+    The admin router carries no auth of its own — it inherits the API-level
+    CustomJwtAuthMiddleware. Regression guard for the removed AdminJwtAuthMiddleware:
+    if someone re-binds a bespoke session onto this router, this fails.
+
+    Asserted by introspecting the router rather than issuing HTTP, per the testing skill.
     """
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
+    assert admin_router.auth is NOT_SET
 
-    redis_patch, roles_patch = _mock_auth_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        response = post_admin_login(
-            mock_request(), LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    for cookie_name in ("admin_access_token", "admin_refresh_token"):
-        cookie = response.cookies[cookie_name]
-        assert cookie["httponly"] is True
-        assert cookie["secure"] is True
-        assert cookie["samesite"] == settings.COOKIE_SAMESITE
-        assert cookie["path"] == "/"
-
-
-def test_admin_logout_clears_admin_cookies(platform_admin_request):
-    """Admin logout deletes only the admin_* cookies (independent of the normal session)."""
-    platform_admin_request.COOKIES = {}
-    response = post_admin_logout(platform_admin_request)
-    assert response.status_code == 200
-    assert response.cookies["admin_access_token"].value == ""
-    assert response.cookies["admin_refresh_token"].value == ""
-
-
-def test_admin_logout_blacklists_both_admin_tokens(platform_admin_request):
-    """
-    Logout must actually INVALIDATE the tokens, not just drop the cookies — otherwise a
-    copied token keeps working until it expires. Both the access and the refresh JTI are
-    written to the Redis blacklist. (The sibling cookie test passes empty COOKIES, so it
-    never reaches this branch.)
-    """
-    user = platform_admin_request.orguser.user
-    access = AccessToken.for_user(user)
-    refresh = RefreshToken.for_user(user)
-    platform_admin_request.COOKIES = {
-        "admin_access_token": str(access),
-        "admin_refresh_token": str(refresh),
-    }
-
-    fake_redis = Mock()
-    with patch("ddpui.auth.RedisClient.get_instance", return_value=fake_redis):
-        response = post_admin_logout(platform_admin_request)
-
-    assert response.status_code == 200
-    blacklisted_keys = {call.args[0] for call in fake_redis.set.call_args_list}
-    assert f"blacklisted_jti:{access.payload['jti']}" in blacklisted_keys
-    assert f"blacklisted_jti:{refresh.payload['jti']}" in blacklisted_keys
-
-
-def test_admin_logout_forbidden_for_non_platform_admin(orguser):
-    """logout is gated like every other admin route — a non-admin is refused."""
-    request = mock_request(orguser)
-    request.COOKIES = {}
-    with pytest.raises(HttpError) as excinfo:
-        post_admin_logout(request)
-    assert excinfo.value.status_code == 403
-
-
-def test_admin_currentuser_reports_platform_admin(platform_admin_request):
-    """currentuser returns the admin's email + is_platform_admin, via the admin session."""
-    result = get_admin_currentuser(platform_admin_request)
-    assert result["is_platform_admin"] is True
-    assert result["email"] == platform_admin_request.orguser.user.email
-
-
-def test_admin_currentuser_forbidden_for_non_platform_admin(orguser):
-    """
-    currentuser is gated like every other admin route. It backs the frontend AdminGuard,
-    so a non-admin reaching it must 403 rather than get an identity payload.
-    """
-    with pytest.raises(HttpError) as excinfo:
-        get_admin_currentuser(mock_request(orguser))
-    assert excinfo.value.status_code == 403
-
-
-def test_admin_token_refresh_without_cookie_is_401():
-    request = mock_request()
-    request.COOKIES = {}
-    with pytest.raises(HttpError) as excinfo:
-        post_admin_token_refresh(request)
-    assert excinfo.value.status_code == 401
-
-
-def test_admin_token_refresh_issues_new_admin_access():
-    """A valid admin refresh token yields a new admin_access_token carrying session='admin'."""
-    user = User.objects.create_user(
-        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
-    )
-    UserAttributes.objects.create(user=user, is_platform_admin=True)
-
-    redis_patch, roles_patch = _mock_auth_redis()
-    with redis_patch as mock_redis, roles_patch:
-        mock_redis.return_value.get.return_value = None
-        token_data = admin_service.issue_admin_session(
-            LoginPayload(username="admin@dalgo.org", password="Secret@123")
-        )
-
-    request = mock_request()
-    request.COOKIES = {"admin_refresh_token": token_data["refresh"]}
-    # the blacklist lookup now lives in the service, so patch it at its import site
-    with patch("ddpui.core.admin.admin_service.RedisClient.get_instance") as mock_redis2:
-        mock_redis2.return_value.get.return_value = None
-        response = post_admin_token_refresh(request)
-
-    assert "admin_access_token" in response.cookies
-    access = AccessToken(response.cookies["admin_access_token"].value)
-    assert access["session"] == "admin"
-
-
-def test_admin_router_requires_admin_session():
-    """
-    Router-level auth: the admin router is guarded by AdminJwtAuthMiddleware, and the
-    only routes opting out are the two that cannot require a session you don't have yet.
-
-    Asserted by introspecting the router rather than issuing HTTP — this repo's testing
-    skill calls view functions directly and does not use ninja's TestClient.
-    """
-    assert isinstance(admin_router.auth, AdminJwtAuthMiddleware)
-
-    # auth_param is NOT_SET when a route inherits the router's auth, and None when a
-    # route explicitly opts out via auth=None.
+    # No route opts out of auth either: the login/token-refresh routes that used
+    # auth=None are gone, so nothing on the admin router is public.
     opted_out = {
         path
         for path, view in admin_router.path_operations.items()
         for op in view.operations
         if op.auth_param is None
     }
-    assert opted_out == {"/login/", "/token/refresh"}
+    assert opted_out == set()
 
 
-def test_admin_session_rejected_without_admin_cookie():
-    """No admin_access_token cookie and no bearer header -> the middleware does not
-    authenticate, so ninja answers 401."""
-    request = Mock()
-    request.COOKIES = {}
-    request.headers = {}
-    assert AdminJwtAuthMiddleware()(request) is None
+def test_admin_currentuser_refuses_signed_in_non_platform_admin(orguser):
+    """
+    A perfectly valid NORMAL session is not enough to reach the admin API. The session
+    is now shared, so the whole guarantee rests on @platform_admin_required: a signed-in
+    user without the flag gets 403, not admin identity.
+    """
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_currentuser(request)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_currentuser_reports_platform_admin(platform_admin_request):
+    """A platform admin resolves identity — this is what AdminGuard reads."""
+    result = get_admin_currentuser(platform_admin_request)
+    assert result == {
+        "email": platform_admin_request.orguser.user.email,
+        "is_platform_admin": True,
+    }
+
+
+# ---- the contract the admin sign-in depends on -------------------------------
+
+
+def test_v2_login_response_carries_is_platform_admin(seed_db):
+    """
+    The admin app signs in through the SHARED POST /api/v2/login/ and decides whether to
+    admit the user from is_platform_admin in that response body. post_login_v2 has no
+    `response=` schema (it must return a JsonResponse to set cookies), so nothing else
+    pins this key — without this test, dropping it from lookup_user() would silently
+    break the admin sign-in. See lookup_user() in ddpui/core/orguserfunctions.py.
+    """
+    user = User.objects.create_user(
+        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
+    )
+    UserAttributes.objects.create(user=user, is_platform_admin=True)
+
+    with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
+        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
+    ):
+        mock_redis.return_value.get.return_value = None
+        response = post_login_v2(
+            mock_request(), LoginPayload(username="admin@dalgo.org", password="Secret@123")
+        )
+
+    body = json.loads(response.content)
+    assert body["is_platform_admin"] is True
+    assert body["email"] == "admin@dalgo.org"
+    # and the shared session cookies are what got set — no admin_* cookie any more
+    assert "access_token" in response.cookies
+    assert "refresh_token" in response.cookies
+    assert not any(name.startswith("admin_") for name in response.cookies)
+
+
+def test_v2_login_reports_is_platform_admin_false_for_a_normal_user(seed_db):
+    """
+    The negative half of the contract. The shared login SUCCEEDS for any valid account —
+    it does not know about platform admins — so a normal user must come back with
+    is_platform_admin False, not a missing key and not an error. This is exactly what the
+    admin sign-in form refuses on, so a regression here would silently let a non-admin
+    into the admin shell (the backend would still 403 every route, but the UX breaks).
+    """
+    User.objects.create_user(username="ops@dalgo.org", email="ops@dalgo.org", password="Secret@123")
+    # no UserAttributes row at all -> lookup_user creates one, defaulting the flag False
+
+    with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
+        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
+    ):
+        mock_redis.return_value.get.return_value = None
+        response = post_login_v2(
+            mock_request(), LoginPayload(username="ops@dalgo.org", password="Secret@123")
+        )
+
+    body = json.loads(response.content)
+    assert "is_platform_admin" in body  # present, not merely falsy-by-absence
+    assert body["is_platform_admin"] is False
+    assert body["email"] == "ops@dalgo.org"
+    # the sign-in still succeeded — cookies are set even though they are not an admin
+    assert "access_token" in response.cookies
+
+
+def test_v2_login_bad_credentials_maps_to_401_not_500():
+    """
+    Wrong password on the shared login raises DRF's AuthenticationFailed. These are
+    ninja views, so DRF's own handler never runs and it used to fall through to the
+    generic Exception handler as a 500. routes.drf_authentication_failed_handler maps it
+    to the 401 it already declares — which is what the admin sign-in form renders.
+    """
+    User.objects.create_user(
+        username="admin@dalgo.org", email="admin@dalgo.org", password="Secret@123"
+    )
+
+    with pytest.raises(AuthenticationFailed) as excinfo:
+        post_login_v2(mock_request(), LoginPayload(username="admin@dalgo.org", password="nope"))
+
+    # the handler registered in routes.py turns that exception into a 401 response
+    response = drf_authentication_failed_handler(mock_request(), excinfo.value)
+    assert response.status_code == 401
