@@ -63,16 +63,21 @@ def map_airbyte_keys_to_postgres_keys(conn_info: dict):
     if "tunnel_method" in conn_info:
         method = conn_info["tunnel_method"]
 
-        if method["tunnel_method"] in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
-            conn_info["ssh_host"] = method["tunnel_host"]
-            conn_info["ssh_port"] = method["tunnel_port"]
-            conn_info["ssh_username"] = method["tunnel_user"]
+        if method.get("tunnel_method") in ["SSH_KEY_AUTH", "SSH_PASSWORD_AUTH"]:
+            conn_info["ssh_host"] = method.get("tunnel_host")
+            conn_info["ssh_port"] = method.get("tunnel_port")
+            conn_info["ssh_username"] = method.get("tunnel_user")
 
-        if method["tunnel_method"] == "SSH_KEY_AUTH":
-            conn_info["ssh_pkey"] = method["ssh_key"]
+        if method.get("tunnel_method") == "SSH_KEY_AUTH":
+            ssh_key = method.get("ssh_key")
+            if not ssh_key:
+                raise ValueError(
+                    "ssh_key is required for SSH_KEY_AUTH tunnel method but was not found in credentials"
+                )
+            conn_info["ssh_pkey"] = ssh_key
             conn_info["ssh_private_key_password"] = method.get("tunnel_private_key_password")
 
-        elif method["tunnel_method"] == "SSH_PASSWORD_AUTH":
+        elif method.get("tunnel_method") == "SSH_PASSWORD_AUTH":
             conn_info["ssh_password"] = method.get("tunnel_user_password")
 
     conn_info["user"] = conn_info["username"]
