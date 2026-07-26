@@ -880,7 +880,16 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     # we want to map cli profile block to orgdbt
     # create_or_update_org_cli_block(org, warehouse, dbt_credentials)
 
-    return None, None
+    warehouse_data = {
+        "wtype": warehouse.wtype,
+        "name": warehouse.name,
+        "airbyte_destination": airbyte_service.get_destination(
+            org.airbyte_workspace_id, warehouse.airbyte_destination_id
+        ),
+        "airbyte_docker_repository": warehouse.airbyte_docker_repository,
+        "airbyte_docker_image_tag": warehouse.airbyte_docker_image_tag,
+    }
+    return warehouse_data, None
 
 
 def get_warehouses(org: Org):
