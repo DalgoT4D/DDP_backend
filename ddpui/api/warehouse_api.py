@@ -14,6 +14,7 @@ import sqlalchemy.exc
 from django.http import StreamingHttpResponse
 from ddpui import auth
 from ddpui.core import dbtautomation_service
+from ddpui.utils.warehouse.old_client.warehouse_interface import TableNotFoundError
 from ddpui.core.warehousefunctions import get_warehouse_data, fetch_warehouse_tables
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -166,6 +167,8 @@ def get_table_count(request, schema_name: str, table_name: str):
         client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
+    except TableNotFoundError:
+        raise HttpError(404, f"Table {schema_name}.{table_name} not found")
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
         raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
