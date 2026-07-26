@@ -37,6 +37,7 @@ from ddpui.api.airbyte_api import (
     post_source_oauth_consent,
     get_source_oauth_callback,
     post_source_oauth_create,
+    put_source_oauth_update,
 )
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.core.oauth.google_oauth_provider import GSHEETS_SOURCE_DEFINITION_ID as GSHEETS_DEF_ID
@@ -49,6 +50,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdateCheckConnection,
     SourceGoogleOAuthConsentCreate,
     SourceGoogleOAuthCreate,
+    SourceGoogleOAuthUpdate,
 )
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui import ddpprefect
@@ -352,7 +354,6 @@ def test_post_source_oauth_consent_builds_google_url(seed_db, orguser_workspace,
     # the nonce is stored in redis bound to the caller's own org (CSRF + identity)
     stored = json.loads(fake_redis.store[f"airbyte_oauth_state:{state}"])
     assert stored["orguser_id"] == orguser_workspace.id
-    assert stored["workspace_id"] == orguser_workspace.org.airbyte_workspace_id
     assert stored["source_definition_id"] == GSHEETS_DEF_ID
 
 
@@ -362,7 +363,6 @@ def _seed_state(fake_redis, orguser, source_def_id, state="good-state"):
     fake_redis.store[f"airbyte_oauth_state:{state}"] = json.dumps(
         {
             "orguser_id": orguser.id,
-            "workspace_id": orguser.org.airbyte_workspace_id,
             "source_definition_id": source_def_id,
         }
     )
@@ -389,14 +389,14 @@ def test_oauth_callback_happy_path(seed_db, orguser_workspace, monkeypatch):
         "https://app.dalgo.org/oauth/airbyte/callback"
     )
     assert "rt-123" not in response.url  # the refresh_token is NOT in the redirect
-    ref = parse_qs(location.query)["ref"][0]
+    refresh_token_ref = parse_qs(location.query)["refresh_token_ref"][0]
     # the ref maps (server-side) to the refresh_token + the state's orguser
-    stored = json.loads(fake_redis.store[f"airbyte_oauth_ref:{ref}"])
+    stored = json.loads(fake_redis.store[f"airbyte_oauth_refresh_token_ref:{refresh_token_ref}"])
     assert stored["refresh_token"] == "rt-123"
     assert stored["orguser_id"] == orguser_workspace.id
     assert stored["source_definition_id"] == GSHEETS_DEF_ID
-    # state nonce is single-use — consumed
-    assert f"airbyte_oauth_state:{state}" not in fake_redis.store
+    # state nonce is not consumed; it expires on its own short TTL
+    assert f"airbyte_oauth_state:{state}" in fake_redis.store
 
 
 def test_oauth_callback_bad_state_redirects_error(seed_db, orguser_workspace, monkeypatch):
@@ -447,7 +447,7 @@ def test_oauth_callback_no_refresh_token_redirects_error(seed_db, orguser_worksp
     assert response.status_code == 302
     assert "error=" in response.url
     # no ref stashed
-    assert not any(k.startswith("airbyte_oauth_ref:") for k in fake_redis.store)
+    assert not any(k.startswith("airbyte_oauth_refresh_token_ref:") for k in fake_redis.store)
 
 
 def test_oauth_callback_request_timeout_redirects_error(seed_db, orguser_workspace, monkeypatch):
@@ -466,8 +466,8 @@ def test_oauth_callback_request_timeout_redirects_error(seed_db, orguser_workspa
 
     assert response.status_code == 302
     assert "error=oauth_failed" in response.url
-    # state consumed, no ref stashed
-    assert not any(k.startswith("airbyte_oauth_ref:") for k in fake_redis.store)
+    # exchange failed before stashing anything — no ref stashed
+    assert not any(k.startswith("airbyte_oauth_refresh_token_ref:") for k in fake_redis.store)
 
 
 def test_oauth_callback_non_json_response_redirects_error(seed_db, orguser_workspace, monkeypatch):
@@ -485,13 +485,13 @@ def test_oauth_callback_non_json_response_redirects_error(seed_db, orguser_works
 
     assert response.status_code == 302
     assert "error=oauth_failed" in response.url
-    assert not any(k.startswith("airbyte_oauth_ref:") for k in fake_redis.store)
+    assert not any(k.startswith("airbyte_oauth_refresh_token_ref:") for k in fake_redis.store)
 
 
 # ---- create: redeem the ref, inject creds, save the source ------------------
 def _seed_ref(fake_redis, orguser, source_def_id, refresh_token="rt-123", ref="good-ref"):
     """helper: pre-store a valid oauth ref (stashed refresh_token) in the fake redis"""
-    fake_redis.store[f"airbyte_oauth_ref:{ref}"] = json.dumps(
+    fake_redis.store[f"airbyte_oauth_refresh_token_ref:{ref}"] = json.dumps(
         {
             "orguser_id": orguser.id,
             "source_definition_id": source_def_id,
@@ -518,7 +518,7 @@ def test_post_source_oauth_create_success(seed_db, orguser_workspace, monkeypatc
             sourceDefId=GSHEETS_DEF_ID,
             name="my sheet",
             config={"spreadsheet_id": "https://sheet"},
-            ref=ref,
+            refresh_token_ref=ref,
         ),
     )
 
@@ -539,29 +539,32 @@ def test_post_source_oauth_create_success(seed_db, orguser_workspace, monkeypatc
             },
         },
     )
-    # ref is single-use — consumed
-    assert f"airbyte_oauth_ref:{ref}" not in fake_redis.store
+    # ref is not consumed on redeem; it expires on its own short TTL
+    assert f"airbyte_oauth_refresh_token_ref:{ref}" in fake_redis.store
 
 
 @patch.multiple(
     "ddpui.ddpairbyte.airbyte_service",
     update_source=Mock(return_value={"sourceId": "existing-src-id"}),
+    get_source=Mock(
+        return_value={"sourceId": "existing-src-id", "workspaceId": "FAKE-WORKSPACE-ID"}
+    ),
 )
-def test_post_source_oauth_create_reauth_updates(seed_db, orguser_workspace, monkeypatch):
-    """with a sourceId, create updates the existing source rather than creating a new one"""
+def test_put_source_oauth_update_reauth(seed_db, orguser_workspace, monkeypatch):
+    """the update endpoint re-authenticates an existing source in the caller's workspace"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
     ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
     request = mock_request(orguser_workspace)
 
-    result = post_source_oauth_create(
+    result = put_source_oauth_update(
         request,
-        SourceGoogleOAuthCreate(
+        "existing-src-id",
+        SourceGoogleOAuthUpdate(
             sourceDefId=GSHEETS_DEF_ID,
             name="my sheet",
             config={"spreadsheet_id": "https://sheet"},
-            ref=ref,
-            sourceId="existing-src-id",
+            refresh_token_ref=ref,
         ),
     )
 
@@ -582,6 +585,37 @@ def test_post_source_oauth_create_reauth_updates(seed_db, orguser_workspace, mon
     )
 
 
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    update_source=Mock(return_value={"sourceId": "foreign-src-id"}),
+    get_source=Mock(
+        return_value={"sourceId": "foreign-src-id", "workspaceId": "SOME-OTHER-WORKSPACE"}
+    ),
+)
+def test_put_source_oauth_update_foreign_source_rejected(seed_db, orguser_workspace, monkeypatch):
+    """a source_id living in another org's workspace cannot be updated (Airbyte's
+    sources/update is not workspace-scoped, so the service guards ownership)"""
+    _oauth_env(monkeypatch)
+    fake_redis = _use_fake_redis(monkeypatch)
+    ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_DEF_ID)
+    request = mock_request(orguser_workspace)
+
+    with pytest.raises(HttpError) as excinfo:
+        put_source_oauth_update(
+            request,
+            "foreign-src-id",
+            SourceGoogleOAuthUpdate(
+                sourceDefId=GSHEETS_DEF_ID,
+                name="my sheet",
+                config={"spreadsheet_id": "https://sheet"},
+                refresh_token_ref=ref,
+            ),
+        )
+
+    assert str(excinfo.value) == "source not found"
+    airbyte_service.update_source.assert_not_called()
+
+
 def test_post_source_oauth_create_expired_ref(seed_db, orguser_workspace, monkeypatch):
     """a missing/expired ref is rejected"""
     _oauth_env(monkeypatch)
@@ -592,7 +626,10 @@ def test_post_source_oauth_create_expired_ref(seed_db, orguser_workspace, monkey
         post_source_oauth_create(
             request,
             SourceGoogleOAuthCreate(
-                sourceDefId=GSHEETS_DEF_ID, name="my sheet", config={}, ref="never-issued"
+                sourceDefId=GSHEETS_DEF_ID,
+                name="my sheet",
+                config={},
+                refresh_token_ref="never-issued",
             ),
         )
 
@@ -612,7 +649,7 @@ def test_post_source_oauth_create_foreign_ref_rejected(
         post_source_oauth_create(
             request,
             SourceGoogleOAuthCreate(
-                sourceDefId=GSHEETS_DEF_ID, name="my sheet", config={}, ref=ref
+                sourceDefId=GSHEETS_DEF_ID, name="my sheet", config={}, refresh_token_ref=ref
             ),
         )
 
@@ -630,7 +667,7 @@ def test_post_source_oauth_create_wrong_sourcedef_rejected(seed_db, orguser_work
         post_source_oauth_create(
             request,
             SourceGoogleOAuthCreate(
-                sourceDefId="a-different-id", name="my sheet", config={}, ref=ref
+                sourceDefId="a-different-id", name="my sheet", config={}, refresh_token_ref=ref
             ),
         )
 

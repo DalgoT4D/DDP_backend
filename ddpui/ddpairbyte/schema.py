@@ -40,21 +40,33 @@ class SourceGoogleOAuthConsentCreate(Schema):
 
 
 class SourceGoogleOAuthCreate(Schema):
-    """Create (or update) a source from a redeemed Google OAuth `ref`.
+    """Create a NEW source from a redeemed Google OAuth `refresh_token_ref`.
 
     The user fills in `name` + `config` (e.g. spreadsheet_id) and authenticates via Google;
     the backend has already exchanged the code and stashed the refresh_token server-side
-    under the opaque `ref`. Here the backend redeems `ref`, builds the `credentials` block
-    (from env + refresh_token), and saves the source — so the refresh_token never travels
-    through the browser. `config` must NOT include a `credentials` block — the backend fills
-    it in. Pass `sourceId` to re-authenticate an existing source (update); omit it to create
-    a new one."""
+    under the opaque `refresh_token_ref`. Here the backend redeems `refresh_token_ref`, builds
+    the `credentials` block (from env + refresh_token), and saves the source — so the
+    refresh_token never travels through the browser. `config` must NOT include a `credentials`
+    block — the backend fills it in. To re-authenticate an EXISTING source, use the update
+    endpoint (PUT /sources/oauth/{source_id}) instead."""
 
     sourceDefId: str
     name: str
     config: dict
-    ref: str
-    sourceId: Optional[str] = None
+    refresh_token_ref: str
+
+
+class SourceGoogleOAuthUpdate(Schema):
+    """Re-authenticate an EXISTING source from a redeemed Google OAuth `refresh_token_ref`.
+
+    Same shape as create, minus the source id — that comes from the URL path. The backend
+    redeems `refresh_token_ref`, rebuilds the `credentials` block, and updates the source in
+    the caller's own workspace. `config` must NOT include a `credentials` block."""
+
+    sourceDefId: str
+    name: str
+    config: dict
+    refresh_token_ref: str
 
 
 class AirbyteDestinationCreate(Schema):

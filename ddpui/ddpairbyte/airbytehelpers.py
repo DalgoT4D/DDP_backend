@@ -45,6 +45,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionSchemaUpdateSchedule,
     AirbyteGetConnectionsResponse,
     SourceGoogleOAuthCreate,
+    SourceGoogleOAuthUpdate,
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
@@ -82,31 +83,50 @@ from ddpui.utils.redis_client import RedisClient
 logger = CustomLogger("airbyte")
 
 
-def save_oauth_source(orguser: OrgUser, payload: SourceGoogleOAuthCreate) -> dict:
-    """Create (or update) the source from a redeemed OAuth ref.
-
-    Redeems `payload.ref` for the refresh_token, builds the connector `credentials` via the
-    source's Google OAuth provider (client_id/client_secret from env + refresh_token), merges
-    it into `payload.config`, and saves the source. The refresh_token never travels through
-    the browser. With `payload.sourceId` set it updates that source (re-authenticate);
-    otherwise it creates a new one."""
-    refresh_token = google_oauth_service.redeem_ref(orguser, payload.ref, payload.sourceDefId)
-    connector = get_connector(payload.sourceDefId)
+def _build_oauth_source_config(
+    orguser: OrgUser, source_def_id: str, refresh_token_ref: str, config: dict
+) -> dict:
+    """Redeem the refresh_token_ref and return `config` with a backend-built `credentials`
+    block merged in. The refresh_token never travels through the browser; it is fetched
+    server-side from the ref and folded into the connector credentials here."""
+    refresh_token = google_oauth_service.redeem_refresh_token_ref(
+        orguser, refresh_token_ref, source_def_id
+    )
+    connector = get_connector(source_def_id)
     credentials = connector.credentials_builder(
         oauth_client_id(), oauth_client_secret(), refresh_token
     )
-    config = {**payload.config, "credentials": credentials}
+    return {**config, "credentials": credentials}
+
+
+def create_oauth_source(orguser: OrgUser, payload: SourceGoogleOAuthCreate) -> dict:
+    """Create a NEW source from a redeemed OAuth refresh_token_ref."""
+    config = _build_oauth_source_config(
+        orguser, payload.sourceDefId, payload.refresh_token_ref, payload.config
+    )
+    source = airbyte_service.create_source(
+        orguser.org.airbyte_workspace_id, payload.name, payload.sourceDefId, config
+    )
+    logger.info("created oauth source having id %s", source["sourceId"])
+    return {"sourceId": source["sourceId"]}
+
+
+def update_oauth_source(orguser: OrgUser, source_id: str, payload: SourceGoogleOAuthUpdate) -> dict:
+    """Re-authenticate an EXISTING source from a redeemed OAuth refresh_token_ref.
+
+    Verifies `source_id` belongs to the caller's own workspace before updating — Airbyte's
+    sources/update is not workspace-scoped, so without this guard a caller could overwrite a
+    source in another org's workspace by passing its id."""
     workspace_id = orguser.org.airbyte_workspace_id
-    if payload.sourceId:
-        source = airbyte_service.update_source(
-            payload.sourceId, payload.name, config, payload.sourceDefId
-        )
-        logger.info("updated oauth source having id %s", source["sourceId"])
-    else:
-        source = airbyte_service.create_source(
-            workspace_id, payload.name, payload.sourceDefId, config
-        )
-        logger.info("created oauth source having id %s", source["sourceId"])
+    source = airbyte_service.get_source(workspace_id, source_id)
+    if source.get("workspaceId") != workspace_id:
+        raise HttpError(404, "source not found")
+
+    config = _build_oauth_source_config(
+        orguser, payload.sourceDefId, payload.refresh_token_ref, payload.config
+    )
+    source = airbyte_service.update_source(source_id, payload.name, config, payload.sourceDefId)
+    logger.info("updated oauth source having id %s", source["sourceId"])
     return {"sourceId": source["sourceId"]}
 
 

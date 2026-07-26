@@ -23,6 +23,7 @@ from ddpui.ddpairbyte.schema import (
     AirbyteConnectionUpdate,
     SourceGoogleOAuthConsentCreate,
     SourceGoogleOAuthCreate,
+    SourceGoogleOAuthUpdate,
 )
 from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
@@ -141,9 +142,10 @@ def get_source_oauth_callback(request, state: str = None, code: str = None, erro
     """Google's redirect target after consent. PUBLIC — no JWT (a browser redirect carries
     none); the unguessable `state` nonce is the authentication.
 
-    Exchanges the auth code for a refresh_token server-side, stashes it under a single-use
-    opaque `ref`, and 302s the popup back to the frontend callback page carrying only that
-    `ref` (or an `error`). The auth code and refresh_token never reach the browser.
+    Exchanges the auth code for a refresh_token server-side, stashes it under an opaque
+    `refresh_token_ref`, and 302s the popup back to the frontend callback page carrying only
+    that `refresh_token_ref` (or an `error`). The auth code and refresh_token never reach the
+    browser.
     """
     return HttpResponseRedirect(
         google_oauth_service.oauth_callback_redirect_url(state, code, error)
@@ -153,17 +155,33 @@ def get_source_oauth_callback(request, state: str = None, code: str = None, erro
 @airbyte_router.post("/sources/oauth/create/")
 @has_permission(["can_create_source"])
 def post_source_oauth_create(request, payload: SourceGoogleOAuthCreate):
-    """Create (or update) the source from a redeemed OAuth `ref`.
+    """Create a NEW source from a redeemed OAuth `refresh_token_ref`.
 
-    Redeems the `ref` for the stashed refresh_token, builds the connector credentials
-    (client_id/secret from env), merges them into the config, and saves the source. The
-    refresh_token never travels through the browser.
+    Redeems the `refresh_token_ref` for the stashed refresh_token, builds the connector
+    credentials (client_id/secret from env), merges them into the config, and creates the
+    source. The refresh_token never travels through the browser.
     """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return airbytehelpers.save_oauth_source(orguser, payload)
+    return airbytehelpers.create_oauth_source(orguser, payload)
+
+
+@airbyte_router.put("/sources/oauth/{source_id}")
+@has_permission(["can_edit_source"])
+def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthUpdate):
+    """Re-authenticate an EXISTING source from a redeemed OAuth `refresh_token_ref`.
+
+    Same as create, but updates the source named in the URL path. The source must belong to
+    the caller's own workspace (enforced in the service layer). The refresh_token never
+    travels through the browser.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return airbytehelpers.update_oauth_source(orguser, source_id, payload)
 
 
 @airbyte_router.put("/sources/{source_id}")

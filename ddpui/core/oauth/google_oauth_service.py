@@ -2,18 +2,19 @@
 
 Dalgo builds the Google consent URL itself, receives Google's redirect on its own backend
 callback, exchanges the auth code for a refresh_token server-side, and stashes it in Redis
-under a single-use opaque `ref`. The browser never sees the auth code, the client_secret, or
-the refresh_token — only the `ref`. Airbyte's source_oauths/* is not involved; the
-per-source scopes and credentials shape come from the provider registry.
+under an opaque `refresh_token_ref`. The browser never sees the auth code, the client_secret,
+or the refresh_token — only the `refresh_token_ref`. Airbyte's source_oauths/* is not
+involved; the per-source scopes and credentials shape come from the provider registry.
 """
 
-import json
 import os
 import secrets
 from urllib.parse import urlencode
 
 import requests
+from ninja import Schema
 from ninja.errors import HttpError
+from pydantic import ConfigDict, ValidationError
 
 from ddpui.core.oauth.google_oauth_provider import (
     GOOGLE_OAUTH_AUTH_URL,
@@ -30,10 +31,33 @@ logger = CustomLogger("ddpui.core.oauth")
 
 # state: CSRF nonce bound to the orguser that started the flow (consent -> callback window)
 OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
-OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
-# ref: opaque handle to a stashed refresh_token (callback -> create-source window)
-OAUTH_REF_REDIS_PREFIX = "airbyte_oauth_ref"
-OAUTH_REF_TTL_SECONDS = 300  # 5 minutes
+OAUTH_STATE_TTL_SECONDS = 60  # 1 minute
+# refresh_token_ref: opaque handle to a stashed refresh_token (callback -> create-source window)
+OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX = "airbyte_oauth_refresh_token_ref"
+OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 60  # 1 minute
+
+
+class OAuthStateData(Schema):
+    """Typed payload stashed in Redis under the `state` nonce (consent -> callback window):
+    who/what started the flow. The unguessable nonce is the authentication on the JWT-less
+    callback, so validating this shape keeps the callback from trusting a tampered value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    orguser_id: int
+    source_definition_id: str
+
+
+class OAuthRefData(Schema):
+    """Typed payload stashed in Redis under the `refresh_token_ref` handle (callback ->
+    create-source window): the stashed refresh_token plus the orguser/source it was minted
+    for. Redeemed at create-source time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    orguser_id: int
+    source_definition_id: str
+    refresh_token: str
 
 
 def _oauth_redirect_url() -> str:
@@ -49,8 +73,8 @@ def _oauth_redirect_url() -> str:
 
 def _frontend_oauth_callback_url() -> str:
     """The webapp_v2 page the backend redirects the popup to after the exchange, carrying
-    only the opaque `ref` (or an `error`). Derived from FRONTEND_URL_V2 (falls back to
-    FRONTEND_URL)."""
+    only the opaque `refresh_token_ref` (or an `error`). Derived from FRONTEND_URL_V2 (falls
+    back to FRONTEND_URL)."""
     frontend_url = os.getenv("FRONTEND_URL_V2") or os.getenv("FRONTEND_URL")
     if not frontend_url:
         raise HttpError(500, "frontend url is not configured")
@@ -58,71 +82,63 @@ def _frontend_oauth_callback_url() -> str:
 
 
 def _store_oauth_state(orguser: OrgUser, source_def_id: str) -> str:
-    """Generate a state nonce, remember who/what it belongs to, auto-expire in 10 min"""
+    """Generate a state nonce, remember who/what it belongs to, auto-expire in 1 min"""
     state = secrets.token_urlsafe(48)
+    data = OAuthStateData(orguser_id=orguser.id, source_definition_id=source_def_id)
     RedisClient.get_instance().set(
         f"{OAUTH_STATE_REDIS_PREFIX}:{state}",
-        json.dumps(
-            {
-                "orguser_id": orguser.id,
-                "workspace_id": orguser.org.airbyte_workspace_id,
-                "source_definition_id": source_def_id,
-            }
-        ),
+        data.model_dump_json(),
         ex=OAUTH_STATE_TTL_SECONDS,
     )
     return state
 
 
-def _atomic_pop(key: str):
-    """Atomically read and delete a key, returning its value (or None). Uses a MULTI/EXEC
-    pipeline rather than GETDEL so it works on Redis < 6.2 while keeping the single-use /
-    replay guarantee (the get and delete run as one transaction)."""
-    pipe = RedisClient.get_instance().pipeline()
-    pipe.get(key)
-    pipe.delete(key)
-    value, _ = pipe.execute()
-    return value
-
-
-def _pop_oauth_state(state: str) -> dict:
-    """Validate + consume a state nonce on the (JWT-less) backend callback. The unguessable
-    nonce IS the authentication — it identifies the orguser that started the flow. Rejects
-    missing/expired/reused states; the atomic pop closes the replay window."""
-    raw = _atomic_pop(f"{OAUTH_STATE_REDIS_PREFIX}:{state}")
+def _read_oauth_state(state: str) -> OAuthStateData:
+    """Validate a state nonce on the (JWT-less) backend callback. The unguessable nonce IS
+    the authentication — it identifies the orguser that started the flow. Rejects
+    missing/expired states; the short TTL bounds the replay window."""
+    raw = RedisClient.get_instance().get(f"{OAUTH_STATE_REDIS_PREFIX}:{state}")
     if raw is None:
         raise HttpError(400, "invalid or expired oauth state")
-    return json.loads(raw)
+    try:
+        return OAuthStateData.model_validate_json(raw)
+    except ValidationError as err:
+        raise HttpError(400, "invalid or expired oauth state") from err
 
 
-def _store_oauth_ref(orguser_id: int, source_def_id: str, refresh_token: str) -> str:
-    """Stash the refresh_token server-side under a fresh single-use handle. The browser
-    only ever receives this `ref`, never the token."""
-    ref = secrets.token_urlsafe(48)
-    RedisClient.get_instance().set(
-        f"{OAUTH_REF_REDIS_PREFIX}:{ref}",
-        json.dumps(
-            {
-                "orguser_id": orguser_id,
-                "source_definition_id": source_def_id,
-                "refresh_token": refresh_token,
-            }
-        ),
-        ex=OAUTH_REF_TTL_SECONDS,
+def _store_refresh_token_ref(orguser_id: int, source_def_id: str, refresh_token: str) -> str:
+    """Stash the refresh_token server-side under a fresh opaque handle. The browser only
+    ever receives this `refresh_token_ref`, never the token."""
+    refresh_token_ref = secrets.token_urlsafe(48)
+    data = OAuthRefData(
+        orguser_id=orguser_id,
+        source_definition_id=source_def_id,
+        refresh_token=refresh_token,
     )
-    return ref
+    RedisClient.get_instance().set(
+        f"{OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX}:{refresh_token_ref}",
+        data.model_dump_json(),
+        ex=OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS,
+    )
+    return refresh_token_ref
 
 
-def redeem_ref(orguser: OrgUser, ref: str, source_def_id: str) -> str:
-    """Redeem a ref at create-source time; return the stashed refresh_token. Rejects a
-    missing/expired ref, or one minted for a different orguser or source definition."""
-    raw = _atomic_pop(f"{OAUTH_REF_REDIS_PREFIX}:{ref}")
+def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_def_id: str) -> str:
+    """Redeem a refresh_token_ref at create-source time; return the stashed refresh_token.
+    Rejects a missing/expired handle, or one minted for a different orguser or source
+    definition."""
+    raw = RedisClient.get_instance().get(
+        f"{OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX}:{refresh_token_ref}"
+    )
     if raw is None:
         raise HttpError(400, "invalid or expired oauth session")
-    stored = json.loads(raw)
-    if stored["orguser_id"] != orguser.id or stored["source_definition_id"] != source_def_id:
+    try:
+        stored = OAuthRefData.model_validate_json(raw)
+    except ValidationError as err:
+        raise HttpError(400, "invalid or expired oauth session") from err
+    if stored.orguser_id != orguser.id or stored.source_definition_id != source_def_id:
         raise HttpError(403, "oauth session does not match this request")
-    return stored["refresh_token"]
+    return stored.refresh_token
 
 
 def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
@@ -186,30 +202,30 @@ def exchange_google_oauth_code(code: str) -> dict:
 
 def complete_source_oauth(state: str, code: str) -> str:
     """Backend-callback step (no JWT): validate the state nonce, exchange the code with
-    Google, stash the refresh_token under a fresh ref, and return the ref. The state nonce
-    is the authentication — it recovers the orguser that started the flow."""
-    stored = _pop_oauth_state(state)
+    Google, stash the refresh_token under a fresh refresh_token_ref, and return the ref. The
+    state nonce is the authentication — it recovers the orguser that started the flow."""
+    stored = _read_oauth_state(state)
     tokens = exchange_google_oauth_code(code)
-    return _store_oauth_ref(
-        stored["orguser_id"], stored["source_definition_id"], tokens["refresh_token"]
+    return _store_refresh_token_ref(
+        stored.orguser_id, stored.source_definition_id, tokens["refresh_token"]
     )
 
 
 def oauth_callback_redirect_url(state: str, code: str, error: str) -> str:
     """Build the frontend redirect URL for the backend OAuth callback.
 
-    On success the URL carries the opaque `ref`; on any failure (Google denial, missing
-    code/state, or a failed exchange) it carries an `error` code. Never raises for OAuth
-    failures — the callback must always redirect the popup somewhere it can close and report.
-    (A missing frontend-url config still 500s, as that is a deployment error, not an OAuth
-    outcome.)"""
+    On success the URL carries the opaque `refresh_token_ref`; on any failure (Google denial,
+    missing code/state, or a failed exchange) it carries an `error` code. Never raises for
+    OAuth failures — the callback must always redirect the popup somewhere it can close and
+    report. (A missing frontend-url config still 500s, as that is a deployment error, not an
+    OAuth outcome.)"""
     frontend_url = _frontend_oauth_callback_url()
     if error or not code or not state:
         reason = error or "missing_code_or_state"
         return f"{frontend_url}?{urlencode({'error': reason})}"
     try:
-        ref = complete_source_oauth(state, code)
+        refresh_token_ref = complete_source_oauth(state, code)
     except HttpError as err:
         logger.error("oauth callback failed: %s", err)
         return f"{frontend_url}?{urlencode({'error': 'oauth_failed'})}"
-    return f"{frontend_url}?{urlencode({'ref': ref})}"
+    return f"{frontend_url}?{urlencode({'refresh_token_ref': refresh_token_ref})}"
