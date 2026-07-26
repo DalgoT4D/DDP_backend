@@ -114,6 +114,7 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
     # Lock all dbt tasks that will be run
     task_locks: list[TaskLock] = []
+    taskprogress = None
 
     try:
         orgtasks = OrgTask.objects.filter(
@@ -121,9 +122,12 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         )
         for orgtask in orgtasks:
             task_lock, task_lock_created = TaskLock.objects.get_or_create(
-                orgtask=orgtask, locked_by=system_user, celery_task_id=task_id
+                orgtask=orgtask,
+                defaults={"locked_by": system_user, "celery_task_id": task_id},
             )
             if not task_lock_created:
+                task_lock.locked_by = system_user
+                task_lock.celery_task_id = task_id
                 task_lock.locked_at = datetime.now()
                 task_lock.save()
 
@@ -301,12 +305,13 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
         # done
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
     except Exception as e:
-        taskprogress.add(
-            {
-                "message": "Job finished with a failure",
-                "status": "failed",
-            }
-        )
+        if taskprogress is not None:
+            taskprogress.add(
+                {
+                    "message": "Job finished with a failure",
+                    "status": "failed",
+                }
+            )
 
     finally:
         for task_lock in task_locks:
