@@ -90,8 +90,7 @@ def get_org_from_flow_run(flow_run: dict) -> Org | None:
             logger.info(f"found the org slug {org.slug} inside the webhook function")
             return org
 
-    logger.error("didn't find the org slug inside the webhook function")
-    sentry_sdk.set_tag("org_slug", "__unknown__")
+    logger.info("didn't find the org slug inside the webhook function")
 
     return None
 
@@ -389,7 +388,6 @@ def do_handle_prefect_webhook(flow_run_id: str, state: str):
 
         # Trigger automatic summarization for failures
         if state in [FLOW_RUN_FAILED_STATE_NAME, FLOW_RUN_CRASHED_STATE_NAME]:
-            org = get_org_from_flow_run(flow_run)
             # Import here to avoid circular import
             from ddpui.celeryworkers.tasks import trigger_log_summarization_for_failed_flow
 
