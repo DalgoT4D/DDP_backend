@@ -690,7 +690,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
                 map_payload.schema_name,
                 map_payload.table_name,
                 map_payload.geographic_column,
-                map_payload.value_column,
             ]
         ):
             raise Exception("Missing required fields for map data")
@@ -1400,7 +1399,6 @@ def get_public_report_map_data(request, token: str):
                 map_payload.schema_name,
                 map_payload.table_name,
                 map_payload.geographic_column,
-                map_payload.value_column,
             ]
         ):
             raise Exception("Missing required fields for map data")
