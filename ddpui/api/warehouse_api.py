@@ -43,6 +43,21 @@ from ddpui.utils.helpers import convert_to_standard_types
 from ddpui.utils.constants import LIMIT_ROWS_TO_SEND_TO_LLM
 from ddpui.utils.redis_client import RedisClient
 
+try:
+    from psycopg2.errors import UndefinedTable
+except ImportError:
+
+    class UndefinedTable(Exception):
+        """Placeholder when psycopg2 is not installed"""
+
+
+try:
+    from google.cloud.exceptions import NotFound as GoogleCloudNotFound
+except ImportError:
+
+    class GoogleCloudNotFound(Exception):
+        """Placeholder when google-cloud is not installed"""
+
 warehouse_router = Router()
 logger = CustomLogger("ddpui")
 
@@ -166,6 +181,8 @@ def get_table_count(request, schema_name: str, table_name: str):
         client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
+    except (UndefinedTable, GoogleCloudNotFound):
+        raise HttpError(404, f"Table {schema_name}.{table_name} not found")
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
         raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
