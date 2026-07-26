@@ -2,7 +2,10 @@ import os
 import tempfile
 from unittest.mock import patch, ANY, Mock, MagicMock
 import pytest
+import psycopg2
+import psycopg2.errors
 from ddpui.utils.warehouse.old_client.postgres import PostgresClient
+from ddpui.utils.warehouse.old_client.warehouse_interface import TableNotFoundError
 
 
 @pytest.fixture
@@ -292,6 +295,25 @@ def test_get_total_rows():
                 """
         )
         assert result == 10
+
+
+def test_get_total_rows_undefined_table():
+    """tests PostgresClient.get_total_rows raises TableNotFoundError for missing tables"""
+    with patch(
+        "ddpui.utils.warehouse.old_client.postgres.psycopg2.connect"
+    ):
+        client = PostgresClient(
+            {"host": "HOST", "port": 1234, "user": "USER", "password": "PASSWORD"}
+        )
+        mock_connection = Mock()
+        client.connection = mock_connection
+
+        error = psycopg2.errors.UndefinedTable('relation "intermediate.2008_casted" does not exist')
+        with patch.object(PostgresClient, "execute", side_effect=error):
+            with pytest.raises(TableNotFoundError) as exc:
+                client.get_total_rows("intermediate", "2008_casted")
+            assert "does not exist" in str(exc.value)
+            mock_connection.rollback.assert_called_once()
 
 
 def test_get_column_data_types():

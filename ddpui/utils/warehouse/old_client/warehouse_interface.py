@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 
 
+class TableNotFoundError(Exception):
+    """Raised when a referenced table does not exist in the warehouse."""
+
+
 class WarehouseInterface(ABC):
     @abstractmethod
     def execute(self, statement: str):

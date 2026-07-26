@@ -19,12 +19,14 @@ from ddpui.api.warehouse_api import (
     get_table,
     get_table_columns,
     get_table_data,
+    get_table_count,
     post_data_insights,
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
     post_warehouse_prompt,
     post_save_warehouse_prompt_session,
 )
+from ddpui.utils.warehouse.old_client.warehouse_interface import TableNotFoundError
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
@@ -417,3 +419,59 @@ def test_llm_data_analysis_save_and_overwrite_session(orguser):
         ).count()
         == 1
     )
+
+
+def test_get_table_count_table_not_found(seed_db, orguser):
+    """Test that get_table_count returns 404 when the table does not exist"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = TableNotFoundError(
+        "Table intermediate.2008_casted does not exist"
+    )
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "intermediate", "2008_casted")
+        assert exc.value.status_code == 404
+        assert "not found" in str(exc.value)
+
+
+def test_get_table_count_success(seed_db, orguser):
+    """Test that get_table_count returns total_rows on success"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.return_value = 42
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        response = get_table_count(request, "test_schema", "test_table")
+        assert response == {"total_rows": 42}
+
+
+def test_get_table_count_generic_error(seed_db, orguser):
+    """Test that get_table_count returns 500 for other database errors"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = Exception("connection refused")
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "test_schema", "test_table")
+        assert exc.value.status_code == 500
