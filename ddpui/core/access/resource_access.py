@@ -1,9 +1,9 @@
 """The single decision point for per-resource access (enforcement pass).
 
 Answers one question three ways:
-- ``effective_level``  — one resource: "view", "edit", or None (invisible)
-- ``effective_levels`` — many resources at once (lists; avoids N+1 queries)
-- ``accessible_q``     — the same rule as one ORM ``Q`` for list endpoints
+- ``get_user_access``      — one resource: "view", "edit", or None (invisible)
+- ``get_user_access_map``  — many resources at once (lists; avoids N+1 queries)
+- ``accessible_filter``    — the same rule as one ORM ``Q`` for list endpoints
 
 Precedence (first match wins):
   1. creator or admin/super-admin        -> "edit" (full)
@@ -43,7 +43,7 @@ def _is_admin(orguser: OrgUser) -> bool:
     )
 
 
-def _floor_level(orguser: OrgUser) -> str:
+def _org_floor(orguser: OrgUser) -> str:
     """The org-default level for this orguser's role. Analysts read the analyst
     column; every other non-admin role reads the member column. A missing
     OrgPreferences row means both floors are "view" (the model defaults)."""
@@ -53,7 +53,7 @@ def _floor_level(orguser: OrgUser) -> str:
     return prefs.default_member_level if prefs else AccessLevel.VIEW
 
 
-def _grant_levels(
+def _grants_map(
     orguser: OrgUser, rtype: str, resource_ids: Optional[Iterable[str]] = None
 ) -> dict[str, str]:
     """Resolve grants into {resource_id(str): level} honoring precedence
@@ -84,12 +84,13 @@ def _grant_levels(
     return {**group_levels, **user_levels}  # user rows override group rows
 
 
-def _visible(level: str) -> Optional[str]:
-    """Map an AccessLevel to the resolver's public answer: no_access -> None."""
+def _hide_no_access(level: str) -> Optional[str]:
+    """Map an AccessLevel to the public answer: a ``no_access`` grant reads as
+    invisible (None), everything else as itself."""
     return None if level == AccessLevel.NO_ACCESS else level
 
 
-def effective_level(orguser: OrgUser, rtype: str, resource: Model) -> Optional[str]:
+def get_user_access(orguser: OrgUser, rtype: str, resource: Model) -> Optional[str]:
     """What can this orguser do with this resource? "edit", "view", or None
     (invisible — the caller should treat it exactly like a missing resource)."""
     if resource.created_by_id is not None and resource.created_by_id == orguser.id:
@@ -97,48 +98,48 @@ def effective_level(orguser: OrgUser, rtype: str, resource: Model) -> Optional[s
     if _is_admin(orguser):
         return AccessLevel.EDIT
 
-    grants = _grant_levels(orguser, rtype, [resource.pk])
+    grants = _grants_map(orguser, rtype, [resource.pk])
     granted = grants.get(str(resource.pk))
     if granted is not None:
-        return _visible(granted)
+        return _hide_no_access(granted)
 
-    return _visible(_floor_level(orguser))
+    return _hide_no_access(_org_floor(orguser))
 
 
-def effective_levels(
+def get_user_access_map(
     orguser: OrgUser, rtype: str, resources: Iterable[Model]
 ) -> dict[int, Optional[str]]:
-    """Batch variant of ``effective_level`` for list serialization — one grants
+    """Batch variant of ``get_user_access`` for list serialization — one grants
     query for the whole page instead of one per row."""
     resources = list(resources)
     if _is_admin(orguser):
         return {r.pk: AccessLevel.EDIT for r in resources}
 
-    grants = _grant_levels(orguser, rtype, [r.pk for r in resources])
-    floor = _floor_level(orguser)
+    grants = _grants_map(orguser, rtype, [r.pk for r in resources])
+    floor = _org_floor(orguser)
 
     levels: dict[int, Optional[str]] = {}
     for resource in resources:
         if resource.created_by_id is not None and resource.created_by_id == orguser.id:
             levels[resource.pk] = AccessLevel.EDIT
         elif str(resource.pk) in grants:
-            levels[resource.pk] = _visible(grants[str(resource.pk)])
+            levels[resource.pk] = _hide_no_access(grants[str(resource.pk)])
         else:
-            levels[resource.pk] = _visible(floor)
+            levels[resource.pk] = _hide_no_access(floor)
     return levels
 
 
-def accessible_q(orguser: OrgUser, rtype: str) -> Q:
+def accessible_filter(orguser: OrgUser, rtype: str) -> Q:
     """The same rule as one ORM filter, for list endpoints: which resources of
     this rtype may the orguser see at all (level >= view)? Compose it into the
     list query with ``&`` — inaccessible rows never leave the database."""
     if _is_admin(orguser):
         return Q()
 
-    grants = _grant_levels(orguser, rtype)
+    grants = _grants_map(orguser, rtype)
     allowed_ids = [int(rid) for rid, level in grants.items() if level != AccessLevel.NO_ACCESS]
     denied_ids = [int(rid) for rid, level in grants.items() if level == AccessLevel.NO_ACCESS]
 
-    if _floor_level(orguser) == AccessLevel.NO_ACCESS:
+    if _org_floor(orguser) == AccessLevel.NO_ACCESS:
         return Q(created_by=orguser) | Q(id__in=allowed_ids)
     return Q(created_by=orguser) | ~Q(id__in=denied_ids)

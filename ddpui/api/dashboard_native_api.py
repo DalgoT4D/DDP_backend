@@ -17,7 +17,7 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission, require_level, with_resource
-from ddpui.core.access import access_resolver
+from ddpui.core.access import resource_access
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
@@ -74,7 +74,7 @@ def list_dashboards(
         orguser=orguser,
     )
 
-    levels = access_resolver.effective_levels(orguser, "dashboard", dashboards)
+    levels = resource_access.get_user_access_map(orguser, "dashboard", dashboards)
     return [
         DashboardResponse(**DashboardService.get_dashboard_response(d), my_access=levels[d.pk])
         for d in dashboards

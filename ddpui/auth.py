@@ -35,10 +35,10 @@ MEMBER_ROLE = "member"
 ACCOUNT_MANAGER_ROLE = ADMIN_ROLE
 GUEST_ROLE = MEMBER_ROLE
 
-# Imported below the role constants on purpose: access_resolver's package sibling
+# Imported below the role constants on purpose: resource_access's package sibling
 # ownership.py imports the constants from this module, so importing the access
 # package any earlier would hit a partially-initialized ddpui.auth.
-from ddpui.core.access import access_resolver, shareable_types
+from ddpui.core.access import resource_access, shareable_types
 
 
 def has_permission(permission_slugs: list):
@@ -86,7 +86,7 @@ def with_resource(rtype: str):
             id_kwarg = shareable_types.get_rtype_entry(rtype)["id_kwarg"]
             resource = shareable_types.get_resource(request.orguser.org, rtype, kwargs[id_kwarg])
             level = (
-                access_resolver.effective_level(request.orguser, rtype, resource)
+                resource_access.get_user_access(request.orguser, rtype, resource)
                 if resource is not None
                 else None
             )
@@ -112,8 +112,8 @@ def require_level(required_level: str):
         @wraps(api_endpoint)
         def wrapper(*args, **kwargs):
             request = args[0]
-            held = access_resolver.LEVEL_RANK[request.access_level]
-            needed = access_resolver.LEVEL_RANK[required_level]
+            held = resource_access.LEVEL_RANK[request.access_level]
+            needed = resource_access.LEVEL_RANK[required_level]
             if held < needed:
                 raise HttpError(403, f"you have {request.access_level}-only access")
             return api_endpoint(*args, **kwargs)
