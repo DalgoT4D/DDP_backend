@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -1084,6 +1084,7 @@ dependencies = [
     { name = "google-api-core" },
     { name = "google-auth" },
     { name = "google-cloud-bigquery" },
+    { name = "google-cloud-bigquery-storage" },
     { name = "google-cloud-core" },
     { name = "google-cloud-dataproc" },
     { name = "google-cloud-storage" },
@@ -1354,6 +1355,7 @@ requires-dist = [
     { name = "google-api-core", specifier = "==2.19.0" },
     { name = "google-auth", specifier = "==2.36.0" },
     { name = "google-cloud-bigquery", specifier = "==3.23.0" },
+    { name = "google-cloud-bigquery-storage", specifier = "==2.25.0" },
     { name = "google-cloud-core", specifier = "==2.4.1" },
     { name = "google-cloud-dataproc", specifier = "==5.9.3" },
     { name = "google-cloud-storage", specifier = "==2.17.0" },
@@ -1905,6 +1907,21 @@ pandas = [
     { name = "db-dtypes" },
     { name = "pandas" },
     { name = "pyarrow" },
+]
+
+[[package]]
+name = "google-cloud-bigquery-storage"
+version = "2.25.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fd/32/f1a76c3587a160acda8580bdb275acc8376e20226b206c9ef92626b75313/google-cloud-bigquery-storage-2.25.0.tar.gz", hash = "sha256:195ffd2b180e9eaa22beab3e40a0b61ecd146ecb32667cf42269a8d7111b4d48", size = 196608, upload-time = "2024-05-03T16:15:41.007Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/56/e4162ca337f4012a41eb04db80560c9424024e1c15b98176ca6922a097d0/google_cloud_bigquery_storage-2.25.0-py2.py3-none-any.whl", hash = "sha256:01109a66d1d23745d8d9c30852a0a137e8238faac1b3b02dec0d8e319ca231cb", size = 199841, upload-time = "2024-05-03T16:15:38.672Z" },
 ]
 
 [[package]]
