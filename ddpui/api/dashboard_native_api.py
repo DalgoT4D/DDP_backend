@@ -142,6 +142,15 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
+    # Snapshot pre-update state so the audit log can skip fields that are
+    # present in the payload but identical to what's already saved — e.g.
+    # the save-on-tab-away flow re-sending the full current state with
+    # nothing actually edited. This is a targeted exception to the rest of
+    # the platform's "no prior-state diffing" design (see plan.md), scoped
+    # only to this "should we log at all" decision — the logged content is
+    # still the curated new-state snapshot below, never an old/new pair.
+    old_dashboard = Dashboard.objects.filter(id=dashboard_id, org=org).first()
+
     try:
         dashboard = DashboardService.update_dashboard(
             dashboard_id=dashboard_id,
@@ -156,11 +165,6 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 
     # DashboardService.update_dashboard only touches a field when it's not
     # None — a genuine partial patch (auto-save may only send one field).
-    # Only fields actually present in this request are logged, using that
-    # exact same criterion. No "skip if unchanged vs prior state" guard —
-    # that would need an old-state DB fetch again. We do still skip when
-    # this specific request touched zero fields (resource_fields ends up
-    # empty) — that's a free check on data we already built, not a diff.
     raw_resource_fields = {
         "title": payload.title,
         "description": payload.description,
@@ -170,7 +174,23 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
         "filter_layout": payload.filter_layout,
         "is_published": payload.is_published,
     }
-    resource_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+    touched_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+
+    def _blank_normalized(value):
+        """Treat None and "" as equivalent. Dashboard.description defaults to
+        None in the DB, but the frontend always sends "" when a field has no
+        value — without this, that mismatch alone looks like a real change."""
+        return value if value not in (None, "") else None
+
+    resource_fields = (
+        {
+            k: v
+            for k, v in touched_fields.items()
+            if _blank_normalized(v) != _blank_normalized(getattr(old_dashboard, k))
+        }
+        if old_dashboard
+        else touched_fields
+    )
     if resource_fields:
         create_audit_log(
             org=org,

@@ -767,6 +767,70 @@ def test_update_dashboard_no_fields_touched_skips_audit_log(
 
 
 @patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_update_dashboard_none_vs_empty_string_skips_audit_log(
+    mock_audit_log, seed_db, orguser, org
+):
+    """A dashboard created without a description defaults to None in the DB.
+    The frontend always sends "" (never omits the field) when there's no
+    description — that mismatch alone must not look like a real change."""
+    dashboard = Dashboard.objects.create(
+        title="No Description Dashboard",
+        description=None,
+        dashboard_type="native",
+        grid_columns=12,
+        created_by=orguser,
+        org=org,
+    )
+    request = mock_request(orguser)
+    payload = DashboardUpdate(description="")
+
+    update_dashboard(request, dashboard.id, payload)
+
+    mock_audit_log.assert_not_called()
+
+    # Cleanup
+    dashboard.delete()
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_update_dashboard_same_values_skips_audit_log(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """A request that resends the dashboard's current values unchanged (e.g.
+    the save-on-tab-away flow firing with nothing actually edited) should not
+    write an audit log row, even though the fields are present in the payload."""
+    request = mock_request(orguser)
+    payload = DashboardUpdate(
+        title=sample_dashboard.title,
+        description=sample_dashboard.description,
+        grid_columns=sample_dashboard.grid_columns,
+    )
+
+    update_dashboard(request, sample_dashboard.id, payload)
+
+    mock_audit_log.assert_not_called()
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_update_dashboard_mixed_changed_and_unchanged_fields(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """When some touched fields changed and others didn't, only the fields
+    that actually changed should be logged."""
+    request = mock_request(orguser)
+    payload = DashboardUpdate(
+        title=sample_dashboard.title,  # unchanged
+        description="A brand new description",  # changed
+    )
+
+    update_dashboard(request, sample_dashboard.id, payload)
+
+    mock_audit_log.assert_called_once()
+    resource_fields = mock_audit_log.call_args[1]["resource_fields"]
+    assert resource_fields == {"description": "A brand new description"}
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
 def test_update_dashboard_tabs_logs_full_tabs_json(
     mock_audit_log, seed_db, orguser, sample_dashboard
 ):
