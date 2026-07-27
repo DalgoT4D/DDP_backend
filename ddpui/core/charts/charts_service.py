@@ -1,5 +1,6 @@
 """Chart service module for handling chart business logic"""
 
+import re
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -963,21 +964,28 @@ def apply_chart_sorting(
                     matching_metric = metric
                     break
 
+            # If no alias match, try parsing as an aggregate expression
+            # e.g. "SUM(silt_achieved)" -> agg_func="sum", col="silt_achieved"
+            if not matching_metric:
+                agg_match = re.match(
+                    r"^(sum|avg|count|min|max|count_distinct)\((.+)\)$",
+                    column_name,
+                    re.IGNORECASE,
+                )
+                if agg_match:
+                    parsed_agg = agg_match.group(1).lower()
+                    parsed_col = agg_match.group(2).strip()
+                    for metric in payload.metrics:
+                        if (
+                            metric.aggregation
+                            and metric.aggregation.lower() == parsed_agg
+                            and metric.column == parsed_col
+                        ):
+                            matching_metric = metric
+                            break
+
         if matching_metric:
-            # It's a metric - generate the actual SQL alias that matches SELECT clause
-            if (
-                matching_metric.aggregation
-                and matching_metric.aggregation.lower() == "count"
-                and matching_metric.column is None
-            ):
-                sort_column = (
-                    f"count_all_{matching_metric.alias}" if matching_metric.alias else "count_all"
-                )
-            else:
-                sort_column = (
-                    matching_metric.alias
-                    or f"{matching_metric.aggregation}_{matching_metric.column}"
-                )
+            sort_column = metric_sql_alias(matching_metric)
         else:
             # It's a dimension column - use as-is
             sort_column = column_name
