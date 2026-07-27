@@ -23,6 +23,8 @@ from ddpui.core.oauth.google_oauth_provider import (
     oauth_client_id,
     oauth_client_secret,
 )
+from ddpui.ddpairbyte import airbyte_service
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
@@ -45,7 +47,7 @@ class OAuthStateData(Schema):
     model_config = ConfigDict(extra="forbid")
 
     orguser_id: int
-    source_definition_id: str
+    source_name: str
 
 
 class OAuthRefData(Schema):
@@ -56,7 +58,7 @@ class OAuthRefData(Schema):
     model_config = ConfigDict(extra="forbid")
 
     orguser_id: int
-    source_definition_id: str
+    source_name: str
     refresh_token: str
 
 
@@ -81,10 +83,22 @@ def _frontend_oauth_callback_url() -> str:
     return f"{frontend_url.rstrip('/')}/oauth/airbyte/callback"
 
 
-def _store_oauth_state(orguser: OrgUser, source_def_id: str) -> str:
+def resolve_source_name(org: Org, source_def_id: str) -> str:
+    """Resolve an Airbyte `sourceDefinitionId` to its source-definition NAME against the org's
+    own workspace catalog.
+
+    The OAuth registry is keyed by name because definition ids vary per connector version and
+    per Airbyte install. Resolving server-side (rather than trusting a client-supplied name)
+    keeps the name authoritative: it is whatever this workspace's catalog says. Raises 404 if
+    the definition is not in this workspace."""
+    sourcedef = airbyte_service.get_source_definition(org.airbyte_workspace_id, source_def_id)
+    return sourcedef.get("name", "")
+
+
+def _store_oauth_state(orguser: OrgUser, source_name: str) -> str:
     """Generate a state nonce, remember who/what it belongs to, auto-expire in 1 min"""
     state = secrets.token_urlsafe(48)
-    data = OAuthStateData(orguser_id=orguser.id, source_definition_id=source_def_id)
+    data = OAuthStateData(orguser_id=orguser.id, source_name=source_name)
     RedisClient.get_instance().set(
         f"{OAUTH_STATE_REDIS_PREFIX}:{state}",
         data.model_dump_json(),
@@ -106,13 +120,13 @@ def _read_oauth_state(state: str) -> OAuthStateData:
         raise HttpError(400, "invalid or expired oauth state") from err
 
 
-def _store_refresh_token_ref(orguser_id: int, source_def_id: str, refresh_token: str) -> str:
+def _store_refresh_token_ref(orguser_id: int, source_name: str, refresh_token: str) -> str:
     """Stash the refresh_token server-side under a fresh opaque handle. The browser only
     ever receives this `refresh_token_ref`, never the token."""
     refresh_token_ref = secrets.token_urlsafe(48)
     data = OAuthRefData(
         orguser_id=orguser_id,
-        source_definition_id=source_def_id,
+        source_name=source_name,
         refresh_token=refresh_token,
     )
     RedisClient.get_instance().set(
@@ -123,10 +137,10 @@ def _store_refresh_token_ref(orguser_id: int, source_def_id: str, refresh_token:
     return refresh_token_ref
 
 
-def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_def_id: str) -> str:
+def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_name: str) -> str:
     """Redeem a refresh_token_ref at create-source time; return the stashed refresh_token.
-    Rejects a missing/expired handle, or one minted for a different orguser or source
-    definition."""
+    Rejects a missing/expired handle, or one minted for a different orguser or a different
+    source connector (compared by source-definition name, the registry key)."""
     raw = RedisClient.get_instance().get(
         f"{OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX}:{refresh_token_ref}"
     )
@@ -136,7 +150,7 @@ def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_de
         stored = OAuthRefData.model_validate_json(raw)
     except ValidationError as err:
         raise HttpError(400, "invalid or expired oauth session") from err
-    if stored.orguser_id != orguser.id or stored.source_definition_id != source_def_id:
+    if stored.orguser_id != orguser.id or stored.source_name != source_name:
         raise HttpError(403, "oauth session does not match this request")
     return stored.refresh_token
 
@@ -148,8 +162,9 @@ def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
     own backend callback, scopes come from the source's provider entry. `access_type=offline`
     + `prompt=consent` guarantee Google returns a refresh_token on every authorization
     (including re-auth of an existing source)."""
-    connector = get_connector(source_def_id)
-    state = _store_oauth_state(orguser, source_def_id)
+    source_name = resolve_source_name(orguser.org, source_def_id)
+    connector = get_connector(source_name)
+    state = _store_oauth_state(orguser, source_name)
     params = {
         "client_id": oauth_client_id(),
         "redirect_uri": _oauth_redirect_url(),
@@ -206,9 +221,7 @@ def complete_source_oauth(state: str, code: str) -> str:
     state nonce is the authentication — it recovers the orguser that started the flow."""
     stored = _read_oauth_state(state)
     tokens = exchange_google_oauth_code(code)
-    return _store_refresh_token_ref(
-        stored.orguser_id, stored.source_definition_id, tokens["refresh_token"]
-    )
+    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, tokens["refresh_token"])
 
 
 def oauth_callback_redirect_url(state: str, code: str, error: str) -> str:

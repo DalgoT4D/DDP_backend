@@ -88,11 +88,15 @@ def _build_oauth_source_config(
 ) -> dict:
     """Redeem the refresh_token_ref and return `config` with a backend-built `credentials`
     block merged in. The refresh_token never travels through the browser; it is fetched
-    server-side from the ref and folded into the connector credentials here."""
+    server-side from the ref and folded into the connector credentials here.
+
+    The connector is looked up by source-definition NAME (resolved from the id against this
+    org's workspace catalog) — definition ids are not stable across versions/installs."""
+    source_name = google_oauth_service.resolve_source_name(orguser.org, source_def_id)
     refresh_token = google_oauth_service.redeem_refresh_token_ref(
-        orguser, refresh_token_ref, source_def_id
+        orguser, refresh_token_ref, source_name
     )
-    connector = get_connector(source_def_id)
+    connector = get_connector(source_name)
     credentials = connector.credentials_builder(
         oauth_client_id(), oauth_client_secret(), refresh_token
     )

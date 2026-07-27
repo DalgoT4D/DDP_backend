@@ -1,7 +1,10 @@
 """Google OAuth provider registry.
 
 Every Airbyte source connector that authenticates via Google OAuth is registered here, keyed
-by its Airbyte `sourceDefinitionId`. All Google connectors share one Google Cloud OAuth app
+by its Airbyte source-definition NAME (e.g. "Google Sheets"), not its `sourceDefinitionId` —
+the id differs per connector version / Airbyte install, so it is not a stable key across
+deployments. The caller resolves the id to a name against its own workspace catalog before
+looking a connector up here. All Google connectors share one Google Cloud OAuth app
 (client_id/secret from env); only the requested `scopes` and the connector-specific
 `credentials` block shape vary. To add another Google connector (Drive, Analytics), add one
 registry entry — no changes to the oauth service, API, or callback.
@@ -22,9 +25,9 @@ from pydantic import BaseModel, ConfigDict
 GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-# Airbyte's global sourceDefinitionId for the Google Sheets connector. Stable across
-# standard Airbyte installs. VERIFY against this deployment's catalog if sources change.
-GSHEETS_SOURCE_DEFINITION_ID = "71607ba1-c0ac-4799-8049-7f4b90dd50f7"
+# Airbyte's source-definition name for the Google Sheets connector, as it appears in the
+# workspace catalog. Names are stable across connector versions and workspaces; ids are not.
+GSHEETS_SOURCE_NAME = "Google Sheets"
 
 
 class GoogleOAuthConnector(BaseModel):
@@ -48,10 +51,16 @@ def _gsheets_credentials(client_id: str, client_secret: str, refresh_token: str)
     }
 
 
-# Registry: sourceDefinitionId -> GoogleOAuthConnector. The single source of truth for
-# "which connectors support the Dalgo-driven Google OAuth flow".
+def _normalize_source_name(source_name: str) -> str:
+    """Registry lookup key: case- and whitespace-insensitive source-definition name, so
+    "Google Sheets", "google sheets" and "Google  Sheets" all resolve to the same entry."""
+    return " ".join(source_name.split()).lower()
+
+
+# Registry: normalized source-definition name -> GoogleOAuthConnector. The single source of
+# truth for "which connectors support the Dalgo-driven Google OAuth flow".
 GOOGLE_OAUTH_CONNECTORS: dict[str, GoogleOAuthConnector] = {
-    GSHEETS_SOURCE_DEFINITION_ID: GoogleOAuthConnector(
+    _normalize_source_name(GSHEETS_SOURCE_NAME): GoogleOAuthConnector(
         # Least privilege: read-only Sheets data (no Drive). If a real sync against the
         # target gsheets connector version demands Drive, add
         # "https://www.googleapis.com/auth/drive.readonly" (a restricted scope — heavier
@@ -62,17 +71,18 @@ GOOGLE_OAUTH_CONNECTORS: dict[str, GoogleOAuthConnector] = {
 }
 
 
-def get_connector(source_def_id: str) -> GoogleOAuthConnector:
-    """Look up the Google OAuth connector for a source definition. Raises 400 for an
+def get_connector(source_name: str) -> GoogleOAuthConnector:
+    """Look up the Google OAuth connector by source-definition name. Raises 400 for an
     unsupported source rather than silently falling back to a wrong scope/credentials
     shape."""
-    connector = GOOGLE_OAUTH_CONNECTORS.get(source_def_id)
+    connector = GOOGLE_OAUTH_CONNECTORS.get(_normalize_source_name(source_name))
     if connector is None:
         raise HttpError(400, "oauth is not supported for this source")
     return connector
 
 
 def oauth_client_id() -> str:
+    """Google Cloud OAuth app client_id, shared by every Google connector"""
     client_id = os.getenv("AIRBYTE_GOOGLE_OAUTH_CLIENT_ID")
     if not client_id:
         raise HttpError(500, "google oauth client id is not configured")
@@ -80,6 +90,7 @@ def oauth_client_id() -> str:
 
 
 def oauth_client_secret() -> str:
+    """Google Cloud OAuth app client_secret — never leaves the backend"""
     client_secret = os.getenv("AIRBYTE_GOOGLE_OAUTH_CLIENT_SECRET")
     if not client_secret:
         raise HttpError(500, "google oauth client secret is not configured")
