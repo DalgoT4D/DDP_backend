@@ -16,7 +16,8 @@ from ddpui.models.dashboard import (
     DashboardFilterType,
 )
 from ddpui.models.org_user import OrgUser
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, require_level, with_resource
+from ddpui.core.access import access_resolver
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
@@ -70,13 +71,19 @@ def list_dashboards(
         dashboard_type=dashboard_type,
         search=search,
         is_published=is_published,
+        orguser=orguser,
     )
 
-    return [DashboardResponse(**DashboardService.get_dashboard_response(d)) for d in dashboards]
+    levels = access_resolver.effective_levels(orguser, "dashboard", dashboards)
+    return [
+        DashboardResponse(**DashboardService.get_dashboard_response(d), my_access=levels[d.pk])
+        for d in dashboards
+    ]
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
 @has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
 def get_dashboard(request, dashboard_id: int):
     """Get a specific dashboard"""
     orguser: OrgUser = request.orguser
@@ -86,7 +93,9 @@ def get_dashboard(request, dashboard_id: int):
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard), my_access=request.access_level
+    )
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -120,7 +129,9 @@ def create_dashboard(request, payload: DashboardCreate):
 
 
 @dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support"""
     orguser: OrgUser = request.orguser
@@ -142,6 +153,8 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 
 @dashboard_native_router.delete("/{dashboard_id}/")
 @has_permission(["can_delete_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def delete_dashboard(request, dashboard_id: int):
     """Delete a dashboard"""
     orguser: OrgUser = request.orguser
@@ -160,6 +173,7 @@ def delete_dashboard(request, dashboard_id: int):
 
 @dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
 @has_permission(["can_create_dashboards"])
+@with_resource("dashboard")
 def duplicate_dashboard(request, dashboard_id: int):
     """Duplicate a dashboard with all its configurations and filters"""
     orguser: OrgUser = request.orguser
@@ -215,7 +229,9 @@ def duplicate_dashboard(request, dashboard_id: int):
 
 # Dashboard Lock endpoints
 @dashboard_native_router.post("/{dashboard_id}/lock/", response=LockResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def lock_dashboard(request, dashboard_id: int):
     """Lock dashboard for editing"""
     orguser: OrgUser = request.orguser
@@ -235,7 +251,9 @@ def lock_dashboard(request, dashboard_id: int):
 
 
 @dashboard_native_router.put("/{dashboard_id}/lock/refresh/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
     orguser: OrgUser = request.orguser
@@ -261,7 +279,9 @@ def refresh_dashboard_lock(request, dashboard_id: int):
 
 
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def unlock_dashboard(request, dashboard_id: int):
     """Unlock dashboard"""
     orguser: OrgUser = request.orguser
@@ -278,7 +298,9 @@ def unlock_dashboard(request, dashboard_id: int):
 
 # Filter endpoints
 @dashboard_native_router.post("/{dashboard_id}/filters/", response=DashboardFilterResponse)
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def create_filter(request, dashboard_id: int, payload: FilterCreate):
     """Add a filter to dashboard"""
     orguser: OrgUser = request.orguser
@@ -306,6 +328,7 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
 @has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
 def get_filter(request, dashboard_id: int, filter_id: int):
     """Get a specific dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -323,7 +346,9 @@ def get_filter(request, dashboard_id: int, filter_id: int):
 @dashboard_native_router.put(
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpdate):
     """Update a dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -346,7 +371,9 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 
 
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
-@has_permission(["can_edit_dashboards"])
+@has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def delete_filter(request, dashboard_id: int, filter_id: int):
     """Delete a dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -394,6 +421,8 @@ def get_filter_options(
 
 @dashboard_native_router.put("/{dashboard_id}/share/")
 @has_permission(["can_share_dashboards"])
+@with_resource("dashboard")
+@require_level("edit")
 def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
     """Toggle public sharing for a dashboard"""
     orguser: OrgUser = request.orguser
@@ -455,6 +484,7 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
 
 @dashboard_native_router.get("/{dashboard_id}/share/")
 @has_permission(["can_view_dashboards"])
+@with_resource("dashboard")
 def get_dashboard_sharing_status(request, dashboard_id: int):
     """Get dashboard sharing status"""
     orguser: OrgUser = request.orguser
