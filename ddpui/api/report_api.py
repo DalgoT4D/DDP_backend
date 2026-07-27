@@ -43,7 +43,7 @@ from ddpui.schemas.report_schema import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import ApiResponse, api_response
-from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui.report_api")
@@ -93,6 +93,17 @@ def create_snapshot(request, payload: SnapshotCreate):
             resource_id=str(s.id),
             resource_name=s.title,
             action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": payload.title,
+                "dashboard": s.frozen_dashboard.get("title") if s.frozen_dashboard else None,
+                "date_column": payload.date_column.model_dump() if payload.date_column else None,
+                # date objects aren't JSON-serializable by the default JSONField
+                # encoder — must convert to strings before logging.
+                "period_start": (
+                    payload.period_start.isoformat() if payload.period_start else None
+                ),
+                "period_end": payload.period_end.isoformat() if payload.period_end else None,
+            },
         )
 
         return api_response(
@@ -194,25 +205,13 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture old state for field_changes tracking
-    try:
-        old_snapshot = ReportService.get_snapshot(snapshot_id, org)
-        old_state = {
-            "title": old_snapshot.title,
-            "summary": old_snapshot.summary or "",
-        }
-    except SnapshotNotFoundError:
-        old_state = {}
-
     try:
         snapshot = ReportService.update_snapshot(snapshot_id, payload, orguser)
 
-        # Compute field changes
-        new_state = {"title": snapshot.title, "summary": snapshot.summary}
-        field_changes = compute_changes(old_state, new_state)
-
-        # Only create audit log if there are actual changes
-        if field_changes:
+        # ReportService.update_snapshot only touches summary when it's not
+        # None (SnapshotUpdate's only field) — skip logging if it wasn't
+        # actually sent, same as this endpoint already did before.
+        if payload.summary is not None:
             create_audit_log(
                 org=org,
                 orguser=orguser,
@@ -220,7 +219,7 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
                 resource_id=str(snapshot_id),
                 resource_name=snapshot.title,
                 action=AuditLogAction.UPDATE,
-                field_changes=field_changes,
+                resource_fields={"summary": payload.summary},
             )
 
         return api_response(
@@ -342,7 +341,7 @@ def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
             resource_id=str(snapshot_id),
             resource_name=snapshot.title,
             action=AuditLogAction.SHARE,
-            field_changes={"is_public": {"old": not payload.is_public, "new": payload.is_public}},
+            resource_fields={"is_public": {"old": not payload.is_public, "new": payload.is_public}},
         )
 
         return api_response(success=True, data=ShareResponse(**response_data))

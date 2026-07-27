@@ -399,6 +399,12 @@ class TestMetricAuditLogs:
         assert call_kwargs["action"] == AuditLogAction.CREATE
         assert call_kwargs["resource_name"] == "Audit Log Test Metric"
 
+        resource_fields = call_kwargs["resource_fields"]
+        assert resource_fields["name"] == "Audit Log Test Metric"
+        assert resource_fields["schema_name"] == "public"
+        assert resource_fields["table_name"] == "beneficiaries"
+        assert resource_fields["column_expression"] == "COUNT(*)"
+
         # Cleanup
         Metric.objects.filter(name="Audit Log Test Metric").delete()
         OrgWarehouse.objects.filter(org=orguser.org).delete()
@@ -427,7 +433,14 @@ class TestMetricAuditLogs:
         assert call_kwargs["resource_type"] == AuditLogResourceType.METRIC
         assert call_kwargs["action"] == AuditLogAction.UPDATE
         assert call_kwargs["resource_id"] == str(sample_metric.id)
-        assert "field_changes" in call_kwargs
+
+        # Curated snapshot, not a diff — every field from the payload is logged,
+        # not just the one that actually changed (name here).
+        resource_fields = call_kwargs["resource_fields"]
+        assert resource_fields["name"] == "Updated Metric Name"
+        assert resource_fields["schema_name"] == sample_metric.schema_name
+        assert resource_fields["table_name"] == sample_metric.table_name
+        assert resource_fields["column_expression"] == sample_metric.column_expression
 
         # Cleanup
         OrgWarehouse.objects.filter(org=orguser.org).delete()

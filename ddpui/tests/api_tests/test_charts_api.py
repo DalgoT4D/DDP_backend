@@ -723,6 +723,13 @@ def test_create_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org_wa
     assert call_kwargs["action"] == AuditLogAction.CREATE
     assert call_kwargs["resource_name"] == "Audit Log Test Chart"
 
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["title"] == "Audit Log Test Chart"
+    assert resource_fields["chart_type"] == "bar"
+    assert resource_fields["schema_name"] == "public"
+    assert resource_fields["table_name"] == "users"
+    assert resource_fields["extra_config"]["dimension_column"] == "date"
+
     # Cleanup
     Chart.objects.filter(title="Audit Log Test Chart").delete()
 
@@ -742,8 +749,11 @@ def test_update_chart_creates_audit_log(mock_audit_log, seed_db, orguser, sample
     assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_id"] == str(sample_chart.id)
-    # field_changes should track the title change
-    assert "field_changes" in call_kwargs
+
+    # ChartService.update_chart is a genuine partial patch — only the field
+    # actually sent (title) should appear, not the whole chart.
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields == {"title": "Updated Chart Title"}
 
 
 @patch("ddpui.api.charts_api.create_audit_log")

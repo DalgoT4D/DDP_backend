@@ -42,6 +42,7 @@ from ddpui.api.dashboard_native_api import (
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
+    DashboardTabSchema,
     FilterCreate,
     FilterUpdate,
 )
@@ -719,6 +720,10 @@ def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
     assert call_kwargs["action"] == AuditLogAction.CREATE
     assert call_kwargs["resource_name"] == "Audit Log Test Dashboard"
 
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["title"] == "Audit Log Test Dashboard"
+    assert resource_fields["grid_columns"] == 12
+
     # Cleanup
     Dashboard.objects.filter(title="Audit Log Test Dashboard").delete()
 
@@ -738,8 +743,60 @@ def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sa
     assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_id"] == str(sample_dashboard.id)
-    # field_changes should be present
-    assert "field_changes" in call_kwargs
+
+    # DashboardService.update_dashboard is a genuine partial patch (auto-save
+    # may only send one field) — only the field actually sent (title) should
+    # appear, not the whole dashboard.
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields == {"title": "Updated Dashboard Title"}
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_update_dashboard_no_fields_touched_skips_audit_log(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """An update request that touches zero fields (resource_fields ends up
+    empty) should not write an audit log row at all — that's a free check
+    on data already built, not a re-introduction of old-state diffing."""
+    request = mock_request(orguser)
+    payload = DashboardUpdate()
+
+    update_dashboard(request, sample_dashboard.id, payload)
+
+    mock_audit_log.assert_not_called()
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_update_dashboard_tabs_logs_full_tabs_json(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """Updating tabs logs the full tabs JSON straight from the payload, since
+    that's what the payload already carries (no diffing, no summarizing)."""
+    request = mock_request(orguser)
+    payload = DashboardUpdate(
+        tabs=[
+            DashboardTabSchema(
+                id="tab-1",
+                title="Overview",
+                layout_config=[{"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 2}],
+                components={"chart-1": {"type": "chart", "config": {"chartId": 42}}},
+            )
+        ]
+    )
+
+    update_dashboard(request, sample_dashboard.id, payload)
+
+    call_kwargs = mock_audit_log.call_args[1]
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["tabs"] == [
+        {
+            "id": "tab-1",
+            "title": "Overview",
+            "layout_config": [{"i": "chart-1", "x": 0, "y": 0, "w": 4, "h": 2}],
+            "components": {"chart-1": {"type": "chart", "config": {"chartId": 42}}},
+        }
+    ]
+    assert "title" not in resource_fields
 
 
 @patch("ddpui.api.dashboard_native_api.create_audit_log")

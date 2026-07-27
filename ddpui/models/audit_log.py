@@ -55,7 +55,7 @@ class AuditLog(models.Model):
     - WHICH organization it belongs to (org)
     - WHAT resource was affected (resource_type, resource_id, resource_name)
     - WHAT action was taken (action)
-    - WHAT changed (field_changes)
+    - WHAT changed (resource_fields)
     - WHEN it happened (timestamp)
     """
 
@@ -101,7 +101,7 @@ class AuditLog(models.Model):
     # What fields changed - stored as JSON like:
     # {"name": {"old": "Old Name", "new": "New Name"}}
     # Never contains secrets (passwords, tokens, etc.)
-    field_changes = models.JSONField(default=dict, blank=True)
+    resource_fields = models.JSONField(default=dict, blank=True)
 
     # When the action happened - automatically set when record is created
     timestamp = models.DateTimeField(auto_now_add=True)

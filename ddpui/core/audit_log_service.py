@@ -46,7 +46,7 @@ def create_audit_log(
     resource_id: str,
     action: str,
     resource_name: str = "",
-    field_changes: dict | None = None,
+    resource_fields: dict | None = None,
 ) -> None:
     """
     Writes an audit log entry in a background thread.
@@ -61,7 +61,7 @@ def create_audit_log(
         resource_id: ID of the specific resource (as string)
         action: The action performed (use AuditLogAction values)
         resource_name: Human-readable name (optional, e.g., "Sales Dashboard")
-        field_changes: Dict of changes (optional, e.g., {"name": {"old": "A", "new": "B"}})
+        resource_fields: Dict of changes (optional, e.g., {"name": {"old": "A", "new": "B"}})
 
     Example:
         create_audit_log(
@@ -86,7 +86,7 @@ def create_audit_log(
                 "resource_id": resource_id,
                 "resource_name": resource_name,
                 "action": action,
-                "field_changes": field_changes or {},
+                "resource_fields": resource_fields or {},
             },
             daemon=True,
         )
@@ -106,7 +106,7 @@ def _write_audit_log(
     resource_id: str,
     resource_name: str,
     action: str,
-    field_changes: dict,
+    resource_fields: dict,
 ) -> None:
     """
     Internal function - does the actual database write.
@@ -125,7 +125,7 @@ def _write_audit_log(
             resource_id=resource_id,
             resource_name=resource_name,
             action=action,
-            field_changes=field_changes,
+            resource_fields=resource_fields,
         )
     except Exception as err:
         # If DB write fails, log it but don't crash
@@ -133,52 +133,3 @@ def _write_audit_log(
     finally:
         # Always close the connection to return it to the pool
         django.db.connection.close()
-
-
-def compute_changes(before: dict, after: dict, exclude_fields: list[str] | None = None) -> dict:
-    """
-    Compares two dictionaries and returns what changed.
-
-    Use this when logging UPDATE actions to show what fields changed.
-
-    Args:
-        before: State before the change (e.g., {"name": "Old", "color": "red"})
-        after: State after the change (e.g., {"name": "New", "color": "red"})
-        exclude_fields: Fields to ignore (use for secrets like passwords!)
-
-    Returns:
-        Dict of changes: {"field": {"old": value, "new": value}}
-
-    Examples:
-        >>> compute_changes(
-        ...     {"name": "Old", "value": 100},
-        ...     {"name": "New", "value": 100}
-        ... )
-        {"name": {"old": "Old", "new": "New"}}
-
-        >>> compute_changes(
-        ...     {"name": "Test", "password": "secret1"},
-        ...     {"name": "Test", "password": "secret2"},
-        ...     exclude_fields=["password"]
-        ... )
-        {}  # password change is not reported
-    """
-    exclude = set(exclude_fields or [])
-    changes = {}
-
-    # Get all keys from both dicts
-    all_keys = set(before.keys()) | set(after.keys())
-
-    for key in all_keys:
-        # Skip excluded fields (like passwords, tokens, etc.)
-        if key in exclude:
-            continue
-
-        old_value = before.get(key)
-        new_value = after.get(key)
-
-        # Only record if value actually changed
-        if old_value != new_value:
-            changes[key] = {"old": old_value, "new": new_value}
-
-    return changes

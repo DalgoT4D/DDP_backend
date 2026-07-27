@@ -24,7 +24,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.auth import has_permission
 
-from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType, ConnectionMeta
@@ -44,6 +44,26 @@ from ddpui.utils.singletaskprogress import SingleTaskProgress
 
 airbyte_router = Router()
 logger = CustomLogger("airbyte")
+
+
+def _summarize_streams(streams: list) -> list:
+    """Stream names for audit logging — not the full syncCatalog, which is
+    internal Airbyte schema plumbing (field types per stream), not something
+    meaningful to a human reading the log.
+
+    `streams` is untyped (`list`) at the schema level and callers have sent
+    both plain stream-name strings and {streamName, streamNamespace} dicts —
+    handle both rather than assuming one shape.
+    """
+    names = []
+    for s in streams:
+        if isinstance(s, dict):
+            name = s.get("streamName")
+            if name:
+                names.append(name)
+        elif isinstance(s, str) and s:
+            names.append(s)
+    return names
 
 
 @airbyte_router.get("/source_definitions")
@@ -123,6 +143,9 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         resource_id=source["sourceId"],
         resource_name=source.get("name", payload.name or ""),
         action=AuditLogAction.CREATE,
+        # Never log payload.config — it holds connection credentials for
+        # whichever source type this is (host, port, username, password, etc).
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
     )
     return {"sourceId": source["sourceId"]}
 
@@ -136,13 +159,6 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         raise HttpError(400, "create an organization first")
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
-
-    # Capture state before update for field_changes tracking
-    try:
-        old_source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
-        old_name = old_source.get("name", "")
-    except Exception:
-        old_name = ""
 
     if orguser.org.base_plan() == OrgType.DEMO:
         logger.info("Demo account user")
@@ -163,22 +179,16 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
     )
     logger.info("updated source having id " + source["sourceId"])
 
-    # Compute field changes (only track name, not config which may contain secrets)
-    field_changes = {}
-    if old_name and old_name != payload.name:
-        field_changes["name"] = {"old": old_name, "new": payload.name}
-
-    # Only create audit log if there are actual changes
-    if field_changes:
-        create_audit_log(
-            org=orguser.org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.DATA_SOURCE,
-            resource_id=source["sourceId"],
-            resource_name=source.get("name", payload.name or ""),
-            action=AuditLogAction.UPDATE,
-            field_changes=field_changes,
-        )
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        resource_name=source.get("name", payload.name or ""),
+        action=AuditLogAction.UPDATE,
+        # Never log payload.config — may contain connection credentials.
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
     return {"sourceId": source["sourceId"]}
 
 
@@ -340,6 +350,8 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         resource_id=destination["destinationId"],
         resource_name=destination.get("destinationName", payload.name or ""),
         action=AuditLogAction.CREATE,
+        # Never log payload.config — warehouse connection credentials.
+        resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
     )
     return {"destinationId": destination["destinationId"]}
 
@@ -490,6 +502,11 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         resource_id=res.get("connectionId", ""),
         resource_name=res.get("name", payload.name or ""),
         action=AuditLogAction.CREATE,
+        resource_fields={
+            "name": payload.name,
+            "streams": _summarize_streams(payload.streams),
+            "destinationSchema": payload.destinationSchema or "",
+        },
     )
     return res
 
@@ -542,38 +559,23 @@ def put_airbyte_connection_v1(
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    # Capture state before update for field_changes tracking
-    try:
-        old_connection = airbyte_service.get_connection(org.airbyte_workspace_id, connection_id)
-        old_state = {
-            "name": old_connection.get("name", ""),
-            "destinationSchema": old_connection.get("namespaceFormat", ""),
-        }
-    except Exception:
-        old_state = {}
-
     res, error = airbytehelpers.update_connection(org, connection_id, payload)
     if error:
         raise HttpError(400, error)
 
-    # Compute field changes
-    new_state = {
-        "name": payload.name,
-        "destinationSchema": payload.destinationSchema or "",
-    }
-    field_changes = compute_changes(old_state, new_state) if old_state else {}
-
-    # Only create audit log if there are actual changes
-    if field_changes:
-        create_audit_log(
-            org=org,
-            orguser=orguser,
-            resource_type=AuditLogResourceType.CONNECTION,
-            resource_id=connection_id,
-            resource_name=payload.name or res.get("name", ""),
-            action=AuditLogAction.UPDATE,
-            field_changes=field_changes,
-        )
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        resource_name=payload.name or res.get("name", ""),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "name": payload.name,
+            "streams": _summarize_streams(payload.streams),
+            "destinationSchema": payload.destinationSchema or "",
+        },
+    )
 
     return res
 
@@ -662,6 +664,8 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
         resource_id=destination["destinationId"],
         resource_name=payload.name or destination.get("destinationName", ""),
         action=AuditLogAction.UPDATE,
+        # Never log payload.config — warehouse connection credentials.
+        resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
     )
 
     return {"destinationId": destination["destinationId"]}

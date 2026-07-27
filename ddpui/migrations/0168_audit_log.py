@@ -69,7 +69,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 # JSON field for tracking what changed
-                ("field_changes", models.JSONField(blank=True, default=dict)),
+                ("resource_fields", models.JSONField(blank=True, default=dict)),
                 # Timestamp - auto-set when record is created
                 ("timestamp", models.DateTimeField(auto_now_add=True)),
                 # Foreign key to Organization

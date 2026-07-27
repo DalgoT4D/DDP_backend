@@ -1119,6 +1119,78 @@ def test_post_dbt_git_pull_creates_audit_log(mock_audit_log, seed_db, orguser: O
 
 
 @patch("ddpui.api.dbt_api.create_audit_log")
+def test_put_dbt_schema_v1_creates_audit_log(
+    mock_audit_log,
+    seed_db,
+    orguser: OrgUser,
+    f_orgwarehouse: OrgWarehouse,
+    f_dbtcliprofileblock: OrgPrefectBlockv1,
+):
+    """Updating the dbt target schema logs the new schema directly from the
+    payload — no prior-state diffing."""
+    orguser.org.dbt = OrgDbt(
+        gitrepo_url="A",
+        target_type="B",
+        default_schema="old-schema",
+        cli_profile_block=f_dbtcliprofileblock,
+    )
+    orguser.org.dbt.save()
+    payload = OrgDbtTarget(target_configs_schema="new-schema")
+    request = mock_request(orguser)
+
+    with patch("ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block"):
+        put_dbt_schema_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {"default_schema": "new-schema"}
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_put_switch_git_repo_creates_audit_log(mock_audit_log, seed_db, orguser: OrgUser):
+    """Switching the git repo logs the new repo url and managed-by-system flag
+    read back from the DB after the switch — never the access token."""
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo",
+        transform_type="git",
+        is_repo_managed_by_system=True,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo",
+        gitrepoAccessToken="super-secret-pat",
+    )
+    request = mock_request(orguser)
+
+    def fake_switch(orguser, payload, actual_pat):
+        orgdbt.gitrepo_url = payload.gitrepoUrl
+        orgdbt.is_repo_managed_by_system = False
+        orgdbt.save()
+        return {"success": 1}
+
+    with patch("ddpui.api.dbt_api.dbt_service.switch_git_repository_v1", side_effect=fake_switch):
+        put_switch_git_repo(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {
+        "gitrepo_url": "https://github.com/new/repo",
+        "is_repo_managed_by_system": False,
+    }
+    assert "super-secret-pat" not in str(call_kwargs["resource_fields"])
+
+    # Cleanup
+    orgdbt.delete()
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
 @patch("ddpui.api.dbt_api.OrgCleanupService")
 def test_dbt_delete_creates_audit_log(mock_cleanup, mock_audit_log, seed_db, orguser: OrgUser):
     """Test that deleting dbt workspace creates an audit log entry"""

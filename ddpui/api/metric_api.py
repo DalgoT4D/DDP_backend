@@ -26,7 +26,7 @@ from ddpui.core.metric.metric_service import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
-from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
@@ -115,6 +115,15 @@ def create_metric(request, payload: MetricPayload):
             resource_id=str(metric.id),
             resource_name=metric.name,
             action=AuditLogAction.CREATE,
+            resource_fields={
+                "name": payload.name,
+                "description": payload.description or "",
+                "schema_name": payload.schema_name,
+                "table_name": payload.table_name,
+                "column": payload.column,
+                "aggregation": payload.aggregation,
+                "column_expression": payload.column_expression,
+            },
         )
     except MetricValidationError as e:
         raise HttpError(400, e.message) from None
@@ -189,17 +198,6 @@ def update_metric(request, metric_id: int, payload: MetricPayload):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture old state for field_changes tracking
-    old_metric = Metric.objects.filter(id=metric_id, org=org).first()
-    old_state = {}
-    if old_metric:
-        old_state = {
-            "name": old_metric.name,
-            "description": old_metric.description or "",
-            "aggregation": old_metric.aggregation,
-            "column": old_metric.column or "",
-        }
-
     try:
         metric = MetricService.update_metric(
             metric_id=metric_id,
@@ -208,26 +206,23 @@ def update_metric(request, metric_id: int, payload: MetricPayload):
             payload=payload,
         )
 
-        # Compute field changes
-        new_state = {
-            "name": metric.name,
-            "description": metric.description or "",
-            "aggregation": metric.aggregation,
-            "column": metric.column or "",
-        }
-        field_changes = compute_changes(old_state, new_state)
-
-        # Only create audit log if there are actual changes
-        if field_changes:
-            create_audit_log(
-                org=org,
-                orguser=orguser,
-                resource_type=AuditLogResourceType.METRIC,
-                resource_id=str(metric_id),
-                resource_name=metric.name,
-                action=AuditLogAction.UPDATE,
-                field_changes=field_changes,
-            )
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.METRIC,
+            resource_id=str(metric_id),
+            resource_name=metric.name,
+            action=AuditLogAction.UPDATE,
+            resource_fields={
+                "name": payload.name,
+                "description": payload.description or "",
+                "schema_name": payload.schema_name,
+                "table_name": payload.table_name,
+                "column": payload.column,
+                "aggregation": payload.aggregation,
+                "column_expression": payload.column_expression,
+            },
+        )
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
     except MetricValidationError as e:

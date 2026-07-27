@@ -125,6 +125,11 @@ def create_dashboard(request, payload: DashboardCreate):
         resource_id=str(dashboard.id),
         resource_name=dashboard.title,
         action=AuditLogAction.CREATE,
+        resource_fields={
+            "title": payload.title,
+            "description": payload.description or "",
+            "grid_columns": payload.grid_columns,
+        },
     )
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
@@ -136,9 +141,6 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support"""
     orguser: OrgUser = request.orguser
     org = orguser.org
-
-    # Capture old state for field_changes tracking
-    old_dashboard = Dashboard.objects.filter(id=dashboard_id, org=org).first()
 
     try:
         dashboard = DashboardService.update_dashboard(
@@ -152,13 +154,24 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
 
-    # Compute field changes using service method
-    field_changes = {}
-    if old_dashboard:
-        field_changes = DashboardService.compute_field_changes(old_dashboard, dashboard)
-
-    # Only create audit log if there are actual changes (skip empty auto-save updates)
-    if field_changes:
+    # DashboardService.update_dashboard only touches a field when it's not
+    # None — a genuine partial patch (auto-save may only send one field).
+    # Only fields actually present in this request are logged, using that
+    # exact same criterion. No "skip if unchanged vs prior state" guard —
+    # that would need an old-state DB fetch again. We do still skip when
+    # this specific request touched zero fields (resource_fields ends up
+    # empty) — that's a free check on data we already built, not a diff.
+    raw_resource_fields = {
+        "title": payload.title,
+        "description": payload.description,
+        "grid_columns": payload.grid_columns,
+        "target_screen_size": payload.target_screen_size,
+        "tabs": [tab.model_dump() for tab in payload.tabs] if payload.tabs is not None else None,
+        "filter_layout": payload.filter_layout,
+        "is_published": payload.is_published,
+    }
+    resource_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+    if resource_fields:
         create_audit_log(
             org=org,
             orguser=orguser,
@@ -166,7 +179,7 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             resource_id=str(dashboard_id),
             resource_name=dashboard.title,
             action=AuditLogAction.UPDATE,
-            field_changes=field_changes,
+            resource_fields=resource_fields,
         )
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
@@ -511,7 +524,7 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
         resource_id=str(dashboard_id),
         resource_name=dashboard.title,
         action=AuditLogAction.SHARE,
-        field_changes={"is_public": {"old": not is_public, "new": is_public}},
+        resource_fields={"is_public": {"old": not is_public, "new": is_public}},
     )
 
     return DashboardShareResponse(**response_data)
@@ -588,7 +601,7 @@ def set_personal_landing_dashboard(request, dashboard_id: int):
         resource_id=str(dashboard_id),
         resource_name=dashboard.title,
         action=AuditLogAction.UPDATE,
-        field_changes={"personal_landing_page": {"old": False, "new": True}},
+        resource_fields={"personal_landing_page": {"old": False, "new": True}},
     )
 
     return LandingPageResponse(success=True, message="Dashboard set as personal landing page")
@@ -647,7 +660,7 @@ def set_org_default_dashboard(request, dashboard_id: int):
         resource_id=str(dashboard_id),
         resource_name=dashboard.title,
         action=AuditLogAction.UPDATE,
-        field_changes={"is_org_default": {"old": False, "new": True}},
+        resource_fields={"is_org_default": {"old": False, "new": True}},
     )
 
     return LandingPageResponse(

@@ -822,6 +822,18 @@ class TestReportAuditLogs:
         assert call_kwargs["action"] == AuditLogAction.CREATE
         assert call_kwargs["resource_name"] == "Audit Log Test Report"
 
+        # period_start/period_end are Python `date` objects — the default
+        # JSONField encoder can't serialize those, so they must be converted
+        # to strings before being logged (silently breaks the background
+        # write otherwise, since create_audit_log never raises).
+        resource_fields = call_kwargs["resource_fields"]
+        assert resource_fields["title"] == "Audit Log Test Report"
+        assert resource_fields["dashboard"] == sample_dashboard.title
+        assert resource_fields["period_start"] == "2025-01-01"
+        assert isinstance(resource_fields["period_start"], str)
+        assert resource_fields["period_end"] == "2025-03-31"
+        assert resource_fields["date_column"]["column_name"] == "created_at"
+
         # Cleanup
         ReportSnapshot.objects.filter(title="Audit Log Test Report").delete()
 
@@ -843,7 +855,21 @@ class TestReportAuditLogs:
         assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
         assert call_kwargs["action"] == AuditLogAction.UPDATE
         assert call_kwargs["resource_id"] == str(sample_snapshot.id)
-        assert "field_changes" in call_kwargs
+        assert call_kwargs["resource_fields"] == {"summary": "Updated summary text"}
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_update_snapshot_without_summary_skips_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """SnapshotUpdate's only field is summary — a request that doesn't
+        send it has nothing to log, matching this endpoint's pre-existing
+        behavior (it already skipped logging when nothing changed)."""
+        request = mock_request(orguser)
+        payload = SnapshotUpdate()
+
+        update_snapshot(request, sample_snapshot.id, payload)
+
+        mock_audit_log.assert_not_called()
 
     @patch("ddpui.api.report_api.create_audit_log")
     def test_delete_snapshot_creates_audit_log(self, mock_audit_log, orguser, org, seed_db):

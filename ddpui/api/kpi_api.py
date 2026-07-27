@@ -27,7 +27,7 @@ from ddpui.core.metric.metric_service import MetricNotFoundError
 from ddpui.models.metric import KPI
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
-from ddpui.core.audit_log_service import create_audit_log, compute_changes
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 import json
 
@@ -100,6 +100,12 @@ def create_kpi(request, payload: KPICreate):
     try:
         kpi = KPIService.create_kpi(payload, orguser)
 
+        resource_fields = payload.model_dump(exclude={"metric_id"})
+        resource_fields[
+            "name"
+        ] = kpi.name  # actual resolved name, not the raw (possibly None) payload value
+        resource_fields["metric"] = kpi.metric.name
+
         create_audit_log(
             org=org,
             orguser=orguser,
@@ -107,6 +113,7 @@ def create_kpi(request, payload: KPICreate):
             resource_id=str(kpi.id),
             resource_name=kpi.name,
             action=AuditLogAction.CREATE,
+            resource_fields=resource_fields,
         )
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
@@ -135,44 +142,30 @@ def get_kpi(request, kpi_id: int):
 def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     """Update a KPI"""
 
-    print("I am updating the kpi here brother")
     orguser: OrgUser = request.orguser
     org = orguser.org
-
-    # Capture old state for field_changes tracking
-    old_kpi = KPI.objects.filter(id=kpi_id, org=org).first()
-    old_state = {}
-    if old_kpi:
-        old_state = {
-            "name": old_kpi.name,
-            "target_value": old_kpi.target_value,
-            "direction": old_kpi.direction,
-            "time_grain": old_kpi.time_grain,
-        }
 
     try:
         kpi = KPIService.update_kpi(kpi_id, org, orguser, payload)
 
-        # Compute field changes
-        new_state = {
-            "name": kpi.name,
-            "target_value": kpi.target_value,
-            "direction": kpi.direction,
-            "time_grain": kpi.time_grain,
-        }
-        field_changes = compute_changes(old_state, new_state)
+        # KPIUpdate is a genuine partial patch — only fields actually present
+        # in this request are logged, matching the exact criterion
+        # KPIService itself uses (model_dump(exclude_unset=True)) to decide
+        # what to touch. A field missing here means "not touched", not "cleared".
+        touched = payload.model_dump(exclude_unset=True)
+        resource_fields = {k: v for k, v in touched.items() if k != "metric_id"}
+        if "metric_id" in touched:
+            resource_fields["metric"] = kpi.metric.name
 
-        # Only create audit log if there are actual changes
-        if field_changes:
-            create_audit_log(
-                org=org,
-                orguser=orguser,
-                resource_type=AuditLogResourceType.KPI,
-                resource_id=str(kpi_id),
-                resource_name=kpi.name,
-                action=AuditLogAction.UPDATE,
-                field_changes=field_changes,
-            )
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.KPI,
+            resource_id=str(kpi_id),
+            resource_name=kpi.name,
+            action=AuditLogAction.UPDATE,
+            resource_fields=resource_fields,
+        )
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
     except KPIValidationError as e:

@@ -732,6 +732,11 @@ def test_post_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace
     assert call_kwargs["resource_type"] == AuditLogResourceType.DATA_SOURCE
     assert call_kwargs["action"] == AuditLogAction.CREATE
     assert call_kwargs["resource_id"] == "new-source-id"
+    assert call_kwargs["resource_fields"] == {
+        "name": "Test Source",
+        "sourceDefId": "fake-source-def-id",
+    }
+    assert "config" not in call_kwargs["resource_fields"]
 
 
 @patch("ddpui.api.airbyte_api.create_audit_log")
@@ -756,7 +761,13 @@ def test_put_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace,
     assert call_kwargs["org"] == orguser_workspace.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DATA_SOURCE
     assert call_kwargs["action"] == AuditLogAction.UPDATE
-    assert call_kwargs["field_changes"] == {"name": {"old": "Old Source", "new": "Updated Source"}}
+    # Curated snapshot, not a diff — and config is never logged, since it may
+    # contain connection credentials (host, password, api keys, etc).
+    assert call_kwargs["resource_fields"] == {
+        "name": "Updated Source",
+        "sourceDefId": "fake-source-def-id",
+    }
+    assert "config" not in call_kwargs["resource_fields"]
 
 
 @patch("ddpui.api.airbyte_api.create_audit_log")
@@ -783,3 +794,8 @@ def test_post_airbyte_destination_creates_audit_log(mock_audit_log, orguser_work
     assert call_kwargs["resource_type"] == AuditLogResourceType.WAREHOUSE
     assert call_kwargs["action"] == AuditLogAction.CREATE
     assert call_kwargs["resource_id"] == "new-dest-id"
+    assert call_kwargs["resource_fields"] == {
+        "name": "Test Warehouse",
+        "destinationDefId": "fake-dest-def-id",
+    }
+    assert "config" not in call_kwargs["resource_fields"]

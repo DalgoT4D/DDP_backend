@@ -17,6 +17,7 @@ from ddpui.core.alerts.exceptions import (
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
+from ddpui.models.metric import KPI, Metric
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.alert_schema import (
     AlertCreate,
@@ -70,6 +71,34 @@ def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
         else:
             out.append(RecipientOut(type="external", email=r.get("email")))
     return out
+
+
+def _resolve_alert_source_label(
+    org_id: int,
+    alert_type: str,
+    metric_id: Optional[int],
+    kpi_id: Optional[int],
+    standalone_config,
+) -> Optional[str]:
+    """Human-readable label for what an alert is monitoring, for audit logging
+    (a bare metric/kpi id isn't useful to a human reading the log later)."""
+    if alert_type == AlertType.METRIC_THRESHOLD and metric_id:
+        metric = Metric.objects.filter(id=metric_id, org_id=org_id).first()
+        return metric.name if metric else str(metric_id)
+    if alert_type == AlertType.KPI_RAG and kpi_id:
+        kpi = KPI.objects.filter(id=kpi_id, org_id=org_id).first()
+        return kpi.name if kpi else str(kpi_id)
+    if alert_type == AlertType.STANDALONE and standalone_config:
+        return f"{standalone_config.schema_name}.{standalone_config.table_name}"
+    return None
+
+
+def _summarize_recipients(recipients: list, org_id: int) -> list[str]:
+    """Human-readable recipient targets (names/emails) for audit logging, not raw ids."""
+    return [
+        r.orguser_name if r.type == "orguser" else r.email
+        for r in _build_recipient_out(recipients, org_id)
+    ]
 
 
 def _build_alert_response(alert: Alert) -> AlertResponse:
@@ -241,6 +270,23 @@ def create_alert(request, payload: AlertCreate):
         resource_id=str(alert.id),
         resource_name=alert.name,
         action=AuditLogAction.CREATE,
+        resource_fields={
+            "source": _resolve_alert_source_label(
+                orguser.org_id,
+                payload.alert_type,
+                payload.metric_id,
+                payload.kpi_id,
+                payload.standalone_config,
+            ),
+            "condition": payload.condition.model_dump(),
+            "schedule_cron": payload.schedule_cron,
+            "delivery_channels": payload.delivery_channels,
+            "message_template": payload.message_template,
+            "recipients": _summarize_recipients(
+                [r.model_dump() for r in payload.recipients], orguser.org_id
+            ),
+            "is_active": True,
+        },
     )
 
     return _build_alert_response(alert)
@@ -292,6 +338,30 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
     except AlertValidationError as e:
         raise HttpError(400, e.message) from None
 
+    # Only fields actually present in this request are logged — AlertUpdate
+    # is a genuine partial patch (AlertService only touches fields that are
+    # not None), so a field missing here means "not touched", not "cleared".
+    raw_resource_fields = {
+        "name": payload.name,
+        "source": _resolve_alert_source_label(
+            orguser.org_id,
+            alert.alert_type,
+            payload.metric_id,
+            payload.kpi_id,
+            payload.standalone_config,
+        ),
+        "condition": payload.condition.model_dump() if payload.condition is not None else None,
+        "schedule_cron": payload.schedule_cron,
+        "delivery_channels": payload.delivery_channels,
+        "message_template": payload.message_template,
+        "recipients": (
+            _summarize_recipients([r.model_dump() for r in payload.recipients], orguser.org_id)
+            if payload.recipients is not None
+            else None
+        ),
+        "is_active": payload.is_active,
+    }
+
     create_audit_log(
         org=orguser.org,
         orguser=orguser,
@@ -299,6 +369,7 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
         resource_id=str(alert.id),
         resource_name=alert.name,
         action=AuditLogAction.UPDATE,
+        resource_fields={k: v for k, v in raw_resource_fields.items() if v is not None},
     )
 
     return _build_alert_response(alert)
@@ -321,7 +392,7 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         resource_id=str(alert.id),
         resource_name=alert.name,
         action=AuditLogAction.UPDATE,
-        field_changes={"is_active": payload.is_active},
+        resource_fields={"is_active": payload.is_active},
     )
 
     return _build_alert_response(alert)

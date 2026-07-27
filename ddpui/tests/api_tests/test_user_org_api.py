@@ -538,6 +538,49 @@ def test_post_organization_warehouse_bigquery(orguser):
 
     assert response["success"] == 1
 
+
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_destination=Mock(
+        return_value={"destinationId": "destination-id", "connectionConfiguration": {}}
+    ),
+    get_destination_definition=Mock(
+        return_value={"dockerRepository": "docker-repo", "dockerImageTag": "0.0.0"}
+    ),
+)
+@patch.multiple(
+    "ddpui.utils.secretsmanager",
+    save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
+)
+@patch.multiple(
+    "ddpui.ddpdbt.dbthelpers",
+    create_or_update_org_cli_block=Mock(return_value=((None, None), None)),
+)
+@patch("ddpui.api.user_org_api.create_audit_log")
+def test_post_organization_warehouse_creates_audit_log(mock_audit_log, orguser):
+    """Creating a warehouse logs wtype/name only — never airbyteConfig, which
+    carries the actual warehouse connection credentials."""
+    request = mock_request(orguser)
+    payload = OrgWarehouseSchema(
+        wtype="bigquery",
+        name="bigquery",
+        destinationDefId="destinationDefId",
+        airbyteConfig={
+            "credentials_json": '{"private_key": "super-secret-service-account-key"}',
+            "dataset_location": "us-central1",
+            "transformation_priority": "batch",
+        },
+    )
+
+    post_organization_warehouse(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.WAREHOUSE
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_fields"] == {"wtype": "bigquery", "name": "bigquery"}
+    assert "airbyteConfig" not in call_kwargs["resource_fields"]
+
     warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
     assert warehouse.wtype == "bigquery"
     assert warehouse.airbyte_destination_id == "destination-id"
@@ -800,6 +843,42 @@ def test_post_organization_user_accept_invite_v1(orguser, seed_db):
     assert response.email == "invited_email"
     assert OrgUser.objects.filter(user__email="invited_email", new_role=guest_role).count() == 1
     assert UserAttributes.objects.filter(user__email="invited_email").exists()
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+def test_post_organization_user_accept_invite_v1_creates_audit_logs(
+    mock_audit_log, orguser, seed_db
+):
+    """Accepting an invitation logs both an INVITATION status update and an
+    ORG_USER create, attributed to the org the invitation belongs to."""
+    request = mock_request(orguser)
+    payload = AcceptInvitationSchema(invite_code="invite_code_audit", password="password")
+
+    guest_role = Role.objects.filter(slug=GUEST_ROLE).first()
+    Invitation.objects.create(
+        invited_email="invited_audit_email",
+        invited_by=orguser,
+        invited_on=timezone.as_ist(datetime.now()),
+        invite_code="invite_code_audit",
+        invited_new_role=guest_role,
+    )
+
+    post_organization_user_accept_invite_v1(request, payload)
+
+    assert mock_audit_log.call_count == 2
+
+    invitation_call_kwargs = mock_audit_log.call_args_list[0][1]
+    assert invitation_call_kwargs["org"] == orguser.org
+    assert invitation_call_kwargs["resource_type"] == AuditLogResourceType.INVITATION
+    assert invitation_call_kwargs["action"] == AuditLogAction.UPDATE
+    assert invitation_call_kwargs["resource_name"] == "invited_audit_email"
+    assert invitation_call_kwargs["resource_fields"] == {"status": "accepted"}
+
+    orguser_call_kwargs = mock_audit_log.call_args_list[1][1]
+    assert orguser_call_kwargs["org"] == orguser.org
+    assert orguser_call_kwargs["resource_type"] == AuditLogResourceType.ORG_USER
+    assert orguser_call_kwargs["action"] == AuditLogAction.CREATE
+    assert orguser_call_kwargs["resource_name"] == "invited_audit_email"
 
 
 def test_post_organization_user_accept_invite_v1_lowercase_email(orguser, seed_db):
@@ -1314,7 +1393,7 @@ def assert_audit_log_call(
     action,
     resource_name="",
     resource_id="",
-    field_changes=None,
+    resource_fields=None,
 ):
     """Assert the common audit-log payload for a success-path API call."""
     mock_audit_log.assert_called_once()
@@ -1328,8 +1407,8 @@ def assert_audit_log_call(
         assert call_kwargs["resource_name"] == resource_name
     if resource_id != "":
         assert call_kwargs["resource_id"] == resource_id
-    if field_changes is not None:
-        assert call_kwargs["field_changes"] == field_changes
+    if resource_fields is not None:
+        assert call_kwargs["resource_fields"] == resource_fields
 
 
 @patch("ddpui.api.user_org_api.create_audit_log")
@@ -1510,8 +1589,8 @@ def test_modify_user_role_creates_audit_log(mock_audit_log, orguser, seed_db):
         AuditLogResourceType.ORG_USER,
         AuditLogAction.UPDATE,
         resource_name="target@example.com",
+        resource_fields={"role": account_manager_role.slug},
     )
-    assert "role" in mock_audit_log.call_args[1]["field_changes"]
 
     # Cleanup
     target_orguser.delete()
@@ -1570,6 +1649,7 @@ def test_resend_invitation_creates_audit_log(mock_resend, mock_audit_log, orguse
         AuditLogResourceType.INVITATION,
         AuditLogAction.UPDATE,
         resource_id=str(invitation.id),
+        resource_fields={"action": "resent"},
     )
 
     # Cleanup

@@ -999,7 +999,7 @@ def download_chart_data_csv(
         resource_id=f"{payload.schema_name}.{payload.table_name}",
         resource_name=payload.table_name,
         action=AuditLogAction.EXPORT,
-        field_changes={"format": "csv"},
+        resource_fields={"format": "csv"},
     )
 
     # Stream response using common function
@@ -1142,6 +1142,14 @@ def create_chart(request, payload: ChartCreate):
             resource_id=str(chart.id),
             resource_name=chart.title,
             action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": payload.title,
+                "description": payload.description or "",
+                "chart_type": payload.chart_type,
+                "schema_name": payload.schema_name,
+                "table_name": payload.table_name,
+                "extra_config": extra_config,
+            },
         )
 
     except ChartValidationError as e:
@@ -1172,9 +1180,6 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture old state for field_changes tracking
-    old_chart = Chart.objects.filter(id=chart_id, org=org).first()
-
     # ChartUpdate.extra_config is a typed sub-schema when chart_type was sent
     # alongside it; otherwise it's still a raw dict (or None). Either way the
     # service layer wants a dict.
@@ -1195,22 +1200,26 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             extra_config=extra_config,
         )
 
-        # Compute field changes using service method
-        field_changes = {}
-        if old_chart:
-            field_changes = ChartService.compute_field_changes(old_chart, chart)
-
-        # Only create audit log if there are actual changes
-        if field_changes:
-            create_audit_log(
-                org=org,
-                orguser=orguser,
-                resource_type=AuditLogResourceType.CHART,
-                resource_id=str(chart_id),
-                resource_name=chart.title,
-                action=AuditLogAction.UPDATE,
-                field_changes=field_changes,
-            )
+        # ChartService.update_chart only touches a field when it's not None —
+        # a genuine partial patch. Only fields actually present in this
+        # request are logged, using that exact same criterion.
+        raw_resource_fields = {
+            "title": payload.title,
+            "description": payload.description,
+            "chart_type": payload.chart_type,
+            "schema_name": payload.schema_name,
+            "table_name": payload.table_name,
+            "extra_config": extra_config,
+        }
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart_id),
+            resource_name=chart.title,
+            action=AuditLogAction.UPDATE,
+            resource_fields={k: v for k, v in raw_resource_fields.items() if v is not None},
+        )
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
     except ChartValidationError as e:

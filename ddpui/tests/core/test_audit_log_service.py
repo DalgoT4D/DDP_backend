@@ -2,9 +2,8 @@
 Tests for the audit log service.
 
 These tests verify that:
-1. compute_changes() correctly finds differences between two dicts
-2. _write_audit_log() correctly writes to the database
-3. create_audit_log() starts a background thread and never crashes
+1. _write_audit_log() correctly writes to the database
+2. create_audit_log() starts a background thread and never crashes
 """
 
 from unittest.mock import patch, MagicMock
@@ -18,7 +17,6 @@ from ddpui.models.audit_log import AuditLog, AuditLogResourceType, AuditLogActio
 from ddpui.core.audit_log_service import (
     create_audit_log,
     _write_audit_log,
-    compute_changes,
 )
 
 # This tells pytest to use the test database
@@ -57,82 +55,6 @@ def test_orguser(test_user, test_org):
 
 
 # ============================================================================
-# TESTS FOR compute_changes()
-# ============================================================================
-
-
-class TestComputeChanges:
-    """Tests for the compute_changes helper function."""
-
-    def test_no_changes_returns_empty_dict(self):
-        """When before and after are identical, returns empty dict."""
-        before = {"name": "Test", "value": 123}
-        after = {"name": "Test", "value": 123}
-
-        result = compute_changes(before, after)
-
-        assert result == {}
-
-    def test_detects_single_field_change(self):
-        """Detects when one field changes."""
-        before = {"name": "Old Name", "value": 123}
-        after = {"name": "New Name", "value": 123}
-
-        result = compute_changes(before, after)
-
-        assert result == {"name": {"old": "Old Name", "new": "New Name"}}
-
-    def test_detects_multiple_field_changes(self):
-        """Detects when multiple fields change."""
-        before = {"name": "Old", "value": 100, "active": True}
-        after = {"name": "New", "value": 200, "active": True}
-
-        result = compute_changes(before, after)
-
-        assert result == {
-            "name": {"old": "Old", "new": "New"},
-            "value": {"old": 100, "new": 200},
-        }
-
-    def test_detects_field_added(self):
-        """Detects when a new field is added."""
-        before = {"name": "Test"}
-        after = {"name": "Test", "description": "A description"}
-
-        result = compute_changes(before, after)
-
-        assert result == {"description": {"old": None, "new": "A description"}}
-
-    def test_detects_field_removed(self):
-        """Detects when a field is removed."""
-        before = {"name": "Test", "description": "A description"}
-        after = {"name": "Test"}
-
-        result = compute_changes(before, after)
-
-        assert result == {"description": {"old": "A description", "new": None}}
-
-    def test_excludes_specified_fields(self):
-        """Does not include excluded fields in the diff."""
-        before = {"name": "Old", "password": "secret1", "token": "abc123"}
-        after = {"name": "New", "password": "secret2", "token": "xyz789"}
-
-        result = compute_changes(before, after, exclude_fields=["password", "token"])
-
-        # Only name should appear, not password or token
-        assert result == {"name": {"old": "Old", "new": "New"}}
-
-    def test_handles_none_values(self):
-        """Handles None values correctly."""
-        before = {"name": None}
-        after = {"name": "New Name"}
-
-        result = compute_changes(before, after)
-
-        assert result == {"name": {"old": None, "new": "New Name"}}
-
-
-# ============================================================================
 # TESTS FOR _write_audit_log()
 # We mock django.db.connection.close() because closing the connection
 # in tests breaks pytest's database cleanup.
@@ -155,7 +77,7 @@ class TestWriteAuditLog:
             resource_id="123",
             resource_name="Test Dashboard",
             action=AuditLogAction.CREATE,
-            field_changes={},
+            resource_fields={},
         )
 
         # Should have one more record now
@@ -175,8 +97,8 @@ class TestWriteAuditLog:
         mock_close.assert_called_once()
 
     @patch("ddpui.core.audit_log_service.django.db.connection.close")
-    def test_stores_field_changes(self, mock_close, test_org, test_orguser):
-        """_write_audit_log stores field_changes correctly."""
+    def test_stores_resource_fields(self, mock_close, test_org, test_orguser):
+        """_write_audit_log stores resource_fields correctly."""
         changes = {"name": {"old": "Old", "new": "New"}}
 
         _write_audit_log(
@@ -187,11 +109,11 @@ class TestWriteAuditLog:
             resource_id="123",
             resource_name="Test Dashboard",
             action=AuditLogAction.UPDATE,
-            field_changes=changes,
+            resource_fields=changes,
         )
 
         log = AuditLog.objects.latest("timestamp")
-        assert log.field_changes == changes
+        assert log.resource_fields == changes
 
     @patch("ddpui.core.audit_log_service.django.db.connection.close")
     def test_handles_null_orguser(self, mock_close, test_org):
@@ -204,7 +126,7 @@ class TestWriteAuditLog:
             resource_id=str(test_org.id),
             resource_name=test_org.name,
             action=AuditLogAction.CREATE,
-            field_changes={},
+            resource_fields={},
         )
 
         log = AuditLog.objects.latest("timestamp")
@@ -227,7 +149,7 @@ class TestWriteAuditLog:
             resource_id="123",
             resource_name="Test",
             action=AuditLogAction.CREATE,
-            field_changes={},
+            resource_fields={},
         )
 
         # Should have logged the error
@@ -259,7 +181,7 @@ class TestCreateAuditLog:
             resource_id="456",
             resource_name="Test Chart",
             action=AuditLogAction.CREATE,
-            field_changes={"title": {"old": None, "new": "Test Chart"}},
+            resource_fields={"title": {"old": None, "new": "Test Chart"}},
         )
 
         # Give the thread a moment to execute
@@ -276,7 +198,7 @@ class TestCreateAuditLog:
             resource_id="456",
             resource_name="Test Chart",
             action=AuditLogAction.CREATE,
-            field_changes={"title": {"old": None, "new": "Test Chart"}},
+            resource_fields={"title": {"old": None, "new": "Test Chart"}},
         )
 
     @patch("ddpui.core.audit_log_service._write_audit_log")
@@ -301,8 +223,8 @@ class TestCreateAuditLog:
         assert call_kwargs["orguser_email"] == ""
 
     @patch("ddpui.core.audit_log_service._write_audit_log")
-    def test_defaults_field_changes_to_empty_dict(self, mock_write, test_org, test_orguser):
-        """create_audit_log defaults field_changes to empty dict when not provided."""
+    def test_defaults_resource_fields_to_empty_dict(self, mock_write, test_org, test_orguser):
+        """create_audit_log defaults resource_fields to empty dict when not provided."""
         create_audit_log(
             org=test_org,
             orguser=test_orguser,
@@ -317,7 +239,7 @@ class TestCreateAuditLog:
 
         mock_write.assert_called_once()
         call_kwargs = mock_write.call_args[1]
-        assert call_kwargs["field_changes"] == {}
+        assert call_kwargs["resource_fields"] == {}
 
     @patch("ddpui.core.audit_log_service.threading.Thread")
     @patch("ddpui.core.audit_log_service.logger")

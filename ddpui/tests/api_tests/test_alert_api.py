@@ -1,6 +1,8 @@
 """API tests for Alert endpoints — CRUD + listing + permissions."""
 
 import os
+from unittest.mock import patch
+
 import django
 import pytest
 from ninja.errors import HttpError
@@ -24,6 +26,7 @@ from ddpui.api.alert_api import test_alert as run_dry_run
 from ddpui.api.alert_api import test_slack_webhook as run_slack_webhook_test
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.models.alert import Alert
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -484,6 +487,70 @@ def test_metric_delete_cascades_to_alert(seed_db, orguser, sample_metric):
     Metric.objects.filter(id=sample_metric.id).delete()
 
     assert not Alert.objects.filter(id=created.id).exists()
+
+
+# ── Audit log ───────────────────────────────────────────────────────────────
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_create_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample_metric):
+    """Creating an alert logs a curated snapshot with the metric name resolved
+    (not a bare metric_id) and never includes slack_webhook_url, even when set."""
+    request = mock_request(orguser)
+    payload = _base_payload(
+        orguser,
+        metric_id=sample_metric.id,
+        delivery_channels=["email", "slack"],
+        slack_webhook_url="https://hooks.slack.com/services/T00/B00/XXXXXXXX",
+    )
+
+    alert = create_alert(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ALERT
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_id"] == str(alert.id)
+
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["source"] == "Alert API Metric"
+    assert resource_fields["schedule_cron"] == "0 9 * * *"
+    assert resource_fields["delivery_channels"] == ["email", "slack"]
+    assert resource_fields["message_template"] == payload.message_template
+    assert resource_fields["recipients"] == [orguser.user.email]
+    assert resource_fields["is_active"] is True
+    assert "slack_webhook_url" not in resource_fields
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_update_alert_creates_audit_log_only_touched_fields(
+    mock_audit_log, seed_db, orguser, sample_metric
+):
+    """Updating only name + condition logs only those two fields — AlertUpdate
+    is a genuine partial patch, so untouched fields must not appear at all
+    (not even as null), and slack_webhook_url must never be logged."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    update_alert(
+        request,
+        created.id,
+        AlertUpdate(name="Renamed", condition=ThresholdCondition(operator="gt", value=100)),
+    )
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+
+    resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["name"] == "Renamed"
+    assert resource_fields["condition"] == {"operator": "gt", "value": 100.0}
+    assert "schedule_cron" not in resource_fields
+    assert "delivery_channels" not in resource_fields
+    assert "recipients" not in resource_fields
+    assert "source" not in resource_fields
+    assert "slack_webhook_url" not in resource_fields
 
 
 # ── Logs ────────────────────────────────────────────────────────────────────
