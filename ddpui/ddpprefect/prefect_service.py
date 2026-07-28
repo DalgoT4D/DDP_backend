@@ -568,6 +568,14 @@ def get_deployment(deployment_id) -> dict:
     return res
 
 
+def update_deployment_entrypoint(deployment_id: str, entrypoint: str) -> dict:
+    """Proxy api to PATCH a deployment's entrypoint."""
+    res = prefect_patch(
+        f"v1/deployments/{deployment_id}/entrypoint", json={"entrypoint": entrypoint}
+    )
+    return res
+
+
 def get_flow_run_logs(
     flow_run_id: str, task_run_id: str, limit: int, offset: int
 ) -> dict:  # pragma: no cover
