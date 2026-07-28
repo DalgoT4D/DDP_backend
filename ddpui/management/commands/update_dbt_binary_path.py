@@ -5,25 +5,46 @@ from pathlib import Path
 from dotenv import load_dotenv
 from django.core.management.base import BaseCommand, CommandError
 
-from ddpui.models.org import Org, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1
 from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.ddpprefect import DBTCORE
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
+from ddpui.utils.constants import TASK_GENERATE_EDR
 
 load_dotenv()
 
 
 class Command(BaseCommand):
-    """Updates the dbt binary path in Prefect deployments for dbt Core Operation tasks"""
+    """Updates the dbt binary path in Prefect deployments for dbt Core Operation tasks.
 
-    help = "Updates the dbt binary path in Prefect deployments for an organization"
+    Two modes:
+      - Re-sync: no --new-dbt-venv; fixes deployments to match each org's current dbt_venv.
+      - Migrate: --new-dbt-venv <dir>; updates OrgDbt.dbt_venv and all deployment params
+                 to the new venv (e.g. 'venv-1.9.8' under $DBT_VENV).
+    """
+
+    help = (
+        "Update dbt binary paths in Prefect deployments. "
+        "Pass --new-dbt-venv to migrate orgs to a new dbt version."
+    )
 
     def add_arguments(self, parser):
-        """Add arguments to the command"""
         parser.add_argument(
             "org_slug",
+            nargs="?",
             type=str,
-            help="The organization slug to update deployments for",
+            default=None,
+            help="Org slug to update; omit to run across all orgs with dbt configured",
+        )
+        parser.add_argument(
+            "--new-dbt-venv",
+            type=str,
+            required=True,
+            help=(
+                "New dbt venv directory to migrate to (relative to DBT_VENV). "
+                "E.g. if DBT_VENV=/data/dalgo_dbt_venv and the new venv lives at "
+                "/data/dalgo_dbt_venv/venv-1.9.8, pass 'venv-1.9.8'."
+            ),
         )
         parser.add_argument(
             "--dry-run",
@@ -32,134 +53,173 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        """Handle the command execution"""
         org_slug = options["org_slug"]
+        new_dbt_venv = options["new_dbt_venv"]
         dry_run = options["dry_run"]
 
-        # Validate organization exists
-        try:
-            org = Org.objects.get(slug=org_slug)
-        except Org.DoesNotExist:
-            raise CommandError(f"Organization with slug '{org_slug}' does not exist")
+        dbt_venv_base = os.getenv("DBT_VENV")
+        if not dbt_venv_base:
+            raise CommandError("DBT_VENV environment variable is not set")
 
-        if org.dbt is None:
-            raise CommandError("dbt is not set up for org")
+        # Validate new venv binary exists before touching anything
+        if not dry_run:
+            new_binary_path = str(Path(dbt_venv_base) / new_dbt_venv / "bin" / "dbt")
+            if not Path(new_binary_path).exists():
+                raise CommandError(
+                    f"dbt binary not found at {new_binary_path} — "
+                    "ensure the venv is built before running this command"
+                )
 
-        dbt_binary_path = str(Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin/dbt")
-
-        # Get all deployments for this organization
-        deployments = OrgDataFlowv1.objects.filter(org=org)
-
-        if not deployments.exists():
+        # Resolve org set
+        if org_slug:
+            try:
+                org = Org.objects.get(slug=org_slug)
+            except Org.DoesNotExist:
+                raise CommandError(f"Organization '{org_slug}' does not exist") from None
+            if org.dbt is None:
+                raise CommandError(f"Organization '{org_slug}' has no dbt configuration")
+            org_dbts = OrgDbt.objects.filter(pk=org.dbt.pk)
+        else:
+            org_dbts = OrgDbt.objects.exclude(dbt_venv=None)
+            count = org_dbts.count()
             self.stdout.write(
-                self.style.WARNING(f"No deployments found for organization '{org_slug}'")
+                self.style.WARNING(
+                    f"No org_slug provided. This will update ALL {count} org(s) with dbt configured."
+                )
             )
+            confirm = input("Continue? [y/N] ").strip().lower()
+            if confirm != "y":
+                self.stdout.write("Aborted.")
+                return
+
+        if not org_dbts.exists():
+            self.stdout.write(self.style.WARNING("No orgs with dbt configuration found"))
             return
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Found {deployments.count()} deployment(s) for organization '{org_slug}'"
-            )
+            self.style.SUCCESS(f"Found {org_dbts.count()} org(s) to process")
         )
 
-        updated_count = 0
-        for deployment in deployments:
+        orgs_updated = 0
+        deployments_updated = 0
+
+        for org_dbt in org_dbts:
             try:
-                # Fetch deployment from Prefect
-                prefect_deployment = get_deployment(deployment.deployment_id)
-                deployment_params = prefect_deployment["parameters"]
+                target_org = Org.objects.get(dbt=org_dbt)
+            except Org.DoesNotExist:
+                self.stdout.write(
+                    self.style.WARNING(f"No org references OrgDbt {org_dbt.pk}, skipping")
+                )
+                continue
 
-                # Check if deployment has tasks in config
-                if "config" not in deployment_params or "tasks" not in deployment_params["config"]:
-                    self.stdout.write(
-                        self.style.WARNING(
-                            f"Deployment {deployment.deployment_name} ({deployment.deployment_id}) "
-                            "has no tasks configuration, skipping"
-                        )
-                    )
-                    continue
+            dbt_binary_path = str(Path(dbt_venv_base) / new_dbt_venv / "bin" / "dbt")
+            edr_bin_dir = str(Path(dbt_venv_base) / new_dbt_venv / "bin")
 
-                modified = False
+            self.stdout.write(f"\nOrg: {target_org.slug}")
 
-                # Iterate through tasks in deployment config
-                for task in deployment_params["config"]["tasks"]:
-                    if task["type"] == DBTCORE:
-                        if "commands" not in task or not task["commands"]:
-                            self.stdout.write(
-                                self.style.WARNING(
-                                    f"dbt Core Operation task in deployment {deployment.deployment_name} "
-                                    "has no commands, skipping"
-                                )
-                            )
-                            continue
+            # Always update OrgDbt.dbt_venv
+            old_venv = org_dbt.dbt_venv
+            if not dry_run:
+                org_dbt.dbt_venv = new_dbt_venv
+                org_dbt.save(update_fields=["dbt_venv"])
+                self.stdout.write(
+                    self.style.SUCCESS(f"  dbt_venv: {old_venv!r} → {new_dbt_venv!r} (saved)")
+                )
+            else:
+                self.stdout.write(
+                    self.style.WARNING(f"  [DRY RUN] dbt_venv: {old_venv!r} → {new_dbt_venv!r}")
+                )
 
-                        # Update the first command (commands[0]) with new dbt binary path
-                        old_command = task["commands"][0]
+            deployments = OrgDataFlowv1.objects.filter(org=target_org)
+            if not deployments.exists():
+                self.stdout.write(self.style.WARNING("  No deployments found"))
 
-                        # Find the dbt binary part and replace it
-                        command_parts = old_command.split()
-                        if command_parts:
-                            command_parts[0] = dbt_binary_path
-                            new_command = " ".join(command_parts)
+            org_deployment_updates = 0
 
-                            if old_command != new_command:
-                                task["commands"][0] = new_command
-                                modified = True
+            for deployment in deployments:
+                try:
+                    prefect_deployment = get_deployment(deployment.deployment_id)
+                    deployment_params = prefect_deployment["parameters"]
 
-                                self.stdout.write(
-                                    f"Deployment: {deployment.deployment_name} ({deployment.deployment_id})"
-                                )
-                                self.stdout.write(f"  Old command: {old_command}")
-                                self.stdout.write(f"  New command: {new_command}")
-                                self.stdout.write("")
-
-                    elif task["slug"] == "generate-edr":
-                        self.stdout.write(" Old PATH for edr: " + task["env"]["PATH"])
-                        newpath = str(Path(os.getenv("DBT_VENV")) / org.dbt.dbt_venv / "bin")
-                        if task["env"]["PATH"] != newpath:
-                            task["env"]["PATH"] = newpath
-                            modified = True
-                            self.stdout.write(" New PATH for edr: " + task["env"]["PATH"])
-
-                # Update deployment if modified and not dry run
-                if modified:
-                    if not dry_run:
-                        update_dataflow_v1(
-                            deployment.deployment_id,
-                            PrefectDataFlowUpdateSchema3(
-                                deployment_params=deployment_params, cron=deployment.cron
-                            ),
-                        )
-                        self.stdout.write(
-                            self.style.SUCCESS(
-                                f"Updated deployment {deployment.deployment_name} ({deployment.deployment_id})"
-                            )
-                        )
-                    else:
+                    if (
+                        "config" not in deployment_params
+                        or "tasks" not in deployment_params["config"]
+                    ):
                         self.stdout.write(
                             self.style.WARNING(
-                                f"[DRY RUN] Would update deployment {deployment.deployment_name} ({deployment.deployment_id})"
+                                f"  {deployment.deployment_name}: no tasks config, skipping"
                             )
                         )
-                    updated_count += 1
+                        continue
 
-            except Exception as e:
-                self.stdout.write(
-                    self.style.ERROR(
-                        f"Error processing deployment {deployment.deployment_name} ({deployment.deployment_id}): {str(e)}"
+                    modified = False
+
+                    for task in deployment_params["config"]["tasks"]:
+                        if task["type"] == DBTCORE:
+                            if not task.get("commands"):
+                                self.stdout.write(
+                                    self.style.WARNING(
+                                        f"  {deployment.deployment_name}: dbt Core task has no commands, skipping"
+                                    )
+                                )
+                                continue
+
+                            old_cmd = task["commands"][0]
+                            parts = old_cmd.split()
+                            if parts:
+                                parts[0] = dbt_binary_path
+                                new_cmd = " ".join(parts)
+                                if old_cmd != new_cmd:
+                                    self.stdout.write(f"  [{deployment.deployment_name}]")
+                                    self.stdout.write(f"    old: {old_cmd}")
+                                    self.stdout.write(f"    new: {new_cmd}")
+                                    task["commands"][0] = new_cmd
+                                    modified = True
+
+                        elif task.get("slug") == TASK_GENERATE_EDR:
+                            old_path = task.get("env", {}).get("PATH", "")
+                            if old_path != edr_bin_dir:
+                                self.stdout.write(
+                                    f"  [{deployment.deployment_name}] EDR PATH: {old_path!r} → {edr_bin_dir!r}"
+                                )
+                                task.setdefault("env", {})["PATH"] = edr_bin_dir
+                                modified = True
+
+                    if modified:
+                        if not dry_run:
+                            update_dataflow_v1(
+                                deployment.deployment_id,
+                                PrefectDataFlowUpdateSchema3(
+                                    deployment_params=deployment_params,
+                                    cron=deployment.cron,
+                                ),
+                            )
+                            self.stdout.write(
+                                self.style.SUCCESS(
+                                    f"  Updated deployment {deployment.deployment_name}"
+                                )
+                            )
+                        else:
+                            self.stdout.write(
+                                self.style.WARNING(
+                                    f"  [DRY RUN] Would update {deployment.deployment_name}"
+                                )
+                            )
+                        org_deployment_updates += 1
+
+                except Exception as err:
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f"  Error processing {deployment.deployment_name}: {err}"
+                        )
                     )
-                )
 
-        # Summary
-        if dry_run:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"\n[DRY RUN] Would update {updated_count} deployment(s) for organization '{org_slug}'"
-                )
+            orgs_updated += 1
+            deployments_updated += org_deployment_updates
+
+        label = "[DRY RUN] Would update" if dry_run else "Updated"
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"\n{label} {orgs_updated} org(s), {deployments_updated} deployment(s)"
             )
-        else:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"\nSuccessfully updated {updated_count} deployment(s) for organization '{org_slug}'"
-                )
-            )
+        )
