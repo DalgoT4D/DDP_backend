@@ -17,8 +17,9 @@ from django.utils import timezone
 from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
-from ddpui.core.access import resource_access
+from ddpui.core.access import access_control
 from ddpui.core.access.ownership import can_delete_resource
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.dashboard import (
     Dashboard,
     DashboardFilter,
@@ -295,7 +296,7 @@ class DashboardService:
         query = Q(org=org)
 
         if orguser is not None:
-            query &= resource_access.accessible_filter(orguser, "dashboard")
+            query &= access_control.accessible_filter(orguser, ResourceType.DASHBOARD)
 
         if dashboard_type:
             query &= Q(dashboard_type=dashboard_type)

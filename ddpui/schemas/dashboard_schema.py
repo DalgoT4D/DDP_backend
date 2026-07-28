@@ -86,7 +86,7 @@ class DashboardResponse(Schema):
     filters: List[DashboardFilterResponse] = []
     # The requestor's own level on this dashboard ("view" | "edit") — the UI
     # mirrors enforcement from this; never "no_access" (those rows are hidden).
-    my_access: Optional[str] = None
+    access_level: Optional[str] = None
 
 
 # =============================================================================

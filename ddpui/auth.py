@@ -12,7 +12,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, Toke
 from django.contrib.auth.models import User
 
 from ddpui.models.org_user import OrgUser
-from ddpui.models.role_based_access import RolePermission
+from ddpui.models.role_based_access import RolePermission, RoleSlug
 from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -21,24 +21,20 @@ logger = CustomLogger("ddpui")
 
 UNAUTHORIZED = "unauthorized"
 
-SUPER_ADMIN_ROLE = "super-admin"
-ADMIN_ROLE = "admin"
-ANALYST_ROLE = "analyst"
-MEMBER_ROLE = "member"
+SUPER_ADMIN_ROLE = RoleSlug.SUPER_ADMIN
+ADMIN_ROLE = RoleSlug.ADMIN
+ANALYST_ROLE = RoleSlug.ANALYST
+MEMBER_ROLE = RoleSlug.MEMBER
 
-# Deprecated aliases. Access Control v2 (migration 0165) collapsed the four customer roles
-# into three: account-manager was renamed to `admin`, guest to `member`, and
-# pipeline-manager was MERGED into admin (the role no longer exists). These aliases keep
-# existing imports resolving to the role each was renamed to. Do not reintroduce a
-# PIPELINE_MANAGER_ROLE alias — pipeline-manager was a strictly lower role than admin, so
-# aliasing it to "admin" would silently over-grant.
-ACCOUNT_MANAGER_ROLE = ADMIN_ROLE
-GUEST_ROLE = MEMBER_ROLE
+# Deprecated aliases — kept for backwards compatibility with existing imports.
+ACCOUNT_MANAGER_ROLE = RoleSlug.ADMIN
+GUEST_ROLE = RoleSlug.MEMBER
 
-# Imported below the role constants on purpose: resource_access's package sibling
+# Imported below the role constants on purpose: access_control's package sibling
 # ownership.py imports the constants from this module, so importing the access
 # package any earlier would hit a partially-initialized ddpui.auth.
-from ddpui.core.access import resource_access, shareable_types
+from ddpui.core.access import access_control, shareable_types
+from ddpui.models.resource_share import AccessLevel
 
 
 def has_permission(permission_slugs: list):
@@ -65,57 +61,35 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
-def with_resource(rtype: str):
-    """Layer-3 gate, step 1: fetch the resource named in the URL and resolve the
-    requestor's per-resource access level.
+def has_access(rtype: str, required_level: str = AccessLevel.VIEW, get_resource_id=None):
+    """Gate that checks the requestor has at least ``required_level`` on the
+    named resource.
 
-    Reads the id from the kwarg named by ``RTYPES[rtype]["id_kwarg"]``
-    (e.g. ``dashboard_id``), does the org-scoped fetch, and asks the resolver.
-    Missing, cross-org, and invisible (level None) are all the same 404 — the
-    caller can't learn whether the resource exists. On success stashes
-    ``request.resource`` and ``request.access_level`` for the endpoint body and
-    for ``require_level`` below.
+    ``get_resource_id`` is a callable that receives the endpoint kwargs and
+    returns the resource id (e.g. ``lambda kwargs: kwargs["dashboard_id"]``).
+    The caller declares explicitly how to source the id — no naming conventions
+    assumed.
+
+    Missing, cross-org, and invisible resources return 404. Insufficient level
+    returns 403.
 
     Stack under ``@has_permission([...])`` (which populates ``request.orguser``).
     """
+    if get_resource_id is None:
+        raise ValueError(f"has_access requires a get_resource_id callable for rtype '{rtype}'")
 
     def decorator(api_endpoint):
         @wraps(api_endpoint)
         def wrapper(*args, **kwargs):
             request = args[0]
-            id_kwarg = shareable_types.get_rtype_entry(rtype)["id_kwarg"]
-            resource = shareable_types.get_resource(request.orguser.org, rtype, kwargs[id_kwarg])
-            level = (
-                resource_access.get_user_access(request.orguser, rtype, resource)
-                if resource is not None
-                else None
-            )
+            resource_id = get_resource_id(kwargs)
+            if resource_id is None:
+                raise HttpError(400, f"missing resource id for {rtype}")
+            level = access_control.get_user_access(request.orguser, rtype, resource_id)
             if level is None:
                 raise HttpError(404, f"{rtype} not found")
-
-            request.resource = resource
-            request.access_level = level
-            return api_endpoint(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-def require_level(required_level: str):
-    """Layer-3 gate, step 2: require an access level on the resource fetched by
-    ``with_resource`` (which must sit above this decorator). 403 — not 404 —
-    because the requestor is allowed to know the resource exists; they just
-    can't perform this action on it."""
-
-    def decorator(api_endpoint):
-        @wraps(api_endpoint)
-        def wrapper(*args, **kwargs):
-            request = args[0]
-            held = resource_access.LEVEL_RANK[request.access_level]
-            needed = resource_access.LEVEL_RANK[required_level]
-            if held < needed:
-                raise HttpError(403, f"you have {request.access_level}-only access")
+            if access_control.LEVEL_RANK[level] < access_control.LEVEL_RANK[required_level]:
+                raise HttpError(403, f"you have {level}-only access")
             return api_endpoint(*args, **kwargs)
 
         return wrapper

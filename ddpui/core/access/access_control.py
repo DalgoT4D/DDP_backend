@@ -15,31 +15,26 @@ Precedence (first match wins):
 principal below a permissive org floor. This is precedence, not max-merge,
 on purpose.
 
-This module deliberately imports models only. ``ddpui.auth`` imports it for the
-``with_resource`` / ``require_level`` decorators, and ``ownership.py`` imports
-``ddpui.auth`` — importing either here would create a cycle.
+This module imports models only. ``ddpui.auth`` imports it for the ``has_access``
+decorator, and ``ownership.py`` imports ``ddpui.auth`` — importing auth here
+would create a cycle.
 """
 
 from typing import Iterable, Optional
 
 from django.db.models import Model, Q
 
+from ddpui.core.access import shareable_types
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser, OrgUserGroupMember
-from ddpui.models.resource_share import AccessLevel, ResourceShare, ResourceSharePrincipalType
-
-# Role slugs duplicated from ddpui.auth to avoid an import cycle (see docstring).
-_SUPER_ADMIN_ROLE = "super-admin"
-_ADMIN_ROLE = "admin"
-_ANALYST_ROLE = "analyst"
-
-LEVEL_RANK = {AccessLevel.NO_ACCESS: 0, AccessLevel.VIEW: 1, AccessLevel.EDIT: 2}
+from ddpui.models.resource_share import AccessLevel, LEVEL_RANK, ResourceShare, ResourceSharePrincipalType
+from ddpui.models.role_based_access import RoleSlug
 
 
 def _is_admin(orguser: OrgUser) -> bool:
     return orguser.new_role is not None and orguser.new_role.slug in (
-        _ADMIN_ROLE,
-        _SUPER_ADMIN_ROLE,
+        RoleSlug.ADMIN,
+        RoleSlug.SUPER_ADMIN,
     )
 
 
@@ -48,7 +43,7 @@ def _org_floor(orguser: OrgUser) -> str:
     column; every other non-admin role reads the member column. A missing
     OrgPreferences row means both floors are "view" (the model defaults)."""
     prefs = OrgPreferences.objects.filter(org=orguser.org).first()
-    if orguser.new_role is not None and orguser.new_role.slug == _ANALYST_ROLE:
+    if orguser.new_role is not None and orguser.new_role.slug == RoleSlug.ANALYST:
         return prefs.default_analyst_level if prefs else AccessLevel.VIEW
     return prefs.default_member_level if prefs else AccessLevel.VIEW
 
@@ -90,16 +85,21 @@ def _hide_no_access(level: str) -> Optional[str]:
     return None if level == AccessLevel.NO_ACCESS else level
 
 
-def get_user_access(orguser: OrgUser, rtype: str, resource: Model) -> Optional[str]:
+def get_user_access(orguser: OrgUser, rtype: str, resource_id) -> Optional[str]:
     """What can this orguser do with this resource? "edit", "view", or None
     (invisible — the caller should treat it exactly like a missing resource)."""
-    if resource.created_by_id is not None and resource.created_by_id == orguser.id:
+    entry = shareable_types.get_rtype_entry(rtype)
+    row = entry["model"].objects.filter(org=orguser.org, pk=resource_id).values("created_by_id").first()
+    if row is None:
+        return None
+
+    if row["created_by_id"] is not None and row["created_by_id"] == orguser.id:
         return AccessLevel.EDIT
     if _is_admin(orguser):
         return AccessLevel.EDIT
 
-    grants = _grants_map(orguser, rtype, [resource.pk])
-    granted = grants.get(str(resource.pk))
+    grants = _grants_map(orguser, rtype, [resource_id])
+    granted = grants.get(str(resource_id))
     if granted is not None:
         return _hide_no_access(granted)
 
