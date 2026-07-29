@@ -297,13 +297,19 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
         # done
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
-    except Exception as e:
+    except Exception:
         taskprogress.add(
             {
                 "message": "Job finished with a failure",
                 "status": "failed",
             }
         )
+        # Re-raise so the celery task ends in FAILURE state. Callers using
+        # .apply().maybe_throw() (e.g. install_elementary step 1) rely on this
+        # to detect sub-task failure — without it, an EagerResult in SUCCESS
+        # state hides the error and the caller proceeds as if it worked.
+        # .delay() callers are unaffected (they poll TaskProgress in Redis).
+        raise
 
     finally:
         for task_lock in task_locks:

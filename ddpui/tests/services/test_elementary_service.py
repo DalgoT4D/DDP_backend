@@ -1001,3 +1001,35 @@ def test_install_elementary_step2_failure(
     last_emit = mock_progress.add.call_args_list[-1].args[0]
     assert last_emit["stepIndex"] == 2
     assert last_emit["status"] == "failed"
+
+
+# ==================== run_dbt_commands failure-propagation ====================
+
+
+@patch("ddpui.celeryworkers.tasks.write_dbt_profiles_yml")
+@patch("ddpui.celeryworkers.tasks.DbtProjectManager")
+@patch("ddpui.celeryworkers.tasks.TaskProgress")
+def test_run_dbt_commands_propagates_inner_failure(
+    mock_task_progress_cls,
+    mock_dbt_project_manager,
+    mock_write_dbt_profiles_yml,
+    org,
+):
+    """When an inner step of run_dbt_commands fails, the celery task must end
+    in FAILURE state so .apply().maybe_throw() re-raises for callers like
+    install_elementary. Previously the outer `except Exception` swallowed the
+    error, so the task ended in SUCCESS state and install_elementary proceeded
+    to schedule EDR reports even though the elementary dbt install had failed.
+
+    Exercises the real run_dbt_commands via .apply() (not a mocked boundary) so
+    any regression to swallowing behavior is caught."""
+    from ddpui.celeryworkers.tasks import run_dbt_commands
+
+    mock_task_progress_cls.return_value = Mock()
+    mock_dbt_project_manager.gather_dbt_project_params.return_value = Mock()
+    mock_write_dbt_profiles_yml.side_effect = Exception("warehouse not found for org")
+
+    result = run_dbt_commands.apply(args=[org.id, org.dbt.id, "task-id", None])
+
+    with pytest.raises(Exception, match="warehouse not found for org"):
+        result.maybe_throw()

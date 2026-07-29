@@ -96,9 +96,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("No orgs with dbt configuration found"))
             return
 
-        self.stdout.write(
-            self.style.SUCCESS(f"Found {org_dbts.count()} org(s) to process")
-        )
+        self.stdout.write(self.style.SUCCESS(f"Found {org_dbts.count()} org(s) to process"))
 
         orgs_updated = 0
         deployments_updated = 0
@@ -209,9 +207,7 @@ class Command(BaseCommand):
 
                 except Exception as err:
                     self.stdout.write(
-                        self.style.ERROR(
-                            f"  Error processing {deployment.deployment_name}: {err}"
-                        )
+                        self.style.ERROR(f"  Error processing {deployment.deployment_name}: {err}")
                     )
 
             orgs_updated += 1
