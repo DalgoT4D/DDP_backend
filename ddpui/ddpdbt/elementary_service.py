@@ -496,17 +496,15 @@ def ensure_edr_sendreport_dataflow(org: Org, cron: str):
 
     existing_dfot = DataflowOrgTask.objects.filter(orgtask=org_task).first()
     if existing_dfot is not None:
-        # Update existing Prefect deployment and local record (keep same cron)
         orgdataflow = existing_dfot.dataflow
-        effective_cron = cron or orgdataflow.cron
         prefect_service.update_dataflow_v1(
             orgdataflow.deployment_id,
             PrefectDataFlowUpdateSchema3(
-                cron=effective_cron,
+                cron=cron,
                 deployment_params=deployment_params,
             ),
         )
-        orgdataflow.cron = effective_cron
+        orgdataflow.cron = cron
         orgdataflow.save(update_fields=["cron"])
         logger.info(f"updated EDR dataflow {orgdataflow.name} for {org.slug}")
         return {"status": "success", "dataflow": orgdataflow.name, "updated": True}
