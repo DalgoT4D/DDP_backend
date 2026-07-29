@@ -113,11 +113,14 @@ def _build_output(wtype: str, schema: str, creds: dict, extras: dict, threads: i
         return output
 
     if wtype == "bigquery":
+        # `project` (dbt alias for `database`) is required at the top level;
+        # if omitted, dbt-bigquery falls back to google.auth.default() (ADC).
         output = {
             "type": "bigquery",
             "schema": schema,
             "threads": threads,
             "method": "service-account-json",
+            "project": creds["project_id"],
             "keyfile_json": creds,
         }
         if "location" in extras:
