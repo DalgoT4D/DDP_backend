@@ -25,6 +25,7 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTRUN: 5,
     TASK_DBTTEST: 6,
     TASK_DBTCLOUD_JOB: 20,
+    TASK_GENERATE_EDR: 25,
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [

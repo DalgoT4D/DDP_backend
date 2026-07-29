@@ -141,42 +141,22 @@ PREFECT_PROXY_API_URL=
 
 ### Step 7: Install DBT
 
-The platform now supports multiple DBT versions using `uv` and `pyproject.toml` for better dependency management.
+All orgs run on dbt-core 1.10.19. Set up a local venv from the pinned pyproject.toml:
 
-#### For DBT 1.8.7 (current production)
 ```bash
-cd dbt_deps/dbt-1.8.7/
+cd ../prefect-proxy/docker/dbt-1.10.19/
 UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv uv sync
 ```
 
-#### For DBT 1.9.8 (migration target)
-```bash
-cd dbt_deps/dbt-1.9.8/
-UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.9.8 uv sync
-```
+The `uv.lock` file is committed for reproducible versions.
 
-#### For DBT 1.10.19
-```bash
-cd dbt_deps/dbt-1.10.19/
-UV_PROJECT_ENVIRONMENT=$DBT_VENV/venv-1.10.19 uv sync
-```
-
-**Note**: The `uv.lock` files are committed to ensure reproducible dependency versions across all environments.
-
-Set the DBT environment path in `.env`:
+Set the DBT paths in `.env`:
 ```
 CLIENTDBT_ROOT=/path/to/client/dbt/projects
 DBT_VENV=/path/to/dbt/environments
 ```
 
-This creates the structure:
-```
-$DBT_VENV/
-├── venv/          # DBT 1.8.7
-└── venv-1.9.8/    # DBT 1.9.8
-```
-
-Organizations use either `venv` or `venv-1.9.8` in their `dbt_venv` database field.
+Django resolves the dbt binary as `$DBT_VENV/<orgdbt.dbt_venv>/bin/dbt` (default `dbt_venv` value is `venv`).
 
 ### Step 8: Add SIGNUPCODE and FRONTEND_URL
 

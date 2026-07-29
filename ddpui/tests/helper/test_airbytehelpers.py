@@ -941,7 +941,12 @@ def test_update_destination_snowflake_config(
     "ddpui.ddpairbyte.airbytehelpers.elementary_setup_status",
     mock_uuid4=Mock(),
 )
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.write_dbt_profiles_yml",
+    mock_write_dbt_profiles_yml=Mock(),
+)
 def test_update_destination_cliprofile(
+    mock_write_dbt_profiles_yml: Mock,
     mock_elementary_setup_status: Mock,
     mock_timezone: Mock,
     mock_uuid4: Mock,
@@ -997,24 +1002,11 @@ def test_update_destination_cliprofile(
     assert response == {"destinationId": "DESTINATION_ID"}
 
     mock_create_or_update_org_cli_block.assert_called_once_with(org, warehouse, payload.config)
+    # When elementary is set up, update_destination materializes profiles.yml on disk
+    # and refreshes elementary's profile — the old dbt-debug Prefect roundtrip is gone.
+    mock_write_dbt_profiles_yml.assert_called_once_with(org)
     mock_create_elementary_profile.assert_called_once_with(org)
-
-    dbtdebugtask = schema.PrefectDbtTaskSetup(
-        seq=1,
-        slug="dbt-debug",
-        commands=["dbt-binary debug"],
-        type=DBTCORE,
-        env={},
-        working_dir="dbt-project-dir",
-        profiles_dir="dbt-project-dir/profiles/",
-        project_dir="dbt-project-dir",
-        cli_profile_block="block-name",
-        cli_args=[],
-        orgtask_uuid="fake-uuid",
-        flow_name="org-dbt-debug",
-        flow_run_name="isoformatted-time",
-    )
-    mock_run_dbt_task_sync.assert_called_once_with(dbtdebugtask)
+    mock_run_dbt_task_sync.assert_not_called()
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())

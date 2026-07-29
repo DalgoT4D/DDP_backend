@@ -22,7 +22,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from ddpui.ddpdbt.elementary_service import create_edr_sendreport_dataflow
+        from ddpui.ddpdbt.elementary_service import ensure_edr_sendreport_dataflow
 
         if options["fix_links"]:
             for org in Org.objects.exclude(dbt__isnull=True):
@@ -58,12 +58,4 @@ class Command(BaseCommand):
             print(f"OrgDbt for {org.slug} not found")
             return
 
-        org_task = get_edr_send_report_task(org)
-        if org_task is None:
-            print("creating OrgTask for edr-send-report")
-            org_task = get_edr_send_report_task(org, create=True)
-
-        dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-
-        if dataflow_orgtask is None:
-            dataflow = create_edr_sendreport_dataflow(org, org_task, options["cron"])
+        dataflow = ensure_edr_sendreport_dataflow(org, options["cron"])

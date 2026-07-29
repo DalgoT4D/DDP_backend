@@ -8,18 +8,17 @@ from django.contrib.auth.models import User
 from ddpui import settings
 from ddpui.models.org import Org, OrgDbt, OrgDataFlowv1, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
-from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskProgressHashPrefix, TaskType
+from ddpui.models.tasks import OrgTask, Task, DataflowOrgTask, TaskType
 from ddpui.ddpdbt.elementary_service import (
     elementary_setup_status,
     get_elementary_target_schema,
     get_elementary_package_version,
     check_dbt_files,
-    create_elementary_tracking_tables,
     extract_profile_from_generate_elementary_cli_profile,
     refresh_elementary_report_via_prefect,
     get_dbt_version,
     get_edr_version,
-    create_edr_sendreport_dataflow,
+    ensure_edr_sendreport_dataflow,
     create_elementary_profile,
 )
 from ddpui.utils.constants import TASK_GENERATE_EDR
@@ -515,37 +514,6 @@ def test_check_dbt_files_missing_elementary_package_have_target_schema(
     )
 
 
-@patch("ddpui.ddpdbt.elementary_service.TaskProgress")
-@patch("ddpui.ddpdbt.elementary_service.uuid4")
-@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
-def test_create_elementary_tracking_tables(
-    mock_run_dbt_commands, mock_uuid4, mock_task_progress, org
-):
-    """tests create_elementary_tracking_tables"""
-    mock_task_progress.return_value = Mock(add=Mock())
-    mock_uuid4.return_value = "test-uuid"
-    mock_run_dbt_commands.delay = Mock()
-
-    response = create_elementary_tracking_tables(org)
-    assert response == {
-        "task_id": "test-uuid",
-        "hashkey": f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-test-org",
-    }
-
-    mock_task_progress.assert_called_once_with("test-uuid", "run-dbt-commands-" + org.slug)
-    mock_run_dbt_commands.delay.assert_called_once_with(
-        org.id,
-        org.dbt.id,
-        "test-uuid",
-        {
-            # run parameters
-            "options": {
-                "select": "elementary",
-            }
-        },
-    )
-
-
 def test_extract_profile_from_generate_elementary_cli_profile_failure():
     """tests extract_profile_from_generate_elementary_cli_profile"""
     profile = """
@@ -690,7 +658,9 @@ def test_get_edr_version_success(mock_check_output, mock_gather_dbt_project_para
 @patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
 @patch("ddpui.ddpdbt.elementary_service.generate_hash_id")
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
-def test_create_edr_sendreport_dataflow(
+@patch("ddpui.core.orgtaskfunctions.get_edr_send_report_task")
+def test_ensure_edr_sendreport_dataflow(
+    mock_get_edr_send_report_task,
     mock_create_dataflow_v1,
     mock_generate_hash_id,
     mock_setup_edr_send_report_task_config,
@@ -698,13 +668,14 @@ def test_create_edr_sendreport_dataflow(
     org,
     orgtask,
 ):
-    """tests create_edr_sendreport_dataflow"""
+    """tests ensure_edr_sendreport_dataflow"""
     os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
     cron = "0 0 * * *"
 
     mock_gather_dbt_project_params.return_value = Mock(
         venv_binary="venv/bin", project_dir="project-dir"
     )
+    mock_get_edr_send_report_task.return_value = orgtask
     mock_setup_edr_send_report_task_config.return_value = Mock(
         to_json=Mock(return_value={"task": "config"})
     )
@@ -719,12 +690,10 @@ def test_create_edr_sendreport_dataflow(
         }
     }
 
-    create_edr_sendreport_dataflow(org, orgtask, cron)
+    ensure_edr_sendreport_dataflow(org, cron)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
-    mock_setup_edr_send_report_task_config.assert_called_once_with(
-        orgtask, "project-dir", "venv/bin"
-    )
+    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir")
     mock_generate_hash_id.assert_called_once_with(8)
 
     # The create_dataflow_v1 should be called with the org's edr_queue config
@@ -807,88 +776,54 @@ def test_create_elementary_profile_with_existing_profiles_yml(
     assert elementary_file.exists()
 
 
+@patch("ddpui.ddpdbt.elementary_service.write_dbt_profiles_yml")
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
-@patch("ddpui.ddpdbt.elementary_service.prefect_service.get_dbt_cli_profile_block")
-def test_create_elementary_profile_without_profiles_yml_fetch_from_prefect(
-    mock_get_block, mock_subprocess, mock_gather_params, org, tmp_path
+def test_create_elementary_profile_missing_profiles_yml_calls_write_dbt_profiles_yml(
+    mock_subprocess, mock_gather_params, mock_write_dbt_profiles_yml, org, tmp_path
 ):
-    """tests create_elementary_profile when profiles.yml doesn't exist, fetches from Prefect blocks"""
-    # Create Prefect block
-    cli_block = OrgPrefectBlockv1.objects.create(
-        org=org, block_type=DBTCLIPROFILE, block_name="test-cli-profile"
-    )
-    # Link it to the org's dbt
-    org.dbt.cli_profile_block = cli_block
-    org.dbt.save()
-
-    # Create temporary project directory (no profiles.yml)
+    """If profiles.yml is missing on disk, create_elementary_profile calls
+    write_dbt_profiles_yml(org) to generate it from warehouse creds (no more
+    CLI-block fetch fallback)."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
 
-    # Create dbt_project.yml
     dbt_project_file = project_dir / "dbt_project.yml"
-    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
     with open(dbt_project_file, "w") as f:
-        yaml.safe_dump(dbt_project_content, f)
+        yaml.safe_dump({"name": "test_project", "profile": "test_profile"}, f)
 
-    # Setup mocks
-    mock_gather_params.return_value = Mock(
-        project_dir=str(project_dir), dbt_binary="test-dbt", target="test-target"
-    )
-    mock_get_block.return_value = {
-        "profile": {
-            "test_profile": {
-                "outputs": {"test-target": {"schema": "test_schema", "host": "localhost"}}
-            }
-        }
-    }
+    # write_dbt_profiles_yml is mocked but we still need profiles.yml on disk
+    # after it's called — the code reads it right after. Simulate that side effect.
+    profiles_dir = project_dir / "profiles"
+    profiles_dir.mkdir()
+
+    def _write_profile_file(_org):
+        with open(profiles_dir / "profiles.yml", "w") as f:
+            yaml.safe_dump(
+                {
+                    "test_profile": {
+                        "target": "default",
+                        "outputs": {
+                            "default": {"type": "postgres", "host": "h", "schema": "analytics"}
+                        },
+                    }
+                },
+                f,
+            )
+
+    mock_write_dbt_profiles_yml.side_effect = _write_profile_file
+    mock_gather_params.return_value = Mock(project_dir=str(project_dir), dbt_binary="test-dbt")
     mock_subprocess.return_value = """elementary:
-  target: test-target
+  target: default
   outputs:
-    test-target:
+    default:
       type: postgres
       schema: elementary_schema"""
 
     result = create_elementary_profile(org)
 
     assert result == {"status": "success"}
-    mock_get_block.assert_called_once_with("test-cli-profile")
-    mock_subprocess.assert_called_once()
-
-    # Verify profiles directory and file were created
-    profiles_dir = project_dir / "profiles"
-    assert profiles_dir.exists()
-    profiles_file = profiles_dir / "profiles.yml"
-    assert profiles_file.exists()
-
-    # Verify elementary profile was created
-    elementary_dir = project_dir / "elementary_profiles"
-    assert elementary_dir.exists()
-    elementary_file = elementary_dir / "profiles.yml"
-    assert elementary_file.exists()
-
-
-@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
-def test_create_elementary_profile_missing_prefect_block(mock_gather_params, org, tmp_path):
-    """tests create_elementary_profile when profiles.yml doesn't exist and no Prefect block found"""
-    # Create temporary project directory (no profiles.yml)
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-
-    # Create dbt_project.yml
-    dbt_project_file = project_dir / "dbt_project.yml"
-    dbt_project_content = {"name": "test_project", "version": "1.0.0", "profile": "test_profile"}
-    with open(dbt_project_file, "w") as f:
-        yaml.safe_dump(dbt_project_content, f)
-
-    mock_gather_params.return_value = Mock(project_dir=str(project_dir))
-
-    # No OrgPrefectBlockv1 created, so it should raise HttpError
-    with pytest.raises(HttpError) as exc_info:
-        create_elementary_profile(org)
-
-    assert "is missing" in str(exc_info.value)
+    mock_write_dbt_profiles_yml.assert_called_once_with(org)
 
 
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
@@ -938,3 +873,163 @@ def test_create_elementary_profile_elementary_dir_already_exists(
     # Verify elementary profile was still created (overwrites existing)
     elementary_file = elementary_dir / "profiles.yml"
     assert elementary_file.exists()
+
+
+# ==================== install_elementary celery task tests ====================
+
+
+@patch("ddpui.celeryworkers.tasks.ensure_edr_sendreport_dataflow")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.create_elementary_profile")
+@patch("ddpui.celeryworkers.tasks.TaskProgress")
+def test_install_elementary_happy_path(
+    mock_task_progress_cls,
+    mock_create_profile,
+    mock_run_dbt_commands,
+    mock_ensure_edr,
+    org,
+):
+    """all three sub-steps succeed; each emits a running+completed pair to
+    TaskProgress under (stepIndex, step, status)."""
+    from ddpui.celeryworkers.tasks import install_elementary
+
+    mock_progress = Mock()
+    mock_task_progress_cls.return_value = mock_progress
+    mock_create_profile.return_value = {"status": "success"}
+    mock_run_dbt_commands.apply.return_value = Mock(maybe_throw=Mock(return_value=None))
+    mock_ensure_edr.return_value = {"status": "success"}
+
+    install_elementary(org.id, "task-1", "install-elementary-test-org")
+
+    # 3 steps × 2 statuses (running + completed) = 6 emits, no failed
+    assert mock_progress.add.call_count == 6
+    emitted = [call.args[0] for call in mock_progress.add.call_args_list]
+    for i in range(3):
+        assert emitted[i * 2]["stepIndex"] == i
+        assert emitted[i * 2]["status"] == "running"
+        assert emitted[i * 2 + 1]["stepIndex"] == i
+        assert emitted[i * 2 + 1]["status"] == "completed"
+
+    mock_create_profile.assert_called_once_with(org)
+    mock_run_dbt_commands.apply.assert_called_once()
+    mock_ensure_edr.assert_called_once_with(org, "0 0 * * *")
+
+
+@patch("ddpui.celeryworkers.tasks.ensure_edr_sendreport_dataflow")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.create_elementary_profile")
+@patch("ddpui.celeryworkers.tasks.TaskProgress")
+def test_install_elementary_step0_failure(
+    mock_task_progress_cls,
+    mock_create_profile,
+    mock_run_dbt_commands,
+    mock_ensure_edr,
+    org,
+):
+    """step 0 (create profile) fails: emit failed for step 0, don't touch step 1 or 2, re-raise."""
+    from ddpui.celeryworkers.tasks import install_elementary
+
+    mock_progress = Mock()
+    mock_task_progress_cls.return_value = mock_progress
+    mock_create_profile.return_value = {"error": "profile blew up"}
+
+    with pytest.raises(Exception, match="profile blew up"):
+        install_elementary(org.id, "task-1", "install-elementary-test-org")
+
+    mock_run_dbt_commands.apply.assert_not_called()
+    mock_ensure_edr.assert_not_called()
+    # last emit is failed for step 0
+    last_emit = mock_progress.add.call_args_list[-1].args[0]
+    assert last_emit["stepIndex"] == 0
+    assert last_emit["status"] == "failed"
+    assert last_emit["message"] == "profile blew up"
+
+
+@patch("ddpui.celeryworkers.tasks.ensure_edr_sendreport_dataflow")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.create_elementary_profile")
+@patch("ddpui.celeryworkers.tasks.TaskProgress")
+def test_install_elementary_step1_failure(
+    mock_task_progress_cls,
+    mock_create_profile,
+    mock_run_dbt_commands,
+    mock_ensure_edr,
+    org,
+):
+    """step 1 (dbt commands) fails: profile completed, ensure_edr not called, failed emitted for step 1."""
+    from ddpui.celeryworkers.tasks import install_elementary
+
+    mock_progress = Mock()
+    mock_task_progress_cls.return_value = mock_progress
+    mock_create_profile.return_value = {"status": "success"}
+    mock_run_dbt_commands.apply.return_value = Mock(
+        maybe_throw=Mock(side_effect=Exception("dbt exploded"))
+    )
+
+    with pytest.raises(Exception, match="dbt exploded"):
+        install_elementary(org.id, "task-1", "install-elementary-test-org")
+
+    mock_ensure_edr.assert_not_called()
+    last_emit = mock_progress.add.call_args_list[-1].args[0]
+    assert last_emit["stepIndex"] == 1
+    assert last_emit["status"] == "failed"
+
+
+@patch("ddpui.celeryworkers.tasks.ensure_edr_sendreport_dataflow")
+@patch("ddpui.celeryworkers.tasks.run_dbt_commands")
+@patch("ddpui.celeryworkers.tasks.create_elementary_profile")
+@patch("ddpui.celeryworkers.tasks.TaskProgress")
+def test_install_elementary_step2_failure(
+    mock_task_progress_cls,
+    mock_create_profile,
+    mock_run_dbt_commands,
+    mock_ensure_edr,
+    org,
+):
+    """step 2 (schedule reports) fails: first two completed, failed emitted for step 2."""
+    from ddpui.celeryworkers.tasks import install_elementary
+
+    mock_progress = Mock()
+    mock_task_progress_cls.return_value = mock_progress
+    mock_create_profile.return_value = {"status": "success"}
+    mock_run_dbt_commands.apply.return_value = Mock(maybe_throw=Mock(return_value=None))
+    mock_ensure_edr.return_value = {"error": "edr scheduling failed"}
+
+    with pytest.raises(Exception, match="edr scheduling failed"):
+        install_elementary(org.id, "task-1", "install-elementary-test-org")
+
+    last_emit = mock_progress.add.call_args_list[-1].args[0]
+    assert last_emit["stepIndex"] == 2
+    assert last_emit["status"] == "failed"
+
+
+# ==================== run_dbt_commands failure-propagation ====================
+
+
+@patch("ddpui.celeryworkers.tasks.write_dbt_profiles_yml")
+@patch("ddpui.celeryworkers.tasks.DbtProjectManager")
+@patch("ddpui.celeryworkers.tasks.TaskProgress")
+def test_run_dbt_commands_propagates_inner_failure(
+    mock_task_progress_cls,
+    mock_dbt_project_manager,
+    mock_write_dbt_profiles_yml,
+    org,
+):
+    """When an inner step of run_dbt_commands fails, the celery task must end
+    in FAILURE state so .apply().maybe_throw() re-raises for callers like
+    install_elementary. Previously the outer `except Exception` swallowed the
+    error, so the task ended in SUCCESS state and install_elementary proceeded
+    to schedule EDR reports even though the elementary dbt install had failed.
+
+    Exercises the real run_dbt_commands via .apply() (not a mocked boundary) so
+    any regression to swallowing behavior is caught."""
+    from ddpui.celeryworkers.tasks import run_dbt_commands
+
+    mock_task_progress_cls.return_value = Mock()
+    mock_dbt_project_manager.gather_dbt_project_params.return_value = Mock()
+    mock_write_dbt_profiles_yml.side_effect = Exception("warehouse not found for org")
+
+    result = run_dbt_commands.apply(args=[org.id, org.dbt.id, "task-id", None])
+
+    with pytest.raises(Exception, match="warehouse not found for org"):
+        result.maybe_throw()
