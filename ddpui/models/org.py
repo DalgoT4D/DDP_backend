@@ -245,7 +245,7 @@ class OrgWarehouse(models.Model):
     wtype = models.CharField(max_length=25)  # postgres, bigquery, snowflake
     name = models.CharField(max_length=256, default="", blank=True)
     credentials = models.CharField(max_length=1000)
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, unique=True)
     airbyte_destination_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
     )
