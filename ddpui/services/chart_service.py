@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from django.db.models import Q
 
 from ddpui.core.ownership import can_delete_resource
-from ddpui.models.visualization import Chart, ChartFavorite
+from ddpui.models.visualization import Chart
+from ddpui.models.favorite import FavoriteResourceType
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
+from ddpui.services.favorite_service import FavoriteService
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.chart_service")
@@ -351,8 +353,8 @@ class ChartService:
         Raises:
             ChartNotFoundError: If chart doesn't exist or doesn't belong to org
         """
-        chart = ChartService.get_chart(chart_id, org)
-        ChartFavorite.objects.get_or_create(chart=chart, org_user=orguser)
+        ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
+        FavoriteService.add_favorite(FavoriteResourceType.CHART, chart_id, orguser)
 
     @staticmethod
     def unfavorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
@@ -366,8 +368,8 @@ class ChartService:
         Raises:
             ChartNotFoundError: If chart doesn't exist or doesn't belong to org
         """
-        chart = ChartService.get_chart(chart_id, org)
-        ChartFavorite.objects.filter(chart=chart, org_user=orguser).delete()
+        ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
+        FavoriteService.remove_favorite(FavoriteResourceType.CHART, chart_id, orguser)
 
     @staticmethod
     def get_favorited_chart_ids(chart_ids: List[int], orguser: OrgUser) -> Set[int]:
@@ -380,10 +382,4 @@ class ChartService:
         Returns:
             Set of chart IDs favorited by this user
         """
-        if not chart_ids:
-            return set()
-        return set(
-            ChartFavorite.objects.filter(org_user=orguser, chart_id__in=chart_ids).values_list(
-                "chart_id", flat=True
-            )
-        )
+        return FavoriteService.get_favorited_ids(FavoriteResourceType.CHART, chart_ids, orguser)

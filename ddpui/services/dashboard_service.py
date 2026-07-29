@@ -20,15 +20,16 @@ from sqlalchemy.dialects import postgresql
 from ddpui.core.ownership import can_delete_resource
 from ddpui.models.dashboard import (
     Dashboard,
-    DashboardFavorite,
     DashboardFilter,
     DashboardLock,
     DashboardComponentType,
     DashboardFilterType,
 )
+from ddpui.models.favorite import FavoriteResourceType
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
+from ddpui.services.favorite_service import FavoriteService
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.core.charts.charts_service import (
@@ -315,8 +316,8 @@ class DashboardService:
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
         """
-        dashboard = DashboardService.get_dashboard(dashboard_id, org)
-        DashboardFavorite.objects.get_or_create(dashboard=dashboard, org_user=orguser)
+        DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
+        FavoriteService.add_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
 
     @staticmethod
     def unfavorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
@@ -330,8 +331,8 @@ class DashboardService:
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
         """
-        dashboard = DashboardService.get_dashboard(dashboard_id, org)
-        DashboardFavorite.objects.filter(dashboard=dashboard, org_user=orguser).delete()
+        DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
+        FavoriteService.remove_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
 
     @staticmethod
     def get_favorited_dashboard_ids(dashboard_ids: List[int], orguser: OrgUser) -> Set[int]:
@@ -344,12 +345,8 @@ class DashboardService:
         Returns:
             Set of dashboard IDs favorited by this user
         """
-        if not dashboard_ids:
-            return set()
-        return set(
-            DashboardFavorite.objects.filter(
-                org_user=orguser, dashboard_id__in=dashboard_ids
-            ).values_list("dashboard_id", flat=True)
+        return FavoriteService.get_favorited_ids(
+            FavoriteResourceType.DASHBOARD, dashboard_ids, orguser
         )
 
     @staticmethod

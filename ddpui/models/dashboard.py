@@ -233,25 +233,3 @@ class DashboardLock(models.Model):
 
     class Meta:
         db_table = "dashboard_lock"
-
-
-class DashboardFavorite(models.Model):
-    """Tracks which org users have favorited which dashboards. Favoriting is
-    personal — one user's favorite has no effect on any other user."""
-
-    dashboard = models.ForeignKey(Dashboard, on_delete=models.CASCADE, related_name="favorited_by")
-    org_user = models.ForeignKey(
-        OrgUser, on_delete=models.CASCADE, related_name="favorite_dashboards"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "dashboard_favorite"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["dashboard", "org_user"], name="unique_dashboard_favorite"
-            )
-        ]
-
-    def __str__(self):
-        return f"{self.org_user.user.email} favorited dashboard {self.dashboard_id}"
