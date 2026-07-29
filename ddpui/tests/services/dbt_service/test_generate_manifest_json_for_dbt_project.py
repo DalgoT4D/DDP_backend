@@ -55,22 +55,25 @@ def org_with_dbt_workspace(tmpdir_factory):
 
 
 @pytest.mark.django_db
-def test_generate_manifest_no_cli_profile_block(org_with_dbt_workspace: Org):
-    """Test that exception is raised when CLI profile block is missing"""
-
-    org_with_dbt_workspace.dbt.cli_profile_block = None
-
-    with pytest.raises(Exception) as exc_info:
-        generate_manifest_json_for_dbt_project(org_with_dbt_workspace, org_with_dbt_workspace.dbt)
-
-    assert "DBT CLI profile block not found" in str(exc_info.value)
+def test_generate_manifest_write_profiles_fails(org_with_dbt_workspace: Org):
+    """If write_dbt_profiles_yml raises, the exception is caught and re-raised
+    with a clear wrapping message so callers can distinguish setup failures from
+    dbt runtime failures."""
+    with patch(
+        "ddpui.ddpdbt.dbt_service.write_dbt_profiles_yml",
+        side_effect=Exception("warehouse not found for org"),
+    ):
+        with pytest.raises(Exception) as exc_info:
+            generate_manifest_json_for_dbt_project(
+                org_with_dbt_workspace, org_with_dbt_workspace.dbt
+            )
+        assert "Something went wrong while writing profiles.yml" in str(exc_info.value)
+        assert "warehouse not found for org" in str(exc_info.value)
 
 
 @pytest.mark.django_db
 def test_generate_manifest_success(org_with_dbt_workspace: Org):
     """Test successful manifest generation"""
-    # Create CLI profile block
-
     # Mock the subprocess call to simulate successful dbt docs generation
     mock_manifest = {"metadata": {"project_name": "test_project"}}
 
@@ -80,20 +83,9 @@ def test_generate_manifest_success(org_with_dbt_workspace: Org):
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(mock_manifest))
 
-    with patch(
-        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
-    ) as mock_get_profile, patch(
+    with patch("ddpui.ddpdbt.dbt_service.write_dbt_profiles_yml"), patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
     ) as mock_run_dbt:
-        # Mock the profile block content
-        mock_get_profile.return_value = {
-            "profile": {
-                "test_profile": {
-                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
-                }
-            }
-        }
-
         result = generate_manifest_json_for_dbt_project(
             org_with_dbt_workspace, org_with_dbt_workspace.dbt
         )
@@ -115,20 +107,9 @@ def test_generate_manifest_success(org_with_dbt_workspace: Org):
 def test_generate_manifest_error(org_with_dbt_workspace: Org):
     """Test error handling when dbt docs generate fails"""
 
-    with patch(
-        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
-    ) as mock_get_profile, patch(
+    with patch("ddpui.ddpdbt.dbt_service.write_dbt_profiles_yml"), patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
     ) as mock_run_dbt:
-        # Mock the profile block content
-        mock_get_profile.return_value = {
-            "profile": {
-                "test_profile": {
-                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
-                }
-            }
-        }
-
         # Mock dbt command to fail
         mock_run_dbt.side_effect = DbtCommandError("dbt deps failed", "command failed")
 

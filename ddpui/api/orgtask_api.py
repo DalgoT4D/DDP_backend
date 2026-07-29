@@ -231,11 +231,15 @@ def get_elemetary_task_lock(request):
 
 @orgtask_router.get("transform/")
 @has_permission(["can_view_orgtasks"])
-def get_prefect_transformation_tasks(request):
+def get_prefect_transformation_tasks(request, include_edr: bool = False):
     """Fetch manual (Transform-tab) dbt deployments for an org. Each response
     row represents one runnable deployment; the "primary" orgtask (the last
     one in the chain by seq, ignoring auto-managed dependencies) determines
-    the label/slug/command/lock/uuid shown."""
+    the label/slug/command/lock/uuid shown.
+
+    `include_edr=true` opts the generate-edr deployment into the response —
+    used by the pipeline form picker. Defaults to False so the Transform tab
+    and other callers don't see EDR."""
     orguser: OrgUser = request.orguser
 
     auto_managed_task_slugs = set(TRANSFORM_TASKS_DEPENDENCIES)
@@ -259,6 +263,8 @@ def get_prefect_transformation_tasks(request):
                 break
         if primary_dfot is None:
             continue
+        if primary_dfot.orgtask.task.slug == TASK_GENERATE_EDR and not include_edr:
+            continue
         primaries.append((dataflow, primary_dfot.orgtask))
 
     # gather all orgtask ids across all chained deployments so a lock held on
@@ -274,7 +280,7 @@ def get_prefect_transformation_tasks(request):
     res = []
     for dataflow, primary in primaries:
         command = None
-        if primary.task.type != TaskType.DBTCLOUD:
+        if primary.task.type not in (TaskType.DBTCLOUD, TaskType.EDR):
             command = primary.task.type + " " + primary.get_task_parameters()
 
         chain_ids = {dfot.orgtask_id for dfot in dataflow.datafloworgtasks.all()}
@@ -404,9 +410,7 @@ def post_run_prefect_org_task(
             raise HttpError(400, f"failed to run the shell task {org_task.task.slug}") from error
 
     elif org_task.task.slug == TASK_GENERATE_EDR:
-        task_config = setup_edr_send_report_task_config(
-            org_task, dbt_project_params.project_dir, dbt_project_params.venv_binary
-        )
+        task_config = setup_edr_send_report_task_config(org_task, dbt_project_params.project_dir)
 
         if task_config.flow_name is None:
             task_config.flow_name = f"{orguser.org.name}-edr-send-report"

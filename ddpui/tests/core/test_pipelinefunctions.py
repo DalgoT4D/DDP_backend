@@ -6,16 +6,23 @@ from django.contrib.auth.models import User
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, OrgDbt
 from ddpui.models.tasks import Task, OrgTask, TaskLock, TaskLockStatus, DataflowOrgTask, TaskType
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.ddpprefect import (
     AIRBYTESERVER,
+    DBTCORE,
+    SECRET,
     FLOW_RUN_RUNNING_STATE_TYPE,
     FLOW_RUN_COMPLETED_STATE_TYPE,
 )
 from ddpui.models.org_user import OrgUser, Role
-from ddpui.core.pipelinefunctions import fetch_pipeline_lock_v1, lock_tasks_for_dataflow
+from ddpui.core.pipelinefunctions import (
+    fetch_pipeline_lock_v1,
+    lock_tasks_for_dataflow,
+    setup_dbt_core_task_config,
+)
+from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_DBTRUN
 

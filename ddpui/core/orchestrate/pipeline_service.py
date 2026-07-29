@@ -100,6 +100,7 @@ class PipelineService:
         dbt_orgtasks = []
         git_orgtasks = []
         dbt_cloud_orgtasks = []
+        edr_orgtasks = []
         auto_managed_dbt_orgtasks = []
 
         # Task slugs that are auto-managed and should not come from frontend
@@ -130,6 +131,8 @@ class PipelineService:
                 dbt_orgtasks.append(org_task)
             elif org_task.task.type == TaskType.DBTCLOUD:
                 dbt_cloud_orgtasks.append(org_task)
+            elif org_task.task.type == TaskType.EDR:
+                edr_orgtasks.append(org_task)
 
         logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
         logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
@@ -166,7 +169,13 @@ class PipelineService:
                 raise PipelineConfigurationError("dbt cloud creds block not found")
 
         # get the deployment task configs
-        all_orgtasks = git_orgtasks + auto_managed_dbt_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks
+        all_orgtasks = (
+            git_orgtasks
+            + auto_managed_dbt_orgtasks
+            + dbt_orgtasks
+            + dbt_cloud_orgtasks
+            + edr_orgtasks
+        )
         task_configs, error = pipeline_with_orgtasks(
             org,
             all_orgtasks,
@@ -462,7 +471,7 @@ class PipelineService:
             {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
             for dataflow_orgtask in DataflowOrgTask.objects.filter(
                 dataflow=org_data_flow,
-                orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD],
+                orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD, TaskType.EDR],
             )
             .exclude(orgtask__task__slug__in=auto_managed_slugs)
             .all()

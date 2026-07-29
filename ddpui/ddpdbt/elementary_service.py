@@ -4,25 +4,22 @@ import os
 from pathlib import Path
 import subprocess
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
 import yaml
-import boto3
-import boto3.exceptions
 from ninja.errors import HttpError
 from django.utils import timezone as djantotimezone
 
 from ddpui import settings
-from ddpui.utils.s3_utils import download_file
-from ddpui.models.org import Org, OrgPrefectBlockv1
+from ddpui.utils.s3_utils import download_file, list_objects
+from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import OrgDataFlowv1
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask
-from ddpui.models.tasks import TaskProgressHashPrefix
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.taskprogress import TaskProgress
 from ddpui.utils.constants import TASK_GENERATE_EDR
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
+from ddpui.ddpdbt.dbthelpers import write_dbt_profiles_yml
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpprefect import prefect_service
@@ -30,7 +27,6 @@ from ddpui.utils.helpers import generate_hash_id, compare_semver
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
 )
-from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -38,11 +34,28 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui")
 
 
-def make_edr_report_s3_path(org: Org):
-    """make s3 path for elementary report"""
-    todays_date = datetime.today().strftime("%Y-%m-%d")
-    bucket_file_path = f"reports/{org.slug}.{todays_date}.html"
-    return bucket_file_path
+def make_edr_report_s3_path(org: Org, report_date: datetime | None = None):
+    """S3 path for the elementary report on a given date (default: today)."""
+    date_str = (report_date or datetime.today()).strftime("%Y-%m-%d")
+    return f"reports/{org.slug}.{date_str}.html"
+
+
+# Days to walk back looking for the most recent Elementary report in S3 when
+# today's isn't there yet. If nothing's landed in this window, EDR is likely
+# broken (or the org just set up) — surface empty state so the user notices.
+EDR_REPORT_LOOKBACK_DAYS = 3
+
+
+def get_edr_schedule(org: Org) -> dict | None:
+    """Return the cron schedule for this org's EDR send-report deployment,
+    or None if not configured."""
+    edr_orgtask = OrgTask.objects.filter(org=org, task__slug=TASK_GENERATE_EDR).first()
+    if edr_orgtask is None:
+        return None
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=edr_orgtask).first()
+    if dataflow_orgtask is None or dataflow_orgtask.dataflow is None:
+        return None
+    return {"cron": dataflow_orgtask.dataflow.cron}
 
 
 def elementary_setup_status(org: Org) -> dict:
@@ -159,36 +172,6 @@ def check_dbt_files(org: Org):
     return None, retval
 
 
-def create_elementary_tracking_tables(org: Org):
-    """creates elementary tracking tables"""
-
-    from ddpui.celeryworkers.tasks import run_dbt_commands
-
-    if org.dbt is None:
-        return {"error": "dbt is not configured for this client"}
-
-    task_id = str(uuid4())
-
-    hashkey = f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}"
-    taskprogress = TaskProgress(task_id, hashkey)
-
-    taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
-
-    # executes clean, deps, run
-    run_dbt_commands.delay(
-        org.id,
-        org.dbt.id,
-        task_id,
-        {
-            # run parameters
-            "options": {
-                "select": "elementary",
-            }
-        },
-    )
-    return {"task_id": task_id, "hashkey": hashkey}
-
-
 def extract_profile_from_generate_elementary_cli_profile(lines: list[str]):
     """skips the first few lines of the output until the profile yaml begins"""
     buffer = ""
@@ -217,32 +200,17 @@ def create_elementary_profile(org: Org):
 
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
-    # read profiles.yml is created either from disk or from the prefect block
+    # Ensure profiles.yml exists on disk — elementary CLI reads it to shape its
+    # own profile. Build it from warehouse creds if missing (same source-of-truth
+    # as the runner-flow Secret block).
     dbt_profile_file = Path(dbt_project_params.project_dir) / "profiles/profiles.yml"
-    dbt_profile = {}
     if not os.path.exists(dbt_profile_file):
-        # fetch from the cli profile block in prefect
-        logger.info("fetching dbt profile from prefect block")
-        dbt_cli_profile: OrgPrefectBlockv1 = org.dbt.cli_profile_block if org.dbt else None
-        if dbt_cli_profile is None:
-            raise HttpError(400, f"{dbt_profile_file} is missing")
+        logger.info("profiles.yml missing; generating from warehouse creds")
+        write_dbt_profiles_yml(org)
 
-        dbt_profile = prefect_service.get_dbt_cli_profile_block(dbt_cli_profile.block_name)[
-            "profile"
-        ]
-
-        # write the dbt profile to disk also since elementary cli will reference it while generating its profile
-        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
-        profile_filename = profile_dirname / "profiles.yml"
-        logger.info("writing dbt profile to " + str(profile_filename))
-        with open(profile_filename, "w", encoding="utf-8") as f:
-            yaml.safe_dump(dbt_profile, f)
-        logger.info("wrote dbt profile to %s", profile_filename)
-    else:
-        with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
-            dbt_profile = yaml.safe_load(dbt_profile_file_f)
-            logger.info("read dbt profile from %s", dbt_profile_file)
+    with open(dbt_profile_file, "r", encoding="utf-8") as dbt_profile_file_f:
+        dbt_profile = yaml.safe_load(dbt_profile_file_f)
+        logger.info("read dbt profile from %s", dbt_profile_file)
 
     # now we have to fix up the auth section by copying the dbt profile's auth section
     r = subprocess.check_output(
@@ -271,20 +239,24 @@ def create_elementary_profile(org: Org):
             raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
 
     dbt_profile_name = dbt_project["profile"]
-    dbt_profiles_target = dbt_project_params.target
 
     target = elementary_profile["elementary"].get("target", "default")
-    if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":
-        elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_profile[
-            "elementary"
-        ]["outputs"][target]["dataset"]
-    elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
-    elementary_profile["elementary"]["outputs"][target] = (
-        dbt_profile.get(dbt_profile_name, {}).get("outputs", {}).get(dbt_profiles_target, {})
-    )
 
-    # set schema to what the elementary.generate_elementary_cli_profile macro computed
-    elementary_profile["elementary"]["outputs"][target]["schema"] = elementary_schema
+    # Extract elementary's schema from the macro output. BQ emits it under
+    # `dataset` (BQ terminology), postgres/snowflake under `schema`.
+    if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":
+        elementary_schema = elementary_profile["elementary"]["outputs"][target]["dataset"]
+    else:
+        elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
+
+    # Base = dbt's output (all warehouse params — host/user/password/port/…).
+    # Override the schema with elementary's own, so elementary writes to its
+    # dedicated schema while reusing the same warehouse connection.
+    dbt_output = dbt_profile[dbt_profile_name]["outputs"][target]
+    elementary_profile["elementary"]["outputs"][target] = {
+        **dbt_output,
+        "schema": elementary_schema,
+    }
 
     elementary_profile_dir = Path(dbt_project_params.project_dir) / "elementary_profiles"
 
@@ -301,7 +273,14 @@ def create_elementary_profile(org: Org):
 
 
 def fetch_elementary_report(org: Org):
-    """fetch previously generated elementary report"""
+    """Fetch a previously generated Elementary report from S3.
+
+    Returns (error, result):
+      - No dbt / no elementary set up → (error_str, None)  — real preconditions
+      - No report in S3 yet (expected empty state) → (None, {"report_exists": False})
+      - Report present → (None, {"report_exists": True, "token", ...})
+      - S3 download failure → (error_str, None)  — genuine failure
+    """
     if org.dbt is None:
         return "dbt is not configured for this client", None
 
@@ -310,13 +289,41 @@ def fetch_elementary_report(org: Org):
     if not os.path.exists(project_dir / "elementary_profiles"):
         return "set up elementary profile first", None
 
-    bucket_file_path = make_edr_report_s3_path(org)
+    bucket = os.getenv("ELEMENTARY_S3_BUCKET")
+    schedule = get_edr_schedule(org)
+
+    # Find the newest report within the lookback window in a single S3 API
+    # call. Our key format `reports/<slug>.<YYYY-MM-DD>.html` puts ISO dates
+    # in lexicographical = chronological order, so:
+    #   - Prefix narrows to this org's reports
+    #   - StartAfter is a sentinel one day older than the cutoff — S3 returns
+    #     only keys strictly greater than this, so keys for the last
+    #     EDR_REPORT_LOOKBACK_DAYS days come through
+    #   - MaxKeys caps the response (window is small, ~3 keys expected)
+    # The last entry in the returned list is the newest report.
+    today = datetime.today()
+    prefix = f"reports/{org.slug}."
+    cutoff_sentinel = (
+        f"{prefix}{(today - timedelta(days=EDR_REPORT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')}"
+    )
+
     try:
-        s3response = download_file(os.getenv("ELEMENTARY_S3_BUCKET"), bucket_file_path)
-        logger.info("fetched s3response")
-    except boto3.exceptions.botocore.exceptions.ClientError:
-        return "report has not been generated", None
-    except Exception:
+        contents = list_objects(bucket, prefix=prefix, start_after=cutoff_sentinel, max_keys=10)
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        logger.error("failed to list elementary reports: %s", err)
+        return "error fetching elementary report", None
+
+    if not contents:
+        return None, {"report_exists": False, "schedule": schedule}
+
+    latest = contents[-1]
+    bucket_file_path = latest["Key"]
+
+    try:
+        s3response = download_file(bucket, bucket_file_path)
+        logger.info("fetched s3response for %s", bucket_file_path)
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        logger.error("failed to download elementary report: %s", err)
         return "error fetching elementary report", None
 
     report_html = s3response["Body"].read().decode("utf-8")
@@ -333,11 +340,13 @@ def fetch_elementary_report(org: Org):
     logger.info("created redis key %s", redis_key)
 
     return None, {
+        "report_exists": True,
         "token": token.hex,
         "created_on_utc": s3response["LastModified"].isoformat(),  # e.g. 2024-06-07T00:44:08+00:00
         "created_on_ist": as_ist(
             s3response["LastModified"]
         ).isoformat(),  # e.g. 2024-06-07T06:14:08+05:30
+        "schedule": schedule,
     }
 
 
@@ -418,8 +427,14 @@ def get_edr_version(org: Org):
         return "Not available"
 
 
-def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
-    """create the DataflowOrgTask for the orgtask"""
+def ensure_edr_sendreport_dataflow(org: Org, cron: str):
+    """Create the EDR send-report Prefect dataflow for the org. Idempotent:
+    if the dataflow already exists, returns success without touching Prefect.
+    Ensures the underlying OrgTask exists too — creates it if missing.
+    To change the schedule or task_config, delete the existing dataflow and
+    re-run."""
+    from ddpui.core.orgtaskfunctions import get_edr_send_report_task
+
     dbt_project_params: DbtProjectParams = None
     try:
         dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
@@ -427,16 +442,20 @@ def create_edr_sendreport_dataflow(org: Org, org_task: OrgTask, cron: str):
         logger.error(error)
         return None
 
-    if org_task.task.slug != TASK_GENERATE_EDR:
-        return {"error": "This is not TASK_GENERATE_EDR task"}
+    org_task = get_edr_send_report_task(org) or get_edr_send_report_task(org, create=True)
+    if org_task is None:
+        return {"error": "could not get or create EDR send-report OrgTask"}
 
-    datafloworgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-    if datafloworgtask is not None:
-        return {"error": "datafloworgtask already exists for for " + org.slug}
+    existing = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+    if existing is not None:
+        logger.info(f"EDR dataflow already exists for {org.slug} — skipping create")
+        return {
+            "status": "success",
+            "dataflow": existing.dataflow.name,
+            "already_existed": True,
+        }
 
-    task_config = setup_edr_send_report_task_config(
-        org_task, dbt_project_params.project_dir, dbt_project_params.venv_binary
-    )
+    task_config = setup_edr_send_report_task_config(org_task, dbt_project_params.project_dir)
 
     hash_code = generate_hash_id(8)
     deployment_name = f"pipeline-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
