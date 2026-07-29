@@ -36,6 +36,7 @@ from ddpui.api.user_org_api import (
     upload_logo_file,
     upload_logo_from_url,
     delete_logo,
+    post_organization_v1,
 )
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -54,7 +55,7 @@ from ddpui.models.org_user import (
     DeleteOrgUserPayload,
 )
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
-from ddpui.schemas.org_schema import OrgLogoUrlPayload
+from ddpui.schemas.org_schema import OrgLogoUrlPayload, CreateOrgSchema
 from ddpui.core.org_logo.exceptions import (
     OrgLogoNotFoundError,
     OrgLogoValidationError,
@@ -871,14 +872,16 @@ def test_post_organization_user_accept_invite_v1_creates_audit_logs(
     assert invitation_call_kwargs["org"] == orguser.org
     assert invitation_call_kwargs["resource_type"] == AuditLogResourceType.INVITATION
     assert invitation_call_kwargs["action"] == AuditLogAction.UPDATE
-    assert invitation_call_kwargs["resource_name"] == "invited_audit_email"
-    assert invitation_call_kwargs["resource_fields"] == {"status": "accepted"}
+    assert invitation_call_kwargs["resource_fields"] == {
+        "email": "invited_audit_email",
+        "status": "accepted",
+    }
 
     orguser_call_kwargs = mock_audit_log.call_args_list[1][1]
     assert orguser_call_kwargs["org"] == orguser.org
     assert orguser_call_kwargs["resource_type"] == AuditLogResourceType.ORG_USER
     assert orguser_call_kwargs["action"] == AuditLogAction.CREATE
-    assert orguser_call_kwargs["resource_name"] == "invited_audit_email"
+    assert orguser_call_kwargs["resource_fields"] == {"email": "invited_audit_email"}
 
 
 def test_post_organization_user_accept_invite_v1_lowercase_email(orguser, seed_db):
@@ -1215,6 +1218,73 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
         assert response == {"success": 1}
 
 
+@patch("ddpui.api.user_org_api.create_audit_log")
+def test_delete_organization_warehouses_v1_creates_audit_log(mock_audit_log, orguser, seed_db):
+    """Deleting the org's warehouse logs its wtype, captured before deletion."""
+    warehouse = OrgWarehouse.objects.create(
+        org=orguser.org, wtype="bigquery", airbyte_destination_id="dest-id-audit"
+    )
+    request = mock_request(orguser)
+
+    with patch("ddpui.api.user_org_api.OrgCleanupService") as MockCleanupService:
+        instance = MockCleanupService.return_value
+        instance.delete_orchestrate_pipelines = MagicMock()
+        instance.delete_warehouse = MagicMock()
+        instance.delete_transformation_layer = MagicMock()
+
+        delete_organization_warehouses_v1(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.WAREHOUSE
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == "dest-id-audit"
+    assert call_kwargs["resource_fields"] == {"wtype": "bigquery"}
+
+    warehouse.delete()
+
+
+@patch("ddpui.api.user_org_api.create_audit_log")
+@patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace.delay")
+@patch(
+    "ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1",
+    return_value=Mock(workspaceId="fake-workspace-id"),
+)
+def test_post_organization_v1_creates_audit_log(
+    mock_workspace, mock_delay, mock_audit_log, orguser, seed_db
+):
+    """Creating an org logs its name."""
+    # can_create_org is a super-admin-only permission
+    orguser.new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
+    orguser.save()
+
+    userattributes = UserAttributes.objects.filter(user=orguser.user).first()
+    if userattributes is None:
+        userattributes = UserAttributes.objects.create(user=orguser.user)
+    userattributes.can_create_orgs = True
+    userattributes.save()
+
+    request = mock_request(orguser)
+    payload = CreateOrgSchema(
+        name="Brand New Org",
+        base_plan="Free",
+        can_upgrade_plan=False,
+        subscription_duration="Yearly",
+        superset_included=False,
+    )
+
+    post_organization_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ORG
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_fields"] == {"name": "Brand New Org"}
+
+    # Cleanup
+    Org.objects.filter(name="Brand New Org").delete()
+
+
 # ================================================================================
 # Logout tests
 # ================================================================================
@@ -1391,7 +1461,6 @@ def assert_audit_log_call(
     orguser,
     resource_type,
     action,
-    resource_name="",
     resource_id="",
     resource_fields=None,
 ):
@@ -1403,8 +1472,6 @@ def assert_audit_log_call(
     assert call_kwargs["resource_type"] == resource_type
     assert call_kwargs["action"] == action
 
-    if resource_name != "":
-        assert call_kwargs["resource_name"] == resource_name
     if resource_id != "":
         assert call_kwargs["resource_id"] == resource_id
     if resource_fields is not None:
@@ -1469,8 +1536,7 @@ def test_change_password_creates_audit_log(mock_change_pwd, mock_audit_log, orgu
         mock_audit_log,
         orguser,
         AuditLogResourceType.AUTH,
-        AuditLogAction.UPDATE,
-        resource_name="password_change",
+        AuditLogAction.PASSWORD_CHANGED,
     )
 
 
@@ -1489,8 +1555,7 @@ def test_forgot_password_v2_creates_audit_log(mock_reset_pwd, mock_audit_log, or
         mock_audit_log,
         orguser,
         AuditLogResourceType.AUTH,
-        AuditLogAction.CREATE,  # CREATE because a reset token is generated
-        resource_name="password_reset_request",
+        AuditLogAction.PASSWORD_RESET_REQUESTED,
     )
 
 
@@ -1509,8 +1574,7 @@ def test_reset_password_creates_audit_log(mock_confirm, mock_audit_log, orguser)
         mock_audit_log,
         orguser,
         AuditLogResourceType.AUTH,
-        AuditLogAction.UPDATE,  # UPDATE because password is actually changed
-        resource_name="password_reset_completed",
+        AuditLogAction.PASSWORD_RESET_COMPLETED,
     )
 
 
@@ -1529,8 +1593,7 @@ def test_verify_email_creates_audit_log(mock_verify, mock_audit_log, orguser):
         mock_audit_log,
         orguser,
         AuditLogResourceType.AUTH,
-        AuditLogAction.UPDATE,
-        resource_name="email_verified",
+        AuditLogAction.EMAIL_VERIFIED,
     )
 
 
@@ -1550,7 +1613,7 @@ def test_delete_user_creates_audit_log(mock_delete, mock_audit_log, orguser, see
         orguser,
         AuditLogResourceType.ORG_USER,
         AuditLogAction.DELETE,
-        resource_name="user_to_delete@example.com",
+        resource_fields={"email": "user_to_delete@example.com"},
     )
 
 
@@ -1588,8 +1651,7 @@ def test_modify_user_role_creates_audit_log(mock_audit_log, orguser, seed_db):
         orguser,
         AuditLogResourceType.ORG_USER,
         AuditLogAction.UPDATE,
-        resource_name="target@example.com",
-        resource_fields={"role": account_manager_role.slug},
+        resource_fields={"email": "target@example.com", "role": account_manager_role.slug},
     )
 
     # Cleanup
@@ -1622,7 +1684,7 @@ def test_invite_user_creates_audit_log(mock_invite, mock_audit_log, orguser, see
         orguser,
         AuditLogResourceType.INVITATION,
         AuditLogAction.CREATE,
-        resource_name="newuser@example.com",
+        resource_fields={"email": "newuser@example.com"},
     )
 
 
@@ -1649,7 +1711,7 @@ def test_resend_invitation_creates_audit_log(mock_resend, mock_audit_log, orguse
         AuditLogResourceType.INVITATION,
         AuditLogAction.UPDATE,
         resource_id=str(invitation.id),
-        resource_fields={"action": "resent"},
+        resource_fields={"email": "test_resend@example.com", "action": "resent"},
     )
 
     # Cleanup
@@ -1677,7 +1739,7 @@ def test_delete_invitation_creates_audit_log(mock_audit_log, orguser):
         AuditLogResourceType.INVITATION,
         AuditLogAction.DELETE,
         resource_id=str(invitation_id),
-        resource_name="delete_test@example.com",
+        resource_fields={"email": "delete_test@example.com"},
     )
 
 
@@ -1701,8 +1763,11 @@ def test_upload_logo_creates_audit_log(mock_upload, mock_audit_log, orguser, see
     assert call_kwargs["org"] == orguser.org
     assert call_kwargs["orguser"] == orguser
     assert call_kwargs["resource_type"] == AuditLogResourceType.ORG
-    assert call_kwargs["resource_name"] == "logo"
     assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_fields"] == {
+        "org": orguser.org.name,
+        "logo_url": orguser.org.logo_url,
+    }
 
 
 @patch("ddpui.api.user_org_api.create_audit_log")
@@ -1719,5 +1784,5 @@ def test_delete_logo_creates_audit_log(mock_delete, mock_audit_log, orguser, see
         orguser,
         AuditLogResourceType.ORG,
         AuditLogAction.DELETE,
-        resource_name="logo",
+        resource_fields={"org": orguser.org.name},
     )

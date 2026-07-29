@@ -286,3 +286,9 @@ class CommentService:
             return Comment.objects.get(id=comment_id, org=org)
         except Comment.DoesNotExist:
             raise CommentNotFoundError(comment_id)
+
+    @staticmethod
+    def get_comment(comment_id: int, org: Org) -> Comment:
+        """Public accessor — e.g. for the API layer to read a comment's
+        current state (for audit logging) without querying the model directly."""
+        return CommentService._get_comment(comment_id, org)

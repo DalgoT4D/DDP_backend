@@ -49,8 +49,6 @@ class Migration(migrations.Migration):
                 ),
                 # ID of the specific resource
                 ("resource_id", models.CharField(blank=True, max_length=255)),
-                # Human-readable name of the resource
-                ("resource_name", models.CharField(blank=True, max_length=500)),
                 # What action was performed
                 (
                     "action",
@@ -65,6 +63,10 @@ class Migration(migrations.Migration):
                             ("export", "Export"),
                             ("login", "Login"),
                             ("logout", "Logout"),
+                            ("password_reset_requested", "Password Reset Requested"),
+                            ("password_reset_completed", "Password Reset Completed"),
+                            ("password_changed", "Password Changed"),
+                            ("email_verified", "Email Verified"),
                         ],
                     ),
                 ),

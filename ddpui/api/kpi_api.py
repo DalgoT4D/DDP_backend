@@ -111,7 +111,6 @@ def create_kpi(request, payload: KPICreate):
             orguser=orguser,
             resource_type=AuditLogResourceType.KPI,
             resource_id=str(kpi.id),
-            resource_name=kpi.name,
             action=AuditLogAction.CREATE,
             resource_fields=resource_fields,
         )
@@ -152,17 +151,19 @@ def update_kpi(request, kpi_id: int, payload: KPIUpdate):
         # in this request are logged, matching the exact criterion
         # KPIService itself uses (model_dump(exclude_unset=True)) to decide
         # what to touch. A field missing here means "not touched", not "cleared".
+        # "name" is the exception: always included (current value) so the row
+        # stays self-identifying without a separate name column.
         touched = payload.model_dump(exclude_unset=True)
         resource_fields = {k: v for k, v in touched.items() if k != "metric_id"}
         if "metric_id" in touched:
             resource_fields["metric"] = kpi.metric.name
+        resource_fields["name"] = kpi.name
 
         create_audit_log(
             org=org,
             orguser=orguser,
             resource_type=AuditLogResourceType.KPI,
             resource_id=str(kpi_id),
-            resource_name=kpi.name,
             action=AuditLogAction.UPDATE,
             resource_fields=resource_fields,
         )
@@ -199,8 +200,8 @@ def delete_kpi(request, kpi_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.KPI,
         resource_id=str(kpi_id),
-        resource_name=kpi_name,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": kpi_name},
     )
 
     return api_response(success=True)

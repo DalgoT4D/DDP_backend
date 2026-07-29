@@ -88,9 +88,9 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(orgdbt.id),
-            resource_name=org.slug,
             action=AuditLogAction.UPDATE,
             resource_fields={
+                "org": org.slug,
                 "gitrepo_url": orgdbt.gitrepo_url,
                 "is_repo_managed_by_system": orgdbt.is_repo_managed_by_system,
             },
@@ -184,6 +184,7 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
 
     # Record what was published in the audit log
     resource_fields = {
+        "org": org.slug,
         "commit_message": {"old": None, "new": payload.commit_message},
         "pushed_to_remote": {"old": None, "new": pushed},
     }
@@ -193,7 +194,6 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
-        resource_name=org.slug,
         action=AuditLogAction.UPDATE,
         resource_fields=resource_fields,
     )
@@ -254,8 +254,8 @@ def dbt_delete(request):
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(orgdbt.id),
-            resource_name=org.slug,
             action=AuditLogAction.DELETE,
+            resource_fields={"org": org.slug},
         )
 
     return from_orguser(orguser)
@@ -308,8 +308,8 @@ def post_dbt_git_pull(request):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
-        resource_name=orguser.org.slug,
         action=AuditLogAction.EXECUTE,
+        resource_fields={"org": orguser.org.slug},
     )
 
     return {"success": True}
@@ -353,8 +353,8 @@ def post_dbt_makedocs(request):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orguser.org.dbt.id) if orguser.org.dbt else str(orguser.org.id),
-        resource_name=orguser.org.slug,
         action=AuditLogAction.EXECUTE,
+        resource_fields={"org": orguser.org.slug},
     )
 
     return result
@@ -381,9 +381,8 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(org.dbt.id),
-        resource_name=org.slug,
         action=AuditLogAction.UPDATE,
-        resource_fields={"default_schema": payload.target_configs_schema},
+        resource_fields={"org": org.slug, "default_schema": payload.target_configs_schema},
     )
 
     cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
@@ -442,8 +441,8 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
-        resource_name=org.slug,
         action=AuditLogAction.EXECUTE,
+        resource_fields={"org": org.slug},
     )
 
     return {"task_id": task_id}

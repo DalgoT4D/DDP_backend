@@ -77,8 +77,8 @@ def create_dbt_project(request, payload: DbtProjectSchema):
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(orgdbt.id),
-            resource_name=org.slug,
             action=AuditLogAction.CREATE,
+            resource_fields={"name": org.slug},
         )
 
     return {"message": f"Project {org.slug} created successfully"}
@@ -149,8 +149,8 @@ def delete_dbt_project(request, project_name: str, force_delete: bool = False):
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(orgdbt.id),
-            resource_name=project_name,
             action=AuditLogAction.DELETE,
+            resource_fields={"name": project_name},
         )
 
     logger.warning(f"DELETION COMPLETED: org={org.slug}, project={project_name}")
@@ -196,8 +196,8 @@ def sync_sources(request):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
-        resource_name=org.slug,
         action=AuditLogAction.EXECUTE,
+        resource_fields={"name": org.slug},
     )
 
     return {"task_id": task_id, "hashkey": hashkey}
@@ -484,8 +484,8 @@ def delete_orgdbtmodel(request, model_uuid, canvas_lock_id: str = None, cascade:
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(model_uuid),
-        resource_name=orgdbt_model.name,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": orgdbt_model.name},
     )
 
     return {"success": 1}
@@ -645,8 +645,8 @@ def post_create_src_model_node(request, dbtmodel_uuid: str):
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(canvas_node.uuid),
-            resource_name=canvas_node.name,
             action=AuditLogAction.CREATE,
+            resource_fields={"name": canvas_node.name},
         )
 
         return convert_canvas_node_to_frontend_format(canvas_node)
@@ -778,8 +778,8 @@ def post_add_operation_node(request, payload: CreateOperationNodePayload):
                 orguser=orguser,
                 resource_type=AuditLogResourceType.DBT,
                 resource_id=str(canvas_node.uuid),
-                resource_name=canvas_node.name,
                 action=AuditLogAction.CREATE,
+                resource_fields={"name": canvas_node.name},
             )
 
             return convert_canvas_node_to_frontend_format(canvas_node)
@@ -922,8 +922,8 @@ def put_operation_node(request, node_uuid: str, payload: EditOperationNodePayloa
                 orguser=orguser,
                 resource_type=AuditLogResourceType.DBT,
                 resource_id=str(curr_operation_node.uuid),
-                resource_name=curr_operation_node.name,
                 action=AuditLogAction.UPDATE,
+                resource_fields={"name": curr_operation_node.name},
             )
             return convert_canvas_node_to_frontend_format(curr_operation_node)
 
@@ -1034,8 +1034,8 @@ def post_terminate_operation_node(
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(model_node.uuid),
-            resource_name=model_node.name,
             action=AuditLogAction.CREATE,
+            resource_fields={"name": model_node.name},
         )
         return convert_canvas_node_to_frontend_format(model_node)
 
@@ -1086,8 +1086,8 @@ def delete_canvas_node(request, node_uuid: str):
             orguser=orguser,
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(node_uuid),
-            resource_name=canvas_node_name,
             action=AuditLogAction.DELETE,
+            resource_fields={"name": canvas_node_name},
         )
         return {"success": 1}
     except CanvasNode.DoesNotExist:
@@ -1185,8 +1185,8 @@ def sync_remote_dbtproject_to_canvas(request):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
-        resource_name=org.slug,
         action=AuditLogAction.UPDATE,
+        resource_fields={"name": org.slug},
     )
 
     return result

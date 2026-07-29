@@ -37,6 +37,7 @@ from ddpui.api.charts_api import (
     bulk_delete_charts,
     get_chart_dashboards,
     get_chart_data,
+    download_chart_data_csv,
     BulkDeleteRequest,
 )
 from ddpui.schemas.chart_schemas import ChartCreate, ChartUpdate, ChartDataPayload
@@ -721,7 +722,6 @@ def test_create_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org_wa
     assert call_kwargs["orguser"] == orguser
     assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
     assert call_kwargs["action"] == AuditLogAction.CREATE
-    assert call_kwargs["resource_name"] == "Audit Log Test Chart"
 
     resource_fields = call_kwargs["resource_fields"]
     assert resource_fields["title"] == "Audit Log Test Chart"
@@ -757,6 +757,21 @@ def test_update_chart_creates_audit_log(mock_audit_log, seed_db, orguser, sample
 
 
 @patch("ddpui.api.charts_api.create_audit_log")
+def test_update_chart_untouched_title_still_logged(mock_audit_log, seed_db, orguser, sample_chart):
+    """title is always logged (the resource's current value), even when the
+    request didn't touch it, so the row stays self-identifying without a
+    separate name column."""
+    request = mock_request(orguser)
+    payload = ChartUpdate(description="Updated description only")
+
+    update_chart(request, sample_chart.id, payload)
+
+    resource_fields = mock_audit_log.call_args[1]["resource_fields"]
+    assert resource_fields["title"] == sample_chart.title
+    assert resource_fields["description"] == "Updated description only"
+
+
+@patch("ddpui.api.charts_api.create_audit_log")
 def test_delete_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org):
     """Test that deleting a chart creates an audit log entry."""
     # Create a chart to delete
@@ -781,7 +796,7 @@ def test_delete_chart_creates_audit_log(mock_audit_log, seed_db, orguser, org):
     assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
     assert call_kwargs["action"] == AuditLogAction.DELETE
     assert call_kwargs["resource_id"] == str(chart_id)
-    assert call_kwargs["resource_name"] == "Chart To Delete"
+    assert call_kwargs["resource_fields"] == {"title": "Chart To Delete"}
 
 
 @patch("ddpui.api.charts_api.create_audit_log")
@@ -819,4 +834,37 @@ def test_bulk_delete_charts_creates_audit_log(mock_audit_log, seed_db, orguser, 
     assert call_kwargs["org"] == orguser.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
     assert call_kwargs["action"] == AuditLogAction.DELETE
-    assert "2 charts" in call_kwargs["resource_name"]
+    assert set(call_kwargs["resource_fields"]["titles"]) == {
+        "Bulk Delete Chart 1",
+        "Bulk Delete Chart 2",
+    }
+
+
+@patch("ddpui.api.charts_api.create_audit_log")
+@patch("ddpui.api.charts_api.stream_chart_data_csv", return_value=iter([b"col1,col2\n"]))
+def test_download_chart_data_csv_creates_audit_log(
+    mock_stream, mock_audit_log, seed_db, orguser, org_warehouse
+):
+    """CSV export has no real chart_id today — the frontend doesn't send one
+    for the authenticated export flow yet (will be threaded through later
+    alongside PNG/PDF export work). resource_id stays empty rather than
+    faking an identifier out of schema.table."""
+    request = mock_request(orguser)
+    payload = ChartDataPayload(
+        chart_type="bar",
+        schema_name="public",
+        table_name="users",
+        extra_config={
+            "dimension_column": "date",
+            "metrics": [{"column": "amount", "aggregation": "sum"}],
+        },
+    )
+
+    download_chart_data_csv(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CHART
+    assert call_kwargs["action"] == AuditLogAction.EXPORT
+    assert call_kwargs["resource_id"] == ""
+    assert call_kwargs["resource_fields"] == {"format": "csv"}

@@ -138,8 +138,8 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgtask.uuid),
-        resource_name=orgtask.task.slug,
         action=AuditLogAction.CREATE,
+        resource_fields={"name": orgtask.task.slug},
     )
 
     return {
@@ -229,8 +229,8 @@ def post_system_transformation_tasks(request):
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(org.dbt.id),
-        resource_name=f"{org.slug}-transform-tasks",
         action=AuditLogAction.CREATE,
+        resource_fields={"name": f"{org.slug}-transform-tasks"},
     )
 
     return {"success": 1}
@@ -483,8 +483,8 @@ def post_run_prefect_org_task(
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(org_task.uuid),
-        resource_name=org_task.task.slug,
         action=AuditLogAction.EXECUTE,
+        resource_fields={"name": org_task.task.slug},
     )
 
     return result
@@ -549,8 +549,8 @@ def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argume
         orguser=orguser,
         resource_type=AuditLogResourceType.DBT,
         resource_id=task_uuid,
-        resource_name=task_slug,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": task_slug},
     )
 
     return {"success": 1}

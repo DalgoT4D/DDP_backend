@@ -242,7 +242,6 @@ class TestKPIAuditLogs:
         assert call_kwargs["org"] == orguser.org
         assert call_kwargs["resource_type"] == AuditLogResourceType.KPI
         assert call_kwargs["action"] == AuditLogAction.CREATE
-        assert call_kwargs["resource_name"] == "Audit Log Test KPI"
 
         # Metric resolved to its real name, not a bare metric_id.
         resource_fields = call_kwargs["resource_fields"]
@@ -308,7 +307,9 @@ class TestKPIAuditLogs:
             resource_fields = call_kwargs["resource_fields"]
             assert resource_fields["metric"] == "Other API KPI Metric"
             assert "metric_id" not in resource_fields
-            assert "name" not in resource_fields
+            # name is always included now (current value), so the row stays
+            # self-identifying without a separate name column.
+            assert resource_fields["name"] == sample_kpi.name
         finally:
             # sample_kpi now references other_metric (PROTECT) — delete the KPI
             # first so other_metric's teardown doesn't hit a ProtectedError.
@@ -339,4 +340,4 @@ class TestKPIAuditLogs:
         assert call_kwargs["resource_type"] == AuditLogResourceType.KPI
         assert call_kwargs["action"] == AuditLogAction.DELETE
         assert call_kwargs["resource_id"] == str(kpi_id)
-        assert call_kwargs["resource_name"] == "KPI To Delete"
+        assert call_kwargs["resource_fields"] == {"name": "KPI To Delete"}

@@ -21,8 +21,8 @@ Example usage in an API endpoint:
             orguser=request.orguser,
             resource_type=AuditLogResourceType.DASHBOARD,
             resource_id=str(dashboard_id),
-            resource_name="My Dashboard",
             action=AuditLogAction.DELETE,
+            resource_fields={"title": "My Dashboard"},
         )
 
         return {"success": True}
@@ -45,7 +45,6 @@ def create_audit_log(
     resource_type: str,
     resource_id: str,
     action: str,
-    resource_name: str = "",
     resource_fields: dict | None = None,
 ) -> None:
     """
@@ -60,7 +59,6 @@ def create_audit_log(
         resource_type: Type of resource (use AuditLogResourceType values)
         resource_id: ID of the specific resource (as string)
         action: The action performed (use AuditLogAction values)
-        resource_name: Human-readable name (optional, e.g., "Sales Dashboard")
         resource_fields: Dict of changes (optional, e.g., {"name": {"old": "A", "new": "B"}})
 
     Example:
@@ -69,8 +67,8 @@ def create_audit_log(
             orguser=orguser,
             resource_type=AuditLogResourceType.DASHBOARD,
             resource_id="123",
-            resource_name="Sales Dashboard",
             action=AuditLogAction.DELETE,
+            resource_fields={"title": "Sales Dashboard"},
         )
     """
     try:
@@ -84,7 +82,6 @@ def create_audit_log(
                 "orguser_email": orguser.user.email if orguser else "",
                 "resource_type": resource_type,
                 "resource_id": resource_id,
-                "resource_name": resource_name,
                 "action": action,
                 "resource_fields": resource_fields or {},
             },
@@ -104,7 +101,6 @@ def _write_audit_log(
     orguser_email: str,
     resource_type: str,
     resource_id: str,
-    resource_name: str,
     action: str,
     resource_fields: dict,
 ) -> None:
@@ -123,7 +119,6 @@ def _write_audit_log(
             orguser_email=orguser_email,
             resource_type=resource_type,
             resource_id=resource_id,
-            resource_name=resource_name,
             action=action,
             resource_fields=resource_fields,
         )

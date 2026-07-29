@@ -44,6 +44,10 @@ class AuditLogAction(models.TextChoices):
     EXPORT = "export", "Export"
     LOGIN = "login", "Login"
     LOGOUT = "logout", "Logout"
+    PASSWORD_RESET_REQUESTED = "password_reset_requested", "Password Reset Requested"
+    PASSWORD_RESET_COMPLETED = "password_reset_completed", "Password Reset Completed"
+    PASSWORD_CHANGED = "password_changed", "Password Changed"
+    EMAIL_VERIFIED = "email_verified", "Email Verified"
 
 
 class AuditLog(models.Model):
@@ -53,7 +57,7 @@ class AuditLog(models.Model):
     Each entry captures:
     - WHO performed the action (orguser + orguser_email)
     - WHICH organization it belongs to (org)
-    - WHAT resource was affected (resource_type, resource_id, resource_name)
+    - WHAT resource was affected (resource_type, resource_id, resource_fields)
     - WHAT action was taken (action)
     - WHAT changed (resource_fields)
     - WHEN it happened (timestamp)
@@ -91,9 +95,6 @@ class AuditLog(models.Model):
 
     # The ID of the specific resource (e.g., dashboard ID "123")
     resource_id = models.CharField(max_length=255, blank=True)
-
-    # Human-readable name (e.g., "Sales Dashboard")
-    resource_name = models.CharField(max_length=500, blank=True)
 
     # What action was performed (create, update, delete, etc.)
     action = models.CharField(max_length=50, choices=AuditLogAction.choices)

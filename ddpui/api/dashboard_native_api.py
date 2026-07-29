@@ -123,7 +123,6 @@ def create_dashboard(request, payload: DashboardCreate):
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(dashboard.id),
-        resource_name=dashboard.title,
         action=AuditLogAction.CREATE,
         resource_fields={
             "title": payload.title,
@@ -197,9 +196,8 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             orguser=orguser,
             resource_type=AuditLogResourceType.DASHBOARD,
             resource_id=str(dashboard_id),
-            resource_name=dashboard.title,
             action=AuditLogAction.UPDATE,
-            resource_fields=resource_fields,
+            resource_fields={**resource_fields, "title": dashboard.title},
         )
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
@@ -230,8 +228,8 @@ def delete_dashboard(request, dashboard_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(dashboard_id),
-        resource_name=dashboard_name,
         action=AuditLogAction.DELETE,
+        resource_fields={"title": dashboard_name},
     )
 
     return {"success": True}
@@ -293,8 +291,8 @@ def duplicate_dashboard(request, dashboard_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(new_dashboard.id),
-        resource_name=new_dashboard.title,
         action=AuditLogAction.CREATE,
+        resource_fields={"title": new_dashboard.title},
     )
 
     return DashboardResponse(**DashboardService.get_dashboard_response(new_dashboard))
@@ -542,9 +540,11 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(dashboard_id),
-        resource_name=dashboard.title,
         action=AuditLogAction.SHARE,
-        resource_fields={"is_public": {"old": not is_public, "new": is_public}},
+        resource_fields={
+            "title": dashboard.title,
+            "is_public": {"old": not is_public, "new": is_public},
+        },
     )
 
     return DashboardShareResponse(**response_data)
@@ -619,9 +619,11 @@ def set_personal_landing_dashboard(request, dashboard_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(dashboard_id),
-        resource_name=dashboard.title,
         action=AuditLogAction.UPDATE,
-        resource_fields={"personal_landing_page": {"old": False, "new": True}},
+        resource_fields={
+            "title": dashboard.title,
+            "personal_landing_page": {"old": False, "new": True},
+        },
     )
 
     return LandingPageResponse(success=True, message="Dashboard set as personal landing page")
@@ -678,9 +680,11 @@ def set_org_default_dashboard(request, dashboard_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.DASHBOARD,
         resource_id=str(dashboard_id),
-        resource_name=dashboard.title,
         action=AuditLogAction.UPDATE,
-        resource_fields={"is_org_default": {"old": False, "new": True}},
+        resource_fields={
+            "title": dashboard.title,
+            "is_org_default": {"old": False, "new": True},
+        },
     )
 
     return LandingPageResponse(

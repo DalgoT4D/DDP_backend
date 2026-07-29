@@ -78,7 +78,6 @@ def _record_audit_log(
     resource_type,
     action,
     resource_id: str = "",
-    resource_name: str = "",
     resource_fields: dict | None = None,
 ):
     """Emit an audit log for the current org user when available."""
@@ -90,7 +89,6 @@ def _record_audit_log(
         orguser=orguser,
         resource_type=resource_type,
         resource_id=resource_id,
-        resource_name=resource_name,
         action=action,
         resource_fields=resource_fields,
     )
@@ -340,7 +338,7 @@ def delete_organization_users_v1(request, payload: DeleteOrgUserPayload):
         orguser,
         AuditLogResourceType.ORG_USER,
         AuditLogAction.DELETE,
-        resource_name=deleted_email,
+        resource_fields={"email": deleted_email},
     )
 
     return {"success": 1}
@@ -423,8 +421,10 @@ def post_modify_orguser_role(request, payload: OrgUserUpdateNewRole):
         AuditLogResourceType.ORG_USER,
         AuditLogAction.UPDATE,
         resource_id=str(orguser_to_be_assigned.id),
-        resource_name=orguser_to_be_assigned.user.email,
-        resource_fields={"role": role_to_be_assgined.slug},
+        resource_fields={
+            "email": orguser_to_be_assigned.user.email,
+            "role": role_to_be_assgined.slug,
+        },
     )
 
     return {"success": 1}
@@ -446,7 +446,6 @@ def post_organization_warehouse(request, payload: OrgWarehouseSchema):
         orguser=orguser,
         resource_type=AuditLogResourceType.WAREHOUSE,
         resource_id=warehouse.airbyte_destination_id if warehouse else "",
-        resource_name=payload.wtype,
         action=AuditLogAction.CREATE,
         # Never log payload.airbyteConfig — warehouse connection credentials.
         resource_fields={"wtype": payload.wtype, "name": payload.name},
@@ -478,7 +477,7 @@ def post_forgot_password_v2(
     if error:
         raise HttpError(400, error)
 
-    # Audit log: password reset requested (CREATE because a reset token is generated)
+    # Audit log: password reset requested
     user = User.objects.filter(email__iexact=payload.email).first()
     if user:
         orguser = OrgUser.objects.filter(user=user).first()
@@ -488,8 +487,7 @@ def post_forgot_password_v2(
                 orguser=orguser,
                 resource_type=AuditLogResourceType.AUTH,
                 resource_id="",
-                resource_name="password_reset_request",
-                action=AuditLogAction.CREATE,
+                action=AuditLogAction.PASSWORD_RESET_REQUESTED,
             )
 
     return {"success": 1}
@@ -502,15 +500,14 @@ def post_reset_password(request, payload: ResetPasswordSchema):  # pylint: disab
     if error:
         raise HttpError(400, error)
 
-    # Audit log: password reset completed (UPDATE because password is actually changed)
+    # Audit log: password reset completed
     if orguser and orguser.org:
         create_audit_log(
             org=orguser.org,
             orguser=orguser,
             resource_type=AuditLogResourceType.AUTH,
             resource_id="",
-            resource_name="password_reset_completed",
-            action=AuditLogAction.UPDATE,
+            action=AuditLogAction.PASSWORD_RESET_COMPLETED,
         )
 
     return {"success": 1}
@@ -530,8 +527,7 @@ def change_password(request, payload: ChangePasswordSchema):  # pylint: disable=
         orguser=orguser,
         resource_type=AuditLogResourceType.AUTH,
         resource_id="",
-        resource_name="password_change",
-        action=AuditLogAction.UPDATE,
+        action=AuditLogAction.PASSWORD_CHANGED,
     )
 
     return {"success": 1}
@@ -561,8 +557,7 @@ def post_verify_email(request, payload: VerifyEmailSchema):  # pylint: disable=u
             orguser=orguser,
             resource_type=AuditLogResourceType.AUTH,
             resource_id="",
-            resource_name="email_verified",
-            action=AuditLogAction.UPDATE,
+            action=AuditLogAction.EMAIL_VERIFIED,
         )
 
     return {"success": 1}
@@ -585,14 +580,14 @@ def post_organization_user_invite_v1(request, payload: NewInvitationSchema):
 
     # Audit log: invitation sent
     # resource_id is empty because NewInvitationSchema has no id field;
-    # the invited email in resource_name is sufficient to identify who was invited
+    # the invited email in resource_fields is sufficient to identify who was invited
     create_audit_log(
         org=orguser.org,
         orguser=orguser,
         resource_type=AuditLogResourceType.INVITATION,
         resource_id="",
-        resource_name=payload.invited_email,
         action=AuditLogAction.CREATE,
+        resource_fields={"email": payload.invited_email},
     )
 
     return retval
@@ -624,17 +619,16 @@ def post_organization_user_accept_invite_v1(
                 orguser=orguser,
                 resource_type=AuditLogResourceType.INVITATION,
                 resource_id="",
-                resource_name=invited_email,
                 action=AuditLogAction.UPDATE,
-                resource_fields={"status": "accepted"},
+                resource_fields={"email": invited_email, "status": "accepted"},
             )
             create_audit_log(
                 org=invited_by_org,
                 orguser=orguser,
                 resource_type=AuditLogResourceType.ORG_USER,
                 resource_id=str(orguser.id),
-                resource_name=invited_email,
                 action=AuditLogAction.CREATE,
+                resource_fields={"email": invited_email},
             )
 
     return retval
@@ -671,9 +665,11 @@ def post_resend_invitation(request, invitation_id):
         orguser=orguser,
         resource_type=AuditLogResourceType.INVITATION,
         resource_id=str(invitation_id),
-        resource_name=invitation.invited_email if invitation else "",
         action=AuditLogAction.UPDATE,
-        resource_fields={"action": "resent"},
+        resource_fields={
+            "email": invitation.invited_email if invitation else "",
+            "action": "resent",
+        },
     )
 
     return {"success": 1}
@@ -701,8 +697,8 @@ def delete_invitation(request, invitation_id):
             orguser=orguser,
             resource_type=AuditLogResourceType.INVITATION,
             resource_id=str(invitation_id),
-            resource_name=invited_email,
             action=AuditLogAction.DELETE,
+            resource_fields={"email": invited_email},
         )
 
     return {"success": 1}
@@ -741,8 +737,8 @@ def post_organization_v1(request, payload: CreateOrgSchema):
         orguser=orguser,
         resource_type=AuditLogResourceType.ORG,
         resource_id=str(org.id),
-        resource_name=org.name,
         action=AuditLogAction.CREATE,
+        resource_fields={"name": org.name},
     )
 
     logger.info(f"{orguser.user.email} created new org {org.name}")
@@ -777,8 +773,8 @@ def delete_organization_warehouses_v1(request):
         orguser=orguser,
         resource_type=AuditLogResourceType.WAREHOUSE,
         resource_id=warehouse_destination_id or str(org.id),
-        resource_name=warehouse_type,
         action=AuditLogAction.DELETE,
+        resource_fields={"wtype": warehouse_type},
     )
 
     return {"success": 1}
@@ -855,7 +851,6 @@ def post_login_v2(request, payload: LoginPayload):
                 orguser=orguser,
                 resource_type=AuditLogResourceType.AUTH,
                 resource_id="",
-                resource_name="",
                 action=AuditLogAction.LOGIN,
             )
 
@@ -969,8 +964,8 @@ def upload_logo_file(request, file: UploadedFile = File(...)):
             orguser=orguser,
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(orguser.org.id),
-            resource_name="logo",
             action=AuditLogAction.UPDATE if had_logo else AuditLogAction.CREATE,
+            resource_fields={"org": org.name, "logo_url": org.logo_url},
         )
 
         return api_response(
@@ -1005,8 +1000,8 @@ def upload_logo_from_url(request, payload: OrgLogoUrlPayload):
             orguser=orguser,
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(orguser.org.id),
-            resource_name="logo",
             action=AuditLogAction.UPDATE if had_logo else AuditLogAction.CREATE,
+            resource_fields={"org": org.name, "logo_url": org.logo_url},
         )
 
         return api_response(
@@ -1036,8 +1031,8 @@ def delete_logo(request):
             orguser=orguser,
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(orguser.org.id),
-            resource_name="logo",
             action=AuditLogAction.DELETE,
+            resource_fields={"org": orguser.org.name},
         )
 
         return api_response(success=True, message="Logo deleted successfully")

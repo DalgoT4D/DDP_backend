@@ -513,6 +513,7 @@ def test_create_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample
     assert call_kwargs["resource_id"] == str(alert.id)
 
     resource_fields = call_kwargs["resource_fields"]
+    assert resource_fields["name"] == alert.name
     assert resource_fields["source"] == "Alert API Metric"
     assert resource_fields["schedule_cron"] == "0 9 * * *"
     assert resource_fields["delivery_channels"] == ["email", "slack"]
@@ -551,6 +552,59 @@ def test_update_alert_creates_audit_log_only_touched_fields(
     assert "recipients" not in resource_fields
     assert "source" not in resource_fields
     assert "slack_webhook_url" not in resource_fields
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_update_alert_untouched_name_still_logged(mock_audit_log, seed_db, orguser, sample_metric):
+    """name is always logged (the alert's current value), even when the
+    request didn't touch it, so the row stays self-identifying without a
+    separate name column."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    update_alert(
+        request,
+        created.id,
+        AlertUpdate(condition=ThresholdCondition(operator="gt", value=100)),
+    )
+
+    resource_fields = mock_audit_log.call_args[1]["resource_fields"]
+    assert resource_fields["name"] == created.name
+    assert resource_fields["condition"] == {"operator": "gt", "value": 100.0}
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_toggle_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample_metric):
+    """Toggling is_active logs the alert's name alongside the new state."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    toggle_alert(request, created.id, AlertToggle(is_active=False))
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ALERT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {"name": created.name, "is_active": False}
+
+
+@patch("ddpui.api.alert_api.create_audit_log")
+def test_delete_alert_creates_audit_log(mock_audit_log, seed_db, orguser, sample_metric):
+    """Deleting an alert logs its name, captured before deletion."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+    mock_audit_log.reset_mock()
+
+    delete_alert(request, created.id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.ALERT
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == str(created.id)
+    assert call_kwargs["resource_fields"] == {"name": created.name}
 
 
 # ── Logs ────────────────────────────────────────────────────────────────────

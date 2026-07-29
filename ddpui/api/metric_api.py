@@ -113,7 +113,6 @@ def create_metric(request, payload: MetricPayload):
             orguser=orguser,
             resource_type=AuditLogResourceType.METRIC,
             resource_id=str(metric.id),
-            resource_name=metric.name,
             action=AuditLogAction.CREATE,
             resource_fields={
                 "name": payload.name,
@@ -211,7 +210,6 @@ def update_metric(request, metric_id: int, payload: MetricPayload):
             orguser=orguser,
             resource_type=AuditLogResourceType.METRIC,
             resource_id=str(metric_id),
-            resource_name=metric.name,
             action=AuditLogAction.UPDATE,
             resource_fields={
                 "name": payload.name,
@@ -268,8 +266,8 @@ def delete_metric(request, metric_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.METRIC,
         resource_id=str(metric_id),
-        resource_name=metric_name,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": metric_name},
     )
 
     return api_response(success=True)

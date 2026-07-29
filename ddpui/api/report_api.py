@@ -91,7 +91,6 @@ def create_snapshot(request, payload: SnapshotCreate):
             orguser=orguser,
             resource_type=AuditLogResourceType.REPORT,
             resource_id=str(s.id),
-            resource_name=s.title,
             action=AuditLogAction.CREATE,
             resource_fields={
                 "title": payload.title,
@@ -217,9 +216,8 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
                 orguser=orguser,
                 resource_type=AuditLogResourceType.REPORT,
                 resource_id=str(snapshot_id),
-                resource_name=snapshot.title,
                 action=AuditLogAction.UPDATE,
-                resource_fields={"summary": payload.summary},
+                resource_fields={"title": snapshot.title, "summary": payload.summary},
             )
 
         return api_response(
@@ -253,8 +251,8 @@ def delete_snapshot(request, snapshot_id: int):
             orguser=orguser,
             resource_type=AuditLogResourceType.REPORT,
             resource_id=str(snapshot_id),
-            resource_name=snapshot_name,
             action=AuditLogAction.DELETE,
+            resource_fields={"title": snapshot_name},
         )
 
         return api_response(
@@ -339,9 +337,11 @@ def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
             orguser=orguser,
             resource_type=AuditLogResourceType.REPORT,
             resource_id=str(snapshot_id),
-            resource_name=snapshot.title,
             action=AuditLogAction.SHARE,
-            resource_fields={"is_public": {"old": not payload.is_public, "new": payload.is_public}},
+            resource_fields={
+                "title": snapshot.title,
+                "is_public": {"old": not payload.is_public, "new": payload.is_public},
+            },
         )
 
         return api_response(success=True, data=ShareResponse(**response_data))
@@ -489,8 +489,12 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
             orguser=orguser,
             resource_type=AuditLogResourceType.COMMENT,
             resource_id=str(comment.id),
-            resource_name=f"Comment on snapshot {snapshot_id}",
             action=AuditLogAction.CREATE,
+            resource_fields={
+                "content": payload.content,
+                "target_type": comment.target_type,
+                "snapshot": comment.snapshot.title if comment.snapshot else "",
+            },
         )
 
         return api_response(
@@ -526,8 +530,12 @@ def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentU
             orguser=orguser,
             resource_type=AuditLogResourceType.COMMENT,
             resource_id=str(comment_id),
-            resource_name=f"Comment on snapshot {snapshot_id}",
             action=AuditLogAction.UPDATE,
+            resource_fields={
+                "content": payload.content,
+                "target_type": comment.target_type,
+                "snapshot": comment.snapshot.title if comment.snapshot else "",
+            },
         )
 
         return api_response(
@@ -549,6 +557,7 @@ def delete_comment(request, snapshot_id: int, comment_id: int):
     org = orguser.org
 
     try:
+        comment = CommentService.get_comment(comment_id, org)
         CommentService.delete_comment(
             comment_id=comment_id,
             org=org,
@@ -560,8 +569,12 @@ def delete_comment(request, snapshot_id: int, comment_id: int):
             orguser=orguser,
             resource_type=AuditLogResourceType.COMMENT,
             resource_id=str(comment_id),
-            resource_name=f"Comment on snapshot {snapshot_id}",
             action=AuditLogAction.DELETE,
+            resource_fields={
+                "content": comment.content,
+                "target_type": comment.target_type,
+                "snapshot": comment.snapshot.title if comment.snapshot else "",
+            },
         )
 
         return api_response(success=True, message="Comment deleted")

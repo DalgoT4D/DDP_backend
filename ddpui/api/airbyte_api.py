@@ -141,7 +141,6 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         orguser=orguser,
         resource_type=AuditLogResourceType.DATA_SOURCE,
         resource_id=source["sourceId"],
-        resource_name=source.get("name", payload.name or ""),
         action=AuditLogAction.CREATE,
         # Never log payload.config — it holds connection credentials for
         # whichever source type this is (host, port, username, password, etc).
@@ -184,7 +183,6 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         orguser=orguser,
         resource_type=AuditLogResourceType.DATA_SOURCE,
         resource_id=source["sourceId"],
-        resource_name=source.get("name", payload.name or ""),
         action=AuditLogAction.UPDATE,
         # Never log payload.config — may contain connection credentials.
         resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
@@ -348,7 +346,6 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         orguser=orguser,
         resource_type=AuditLogResourceType.WAREHOUSE,
         resource_id=destination["destinationId"],
-        resource_name=destination.get("destinationName", payload.name or ""),
         action=AuditLogAction.CREATE,
         # Never log payload.config — warehouse connection credentials.
         resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
@@ -500,7 +497,6 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         orguser=orguser,
         resource_type=AuditLogResourceType.CONNECTION,
         resource_id=res.get("connectionId", ""),
-        resource_name=res.get("name", payload.name or ""),
         action=AuditLogAction.CREATE,
         resource_fields={
             "name": payload.name,
@@ -568,7 +564,6 @@ def put_airbyte_connection_v1(
         orguser=orguser,
         resource_type=AuditLogResourceType.CONNECTION,
         resource_id=connection_id,
-        resource_name=payload.name or res.get("name", ""),
         action=AuditLogAction.UPDATE,
         resource_fields={
             "name": payload.name,
@@ -604,8 +599,8 @@ def delete_airbyte_connection_v1(request, connection_id):
         orguser=orguser,
         resource_type=AuditLogResourceType.CONNECTION,
         resource_id=connection_id,
-        resource_name=connection_name,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": connection_name},
     )
 
     return {"success": 1}
@@ -662,7 +657,6 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
         orguser=orguser,
         resource_type=AuditLogResourceType.WAREHOUSE,
         resource_id=destination["destinationId"],
-        resource_name=payload.name or destination.get("destinationName", ""),
         action=AuditLogAction.UPDATE,
         # Never log payload.config — warehouse connection credentials.
         resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
@@ -697,8 +691,8 @@ def delete_airbyte_source_v1(request, source_id):
         orguser=orguser,
         resource_type=AuditLogResourceType.DATA_SOURCE,
         resource_id=source_id,
-        resource_name=source_name,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": source_name},
     )
 
     return {"success": 1}
@@ -747,13 +741,17 @@ def schedule_update_connection_schema(
         raise HttpError(400, "create an airbyte workspace first")
 
     airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
+
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    connection_name = connection_meta.connection_name if connection_meta else connection_id
+
     create_audit_log(
         org=orguser.org,
         orguser=orguser,
         resource_type=AuditLogResourceType.CONNECTION,
         resource_id=connection_id,
-        resource_name=connection_id,
         action=AuditLogAction.UPDATE,
+        resource_fields={"name": connection_name, "cron": payload.cron},
     )
 
     return {"success": 1}

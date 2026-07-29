@@ -75,7 +75,6 @@ class TestWriteAuditLog:
             orguser_email=test_orguser.user.email,
             resource_type=AuditLogResourceType.DASHBOARD,
             resource_id="123",
-            resource_name="Test Dashboard",
             action=AuditLogAction.CREATE,
             resource_fields={},
         )
@@ -90,7 +89,6 @@ class TestWriteAuditLog:
         assert log.orguser_email == "test@example.com"
         assert log.resource_type == AuditLogResourceType.DASHBOARD
         assert log.resource_id == "123"
-        assert log.resource_name == "Test Dashboard"
         assert log.action == AuditLogAction.CREATE
 
         # Verify close was called (important for real usage)
@@ -107,7 +105,6 @@ class TestWriteAuditLog:
             orguser_email=test_orguser.user.email,
             resource_type=AuditLogResourceType.DASHBOARD,
             resource_id="123",
-            resource_name="Test Dashboard",
             action=AuditLogAction.UPDATE,
             resource_fields=changes,
         )
@@ -124,7 +121,6 @@ class TestWriteAuditLog:
             orguser_email="",
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(test_org.id),
-            resource_name=test_org.name,
             action=AuditLogAction.CREATE,
             resource_fields={},
         )
@@ -147,7 +143,6 @@ class TestWriteAuditLog:
             orguser_email="",
             resource_type=AuditLogResourceType.ORG,
             resource_id="123",
-            resource_name="Test",
             action=AuditLogAction.CREATE,
             resource_fields={},
         )
@@ -179,7 +174,6 @@ class TestCreateAuditLog:
             orguser=test_orguser,
             resource_type=AuditLogResourceType.CHART,
             resource_id="456",
-            resource_name="Test Chart",
             action=AuditLogAction.CREATE,
             resource_fields={"title": {"old": None, "new": "Test Chart"}},
         )
@@ -196,7 +190,6 @@ class TestCreateAuditLog:
             orguser_email="test@example.com",
             resource_type=AuditLogResourceType.CHART,
             resource_id="456",
-            resource_name="Test Chart",
             action=AuditLogAction.CREATE,
             resource_fields={"title": {"old": None, "new": "Test Chart"}},
         )
@@ -209,7 +202,6 @@ class TestCreateAuditLog:
             orguser=None,
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(test_org.id),
-            resource_name=test_org.name,
             action=AuditLogAction.CREATE,
         )
 

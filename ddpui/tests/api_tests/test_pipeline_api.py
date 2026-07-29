@@ -1036,6 +1036,39 @@ def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):
     assert TaskLock.objects.filter(orgtask=org_task).count() == 1
 
 
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_deployment_flow_run=Mock(
+        return_value={
+            "flow_run_id": "fake-flow-run-id",
+            "name": "fake-flow-run-name",
+        }
+    ),
+    lock_tasks_for_deployment=Mock(return_value=[]),
+)
+def test_post_run_prefect_org_deployment_task_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Running a pipeline logs the pipeline's real name (fetched from
+    OrgDataFlowv1), not just the deployment_id repeated."""
+    request = mock_request(orguser_transform_tasks)
+
+    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_DBTRUN).first()
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+    post_run_prefect_org_deployment_task(request, dataflow_orgtask.dataflow.deployment_id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.EXECUTE
+    assert call_kwargs["resource_fields"] == {"name": dataflow_orgtask.dataflow.name}
+
+    # Cleanup
+    TaskLock.objects.filter(orgtask=org_task).delete()
+
+
 @patch("ddpui.api.pipeline_api.prefect_service.get_flow_runs_by_deployment_id_v1")
 @patch("ddpui.api.pipeline_api.prefect_service.get_flow_run_graphs")
 @patch("ddpui.api.pipeline_api.airbyte_service.get_connection")
@@ -1413,6 +1446,7 @@ def test_post_prefect_dataflow_v1_creates_audit_log(
     assert call_kwargs["orguser"] == orguser_transform_tasks
     assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
     assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_fields"]["name"] == "audit-test-flow"
     assert call_kwargs["resource_fields"]["cron"] == ""
     assert call_kwargs["resource_fields"]["connections"] == []
     assert call_kwargs["resource_fields"]["transform_tasks"] == []
@@ -1500,6 +1534,9 @@ def test_delete_prefect_dataflow_v1_creates_audit_log(
     assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
     assert call_kwargs["action"] == AuditLogAction.DELETE
     assert call_kwargs["resource_id"] == "delete-audit-dep-id"
+    # Name is fetched before deletion (nothing left to look it up by
+    # afterward) — not just the deployment_id repeated.
+    assert call_kwargs["resource_fields"] == {"name": "delete-audit-test"}
 
 
 @patch("ddpui.api.pipeline_api.create_audit_log")
@@ -1559,7 +1596,7 @@ def test_put_prefect_dataflow_v1_creates_audit_log(
     assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_id"] == "update-audit-dep-id"
-    assert call_kwargs["resource_name"] == "updated-name"
+    assert call_kwargs["resource_fields"]["name"] == "updated-name"
     assert call_kwargs["resource_fields"]["cron"] == "0 5 * * *"
     assert call_kwargs["resource_fields"]["connections"] == ["Nice Connection Name"]
     assert call_kwargs["resource_fields"]["transform_tasks"] == [transform_task.task.label]
@@ -1594,5 +1631,10 @@ def test_post_deployment_set_schedule_creates_audit_log(
     assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_id"] == "schedule-audit-dep-id"
+    assert call_kwargs["resource_fields"]["name"] == "schedule-audit-test"
+    assert call_kwargs["resource_fields"]["schedule_active"] == {
+        "old": "inactive",
+        "new": "active",
+    }
 
     dataflow.delete()

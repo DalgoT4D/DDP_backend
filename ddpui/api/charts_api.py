@@ -996,8 +996,7 @@ def download_chart_data_csv(
         org=orguser.org,
         orguser=orguser,
         resource_type=AuditLogResourceType.CHART,
-        resource_id=f"{payload.schema_name}.{payload.table_name}",
-        resource_name=payload.table_name,
+        resource_id="",
         action=AuditLogAction.EXPORT,
         resource_fields={"format": "csv"},
     )
@@ -1140,7 +1139,6 @@ def create_chart(request, payload: ChartCreate):
             orguser=orguser,
             resource_type=AuditLogResourceType.CHART,
             resource_id=str(chart.id),
-            resource_name=chart.title,
             action=AuditLogAction.CREATE,
             resource_fields={
                 "title": payload.title,
@@ -1202,7 +1200,9 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 
         # ChartService.update_chart only touches a field when it's not None —
         # a genuine partial patch. Only fields actually present in this
-        # request are logged, using that exact same criterion.
+        # request are logged, using that exact same criterion. "title" is the
+        # exception: always included (current value, not just when touched)
+        # so the row stays self-identifying without a separate name column.
         raw_resource_fields = {
             "title": payload.title,
             "description": payload.description,
@@ -1211,14 +1211,15 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             "table_name": payload.table_name,
             "extra_config": extra_config,
         }
+        resource_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+        resource_fields["title"] = chart.title
         create_audit_log(
             org=org,
             orguser=orguser,
             resource_type=AuditLogResourceType.CHART,
             resource_id=str(chart_id),
-            resource_name=chart.title,
             action=AuditLogAction.UPDATE,
-            resource_fields={k: v for k, v in raw_resource_fields.items() if v is not None},
+            resource_fields=resource_fields,
         )
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
@@ -1262,8 +1263,8 @@ def delete_chart(request, chart_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.CHART,
         resource_id=str(chart_id),
-        resource_name=chart_name,
         action=AuditLogAction.DELETE,
+        resource_fields={"title": chart_name},
     )
 
     return {"success": True}
@@ -1294,8 +1295,8 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
                 orguser=orguser,
                 resource_type=AuditLogResourceType.CHART,
                 resource_id=",".join(str(cid) for cid in payload.chart_ids),
-                resource_name=f"{deleted_count} charts",
                 action=AuditLogAction.DELETE,
+                resource_fields={"titles": list(chart_names.values())},
             )
 
         return {

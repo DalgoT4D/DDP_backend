@@ -268,9 +268,9 @@ def create_alert(request, payload: AlertCreate):
         orguser=orguser,
         resource_type=AuditLogResourceType.ALERT,
         resource_id=str(alert.id),
-        resource_name=alert.name,
         action=AuditLogAction.CREATE,
         resource_fields={
+            "name": alert.name,
             "source": _resolve_alert_source_label(
                 orguser.org_id,
                 payload.alert_type,
@@ -362,14 +362,16 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
         "is_active": payload.is_active,
     }
 
+    resource_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+    resource_fields["name"] = alert.name
+
     create_audit_log(
         org=orguser.org,
         orguser=orguser,
         resource_type=AuditLogResourceType.ALERT,
         resource_id=str(alert.id),
-        resource_name=alert.name,
         action=AuditLogAction.UPDATE,
-        resource_fields={k: v for k, v in raw_resource_fields.items() if v is not None},
+        resource_fields=resource_fields,
     )
 
     return _build_alert_response(alert)
@@ -390,9 +392,8 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         orguser=orguser,
         resource_type=AuditLogResourceType.ALERT,
         resource_id=str(alert.id),
-        resource_name=alert.name,
         action=AuditLogAction.UPDATE,
-        resource_fields={"is_active": payload.is_active},
+        resource_fields={"name": alert.name, "is_active": payload.is_active},
     )
 
     return _build_alert_response(alert)
@@ -415,8 +416,8 @@ def delete_alert(request, alert_id: int):
         orguser=orguser,
         resource_type=AuditLogResourceType.ALERT,
         resource_id=str(alert_id),
-        resource_name=alert.name,
         action=AuditLogAction.DELETE,
+        resource_fields={"name": alert.name},
     )
 
     return api_response(success=True)

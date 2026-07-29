@@ -397,7 +397,6 @@ class TestMetricAuditLogs:
         assert call_kwargs["org"] == orguser.org
         assert call_kwargs["resource_type"] == AuditLogResourceType.METRIC
         assert call_kwargs["action"] == AuditLogAction.CREATE
-        assert call_kwargs["resource_name"] == "Audit Log Test Metric"
 
         resource_fields = call_kwargs["resource_fields"]
         assert resource_fields["name"] == "Audit Log Test Metric"
@@ -467,4 +466,4 @@ class TestMetricAuditLogs:
         assert call_kwargs["resource_type"] == AuditLogResourceType.METRIC
         assert call_kwargs["action"] == AuditLogAction.DELETE
         assert call_kwargs["resource_id"] == str(metric_id)
-        assert call_kwargs["resource_name"] == "Metric To Delete"
+        assert call_kwargs["resource_fields"] == {"name": "Metric To Delete"}

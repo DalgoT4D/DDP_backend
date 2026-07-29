@@ -38,11 +38,15 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
+    toggle_dashboard_sharing,
+    set_personal_landing_dashboard,
+    set_org_default_dashboard,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     DashboardTabSchema,
+    DashboardShareToggle,
     FilterCreate,
     FilterUpdate,
 )
@@ -718,7 +722,6 @@ def test_create_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser):
     assert call_kwargs["orguser"] == orguser
     assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
     assert call_kwargs["action"] == AuditLogAction.CREATE
-    assert call_kwargs["resource_name"] == "Audit Log Test Dashboard"
 
     resource_fields = call_kwargs["resource_fields"]
     assert resource_fields["title"] == "Audit Log Test Dashboard"
@@ -827,7 +830,10 @@ def test_update_dashboard_mixed_changed_and_unchanged_fields(
 
     mock_audit_log.assert_called_once()
     resource_fields = mock_audit_log.call_args[1]["resource_fields"]
-    assert resource_fields == {"description": "A brand new description"}
+    assert resource_fields == {
+        "description": "A brand new description",
+        "title": sample_dashboard.title,
+    }
 
 
 @patch("ddpui.api.dashboard_native_api.create_audit_log")
@@ -860,7 +866,9 @@ def test_update_dashboard_tabs_logs_full_tabs_json(
             "components": {"chart-1": {"type": "chart", "config": {"chartId": 42}}},
         }
     ]
-    assert "title" not in resource_fields
+    # The dashboard's own title is always included for self-sufficiency,
+    # even when this update only touched tabs.
+    assert resource_fields["title"] == sample_dashboard.title
 
 
 @patch("ddpui.api.dashboard_native_api.create_audit_log")
@@ -892,7 +900,7 @@ def test_delete_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, or
     assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
     assert call_kwargs["action"] == AuditLogAction.DELETE
     assert call_kwargs["resource_id"] == str(dashboard_id)
-    assert call_kwargs["resource_name"] == "Dashboard To Delete"
+    assert call_kwargs["resource_fields"] == {"title": "Dashboard To Delete"}
 
     # Cleanup
     dashboard_keep.delete()
@@ -913,6 +921,71 @@ def test_duplicate_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser,
     # Duplicate uses CREATE action since it creates a new dashboard
     assert call_kwargs["action"] == AuditLogAction.CREATE
     assert call_kwargs["resource_id"] == str(response.id)
+    assert call_kwargs["resource_fields"] == {"title": response.title}
 
     # Cleanup
     Dashboard.objects.filter(id=response.id).delete()
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_toggle_dashboard_sharing_creates_audit_log(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """Test that toggling dashboard sharing creates an audit log entry with the title."""
+    request = mock_request(orguser)
+    payload = DashboardShareToggle(is_public=True)
+
+    toggle_dashboard_sharing(request, sample_dashboard.id, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    assert call_kwargs["action"] == AuditLogAction.SHARE
+    assert call_kwargs["resource_id"] == str(sample_dashboard.id)
+    assert call_kwargs["resource_fields"] == {
+        "title": sample_dashboard.title,
+        "is_public": {"old": False, "new": True},
+    }
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_set_personal_landing_dashboard_creates_audit_log(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """Test that setting a personal landing dashboard creates an audit log entry with the title."""
+    request = mock_request(orguser)
+
+    set_personal_landing_dashboard(request, sample_dashboard.id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == str(sample_dashboard.id)
+    assert call_kwargs["resource_fields"] == {
+        "title": sample_dashboard.title,
+        "personal_landing_page": {"old": False, "new": True},
+    }
+
+
+@patch("ddpui.api.dashboard_native_api.create_audit_log")
+def test_set_org_default_dashboard_creates_audit_log(
+    mock_audit_log, seed_db, orguser, sample_dashboard
+):
+    """Test that setting the org default dashboard creates an audit log entry with the title."""
+    request = mock_request(orguser)
+
+    set_org_default_dashboard(request, sample_dashboard.id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == str(sample_dashboard.id)
+    assert call_kwargs["resource_fields"] == {
+        "title": sample_dashboard.title,
+        "is_org_default": {"old": False, "new": True},
+    }
