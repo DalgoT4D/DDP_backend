@@ -531,6 +531,45 @@ class TestKPIData:
         assert result["data"]["current_value"] == 500.0
         assert result["data"]["rag_status"] == "red"
 
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
+    def test_data_string_value_no_crash(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """String values from CASE expressions are preserved; RAG is None."""
+        mock_trend.return_value = [
+            {"period": "Jan 2026", "value": "Delayed"},
+            {"period": "Feb 2026", "value": "On Track"},
+        ]
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+
+        result = KPIService.get_kpi_data(sample_kpi.id, org)
+        assert result["data"]["current_value"] == "On Track"
+        assert result["data"]["rag_status"] is None
+        assert len(result["data"]["periods"]) == 2
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+
+# ── String Value Tests ─────────────────────────────────────────────────
+
+
+class TestStringValueKPI:
+    @patch("ddpui.core.kpi.kpi_service.KPIService._compute_trend")
+    def test_summary_string_values(self, mock_trend, orguser, org, sample_kpi, seed_db):
+        """String KPI values don't crash summary; RAG/achievement/pop_change are None."""
+        mock_trend.return_value = [
+            {"period": "Jan 2026", "value": "Delayed"},
+            {"period": "Feb 2026", "value": "On Track"},
+        ]
+        OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+
+        results = KPIService.get_kpi_summary(org)
+        item = next(r for r in results if r["id"] == sample_kpi.id)
+        assert item["current_value"] == "On Track"
+        assert item["rag_status"] is None
+        assert item["achievement_pct"] is None
+        assert item["period_over_period_change"] is None
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
 
 # ── Annotation Tests ──────────────────────────────────────────────────
 

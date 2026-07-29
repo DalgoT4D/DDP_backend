@@ -362,8 +362,8 @@ class KPIService:
                         current_value = trend[-1]["value"]
                     if (
                         len(trend) >= 2
-                        and trend[-1]["value"] is not None
-                        and trend[-2]["value"] is not None
+                        and isinstance(trend[-1]["value"], (int, float))
+                        and isinstance(trend[-2]["value"], (int, float))
                         and trend[-2]["value"] != 0
                     ):
                         pop_change = round(
@@ -374,8 +374,9 @@ class KPIService:
                 except Exception as e:
                     logger.error(f"Error computing trend for KPI {kpi.id}: {e}")
 
+            numeric_value = current_value if isinstance(current_value, (int, float)) else None
             rag_status = compute_rag_status(
-                current_value,
+                numeric_value,
                 kpi.target_value,
                 kpi.direction,
                 kpi.green_threshold_pct,
@@ -383,8 +384,8 @@ class KPIService:
             )
 
             achievement_pct = None
-            if current_value is not None and kpi.target_value and kpi.target_value != 0:
-                achievement_pct = round((current_value / kpi.target_value) * 100, 1)
+            if numeric_value is not None and kpi.target_value and kpi.target_value != 0:
+                achievement_pct = round((numeric_value / kpi.target_value) * 100, 1)
 
             results.append(
                 {
@@ -456,11 +457,16 @@ class KPIService:
             period_val = row.get("period")
             value_val = row.get("value")
             period_label = format_time_grain_label(period_val, sql_grain)
+            if value_val is not None:
+                try:
+                    value_val = float(value_val)
+                except (TypeError, ValueError):
+                    pass  # keep original value (e.g. string from CASE expression)
             periods.append(
                 {
                     "period": period_label,
                     "period_date": str(period_val) if period_val is not None else None,
-                    "value": float(value_val) if value_val is not None else None,
+                    "value": value_val,
                 }
             )
 
@@ -587,10 +593,11 @@ class KPIService:
             logger.error(f"Error computing KPI trend: {e}")
 
         current_value = periods[-1]["value"] if periods else None
+        numeric_value = current_value if isinstance(current_value, (int, float)) else None
 
         # RAG
         rag_status = compute_rag_status(
-            current_value,
+            numeric_value,
             kpi_response.target_value,
             kpi_response.direction,
             kpi_response.green_threshold_pct,
