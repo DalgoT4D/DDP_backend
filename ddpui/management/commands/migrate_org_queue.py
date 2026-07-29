@@ -8,16 +8,23 @@ from django.core.management.base import BaseCommand, CommandError
 from ddpui.models.org import (
     Org,
     OrgDataFlowv1,
+    OrgPrefectBlockv1,
     QueueConfigUpdateSchema,
     QueueDetailsSchema,
 )
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskType, Task
-from ddpui.ddpprefect import SCHEDULED_PIPELINE_QUEUE, CONNECTION_SYNC_QUEUE
-from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put
+from ddpui.ddpprefect import SCHEDULED_PIPELINE_QUEUE, CONNECTION_SYNC_QUEUE, SECRET
+from ddpui.ddpprefect.prefect_service import prefect_get, prefect_put, update_dataflow_v1
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
 from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITPULL, TASK_GITCLONE
 from ddpui.utils.unified_logger import get_logger
 from ddpui.core.orchestrate.pipeline_service import PipelineService
+from ddpui.core.orgdbt_manager import DbtProjectManager
+from ddpui.core.pipelinefunctions import (
+    setup_git_pull_shell_task_config,
+    setup_git_clone_shell_task_config,
+)
+from ddpui.ddpdbt.elementary_service import ensure_edr_sendreport_dataflow
 
 # Mapping from queue type to the EKS queue name
 EKS_QUEUE_NAME_MAP = {
@@ -288,10 +295,14 @@ class Command(BaseCommand):
                 # Update queue/workpool for all dataflows first
                 self.update_dataflow_queue(dataflow, new_queue, final_workpool)
 
-                # For scheduled pipelines, update pipeline which will handle git steps automatically
-                # This runs after queue update so the schedule toggle picks up the new queue
+                # Swap git-pull ↔ git-clone in deployment params based on is_workpool_eks.
+                # DB config is already updated above so is_workpool_eks is authoritative.
                 if queue_type == "scheduled_pipeline_queue":
                     self.update_scheduled_pipeline(dataflow)
+                elif queue_type == "transform_task_queue":
+                    self.update_transform_task_deployment(dataflow, is_workpool_eks)
+                elif queue_type == "edr_queue":
+                    self.update_edr_deployment(dataflow, is_workpool_eks)
                 self.stdout.write(f"  ✓ Updated dataflow: {dataflow.deployment_name}")
                 updated_count += 1
             except Exception as e:
@@ -396,3 +407,78 @@ class Command(BaseCommand):
 
         except Exception as e:
             raise Exception(f"Pipeline update error: {str(e)}")
+
+    def update_transform_task_deployment(self, dataflow: OrgDataFlowv1, is_workpool_eks: bool):
+        """Swap git-pull ↔ git-clone in a manual dbt deployment's task params"""
+        try:
+            org = dataflow.org
+
+            dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+
+            gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=SECRET, block_name__contains="git-pull"
+            ).first()
+
+            prefect_deployment = prefect_get(f"deployments/{dataflow.deployment_id}")
+            if not prefect_deployment:
+                raise Exception(f"Deployment {dataflow.deployment_id} not found in Prefect")
+
+            tasks = prefect_deployment["parameters"]["config"]["tasks"]
+
+            git_task_index = next(
+                (i for i, t in enumerate(tasks) if t.get("slug") in (TASK_GITPULL, TASK_GITCLONE)),
+                None,
+            )
+            if git_task_index is None:
+                self.stdout.write(f"  → No git step in {dataflow.deployment_name}, skipping")
+                return
+
+            old_slug = tasks[git_task_index]["slug"]
+            seq = tasks[git_task_index].get("seq", 1)
+
+            if is_workpool_eks:
+                git_orgtask = PipelineService.get_or_create_git_clone_orgtask(org)
+                new_git_config = setup_git_clone_shell_task_config(
+                    git_orgtask,
+                    dbt_project_params.clients_base_dir,
+                    dbt_project_params.project_dir_relative,
+                    gitpull_secret_block,
+                    seq=seq,
+                    gitrepo_url=org.dbt.gitrepo_url if org.dbt else "",
+                ).to_json()
+            else:
+                git_orgtask = PipelineService.get_or_create_git_pull_orgtask(org)
+                new_git_config = setup_git_pull_shell_task_config(
+                    git_orgtask,
+                    dbt_project_params.project_dir,
+                    gitpull_secret_block,
+                    seq=seq,
+                ).to_json()
+
+            tasks[git_task_index] = new_git_config
+            prefect_deployment["parameters"]["config"]["tasks"] = tasks
+
+            update_dataflow_v1(
+                dataflow.deployment_id,
+                PrefectDataFlowUpdateSchema3(
+                    cron=dataflow.cron,
+                    deployment_params=prefect_deployment["parameters"],
+                ),
+            )
+
+            self.stdout.write(f"  → Swapped {old_slug} → {new_git_config['slug']} in {dataflow.deployment_name}")
+            logger.info(f"Swapped git step in transform deployment {dataflow.deployment_name}")
+
+        except Exception as e:
+            raise Exception(f"Transform task git step update error: {str(e)}") from e
+
+    def update_edr_deployment(self, dataflow: OrgDataFlowv1, is_workpool_eks: bool):
+        """Rebuild EDR deployment params to add/remove git-clone based on is_workpool_eks.
+        ensure_edr_sendreport_dataflow reads org.get_queue_config() which is already updated."""
+        try:
+            ensure_edr_sendreport_dataflow(dataflow.org, dataflow.cron or "")
+            action = "added git-clone" if is_workpool_eks else "removed git-clone"
+            self.stdout.write(f"  → EDR deployment updated ({action}) for {dataflow.org.slug}")
+            logger.info(f"Updated EDR deployment {dataflow.deployment_name}")
+        except Exception as e:
+            raise Exception(f"EDR git step update error: {str(e)}") from e
