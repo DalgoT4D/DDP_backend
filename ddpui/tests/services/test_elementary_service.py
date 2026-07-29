@@ -693,7 +693,7 @@ def test_ensure_edr_sendreport_dataflow(
     ensure_edr_sendreport_dataflow(org, cron)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
-    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir")
+    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir", seq=0)
     mock_generate_hash_id.assert_called_once_with(8)
 
     # The create_dataflow_v1 should be called with the org's edr_queue config
@@ -717,6 +717,119 @@ def test_ensure_edr_sendreport_dataflow(
     assert hasattr(queue_details, "workpool")
     assert queue_details.name == EDR_WORK_QUEUE
     assert queue_details.workpool == "test_workpool"
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.update_dataflow_v1")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
+@patch("ddpui.core.orgtaskfunctions.get_edr_send_report_task")
+def test_ensure_edr_sendreport_dataflow_updates_existing(
+    mock_get_edr_send_report_task,
+    mock_create_dataflow_v1,
+    mock_update_dataflow_v1,
+    mock_setup_edr_send_report_task_config,
+    mock_gather_dbt_project_params,
+    edr_deployment_org,
+):
+    """when a deployment already exists the command updates it instead of skipping"""
+    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
+    cron = "0 6 * * *"
+
+    orgtask = OrgTask.objects.filter(
+        org=edr_deployment_org, task__slug=TASK_GENERATE_EDR
+    ).first()
+    mock_get_edr_send_report_task.return_value = orgtask
+    mock_gather_dbt_project_params.return_value = Mock(
+        venv_binary="venv/bin", project_dir="project-dir"
+    )
+    mock_setup_edr_send_report_task_config.return_value = Mock(
+        to_json=Mock(return_value={"task": "config"})
+    )
+
+    result = ensure_edr_sendreport_dataflow(edr_deployment_org, cron)
+
+    assert result["status"] == "success"
+    assert result.get("updated") is True
+
+    # update was called, create was not
+    mock_update_dataflow_v1.assert_called_once()
+    mock_create_dataflow_v1.assert_not_called()
+
+    # the deployment_params passed to update contains the edr task config
+    update_payload = mock_update_dataflow_v1.call_args[0][1]
+    assert update_payload.cron == cron
+    assert update_payload.deployment_params["config"]["tasks"] == [{"task": "config"}]
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
+@patch("ddpui.ddpdbt.elementary_service.setup_git_clone_shell_task_config")
+@patch("ddpui.ddpdbt.elementary_service.generate_hash_id")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
+@patch("ddpui.core.orgtaskfunctions.get_edr_send_report_task")
+def test_ensure_edr_sendreport_dataflow_eks(
+    mock_get_edr_send_report_task,
+    mock_create_dataflow_v1,
+    mock_generate_hash_id,
+    mock_setup_git_clone,
+    mock_setup_edr_send_report_task_config,
+    mock_gather_dbt_project_params,
+    org,
+    orgtask,
+):
+    """on EKS (is_workpool_eks=True on edr_queue) a git-clone task is prepended"""
+    import json as _json
+
+    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
+    os.environ["PREFECT_EKS_WORKER_POOL_NAME"] = "eks_workpool"
+
+    # Ensure git-clone Task exists in DB
+    from ddpui.utils.constants import TASK_GITCLONE
+
+    git_clone_task, _ = Task.objects.get_or_create(
+        slug=TASK_GITCLONE,
+        defaults={"type": TaskType.GIT, "label": "git clone"},
+    )
+
+    cron = "0 0 * * *"
+    mock_gather_dbt_project_params.return_value = Mock(
+        venv_binary="venv/bin",
+        project_dir="project-dir",
+        clients_base_dir="/mnt/clientdbts",
+        project_dir_relative="org/dbtrepo",
+    )
+    mock_get_edr_send_report_task.return_value = orgtask
+    mock_setup_git_clone.return_value = Mock(to_json=Mock(return_value={"slug": "git-clone"}))
+    mock_setup_edr_send_report_task_config.return_value = Mock(
+        to_json=Mock(return_value={"slug": "generate-edr"})
+    )
+    mock_generate_hash_id.return_value = "hashcode"
+
+    deployment_name = f"pipeline-{org.slug}-generate-edr-hashcode"
+    mock_create_dataflow_v1.return_value = {
+        "deployment": {"name": deployment_name, "id": "deployment-id"}
+    }
+
+    result = ensure_edr_sendreport_dataflow(org, cron)
+
+    assert result["status"] == "success"
+
+    # git-clone config is built
+    mock_setup_git_clone.assert_called_once()
+
+    # edr config is built with seq=1 (after git-clone at seq=0)
+    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir", seq=1)
+
+    # both tasks are present in the deployment params
+    call_args = mock_create_dataflow_v1.call_args
+    tasks = call_args[0][0].deployment_params["config"]["tasks"]
+    assert len(tasks) == 2
+    assert tasks[0]["slug"] == "git-clone"
+    assert tasks[1]["slug"] == "generate-edr"
+
+    # cleanup
+    del os.environ["PREFECT_EKS_WORKER_POOL_NAME"]
 
 
 def test_create_elementary_profile_no_dbt(org):

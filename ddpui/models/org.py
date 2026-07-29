@@ -68,13 +68,13 @@ def get_default_queue_config():
         },
         "transform_task_queue": {
             "name": MANUL_DBT_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
         "edr_queue": {
             "name": EDR_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
     }
 
@@ -167,12 +167,12 @@ class Org(models.Model):
 
         def get_queue_details(key: str) -> QueueDetailsSchema:
             if key not in stored:
-                # Use default from function
+                # Use default from function (includes is_workpool_eks derived from env vars)
                 default_data = default_config[key]
                 return QueueDetailsSchema(
                     name=default_data["name"],
                     workpool=default_data["workpool"],
-                    is_workpool_eks=False,  # Default to EC2
+                    is_workpool_eks=default_data.get("is_workpool_eks", False),
                 )
 
             queue_data = stored[key]

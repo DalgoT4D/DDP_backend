@@ -137,18 +137,19 @@ class PipelineService:
         logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
         logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
 
-        # Auto-add git and dbt-clean/dbt-deps steps when there are DBT tasks
-        if len(dbt_orgtasks) > 0:
+        # Auto-add git step when there are DBT or EDR tasks (both need the repo on disk on EKS)
+        if len(dbt_orgtasks) > 0 or len(edr_orgtasks) > 0:
             if PipelineService.is_workpool_eks(org):
-                logger.info("EKS workpool detected, adding git clone step before DBT tasks")
+                logger.info("EKS workpool detected, adding git clone step")
                 git_clone_orgtask = PipelineService.get_or_create_git_clone_orgtask(org)
                 git_orgtasks.insert(0, git_clone_orgtask)
             else:
-                logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
+                logger.info("Non-EKS workpool detected, adding git pull step")
                 git_pull_orgtask = PipelineService.get_or_create_git_pull_orgtask(org)
                 git_orgtasks.insert(0, git_pull_orgtask)
 
-            # Auto-add dbt clean and dbt deps before other DBT tasks
+        # Auto-add dbt clean and dbt deps only when there are DBT tasks
+        if len(dbt_orgtasks) > 0:
             logger.info("Adding dbt clean and dbt deps steps before DBT tasks")
             dbt_clean_orgtask = PipelineService.get_or_create_dbt_clean_orgtask(org)
             dbt_deps_orgtask = PipelineService.get_or_create_dbt_deps_orgtask(org)

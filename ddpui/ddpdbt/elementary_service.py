@@ -17,8 +17,8 @@ from ddpui.models.tasks import OrgDataFlowv1
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.utils.constants import TASK_GENERATE_EDR
-from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
+from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITCLONE
+from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config, setup_git_clone_shell_task_config
 from ddpui.ddpdbt.dbthelpers import write_dbt_profiles_yml
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -26,6 +26,7 @@ from ddpui.ddpprefect import prefect_service
 from ddpui.utils.helpers import generate_hash_id, compare_semver
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.utils.timezone import as_ist
 from ddpui.utils.redis_client import RedisClient
@@ -432,8 +433,16 @@ def ensure_edr_sendreport_dataflow(org: Org, cron: str):
     if the dataflow already exists, returns success without touching Prefect.
     Ensures the underlying OrgTask exists too — creates it if missing.
     To change the schedule or task_config, delete the existing dataflow and
-    re-run."""
+    re-run.
+
+    On EKS (edr_queue.is_workpool_eks=True) a git-clone task is prepended
+    because each pod starts with an empty filesystem — the dbt project must
+    be cloned before _prepare_elementary_profile can run.
+    """
     from ddpui.core.orgtaskfunctions import get_edr_send_report_task
+    from ddpui.models.org import OrgPrefectBlockv1
+    from ddpui.ddpprefect import SECRET
+    from ddpui.models.tasks import Task
 
     dbt_project_params: DbtProjectParams = None
     try:
@@ -446,16 +455,61 @@ def ensure_edr_sendreport_dataflow(org: Org, cron: str):
     if org_task is None:
         return {"error": "could not get or create EDR send-report OrgTask"}
 
-    existing = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-    if existing is not None:
-        logger.info(f"EDR dataflow already exists for {org.slug} — skipping create")
-        return {
-            "status": "success",
-            "dataflow": existing.dataflow.name,
-            "already_existed": True,
-        }
+    edr_queue = org.get_queue_config().edr_queue
+    tasks = []
 
-    task_config = setup_edr_send_report_task_config(org_task, dbt_project_params.project_dir)
+    if getattr(edr_queue, "is_workpool_eks", False):
+        # EKS pods start with an empty filesystem — clone the repo first so
+        # _prepare_elementary_profile can find dbt_project.yml and packages.yml.
+        git_clone_task = Task.objects.filter(slug=TASK_GITCLONE).first()
+        if git_clone_task is None:
+            return {"error": "git-clone task not found in database"}
+
+        git_clone_orgtask, _ = OrgTask.objects.get_or_create(
+            org=org, task=git_clone_task, dbt=org.dbt, defaults={"parameters": {}}
+        )
+        gitpull_secret_block = OrgPrefectBlockv1.objects.filter(
+            org=org, block_type=SECRET, block_name__contains="git-pull"
+        ).first()
+        git_clone_config = setup_git_clone_shell_task_config(
+            git_clone_orgtask,
+            dbt_project_params.clients_base_dir,
+            dbt_project_params.project_dir_relative,
+            gitpull_secret_block,
+            seq=0,
+            gitrepo_url=org.dbt.gitrepo_url or "",
+        ).to_json()
+        tasks.append(git_clone_config)
+        logger.info(f"EKS edr deployment: prepending git-clone step for {org.slug}")
+
+    edr_task_config = setup_edr_send_report_task_config(
+        org_task, dbt_project_params.project_dir, seq=len(tasks)
+    )
+    tasks.append(edr_task_config.to_json())
+
+    deployment_params = {
+        "config": {
+            "tasks": tasks,
+            "org_slug": org_task.org.slug,
+        }
+    }
+
+    existing_dfot = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+    if existing_dfot is not None:
+        # Update existing Prefect deployment and local record (keep same cron)
+        orgdataflow = existing_dfot.dataflow
+        effective_cron = cron or orgdataflow.cron
+        prefect_service.update_dataflow_v1(
+            orgdataflow.deployment_id,
+            PrefectDataFlowUpdateSchema3(
+                cron=effective_cron,
+                deployment_params=deployment_params,
+            ),
+        )
+        orgdataflow.cron = effective_cron
+        orgdataflow.save(update_fields=["cron"])
+        logger.info(f"updated EDR dataflow {orgdataflow.name} for {org.slug}")
+        return {"status": "success", "dataflow": orgdataflow.name, "updated": True}
 
     hash_code = generate_hash_id(8)
     deployment_name = f"pipeline-{org_task.org.slug}-{org_task.task.slug}-{hash_code}"
@@ -466,15 +520,10 @@ def ensure_edr_sendreport_dataflow(org: Org, cron: str):
             deployment_name=deployment_name,
             flow_name=deployment_name,
             orgslug=org_task.org.slug,
-            deployment_params={
-                "config": {
-                    "tasks": [task_config.to_json()],
-                    "org_slug": org_task.org.slug,
-                }
-            },
+            deployment_params=deployment_params,
             cron=cron,
         ),
-        org.get_queue_config().edr_queue,
+        edr_queue,
     )
 
     logger.info(
@@ -485,7 +534,7 @@ def ensure_edr_sendreport_dataflow(org: Org, cron: str):
         name=dataflow["deployment"]["name"],
         deployment_name=dataflow["deployment"]["name"],
         deployment_id=dataflow["deployment"]["id"],
-        dataflow_type="manual",  # we dont want it to show in flows/pipelines page
+        dataflow_type="manual",
         cron=cron,
     )
     DataflowOrgTask.objects.create(dataflow=orgdataflow, orgtask=org_task)
