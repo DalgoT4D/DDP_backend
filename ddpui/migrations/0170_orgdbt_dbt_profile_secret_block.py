@@ -5,15 +5,20 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ddpui', '0169_alter_chart_chart_type'),
+        ("ddpui", "0169_alter_chart_chart_type"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='orgdbt',
-            name='dbt_profile_secret_block',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='ddpui.orgprefectblockv1'),
+            model_name="orgdbt",
+            name="dbt_profile_secret_block",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to="ddpui.orgprefectblockv1",
+            ),
         ),
     ]
