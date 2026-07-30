@@ -157,6 +157,19 @@ def normalize_dimensions(payload: ChartDataPayload) -> List[str]:
             filtered_dims = [d for d in payload.dimensions if d and d.strip()]
             final_dims = filtered_dims if filtered_dims else []
 
+        # Fallback to legacy dimension_col + extra_dimension fields
+        if not final_dims:
+            if payload.dimension_col:
+                final_dims.append(payload.dimension_col)
+            if payload.extra_dimension:
+                final_dims.append(payload.extra_dimension)
+
+        # Fallback to table_columns in extra_config
+        if not final_dims and payload.extra_config:
+            table_columns = payload.extra_config.get("table_columns")
+            if table_columns and isinstance(table_columns, list):
+                final_dims = [c for c in table_columns if c and isinstance(c, str) and c.strip()]
+
     else:
         # For other charts, include both dimension_col and extra_dimension if present
         if payload.dimension_col:
