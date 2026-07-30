@@ -21,6 +21,7 @@ NOT NULL unique field with no model-level default, so it must always be supplied
 
 import copy
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -358,33 +359,51 @@ def copy_repo_models_from_template(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> i
     profile, so nothing outside `models/` needs to carry over — packages.yml and the asset
     macros are already identical from `setup_managed_git_workspace`'s scaffold.
 
-    Reads the template's LOCAL working directory (`DbtProjectManager.get_dbt_project_dir`)
-    — the template org lives on this same instance and its working dir is the write-first
-    copy of the repo (every UI4T edit lands here before the push). Fails loud if the
-    template project or its `models/` dir is missing on disk.
+    Reads from a FRESH clone of the template's REMOTE repo (`template_dbt.gitrepo_url`),
+    not the template's local working directory. The local working dir is a write-first
+    scratch space — UI4T edits and any in-progress test models land there before ever
+    being pushed — so reading it would leak unpublished/test content into every trial.
+    The remote is the actual source of truth for "what's really in the template", so
+    every trial clone gets exactly what's been pushed, no more.
+
+    The clone lands in a per-call `tempfile.mkdtemp()` directory — unique per process,
+    so concurrent trial clones (even of the same template) never share a path and never
+    race each other. Cleaned up in a `finally` regardless of outcome.
 
     `copy_dbt_dag` preserves each copied row's `sql_path`, which stays valid because the
     files land at the same project-relative paths.
 
     Returns the number of files copied.
     """
-    template_dir = Path(DbtProjectManager.get_dbt_project_dir(template_dbt))
     trial_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
-    template_models = template_dir / "models"
-    if not template_models.exists():
-        raise TrialCloneError(
-            f"template dbt project has no models/ directory on disk at {template_models}"
-        )
+    pat = GitManager.get_org_admin_pat()
 
-    shutil.copytree(template_models, trial_dir / "models", dirs_exist_ok=True)
+    tmp_root = tempfile.mkdtemp(prefix="trial-clone-template-")
+    try:
+        GitManager.clone(
+            cwd=tmp_root,
+            remote_repo_url=template_dbt.gitrepo_url,
+            relative_path="template_repo",
+            pat=pat,
+        )
+        template_models = Path(tmp_root) / "template_repo" / "models"
+        if not template_models.exists():
+            raise TrialCloneError(
+                f"template remote repo has no models/ directory at {template_dbt.gitrepo_url}"
+            )
+
+        shutil.copytree(template_models, trial_dir / "models", dirs_exist_ok=True)
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
     copied_files = sum(1 for p in (trial_dir / "models").rglob("*") if p.is_file())
 
-    pat = GitManager.get_org_admin_pat()
     git_manager = GitManager(str(trial_dir), pat)
     git_manager.commit_changes("clone template dbt models")
     git_manager.push_changes()
 
     logger.info(
-        f"copied {copied_files} model files from template repo into {trial_dbt.gitrepo_url}"
+        f"copied {copied_files} model files from template remote {template_dbt.gitrepo_url} "
+        f"into {trial_dbt.gitrepo_url}"
     )
     return copied_files

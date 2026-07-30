@@ -92,6 +92,8 @@ def test_clone_kpis_remaps_metric_fk():
         target_value=100.0,
         direction="increase",
         time_grain="monthly",
+        annotations=[{"date": "2026-01-01", "note": "launch"}],
+        display_order=3,
         org=template_org,
         created_by=template_user,
         last_modified_by=template_user,
@@ -107,6 +109,13 @@ def test_clone_kpis_remaps_metric_fk():
     assert new_k.created_by_id == trial_user.id
     assert new_k.name == "KPI1"
     assert new_k.target_value == 100.0
+    # KPICreate/create_kpi has no annotations/display_order fields — must survive via the
+    # follow-up .update() patch, both on the DB row and the in-memory instance _clone_kpis returns
+    assert new_k.annotations == [{"date": "2026-01-01", "note": "launch"}]
+    assert new_k.display_order == 3
+    new_k.refresh_from_db()
+    assert new_k.annotations == [{"date": "2026-01-01", "note": "launch"}]
+    assert new_k.display_order == 3
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +428,47 @@ def test_clone_alerts_remaps_metric_kpi_and_resets_delivery_state():
     assert new_alert.delivery_channels == ["email"]
     assert new_alert.slack_webhook_url is None
     assert new_alert.last_evaluated_at is None
+
+
+def test_clone_alerts_preserves_inactive_template_alert():
+    """AlertCreate/create_alert hard-codes is_active=True on creation (no schema field for it) —
+    an inactive template alert must still clone as inactive via the follow-up .update() patch,
+    not silently flip active on the trial."""
+    template_org = _make_org("tmpl-alert-inactive")
+    trial_org = _make_org("trial-alert-inactive")
+    template_user = _make_orguser(template_org, "tmpl-alert-inactive@x.org")
+    trial_user = _make_orguser(trial_org, "trial-alert-inactive@x.org")
+
+    m = Metric.objects.create(
+        name="Metric1",
+        schema_name="analytics",
+        table_name="t",
+        column="id",
+        aggregation="count",
+        org=template_org,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+    Alert.objects.create(
+        org=template_org,
+        name="InactiveAlert",
+        alert_type="metric_threshold",
+        metric=m,
+        condition={"operator": "lt", "value": 10},
+        schedule_cron="0 9 * * *",
+        delivery_channels=["email"],
+        message_template="{{value}}",
+        recipients=[{"type": "external", "email": "tmpl-owner@x.org"}],
+        is_active=False,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+
+    metric_map = viz_clone._clone_metrics(template_org, trial_org, trial_user)
+    viz_clone._clone_alerts(template_org, trial_org, trial_user, metric_map, {})
+
+    new_alert = Alert.objects.get(org=trial_org, name="InactiveAlert")
+    assert new_alert.is_active is False
 
 
 # ---------------------------------------------------------------------------

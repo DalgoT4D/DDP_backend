@@ -20,6 +20,9 @@ import secrets
 
 from django.utils import timezone
 
+from ddpui.core.alerts.alert_service import AlertService
+from ddpui.core.kpi.kpi_service import KPIService
+from ddpui.core.metric.metric_service import MetricService
 from ddpui.models.alert import Alert
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.geojson import GeoJSON
@@ -28,7 +31,10 @@ from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.visualization import Chart
-from ddpui.services.dashboard_service import DashboardService
+from ddpui.schemas.alert_schema import AlertCreate
+from ddpui.schemas.kpi_schema import KPICreate, KPIExtraConfig
+from ddpui.services.chart_service import ChartData, ChartService
+from ddpui.services.dashboard_service import DashboardService, FilterData
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.viz_clone")
@@ -53,11 +59,23 @@ def _preserve_ordering_timestamps(instance, template_row) -> None:
         type(instance).objects.filter(pk=instance.pk).update(**fields)
 
 
-def _clone_metrics(template_org: Org, trial_org: Org, trial_orguser: OrgUser) -> dict:
-    """Copy every template Metric onto the trial org. Returns {old Metric.id: new Metric}."""
+def _clone_metrics(  # pylint: disable=unused-argument
+    template_org: Org, trial_org: Org, trial_orguser: OrgUser
+) -> dict:
+    """Copy every template Metric onto the trial org via `MetricService.create_metric` — the
+    same creation path the normal UI-driven "create a metric" flow uses, so a cloned metric
+    gets the same org-scoped name-uniqueness check and live warehouse-query validation a
+    user-created one would. The trial warehouse already holds a full data copy of the
+    template's (Step 2's server-side `CREATE DATABASE ... TEMPLATE` copy), so the validation
+    query resolves against real, matching tables rather than an empty scaffold.
+
+    Returns {old Metric.id: new Metric}. `trial_org` is unused directly (the service derives
+    org from `trial_orguser.org`, which is always this same org) — kept for signature/test
+    stability.
+    """
     metric_map: dict = {}
     for m in Metric.objects.filter(org=template_org):
-        new_m = Metric.objects.create(
+        new_m = MetricService.create_metric(
             name=m.name,
             description=m.description,
             schema_name=m.schema_name,
@@ -65,24 +83,31 @@ def _clone_metrics(template_org: Org, trial_org: Org, trial_orguser: OrgUser) ->
             column=m.column,
             aggregation=m.aggregation,
             column_expression=m.column_expression,
-            org=trial_org,
-            created_by=trial_orguser,
-            last_modified_by=trial_orguser,
+            orguser=trial_orguser,
         )
         _preserve_ordering_timestamps(new_m, m)
         metric_map[m.id] = new_m
     return metric_map
 
 
-def _clone_kpis(
+def _clone_kpis(  # pylint: disable=unused-argument
     template_org: Org, trial_org: Org, trial_orguser: OrgUser, metric_map: dict
 ) -> dict:
-    """Copy every template KPI onto the trial org, remapping `.metric` via `metric_map`.
-    Returns {old KPI.id: new KPI}."""
+    """Copy every template KPI onto the trial org via `KPIService.create_kpi` — the same
+    creation path the normal UI-driven "create a KPI" flow uses (field validation +
+    metric-FK org-scoping check), remapping `.metric` via `metric_map`.
+
+    `KPICreate` has no `annotations`/`display_order` fields (they're update-only on the
+    normal KPI API), so `create_kpi` can't carry them — patched on afterward via a direct
+    `.update()`, same pattern as `_preserve_ordering_timestamps` below.
+
+    Returns {old KPI.id: new KPI}. `trial_org` is unused directly (the service derives org
+    from `trial_orguser.org`) — kept for signature/test stability.
+    """
     kpi_map: dict = {}
     for k in KPI.objects.filter(org=template_org):
-        new_k = KPI.objects.create(
-            metric=metric_map[k.metric_id],
+        kpi_payload = KPICreate(
+            metric_id=metric_map[k.metric_id].id,
             name=k.name,
             target_value=k.target_value,
             direction=k.direction,
@@ -92,13 +117,14 @@ def _clone_kpis(
             time_dimension_column=k.time_dimension_column,
             metric_type_tag=k.metric_type_tag,
             program_tags=k.program_tags,
-            annotations=k.annotations,
-            extra_config=k.extra_config,
-            display_order=k.display_order,
-            org=trial_org,
-            created_by=trial_orguser,
-            last_modified_by=trial_orguser,
+            extra_config=KPIExtraConfig(**(k.extra_config or {})),
         )
+        new_k = KPIService.create_kpi(kpi_payload, trial_orguser)
+        KPI.objects.filter(pk=new_k.pk).update(
+            annotations=k.annotations, display_order=k.display_order
+        )
+        new_k.annotations = k.annotations
+        new_k.display_order = k.display_order
         _preserve_ordering_timestamps(new_k, k)
         kpi_map[k.id] = new_k
     return kpi_map
@@ -131,25 +157,29 @@ def _remap_chart_extra_config(extra_config: dict, metric_map: dict) -> dict:
     return ec
 
 
-def _clone_charts(
+def _clone_charts(  # pylint: disable=unused-argument
     template_org: Org, trial_org: Org, trial_orguser: OrgUser, metric_map: dict
 ) -> dict:
-    """Copy every template Chart onto the trial org, remapping `extra_config` saved-metric refs.
-    Returns {old Chart.id: new Chart}."""
+    """Copy every template Chart onto the trial org via `ChartService.create_chart` — the same
+    creation path the normal UI-driven "create a chart" flow uses — remapping `extra_config`
+    saved-metric refs. `ChartData` has no `computation_type` field: the `Chart` model docstring
+    marks it deprecated/"no longer used in chart logic", so it's left at its model default on
+    the clone rather than threading a dead field through the service layer.
+
+    Returns {old Chart.id: new Chart}. `trial_org` is unused directly (the service derives org
+    from `trial_orguser.org`) — kept for signature/test stability.
+    """
     chart_map: dict = {}
     for c in Chart.objects.filter(org=template_org):
-        new_c = Chart.objects.create(
+        chart_data = ChartData(
             title=c.title,
             description=c.description,
             chart_type=c.chart_type,
-            computation_type=c.computation_type,
             schema_name=c.schema_name,
             table_name=c.table_name,
             extra_config=_remap_chart_extra_config(c.extra_config, metric_map),
-            org=trial_org,
-            created_by=trial_orguser,
-            last_modified_by=trial_orguser,
         )
+        new_c = ChartService.create_chart(chart_data, trial_orguser)
         _preserve_ordering_timestamps(new_c, c)
         chart_map[c.id] = new_c
     return chart_map
@@ -188,6 +218,13 @@ def _clone_dashboards(
       (no token). Public-access analytics (count / last-accessed) start clean.
     - `is_org_default` is copied (scoped per-org; template has at most one True), so the Impact
       page shows the same landing dashboard.
+
+    Deliberately NOT routed through `DashboardService.create_dashboard`: that service always
+    forces a single fresh default tab and has no fields for `is_public`/`public_share_token`/
+    `public_shared_at`/`is_org_default`/`is_published`/`dashboard_type`/`target_screen_size` —
+    using it would mean generating a throwaway tab only to immediately overwrite it plus every
+    other field via a follow-up `.update()`, for no validation gained (the service does none).
+
     Returns {old Dashboard.id: new Dashboard}."""
     dash_map: dict = {}
     for d in Dashboard.objects.filter(org=template_org):
@@ -229,16 +266,19 @@ def _clone_dashboard_filters(template_org: Org, dash_map: dict) -> int:
     # old dashboard id -> {old filter id (str) -> new filter id (str)}
     filter_maps: dict = {}
     for f in DashboardFilter.objects.filter(dashboard__org=template_org):
-        new_f = DashboardFilter.objects.create(
-            dashboard=dash_map[f.dashboard_id],
-            name=f.name,
+        new_dashboard = dash_map[f.dashboard_id]
+        filter_data = FilterData(
             filter_type=f.filter_type,
             schema_name=f.schema_name,
             table_name=f.table_name,
             column_name=f.column_name,
+            name=f.name,
             settings=f.settings,
             order=f.order,
         )
+        # org comes from the already-cloned trial Dashboard instance, not a separate param —
+        # DashboardService.create_filter re-fetches the dashboard scoped to this org.
+        new_f = DashboardService.create_filter(new_dashboard.id, new_dashboard.org, filter_data)
         filter_maps.setdefault(f.dashboard_id, {})[str(f.id)] = str(new_f.id)
         count += 1
 
@@ -252,27 +292,35 @@ def _clone_dashboard_filters(template_org: Org, dash_map: dict) -> int:
     return count
 
 
-def _clone_alerts(
+def _clone_alerts(  # pylint: disable=unused-argument
     template_org: Org,
     trial_org: Org,
     trial_orguser: OrgUser,
     metric_map: dict,
     kpi_map: dict,
 ) -> int:
-    """Copy every template Alert onto the trial org, remapping `metric`/`kpi` and resetting
-    delivery/evaluation state — a clone must not fire alerts at the template's Slack webhook or
-    external recipients, and has no evaluation history yet. Returns the number of alerts copied."""
+    """Copy every template Alert onto the trial org via `AlertService.create_alert` — the same
+    creation path the normal UI-driven "create an alert" flow uses (name uniqueness, cron
+    validation, condition-shape validation, delivery-channel/recipient validation, metric/kpi
+    FK org-scoping) — remapping `metric`/`kpi` and resetting delivery/evaluation state: a clone
+    must not fire alerts at the template's Slack webhook or external recipients, and has no
+    evaluation history yet.
+
+    `AlertCreate`/`create_alert` hard-codes `is_active=True` on creation (no way to pass a
+    different initial value through the schema) — patched to the template's real value
+    afterward via a direct `.update()`, same as `_preserve_ordering_timestamps` below.
+
+    Returns the number of alerts copied."""
     count = 0
     for a in Alert.objects.filter(org=template_org):
-        new_a = Alert.objects.create(
-            org=trial_org,
+        # fail-loud indexing (like the KPI/Chart remaps): a metric_id/kpi_id that is set but
+        # absent from the map means a broken clone — surface it instead of silently producing
+        # a sourceless alert.
+        alert_payload = AlertCreate(
             name=a.name,
             alert_type=a.alert_type,
-            # fail-loud indexing (like the KPI/Chart remaps): a metric_id/kpi_id that is set but
-            # absent from the map means a broken clone — surface it instead of silently producing
-            # a sourceless alert.
-            metric=metric_map[a.metric_id] if a.metric_id else None,
-            kpi=kpi_map[a.kpi_id] if a.kpi_id else None,
+            metric_id=metric_map[a.metric_id].id if a.metric_id else None,
+            kpi_id=kpi_map[a.kpi_id].id if a.kpi_id else None,
             standalone_config=a.standalone_config,
             condition=a.condition,
             schedule_cron=a.schedule_cron,
@@ -280,11 +328,11 @@ def _clone_alerts(
             slack_webhook_url=None,
             message_template=a.message_template,
             recipients=[{"type": "orguser", "orguser_id": trial_orguser.id}],
-            is_active=a.is_active,
-            last_evaluated_at=None,
-            created_by=trial_orguser,
-            last_modified_by=trial_orguser,
         )
+        new_a = AlertService.create_alert(alert_payload, trial_orguser)
+        if new_a.is_active != a.is_active:
+            Alert.objects.filter(pk=new_a.pk).update(is_active=a.is_active)
+            new_a.is_active = a.is_active
         _preserve_ordering_timestamps(new_a, a)
         count += 1
     return count
@@ -323,7 +371,15 @@ def _clone_report_snapshots(
     """Copy every template ReportSnapshot onto the trial org, resetting public sharing. The
     frozen JSON blobs are copied verbatim EXCEPT the live-resolved saved-metric refs inside
     `frozen_chart_configs`, which are remapped onto the trial's cloned Metrics — see
-    `_remap_frozen_chart_configs`. Returns the number of snapshots copied."""
+    `_remap_frozen_chart_configs`. Returns the number of snapshots copied.
+
+    Deliberately NOT routed through `ReportService.create_snapshot`: that function *freezes
+    the current live state of an existing Dashboard* (re-resolving date columns against the
+    warehouse and recomputing `frozen_dashboard`/`frozen_chart_configs` from scratch) — it is
+    not a "copy these exact stored field values" operation, so using it here would silently
+    replace the template snapshot's real historical content with a fresh freeze of whatever the
+    (already-cloned) trial dashboard looks like right now. No general-purpose creation service
+    exists for a verbatim snapshot copy, so this stays a direct `.create()`."""
     count = 0
     for r in ReportSnapshot.objects.filter(org=template_org):
         new_r = ReportSnapshot.objects.create(

@@ -37,6 +37,7 @@ app.autodiscover_tasks()
 app.conf.task_default_queue = "default"
 app.conf.task_routes = {
     "ddpui.celeryworkers.tasks.run_dbt_commands": {"queue": "canvas_dbt"},
+    "ddpui.core.trial.tasks.clone_trial_org_task": {"queue": "trial_clone"},
     "alerts.dispatch_due_alerts": {"queue": "alerts"},
     "alerts.evaluate_alert": {"queue": "alerts"},
 }

@@ -599,30 +599,45 @@ def test_regenerate_and_push_skips_sources_not_on_canvas(
 
 @patch("ddpui.core.trial.dbt_clone.GitManager")
 def test_copy_repo_models_from_template_copies_verbatim_and_pushes(mock_git_manager_cls, tmp_path):
-    """models/ dir (sql + sources.yml + docs) copied byte-identical from the template's local
-    working dir into the trial repo; commit + push with the org-admin PAT; file count returned."""
+    """models/ dir (sql + sources.yml + docs) copied byte-identical from a FRESH CLONE of the
+    template's remote repo (never the template's local working dir) into the trial repo;
+    commit + push with the org-admin PAT; file count returned."""
     import os
 
     os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
     template_org = Org.objects.create(name="tmpl-vc", slug="tmpl-vc")
     trial_org = Org.objects.create(name="trial-vc", slug="trial-vc")
     template_dbt = _make_orgdbt(template_org)
+    template_dbt.gitrepo_url = "https://github.com/dalgo/tmpl-vc-dbtrepo.git"
+    template_dbt.save()
     trial_dbt = _make_orgdbt(trial_org)
 
+    # the template's LOCAL working dir gets a decoy file — proves it's never read
     template_dir = Path(DbtProjectManager.get_dbt_project_dir(template_dbt))
     (template_dir / "models" / "staging").mkdir(parents=True)
-    (template_dir / "models" / "staging" / "sources.yml").write_text("sources: []")
-    (template_dir / "models" / "staging" / "casted_pivottest.sql").write_text("select 1")
+    (template_dir / "models" / "staging" / "decoy_local_only.sql").write_text("select 999")
+
     trial_dir = Path(DbtProjectManager.get_dbt_project_dir(trial_dbt))
     (trial_dir / "models").mkdir(parents=True)  # empty scaffold
 
     mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+
+    def _fake_clone(cwd, remote_repo_url, relative_path, pat=None):
+        assert remote_repo_url == template_dbt.gitrepo_url
+        assert pat == "admin-pat"
+        cloned_models = Path(cwd) / relative_path / "models" / "staging"
+        cloned_models.mkdir(parents=True)
+        (cloned_models / "sources.yml").write_text("sources: []")
+        (cloned_models / "casted_pivottest.sql").write_text("select 1")
+
+    mock_git_manager_cls.clone.side_effect = _fake_clone
 
     count = dbt_clone.copy_repo_models_from_template(template_dbt, trial_dbt)
 
     assert count == 2
     assert (trial_dir / "models" / "staging" / "casted_pivottest.sql").read_text() == "select 1"
     assert (trial_dir / "models" / "staging" / "sources.yml").read_text() == "sources: []"
+    assert not (trial_dir / "models" / "staging" / "decoy_local_only.sql").exists()
     mock_git_manager_cls.assert_called_once_with(str(trial_dir), "admin-pat")
     push_instance = mock_git_manager_cls.return_value
     push_instance.commit_changes.assert_called_once_with("clone template dbt models")
@@ -631,6 +646,7 @@ def test_copy_repo_models_from_template_copies_verbatim_and_pushes(mock_git_mana
 
 @patch("ddpui.core.trial.dbt_clone.GitManager")
 def test_copy_repo_models_from_template_raises_when_no_models_dir(mock_git_manager_cls, tmp_path):
+    """template's remote clone has no models/ dir (e.g. an empty repo) — fails loud."""
     import os
 
     os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
@@ -638,6 +654,12 @@ def test_copy_repo_models_from_template_raises_when_no_models_dir(mock_git_manag
     trial_org = Org.objects.create(name="trial-nm", slug="trial-nm")
     template_dbt = _make_orgdbt(template_org)
     trial_dbt = _make_orgdbt(trial_org)
+
+    def _fake_clone_empty(cwd, remote_repo_url, relative_path, pat=None):
+        (Path(cwd) / relative_path).mkdir(parents=True)  # cloned repo, no models/ dir
+
+    mock_git_manager_cls.get_org_admin_pat.return_value = "admin-pat"
+    mock_git_manager_cls.clone.side_effect = _fake_clone_empty
 
     with pytest.raises(RuntimeError, match="no models/ directory"):
         dbt_clone.copy_repo_models_from_template(template_dbt, trial_dbt)

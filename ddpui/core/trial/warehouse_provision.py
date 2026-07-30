@@ -21,6 +21,15 @@ logger = CustomLogger("ddpui.core.trial.warehouse_provision")
 _TEMPLATE_COPY_MAX_ATTEMPTS = 5
 _TEMPLATE_COPY_RETRY_SLEEP_SECONDS = 1.0
 
+# NOTE: verified empirically (2026-07-29, Postgres 15.16) that Postgres does NOT serialize two
+# concurrent `CREATE DATABASE ... TEMPLATE src` calls issued by different sessions against the
+# SAME src, as long as neither session's OWN current database is `src` — 4 concurrent copies
+# from the same source ran fully in parallel (identical start/finish times), no ObjectInUse, no
+# contention. So the only real race here is the one already handled below: a stray session that
+# IS connected to `src` itself (idle pooled/Airbyte/chart-query connection). No app-level lock
+# needed between concurrent clones — that would only add unnecessary serialization and hurt
+# the goal of clones running fully in parallel.
+
 
 def _create_database_from_template(cursor, ft_db: str, template_db: str) -> None:
     """CREATE DATABASE ft_db as a server-side copy of template_db, clearing blocking sessions.
