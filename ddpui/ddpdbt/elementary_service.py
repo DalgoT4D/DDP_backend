@@ -253,20 +253,27 @@ def create_elementary_profile(org: Org):
 
     dbt_profile_name = dbt_project["profile"]
 
-    target = elementary_profile["elementary"].get("target", "default")
+    # elementary_target: what the macro emitted (used to index into the macro output)
+    elementary_target = elementary_profile["elementary"].get("target", "default")
 
     # Extract elementary's schema from the macro output. BQ emits it under
     # `dataset` (BQ terminology), postgres/snowflake under `schema`.
-    if elementary_profile["elementary"]["outputs"][target]["type"] == "bigquery":
-        elementary_schema = elementary_profile["elementary"]["outputs"][target]["dataset"]
+    if elementary_profile["elementary"]["outputs"][elementary_target]["type"] == "bigquery":
+        elementary_schema = elementary_profile["elementary"]["outputs"][elementary_target]["dataset"]
     else:
-        elementary_schema = elementary_profile["elementary"]["outputs"][target]["schema"]
+        elementary_schema = elementary_profile["elementary"]["outputs"][elementary_target]["schema"]
+
+    # dbt_target: the target configured in the dbt profile on disk — this is
+    # the source of truth for warehouse credentials. The elementary macro may
+    # emit a different target name (e.g. "default") when the dbt profile uses
+    # a custom one, so we must look up creds by the dbt profile's own target.
+    dbt_target = dbt_profile[dbt_profile_name].get("target", elementary_target)
+    dbt_output = dbt_profile[dbt_profile_name]["outputs"][dbt_target]
 
     # Base = dbt's output (all warehouse params — host/user/password/port/…).
     # Override the schema with elementary's own, so elementary writes to its
     # dedicated schema while reusing the same warehouse connection.
-    dbt_output = dbt_profile[dbt_profile_name]["outputs"][target]
-    elementary_profile["elementary"]["outputs"][target] = {
+    elementary_profile["elementary"]["outputs"][elementary_target] = {
         **dbt_output,
         "schema": elementary_schema,
     }

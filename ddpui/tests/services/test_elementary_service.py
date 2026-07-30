@@ -1029,6 +1029,63 @@ def test_create_elementary_profile_elementary_dir_already_exists(
     assert elementary_file.exists()
 
 
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_create_elementary_profile_macro_target_mismatch(
+    mock_subprocess, mock_gather_params, org, tmp_path
+):
+    """When the elementary macro emits target='default' but the dbt profile on
+    disk uses a custom target name, create_elementary_profile must still read
+    warehouse creds from the dbt profile's configured target — not blindly use
+    the macro's target as the key into dbt outputs (which caused KeyError: 'default')."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    profiles_dir = project_dir / "profiles"
+    profiles_dir.mkdir()
+
+    # dbt profile uses a custom target name, NOT "default"
+    dbt_profile_content = {
+        "test_profile": {
+            "target": "custom_target",
+            "outputs": {
+                "custom_target": {
+                    "type": "postgres",
+                    "host": "db.example.com",
+                    "schema": "analytics",
+                }
+            },
+        }
+    }
+    with open(profiles_dir / "profiles.yml", "w") as f:
+        yaml.safe_dump(dbt_profile_content, f)
+
+    dbt_project_file = project_dir / "dbt_project.yml"
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump({"name": "test_project", "profile": "test_profile"}, f)
+
+    mock_gather_params.return_value = Mock(
+        project_dir=str(project_dir), dbt_binary="test-dbt"
+    )
+    # elementary macro emits target: default — does NOT match the dbt profile
+    mock_subprocess.return_value = """elementary:
+  target: default
+  outputs:
+    default:
+      type: postgres
+      schema: elementary_schema"""
+
+    result = create_elementary_profile(org)
+
+    assert result == {"status": "success"}
+    # The written elementary profile must carry the creds from the dbt profile
+    elementary_file = project_dir / "elementary_profiles" / "profiles.yml"
+    assert elementary_file.exists()
+    written = yaml.safe_load(elementary_file.read_text())
+    output = written["elementary"]["outputs"]["default"]
+    assert output["host"] == "db.example.com"
+    assert output["schema"] == "elementary_schema"
+
+
 # ==================== install_elementary celery task tests ====================
 
 
