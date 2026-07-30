@@ -1,6 +1,7 @@
 """functions to set up elementary"""
 
 import os
+import re
 from pathlib import Path
 import subprocess
 from uuid import uuid4
@@ -18,7 +19,10 @@ from ddpui.models.tasks import OrgDataFlowv1
 from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.utils.constants import TASK_GENERATE_EDR, TASK_GITCLONE
-from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config, setup_git_clone_shell_task_config
+from ddpui.core.pipelinefunctions import (
+    setup_edr_send_report_task_config,
+    setup_git_clone_shell_task_config,
+)
 from ddpui.ddpdbt.dbthelpers import write_dbt_profiles_yml
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.orgdbt_manager import DbtProjectManager
@@ -173,14 +177,22 @@ def check_dbt_files(org: Org):
     return None, retval
 
 
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def extract_profile_from_generate_elementary_cli_profile(lines: list[str]):
     """skips the first few lines of the output until the profile yaml begins"""
     buffer = ""
     gather = False
     for line in lines:
+        line = _ANSI_ESCAPE.sub("", line)
         if line == "elementary:":
             gather = True
         if gather:
+            # a non-empty non-indented line after the first means we've hit a
+            # dbt log/warning — the YAML block is done
+            if buffer and line and not line[0].isspace():
+                break
             buffer += line + "\n"
 
     if buffer == "":

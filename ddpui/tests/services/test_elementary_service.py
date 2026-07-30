@@ -557,6 +557,49 @@ elementary:
     }
 
 
+def test_extract_profile_strips_ansi_codes():
+    """ANSI escape codes in dbt output must be stripped before YAML parsing."""
+    # dbt emits colour codes around log lines; the profile itself may have them too
+    lines = [
+        "\x1b[0mRunning with dbt=1.7.0\x1b[0m",
+        "\x1b[32melementary:\x1b[0m",
+        "\x1b[0m  target: default\x1b[0m",
+        "\x1b[0m  outputs:\x1b[0m",
+        "\x1b[0m    default:\x1b[0m",
+        "\x1b[0m      type: postgres\x1b[0m",
+        "",
+    ]
+    _, result = extract_profile_from_generate_elementary_cli_profile(lines)
+    assert result == {
+        "elementary": {
+            "target": "default",
+            "outputs": {"default": {"type": "postgres"}},
+        }
+    }
+
+
+def test_extract_profile_stops_at_trailing_dbt_log_line():
+    """A non-indented line after the YAML block (dbt warning/log) must not be
+    included in the buffer — it would break YAML parsing."""
+    lines = [
+        "elementary:",
+        "  target: default",
+        "  outputs:",
+        "    default:",
+        "      type: postgres",
+        # dbt sometimes prints a warning after the macro output
+        "Some dbt warning that is not indented",
+        "another dbt line",
+    ]
+    _, result = extract_profile_from_generate_elementary_cli_profile(lines)
+    assert result == {
+        "elementary": {
+            "target": "default",
+            "outputs": {"default": {"type": "postgres"}},
+        }
+    }
+
+
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.lock_tasks_for_deployment")
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.create_deployment_flow_run")
 def test_refresh_elementary_report_via_prefect(
@@ -736,9 +779,7 @@ def test_ensure_edr_sendreport_dataflow_updates_existing(
     os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
     cron = "0 6 * * *"
 
-    orgtask = OrgTask.objects.filter(
-        org=edr_deployment_org, task__slug=TASK_GENERATE_EDR
-    ).first()
+    orgtask = OrgTask.objects.filter(org=edr_deployment_org, task__slug=TASK_GENERATE_EDR).first()
     mock_get_edr_send_report_task.return_value = orgtask
     mock_gather_dbt_project_params.return_value = Mock(
         venv_binary="venv/bin", project_dir="project-dir"

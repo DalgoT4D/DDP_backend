@@ -26,7 +26,13 @@ from ddpui.core.orchestrate.pipeline_service import PipelineService
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect.schema import PrefectDataFlowOrgTasks
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_DBTRUN, TASK_GITCLONE, TASK_GITPULL, TASK_GENERATE_EDR
+from ddpui.utils.constants import (
+    TASK_AIRBYTESYNC,
+    TASK_DBTRUN,
+    TASK_GITCLONE,
+    TASK_GITPULL,
+    TASK_GENERATE_EDR,
+)
 
 pytestmark = pytest.mark.django_db
 

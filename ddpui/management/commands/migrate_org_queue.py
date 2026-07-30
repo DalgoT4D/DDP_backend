@@ -466,7 +466,9 @@ class Command(BaseCommand):
                 ),
             )
 
-            self.stdout.write(f"  → Swapped {old_slug} → {new_git_config['slug']} in {dataflow.deployment_name}")
+            self.stdout.write(
+                f"  → Swapped {old_slug} → {new_git_config['slug']} in {dataflow.deployment_name}"
+            )
             logger.info(f"Swapped git step in transform deployment {dataflow.deployment_name}")
 
         except Exception as e:

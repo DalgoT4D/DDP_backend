@@ -32,9 +32,9 @@ class Command(BaseCommand):
 
         if options["refresh_all"]:
             # Only update orgs that already have an EDR dataflow — do not create new ones
-            edr_orgtask_ids = OrgTask.objects.filter(
-                task__slug=TASK_GENERATE_EDR
-            ).values_list("id", flat=True)
+            edr_orgtask_ids = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR).values_list(
+                "id", flat=True
+            )
             existing_dfots = DataflowOrgTask.objects.filter(
                 orgtask_id__in=edr_orgtask_ids
             ).select_related("orgtask__org", "dataflow")
