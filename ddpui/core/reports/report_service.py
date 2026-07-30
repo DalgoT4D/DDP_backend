@@ -279,6 +279,17 @@ class ReportService:
             raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
+        # Look up the column's data_type so downstream filter logic
+        # (_is_timestamp_date) can apply type-appropriate comparisons.
+        col_data_type = None
+        try:
+            for col_info in warehouse_client.get_table_columns(anchor_schema, anchor_table):
+                if col_info["name"] == col_name:
+                    col_data_type = col_info.get("data_type")
+                    break
+        except Exception:
+            pass
+
         for chart_id, config in frozen_chart_configs.items():
             chart_schema = config.get("schema_name", "")
             chart_table = config.get("table_name", "")
@@ -295,21 +306,23 @@ class ReportService:
             filters = list(extra_config.get("filters") or [])
 
             if snapshot.period_start:
-                filters.append(
-                    {
-                        "column": col_name,
-                        "operator": "greater_than_equal",
-                        "value": snapshot.period_start.isoformat(),
-                    }
-                )
+                start_filter = {
+                    "column": col_name,
+                    "operator": "greater_than_equal",
+                    "value": snapshot.period_start.isoformat(),
+                }
+                if col_data_type:
+                    start_filter["data_type"] = col_data_type
+                filters.append(start_filter)
             if snapshot.period_end:
-                filters.append(
-                    {
-                        "column": col_name,
-                        "operator": "less_than_equal",
-                        "value": snapshot.period_end.isoformat() + "T23:59:59",
-                    }
-                )
+                end_filter = {
+                    "column": col_name,
+                    "operator": "less_than_equal",
+                    "value": snapshot.period_end.isoformat(),
+                }
+                if col_data_type:
+                    end_filter["data_type"] = col_data_type
+                filters.append(end_filter)
 
             extra_config["filters"] = filters
             config["extra_config"] = extra_config

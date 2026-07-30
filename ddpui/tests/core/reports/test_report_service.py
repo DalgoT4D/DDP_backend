@@ -342,7 +342,29 @@ class TestInjectPeriodIntoChartConfigs:
         assert filters[0]["operator"] == "greater_than_equal"
         assert filters[0]["value"] == "2025-01-01"
         assert filters[1]["operator"] == "less_than_equal"
-        assert "2025-01-31" in filters[1]["value"]
+        assert filters[1]["value"] == "2025-01-31"
+
+    def test_inject_filters_includes_data_type(
+        self, mock_org_warehouse_model, mock_factory, sample_snapshot
+    ):
+        """Filters include data_type from the warehouse column metadata"""
+        mock_org_warehouse_model.objects.filter.return_value.first.return_value = MagicMock()
+        mock_wh_client = MagicMock()
+        mock_wh_client.get_table_columns.return_value = [
+            {"name": "created_at", "data_type": "DATE"},
+        ]
+        mock_factory.get_warehouse_client.return_value = mock_wh_client
+
+        frozen_charts = copy.deepcopy(sample_snapshot.frozen_chart_configs)
+        ReportService._inject_period_into_chart_configs(frozen_charts, sample_snapshot)
+
+        chart = frozen_charts["1"]
+        filters = chart["extra_config"]["filters"]
+        assert len(filters) == 2
+        assert filters[0]["data_type"] == "DATE"
+        assert filters[0]["value"] == "2025-01-01"
+        assert filters[1]["data_type"] == "DATE"
+        assert filters[1]["value"] == "2025-01-31"
 
     def test_no_date_col_does_nothing(
         self, mock_org_warehouse_model, mock_factory, sample_snapshot
