@@ -1276,9 +1276,10 @@ def transform_data_for_chart(
                     safe_get_value(row, payload.dimension_col, null_label), null_label
                 )
 
+            value = row.get(alias, 0)
             pie_data.append(
                 {
-                    "value": row.get(alias, 0),
+                    "value": value if value is not None else 0,
                     "name": slice_name,
                 }
             )
