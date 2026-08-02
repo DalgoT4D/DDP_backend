@@ -225,6 +225,7 @@ def get_airbyte_server_block(blockname) -> dict | None:
 
 def create_airbyte_server_block(blockname):
     """Create airbyte server block in prefect"""
+    use_ssl = os.getenv("AIRBYTE_USE_SSL", "false").lower() == "true"
     response = prefect_post(
         "blocks/airbyte/server/",
         {
@@ -232,6 +233,7 @@ def create_airbyte_server_block(blockname):
             "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
             "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
+            "useSSL": use_ssl,
         },
     )
     return (response["block_id"], response["cleaned_block_name"])
@@ -239,12 +241,14 @@ def create_airbyte_server_block(blockname):
 
 def update_airbyte_server_block(blockname):
     """Create airbyte server block in prefect"""
+    use_ssl = os.getenv("AIRBYTE_USE_SSL", "false").lower() == "true"
     response = prefect_put(
         "blocks/airbyte/server/",
         {
             "blockName": blockname,
             "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
             "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
+            "useSSL": use_ssl,
         },
     )
     return (response["block_id"], response["cleaned_block_name"])

@@ -68,13 +68,13 @@ def get_default_queue_config():
         },
         "transform_task_queue": {
             "name": MANUL_DBT_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
         "edr_queue": {
             "name": EDR_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
     }
 
@@ -167,12 +167,12 @@ class Org(models.Model):
 
         def get_queue_details(key: str) -> QueueDetailsSchema:
             if key not in stored:
-                # Use default from function
+                # Use default from function (includes is_workpool_eks derived from env vars)
                 default_data = default_config[key]
                 return QueueDetailsSchema(
                     name=default_data["name"],
                     workpool=default_data["workpool"],
-                    is_workpool_eks=False,  # Default to EC2
+                    is_workpool_eks=default_data.get("is_workpool_eks", False),
                 )
 
             queue_data = stored[key]
@@ -245,7 +245,7 @@ class OrgWarehouse(models.Model):
     wtype = models.CharField(max_length=25)  # postgres, bigquery, snowflake
     name = models.CharField(max_length=256, default="", blank=True)
     credentials = models.CharField(max_length=1000)
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, unique=True)
     airbyte_destination_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
     )

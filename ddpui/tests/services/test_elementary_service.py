@@ -557,6 +557,49 @@ elementary:
     }
 
 
+def test_extract_profile_strips_ansi_codes():
+    """ANSI escape codes in dbt output must be stripped before YAML parsing."""
+    # dbt emits colour codes around log lines; the profile itself may have them too
+    lines = [
+        "\x1b[0mRunning with dbt=1.7.0\x1b[0m",
+        "\x1b[32melementary:\x1b[0m",
+        "\x1b[0m  target: default\x1b[0m",
+        "\x1b[0m  outputs:\x1b[0m",
+        "\x1b[0m    default:\x1b[0m",
+        "\x1b[0m      type: postgres\x1b[0m",
+        "",
+    ]
+    _, result = extract_profile_from_generate_elementary_cli_profile(lines)
+    assert result == {
+        "elementary": {
+            "target": "default",
+            "outputs": {"default": {"type": "postgres"}},
+        }
+    }
+
+
+def test_extract_profile_stops_at_trailing_dbt_log_line():
+    """A non-indented line after the YAML block (dbt warning/log) must not be
+    included in the buffer — it would break YAML parsing."""
+    lines = [
+        "elementary:",
+        "  target: default",
+        "  outputs:",
+        "    default:",
+        "      type: postgres",
+        # dbt sometimes prints a warning after the macro output
+        "Some dbt warning that is not indented",
+        "another dbt line",
+    ]
+    _, result = extract_profile_from_generate_elementary_cli_profile(lines)
+    assert result == {
+        "elementary": {
+            "target": "default",
+            "outputs": {"default": {"type": "postgres"}},
+        }
+    }
+
+
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.lock_tasks_for_deployment")
 @patch("ddpui.ddpdbt.elementary_service.prefect_service.create_deployment_flow_run")
 def test_refresh_elementary_report_via_prefect(
@@ -693,7 +736,7 @@ def test_ensure_edr_sendreport_dataflow(
     ensure_edr_sendreport_dataflow(org, cron)
 
     mock_gather_dbt_project_params.assert_called_once_with(org, org.dbt)
-    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir")
+    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir", seq=0)
     mock_generate_hash_id.assert_called_once_with(8)
 
     # The create_dataflow_v1 should be called with the org's edr_queue config
@@ -717,6 +760,117 @@ def test_ensure_edr_sendreport_dataflow(
     assert hasattr(queue_details, "workpool")
     assert queue_details.name == EDR_WORK_QUEUE
     assert queue_details.workpool == "test_workpool"
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.update_dataflow_v1")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
+@patch("ddpui.core.orgtaskfunctions.get_edr_send_report_task")
+def test_ensure_edr_sendreport_dataflow_updates_existing(
+    mock_get_edr_send_report_task,
+    mock_create_dataflow_v1,
+    mock_update_dataflow_v1,
+    mock_setup_edr_send_report_task_config,
+    mock_gather_dbt_project_params,
+    edr_deployment_org,
+):
+    """when a deployment already exists the command updates it instead of skipping"""
+    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
+    cron = "0 6 * * *"
+
+    orgtask = OrgTask.objects.filter(org=edr_deployment_org, task__slug=TASK_GENERATE_EDR).first()
+    mock_get_edr_send_report_task.return_value = orgtask
+    mock_gather_dbt_project_params.return_value = Mock(
+        venv_binary="venv/bin", project_dir="project-dir"
+    )
+    mock_setup_edr_send_report_task_config.return_value = Mock(
+        to_json=Mock(return_value={"task": "config"})
+    )
+
+    result = ensure_edr_sendreport_dataflow(edr_deployment_org, cron)
+
+    assert result["status"] == "success"
+    assert result.get("updated") is True
+
+    # update was called, create was not
+    mock_update_dataflow_v1.assert_called_once()
+    mock_create_dataflow_v1.assert_not_called()
+
+    # the deployment_params passed to update contains the edr task config
+    update_payload = mock_update_dataflow_v1.call_args[0][1]
+    assert update_payload.cron == cron
+    assert update_payload.deployment_params["config"]["tasks"] == [{"task": "config"}]
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
+@patch("ddpui.ddpdbt.elementary_service.setup_git_clone_shell_task_config")
+@patch("ddpui.ddpdbt.elementary_service.generate_hash_id")
+@patch("ddpui.ddpdbt.elementary_service.prefect_service.create_dataflow_v1")
+@patch("ddpui.core.orgtaskfunctions.get_edr_send_report_task")
+def test_ensure_edr_sendreport_dataflow_eks(
+    mock_get_edr_send_report_task,
+    mock_create_dataflow_v1,
+    mock_generate_hash_id,
+    mock_setup_git_clone,
+    mock_setup_edr_send_report_task_config,
+    mock_gather_dbt_project_params,
+    org,
+    orgtask,
+):
+    """on EKS (is_workpool_eks=True on edr_queue) a git-clone task is prepended"""
+    import json as _json
+
+    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
+    os.environ["PREFECT_EKS_WORKER_POOL_NAME"] = "eks_workpool"
+
+    # Ensure git-clone Task exists in DB
+    from ddpui.utils.constants import TASK_GITCLONE
+
+    git_clone_task, _ = Task.objects.get_or_create(
+        slug=TASK_GITCLONE,
+        defaults={"type": TaskType.GIT, "label": "git clone"},
+    )
+
+    cron = "0 0 * * *"
+    mock_gather_dbt_project_params.return_value = Mock(
+        venv_binary="venv/bin",
+        project_dir="project-dir",
+        clients_base_dir="/mnt/clientdbts",
+        project_dir_relative="org/dbtrepo",
+    )
+    mock_get_edr_send_report_task.return_value = orgtask
+    mock_setup_git_clone.return_value = Mock(to_json=Mock(return_value={"slug": "git-clone"}))
+    mock_setup_edr_send_report_task_config.return_value = Mock(
+        to_json=Mock(return_value={"slug": "generate-edr"})
+    )
+    mock_generate_hash_id.return_value = "hashcode"
+
+    deployment_name = f"pipeline-{org.slug}-generate-edr-hashcode"
+    mock_create_dataflow_v1.return_value = {
+        "deployment": {"name": deployment_name, "id": "deployment-id"}
+    }
+
+    result = ensure_edr_sendreport_dataflow(org, cron)
+
+    assert result["status"] == "success"
+
+    # git-clone config is built
+    mock_setup_git_clone.assert_called_once()
+
+    # edr config is built with seq=1 (after git-clone at seq=0)
+    mock_setup_edr_send_report_task_config.assert_called_once_with(orgtask, "project-dir", seq=1)
+
+    # both tasks are present in the deployment params
+    call_args = mock_create_dataflow_v1.call_args
+    tasks = call_args[0][0].deployment_params["config"]["tasks"]
+    assert len(tasks) == 2
+    assert tasks[0]["slug"] == "git-clone"
+    assert tasks[1]["slug"] == "generate-edr"
+
+    # cleanup
+    del os.environ["PREFECT_EKS_WORKER_POOL_NAME"]
 
 
 def test_create_elementary_profile_no_dbt(org):
@@ -873,6 +1027,63 @@ def test_create_elementary_profile_elementary_dir_already_exists(
     # Verify elementary profile was still created (overwrites existing)
     elementary_file = elementary_dir / "profiles.yml"
     assert elementary_file.exists()
+
+
+@patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.ddpdbt.elementary_service.subprocess.check_output")
+def test_create_elementary_profile_macro_target_mismatch(
+    mock_subprocess, mock_gather_params, org, tmp_path
+):
+    """When the elementary macro emits target='default' but the dbt profile on
+    disk uses a custom target name, create_elementary_profile must still read
+    warehouse creds from the dbt profile's configured target — not blindly use
+    the macro's target as the key into dbt outputs (which caused KeyError: 'default')."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    profiles_dir = project_dir / "profiles"
+    profiles_dir.mkdir()
+
+    # dbt profile uses a custom target name, NOT "default"
+    dbt_profile_content = {
+        "test_profile": {
+            "target": "custom_target",
+            "outputs": {
+                "custom_target": {
+                    "type": "postgres",
+                    "host": "db.example.com",
+                    "schema": "analytics",
+                }
+            },
+        }
+    }
+    with open(profiles_dir / "profiles.yml", "w") as f:
+        yaml.safe_dump(dbt_profile_content, f)
+
+    dbt_project_file = project_dir / "dbt_project.yml"
+    with open(dbt_project_file, "w") as f:
+        yaml.safe_dump({"name": "test_project", "profile": "test_profile"}, f)
+
+    mock_gather_params.return_value = Mock(
+        project_dir=str(project_dir), dbt_binary="test-dbt"
+    )
+    # elementary macro emits target: default — does NOT match the dbt profile
+    mock_subprocess.return_value = """elementary:
+  target: default
+  outputs:
+    default:
+      type: postgres
+      schema: elementary_schema"""
+
+    result = create_elementary_profile(org)
+
+    assert result == {"status": "success"}
+    # The written elementary profile must carry the creds from the dbt profile
+    elementary_file = project_dir / "elementary_profiles" / "profiles.yml"
+    assert elementary_file.exists()
+    written = yaml.safe_load(elementary_file.read_text())
+    output = written["elementary"]["outputs"]["default"]
+    assert output["host"] == "db.example.com"
+    assert output["schema"] == "elementary_schema"
 
 
 # ==================== install_elementary celery task tests ====================

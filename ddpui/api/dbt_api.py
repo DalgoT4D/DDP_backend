@@ -435,7 +435,8 @@ def post_elementary_check(request):
 
     # 1. Pull latest dbt code
     try:
-        GitManager(repo_local_path=project_dir).pull_changes()
+        pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+        GitManager(repo_local_path=project_dir, pat=pat).pull_changes()
     except Exception as err:
         raise HttpError(500, f"git pull failed: {err}") from err
 

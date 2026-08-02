@@ -22,9 +22,17 @@ from ddpui.core.pipelinefunctions import (
     lock_tasks_for_dataflow,
     setup_dbt_core_task_config,
 )
+from ddpui.core.orchestrate.pipeline_service import PipelineService
 from ddpui.ddpdbt.schema import DbtProjectParams
+from ddpui.ddpprefect.schema import PrefectDataFlowOrgTasks
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_DBTRUN
+from ddpui.utils.constants import (
+    TASK_AIRBYTESYNC,
+    TASK_DBTRUN,
+    TASK_GITCLONE,
+    TASK_GITPULL,
+    TASK_GENERATE_EDR,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -297,3 +305,89 @@ def test_lock_tasks_for_dataflow(test_dataflow: OrgDataFlowv1, orguser: OrgUser)
 
     assert exc.value.status_code == 400
     assert str(exc.value) == f"{orguser.user.email} is running this pipeline right now"
+
+
+# =============================================================================
+# PipelineService._build_transform_tasks — git injection for EDR-only pipelines
+# =============================================================================
+
+
+def _make_edr_org(is_eks: bool):
+    """Create an org + EDR OrgTask. Queue config sets is_workpool_eks per flag."""
+    orgdbt = OrgDbt.objects.create(
+        project_dir="test-org/dbtrepo",
+        target_type="postgres",
+        default_schema="public",
+        gitrepo_url="https://github.com/test/repo.git",
+    )
+    workpool = "eks-pool" if is_eks else "default-pool"
+    queue_config = {
+        "scheduled_pipeline_queue": {
+            "name": "ddp",
+            "workpool": workpool,
+            "is_workpool_eks": is_eks,
+        },
+        "connection_sync_queue": {"name": "ddp", "workpool": workpool, "is_workpool_eks": is_eks},
+        "transform_task_queue": {"name": "ddp", "workpool": workpool, "is_workpool_eks": is_eks},
+        "edr_queue": {"name": "edr", "workpool": workpool, "is_workpool_eks": is_eks},
+    }
+    org = Org.objects.create(slug="edr-test-org", dbt=orgdbt, queue_config=queue_config)
+    edr_task, _ = Task.objects.get_or_create(
+        slug=TASK_GENERATE_EDR, defaults={"type": TaskType.EDR, "label": "EDR generate"}
+    )
+    edr_orgtask = OrgTask.objects.create(org=org, task=edr_task)
+    return org, edr_orgtask
+
+
+@patch("ddpui.core.orchestrate.pipeline_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.core.orchestrate.pipeline_service.pipeline_with_orgtasks")
+def test_build_transform_tasks_edr_only_non_eks_adds_git_pull(
+    mock_pipeline_with_orgtasks,
+    mock_gather_dbt_project_params,
+    seed_master_tasks,
+):
+    """EDR-only pipeline on non-EKS: git-pull is prepended automatically."""
+    org, edr_orgtask = _make_edr_org(is_eks=False)
+    mock_gather_dbt_project_params.return_value = Mock(
+        project_dir="/mnt/clientdbts/edr-test-org/dbtrepo",
+        clients_base_dir="/mnt/clientdbts",
+        project_dir_relative="edr-test-org/dbtrepo",
+    )
+    mock_pipeline_with_orgtasks.return_value = ([], None)
+
+    payload = [PrefectDataFlowOrgTasks(uuid=str(edr_orgtask.uuid), seq=0)]
+    PipelineService._build_transform_tasks(org, payload, [])
+
+    all_orgtasks_passed = mock_pipeline_with_orgtasks.call_args[0][1]
+    slugs = [ot.task.slug for ot in all_orgtasks_passed]
+    assert TASK_GITPULL in slugs
+    assert TASK_GITCLONE not in slugs
+    assert TASK_GENERATE_EDR in slugs
+    assert slugs.index(TASK_GITPULL) < slugs.index(TASK_GENERATE_EDR)
+
+
+@patch("ddpui.core.orchestrate.pipeline_service.DbtProjectManager.gather_dbt_project_params")
+@patch("ddpui.core.orchestrate.pipeline_service.pipeline_with_orgtasks")
+def test_build_transform_tasks_edr_only_eks_adds_git_clone(
+    mock_pipeline_with_orgtasks,
+    mock_gather_dbt_project_params,
+    seed_master_tasks,
+):
+    """EDR-only pipeline on EKS: git-clone is prepended automatically."""
+    org, edr_orgtask = _make_edr_org(is_eks=True)
+    mock_gather_dbt_project_params.return_value = Mock(
+        project_dir="/mnt/clientdbts/edr-test-org/dbtrepo",
+        clients_base_dir="/mnt/clientdbts",
+        project_dir_relative="edr-test-org/dbtrepo",
+    )
+    mock_pipeline_with_orgtasks.return_value = ([], None)
+
+    payload = [PrefectDataFlowOrgTasks(uuid=str(edr_orgtask.uuid), seq=0)]
+    PipelineService._build_transform_tasks(org, payload, [])
+
+    all_orgtasks_passed = mock_pipeline_with_orgtasks.call_args[0][1]
+    slugs = [ot.task.slug for ot in all_orgtasks_passed]
+    assert TASK_GITCLONE in slugs
+    assert TASK_GITPULL not in slugs
+    assert TASK_GENERATE_EDR in slugs
+    assert slugs.index(TASK_GITCLONE) < slugs.index(TASK_GENERATE_EDR)
