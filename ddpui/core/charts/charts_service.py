@@ -782,6 +782,29 @@ TIMESTAMP_TYPES = {
     "timestamp without time zone",
 }
 
+# Numeric column types where filter values must be valid numbers.
+NUMERIC_TYPES = {
+    "integer",
+    "bigint",
+    "smallint",
+    "int",
+    "int2",
+    "int4",
+    "int8",
+    "serial",
+    "bigserial",
+    "numeric",
+    "decimal",
+    "double",
+    "double precision",
+    "real",
+    "float",
+    "float4",
+    "float8",
+    "money",
+    "number",
+}
+
 
 def _is_timestamp_date(filter_config: dict) -> bool:
     """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
@@ -799,6 +822,37 @@ def _is_timestamp_date(filter_config: dict) -> bool:
 def _next_day(val: str) -> str:
     """Return the next day as yyyy-MM-dd string."""
     return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _coerce_numeric_value(value, data_type: str):
+    """Coerce *value* to a numeric Python type when *data_type* is numeric.
+
+    Returns ``(coerced_value, True)`` on success, or ``(None, False)`` when the
+    value cannot be represented as a number (e.g. empty string).
+    """
+    data_type_lower = (data_type or "").lower()
+    if data_type_lower not in NUMERIC_TYPES:
+        return value, True
+
+    # Already a number — nothing to do.
+    if isinstance(value, (int, float)):
+        return value, True
+
+    if not isinstance(value, str) or value.strip() == "":
+        return None, False
+
+    # Integer family → int; everything else → float.
+    integer_types = {
+        "integer", "bigint", "smallint",
+        "int", "int2", "int4", "int8",
+        "serial", "bigserial",
+    }
+    try:
+        if data_type_lower in integer_types:
+            return int(value), True
+        return float(value), True
+    except (ValueError, TypeError):
+        return None, False
 
 
 def apply_chart_filters(
@@ -835,6 +889,20 @@ def apply_chart_filters(
 
         if not column_name or operator is None:
             continue
+
+        # Operators that ignore the value — no coercion needed.
+        if operator in ("is_null", "is_not_null"):
+            single_filters.append(filter_config)
+            continue
+
+        # Coerce value for numeric columns; skip filter if value is invalid.
+        data_type = filter_config.get("data_type", "")
+        coerced_value, valid = _coerce_numeric_value(
+            filter_config.get("value"), data_type
+        )
+        if not valid:
+            continue
+        filter_config = {**filter_config, "value": coerced_value}
 
         # Timestamp date filters need day-range logic — keep full config
         if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):

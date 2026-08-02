@@ -110,3 +110,101 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+
+class TestNumericFilterCoercion:
+    """Tests for numeric value coercion in apply_chart_filters."""
+
+    def test_empty_string_on_integer_column_is_skipped(self):
+        """Empty string value on an integer column must be silently dropped."""
+        sql = get_where_sql(
+            [make_filter("active_work_orders", "greater_than_equal", "", "integer")]
+        )
+        assert len(sql) == 0
+
+    def test_empty_string_on_bigint_column_is_skipped(self):
+        """Empty string value on a bigint column must be silently dropped."""
+        sql = get_where_sql(
+            [make_filter("total_count", "less_than", "", "bigint")]
+        )
+        assert len(sql) == 0
+
+    def test_whitespace_only_on_numeric_column_is_skipped(self):
+        """Whitespace-only value on a numeric column must be silently dropped."""
+        sql = get_where_sql(
+            [make_filter("amount", "equals", "   ", "numeric")]
+        )
+        assert len(sql) == 0
+
+    def test_valid_integer_string_is_coerced(self):
+        """String '42' on an integer column must be coerced to integer 42."""
+        sql = get_where_sql(
+            [make_filter("active_work_orders", "greater_than_equal", "42", "integer")]
+        )
+        assert len(sql) == 1
+        assert "42" in sql[0]
+
+    def test_valid_float_string_is_coerced(self):
+        """String '3.14' on a float column must be coerced to float."""
+        sql = get_where_sql(
+            [make_filter("score", "greater_than", "3.14", "float")]
+        )
+        assert len(sql) == 1
+        assert "3.14" in sql[0]
+
+    def test_non_numeric_string_on_integer_column_is_skipped(self):
+        """Non-numeric string on an integer column must be silently dropped."""
+        sql = get_where_sql(
+            [make_filter("count", "equals", "abc", "integer")]
+        )
+        assert len(sql) == 0
+
+    def test_numeric_value_already_int_passes_through(self):
+        """Integer value on an integer column passes through unchanged."""
+        sql = get_where_sql(
+            [make_filter("count", "equals", 42, "integer")]
+        )
+        assert len(sql) == 1
+        assert "42" in sql[0]
+
+    def test_empty_string_on_varchar_column_is_kept(self):
+        """Empty string on a varchar column should NOT be skipped."""
+        sql = get_where_sql(
+            [make_filter("name", "equals", "", "varchar")]
+        )
+        assert len(sql) == 1
+
+    def test_empty_string_equals_on_integer_grouped_is_skipped(self):
+        """Empty string in a grouped equals on integer column is skipped."""
+        sql = get_where_sql(
+            [make_filter("count", "equals", "", "integer")]
+        )
+        assert len(sql) == 0
+
+    def test_mixed_valid_and_empty_integer_filters(self):
+        """Only the valid filter should produce a WHERE clause."""
+        filters = [
+            make_filter("count", "greater_than", "", "integer"),
+            make_filter("count", "less_than", "100", "integer"),
+        ]
+        sql = get_where_sql(filters)
+        assert len(sql) == 1
+        assert "100" in sql[0]
+
+    def test_empty_string_on_numeric_is_null_still_works(self):
+        """is_null on a numeric column with empty value should still work."""
+        sql = get_where_sql(
+            [make_filter("count", "is_null", "", "integer")]
+        )
+        assert len(sql) == 1
+
+    def test_all_numeric_types_reject_empty_string(self):
+        """All numeric data types should reject empty string values."""
+        for dtype in [
+            "integer", "bigint", "smallint", "numeric", "decimal",
+            "double", "real", "float", "double precision", "money",
+        ]:
+            sql = get_where_sql(
+                [make_filter("col", "greater_than", "", dtype)]
+            )
+            assert len(sql) == 0, f"Empty string not rejected for data_type={dtype}"
