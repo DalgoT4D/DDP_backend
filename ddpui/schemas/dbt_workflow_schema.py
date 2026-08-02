@@ -97,7 +97,7 @@ class ArithmeticOperand(Schema):
     """Schema for individual arithmetic operand"""
 
     is_col: bool
-    value: Union[str, float, int]
+    value: Optional[Union[str, float, int]] = None
 
 
 class ArithmeticOperationConfig(Schema):
