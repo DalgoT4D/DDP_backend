@@ -207,6 +207,8 @@ def create_or_update_dbt_profile_secret_blk(
     )
     org.dbt.dbt_profile_secret_block = dbt_profile_secret_block_row
     org.dbt.save(update_fields=["dbt_profile_secret_block"])
+    warehouse.dbt_profile_secret_block = dbt_profile_secret_block_row
+    warehouse.save(update_fields=["dbt_profile_secret_block"])
     logger.info(
         "Upserted dbt-profile secret block %s for org=%s",
         dbt_profile_secret_response["block_name"],

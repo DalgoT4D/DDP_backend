@@ -10,7 +10,7 @@ from ninja.errors import HttpError
 
 from ddpui.models.tasks import OrgTask, DataflowOrgTask, TaskLock, TaskLockStatus
 from ddpui.models.flow_runs import PrefectFlowRun
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgPrefectBlockv1, OrgDataFlowv1, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.org_task_schema import SelectedStream
 from ddpui.utils.custom_logger import CustomLogger
@@ -46,6 +46,7 @@ from ddpui.utils.constants import (
     TASK_DBTCLOUD_JOB,
 )
 from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
+from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 
 logger = CustomLogger("ddpui")
 
@@ -56,6 +57,38 @@ def setup_airbyte_sync_task_config(
     org_task: OrgTask, server_block: OrgPrefectBlockv1, seq: int = 1
 ):
     """constructs the prefect payload for an airbyte sync or reset"""
+    env = {}
+    post_sync_ops = []
+
+    if org_task.post_sync_transform:
+        warehouse = OrgWarehouse.objects.filter(org=org_task.org).first()
+        if not warehouse:
+            logger.warning(
+                "OrgWarehouse not found for org=%s — post-sync ops skipped", org_task.org.slug
+            )
+        else:
+            if warehouse.dbt_profile_secret_block:
+                env["dbt-profile-secret-block"] = warehouse.dbt_profile_secret_block.block_name
+            else:
+                logger.warning(
+                    "OrgWarehouse for org=%s has no dbt_profile_secret_block — post-sync ops skipped",
+                    org_task.org.slug,
+                )
+            try:
+                client = WarehouseFactory.get_warehouse_client(warehouse)
+                for op in org_task.post_sync_transform.get("ops", []):
+                    if op.get("type") != "cast":
+                        continue
+                    sql = client.generate_cast_sql(op["schema"], op["table"], op["config"])
+                    if sql:
+                        post_sync_ops.append({"type": "cast", "sql": sql})
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "Failed to generate post-sync cast SQL for org=%s: %s",
+                    org_task.org.slug,
+                    str(err),
+                )
+
     return PrefectAirbyteSyncTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
@@ -64,6 +97,8 @@ def setup_airbyte_sync_task_config(
         connection_id=org_task.connection_id,
         timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
+        env=env,
+        post_sync_ops=post_sync_ops,
     )
 
 
@@ -110,18 +145,18 @@ def setup_dbt_core_task_config(
     cli_profile_block: OrgPrefectBlockv1,
     dbt_project_params: DbtProjectParams,
     seq: int = 1,
+    warehouse_secret_block: OrgPrefectBlockv1 = None,
 ):
     """constructs the prefect payload for a dbt job"""
     # Populate env for the runner flow (proxy/prefect_flows_runner.py). Old flow
     # ignores env; keeping cli_profile_block above means a rollback stays safe.
     # Keys use the same hyphen convention as `secret-git-pull-url-block`.
-    orgdbt = org_task.org.dbt
     env = {}
-    if orgdbt and orgdbt.dbt_profile_secret_block:
-        env["dbt-profile-secret-block"] = orgdbt.dbt_profile_secret_block.block_name
+    if warehouse_secret_block:
+        env["dbt-profile-secret-block"] = warehouse_secret_block.block_name
     else:
         logger.warning(
-            "OrgDbt for org=%s has no dbt_profile_secret_block — runner-mode deployments will fail. "
+            "OrgWarehouse for org=%s has no dbt_profile_secret_block — runner-mode deployments will fail. "
             "Run create_or_update_org_cli_block to create the Secret block.",
             org_task.org.slug,
         )
@@ -217,7 +252,12 @@ def setup_git_clone_shell_task_config(
     )
 
 
-def setup_edr_send_report_task_config(org_task: OrgTask, project_dir: str, seq: int = 1):
+def setup_edr_send_report_task_config(
+    org_task: OrgTask,
+    project_dir: str,
+    seq: int = 1,
+    warehouse_secret_block: OrgPrefectBlockv1 = None,
+):
     """Constructs the prefect payload for the EDR (elementary send-report) task.
 
     Runner-side (prefect-proxy/proxy/prefect_flows_runner.py:shellopjob) uses:
@@ -230,14 +270,13 @@ def setup_edr_send_report_task_config(org_task: OrgTask, project_dir: str, seq: 
     runner image + local prefect-proxy venv), so we don't prepend a venv
     path anymore.
     """
-    orgdbt = org_task.org.dbt
     shell_env = {"shell": "/bin/bash"}
-    if orgdbt and orgdbt.dbt_profile_secret_block:
-        shell_env["dbt-profile-secret-block"] = orgdbt.dbt_profile_secret_block.block_name
+    if warehouse_secret_block:
+        shell_env["dbt-profile-secret-block"] = warehouse_secret_block.block_name
     else:
         logger.warning(
-            "OrgDbt for org=%s has no dbt_profile_secret_block — EDR runs will fail. "
-            "Set up Elementary first so the block is created.",
+            "OrgWarehouse for org=%s has no dbt_profile_secret_block — EDR runs will fail. "
+            "Run create_or_update_org_cli_block to create the Secret block.",
             org_task.org.slug,
         )
     return PrefectShellTaskSetup(
@@ -268,6 +307,8 @@ def pipeline_with_orgtasks(
     This assumes the list of orgtasks is in the correct sequence
     """
     task_configs = []
+    warehouse = OrgWarehouse.objects.filter(org=org).first()
+    warehouse_secret_block = warehouse.dbt_profile_secret_block if warehouse else None
     # This block works perfectly for dbt cli tasks and dbt cloud tasks both.
     for org_task in org_tasks:
         task_config = None
@@ -307,6 +348,7 @@ def pipeline_with_orgtasks(
             task_config = setup_edr_send_report_task_config(
                 org_task,
                 dbt_project_params.project_dir,
+                warehouse_secret_block=warehouse_secret_block,
             ).to_json()
         elif org_task.task.slug == TASK_DBTCLOUD_JOB:
             task_config = setup_dbt_cloud_task_config(
@@ -314,7 +356,10 @@ def pipeline_with_orgtasks(
             ).to_json()
         else:
             task_config = setup_dbt_core_task_config(
-                org_task, cli_block, dbt_project_params
+                org_task,
+                cli_block,
+                dbt_project_params,
+                warehouse_secret_block=warehouse_secret_block,
             ).to_json()
 
         if task_config:

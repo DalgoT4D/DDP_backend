@@ -66,6 +66,7 @@ class AirbyteConnectionCreate(Schema):
     syncCatalog: dict
     destinationId: Optional[str] = None
     destinationSchema: Optional[str] = None
+    post_sync_transform: Optional[dict] = None
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -84,6 +85,7 @@ class AirbyteConnectionCreateResponse(Schema):
     lock: Optional[dict] = None
     isRunning: bool = False
     resetConnDeploymentId: Optional[str] = None
+    post_sync_transform: Optional[dict] = None
 
 
 class AirbyteGetConnectionsResponse(Schema):
@@ -113,6 +115,7 @@ class AirbyteConnectionUpdate(Schema):
     catalogId: str
     destinationId: Optional[str] = None
     destinationSchema: Optional[str] = None
+    post_sync_transform: Optional[dict] = None
 
 
 # response schemas

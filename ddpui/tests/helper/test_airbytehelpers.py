@@ -14,6 +14,8 @@ from ddpui.ddpairbyte.airbytehelpers import (
     delete_source,
     create_airbyte_deployment,
     create_connection,
+    update_connection,
+    get_one_connection,
     get_sync_job_history_for_connection,
     schedule_update_connection_schema,
     fetch_and_update_airbyte_job_details,
@@ -23,6 +25,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
 from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
     AirbyteConnectionCreate,
+    AirbyteConnectionUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
 )
 from ddpui.models.role_based_access import Role
@@ -1494,3 +1497,182 @@ def test_update_destination_no_dbt_workspace(
 
     # Verify create_or_update_org_cli_block was NOT called since dbt workspace is not setup
     mock_create_or_update_org_cli_block.assert_not_called()
+
+
+# ================================================================================
+# M2 — post_sync_transform round-trip tests
+# ================================================================================
+
+POST_SYNC_TRANSFORM = {
+    "ops": [
+        {
+            "type": "cast",
+            "schema": "dest",
+            "table": "orders",
+            "config": {"amount": "numeric"},
+        }
+    ]
+}
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
+@patch("ddpui.ddpairbyte.airbytehelpers.logger")
+def test_create_connection_saves_post_sync_transform(
+    mock_logger,
+    mock_create_airbyte_deployment,
+    mock_delete_connection,
+    mock_create_connection,
+    org_with_workspace,
+    sync_task,
+    clear_task,
+):
+    """post_sync_transform is persisted on the sync OrgTask when creating a connection."""
+    mock_create_connection.return_value = {
+        "connectionId": "conn-id",
+        "sourceId": "src-id",
+        "destinationId": "dst-id",
+        "sourceCatalogId": "cat-id",
+        "syncCatalog": {},
+        "status": "active",
+        "name": "test-conn",
+    }
+    new_dataflow = Mock(clear_conn_dataflow=None)
+    mock_create_airbyte_deployment.return_value = new_dataflow
+
+    payload = AirbyteConnectionCreate(
+        name="test-conn",
+        sourceId="src-id",
+        streams=[],
+        catalogId="cat-id",
+        syncCatalog={"streams": []},
+        post_sync_transform=POST_SYNC_TRANSFORM,
+    )
+
+    result, error = create_connection(org_with_workspace, payload)
+
+    assert error is None
+    assert result["post_sync_transform"] == POST_SYNC_TRANSFORM
+
+    # The sync OrgTask should have post_sync_transform set
+    sync_orgtask = OrgTask.objects.filter(
+        org=org_with_workspace,
+        connection_id="conn-id",
+        task=sync_task,
+    ).first()
+    assert sync_orgtask is not None
+    assert sync_orgtask.post_sync_transform == POST_SYNC_TRANSFORM
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.update_dataflow_v1")
+@patch("ddpui.ddpairbyte.airbytehelpers.setup_airbyte_sync_task_config")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_update_connection_saves_post_sync_transform(
+    mock_get_connection,
+    mock_update_connection,
+    mock_setup_task_config,
+    mock_update_dataflow_v1,
+    org_with_workspace,
+    sync_task,
+):
+    """update_connection persists post_sync_transform on OrgTask and regenerates deployment."""
+    # Create existing sync OrgTask + dataflow
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace, task=sync_task, connection_id="conn-id"
+    )
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="manual-dep",
+        deployment_name="manual-dep",
+        deployment_id="dep-id",
+        dataflow_type="manual",
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=sync_orgtask)
+
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "operationIds": [],
+        "syncCatalog": {},
+    }
+    mock_update_connection.return_value = {"connectionId": "conn-id"}
+    mock_setup_task_config.return_value.to_json.return_value = {"slug": "airbytesync"}
+
+    payload = AirbyteConnectionUpdate(
+        name="updated-conn",
+        streams=[{"name": "orders"}],
+        syncCatalog={"streams": []},
+        catalogId="cat-id",
+        post_sync_transform=POST_SYNC_TRANSFORM,
+    )
+
+    _, error = update_connection(org_with_workspace, "conn-id", payload)
+
+    assert error is None
+
+    sync_orgtask.refresh_from_db()
+    assert sync_orgtask.post_sync_transform == POST_SYNC_TRANSFORM
+    mock_update_dataflow_v1.assert_called_once()
+
+    # cleanup
+    DataflowOrgTask.objects.filter(orgtask=sync_orgtask).delete()
+    dataflow.delete()
+    sync_orgtask.delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.fetch_orgtask_lock_v1")
+@patch("ddpui.ddpairbyte.airbytehelpers.TaskLock")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_get_one_connection_includes_post_sync_transform(
+    mock_get_connection,
+    mock_task_lock,
+    mock_fetch_lock,
+    org_with_workspace,
+    sync_task,
+):
+    """get_one_connection includes post_sync_transform from the OrgTask."""
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace,
+        task=sync_task,
+        connection_id="conn-id",
+        post_sync_transform=POST_SYNC_TRANSFORM,
+    )
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="manual-dep",
+        deployment_name="manual-dep",
+        deployment_id="dep-id",
+        dataflow_type="manual",
+        reset_conn_dataflow=None,
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=sync_orgtask)
+
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "sourceId": "src-id",
+        "destinationId": "dst-id",
+        "catalogId": "cat-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "syncCatalog": {},
+        "source": {"name": "src-name"},
+        "destination": {"name": "dst-name"},
+        "name": "test-conn",
+    }
+    mock_task_lock.objects.filter.return_value.first.return_value = None
+    mock_fetch_lock.return_value = None
+
+    result, error = get_one_connection(org_with_workspace, "conn-id")
+
+    assert error is None
+    assert result["post_sync_transform"] == POST_SYNC_TRANSFORM
+
+    # cleanup
+    DataflowOrgTask.objects.filter(orgtask=sync_orgtask).delete()
+    dataflow.delete()
+    sync_orgtask.delete()

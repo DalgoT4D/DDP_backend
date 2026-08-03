@@ -247,17 +247,6 @@ def delete_dbt_workspace(org: Org):
             pass
         secret_block.delete()
 
-    # Delete the dbt-profile secret block (dbt-profile-<slug>). FK lives on
-    # OrgDbt so deleting OrgDbt below would orphan the Prefect block +
-    # OrgPrefectBlockv1 row — clean them up explicitly here.
-    if org.dbt and org.dbt.dbt_profile_secret_block:
-        dbt_profile_secret_block = org.dbt.dbt_profile_secret_block
-        try:
-            prefect_service.delete_secret_block(dbt_profile_secret_block.block_id)
-        except Exception:  # pylint:disable=broad-exception-caught
-            pass
-        dbt_profile_secret_block.delete()
-
     # delete github PAT if exists
     if org.dbt and org.dbt.gitrepo_access_token_secret:
         secretsmanager.delete_github_pat(org.dbt.gitrepo_access_token_secret)

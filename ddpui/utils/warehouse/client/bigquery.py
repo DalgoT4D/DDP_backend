@@ -10,6 +10,16 @@ from ddpui.core.datainsights.insights.insight_interface import MAP_TRANSLATE_TYP
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 
+BIGQUERY_CAST_TYPE_MAP = {
+    "numeric": "NUMERIC",
+    "integer": "INT64",
+    "bigint": "INT64",
+    "boolean": "BOOL",
+    "date": "DATE",
+    "timestamp": "TIMESTAMP",
+    "text": "STRING",
+}
+
 ### CAUTION: workaround for missing datatypes; complex queries on such types using sqlalchemy expression might fail
 _type_map["JSON"] = types.JSON
 
@@ -105,3 +115,36 @@ class BigqueryClient(Warehouse):
             if col.get("name") == column_name:
                 return True
         return False
+
+    def generate_cast_sql(self, schema: str, table: str, column_casts: dict[str, str]) -> str:
+        """Generate CREATE OR REPLACE TABLE SQL to cast columns.
+        Fetches live columns from the warehouse (includes Airbyte meta columns).
+        column_casts: {column_name: target_type} — only the columns to cast.
+        Raises ValueError for unknown types."""
+        for cast_type in column_casts.values():
+            if cast_type not in BIGQUERY_CAST_TYPE_MAP:
+                raise ValueError(f"Unsupported cast type for BigQuery: {cast_type!r}")
+
+        project_id = self.engine.url.host
+        preparer = self.engine.dialect.identifier_preparer
+        all_columns = [col["name"] for col in self.get_table_columns(schema, table)]
+
+        full_table = f"`{project_id}.{schema}.{table}`"
+        select_cols = []
+        for col in all_columns:
+            col_q = preparer.quote(col)
+            if col in column_casts:
+                bq_type = BIGQUERY_CAST_TYPE_MAP[column_casts[col]]
+                select_cols.append(f"CAST({col_q} AS {bq_type}) AS {col_q}")
+            else:
+                select_cols.append(col_q)
+
+        if not select_cols:
+            return ""
+
+        cols_str = ",\n  ".join(select_cols)
+        return (
+            f"CREATE OR REPLACE TABLE {full_table} AS\n"
+            f"SELECT\n  {cols_str}\n"
+            f"FROM {full_table}"
+        )

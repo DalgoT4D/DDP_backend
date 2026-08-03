@@ -266,13 +266,9 @@ class OrgCleanupService:
                 secretsmanager.delete_warehouse_credentials(warehouse)
                 logger.info("deleted warehouse credentials from secrets manager")
 
-                # Delete the dbt-profile Secret block (runner-flow artifact) if
-                # this org has dbt set up. FK lives on OrgDbt; deleting the
-                # Prefect block + OrgPrefectBlockv1 row is our responsibility
-                # here since the warehouse is being torn down.
-                dbt_profile_secret_block = (
-                    self.org.dbt.dbt_profile_secret_block if self.org.dbt else None
-                )
+                # Delete the dbt-profile Secret block (runner-flow artifact).
+                # FK now lives on OrgWarehouse; read it from there.
+                dbt_profile_secret_block = warehouse.dbt_profile_secret_block
                 if dbt_profile_secret_block:
                     try:
                         prefect_service.delete_secret_block(dbt_profile_secret_block.block_id)

@@ -40,6 +40,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
@@ -262,7 +263,10 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         with transaction.atomic():
             # create a sync deployment & dataflow
             org_task = OrgTask.objects.create(
-                org=org, task=sync_task, connection_id=airbyte_conn["connectionId"]
+                org=org,
+                task=sync_task,
+                connection_id=airbyte_conn["connectionId"],
+                post_sync_transform=payload.post_sync_transform or None,
             )
 
             sync_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
@@ -305,6 +309,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         "deploymentId": sync_dataflow.deployment_id,
         "resetConnDeploymentId": None,
         "clearConnDeploymentId": clear_dataflow.deployment_id,
+        "post_sync_transform": payload.post_sync_transform or None,
     }
     return res, None
 
@@ -598,6 +603,7 @@ def get_one_connection(org: Org, connection_id: str):
         ),
         "lock": lock,
         "resetConnDeploymentId": (reset_dataflow.deployment_id if reset_dataflow else None),
+        "post_sync_transform": org_task.post_sync_transform,
     }
 
     return res, None
@@ -645,6 +651,43 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
         ConnectionMeta.objects.filter(connection_id=connection_id).update(
             connection_name=connection["name"]
         )
+
+    # Update post_sync_transform on the sync OrgTask and regenerate deployment params.
+    sync_org_task = OrgTask.objects.filter(
+        org=org, connection_id=connection_id, task__slug=TASK_AIRBYTESYNC
+    ).first()
+    if sync_org_task:
+        sync_org_task.post_sync_transform = payload.post_sync_transform or None
+        sync_org_task.save(update_fields=["post_sync_transform"])
+
+        dot = (
+            DataflowOrgTask.objects.filter(orgtask=sync_org_task).select_related("dataflow").first()
+        )
+        if dot and dot.dataflow:
+            server_block = OrgPrefectBlockv1.objects.filter(
+                org=org, block_type=AIRBYTESERVER
+            ).first()
+            if server_block:
+                try:
+                    task_config = setup_airbyte_sync_task_config(sync_org_task, server_block)
+                    new_params = {
+                        "config": {
+                            "tasks": [task_config.to_json()],
+                            "org_slug": org.slug,
+                        }
+                    }
+                    prefect_service.update_dataflow_v1(
+                        dot.dataflow.deployment_id,
+                        PrefectDataFlowUpdateSchema3(
+                            deployment_params=new_params, cron=dot.dataflow.cron
+                        ),
+                    )
+                except Exception as err:  # pylint: disable=broad-exception-caught
+                    logger.error(
+                        "Failed to update deployment params for connection=%s: %s",
+                        connection_id,
+                        str(err),
+                    )
 
     return res, None
 
