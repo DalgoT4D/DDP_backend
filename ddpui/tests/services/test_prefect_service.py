@@ -252,6 +252,7 @@ def test_create_airbyte_server_block(mock_post: Mock):
             "serverHost": os.getenv("AIRBYTE_SERVER_HOST"),
             "serverPort": os.getenv("AIRBYTE_SERVER_PORT"),
             "apiVersion": os.getenv("AIRBYTE_SERVER_APIVER"),
+            "useSSL": False,
         },
     )
     assert response == ("the-block-id", "theblockname")
