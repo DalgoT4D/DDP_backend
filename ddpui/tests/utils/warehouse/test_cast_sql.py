@@ -43,9 +43,7 @@ def _bigquery_client(columns: list[str]):
         client.engine = engine
         client.inspect_obj = MagicMock()
         # Stub get_table_columns to return the provided column list
-        client.get_table_columns = MagicMock(
-            return_value=[{"name": c} for c in columns]
-        )
+        client.get_table_columns = MagicMock(return_value=[{"name": c} for c in columns])
         return client
 
 
@@ -62,12 +60,17 @@ def test_postgres_empty_casts():
 def test_postgres_single_cast():
     client = _postgres_client()
     sql = client.generate_cast_sql("dest", "orders", {"amount": "numeric"})
-    assert sql == 'ALTER TABLE "dest"."orders"\n  ALTER COLUMN "amount" TYPE numeric USING "amount"::numeric'
+    assert (
+        sql
+        == 'ALTER TABLE "dest"."orders"\n  ALTER COLUMN "amount" TYPE numeric USING "amount"::numeric'
+    )
 
 
 def test_postgres_multiple_casts():
     client = _postgres_client()
-    sql = client.generate_cast_sql("dest", "orders", {"amount": "numeric", "created_at": "timestamp"})
+    sql = client.generate_cast_sql(
+        "dest", "orders", {"amount": "numeric", "created_at": "timestamp"}
+    )
     assert '"amount"' in sql
     assert '"created_at"' in sql
     assert "ALTER TABLE" in sql

@@ -2,7 +2,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("ddpui", "0172_orgwarehouse_dbt_profile_secret_block"),
     ]
