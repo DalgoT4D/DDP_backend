@@ -120,17 +120,23 @@ def task():
 @pytest.fixture
 def sync_task():
     """a pytest fixture which creates a Task object"""
-    task_ = Task.objects.create(slug=TASK_AIRBYTESYNC, label=TASK_AIRBYTESYNC)
+    task_, created = Task.objects.get_or_create(
+        slug=TASK_AIRBYTESYNC, defaults={"label": TASK_AIRBYTESYNC}
+    )
     yield task_
-    task_.delete()
+    if created:
+        task_.delete()
 
 
 @pytest.fixture
 def clear_task():
     """a pytest fixture which creates a Task object"""
-    task_ = Task.objects.create(slug=TASK_AIRBYTECLEAR, label=TASK_AIRBYTECLEAR)
+    task_, created = Task.objects.get_or_create(
+        slug=TASK_AIRBYTECLEAR, defaults={"label": TASK_AIRBYTECLEAR}
+    )
     yield task_
-    task_.delete()
+    if created:
+        task_.delete()
 
 
 @pytest.fixture

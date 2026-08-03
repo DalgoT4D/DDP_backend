@@ -68,13 +68,13 @@ def get_default_queue_config():
         },
         "transform_task_queue": {
             "name": MANUL_DBT_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
         "edr_queue": {
             "name": EDR_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
     }
 

@@ -48,7 +48,7 @@ def seed_master_tasks():
     f = open(os.path.join(seed_dir, "tasks.json"))
     tasks = json.load(f)
     for task in tasks:
-        Task.objects.create(**task["fields"])
+        Task.objects.get_or_create(slug=task["fields"]["slug"], defaults=task["fields"])
 
 
 @pytest.fixture
