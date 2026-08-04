@@ -290,23 +290,23 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
                 connection_id=airbyte_conn["connectionId"], connection_name=payload.name
             )
 
-        # Upsert the AirbyteConnection block only if the user configured casts. Blocks
-        # are created lazily — connections without post_sync_transform never get a block.
-        if payload.post_sync_transform:
-            try:
-                extra = build_connection_block_extra(sync_org_task)
-                prefect_service.upsert_airbyte_connection_block(
-                    server_block_name=org_airbyte_server_block.block_name,
-                    connection_id=airbyte_conn["connectionId"],
-                    connection_name=payload.name,
-                    extra=extra,
-                )
-            except Exception as err:  # pylint: disable=broad-exception-caught
-                logger.error(
-                    "Failed to upsert airbyte connection block for connection=%s: %s",
-                    airbyte_conn["connectionId"],
-                    str(err),
-                )
+        # Always upsert the AirbyteConnection block so every connection has a corresponding
+        # Prefect block (carries the connection name + any post-sync ops). Consistent with
+        # update_connection which also always upserts.
+        try:
+            extra = build_connection_block_extra(sync_org_task)
+            prefect_service.upsert_airbyte_connection_block(
+                server_block_name=org_airbyte_server_block.block_name,
+                connection_id=airbyte_conn["connectionId"],
+                connection_name=payload.name,
+                extra=extra,
+            )
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            logger.error(
+                "Failed to upsert airbyte connection block for connection=%s: %s",
+                airbyte_conn["connectionId"],
+                str(err),
+            )
 
     except Exception as err:
         # delete the airbyte connection; since the deployment didn't get created

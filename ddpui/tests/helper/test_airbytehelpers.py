@@ -1585,7 +1585,7 @@ def test_create_connection_saves_post_sync_transform(
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
 @patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
 @patch("ddpui.ddpairbyte.airbytehelpers.logger")
-def test_create_connection_no_transform_skips_upsert(
+def test_create_connection_no_transform_still_upserts(
     mock_logger,
     mock_create_airbyte_deployment,
     mock_delete_connection,
@@ -1595,7 +1595,8 @@ def test_create_connection_no_transform_skips_upsert(
     sync_task,
     clear_task,
 ):
-    """No post_sync_transform → no block upsert (lazy block creation)."""
+    """Even without post_sync_transform, the block is upserted so every connection has one
+    (consistent with update_connection). extra will just have empty env/ops."""
     mock_create_connection.return_value = {
         "connectionId": "conn-id-2",
         "sourceId": "src-id",
@@ -1618,7 +1619,12 @@ def test_create_connection_no_transform_skips_upsert(
     _, error = create_connection(org_with_workspace, payload)
 
     assert error is None
-    mock_upsert_conn_block.assert_not_called()
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id-2"
+    assert call_kwargs["connection_name"] == "no-cast-conn"
+    # extra carries empty env/ops but the block is still created for consistency
+    assert call_kwargs["extra"] == {"env": {}, "post_sync_ops": []}
 
 
 @patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
