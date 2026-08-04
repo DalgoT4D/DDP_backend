@@ -128,7 +128,11 @@ class BigqueryClient(Warehouse):
 
         project_id = self.engine.url.host
         preparer = self.engine.dialect.identifier_preparer
-        full_table = f"`{project_id}.{schema}.{table}`"
+        # Quote each identifier component separately so a backtick in the user-supplied
+        # schema/table can't escape the identifier boundary.
+        full_table = (
+            f"{preparer.quote(project_id)}.{preparer.quote(schema)}.{preparer.quote(table)}"
+        )
 
         replace_cols = []
         for col, cast_type in column_casts.items():

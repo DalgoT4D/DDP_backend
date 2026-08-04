@@ -103,7 +103,8 @@ def test_bigquery_empty_casts_returns_empty_string():
 def test_bigquery_single_cast_uses_select_star_replace():
     client = _bigquery_client()
     sql = client.generate_cast_sql("dest", "orders", {"amount": "numeric"})
-    assert "CREATE OR REPLACE TABLE `my-project.dest.orders`" in sql
+    # Each identifier is quoted independently so backticks can't escape the boundary
+    assert "CREATE OR REPLACE TABLE `my-project`.`dest`.`orders`" in sql
     assert "SELECT * REPLACE" in sql
     assert "CAST(`amount` AS NUMERIC) AS `amount`" in sql
 
