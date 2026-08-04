@@ -53,10 +53,10 @@ logger = CustomLogger("ddpui")
 ####################### big config dictionaries ##################################
 
 
-def setup_airbyte_sync_task_config(
-    org_task: OrgTask, server_block: OrgPrefectBlockv1, seq: int = 1
-):
-    """constructs the prefect payload for an airbyte sync or reset"""
+def build_connection_block_extra(org_task: OrgTask) -> dict:
+    """Build the `extra` dict to store on the AirbyteConnection block.
+    Contains env (for Secret block reference) and post_sync_ops (generated SQL).
+    Returns {"env": {}, "post_sync_ops": []} when there's no cast config."""
     env = {}
     post_sync_ops = []
 
@@ -89,6 +89,13 @@ def setup_airbyte_sync_task_config(
                     str(err),
                 )
 
+    return {"env": env, "post_sync_ops": post_sync_ops}
+
+
+def setup_airbyte_sync_task_config(
+    org_task: OrgTask, server_block: OrgPrefectBlockv1, seq: int = 1
+):
+    """constructs the prefect payload for an airbyte sync or reset"""
     return PrefectAirbyteSyncTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
@@ -97,8 +104,6 @@ def setup_airbyte_sync_task_config(
         connection_id=org_task.connection_id,
         timeout=PREFECT_AIRBYTE_TASKS_TIMEOUT,
         orgtask_uuid=str(org_task.uuid),
-        env=env,
-        post_sync_ops=post_sync_ops,
     )
 
 

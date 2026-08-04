@@ -1,3 +1,4 @@
+import re
 import sqlalchemy.types as types
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
@@ -117,8 +118,8 @@ class BigqueryClient(Warehouse):
         return False
 
     def generate_cast_sql(self, schema: str, table: str, column_casts: dict[str, str]) -> str:
-        """Generate CREATE OR REPLACE TABLE SQL to cast columns.
-        Fetches live columns from the warehouse (includes Airbyte meta columns).
+        """Generate CREATE OR REPLACE TABLE SQL using SELECT * REPLACE (...) to cast columns.
+        Does not fetch live columns — works even before the first sync.
         column_casts: {column_name: target_type} — only the columns to cast.
         Raises ValueError for unknown types."""
         for cast_type in column_casts.values():
@@ -127,24 +128,22 @@ class BigqueryClient(Warehouse):
 
         project_id = self.engine.url.host
         preparer = self.engine.dialect.identifier_preparer
-        all_columns = [col["name"] for col in self.get_table_columns(schema, table)]
-
         full_table = f"`{project_id}.{schema}.{table}`"
-        select_cols = []
-        for col in all_columns:
-            col_q = preparer.quote(col)
-            if col in column_casts:
-                bq_type = BIGQUERY_CAST_TYPE_MAP[column_casts[col]]
-                select_cols.append(f"CAST({col_q} AS {bq_type}) AS {col_q}")
-            else:
-                select_cols.append(col_q)
 
-        if not select_cols:
+        replace_cols = []
+        for col, cast_type in column_casts.items():
+            # Airbyte Destinations V2: chars not in [a-zA-Z0-9_$] → underscore, case preserved
+            normalized_col = re.sub(r"[^a-zA-Z0-9_$]", "_", col)
+            col_q = preparer.quote(normalized_col)
+            bq_type = BIGQUERY_CAST_TYPE_MAP[cast_type]
+            replace_cols.append(f"CAST({col_q} AS {bq_type}) AS {col_q}")
+
+        if not replace_cols:
             return ""
 
-        cols_str = ",\n  ".join(select_cols)
+        replace_str = ",\n  ".join(replace_cols)
         return (
             f"CREATE OR REPLACE TABLE {full_table} AS\n"
-            f"SELECT\n  {cols_str}\n"
+            f"SELECT * REPLACE (\n  {replace_str}\n)\n"
             f"FROM {full_table}"
         )

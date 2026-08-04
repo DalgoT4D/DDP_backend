@@ -1,3 +1,4 @@
+import re
 import tempfile
 from urllib.parse import quote
 
@@ -138,7 +139,9 @@ class PostgresClient(Warehouse):
             if cast_type not in POSTGRES_CAST_TYPE_MAP:
                 raise ValueError(f"Unsupported cast type for Postgres: {cast_type!r}")
             sql_type = POSTGRES_CAST_TYPE_MAP[cast_type]
-            col_q = preparer.quote(col)
+            # Airbyte Destinations V2: chars not in [a-zA-Z0-9_$] → underscore, case preserved
+            normalized_col = re.sub(r"[^a-zA-Z0-9_$]", "_", col)
+            col_q = preparer.quote(normalized_col)
             clauses.append(f"ALTER COLUMN {col_q} TYPE {sql_type} USING {col_q}::{sql_type}")
         if not clauses:
             return ""

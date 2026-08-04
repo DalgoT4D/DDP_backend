@@ -104,8 +104,6 @@ class PrefectAirbyteSyncTaskSetup(Schema):
     flow_name: Optional[str] = None
     flow_run_name: Optional[str] = None
     seq: int = 0
-    env: dict = {}
-    post_sync_ops: list = []
 
     def to_json(self):
         """JSON serialization"""
@@ -119,8 +117,6 @@ class PrefectAirbyteSyncTaskSetup(Schema):
             "flow_name": self.flow_name,
             "flow_run_name": self.flow_run_name,
             "seq": self.seq,
-            "env": self.env,
-            "post_sync_ops": self.post_sync_ops,
         }
 
 

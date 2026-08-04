@@ -65,6 +65,7 @@ from ddpui.utils import secretsmanager
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
+    build_connection_block_extra,
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
@@ -262,7 +263,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     try:
         with transaction.atomic():
             # create a sync deployment & dataflow
-            org_task = OrgTask.objects.create(
+            sync_org_task = OrgTask.objects.create(
                 org=org,
                 task=sync_task,
                 connection_id=airbyte_conn["connectionId"],
@@ -270,7 +271,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
             )
 
             sync_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
-                org, org_task, org_airbyte_server_block
+                org, sync_org_task, org_airbyte_server_block
             )
 
             # create clear connection task & dataflow/deployment
@@ -288,6 +289,24 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
             ConnectionMeta.objects.create(
                 connection_id=airbyte_conn["connectionId"], connection_name=payload.name
             )
+
+        # Upsert the AirbyteConnection block only if the user configured casts. Blocks
+        # are created lazily — connections without post_sync_transform never get a block.
+        if payload.post_sync_transform:
+            try:
+                extra = build_connection_block_extra(sync_org_task)
+                prefect_service.upsert_airbyte_connection_block(
+                    server_block_name=org_airbyte_server_block.block_name,
+                    connection_id=airbyte_conn["connectionId"],
+                    connection_name=payload.name,
+                    extra=extra,
+                )
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "Failed to upsert airbyte connection block for connection=%s: %s",
+                    airbyte_conn["connectionId"],
+                    str(err),
+                )
 
     except Exception as err:
         # delete the airbyte connection; since the deployment didn't get created
@@ -652,7 +671,7 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
             connection_name=connection["name"]
         )
 
-    # Update post_sync_transform on the sync OrgTask and regenerate deployment params.
+    # Update post_sync_transform on the sync OrgTask and refresh the connection block's extra.
     sync_org_task = OrgTask.objects.filter(
         org=org, connection_id=connection_id, task__slug=TASK_AIRBYTESYNC
     ).first()
@@ -660,34 +679,22 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
         sync_org_task.post_sync_transform = payload.post_sync_transform or None
         sync_org_task.save(update_fields=["post_sync_transform"])
 
-        dot = (
-            DataflowOrgTask.objects.filter(orgtask=sync_org_task).select_related("dataflow").first()
-        )
-        if dot and dot.dataflow:
-            server_block = OrgPrefectBlockv1.objects.filter(
-                org=org, block_type=AIRBYTESERVER
-            ).first()
-            if server_block:
-                try:
-                    task_config = setup_airbyte_sync_task_config(sync_org_task, server_block)
-                    new_params = {
-                        "config": {
-                            "tasks": [task_config.to_json()],
-                            "org_slug": org.slug,
-                        }
-                    }
-                    prefect_service.update_dataflow_v1(
-                        dot.dataflow.deployment_id,
-                        PrefectDataFlowUpdateSchema3(
-                            deployment_params=new_params, cron=dot.dataflow.cron
-                        ),
-                    )
-                except Exception as err:  # pylint: disable=broad-exception-caught
-                    logger.error(
-                        "Failed to update deployment params for connection=%s: %s",
-                        connection_id,
-                        str(err),
-                    )
+        server_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).first()
+        if server_block:
+            try:
+                extra = build_connection_block_extra(sync_org_task)
+                prefect_service.upsert_airbyte_connection_block(
+                    server_block_name=server_block.block_name,
+                    connection_id=connection_id,
+                    connection_name=connection.get("name", ""),
+                    extra=extra,
+                )
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "Failed to upsert airbyte connection block for connection=%s: %s",
+                    connection_id,
+                    str(err),
+                )
 
     return res, None
 

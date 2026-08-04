@@ -1521,6 +1521,7 @@ POST_SYNC_TRANSFORM = {
 }
 
 
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_connection")
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
 @patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
@@ -1530,11 +1531,12 @@ def test_create_connection_saves_post_sync_transform(
     mock_create_airbyte_deployment,
     mock_delete_connection,
     mock_create_connection,
+    mock_upsert_conn_block,
     org_with_workspace,
     sync_task,
     clear_task,
 ):
-    """post_sync_transform is persisted on the sync OrgTask when creating a connection."""
+    """post_sync_transform is persisted on the sync OrgTask + the AirbyteConnection block is upserted."""
     mock_create_connection.return_value = {
         "connectionId": "conn-id",
         "sourceId": "src-id",
@@ -1570,32 +1572,70 @@ def test_create_connection_saves_post_sync_transform(
     assert sync_orgtask is not None
     assert sync_orgtask.post_sync_transform == POST_SYNC_TRANSFORM
 
+    # The AirbyteConnection block should have been upserted with the right identifiers
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id"
+    assert call_kwargs["connection_name"] == "test-conn"
+    assert "extra" in call_kwargs
 
-@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.update_dataflow_v1")
-@patch("ddpui.ddpairbyte.airbytehelpers.setup_airbyte_sync_task_config")
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
+@patch("ddpui.ddpairbyte.airbytehelpers.logger")
+def test_create_connection_no_transform_skips_upsert(
+    mock_logger,
+    mock_create_airbyte_deployment,
+    mock_delete_connection,
+    mock_create_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+    clear_task,
+):
+    """No post_sync_transform → no block upsert (lazy block creation)."""
+    mock_create_connection.return_value = {
+        "connectionId": "conn-id-2",
+        "sourceId": "src-id",
+        "destinationId": "dst-id",
+        "sourceCatalogId": "cat-id",
+        "syncCatalog": {},
+        "status": "active",
+        "name": "no-cast-conn",
+    }
+    mock_create_airbyte_deployment.return_value = Mock(clear_conn_dataflow=None)
+
+    payload = AirbyteConnectionCreate(
+        name="no-cast-conn",
+        sourceId="src-id",
+        streams=[],
+        catalogId="cat-id",
+        syncCatalog={"streams": []},
+    )
+
+    _, error = create_connection(org_with_workspace, payload)
+
+    assert error is None
+    mock_upsert_conn_block.assert_not_called()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
 @patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
 def test_update_connection_saves_post_sync_transform(
     mock_get_connection,
     mock_update_connection,
-    mock_setup_task_config,
-    mock_update_dataflow_v1,
+    mock_upsert_conn_block,
     org_with_workspace,
     sync_task,
 ):
-    """update_connection persists post_sync_transform on OrgTask and regenerates deployment."""
-    # Create existing sync OrgTask + dataflow
+    """update_connection persists post_sync_transform on OrgTask + upserts the AirbyteConnection block."""
+    # Create existing sync OrgTask
     sync_orgtask = OrgTask.objects.create(
         org=org_with_workspace, task=sync_task, connection_id="conn-id"
     )
-    dataflow = OrgDataFlowv1.objects.create(
-        org=org_with_workspace,
-        name="manual-dep",
-        deployment_name="manual-dep",
-        deployment_id="dep-id",
-        dataflow_type="manual",
-    )
-    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=sync_orgtask)
 
     mock_get_connection.return_value = {
         "connectionId": "conn-id",
@@ -1604,9 +1644,9 @@ def test_update_connection_saves_post_sync_transform(
         "namespaceFormat": "",
         "operationIds": [],
         "syncCatalog": {},
+        "name": "updated-conn",
     }
     mock_update_connection.return_value = {"connectionId": "conn-id"}
-    mock_setup_task_config.return_value.to_json.return_value = {"slug": "airbytesync"}
 
     payload = AirbyteConnectionUpdate(
         name="updated-conn",
@@ -1622,11 +1662,14 @@ def test_update_connection_saves_post_sync_transform(
 
     sync_orgtask.refresh_from_db()
     assert sync_orgtask.post_sync_transform == POST_SYNC_TRANSFORM
-    mock_update_dataflow_v1.assert_called_once()
+
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id"
+    assert call_kwargs["connection_name"] == "updated-conn"
+    assert "extra" in call_kwargs
 
     # cleanup
-    DataflowOrgTask.objects.filter(orgtask=sync_orgtask).delete()
-    dataflow.delete()
     sync_orgtask.delete()
 
 

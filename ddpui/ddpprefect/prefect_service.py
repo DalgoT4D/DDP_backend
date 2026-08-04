@@ -254,6 +254,26 @@ def update_airbyte_server_block(blockname):
     return (response["block_id"], response["cleaned_block_name"])
 
 
+def upsert_airbyte_connection_block(
+    server_block_name: str,
+    connection_id: str,
+    connection_name: str,
+    extra: dict,
+) -> tuple[str, str]:
+    """Upsert an AirbyteConnection block via prefect-proxy. Block name = connection_id."""
+    response = prefect_put(
+        "blocks/airbyte/connection/",
+        {
+            "serverBlockName": server_block_name,
+            "connectionId": connection_id,
+            "connectionBlockName": connection_id,
+            "connectionName": connection_name,
+            "extra": extra,
+        },
+    )
+    return (response["block_id"], response["cleaned_block_name"])
+
+
 def delete_airbyte_server_block(block_id):
     """Delete airbyte server block"""
     prefect_delete_a_block(block_id)

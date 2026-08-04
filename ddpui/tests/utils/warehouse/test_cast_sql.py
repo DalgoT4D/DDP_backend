@@ -28,8 +28,10 @@ def _postgres_client():
         return client
 
 
-def _bigquery_client(columns: list[str]):
-    """BigqueryClient with a mocked engine + dialect preparer."""
+def _bigquery_client():
+    """BigqueryClient with a mocked engine + dialect preparer.
+    No live column fetching — the SQL uses SELECT * REPLACE(...) so the
+    warehouse doesn't need to be queried at SQL-generation time."""
     with patch("ddpui.utils.warehouse.client.bigquery.create_engine"), patch(
         "ddpui.utils.warehouse.client.bigquery.inspect"
     ):
@@ -42,8 +44,6 @@ def _bigquery_client(columns: list[str]):
         engine.url.host = "my-project"
         client.engine = engine
         client.inspect_obj = MagicMock()
-        # Stub get_table_columns to return the provided column list
-        client.get_table_columns = MagicMock(return_value=[{"name": c} for c in columns])
         return client
 
 
@@ -94,51 +94,45 @@ def test_postgres_unknown_type_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_bigquery_empty_casts_no_columns():
-    client = _bigquery_client([])
+def test_bigquery_empty_casts_returns_empty_string():
+    """No casts → empty string, no SQL to run."""
+    client = _bigquery_client()
     assert client.generate_cast_sql("dest", "orders", {}) == ""
 
 
-def test_bigquery_no_casts_passthrough():
-    client = _bigquery_client(["id", "name"])
-    sql = client.generate_cast_sql("dest", "orders", {})
-    # no CASTs — all columns pass through unchanged
-    assert "CREATE OR REPLACE TABLE" in sql
-    assert "CAST" not in sql
-    assert "`id`" in sql
-    assert "`name`" in sql
-
-
-def test_bigquery_single_cast():
-    client = _bigquery_client(["id", "amount"])
+def test_bigquery_single_cast_uses_select_star_replace():
+    client = _bigquery_client()
     sql = client.generate_cast_sql("dest", "orders", {"amount": "numeric"})
     assert "CREATE OR REPLACE TABLE `my-project.dest.orders`" in sql
+    assert "SELECT * REPLACE" in sql
     assert "CAST(`amount` AS NUMERIC) AS `amount`" in sql
-    assert "`id`" in sql  # non-cast column passes through
 
 
-def test_bigquery_includes_airbyte_meta_columns():
-    client = _bigquery_client(["id", "amount", "_airbyte_raw_id", "_airbyte_extracted_at"])
-    sql = client.generate_cast_sql("dest", "orders", {"amount": "numeric"})
-    assert "`_airbyte_raw_id`" in sql
-    assert "`_airbyte_extracted_at`" in sql
+def test_bigquery_multiple_casts():
+    client = _bigquery_client()
+    sql = client.generate_cast_sql(
+        "dest", "orders", {"amount": "numeric", "created_at": "timestamp"}
+    )
+    assert "SELECT * REPLACE" in sql
+    assert "CAST(`amount` AS NUMERIC) AS `amount`" in sql
+    assert "CAST(`created_at` AS TIMESTAMP) AS `created_at`" in sql
 
 
 def test_bigquery_all_supported_types():
     for type_key, bq_type in BIGQUERY_CAST_TYPE_MAP.items():
-        client = _bigquery_client(["col"])
+        client = _bigquery_client()
         sql = client.generate_cast_sql("s", "t", {"col": type_key})
         assert f"CAST(`col` AS {bq_type})" in sql
 
 
 def test_bigquery_unknown_type_raises():
-    client = _bigquery_client(["col"])
+    client = _bigquery_client()
     with pytest.raises(ValueError, match="Unsupported cast type for BigQuery"):
         client.generate_cast_sql("s", "t", {"col": "STRUCT"})
 
 
-def test_bigquery_fetches_live_columns():
-    """generate_cast_sql must call get_table_columns so Airbyte meta cols are included."""
-    client = _bigquery_client(["id"])
-    client.generate_cast_sql("dest", "orders", {})
-    client.get_table_columns.assert_called_once_with("dest", "orders")
+def test_bigquery_column_name_normalization():
+    """Airbyte Destinations V2: non-alphanumeric chars → underscore, case preserved."""
+    client = _bigquery_client()
+    sql = client.generate_cast_sql("dest", "orders", {"Measure 7": "numeric"})
+    assert "CAST(`Measure_7` AS NUMERIC) AS `Measure_7`" in sql
