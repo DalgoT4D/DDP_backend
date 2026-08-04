@@ -1,4 +1,3 @@
-import re
 import sqlalchemy.types as types
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
@@ -10,16 +9,6 @@ from sqlalchemy.exc import NoSuchTableError
 from ddpui.core.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
-
-BIGQUERY_CAST_TYPE_MAP = {
-    "numeric": "NUMERIC",
-    "integer": "INT64",
-    "bigint": "INT64",
-    "boolean": "BOOL",
-    "date": "DATE",
-    "timestamp": "TIMESTAMP",
-    "text": "STRING",
-}
 
 ### CAUTION: workaround for missing datatypes; complex queries on such types using sqlalchemy expression might fail
 _type_map["JSON"] = types.JSON
@@ -116,38 +105,3 @@ class BigqueryClient(Warehouse):
             if col.get("name") == column_name:
                 return True
         return False
-
-    def generate_cast_sql(self, schema: str, table: str, column_casts: dict[str, str]) -> str:
-        """Generate CREATE OR REPLACE TABLE SQL using SELECT * REPLACE (...) to cast columns.
-        Does not fetch live columns — works even before the first sync.
-        column_casts: {column_name: target_type} — only the columns to cast.
-        Raises ValueError for unknown types."""
-        for cast_type in column_casts.values():
-            if cast_type not in BIGQUERY_CAST_TYPE_MAP:
-                raise ValueError(f"Unsupported cast type for BigQuery: {cast_type!r}")
-
-        project_id = self.engine.url.host
-        preparer = self.engine.dialect.identifier_preparer
-        # Quote each identifier component separately so a backtick in the user-supplied
-        # schema/table can't escape the identifier boundary.
-        full_table = (
-            f"{preparer.quote(project_id)}.{preparer.quote(schema)}.{preparer.quote(table)}"
-        )
-
-        replace_cols = []
-        for col, cast_type in column_casts.items():
-            # Airbyte Destinations V2: chars not in [a-zA-Z0-9_$] → underscore, case preserved
-            normalized_col = re.sub(r"[^a-zA-Z0-9_$]", "_", col)
-            col_q = preparer.quote(normalized_col)
-            bq_type = BIGQUERY_CAST_TYPE_MAP[cast_type]
-            replace_cols.append(f"CAST({col_q} AS {bq_type}) AS {col_q}")
-
-        if not replace_cols:
-            return ""
-
-        replace_str = ",\n  ".join(replace_cols)
-        return (
-            f"CREATE OR REPLACE TABLE {full_table} AS\n"
-            f"SELECT * REPLACE (\n  {replace_str}\n)\n"
-            f"FROM {full_table}"
-        )

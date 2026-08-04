@@ -1,4 +1,3 @@
-import re
 import tempfile
 from urllib.parse import quote
 
@@ -11,16 +10,6 @@ from sqlalchemy.exc import NoSuchTableError
 from ddpui.core.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
-
-POSTGRES_CAST_TYPE_MAP = {
-    "numeric": "numeric",
-    "integer": "integer",
-    "bigint": "bigint",
-    "boolean": "boolean",
-    "date": "date",
-    "timestamp": "timestamp",
-    "text": "text",
-}
 
 
 class PostgresClient(Warehouse):
@@ -128,23 +117,3 @@ class PostgresClient(Warehouse):
             if col.get("name") == column_name:
                 return True
         return False
-
-    def generate_cast_sql(self, schema: str, table: str, column_casts: dict[str, str]) -> str:
-        """Generate ALTER TABLE SQL to cast columns in-place.
-        column_casts: {column_name: target_type} — only the columns to cast.
-        Raises ValueError for unknown types."""
-        preparer = self.engine.dialect.identifier_preparer
-        clauses = []
-        for col, cast_type in column_casts.items():
-            if cast_type not in POSTGRES_CAST_TYPE_MAP:
-                raise ValueError(f"Unsupported cast type for Postgres: {cast_type!r}")
-            sql_type = POSTGRES_CAST_TYPE_MAP[cast_type]
-            # Airbyte Destinations V2: chars not in [a-zA-Z0-9_$] → underscore, case preserved
-            normalized_col = re.sub(r"[^a-zA-Z0-9_$]", "_", col)
-            col_q = preparer.quote(normalized_col)
-            clauses.append(f"ALTER COLUMN {col_q} TYPE {sql_type} USING {col_q}::{sql_type}")
-        if not clauses:
-            return ""
-        schema_q = preparer.quote_schema(schema)
-        table_q = preparer.quote(table)
-        return f"ALTER TABLE {schema_q}.{table_q}\n  " + ",\n  ".join(clauses)
