@@ -100,6 +100,7 @@ class PipelineService:
         dbt_orgtasks = []
         git_orgtasks = []
         dbt_cloud_orgtasks = []
+        edr_orgtasks = []
         auto_managed_dbt_orgtasks = []
 
         # Task slugs that are auto-managed and should not come from frontend
@@ -130,22 +131,25 @@ class PipelineService:
                 dbt_orgtasks.append(org_task)
             elif org_task.task.type == TaskType.DBTCLOUD:
                 dbt_cloud_orgtasks.append(org_task)
+            elif org_task.task.type == TaskType.EDR:
+                edr_orgtasks.append(org_task)
 
         logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
         logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
 
-        # Auto-add git and dbt-clean/dbt-deps steps when there are DBT tasks
-        if len(dbt_orgtasks) > 0:
+        # Auto-add git step when there are DBT or EDR tasks (both need the repo on disk on EKS)
+        if len(dbt_orgtasks) > 0 or len(edr_orgtasks) > 0:
             if PipelineService.is_workpool_eks(org):
-                logger.info("EKS workpool detected, adding git clone step before DBT tasks")
+                logger.info("EKS workpool detected, adding git clone step")
                 git_clone_orgtask = PipelineService.get_or_create_git_clone_orgtask(org)
                 git_orgtasks.insert(0, git_clone_orgtask)
             else:
-                logger.info("Non-EKS workpool detected, adding git pull step before DBT tasks")
+                logger.info("Non-EKS workpool detected, adding git pull step")
                 git_pull_orgtask = PipelineService.get_or_create_git_pull_orgtask(org)
                 git_orgtasks.insert(0, git_pull_orgtask)
 
-            # Auto-add dbt clean and dbt deps before other DBT tasks
+        # Auto-add dbt clean and dbt deps only when there are DBT tasks
+        if len(dbt_orgtasks) > 0:
             logger.info("Adding dbt clean and dbt deps steps before DBT tasks")
             dbt_clean_orgtask = PipelineService.get_or_create_dbt_clean_orgtask(org)
             dbt_deps_orgtask = PipelineService.get_or_create_dbt_deps_orgtask(org)
@@ -166,7 +170,13 @@ class PipelineService:
                 raise PipelineConfigurationError("dbt cloud creds block not found")
 
         # get the deployment task configs
-        all_orgtasks = git_orgtasks + auto_managed_dbt_orgtasks + dbt_orgtasks + dbt_cloud_orgtasks
+        all_orgtasks = (
+            git_orgtasks
+            + auto_managed_dbt_orgtasks
+            + dbt_orgtasks
+            + dbt_cloud_orgtasks
+            + edr_orgtasks
+        )
         task_configs, error = pipeline_with_orgtasks(
             org,
             all_orgtasks,
@@ -462,7 +472,7 @@ class PipelineService:
             {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
             for dataflow_orgtask in DataflowOrgTask.objects.filter(
                 dataflow=org_data_flow,
-                orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD],
+                orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD, TaskType.EDR],
             )
             .exclude(orgtask__task__slug__in=auto_managed_slugs)
             .all()
