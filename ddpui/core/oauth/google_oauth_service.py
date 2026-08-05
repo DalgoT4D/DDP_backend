@@ -31,10 +31,10 @@ logger = CustomLogger("ddpui.core.oauth")
 
 # state: CSRF nonce bound to the orguser that started the flow (consent -> callback window)
 OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
-OAUTH_STATE_TTL_SECONDS = 60  # 1 minute
+OAUTH_STATE_TTL_SECONDS = 120  # 2 minutes
 # refresh_token_ref: opaque handle to a stashed refresh_token (callback -> create-source window)
 OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX = "airbyte_oauth_refresh_token_ref"
-OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 60  # 1 minute
+OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 120  # 2 minutes
 
 
 class OAuthStateData(Schema):
