@@ -670,7 +670,6 @@ def parse_dbt_manifest_to_canvas(
                     name=table_name,
                     schema=schema,
                     defaults={
-                        "uuid": uuid.uuid4(),
                         "type": OrgDbtModelType.SOURCE,
                         "display_name": table_name,
                         "output_cols": output_cols,
@@ -678,6 +677,9 @@ def parse_dbt_manifest_to_canvas(
                         "under_construction": False,
                     },
                 )
+                if model_created or not orgdbt_model.uuid:
+                    orgdbt_model.uuid = uuid.uuid4()
+                    orgdbt_model.save(update_fields=["uuid"])
 
                 if not model_created and output_cols:
                     # Update output_cols if model exists
@@ -774,7 +776,6 @@ def parse_dbt_manifest_to_canvas(
                     name=model_name,
                     schema=schema,
                     defaults={
-                        "uuid": uuid.uuid4(),
                         "type": OrgDbtModelType.MODEL,
                         "display_name": model_name,
                         "sql_path": original_file_path or path,
@@ -782,6 +783,9 @@ def parse_dbt_manifest_to_canvas(
                         "under_construction": False,
                     },
                 )
+                if model_created or not orgdbt_model.uuid:
+                    orgdbt_model.uuid = uuid.uuid4()
+                    orgdbt_model.save(update_fields=["uuid"])
 
                 if not model_created:
                     # Update fields if model exists
