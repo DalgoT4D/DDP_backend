@@ -84,15 +84,14 @@ logger = CustomLogger("airbyte")
 
 
 def _build_oauth_source_config(
-    orguser: OrgUser, source_def_id: str, refresh_token_ref: str, config: dict
+    orguser: OrgUser, source_name: str, refresh_token_ref: str, config: dict
 ) -> dict:
     """Redeem the refresh_token_ref and return `config` with a backend-built `credentials`
     block merged in. The refresh_token never travels through the browser; it is fetched
     server-side from the ref and folded into the connector credentials here.
 
-    The connector is looked up by source-definition NAME (resolved from the id against this
-    org's workspace catalog) — definition ids are not stable across versions/installs."""
-    source_name = google_oauth_service.resolve_source_name(orguser.org, source_def_id)
+    The connector is looked up by source-definition NAME, as supplied by the frontend from
+    the same workspace catalog it got `sourceDefId` from — it is the OAuth registry key."""
     refresh_token = google_oauth_service.redeem_refresh_token_ref(
         orguser, refresh_token_ref, source_name
     )
@@ -106,7 +105,7 @@ def _build_oauth_source_config(
 def create_oauth_source(orguser: OrgUser, payload: SourceGoogleOAuthCreate) -> dict:
     """Create a NEW source from a redeemed OAuth refresh_token_ref."""
     config = _build_oauth_source_config(
-        orguser, payload.sourceDefId, payload.refresh_token_ref, payload.config
+        orguser, payload.sourceName, payload.refresh_token_ref, payload.config
     )
     source = airbyte_service.create_source(
         orguser.org.airbyte_workspace_id, payload.name, payload.sourceDefId, config
@@ -127,7 +126,7 @@ def update_oauth_source(orguser: OrgUser, source_id: str, payload: SourceGoogleO
         raise HttpError(404, "source not found")
 
     config = _build_oauth_source_config(
-        orguser, payload.sourceDefId, payload.refresh_token_ref, payload.config
+        orguser, payload.sourceName, payload.refresh_token_ref, payload.config
     )
     source = airbyte_service.update_source(source_id, payload.name, config, payload.sourceDefId)
     logger.info("updated oauth source having id %s", source["sourceId"])

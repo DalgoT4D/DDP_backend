@@ -134,7 +134,7 @@ def post_source_oauth_consent(request, payload: SourceGoogleOAuthConsentCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceDefId)
+    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceName)
 
 
 @airbyte_router.get("/sources/oauth/callback", auth=None)

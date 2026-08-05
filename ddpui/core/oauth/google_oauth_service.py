@@ -23,8 +23,6 @@ from ddpui.core.oauth.google_oauth_provider import (
     oauth_client_id,
     oauth_client_secret,
 )
-from ddpui.ddpairbyte import airbyte_service
-from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
@@ -81,18 +79,6 @@ def _frontend_oauth_callback_url() -> str:
     if not frontend_url:
         raise HttpError(500, "frontend url is not configured")
     return f"{frontend_url.rstrip('/')}/oauth/airbyte/callback"
-
-
-def resolve_source_name(org: Org, source_def_id: str) -> str:
-    """Resolve an Airbyte `sourceDefinitionId` to its source-definition NAME against the org's
-    own workspace catalog.
-
-    The OAuth registry is keyed by name because definition ids vary per connector version and
-    per Airbyte install. Resolving server-side (rather than trusting a client-supplied name)
-    keeps the name authoritative: it is whatever this workspace's catalog says. Raises 404 if
-    the definition is not in this workspace."""
-    sourcedef = airbyte_service.get_source_definition(org.airbyte_workspace_id, source_def_id)
-    return sourcedef.get("name", "")
 
 
 def _store_oauth_state(orguser: OrgUser, source_name: str) -> str:
@@ -155,14 +141,13 @@ def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_na
     return stored.refresh_token
 
 
-def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
+def get_source_oauth_consent(orguser: OrgUser, source_name: str) -> dict:
     """Start the Google OAuth flow: mint a state nonce and build the Google consent URL.
 
     Dalgo (not Airbyte) owns the flow. client_id comes from env, redirect_uri is Dalgo's
     own backend callback, scopes come from the source's provider entry. `access_type=offline`
     + `prompt=consent` guarantee Google returns a refresh_token on every authorization
     (including re-auth of an existing source)."""
-    source_name = resolve_source_name(orguser.org, source_def_id)
     connector = get_connector(source_name)
     state = _store_oauth_state(orguser, source_name)
     params = {
