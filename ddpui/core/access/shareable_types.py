@@ -12,28 +12,22 @@ from django.db.models import Model
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
 from ddpui.models.report import ReportSnapshot
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.visualization import Chart
 
 
 class ShareableTypeEntry(TypedDict):
     model: type[Model]
-    # The `id_kwarg` names the URL param used by decorators when they
-    # eventually extract the resource. Kept here so the enforcement pass
-    # can consume the same registry.
-    id_kwarg: str
 
 
-RTYPES: dict[str, ShareableTypeEntry] = {
-    "dashboard": {"model": Dashboard, "id_kwarg": "dashboard_id"},
-    "chart": {"model": Chart, "id_kwarg": "chart_id"},
-    "report": {"model": ReportSnapshot, "id_kwarg": "report_id"},
-    # kpi, alert appended as we wire each rtype.
+RTYPES: dict[ResourceType, ShareableTypeEntry] = {
+    ResourceType.DASHBOARD: {"model": Dashboard},
+    ResourceType.CHART: {"model": Chart},
+    ResourceType.REPORT: {"model": ReportSnapshot},
 }
 
 
-def get_rtype_entry(rtype: str) -> ShareableTypeEntry:
-    """Return the registry entry for an rtype; raise if unknown (fail-fast at
-    the API boundary — unknown rtypes are a client bug, not a 404)."""
+def get_rtype_entry(rtype: ResourceType) -> ShareableTypeEntry:
     if rtype not in RTYPES:
         raise ValueError(f"unknown rtype: {rtype}")
     return RTYPES[rtype]

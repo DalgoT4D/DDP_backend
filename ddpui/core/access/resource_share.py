@@ -42,17 +42,13 @@ def list_grants(org: Org, rtype: str, resource_id) -> list[ShareRowSchema]:
         .order_by("created_at")
     )
 
-    user_ids = [
-        r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.USER
-    ]
+    user_ids = [r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.USER]
     group_ids = [
         r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.GROUP
     ]
     users_by_id = {
         u.id: u
-        for u in OrgUser.objects.filter(org=org, id__in=user_ids).select_related(
-            "user", "new_role"
-        )
+        for u in OrgUser.objects.filter(org=org, id__in=user_ids).select_related("user", "new_role")
     }
     groups_by_id = {g.id: g for g in OrgUserGroup.objects.filter(org=org, id__in=group_ids)}
 

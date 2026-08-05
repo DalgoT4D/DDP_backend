@@ -6,10 +6,18 @@ The resource pointer is deliberately soft — ``resource_type`` + a string
 warehouse "schema.table" identifiers. Do not "improve" this into a FK.
 """
 
+from enum import Enum
+
 from django.db import models
 
 from ddpui.models.org import Org
 from ddpui.models.org_user import Invitation, OrgUser
+
+
+class ResourceType(str, Enum):
+    DASHBOARD = "dashboard"
+    CHART = "chart"
+    REPORT = "report"
 
 
 class AccessLevel(models.TextChoices):
@@ -21,6 +29,15 @@ class AccessLevel(models.TextChoices):
     VIEW = "view", "View"
     EDIT = "edit", "Edit"
     NO_ACCESS = "no_access", "No Access"
+
+
+LEVEL_RANK = {AccessLevel.NO_ACCESS: 0, AccessLevel.VIEW: 1, AccessLevel.EDIT: 2}
+
+
+class ResourceType(models.TextChoices):
+    DASHBOARD = "dashboard", "Dashboard"
+    CHART = "chart", "Chart"
+    REPORT = "report", "Report"
 
 
 class ResourceSharePrincipalType(models.TextChoices):

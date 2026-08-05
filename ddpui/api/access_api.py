@@ -57,9 +57,7 @@ def list_resource_grants(request, rtype: str, resource_id: str):
 
 
 @access_router.post("/{rtype}/{resource_id}/grants", response=list[ShareRowSchema])
-def add_resource_grants(
-    request, rtype: str, resource_id: str, payload: AddGrantsPayload
-):
+def add_resource_grants(request, rtype: str, resource_id: str, payload: AddGrantsPayload):
     """Apply staged chips from the share modal — bulk add/update."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
     _require_owner_or_admin(orguser, resource, "modify sharing")
