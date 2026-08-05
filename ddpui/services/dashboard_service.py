@@ -4,7 +4,7 @@ This module encapsulates all dashboard-related business logic,
 separating it from the API layer for better testability and maintainability.
 """
 
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Dict, List, Optional, Any, Set, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
@@ -25,9 +25,11 @@ from ddpui.models.dashboard import (
     DashboardComponentType,
     DashboardFilterType,
 )
+from ddpui.models.favorite import FavoriteResourceType
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
+from ddpui.services.favorite_service import FavoriteService
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.core.charts.charts_service import (
@@ -238,11 +240,12 @@ class DashboardService:
             raise DashboardNotFoundError(dashboard_id)
 
     @staticmethod
-    def get_dashboard_response(dashboard: Dashboard) -> Dict[str, Any]:
+    def get_dashboard_response(dashboard: Dashboard, is_favorite: bool = False) -> Dict[str, Any]:
         """Convert dashboard model to response dict.
 
         Args:
             dashboard: The dashboard instance
+            is_favorite: Whether the requesting user has favorited this dashboard
 
         Returns:
             Dictionary containing dashboard response data
@@ -254,6 +257,7 @@ class DashboardService:
         response_data["locked_by"] = (
             lock.locked_by.user.email if lock and not lock.is_expired() else None
         )
+        response_data["is_favorite"] = is_favorite
 
         # Add filters without position data in settings
         filters_data = []
@@ -299,6 +303,51 @@ class DashboardService:
             query &= Q(is_published=is_published)
 
         return list(Dashboard.objects.filter(query).order_by("-updated_at"))
+
+    @staticmethod
+    def favorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
+        """Mark a dashboard as favorited by this user.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user favoriting the dashboard
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
+        """
+        DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
+        FavoriteService.add_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
+
+    @staticmethod
+    def unfavorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
+        """Remove this user's favorite on a dashboard, if any.
+
+        Args:
+            dashboard_id: The dashboard ID
+            org: The organization
+            orguser: The user unfavoriting the dashboard
+
+        Raises:
+            DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
+        """
+        DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
+        FavoriteService.remove_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
+
+    @staticmethod
+    def get_favorited_dashboard_ids(dashboard_ids: List[int], orguser: OrgUser) -> Set[int]:
+        """Return the subset of dashboard_ids this user has favorited.
+
+        Args:
+            dashboard_ids: Dashboard IDs to check
+            orguser: The user whose favorites to look up
+
+        Returns:
+            Set of dashboard IDs favorited by this user
+        """
+        return FavoriteService.get_favorited_ids(
+            FavoriteResourceType.DASHBOARD, dashboard_ids, orguser
+        )
 
     @staticmethod
     def create_dashboard(data: DashboardData, orguser: OrgUser) -> Dashboard:
