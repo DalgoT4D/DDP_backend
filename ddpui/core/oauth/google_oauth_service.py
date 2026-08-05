@@ -163,11 +163,11 @@ def get_source_oauth_consent(orguser: OrgUser, source_name: str) -> dict:
     return {"authUrl": f"{GOOGLE_OAUTH_AUTH_URL}?{urlencode(params)}"}
 
 
-def exchange_google_oauth_code(code: str) -> dict:
-    """Exchange the authorization code for tokens directly with Google (server-side).
+def exchange_google_oauth_code(code: str) -> str:
+    """Exchange the authorization code for a refresh_token directly with Google (server-side).
 
-    Returns Google's token response. Raises if the exchange failed or no refresh_token came
-    back (which happens if access_type=offline/prompt=consent were dropped)."""
+    Raises if the exchange failed or no refresh_token came back (which happens if
+    access_type=offline/prompt=consent were dropped)."""
     try:
         response = requests.post(
             GOOGLE_OAUTH_TOKEN_URL,
@@ -197,7 +197,7 @@ def exchange_google_oauth_code(code: str) -> dict:
     if "refresh_token" not in tokens:
         logger.error("google token exchange returned no refresh_token: keys=%s", list(tokens))
         raise HttpError(400, "oauth did not return a refresh token")
-    return tokens
+    return tokens["refresh_token"]
 
 
 def complete_source_oauth(state: str, code: str) -> str:
@@ -205,8 +205,8 @@ def complete_source_oauth(state: str, code: str) -> str:
     Google, stash the refresh_token under a fresh refresh_token_ref, and return the ref. The
     state nonce is the authentication — it recovers the orguser that started the flow."""
     stored = _read_oauth_state(state)
-    tokens = exchange_google_oauth_code(code)
-    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, tokens["refresh_token"])
+    refresh_token = exchange_google_oauth_code(code)
+    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, refresh_token)
 
 
 def oauth_callback_redirect_url(state: str, code: str, error: str) -> str:

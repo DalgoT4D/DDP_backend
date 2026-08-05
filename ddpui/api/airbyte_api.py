@@ -176,6 +176,11 @@ def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthU
     Same as create, but updates the source named in the URL path. The source must belong to
     the caller's own workspace (enforced in the service layer). The refresh_token never
     travels through the browser.
+
+    ONLY for the re-authenticate action (frontend calls this after a fresh consent+callback
+    round redeems a ref). Editing a source's config/streams WITHOUT re-authenticating goes
+    through the plain PUT /sources/{source_id} instead — it never needs a refresh_token_ref
+    and never touches stored credentials.
     """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
