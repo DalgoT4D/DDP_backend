@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from django.db.models import Q
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.ownership import can_delete_resource
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser

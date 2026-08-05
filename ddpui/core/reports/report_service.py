@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.core.ownership import can_delete_resource, is_creator_or_admin
+from ddpui.core.access.ownership import can_delete_resource, is_creator_or_admin
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.metric import KPI

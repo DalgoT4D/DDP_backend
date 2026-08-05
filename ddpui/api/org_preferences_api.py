@@ -10,6 +10,7 @@ from ddpui.models.org_plans import OrgPlans
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.org_preferences_schema import (
     CreateOrgPreferencesSchema,
+    UpdateAccessDefaultsSchema,
     UpdateLLMOptinSchema,
     UpdateDiscordNotificationsSchema,
 )
@@ -121,6 +122,25 @@ def update_discord_notifications(request, payload: UpdateDiscordNotificationsSch
         org_preferences.discord_webhook = None
         org_preferences.enable_discord_notifications = False
 
+    org_preferences.save()
+
+    return {"success": True, "res": org_preferences.to_json()}
+
+
+@orgpreference_router.put("/access-defaults")
+@has_permission(["can_manage_access_defaults"])
+def update_access_defaults(request, payload: UpdateAccessDefaultsSchema):
+    """Updates org-wide access defaults (analyst/member default level + public sharing toggle)."""
+    orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    org_preferences = OrgPreferences.objects.filter(org=org).first()
+    if org_preferences is None:
+        org_preferences = OrgPreferences.objects.create(org=org)
+
+    org_preferences.default_analyst_level = payload.default_analyst_level
+    org_preferences.default_member_level = payload.default_member_level
+    org_preferences.allow_public_sharing = payload.allow_public_sharing
     org_preferences.save()
 
     return {"success": True, "res": org_preferences.to_json()}

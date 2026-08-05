@@ -1,0 +1,95 @@
+"""The ``ResourceShare`` model: one row = one per-principal grant (view/edit)
+on a specific resource.
+
+The resource pointer is deliberately soft — ``resource_type`` + a string
+``resource_id``, not a FK — because it must later hold UUID pks and
+warehouse "schema.table" identifiers. Do not "improve" this into a FK.
+"""
+
+from enum import Enum
+
+from django.db import models
+
+from ddpui.models.org import Org
+from ddpui.models.org_user import Invitation, OrgUser
+
+
+class ResourceType(str, Enum):
+    DASHBOARD = "dashboard"
+    CHART = "chart"
+    REPORT = "report"
+
+
+class AccessLevel(models.TextChoices):
+    """Access level for a shareable resource. Used on both:
+    - ``ResourceShare.access_level`` — the grant itself
+    - ``OrgPreferences.default_{analyst,member}_level`` — org-level defaults
+    """
+
+    VIEW = "view", "View"
+    EDIT = "edit", "Edit"
+    NO_ACCESS = "no_access", "No Access"
+
+
+LEVEL_RANK = {AccessLevel.NO_ACCESS: 0, AccessLevel.VIEW: 1, AccessLevel.EDIT: 2}
+
+
+class ResourceType(models.TextChoices):
+    DASHBOARD = "dashboard", "Dashboard"
+    CHART = "chart", "Chart"
+    REPORT = "report", "Report"
+
+
+class ResourceSharePrincipalType(models.TextChoices):
+    """Who a grant is for. Only ``user`` and ``group`` are matched by the resolver."""
+
+    USER = "user", "User"
+    GROUP = "group", "Group"
+
+
+class ResourceShare(models.Model):
+    """A single access grant on a shareable resource.
+
+    A grant points at either a concrete principal (``principal_type`` +
+    ``principal_id``) or a pending ``invitation``. When the invitation is
+    accepted, the row is promoted to point at the new ``OrgUser`` and
+    ``invitation`` becomes NULL via ``on_delete=SET_NULL``.
+    """
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+
+    resource_type = models.CharField(max_length=20)
+    resource_id = models.CharField(max_length=255)
+
+    principal_type = models.CharField(
+        max_length=5, choices=ResourceSharePrincipalType.choices, null=True
+    )
+    principal_id = models.BigIntegerField(null=True)
+
+    access_level = models.CharField(max_length=10, choices=AccessLevel.choices)
+    invitation = models.ForeignKey(Invitation, on_delete=models.SET_NULL, null=True)
+
+    created_by = models.ForeignKey(
+        OrgUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="resource_shares_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "resource_share"
+        indexes = [
+            # "who has access to this resource?" — tenant-scoped resource lookup
+            models.Index(fields=["org", "resource_type", "resource_id"]),
+            # "what does this principal have access to?" — tenant-scoped principal lookup
+            models.Index(fields=["org", "principal_type", "principal_id"]),
+        ]
+
+    def __str__(self):
+        principal = (
+            f"{self.principal_type}:{self.principal_id}"
+            if self.principal_id is not None
+            else f"inv:{self.invitation_id}"
+        )
+        return f"{self.resource_type}:{self.resource_id} -> {principal} ({self.access_level})"

@@ -1,9 +1,9 @@
 import json
-from typing import List
-from datetime import timedelta
+from typing import List, Literal, Optional
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
-from ninja import Router, File
+from ninja import Router, File, Schema
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
 from rest_framework.authtoken import views
@@ -22,6 +22,7 @@ from ddpui.auth import (
     blacklist_jti_in_redis,
 )
 from ddpui.core import orgfunctions, orguserfunctions
+from ddpui.core.access.ownership import can_delete_resource
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -31,6 +32,8 @@ from ddpui.models.org_user import (
     NewInvitationSchema,
     OrgUser,
     OrgUserCreate,
+    OrgUserGroup,
+    OrgUserGroupMember,
     OrgUserResponse,
     OrgUserUpdate,
     OrgUserUpdateNewRole,
@@ -260,6 +263,392 @@ def get_organization_users(request):
         )
 
     return res
+
+
+class PeopleRow(Schema):
+    email: str
+    role_slug: str
+    role_name: str
+    status: Literal["active", "pending"]
+    created_by_email: Optional[str] = None
+    orguser_id: Optional[int] = None
+    invitation_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+
+@user_org_router.get(
+    "/v1/organizations/people",
+    response=List[PeopleRow],
+)
+@has_permission(["can_view_orgusers", "can_view_invitations"])
+def get_organization_people(request):
+    """merged list of active orgusers + pending invitations for the org (People tab)"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    org: Org = orguser.org
+
+    rows: List[PeopleRow] = []
+
+    for curr_orguser in OrgUser.objects.filter(org=org).select_related("user", "new_role"):
+        rows.append(
+            PeopleRow(
+                email=curr_orguser.user.email,
+                role_slug=curr_orguser.new_role.slug,
+                role_name=curr_orguser.new_role.name,
+                status="active",
+                created_by_email=None,
+                orguser_id=curr_orguser.id,
+                invitation_id=None,
+                created_at=curr_orguser.user.date_joined,
+            )
+        )
+
+    for invitation in Invitation.objects.filter(invited_by__org=org).select_related(
+        "invited_by__user", "invited_new_role"
+    ):
+        rows.append(
+            PeopleRow(
+                email=invitation.invited_email,
+                role_slug=invitation.invited_new_role.slug if invitation.invited_new_role else "",
+                role_name=invitation.invited_new_role.name if invitation.invited_new_role else "",
+                status="pending",
+                created_by_email=invitation.invited_by.user.email,
+                orguser_id=None,
+                invitation_id=invitation.id,
+                created_at=invitation.invited_on,
+            )
+        )
+
+    return rows
+
+
+# ==============================================================================
+# User Groups (Access → Groups tab)
+
+
+class GroupMemberSchema(Schema):
+    member_id: int
+    orguser_id: Optional[int] = None
+    email: str
+    role_name: Optional[str] = None
+    status: Literal["active", "pending"]
+
+
+class GroupListRow(Schema):
+    id: int
+    name: str
+    member_count: int
+    created_by_email: Optional[str] = None
+    created_at: datetime
+
+
+class GroupDetailSchema(Schema):
+    id: int
+    name: str
+    created_by_email: Optional[str] = None
+    created_at: datetime
+    members: List[GroupMemberSchema]
+
+
+class CreateGroupPayload(Schema):
+    name: str
+    orguser_ids: List[int] = []
+    pending_emails: List[str] = []
+    invite_role_uuid: Optional[str] = None
+
+
+class UpdateGroupPayload(Schema):
+    name: str
+
+
+class AddMembersPayload(Schema):
+    orguser_ids: List[int] = []
+    pending_emails: List[str] = []
+    invite_role_uuid: Optional[str] = None
+
+
+def _serialize_group_row(group: OrgUserGroup) -> GroupListRow:
+    created_by_email = (
+        group.created_by.user.email if group.created_by and group.created_by.user else None
+    )
+    return GroupListRow(
+        id=group.id,
+        name=group.name,
+        member_count=group.members.count(),
+        created_by_email=created_by_email,
+        created_at=group.created_at,
+    )
+
+
+def _serialize_group_detail(group: OrgUserGroup) -> GroupDetailSchema:
+    created_by_email = (
+        group.created_by.user.email if group.created_by and group.created_by.user else None
+    )
+    members: List[GroupMemberSchema] = []
+    for m in group.members.select_related("orguser__user", "orguser__new_role", "invitation"):
+        if m.orguser_id is not None and m.orguser is not None:
+            members.append(
+                GroupMemberSchema(
+                    member_id=m.id,
+                    orguser_id=m.orguser_id,
+                    email=m.orguser.user.email,
+                    role_name=m.orguser.new_role.name if m.orguser.new_role else None,
+                    status="active",
+                )
+            )
+        elif m.invitation is not None:
+            members.append(
+                GroupMemberSchema(
+                    member_id=m.id,
+                    orguser_id=None,
+                    email=m.invitation.invited_email,
+                    role_name=(
+                        m.invitation.invited_new_role.name
+                        if m.invitation.invited_new_role
+                        else None
+                    ),
+                    status="pending",
+                )
+            )
+    return GroupDetailSchema(
+        id=group.id,
+        name=group.name,
+        created_by_email=created_by_email,
+        created_at=group.created_at,
+        members=members,
+    )
+
+
+def _resolve_pending_emails(
+    org: Org,
+    orguser: OrgUser,
+    emails: List[str],
+    invite_role_uuid: Optional[str],
+) -> dict[str, int]:
+    """For each email in `emails`, ensure an Invitation exists on the org.
+    Returns {email → invitation_id}. Emails that already belong to an active
+    orguser are ignored and will be resolved via `orguser_ids` later.
+    """
+    if not emails:
+        return {}
+    normalized = [e.strip().lower() for e in emails if e and e.strip()]
+    if not normalized:
+        return {}
+
+    existing_active = set(
+        OrgUser.objects.filter(org=org, user__email__in=normalized).values_list(
+            "user__email", flat=True
+        )
+    )
+    to_process = [e for e in normalized if e not in existing_active]
+    if not to_process:
+        return {}
+
+    existing_invites = {
+        inv.invited_email: inv.id
+        for inv in Invitation.objects.filter(invited_by__org=org, invited_email__in=to_process)
+    }
+    to_invite = [e for e in to_process if e not in existing_invites]
+
+    if to_invite:
+        if not invite_role_uuid:
+            raise HttpError(400, "invite_role_uuid is required to invite new emails to a group")
+        if not Role.objects.filter(uuid=invite_role_uuid).exists():
+            raise HttpError(400, "invalid invite_role_uuid")
+
+        for email in to_invite:
+            payload = NewInvitationSchema(
+                invited_email=email,
+                invited_role_uuid=invite_role_uuid,
+            )
+            _, error = orguserfunctions.invite_user_v1(orguser, payload)
+            if error:
+                raise HttpError(400, f"failed to invite {email}: {error}")
+            invitation = Invitation.objects.filter(invited_by__org=org, invited_email=email).first()
+            if invitation is not None:
+                existing_invites[email] = invitation.id
+
+    return existing_invites
+
+
+def _add_members_to_group(
+    group: OrgUserGroup,
+    orguser_ids: List[int],
+    email_to_invitation_id: dict[str, int],
+) -> None:
+    """Idempotent membership creation (skips existing rows)."""
+    org = group.org
+
+    if orguser_ids:
+        valid_orguser_ids = set(
+            OrgUser.objects.filter(org=org, id__in=orguser_ids).values_list("id", flat=True)
+        )
+        existing_orguser_ids = set(
+            OrgUserGroupMember.objects.filter(
+                group=group, orguser_id__in=valid_orguser_ids
+            ).values_list("orguser_id", flat=True)
+        )
+        for orguser_id in valid_orguser_ids - existing_orguser_ids:
+            OrgUserGroupMember.objects.create(group=group, orguser_id=orguser_id)
+
+    if email_to_invitation_id:
+        invitation_ids = set(email_to_invitation_id.values())
+        existing_invitation_ids = set(
+            OrgUserGroupMember.objects.filter(
+                group=group, invitation_id__in=invitation_ids
+            ).values_list("invitation_id", flat=True)
+        )
+        for invitation_id in invitation_ids - existing_invitation_ids:
+            OrgUserGroupMember.objects.create(group=group, invitation_id=invitation_id)
+
+
+@user_org_router.get(
+    "/v1/organizations/user_groups",
+    response=List[GroupListRow],
+)
+@has_permission(["can_view_user_groups"])
+def list_user_groups(request):
+    """list all user groups in the org (Groups tab)"""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    groups = (
+        OrgUserGroup.objects.filter(org=orguser.org)
+        .select_related("created_by__user")
+        .order_by("-created_at")
+    )
+    return [_serialize_group_row(g) for g in groups]
+
+
+@user_org_router.post(
+    "/v1/organizations/user_groups",
+    response=GroupDetailSchema,
+)
+@has_permission(["can_create_user_group"])
+@transaction.atomic
+def create_user_group(request, payload: CreateGroupPayload):
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+
+    name = payload.name.strip()
+    if not name:
+        raise HttpError(400, "group name is required")
+
+    if OrgUserGroup.objects.filter(org=orguser.org, name__iexact=name).exists():
+        raise HttpError(400, "a group with this name already exists")
+
+    email_to_invitation_id = _resolve_pending_emails(
+        orguser.org, orguser, payload.pending_emails, payload.invite_role_uuid
+    )
+
+    group = OrgUserGroup.objects.create(org=orguser.org, name=name, created_by=orguser)
+    _add_members_to_group(group, payload.orguser_ids, email_to_invitation_id)
+
+    return _serialize_group_detail(group)
+
+
+@user_org_router.get(
+    "/v1/organizations/user_groups/{group_id}",
+    response=GroupDetailSchema,
+)
+@has_permission(["can_view_user_groups"])
+def get_user_group(request, group_id: int):
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    group = OrgUserGroup.objects.filter(id=group_id, org=orguser.org).first()
+    if group is None:
+        raise HttpError(404, "group not found")
+    return _serialize_group_detail(group)
+
+
+@user_org_router.patch(
+    "/v1/organizations/user_groups/{group_id}",
+    response=GroupDetailSchema,
+)
+@has_permission(["can_edit_user_group"])
+def rename_user_group(request, group_id: int, payload: UpdateGroupPayload):
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    group = OrgUserGroup.objects.filter(id=group_id, org=orguser.org).first()
+    if group is None:
+        raise HttpError(404, "group not found")
+
+    name = payload.name.strip()
+    if not name:
+        raise HttpError(400, "group name is required")
+
+    if (
+        OrgUserGroup.objects.filter(org=orguser.org, name__iexact=name)
+        .exclude(id=group.id)
+        .exists()
+    ):
+        raise HttpError(400, "a group with this name already exists")
+
+    group.name = name
+    group.save(update_fields=["name", "updated_at"])
+    return _serialize_group_detail(group)
+
+
+@user_org_router.delete(
+    "/v1/organizations/user_groups/{group_id}",
+)
+@has_permission(["can_delete_user_group"])
+def delete_user_group(request, group_id: int):
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    group = OrgUserGroup.objects.filter(id=group_id, org=orguser.org).first()
+    if group is None:
+        raise HttpError(404, "group not found")
+
+    if not can_delete_resource(orguser, group):
+        raise HttpError(403, "only the group creator or an admin can delete this group")
+
+    group.delete()
+    return {"success": 1}
+
+
+@user_org_router.post(
+    "/v1/organizations/user_groups/{group_id}/members",
+    response=GroupDetailSchema,
+)
+@has_permission(["can_edit_user_group"])
+@transaction.atomic
+def add_user_group_members(request, group_id: int, payload: AddMembersPayload):
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    group = OrgUserGroup.objects.filter(id=group_id, org=orguser.org).first()
+    if group is None:
+        raise HttpError(404, "group not found")
+
+    email_to_invitation_id = _resolve_pending_emails(
+        orguser.org, orguser, payload.pending_emails, payload.invite_role_uuid
+    )
+    _add_members_to_group(group, payload.orguser_ids, email_to_invitation_id)
+    return _serialize_group_detail(group)
+
+
+@user_org_router.delete(
+    "/v1/organizations/user_groups/{group_id}/members/{member_id}",
+)
+@has_permission(["can_edit_user_group"])
+def remove_user_group_member(request, group_id: int, member_id: int):
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    group = OrgUserGroup.objects.filter(id=group_id, org=orguser.org).first()
+    if group is None:
+        raise HttpError(404, "group not found")
+
+    deleted, _ = OrgUserGroupMember.objects.filter(group=group, id=member_id).delete()
+    if deleted == 0:
+        raise HttpError(404, "member not found")
+    return {"success": 1}
 
 
 @user_org_router.post("/v1/organizations/users/delete")
