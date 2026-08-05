@@ -118,15 +118,19 @@ def test_distribution_chart_query_parse_results(
 ):
     """Success test case of parsing the results of the query"""
     mock_results = [
-        {"category": "NGO1", "count": 10},
-        {"category": "NGO2", "count": 20},
+        {"category": "NGO1", "_dalgo_count": 10},
+        {"category": "NGO2", "_dalgo_count": 20},
     ]
     output = distribution_chart_query.parse_results(mock_results)
 
+    expected_data = [
+        {"category": "NGO1", "count": 10},
+        {"category": "NGO2", "count": 20},
+    ]
     assert distribution_chart_query.columns[0].name in output
     assert "charts" in output[distribution_chart_query.columns[0].name]
     assert len(output[distribution_chart_query.columns[0].name]["charts"]) == 1
-    assert output[distribution_chart_query.columns[0].name]["charts"][0]["data"] == mock_results
+    assert output[distribution_chart_query.columns[0].name]["charts"][0]["data"] == expected_data
 
 
 def test_distribution_chart_query_validate_results(
@@ -134,8 +138,8 @@ def test_distribution_chart_query_validate_results(
 ):
     """Success test case of validating the parsed results of the query"""
     mock_results = [
-        {"category": "NGO1", "count": 10},
-        {"category": "NGO2", "count": 20},
+        {"category": "NGO1", "_dalgo_count": 10},
+        {"category": "NGO2", "_dalgo_count": 20},
     ]
     mock_output = distribution_chart_query.parse_results(mock_results)
     result_to_be_validated = mock_output[distribution_chart_query.columns[0].name]

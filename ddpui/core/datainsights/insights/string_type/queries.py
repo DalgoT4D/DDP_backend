@@ -46,11 +46,11 @@ class DistributionChart(ColInsight):
 
         subquery = (
             self.builder.add_column(string_col.label("category"))
-            .add_column(func.count().label("count"))
+            .add_column(func.count().label("_dalgo_count"))
             .where_clause(string_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by(string_col.name)
-            .order_cols_by([("count", "desc")])
+            .order_cols_by([("_dalgo_count", "desc")])
             .limit_rows(5)
             .subquery()
         )
@@ -63,10 +63,10 @@ class DistributionChart(ColInsight):
                     else_=literal_column("'other'"),
                 ).label("category"),
             )
-            .add_column(func.count().label("count"))
+            .add_column(func.count().label("_dalgo_count"))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by("category")
-            .order_cols_by([("count", "desc")])
+            .order_cols_by([("_dalgo_count", "desc")])
             .build()
         )
 
@@ -79,16 +79,20 @@ class DistributionChart(ColInsight):
         [
             {
                 "category": "xyx",
-                "count": 4
+                "_dalgo_count": 4
             }
         ]
         """
+        data = [
+            {"category": row["category"], "count": row["_dalgo_count"]}
+            for row in result
+        ]
         return {
             self.columns[0].name: {
                 "charts": [
                     {
                         "chartType": self.chart_type(),
-                        "data": result,
+                        "data": data,
                     }
                 ]
             }
@@ -164,12 +168,12 @@ class StringLengthStats(ColInsight):
         mode_subquery = (
             self.builder.reset()
             .add_column(length_col.label(f"{col.name}_len"))
-            .add_column(func.count().label("count"))
+            .add_column(func.count().label("_dalgo_count"))
             .where_clause(length_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by(f"{col.name}_len")
             .having_clause(func.count() > 1)
-            .order_cols_by([("count", "desc"), (f"{col.name}_len", "desc")])
+            .order_cols_by([("_dalgo_count", "desc"), (f"{col.name}_len", "desc")])
             .limit_rows(5)
             .subquery(alias="mode_subquery")
         )
@@ -201,7 +205,7 @@ class StringLengthStats(ColInsight):
             .add_column(select([mode_subquery.c[f"{col.name}_len"]]).limit(1).label("mode"))
             .add_column(
                 select([func.array_agg(mode_subquery.c[f"{col.name}_len"])])
-                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1))
+                .where(mode_subquery.c["_dalgo_count"] == select([mode_subquery.c["_dalgo_count"]]).limit(1))
                 .label("other_modes")
             )
         )

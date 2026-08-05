@@ -55,12 +55,12 @@ class DataStats(ColInsight):
         mode_subquery = (
             self.builder.reset()
             .add_column(numeric_col)
-            .add_column(func.count().label("count"))
+            .add_column(func.count().label("_dalgo_count"))
             .where_clause(numeric_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by(numeric_col)
             .having_clause(func.count() > 1)
-            .order_cols_by([("count", "desc"), (col.name, "desc")])
+            .order_cols_by([("_dalgo_count", "desc"), (col.name, "desc")])
             .limit_rows(5)
             .subquery(alias="mode_subquery")
         )
@@ -92,7 +92,7 @@ class DataStats(ColInsight):
             .add_column(select([mode_subquery.c[f"{col.name}"]]).limit(1).label("mode"))
             .add_column(
                 select([func.array_agg(mode_subquery.c[f"{col.name}"])])
-                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1))
+                .where(mode_subquery.c["_dalgo_count"] == select([mode_subquery.c["_dalgo_count"]]).limit(1))
                 .label("other_modes")
             )
         )
