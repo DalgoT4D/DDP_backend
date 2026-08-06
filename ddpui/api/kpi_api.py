@@ -26,6 +26,8 @@ from ddpui.core.kpi.kpi_service import (
 from ddpui.core.metric.metric_service import MetricNotFoundError
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 import json
 
 logger = CustomLogger("ddpui")
@@ -92,9 +94,25 @@ def get_kpi_summary(request):
 def create_kpi(request, payload: KPICreate):
     """Create a new KPI"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
         kpi = KPIService.create_kpi(payload, orguser)
+
+        resource_fields = payload.model_dump(exclude={"metric_id"})
+        resource_fields[
+            "name"
+        ] = kpi.name  # actual resolved name, not the raw (possibly None) payload value
+        resource_fields["metric"] = kpi.metric.name
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.KPI,
+            resource_id=str(kpi.id),
+            action=AuditLogAction.CREATE,
+            resource_fields=resource_fields,
+        )
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
     except KPIValidationError as e:
@@ -121,10 +139,33 @@ def get_kpi(request, kpi_id: int):
 @has_permission(["can_edit_kpis"])
 def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     """Update a KPI"""
+
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        kpi = KPIService.update_kpi(kpi_id, orguser.org, orguser, payload)
+        kpi = KPIService.update_kpi(kpi_id, org, orguser, payload)
+
+        # KPIUpdate is a genuine partial patch — only fields actually present
+        # in this request are logged, matching the exact criterion
+        # KPIService itself uses (model_dump(exclude_unset=True)) to decide
+        # what to touch. A field missing here means "not touched", not "cleared".
+        # "name" is the exception: always included (current value) so the row
+        # stays self-identifying without a separate name column.
+        touched = payload.model_dump(exclude_unset=True)
+        resource_fields = {k: v for k, v in touched.items() if k != "metric_id"}
+        if "metric_id" in touched:
+            resource_fields["metric"] = kpi.metric.name
+        resource_fields["name"] = kpi.name
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.KPI,
+            resource_id=str(kpi_id),
+            action=AuditLogAction.UPDATE,
+            resource_fields=resource_fields,
+        )
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
     except KPIValidationError as e:
@@ -138,15 +179,25 @@ def update_kpi(request, kpi_id: int, payload: KPIUpdate):
 def delete_kpi(request, kpi_id: int):
     """Delete a KPI"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        KPIService.delete_kpi(kpi_id, orguser.org, orguser)
+        kpi_name = KPIService.delete_kpi(kpi_id, org, orguser)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
     except KPIPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.KPI,
+        resource_id=str(kpi_id),
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": kpi_name},
+    )
 
     return api_response(success=True)
 

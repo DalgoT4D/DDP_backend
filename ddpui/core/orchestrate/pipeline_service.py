@@ -500,13 +500,17 @@ class PipelineService:
 
     @staticmethod
     def delete_pipeline(org: Org, deployment_id: str) -> Dict[str, Any]:
-        """Delete a pipeline"""
+        """Delete a pipeline. The returned dict includes pipeline_name so
+        callers (e.g. the API layer's audit log) don't need a separate
+        fetch of their own."""
 
         # Find the org data flow
         org_data_flow = OrgDataFlowv1.objects.filter(org=org, deployment_id=deployment_id).first()
 
         if not org_data_flow:
             raise PipelineNotFoundError(deployment_id)
+
+        pipeline_name = org_data_flow.name
 
         try:
             prefect_service.delete_deployment_by_id(deployment_id)
@@ -516,11 +520,13 @@ class PipelineService:
 
         org_data_flow.delete()
 
-        return {"success": 1}
+        return {"success": 1, "pipeline_name": pipeline_name}
 
     @staticmethod
     def set_pipeline_schedule(org: Org, deployment_id: str, status: str) -> Dict[str, Any]:
-        """Set pipeline schedule to active/inactive"""
+        """Set pipeline schedule to active/inactive. The returned dict
+        includes pipeline_name so callers (e.g. the API layer's audit log)
+        don't need a separate fetch of their own."""
 
         if (
             (status is None)
@@ -539,7 +545,7 @@ class PipelineService:
             logger.exception(error)
             raise PipelineServiceError("failed to change flow state") from error
 
-        return {"success": 1}
+        return {"success": 1, "pipeline_name": org_data_flow.name}
 
     @staticmethod
     def run_pipeline(
@@ -591,6 +597,11 @@ class PipelineService:
         for tasklock in locks:
             tasklock.flow_run_id = res["flow_run_id"]
             tasklock.save()
+
+        # A separate key from Prefect's own "name" (the flow run's name) —
+        # this is the pipeline's own name, so callers (e.g. the API layer's
+        # audit log) don't need a separate fetch of their own.
+        res["pipeline_name"] = dataflow.name
 
         return res
 
@@ -691,6 +702,11 @@ class PipelineService:
         for tasklock in locks:
             tasklock.flow_run_id = res["flow_run_id"]
             tasklock.save()
+
+        # A separate key from Prefect's own "name" (the flow run's name) —
+        # this is the pipeline's own name, so callers (e.g. the API layer's
+        # audit log) don't need a separate fetch of their own.
+        res["pipeline_name"] = dataflow.name
 
         return res
 

@@ -45,7 +45,7 @@ from ddpui.ddpprefect.schema import (
     PrefectDataFlowOrgTasks,
     TaskStateSchema,
 )
-from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgDataFlowv1
+from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgDataFlowv1, ConnectionMeta
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskLock, TaskType
@@ -970,6 +970,17 @@ def test_post_deployment_set_schedule_failure2(orguser_transform_tasks):
     assert str(excinfo.value) == "incorrect status value"
 
 
+def test_post_deployment_set_schedule_not_found(orguser_transform_tasks):
+    """tests 404 in setting schedule for a deployment that doesn't exist for the org"""
+    request = mock_request(orguser_transform_tasks)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_deployment_set_schedule(request, "no-such-deployment-id", "active")
+
+    assert excinfo.value.status_code == 404
+    assert str(excinfo.value) == "pipeline not found"
+
+
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
     set_deployment_schedule=Mock(side_effect=Exception("error")),
@@ -1034,6 +1045,39 @@ def test_post_run_prefect_org_deployment_task_success(orguser_transform_tasks):
     post_run_prefect_org_deployment_task(request, dataflow_orgtask.dataflow.deployment_id)
 
     assert TaskLock.objects.filter(orgtask=org_task).count() == 1
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_deployment_flow_run=Mock(
+        return_value={
+            "flow_run_id": "fake-flow-run-id",
+            "name": "fake-flow-run-name",
+        }
+    ),
+    lock_tasks_for_deployment=Mock(return_value=[]),
+)
+def test_post_run_prefect_org_deployment_task_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Running a pipeline logs the pipeline's real name (fetched from
+    OrgDataFlowv1), not just the deployment_id repeated."""
+    request = mock_request(orguser_transform_tasks)
+
+    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_DBTRUN).first()
+    dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
+
+    post_run_prefect_org_deployment_task(request, dataflow_orgtask.dataflow.deployment_id)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.EXECUTE
+    assert call_kwargs["resource_fields"] == {"name": dataflow_orgtask.dataflow.name}
+
+    # Cleanup
+    TaskLock.objects.filter(orgtask=org_task).delete()
 
 
 @patch("ddpui.api.pipeline_api.prefect_service.get_flow_runs_by_deployment_id_v1")
@@ -1376,4 +1420,232 @@ def test_put_prefect_dataflow_v1_passes_continue_on_sync_failure(orguser_transfo
 
     # cleanup
     DataflowOrgTask.objects.filter(dataflow=dataflow).delete()
+    dataflow.delete()
+
+
+# ================================================================================
+# Audit Log Tests for M3 (Pipeline Events)
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"id": "new-deploy-id", "name": "test-deploy"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Test that creating a pipeline creates an audit log entry"""
+    request = mock_request(orguser_transform_tasks)
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="audit-test-flow",
+        connections=[],
+        transformTasks=[],
+        cron="",
+    )
+
+    post_prefect_dataflow_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_transform_tasks.org
+    assert call_kwargs["orguser"] == orguser_transform_tasks
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_fields"]["name"] == "audit-test-flow"
+    assert call_kwargs["resource_fields"]["cron"] == ""
+    assert call_kwargs["resource_fields"]["connections"] == []
+    assert call_kwargs["resource_fields"]["transform_tasks"] == []
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        return_value={"deployment": {"name": "test-deploy", "id": "test-deploy-id"}}
+    ),
+)
+def test_post_prefect_dataflow_v1_audit_log_resolves_names(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Creating a pipeline logs cron + resolved connection names + resolved
+    transform task labels (not raw ids/uuids) in resource_fields"""
+    request = mock_request(orguser_transform_tasks)
+    org = request.orguser.org
+
+    OrgTask.objects.create(
+        uuid=uuid.uuid4(),
+        org=org,
+        task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
+        connection_id="create-audit-conn-id",
+    )
+    ConnectionMeta.objects.create(
+        connection_id="create-audit-conn-id", connection_name="Nice Connection Name"
+    )
+
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_task = (
+        OrgTask.objects.filter(
+            org=org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .first()
+    )
+
+    payload = PrefectDataFlowCreateSchema4(
+        name="audit-test-flow-2",
+        connections=[PrefectFlowAirbyteConnection2(id="create-audit-conn-id", seq=0)],
+        transformTasks=[PrefectDataFlowOrgTasks(uuid=str(transform_task.uuid), seq=0)],
+        cron="0 5 * * *",
+    )
+
+    post_prefect_dataflow_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_fields"]["cron"] == "0 5 * * *"
+    assert call_kwargs["resource_fields"]["connections"] == ["Nice Connection Name"]
+    assert call_kwargs["resource_fields"]["transform_tasks"] == [transform_task.task.label]
+
+    # cleanup
+    OrgTask.objects.filter(org=org, connection_id="create-audit-conn-id").delete()
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_deployment_by_id=Mock(return_value=True),
+)
+def test_delete_prefect_dataflow_v1_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Test that deleting a pipeline creates an audit log entry"""
+    request = mock_request(orguser_transform_tasks)
+
+    OrgDataFlowv1.objects.create(
+        org=request.orguser.org,
+        name="delete-audit-test",
+        deployment_name="prefect-delete-audit",
+        deployment_id="delete-audit-dep-id",
+        dataflow_type="orchestrate",
+    )
+
+    delete_prefect_dataflow_v1(request, "delete-audit-dep-id")
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_transform_tasks.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == "delete-audit-dep-id"
+    # Name is fetched before deletion (nothing left to look it up by
+    # afterward) — not just the deployment_id repeated.
+    assert call_kwargs["resource_fields"] == {"name": "delete-audit-test"}
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    update_dataflow_v1=Mock(return_value=[]),
+)
+def test_put_prefect_dataflow_v1_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Updating a pipeline logs cron + resolved connection names + resolved
+    transform task labels (not raw ids/uuids) in resource_fields"""
+    request = mock_request(orguser_transform_tasks)
+    org = orguser_transform_tasks.org
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org,
+        name="update-audit-test",
+        deployment_name="prefect-update-audit",
+        deployment_id="update-audit-dep-id",
+        dataflow_type="orchestrate",
+    )
+
+    OrgTask.objects.create(
+        uuid=uuid.uuid4(),
+        org=org,
+        task=Task.objects.filter(type__in=[TaskType.AIRBYTE]).first(),
+        connection_id="update-audit-conn-id",
+    )
+    ConnectionMeta.objects.create(
+        connection_id="update-audit-conn-id", connection_name="Nice Connection Name"
+    )
+
+    auto_managed_slugs = {TASK_DBTCLEAN, TASK_DBTDEPS}
+    transform_task = (
+        OrgTask.objects.filter(
+            org=org,
+            generated_by="system",
+            task__type__in=[TaskType.DBT],
+        )
+        .exclude(task__slug__in=auto_managed_slugs)
+        .first()
+    )
+
+    payload = PrefectDataFlowUpdateSchema3(
+        name="updated-name",
+        connections=[PrefectFlowAirbyteConnection2(id="update-audit-conn-id", seq=0)],
+        transformTasks=[PrefectDataFlowOrgTasks(uuid=str(transform_task.uuid), seq=0)],
+        cron="0 5 * * *",
+    )
+
+    put_prefect_dataflow_v1(request, "update-audit-dep-id", payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == "update-audit-dep-id"
+    assert call_kwargs["resource_fields"]["name"] == "updated-name"
+    assert call_kwargs["resource_fields"]["cron"] == "0 5 * * *"
+    assert call_kwargs["resource_fields"]["connections"] == ["Nice Connection Name"]
+    assert call_kwargs["resource_fields"]["transform_tasks"] == [transform_task.task.label]
+
+    dataflow.delete()
+
+
+@patch("ddpui.api.pipeline_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    set_deployment_schedule=Mock(return_value=True),
+)
+def test_post_deployment_set_schedule_creates_audit_log(
+    mock_audit_log, orguser_transform_tasks, seed_db
+):
+    """Test that toggling pipeline schedule creates an audit log entry"""
+    request = mock_request(orguser_transform_tasks)
+    org = orguser_transform_tasks.org
+
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org,
+        name="schedule-audit-test",
+        deployment_name="schedule-test-deploy",
+        deployment_id="schedule-audit-dep-id",
+    )
+
+    post_deployment_set_schedule(request, "schedule-audit-dep-id", "active")
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.PIPELINE
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == "schedule-audit-dep-id"
+    assert call_kwargs["resource_fields"]["name"] == "schedule-audit-test"
+    assert call_kwargs["resource_fields"]["schedule_active"] == {
+        "old": "inactive",
+        "new": "active",
+    }
+
     dataflow.delete()

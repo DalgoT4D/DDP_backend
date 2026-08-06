@@ -366,15 +366,17 @@ def resend_invitation(invitation_id: str):
     """resend email invitation to user"""
     invitation = Invitation.objects.filter(id=invitation_id).first()
 
-    if invitation:
-        invitation.invited_on = timezone.as_utc(datetime.utcnow())
-        invitation.save()
-        # trigger an email to the user
-        frontend_url = os.getenv("FRONTEND_URL")
-        invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
-        )
+    if invitation is None:
+        return None, "invitation not found"
+
+    invitation.invited_on = timezone.as_utc(datetime.utcnow())
+    invitation.save()
+    # trigger an email to the user
+    frontend_url = os.getenv("FRONTEND_URL")
+    invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
+    awsses.send_invite_user_email(
+        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    )
 
     return None, None
 
@@ -428,7 +430,7 @@ def confirm_reset_password(payload: ResetPasswordSchema):
     orguser.user.set_password(payload.password.get_secret_value())
     orguser.user.save()
 
-    return None, None
+    return orguser, None
 
 
 def change_password(payload: ChangePasswordSchema, orguser: OrgUser):
@@ -486,7 +488,7 @@ def verify_email(payload: VerifyEmailSchema):
         email_verified=True, updated_at=django_timezone.now()
     )
 
-    return None, None
+    return orguser, None
 
 
 def ensure_orguser_for_org(orguser: OrgUser, org):

@@ -701,3 +701,101 @@ def test_post_cancel_connection_job(orguser_workspace):
         mock_cancel_connection_job.assert_called_once_with(
             "FAKE-WORKSPACE-ID", "fake-connection-id", "sync"
         )
+
+
+# ================================================================================
+# Audit Log Tests for M3 (Data Infrastructure Events)
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.airbyte_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_source=Mock(return_value={"sourceId": "new-source-id", "sourceName": "Test Source"}),
+)
+def test_post_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """Test that creating a source creates an audit log entry"""
+    request = mock_request(orguser_workspace)
+
+    payload = AirbyteSourceCreate(
+        name="Test Source",
+        sourceDefId="fake-source-def-id",
+        config={"key": "value"},
+    )
+    post_airbyte_source(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_workspace.org
+    assert call_kwargs["orguser"] == orguser_workspace
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DATA_SOURCE
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_id"] == "new-source-id"
+    assert call_kwargs["resource_fields"] == {
+        "name": "Test Source",
+        "sourceDefId": "fake-source-def-id",
+    }
+    assert "config" not in call_kwargs["resource_fields"]
+
+
+@patch("ddpui.api.airbyte_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    get_source=Mock(return_value={"name": "Old Source"}),
+    update_source=Mock(return_value={"sourceId": "existing-source-id", "name": "Updated Source"}),
+)
+def test_put_airbyte_source_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """Test that updating a source creates an audit log entry when name changes"""
+    request = mock_request(orguser_workspace)
+
+    payload = AirbyteSourceUpdate(
+        name="Updated Source",
+        sourceDefId="fake-source-def-id",
+        config={"key": "new-value"},
+    )
+    put_airbyte_source(request, "existing-source-id", payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_workspace.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DATA_SOURCE
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    # Curated snapshot, not a diff — and config is never logged, since it may
+    # contain connection credentials (host, password, api keys, etc).
+    assert call_kwargs["resource_fields"] == {
+        "name": "Updated Source",
+        "sourceDefId": "fake-source-def-id",
+    }
+    assert "config" not in call_kwargs["resource_fields"]
+
+
+@patch("ddpui.api.airbyte_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_destination=Mock(
+        return_value={"destinationId": "new-dest-id", "destinationName": "Test Warehouse"}
+    ),
+)
+def test_post_airbyte_destination_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """Test that creating a warehouse/destination creates an audit log entry"""
+    request = mock_request(orguser_workspace)
+
+    payload = AirbyteDestinationCreate(
+        name="Test Warehouse",
+        destinationDefId="fake-dest-def-id",
+        config={},
+    )
+    post_airbyte_destination(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser_workspace.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.WAREHOUSE
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_id"] == "new-dest-id"
+    assert call_kwargs["resource_fields"] == {
+        "name": "Test Warehouse",
+        "destinationDefId": "fake-dest-def-id",
+    }
+    assert "config" not in call_kwargs["resource_fields"]

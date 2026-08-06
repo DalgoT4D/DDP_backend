@@ -380,3 +380,101 @@ class TestMetricConsumers:
         with pytest.raises(HttpError) as exc_info:
             get_metric_consumers(request, 99999)
         assert exc_info.value.status_code == 404
+
+
+# ── Audit Log Tests ─────────────────────────────────────────────────────────
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+class TestMetricAuditLogs:
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.api.metric_api.create_audit_log")
+    def test_create_metric_creates_audit_log(self, mock_audit_log, mock_validate, orguser, seed_db):
+        """Test that creating a metric creates an audit log entry."""
+        OrgWarehouse.objects.create(org=orguser.org, wtype="postgres", credentials={})
+        request = mock_request(orguser)
+        payload = MetricPayload(
+            name="Audit Log Test Metric",
+            schema_name="public",
+            table_name="beneficiaries",
+            column_expression="COUNT(*)",
+        )
+
+        response = create_metric(request, payload)
+
+        assert response.name == "Audit Log Test Metric"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.METRIC
+        assert call_kwargs["action"] == AuditLogAction.CREATE
+
+        resource_fields = call_kwargs["resource_fields"]
+        assert resource_fields["name"] == "Audit Log Test Metric"
+        assert resource_fields["schema_name"] == "public"
+        assert resource_fields["table_name"] == "beneficiaries"
+        assert resource_fields["column_expression"] == "COUNT(*)"
+
+        # Cleanup
+        Metric.objects.filter(name="Audit Log Test Metric").delete()
+        OrgWarehouse.objects.filter(org=orguser.org).delete()
+
+    @patch("ddpui.core.metric.metric_service.MetricService.validate_metric_query")
+    @patch("ddpui.api.metric_api.create_audit_log")
+    def test_update_metric_creates_audit_log(
+        self, mock_audit_log, mock_validate, orguser, sample_metric, seed_db
+    ):
+        """Test that updating a metric creates an audit log entry."""
+        OrgWarehouse.objects.create(org=orguser.org, wtype="postgres", credentials={})
+        request = mock_request(orguser)
+        payload = MetricPayload(
+            name="Updated Metric Name",
+            schema_name=sample_metric.schema_name,
+            table_name=sample_metric.table_name,
+            column_expression=sample_metric.column_expression,
+        )
+
+        response = update_metric(request, sample_metric.id, payload)
+
+        assert response.name == "Updated Metric Name"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.METRIC
+        assert call_kwargs["action"] == AuditLogAction.UPDATE
+        assert call_kwargs["resource_id"] == str(sample_metric.id)
+
+        # Curated snapshot, not a diff — every field from the payload is logged,
+        # not just the one that actually changed (name here).
+        resource_fields = call_kwargs["resource_fields"]
+        assert resource_fields["name"] == "Updated Metric Name"
+        assert resource_fields["schema_name"] == sample_metric.schema_name
+        assert resource_fields["table_name"] == sample_metric.table_name
+        assert resource_fields["column_expression"] == sample_metric.column_expression
+
+        # Cleanup
+        OrgWarehouse.objects.filter(org=orguser.org).delete()
+
+    @patch("ddpui.api.metric_api.create_audit_log")
+    def test_delete_metric_creates_audit_log(self, mock_audit_log, orguser, org, seed_db):
+        """Test that deleting a metric creates an audit log entry."""
+        metric = Metric.objects.create(
+            name="Metric To Delete",
+            schema_name="public",
+            table_name="users",
+            column_expression="COUNT(*)",
+            created_by=orguser,
+            org=org,
+        )
+        metric_id = metric.id
+
+        request = mock_request(orguser)
+        delete_metric(request, metric_id)
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.METRIC
+        assert call_kwargs["action"] == AuditLogAction.DELETE
+        assert call_kwargs["resource_id"] == str(metric_id)
+        assert call_kwargs["resource_fields"] == {"name": "Metric To Delete"}

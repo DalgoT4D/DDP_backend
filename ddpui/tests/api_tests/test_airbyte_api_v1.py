@@ -30,10 +30,12 @@ from ddpui.api.airbyte_api import (
     get_sync_history_for_connection,
     schedule_update_connection_schema,
 )
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.ddpairbyte.schema import (
     AirbyteConnectionCreate,
     AirbyteConnectionUpdate,
+    AirbyteConnectionSchemaUpdateSchedule,
     AirbyteDestinationUpdate,
     AirbyteWorkspace,
     AirbyteWorkspaceCreate,
@@ -41,7 +43,7 @@ from ddpui.ddpairbyte.schema import (
 from ddpui.models.airbyte import AirbyteJob
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, SUPER_ADMIN_ROLE
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import Org, OrgPrefectBlockv1, OrgWarehouse
+from ddpui.models.org import ConnectionMeta, Org, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task
 from ddpui.models.flow_runs import PrefectFlowRun
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -551,6 +553,73 @@ def test_post_airbyte_connection_v1_success(
     assert response["deploymentId"] == "fake-deployment-id"
 
 
+@patch("ddpui.api.airbyte_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    create_connection=Mock(
+        return_value={
+            "sourceId": "fake-source-id",
+            "destinationId": "fake-destination-id",
+            "connectionId": "fake-connection-id",
+            "sourceCatalogId": "fake-source-catalog-id",
+            "syncCatalog": "sync-catalog",
+            "status": "running",
+        }
+    ),
+    delete_connection=Mock(),
+)
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    create_dataflow_v1=Mock(
+        side_effect=[
+            {"deployment": {"id": "fake-deployment-id", "name": "fake-deployment-name"}},
+            {
+                "deployment": {
+                    "id": "fake-reset-conn-deployment-id",
+                    "name": "fake-deployment-name",
+                }
+            },
+        ]
+    ),
+)
+def test_post_airbyte_connection_v1_creates_audit_log(
+    mock_audit_log, orguser_workspace, warehouse_with_destination, airbyte_server_block, seed_db
+):
+    """Creating a connection logs name, stream names, and destinationSchema —
+    never syncCatalog (internal schema plumbing, not meaningful to a human)."""
+    request = mock_request(orguser_workspace)
+
+    call_command("loaddata", "seed/tasks.json")
+    for task in Task.objects.all():
+        OrgTask.objects.create(org=request.orguser.org, task=task)
+
+    payload = AirbyteConnectionCreate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
+        name="conn-name",
+        sourceId="source-id",
+        destinationId="dest-id",
+        destinationSchema="dest-schema",
+        streams=["stream_1", "stream_2"],
+    )
+
+    Task.objects.create(type="airbyte", slug="airbyte-sync", label="AIRBYTE sync")
+    Task.objects.create(type="airbyte", slug="airbyte-reset", label="AIRBYTE reset")
+
+    post_airbyte_connection_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CONNECTION
+    assert call_kwargs["action"] == AuditLogAction.CREATE
+    assert call_kwargs["resource_fields"] == {
+        "name": "conn-name",
+        "streams": ["stream_1", "stream_2"],
+        "destinationSchema": "dest-schema",
+    }
+    assert "syncCatalog" not in call_kwargs["resource_fields"]
+
+
 # ================================================================================
 def test_put_airbyte_connection_v1_no_workspace(orguser):
     """tests PUT /v1/connections/{connection_id}/update failure with no workspace"""
@@ -682,6 +751,52 @@ def test_put_airbyte_connection_v1(orguser_workspace):
     )
 
 
+@patch("ddpui.api.airbyte_api.create_audit_log")
+def test_put_airbyte_connection_v1_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """Updating a connection logs a curated snapshot straight from the
+    payload — no prior-state fetch (that used to be a real HTTP call to
+    Airbyte's own API, not a local DB read like everywhere else)."""
+    payload = AirbyteConnectionUpdate(
+        catalogId="catalog-id",
+        syncCatalog={"streams": []},
+        name="connection-name",
+        streams=[{"streamName": "orders", "streamNamespace": "public"}],
+        destinationSchema="dest-schema",
+    )
+    connection_id = "connection_id"
+    request = mock_request(orguser_workspace)
+
+    airbyte_task_config = {
+        "type": "airbyte",
+        "slug": "airbyte-sync",
+        "label": "AIRBYTE sync",
+        "command": None,
+    }
+    task = Task.objects.create(**airbyte_task_config)
+    OrgTask.objects.create(task=task, org=request.orguser.org, connection_id=connection_id)
+    OrgWarehouse.objects.create(
+        org=request.orguser.org, airbyte_destination_id="airbyte_destination_id"
+    )
+
+    with patch.multiple(
+        "ddpui.ddpairbyte.airbyte_service",
+        get_connection=Mock(return_value={"status": "active", "name": "connection-name"}),
+        update_connection=Mock(return_value={"name": "connection-name"}),
+    ):
+        put_airbyte_connection_v1(request, connection_id, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CONNECTION
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {
+        "name": "connection-name",
+        "streams": ["orders"],
+        "destinationSchema": "dest-schema",
+    }
+    assert "syncCatalog" not in call_kwargs["resource_fields"]
+
+
 # ================================================================================
 def test_delete_airbyte_connection_v1_without_org(orguser):
     """tests DELETE /v1/connections/{connection_id} failure without org"""
@@ -752,6 +867,34 @@ def test_delete_airbyte_connection_success(orguser_workspace):
     assert OrgTask.objects.filter(org=request.orguser.org).count() == 0
     assert OrgDataFlowv1.objects.filter(org=request.orguser.org).count() == 0
     assert DataflowOrgTask.objects.filter(orgtask__org=request.orguser.org).count() == 0
+
+
+@patch("ddpui.api.airbyte_api.create_audit_log")
+@patch.multiple(
+    "ddpui.ddpprefect.prefect_service",
+    delete_deployment_by_id=Mock(),
+)
+@patch.multiple(
+    "ddpui.ddpairbyte.airbyte_service",
+    delete_connection=Mock(),
+)
+def test_delete_airbyte_connection_v1_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """tests DELETE /v1/connections/{connection_id} creates an audit log with the connection name"""
+    request = mock_request(orguser_workspace)
+
+    connection_id = "conn-1"
+
+    ConnectionMeta.objects.create(connection_id=connection_id, connection_name="My Connection")
+
+    response = delete_airbyte_connection_v1(request, connection_id)
+    assert response["success"] == 1
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CONNECTION
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == connection_id
+    assert call_kwargs["resource_fields"] == {"name": "My Connection"}
 
 
 def test_post_airbyte_workspace_with_existing_workspace(orguser_workspace):
@@ -961,6 +1104,37 @@ def test_put_airbyte_destination_success(orguser_workspace):
     assert response == {"destinationId": destination_id}
 
 
+@patch("ddpui.api.airbyte_api.create_audit_log")
+def test_put_airbyte_destination_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """Updating a destination logs name/destinationDefId, never config (which
+    holds warehouse connection credentials)."""
+    request = mock_request(orguser_workspace)
+
+    destination_id = "destination_123"
+    payload = AirbyteDestinationUpdate(
+        name="Updated Destination",
+        destinationDefId="def_123",
+        config={"host": "db.example.com", "password": "super-secret"},
+    )
+
+    with patch("ddpui.ddpairbyte.airbytehelpers.update_destination") as update_destination_mock:
+        update_destination_mock.return_value = (
+            {"destinationId": destination_id, "name": "Updated Destination"},
+            None,
+        )
+        put_airbyte_destination_v1(request, destination_id, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.WAREHOUSE
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {
+        "name": "Updated Destination",
+        "destinationDefId": "def_123",
+    }
+    assert "config" not in call_kwargs["resource_fields"]
+
+
 def test_delete_airbyte_source_with_no_workspace(orguser):
     """Tests delete_airbyte_source_v1 when organization has no workspace"""
     request = mock_request(orguser)
@@ -990,6 +1164,31 @@ def test_delete_airbyte_source_success(orguser_workspace):
     assert response == {"success": 1}
 
 
+@patch("ddpui.api.airbyte_api.create_audit_log")
+def test_delete_airbyte_source_v1_creates_audit_log(mock_audit_log, orguser_workspace, seed_db):
+    """Tests delete_airbyte_source_v1 creates an audit log with the source name"""
+    request = mock_request(orguser_workspace)
+
+    source_id = "source_123"
+
+    with patch.multiple(
+        "ddpui.ddpairbyte.airbyte_service",
+        get_source=Mock(return_value={"name": "My Source"}),
+    ), patch("ddpui.ddpairbyte.airbytehelpers.delete_source") as delete_source_mock:
+        delete_source_mock.return_value = (None, None)
+
+        response = delete_airbyte_source_v1(request, source_id)
+
+    assert response == {"success": 1}
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DATA_SOURCE
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == source_id
+    assert call_kwargs["resource_fields"] == {"name": "My Source"}
+
+
 def test_get_connection_catalog_v1_no_workspace(orguser):
     """Tests get_connection_catalog_v1 when organization has no workspace"""
     request = mock_request(orguser)
@@ -1017,14 +1216,14 @@ def test_schedule_update_connection_schema_workspace_not_found(orguser):
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
-def test_schedule_update_connection_schema_workspace_success(orguser):
+def test_schedule_update_connection_schema_workspace_success(orguser, seed_db):
     """Tests schedule_update_connection_schema success"""
 
     orguser.org.airbyte_workspace_id = "workspace_123"
     request = mock_request(orguser)
 
     connection_id = "connection_123"
-    payload = {"schemaChange": "true"}
+    payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={}, cron="0 5 * * *")
 
     with patch(
         "ddpui.ddpairbyte.airbytehelpers.schedule_update_connection_schema"
@@ -1038,3 +1237,31 @@ def test_schedule_update_connection_schema_workspace_success(orguser):
     )
 
     assert response == {"success": 1}
+
+
+@patch("ddpui.api.airbyte_api.create_audit_log")
+def test_schedule_update_connection_schema_creates_audit_log(mock_audit_log, orguser, seed_db):
+    """Tests schedule_update_connection_schema creates an audit log with the connection name and cron"""
+    orguser.org.airbyte_workspace_id = "workspace_123"
+    request = mock_request(orguser)
+
+    connection_id = "connection_123"
+    payload = AirbyteConnectionSchemaUpdateSchedule(catalogDiff={}, cron="0 5 * * *")
+
+    ConnectionMeta.objects.create(connection_id=connection_id, connection_name="My Connection")
+
+    with patch(
+        "ddpui.ddpairbyte.airbytehelpers.schedule_update_connection_schema"
+    ) as schedule_update_connection_schema_mock:
+        schedule_update_connection_schema_mock.return_value = (None, None)
+
+        response = schedule_update_connection_schema(request, connection_id, payload)
+
+    assert response == {"success": 1}
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["resource_type"] == AuditLogResourceType.CONNECTION
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_id"] == connection_id
+    assert call_kwargs["resource_fields"] == {"name": "My Connection", "cron": "0 5 * * *"}

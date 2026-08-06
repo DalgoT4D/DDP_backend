@@ -204,7 +204,7 @@ class OrgCleanupService:
                     self.org.dbt = None
                     self.org.save()
 
-    def delete_warehouse(self):
+    def delete_warehouse(self) -> dict:
         """
         1. delete all connections
             - delete all deployments in prefect related to airbyte tasks
@@ -214,7 +214,11 @@ class OrgCleanupService:
         4. delete all OrgWarehouse object related to the org
 
         Note that this will also remove the connection syncs from the pipelines
+
+        Returns the warehouse's name/destination id, so callers (e.g. the
+        API layer's audit log) don't need a separate fetch of their own.
         """
+        warehouse_info = {"name": "", "airbyte_destination_id": ""}
         for dataflow in OrgDataFlowv1.objects.filter(org=self.org, dataflow_type="manual"):
             all_tasks_are_airbyte_type = all(
                 dataflow_orgtask.orgtask.task.type == "airbyte"
@@ -258,6 +262,11 @@ class OrgCleanupService:
                 )
 
         for warehouse in OrgWarehouse.objects.filter(org=self.org):
+            warehouse_info = {
+                "name": warehouse.name,
+                "airbyte_destination_id": warehouse.airbyte_destination_id,
+            }
+
             logger.info(
                 f"will delete destination {warehouse.airbyte_destination_id} from airbyte and db"
             )
@@ -301,6 +310,8 @@ class OrgCleanupService:
 
                 warehouse.delete()
                 logger.info(f"deleted warehouse {str(warehouse)} from db")
+
+        return warehouse_info
 
     def delete_airbyte_workspace(self):
         """
