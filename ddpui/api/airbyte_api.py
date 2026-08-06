@@ -559,9 +559,13 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    destination, error = airbytehelpers.update_destination(orguser.org, destination_id, payload)
-    if error:
-        raise HttpError(400, error)
+    try:
+        destination = airbytehelpers.update_destination(orguser.org, destination_id, payload)
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(500, "failed to update destination") from error
 
     return {"destinationId": destination["destinationId"]}
 

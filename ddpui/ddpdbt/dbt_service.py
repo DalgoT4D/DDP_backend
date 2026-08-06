@@ -17,7 +17,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import Task, OrgTask, DataflowOrgTask, TaskType
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType
 from ddpui.models.canvas_models import CanvasNode, CanvasNodeType, CanvasEdge
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block, write_dbt_profiles_yml
+from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk, write_dbt_profiles_yml
 from ddpui.utils import secretsmanager
 from ddpui.utils.constants import (
     TASK_DOCSGENERATE,
@@ -25,7 +25,6 @@ from ddpui.utils.constants import (
     TASK_DBTRUN,
     TASK_DBTSEED,
     TASK_DBTDEPS,
-    TASK_DBTCLOUD_JOB,
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtProjectParams
 from ddpui.core.git_manager import GitManager, GitManagerError
@@ -278,7 +277,6 @@ def task_config_params(task: Task):
         TASK_DBTTEST: {"flags": [], "options": ["select", "exclude"]},
         TASK_DBTSEED: {"flags": ["full-refresh"], "options": ["select"]},
         TASK_DOCSGENERATE: {"flags": [], "options": []},
-        TASK_DBTCLOUD_JOB: {"flags": [], "options": ["job_id"]},
     }
 
     return TASK_CONIF_PARAM[task.slug] if task.slug in TASK_CONIF_PARAM else None
@@ -406,16 +404,7 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
                 % org.name
             )
 
-        (cli_profile_block, dbt_project_params), error = create_or_update_org_cli_block(
-            org, warehouse, saved_creds
-        )
-
-        orgdbt.cli_profile_block = cli_profile_block
-        orgdbt.save()
-
-        if error:
-            logger.error("failed to create dbt cli profile for org %s: %s", org.name, error)
-            raise Exception(f"failed to create dbt cli profile for org {org.name}: {error}")
+        create_or_update_dbt_profile_secret_blk(org, warehouse, saved_creds)
 
         # 11. Create .gitignore file
         try:
@@ -1181,27 +1170,6 @@ def switch_git_repository_v1(
     orgdbt.transform_type = TransformType.GIT
     orgdbt.is_repo_managed_by_system = False  # New repo is NOT Dalgo-managed
     orgdbt.save()
-
-    # Update CLI profile block with new dbt_project.yml profile name
-    try:
-        warehouse = OrgWarehouse.objects.filter(org=org).first()
-        if not warehouse:
-            raise Exception("No warehouse configuration found for this organization")
-
-        creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
-
-        # This will automatically read the new dbt_project.yml and update the profile block
-        _, error = create_or_update_org_cli_block(
-            org, warehouse, creds  # Pass the retrieved warehouse creds
-        )
-        if error:
-            logger.error(f"Failed to update CLI profile block: {error}")
-            raise Exception(f"Failed to update CLI profile block: {error}")
-
-        logger.info("CLI profile block updated with new project configuration")
-    except Exception as e:
-        logger.error(f"Error updating CLI profile block: {e}")
-        raise Exception(f"Repository switch failed: CLI profile block update error - {e}") from e
 
     # Handle PAT token storage (only if not masked)
     is_token_masked = set(payload.gitrepoAccessToken.strip()) == set("*")

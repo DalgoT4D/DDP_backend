@@ -332,39 +332,47 @@ def test_put_dbt_schema_v1_no_warehouse(orguser: OrgUser):
     assert str(excinfo.value) == "No warehouse configuration found for this organization"
 
 
-def test_put_dbt_schema_v1_no_cli_profile(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
-    """test put_dbt_schema_v1 no dbt cli profile"""
+def test_put_dbt_schema_v1_success(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
+    """put_dbt_schema_v1: updates default_schema on OrgDbt AND refreshes the
+    dbt-profile SECRET block so the runner picks up the new schema."""
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
-    payload = OrgDbtTarget(target_configs_schema="new-target")
-    request = mock_request(orguser)
-    retval = put_dbt_schema_v1(request, payload)
-    assert retval == {"success": 1}
-    assert orguser.org.dbt.default_schema == payload.target_configs_schema
-
-
-def test_put_dbt_schema_v1_success(
-    orguser: OrgUser, f_orgwarehouse: OrgWarehouse, f_dbtcliprofileblock: OrgPrefectBlockv1
-):
-    """test put_dbt_schema_v1 success flow"""
-    orguser.org.dbt = OrgDbt(
-        gitrepo_url="A",
-        target_type="B",
-        default_schema="C",
-        cli_profile_block=f_dbtcliprofileblock,
-    )
     orguser.org.dbt.save()
     payload = OrgDbtTarget(target_configs_schema="new-target")
     request = mock_request(orguser)
+
     with patch(
-        "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block"
-    ) as mock_update_dbt_cli_profile_block:
+        "ddpui.api.dbt_api.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"username": "u", "password": "pw"},
+    ), patch("ddpui.api.dbt_api.create_or_update_dbt_profile_secret_blk") as mock_upsert:
         retval = put_dbt_schema_v1(request, payload)
-        assert retval == {"success": 1}
-        mock_update_dbt_cli_profile_block.assert_called_once_with(
-            block_name=f_dbtcliprofileblock.block_name,
-            target=payload.target_configs_schema,
-            wtype=f_orgwarehouse.wtype,
-        )
+
+    assert retval == {"success": 1}
+    orguser.org.dbt.refresh_from_db()
+    assert orguser.org.dbt.default_schema == "new-target"
+    mock_upsert.assert_called_once()
+    args = mock_upsert.call_args.args
+    assert args[0] == orguser.org
+    assert args[1] == f_orgwarehouse
+    assert args[2] == {"username": "u", "password": "pw"}
+
+
+def test_put_dbt_schema_v1_no_warehouse_creds(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
+    """put_dbt_schema_v1 returns 500 when warehouse credentials are missing."""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    orguser.org.dbt.save()
+    payload = OrgDbtTarget(target_configs_schema="new-target")
+    request = mock_request(orguser)
+
+    with patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_warehouse_credentials",
+        return_value=None,
+    ), patch("ddpui.api.dbt_api.create_or_update_dbt_profile_secret_blk") as mock_upsert:
+        with pytest.raises(HttpError) as excinfo:
+            put_dbt_schema_v1(request, payload)
+
+    assert excinfo.value.status_code == 500
+    assert str(excinfo.value) == "warehouse credentials not found"
+    mock_upsert.assert_not_called()
 
 
 def test_get_transform_type_none(orguser: OrgUser):

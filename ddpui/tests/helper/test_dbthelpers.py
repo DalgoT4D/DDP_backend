@@ -1,118 +1,98 @@
 from unittest.mock import patch, Mock
 import pytest
-import os
-from pathlib import Path
-import yaml
 
 from ddpui.models.org import (
     Org,
     OrgPrefectBlockv1,
     OrgWarehouse,
     OrgDbt,
-    TransformType,
 )
 
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
-from ddpui.ddpprefect import DBTCLIPROFILE
+from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk
+from ddpui.ddpprefect import SECRET
 
 pytestmark = pytest.mark.django_db
 
 
-@patch(
-    "ddpui.ddpprefect.prefect_service.create_dbt_cli_profile_block",
-    mock_create_dbt_cli_profile_block=Mock(),
-)
-def test_create_or_update_org_cli_block_create_case(
-    mock_create_dbt_cli_profile_block: Mock,
-):
-    """test create_or_update_org_cli_block when its created for the first time"""
+@patch("ddpui.ddpdbt.dbthelpers.prefect_service.upsert_secret_block")
+def test_create_or_update_dbt_profile_secret_blk_creates_row(mock_upsert: Mock):
+    """First-time call creates a new SECRET-type OrgPrefectBlockv1 named
+    `dbt-profile-<slug>` and wires it to `warehouse.dbt_profile_secret_block`
+    (and `org.dbt.dbt_profile_secret_block` when org.dbt is set)."""
     org = Org.objects.create(name="org", slug="org")
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
-    orgdbt = OrgDbt.objects.create(gitrepo_url="A", target_type="B", default_schema="C")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="repo", target_type="postgres", default_schema="dbt_schema"
+    )
     org.dbt = orgdbt
     org.save()
 
-    mock_create_dbt_cli_profile_block.return_value = {
-        "block_id": "some_id",
-        "block_name": "some_name",
-    }
+    mock_upsert.return_value = {"block_id": "sec-id-1", "block_name": "dbt-profile-org"}
 
-    dummy_creds = {
-        "username": "username",
-        "password": "password",
-        "host": "host",
-        "port": "port",
-        "database": "database",
-    }
+    creds = {"username": "u", "password": "pw", "host": "h", "port": 5432}
 
-    create_or_update_org_cli_block(org, warehouse, dummy_creds)
+    create_or_update_dbt_profile_secret_blk(org, warehouse, creds)
 
-    org_cli_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=DBTCLIPROFILE).first()
-    assert org_cli_block is not None
-    assert org_cli_block.block_id == "some_id"
-    assert org_cli_block.block_name == "some_name"
+    # Prefect API was called with the deterministic block name
+    mock_upsert.assert_called_once()
+    payload = mock_upsert.call_args.args[0]
+    assert payload.block_name == "dbt-profile-org"
+
+    # DB row created — one, of type SECRET
+    row = OrgPrefectBlockv1.objects.get(org=org, block_type=SECRET)
+    assert row.block_name == "dbt-profile-org"
+    assert row.block_id == "sec-id-1"
+
+    # Both FKs point to the new row (warehouse is authoritative; org.dbt mirrored)
+    warehouse.refresh_from_db()
+    orgdbt.refresh_from_db()
+    assert warehouse.dbt_profile_secret_block_id == row.id
+    assert orgdbt.dbt_profile_secret_block_id == row.id
 
 
-@patch(
-    "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block",
-    mock_update_dbt_cli_profile_block=Mock(),
-)
-def test_create_or_update_org_cli_block_update_case(
-    mock_update_dbt_cli_profile_block: Mock, tmp_path
-):
-    """test create_or_update_org_cli_block when the block is updated"""
-    os.environ["CLIENTDBT_ROOT"] = str(tmp_path)
+@patch("ddpui.ddpdbt.dbthelpers.prefect_service.upsert_secret_block")
+def test_create_or_update_dbt_profile_secret_blk_reuses_row(mock_upsert: Mock):
+    """Subsequent call reuses the existing OrgPrefectBlockv1 row via update_or_create
+    on block_name — no duplicate created, block_id refreshed from the response."""
     org = Org.objects.create(name="org", slug="org")
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
-
-    mock_update_dbt_cli_profile_block.return_value = {
-        "block_id": "some_id",
-        "block_name": "some_name",
-    }
-
-    dummy_creds = {
-        "username": "username",
-        "password": "password",
-        "host": "host",
-        "port": "port",
-        "database": "database",
-    }
-    cli_profile_block = OrgPrefectBlockv1.objects.create(
-        org=org,
-        block_type=DBTCLIPROFILE,
-        block_id="some_id",
-        block_name="some_name",
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="repo", target_type="postgres", default_schema="dbt_schema"
     )
-    project_name = "dbtrepo"
-
-    project_dir = Path(tmp_path) / org.slug
-    project_dir.mkdir(parents=True, exist_ok=True)
-    dbtrepo_dir = project_dir / project_name
-    dbtrepo_dir.mkdir(parents=True, exist_ok=True)
-    dbt = OrgDbt.objects.create(
-        project_dir=f"{org.slug}/{project_name}",
-        dbt_venv=str(tmp_path),
-        target_type="postgres",
-        default_schema="default",
-        transform_type=TransformType.GIT,
-        cli_profile_block=cli_profile_block,
-    )
-    org.dbt = dbt
+    org.dbt = orgdbt
     org.save()
 
-    # create dbt_project.yml file
-    yml_obj = {"profile": "dummy"}
-    with open(str(dbtrepo_dir / "dbt_project.yml"), "w", encoding="utf-8") as output:
-        yaml.safe_dump(yml_obj, output)
-
-    create_or_update_org_cli_block(org, warehouse, dummy_creds)
-
-    mock_update_dbt_cli_profile_block.assert_called_once_with(
-        block_name=cli_profile_block.block_name,
-        wtype=warehouse.wtype,
-        credentials=dummy_creds,
-        bqlocation=None,
-        profilename=yml_obj["profile"],
-        target="default",
-        priority=None,
+    existing = OrgPrefectBlockv1.objects.create(
+        org=org, block_type=SECRET, block_id="sec-id-1", block_name="dbt-profile-org"
     )
+    warehouse.dbt_profile_secret_block = existing
+    warehouse.save()
+
+    mock_upsert.return_value = {"block_id": "sec-id-2", "block_name": "dbt-profile-org"}
+
+    create_or_update_dbt_profile_secret_blk(org, warehouse, {"username": "u", "password": "pw2"})
+
+    # Still only one row for this org (same name → update_or_create reused it)
+    assert OrgPrefectBlockv1.objects.filter(org=org, block_type=SECRET).count() == 1
+    existing.refresh_from_db()
+    assert existing.block_id == "sec-id-2"  # updated to the new Prefect block id
+
+
+@patch("ddpui.ddpdbt.dbthelpers.prefect_service.upsert_secret_block")
+def test_create_or_update_dbt_profile_secret_blk_no_orgdbt(mock_upsert: Mock):
+    """When org.dbt is None: still upserts the block; default_schema is derived
+    from airbyte_creds (postgres → creds['schema'], bigquery → creds['dataset_id']).
+    warehouse.dbt_profile_secret_block is still set; org.dbt.* is skipped (no orgdbt)."""
+    org = Org.objects.create(name="org", slug="org")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
+
+    mock_upsert.return_value = {"block_id": "sec-id-1", "block_name": "dbt-profile-org"}
+
+    creds = {"username": "u", "password": "pw", "schema": "creds_schema"}
+
+    create_or_update_dbt_profile_secret_blk(org, warehouse, creds)
+
+    mock_upsert.assert_called_once()
+    row = OrgPrefectBlockv1.objects.get(org=org, block_type=SECRET)
+    warehouse.refresh_from_db()
+    assert warehouse.dbt_profile_secret_block_id == row.id

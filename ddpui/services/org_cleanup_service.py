@@ -64,19 +64,21 @@ class OrgCleanupService:
         0. clean up everything Elementary-related (S3 reports, EDR OrgTask,
            EDR Prefect deployment) — elementary only makes sense with dbt,
            so tear it down first before the dbt state disappears.
-        1. delete all transformation OrgTask(s) of type - git, dbt, dbtcloud. \
+        1. delete all transformation OrgTask(s) of type - git, dbt. \
             We should make sure no tasks are being used in any orchestrate pipelines
         2. delete all deployments in prefect related to transformation OrgTask(s) eg. dbt run
-        3. delete cli profile blocks, git secret blocks in prefect, db and in secrets manager
-        4. delete the dbt workspace on disk
-        5. delete OrgDbt object and the link to org
+        3. delete cli profile blocks in prefect and DB
+        4. delete managed GitHub repository (if Dalgo-managed)
+        5. delete git-pull SECRET blocks in prefect and DB
+           (dbt-profile SECRET block is deleted with the warehouse — see delete_warehouse)
+        6. delete github PAT from secrets manager (referenced by orgdbt.gitrepo_access_token_secret)
+        7. delete the dbt workspace on disk
+        8. delete OrgDbt object and the link to org
         """
         self.delete_elementary_setup()
 
         delete_transform_orgtask_ids = []
-        for org_task in OrgTask.objects.filter(
-            org=self.org, task__type__in=["dbt", "git", "dbtcloud"]
-        ).all():
+        for org_task in OrgTask.objects.filter(org=self.org, task__type__in=["dbt", "git"]).all():
             if (
                 DataflowOrgTask.objects.filter(
                     orgtask=org_task, dataflow__dataflow_type="orchestrate"
@@ -168,22 +170,27 @@ class OrgCleanupService:
                     logger.warning(f"failed to delete managed GitHub repository: {str(e)}")
                     # Continue with cleanup even if GitHub deletion fails
 
-        for secret_block in OrgPrefectBlockv1.objects.filter(org=self.org, block_type=SECRET).all():
+        # delete git-pull secret blocks (dbt-profile secret block is deleted with the warehouse)
+        for secret_block in OrgPrefectBlockv1.objects.filter(
+            org=self.org, block_type=SECRET, block_name__contains="git-pull"
+        ).all():
             logger.info(f"will delete secret block {secret_block.block_name} from prefect & DB")
-            logger.info("will also delete github PAT if exists in secrets manager")
             if not self.dry_run:
                 try:
                     prefect_service.delete_secret_block(secret_block.block_id)
                     logger.info(f"deleted secret block {secret_block.block_name} from prefect")
                 except Exception:  # pylint:disable=broad-exception-caught
                     pass
-
-                if orgdbt and orgdbt.gitrepo_access_token_secret:
-                    secretsmanager.delete_github_pat(orgdbt.gitrepo_access_token_secret)
-                    logger.info("deleted github PAT from secrets manager")
-
                 secret_block.delete()
                 logger.info(f"deleted secret block {secret_block.block_name} from DB")
+
+        # delete github PAT from secrets manager if it exists (not a Prefect block — it's a
+        # secrets-manager entry referenced by orgdbt.gitrepo_access_token_secret)
+        if orgdbt and orgdbt.gitrepo_access_token_secret:
+            logger.info("will delete github PAT from secrets manager")
+            if not self.dry_run:
+                secretsmanager.delete_github_pat(orgdbt.gitrepo_access_token_secret)
+                logger.info("deleted github PAT from secrets manager")
 
         # delete the dbt workspace on disk and remove orgdbt references
         logger.info(
@@ -209,11 +216,13 @@ class OrgCleanupService:
         1. delete all connections
             - delete all deployments in prefect related to airbyte tasks
             - delete all connections in airbyte for the workspace
-        2. delete the destinations in airbyte for all OrgWarehouse objects
-        3. delete all warehouse credentials in secrets manager
-        4. delete all OrgWarehouse object related to the org
+        2. delete warehouse credentials in secrets manager
+        3. delete the dbt-profile SECRET block (Prefect block + OrgPrefectBlockv1 row);
+           FK lives on OrgWarehouse.dbt_profile_secret_block
+        4. delete the destination in airbyte for the OrgWarehouse
+        5. delete the OrgWarehouse row
 
-        Note that this will also remove the connection syncs from the pipelines
+        Note that this will also remove the connection syncs from the pipelines.
         """
         for dataflow in OrgDataFlowv1.objects.filter(org=self.org, dataflow_type="manual"):
             all_tasks_are_airbyte_type = all(

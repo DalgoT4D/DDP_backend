@@ -32,7 +32,6 @@ from ddpui.ddpprefect import (
     FLOW_RUN_COMPLETED_STATE_TYPE,
     FLOW_RUN_CRASHED_STATE_TYPE,
     FLOW_RUN_FAILED_STATE_TYPE,
-    DBTCLOUDCREDS,
 )
 from ddpui.utils.constants import (
     FLOW_RUN_LOGS_OFFSET_LIMIT,
@@ -297,89 +296,10 @@ def delete_shell_block(block_id):
 
 
 # ================================================================================================
-def delete_dbt_core_block(block_id):
-    """Delete a dbt core block in prefect"""
-    prefect_delete_a_block(block_id)
-
-
-def update_dbt_core_block_schema(block_name: str, target_configs_schema: str):
-    """Update the schema inside a dbt core block in prefect"""
-    response = prefect_put(
-        "blocks/dbtcore_edit_schema/",
-        {
-            "blockName": block_name,
-            "target_configs_schema": target_configs_schema,
-        },
-    )
-    return response
-
-
-# ================================================================================================
-def create_dbt_cli_profile_block(
-    block_name: str,
-    profilename: str,
-    target: str,
-    wtype: str,
-    bqlocation: str,
-    credentials: dict,
-    priority: str = None,
-) -> dict:
-    """Create a dbt cli profile block in that has the warehouse information"""
-    response = prefect_post(
-        "blocks/dbtcli/profile/",
-        {
-            "cli_profile_block_name": block_name,
-            "profile": {
-                "name": profilename,
-                "target": target,
-                "target_configs_schema": target,
-            },
-            "wtype": wtype,
-            "credentials": credentials,
-            "bqlocation": bqlocation,
-            "priority": priority,
-        },
-    )
-    return response
-
-
-def update_dbt_cli_profile_block(
-    block_name: str,
-    wtype: str = None,
-    profilename: str = None,
-    target: str = None,
-    credentials: dict = None,
-    bqlocation: str = None,
-    priority: str = None,
-):
-    """Update the dbt cli profile for an org"""
-    response = prefect_put(
-        "blocks/dbtcli/profile/",
-        {
-            "cli_profile_block_name": block_name,
-            "wtype": wtype,
-            "profile": {
-                "name": profilename,
-                "target": target,
-                "target_configs_schema": target,
-            },
-            "credentials": credentials,
-            "bqlocation": bqlocation,
-            "priority": priority,
-        },
-    )
-    return response
-
-
 def delete_dbt_cli_profile_block(block_id) -> None:
-    """Delete dbt cli profile block in prefect"""
+    """Delete dbt cli profile block in prefect. Kept for defensive teardown paths only —
+    orgs that still have legacy CLI profile blocks in Prefect get them cleaned up here."""
     prefect_delete_a_block(block_id)
-
-
-def get_dbt_cli_profile_block(block_name: str) -> dict:
-    """fetches the dbt cli profile block from prefect"""
-    response = prefect_get(f"blocks/dbtcli/profile/{block_name}")
-    return response
 
 
 # ================================================================================================
@@ -731,48 +651,6 @@ def get_prefect_version():
     """Fetch secret block id and block name"""
     response = prefect_get("prefect/version")
     return response
-
-
-def upsert_dbt_cloud_creds_block(block_name: str, account_id: int, api_key: str) -> dict:
-    """Create a dbt cloud creds block in prefect; using patch style create or udpate"""
-    response = prefect_patch(
-        "blocks/dbtcloudcreds/",
-        {"block_name": block_name, "account_id": account_id, "api_key": api_key},
-    )
-    return response
-
-
-def create_or_update_dbt_cloud_creds_block(
-    org: Org,
-    account_id: int,
-    api_key: str,
-) -> OrgPrefectBlockv1:
-    """Create a dbt cli profile block in that has the warehouse information"""
-    cloud_creds_block = org.dbt.dbtcloud_creds_block if org.dbt else None
-    block_name = None
-
-    if not cloud_creds_block:
-        block_name = f"{org.slug}-dbtcloud-creds"
-        cloud_creds_block = OrgPrefectBlockv1(
-            org=org,
-            block_type=DBTCLOUDCREDS,
-            block_name=block_name,
-        )
-    else:
-        block_name = cloud_creds_block.block_name
-
-    result = upsert_dbt_cloud_creds_block(block_name, account_id, api_key)
-
-    cloud_creds_block.block_id = result["block_id"]
-    cloud_creds_block.block_name = result["block_name"]
-    cloud_creds_block.save()
-
-    # Update the orgdbt relationship if it exists and doesn't already have a dbtcloud_creds_block
-    if org.dbt and not org.dbt.dbtcloud_creds_block:
-        org.dbt.dbtcloud_creds_block = cloud_creds_block
-        org.dbt.save()
-
-    return cloud_creds_block
 
 
 def cancel_queued_manual_job(flow_run_id: str, payload):

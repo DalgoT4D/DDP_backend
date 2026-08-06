@@ -17,7 +17,6 @@ from ddpui.schemas.org_task_schema import SelectedStream
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.ddpprefect.schema import (
     PrefectDbtTaskSetup,
-    PrefectDbtCloudTaskSetup,
     PrefectShellTaskSetup,
     PrefectAirbyteSyncTaskSetup,
     PrefectAirbyteRefreshSchemaTaskSetup,
@@ -26,7 +25,6 @@ from ddpui.ddpprefect.schema import (
 )
 from ddpui.ddpprefect import (
     AIRBYTECONNECTION,
-    DBTCLOUDJOB,
     DBTCORE,
     SECRET,
     SHELLOPERATION,
@@ -44,9 +42,8 @@ from ddpui.utils.constants import (
     TASK_AIRBYTERESET,
     UPDATE_SCHEMA,
     TRANSFORM_TASKS_SEQ,
-    TASK_DBTCLOUD_JOB,
 )
-from ddpui.ddpdbt.schema import DbtCloudJobParams, DbtProjectParams
+from ddpui.ddpdbt.schema import DbtProjectParams
 
 logger = CustomLogger("ddpui")
 
@@ -157,22 +154,20 @@ def setup_airbyte_update_schema_task_config(
 
 def setup_dbt_core_task_config(
     org_task: OrgTask,
-    cli_profile_block: OrgPrefectBlockv1,
     dbt_project_params: DbtProjectParams,
     seq: int = 1,
     warehouse_secret_block: OrgPrefectBlockv1 = None,
 ):
     """constructs the prefect payload for a dbt job"""
-    # Populate env for the runner flow (proxy/prefect_flows_runner.py). Old flow
-    # ignores env; keeping cli_profile_block above means a rollback stays safe.
-    # Keys use the same hyphen convention as `secret-git-pull-url-block`.
+    # Populate env for the runner flow (proxy/prefect_flows_runner.py).
+    # Key follows the same hyphen convention as `secret-git-pull-url-block`.
     env = {}
     if warehouse_secret_block:
         env["dbt-profile-secret-block"] = warehouse_secret_block.block_name
     else:
         logger.warning(
             "OrgWarehouse for org=%s has no dbt_profile_secret_block — runner-mode deployments will fail. "
-            "Run create_or_update_org_cli_block to create the Secret block.",
+            "Run create_or_update_dbt_profile_secret_blk to create the Secret block.",
             org_task.org.slug,
         )
 
@@ -185,25 +180,7 @@ def setup_dbt_core_task_config(
         working_dir=dbt_project_params.project_dir,
         profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
         project_dir=dbt_project_params.project_dir,
-        cli_profile_block=cli_profile_block.block_name,
         cli_args=[],
-        orgtask_uuid=str(org_task.uuid),
-    )
-
-
-def setup_dbt_cloud_task_config(
-    org_task: OrgTask,
-    cloud_creds_block: OrgPrefectBlockv1,
-    dbt_project_params: DbtCloudJobParams,
-    seq: int = 1,
-):
-    """constructs the prefect payload for a dbt-cloud job"""
-    return PrefectDbtCloudTaskSetup(
-        seq=seq,
-        slug=org_task.task.slug,
-        type=DBTCLOUDJOB,
-        dbt_cloud_job_id=dbt_project_params.job_id,
-        dbt_cloud_creds_block=cloud_creds_block.block_name,
         orgtask_uuid=str(org_task.uuid),
     )
 
@@ -291,7 +268,7 @@ def setup_edr_send_report_task_config(
     else:
         logger.warning(
             "OrgWarehouse for org=%s has no dbt_profile_secret_block — EDR runs will fail. "
-            "Run create_or_update_org_cli_block to create the Secret block.",
+            "Run create_or_update_dbt_profile_secret_blk to create the Secret block.",
             org_task.org.slug,
         )
     return PrefectShellTaskSetup(
@@ -311,10 +288,8 @@ def pipeline_with_orgtasks(
     org: Org,
     org_tasks: list[OrgTask],
     server_block: OrgPrefectBlockv1 = None,
-    cli_block: OrgPrefectBlockv1 = None,
     dbt_project_params: DbtProjectParams = None,
     start_seq: int = 0,
-    dbt_cloud_creds_block: OrgPrefectBlockv1 = None,
     gitrepo_url: str = None,
 ):
     """
@@ -324,7 +299,6 @@ def pipeline_with_orgtasks(
     task_configs = []
     warehouse = OrgWarehouse.objects.filter(org=org).first()
     warehouse_secret_block = warehouse.dbt_profile_secret_block if warehouse else None
-    # This block works perfectly for dbt cli tasks and dbt cloud tasks both.
     for org_task in org_tasks:
         task_config = None
         if org_task.task.slug == TASK_AIRBYTERESET:
@@ -365,14 +339,9 @@ def pipeline_with_orgtasks(
                 dbt_project_params.project_dir,
                 warehouse_secret_block=warehouse_secret_block,
             ).to_json()
-        elif org_task.task.slug == TASK_DBTCLOUD_JOB:
-            task_config = setup_dbt_cloud_task_config(
-                org_task, dbt_cloud_creds_block, DbtCloudJobParams(**org_task.options())
-            ).to_json()
         else:
             task_config = setup_dbt_core_task_config(
                 org_task,
-                cli_block,
                 dbt_project_params,
                 warehouse_secret_block=warehouse_secret_block,
             ).to_json()

@@ -18,7 +18,6 @@ class TaskType(str, Enum):
     DBT = "dbt"
     GIT = "git"
     EDR = "edr"
-    DBTCLOUD = "dbtcloud"
     AIRBYTE = "airbyte"
 
 

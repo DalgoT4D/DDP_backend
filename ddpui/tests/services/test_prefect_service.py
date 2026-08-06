@@ -23,17 +23,14 @@ from ddpui.ddpprefect.prefect_service import (
     HttpError,
     get_airbyte_server_block_id,
     update_airbyte_server_block,
-    update_airbyte_connection_block,
     create_airbyte_server_block,
     delete_airbyte_server_block,
     delete_airbyte_connection_block,
-    delete_dbt_core_block,
     PrefectSecretBlockCreate,
     PrefectSecretBlockEdit,
     create_secret_block,
     upsert_secret_block,
     delete_secret_block,
-    update_dbt_core_block_schema,
     get_flow_runs_by_deployment_id,
     set_deployment_schedule,
     get_filtered_deployments,
@@ -42,7 +39,6 @@ from ddpui.ddpprefect.prefect_service import (
     get_flow_run_logs,
     get_flow_run,
     create_deployment_flow_run,
-    create_dbt_cli_profile_block,
     recurse_flow_run_logs,
 )
 
@@ -274,69 +270,10 @@ def test_delete_airbyte_server_block(mock_delete: Mock):
 
 
 # =============================================================================
-def test_update_airbyte_connection_block():
-    with pytest.raises(Exception) as excinfo:
-        update_airbyte_connection_block("blockname")
-    assert str(excinfo.value) == "not implemented"
-
-
 @patch("ddpui.ddpprefect.prefect_service.prefect_delete_a_block")
 def test_delete_airbyte_connection_block(mock_delete: Mock):
     delete_airbyte_connection_block("blockid")
     mock_delete.assert_called_once_with("blockid")
-
-
-# =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_delete_a_block")
-def test_delete_dbt_core_block(mock_delete: Mock):
-    delete_dbt_core_block("blockid")
-    mock_delete.assert_called_once_with("blockid")
-
-
-@patch("ddpui.ddpprefect.prefect_service.prefect_put")
-def test_update_dbt_core_block_schema(mock_put: Mock):
-    mock_put.return_value = "retval"
-    response = update_dbt_core_block_schema("block_name", "target")
-
-    assert response == "retval"
-    mock_put.assert_called_once_with(
-        "blocks/dbtcore_edit_schema/",
-        {
-            "blockName": "block_name",
-            "target_configs_schema": "target",
-        },
-    )
-
-
-# =============================================================================
-@patch("ddpui.ddpprefect.prefect_service.prefect_post")
-def test_create_dbt_cli_profile_block(mock_post: Mock):
-    mock_post.return_value = "retval"
-    response = create_dbt_cli_profile_block(
-        "block-name",
-        "profilename",
-        "target",
-        "wtype",
-        credentials={"c1": "c2"},
-        bqlocation=None,
-        priority=None,
-    )
-    assert response == "retval"
-    mock_post.assert_called_once_with(
-        "blocks/dbtcli/profile/",
-        {
-            "cli_profile_block_name": "block-name",
-            "profile": {
-                "name": "profilename",
-                "target": "target",
-                "target_configs_schema": "target",
-            },
-            "wtype": "wtype",
-            "credentials": {"c1": "c2"},
-            "bqlocation": None,
-            "priority": None,
-        },
-    )
 
 
 # =============================================================================

@@ -5,8 +5,6 @@ AIRBYTESERVER = "Airbyte Server"
 AIRBYTECONNECTION = "Airbyte Connection"
 SHELLOPERATION = "Shell Operation"
 DBTCORE = "dbt Core Operation"
-DBTCLOUDJOB = "dbt Cloud Job"
-DBTCLOUDCREDS = "dbt Cloud Credentials"
 DBTCLIPROFILE = "dbt CLI Profile"
 SECRET = "Secret"
 
