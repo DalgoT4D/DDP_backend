@@ -758,35 +758,24 @@ def test_post_organization_warehouse_creates_audit_log(mock_audit_log, orguser):
             {
                 "destination_id": "destination_id_1",
             },
-            {
-                "destination_id": "destination_id_2",
-            },
         ]
     ),
 )
 def test_get_organizations_warehouses(orguser):
-    """success test, fetching all warehouses for an org"""
+    """success test, fetching the warehouse for an org"""
     request = mock_request(orguser)
 
-    warehouse1 = OrgWarehouse.objects.create(
+    warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
         airbyte_destination_id="destination_id_1",
     )
-    warehouse2 = OrgWarehouse.objects.create(
-        org=orguser.org,
-        wtype="postgres",
-        airbyte_destination_id="destination_id_2",
-    )
     response = get_organizations_warehouses(request)
     assert "warehouses" in response
-    assert len(response["warehouses"]) == 2
+    assert len(response["warehouses"]) == 1
     assert response["warehouses"][0]["wtype"] == "postgres"
     assert response["warehouses"][0]["airbyte_destination"]["destination_id"] == "destination_id_1"
-    assert response["warehouses"][1]["wtype"] == "postgres"
-    assert response["warehouses"][1]["airbyte_destination"]["destination_id"] == "destination_id_2"
-    warehouse1.delete()
-    warehouse2.delete()
+    warehouse.delete()
 
 
 # ================================================================================

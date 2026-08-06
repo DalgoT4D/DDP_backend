@@ -215,9 +215,8 @@ class OrgCleanupService:
 
         Note that this will also remove the connection syncs from the pipelines
 
-        Returns the first warehouse's name/destination id (there's
-        normally only one per org), so callers (e.g. the API layer's audit
-        log) don't need a separate fetch of their own.
+        Returns the warehouse's name/destination id, so callers (e.g. the
+        API layer's audit log) don't need a separate fetch of their own.
         """
         warehouse_info = {"name": "", "airbyte_destination_id": ""}
         for dataflow in OrgDataFlowv1.objects.filter(org=self.org, dataflow_type="manual"):
@@ -262,12 +261,11 @@ class OrgCleanupService:
                     f"deleted orgtask - {str(org_task)} for connection {org_task.connection_id} from DB"
                 )
 
-        for i, warehouse in enumerate(OrgWarehouse.objects.filter(org=self.org)):
-            if i == 0:
-                warehouse_info = {
-                    "name": warehouse.name,
-                    "airbyte_destination_id": warehouse.airbyte_destination_id,
-                }
+        for warehouse in OrgWarehouse.objects.filter(org=self.org):
+            warehouse_info = {
+                "name": warehouse.name,
+                "airbyte_destination_id": warehouse.airbyte_destination_id,
+            }
 
             logger.info(
                 f"will delete destination {warehouse.airbyte_destination_id} from airbyte and db"

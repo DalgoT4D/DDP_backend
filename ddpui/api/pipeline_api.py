@@ -239,6 +239,8 @@ def post_deployment_set_schedule(request, deployment_id, status):
             },
         )
         return result
+    except PipelineNotFoundError:
+        raise HttpError(404, "pipeline not found")
     except PipelineValidationError as error:
         raise HttpError(422, error.message) from error
     except PipelineServiceError as error:

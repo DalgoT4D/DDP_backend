@@ -970,6 +970,17 @@ def test_post_deployment_set_schedule_failure2(orguser_transform_tasks):
     assert str(excinfo.value) == "incorrect status value"
 
 
+def test_post_deployment_set_schedule_not_found(orguser_transform_tasks):
+    """tests 404 in setting schedule for a deployment that doesn't exist for the org"""
+    request = mock_request(orguser_transform_tasks)
+
+    with pytest.raises(HttpError) as excinfo:
+        post_deployment_set_schedule(request, "no-such-deployment-id", "active")
+
+    assert excinfo.value.status_code == 404
+    assert str(excinfo.value) == "pipeline not found"
+
+
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
     set_deployment_schedule=Mock(side_effect=Exception("error")),
