@@ -230,7 +230,6 @@ def post_system_transformation_tasks(request):
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(org.dbt.id),
         action=AuditLogAction.CREATE,
-        resource_fields={"name": f"{org.slug}-transform-tasks"},
     )
 
     return {"success": 1}

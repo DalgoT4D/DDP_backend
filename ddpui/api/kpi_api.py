@@ -24,7 +24,6 @@ from ddpui.core.kpi.kpi_service import (
     KPIPermissionError,
 )
 from ddpui.core.metric.metric_service import MetricNotFoundError
-from ddpui.models.metric import KPI
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 from ddpui.core.audit_log_service import create_audit_log
@@ -182,12 +181,8 @@ def delete_kpi(request, kpi_id: int):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture KPI name before deletion
-    kpi = KPI.objects.filter(id=kpi_id, org=org).first()
-    kpi_name = kpi.name if kpi else str(kpi_id)
-
     try:
-        KPIService.delete_kpi(kpi_id, org, orguser)
+        kpi_name = KPIService.delete_kpi(kpi_id, org, orguser)
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
     except KPIValidationError as e:

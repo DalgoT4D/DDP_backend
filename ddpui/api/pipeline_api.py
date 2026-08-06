@@ -150,17 +150,16 @@ def delete_prefect_dataflow_v1(request, deployment_id):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    pipeline = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
-
     try:
         result = PipelineService.delete_pipeline(orguser.org, deployment_id)
+        pipeline_name = result.pop("pipeline_name")
         create_audit_log(
             org=orguser.org,
             orguser=orguser,
             resource_type=AuditLogResourceType.PIPELINE,
             resource_id=deployment_id,
             action=AuditLogAction.DELETE,
-            resource_fields={"name": pipeline.name},
+            resource_fields={"name": pipeline_name},
         )
         return result
     except PipelineNotFoundError:
@@ -222,13 +221,12 @@ def post_deployment_set_schedule(request, deployment_id, status):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    pipeline = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
-
     # Track schedule status change
     old_status = "active" if status == "inactive" else "inactive"
 
     try:
         result = PipelineService.set_pipeline_schedule(orguser.org, deployment_id, status)
+        pipeline_name = result.pop("pipeline_name")
         create_audit_log(
             org=orguser.org,
             orguser=orguser,
@@ -236,7 +234,7 @@ def post_deployment_set_schedule(request, deployment_id, status):
             resource_id=deployment_id,
             action=AuditLogAction.UPDATE,
             resource_fields={
-                "name": pipeline.name,
+                "name": pipeline_name,
                 "schedule_active": {"old": old_status, "new": status},
             },
         )
@@ -268,17 +266,16 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
-    pipeline = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
-
     try:
         result = PipelineService.run_pipeline(orguser.org, orguser, deployment_id, payload)
+        pipeline_name = result.pop("pipeline_name")
         create_audit_log(
             org=orguser.org,
             orguser=orguser,
             resource_type=AuditLogResourceType.PIPELINE,
             resource_id=deployment_id,
             action=AuditLogAction.EXECUTE,
-            resource_fields={"name": pipeline.name},
+            resource_fields={"name": pipeline_name},
         )
         return result
     except PipelineNotFoundError:
@@ -301,19 +298,18 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
     if orguser.org is None:
         raise HttpError(400, "Register an organization first")
 
-    pipeline = OrgDataFlowv1.objects.filter(org=orguser.org, deployment_id=deployment_id).first()
-
     try:
         result = PipelineService.post_clear_selected_streams_run(
             orguser.org, orguser, deployment_id, payload
         )
+        pipeline_name = result.pop("pipeline_name")
         create_audit_log(
             org=orguser.org,
             orguser=orguser,
             resource_type=AuditLogResourceType.PIPELINE,
             resource_id=deployment_id,
             action=AuditLogAction.EXECUTE,
-            resource_fields={"name": pipeline.name},
+            resource_fields={"name": pipeline_name},
         )
         return result
     except PipelineNotFoundError:

@@ -161,16 +161,27 @@ class CommentService:
         comment_id: int,
         org: Org,
         orguser: OrgUser,
-    ) -> None:
+    ) -> dict:
         """Delete a comment. Author-only.
 
         Hard-deletes if no other user has commented in the thread (same
         snapshot + target_type + target_id). Soft-deletes otherwise.
+
+        Returns the comment's pre-deletion content/target_type/snapshot title,
+        so callers (e.g. the API layer's audit log) don't need a separate
+        fetch of their own — this also matters because a soft-delete clears
+        `content` below, so it must be captured before that happens.
         """
         comment = CommentService._get_comment(comment_id, org)
 
         if comment.author != orguser:
             raise CommentPermissionError("You can only delete your own comments")
+
+        deleted_info = {
+            "content": comment.content,
+            "target_type": comment.target_type,
+            "snapshot": comment.snapshot.title if comment.snapshot else "",
+        }
 
         thread_query = Q(
             snapshot=comment.snapshot,
@@ -190,6 +201,8 @@ class CommentService:
         else:
             comment.delete()
             logger.info(f"Hard-deleted comment {comment_id}")
+
+        return deleted_info
 
     # language=SQL
     _COMMENT_STATES_SQL = """

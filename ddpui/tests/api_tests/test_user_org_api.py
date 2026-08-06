@@ -1220,16 +1220,25 @@ def test_delete_organization_warehouses_v1_calls_all_cleanup(orguser):
 
 @patch("ddpui.api.user_org_api.create_audit_log")
 def test_delete_organization_warehouses_v1_creates_audit_log(mock_audit_log, orguser, seed_db):
-    """Deleting the org's warehouse logs its wtype, captured before deletion."""
+    """Deleting the org's warehouse logs its name, returned by
+    delete_warehouse() itself (no separate fetch of the warehouse by the API layer)."""
     warehouse = OrgWarehouse.objects.create(
-        org=orguser.org, wtype="bigquery", airbyte_destination_id="dest-id-audit"
+        org=orguser.org,
+        name="My Warehouse",
+        wtype="bigquery",
+        airbyte_destination_id="dest-id-audit",
     )
     request = mock_request(orguser)
 
     with patch("ddpui.api.user_org_api.OrgCleanupService") as MockCleanupService:
         instance = MockCleanupService.return_value
         instance.delete_orchestrate_pipelines = MagicMock()
-        instance.delete_warehouse = MagicMock()
+        instance.delete_warehouse = MagicMock(
+            return_value={
+                "name": "My Warehouse",
+                "airbyte_destination_id": "dest-id-audit",
+            }
+        )
         instance.delete_transformation_layer = MagicMock()
 
         delete_organization_warehouses_v1(request)
@@ -1239,7 +1248,7 @@ def test_delete_organization_warehouses_v1_creates_audit_log(mock_audit_log, org
     assert call_kwargs["resource_type"] == AuditLogResourceType.WAREHOUSE
     assert call_kwargs["action"] == AuditLogAction.DELETE
     assert call_kwargs["resource_id"] == "dest-id-audit"
-    assert call_kwargs["resource_fields"] == {"wtype": "bigquery"}
+    assert call_kwargs["resource_fields"] == {"name": "My Warehouse"}
 
     warehouse.delete()
 
@@ -1253,7 +1262,8 @@ def test_delete_organization_warehouses_v1_creates_audit_log(mock_audit_log, org
 def test_post_organization_v1_creates_audit_log(
     mock_workspace, mock_delay, mock_audit_log, orguser, seed_db
 ):
-    """Creating an org logs its name."""
+    """Creating an org logs the plan choices made at creation (org identity itself
+    is already on the row via the org FK, so it isn't repeated in resource_fields)."""
     # can_create_org is a super-admin-only permission
     orguser.new_role = Role.objects.filter(slug=SUPER_ADMIN_ROLE).first()
     orguser.save()
@@ -1279,7 +1289,11 @@ def test_post_organization_v1_creates_audit_log(
     call_kwargs = mock_audit_log.call_args[1]
     assert call_kwargs["resource_type"] == AuditLogResourceType.ORG
     assert call_kwargs["action"] == AuditLogAction.CREATE
-    assert call_kwargs["resource_fields"] == {"name": "Brand New Org"}
+    assert call_kwargs["resource_fields"] == {
+        "base_plan": "Free",
+        "subscription_duration": "Yearly",
+        "superset_included": False,
+    }
 
     # Cleanup
     Org.objects.filter(name="Brand New Org").delete()
@@ -1764,10 +1778,7 @@ def test_upload_logo_creates_audit_log(mock_upload, mock_audit_log, orguser, see
     assert call_kwargs["orguser"] == orguser
     assert call_kwargs["resource_type"] == AuditLogResourceType.ORG
     assert call_kwargs["action"] == AuditLogAction.CREATE
-    assert call_kwargs["resource_fields"] == {
-        "org": orguser.org.name,
-        "logo_url": orguser.org.logo_url,
-    }
+    assert call_kwargs["resource_fields"] == {"logo_url": orguser.org.logo_url}
 
 
 @patch("ddpui.api.user_org_api.create_audit_log")
@@ -1784,5 +1795,5 @@ def test_delete_logo_creates_audit_log(mock_delete, mock_audit_log, orguser, see
         orguser,
         AuditLogResourceType.ORG,
         AuditLogAction.DELETE,
-        resource_fields={"org": orguser.org.name},
     )
+    assert "resource_fields" not in mock_audit_log.call_args[1]

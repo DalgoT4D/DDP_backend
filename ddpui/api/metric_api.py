@@ -16,7 +16,6 @@ from ddpui.schemas.metric_schema import (
     MetricValidateResponse,
 )
 from ddpui.models.org import OrgWarehouse
-from ddpui.models.metric import Metric
 from ddpui.core.metric.metric_service import (
     MetricService,
     MetricNotFoundError,
@@ -248,12 +247,8 @@ def delete_metric(request, metric_id: int):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture metric name before deletion
-    metric = Metric.objects.filter(id=metric_id, org=org).first()
-    metric_name = metric.name if metric else str(metric_id)
-
     try:
-        MetricService.delete_metric(metric_id, org, orguser)
+        metric_name = MetricService.delete_metric(metric_id, org, orguser)
     except MetricNotFoundError:
         raise HttpError(404, "Metric not found") from None
     except MetricDeleteBlockedError as e:

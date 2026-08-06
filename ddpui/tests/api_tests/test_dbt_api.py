@@ -1113,7 +1113,7 @@ def test_post_dbt_git_pull_creates_audit_log(mock_audit_log, seed_db, orguser: O
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     # Git pull is logged as EXECUTE (pulling latest changes is an execution action)
     assert call_kwargs["action"] == AuditLogAction.EXECUTE
-    assert call_kwargs["resource_fields"] == {"org": orguser.org.slug}
+    assert "resource_fields" not in call_kwargs
 
     # Cleanup
     orgdbt.delete()
@@ -1147,10 +1147,7 @@ def test_put_dbt_schema_v1_creates_audit_log(
     assert call_kwargs["org"] == orguser.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.UPDATE
-    assert call_kwargs["resource_fields"] == {
-        "org": orguser.org.slug,
-        "default_schema": "new-schema",
-    }
+    assert call_kwargs["resource_fields"] == {"default_schema": "new-schema"}
 
 
 @patch("ddpui.api.dbt_api.create_audit_log")
@@ -1185,7 +1182,6 @@ def test_put_switch_git_repo_creates_audit_log(mock_audit_log, seed_db, orguser:
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_fields"] == {
-        "org": orguser.org.slug,
         "gitrepo_url": "https://github.com/new/repo",
         "is_repo_managed_by_system": False,
     }
@@ -1221,7 +1217,7 @@ def test_dbt_delete_creates_audit_log(mock_cleanup, mock_audit_log, seed_db, org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.DELETE
     assert call_kwargs["resource_id"] == str(orgdbt_id)
-    assert call_kwargs["resource_fields"] == {"org": orguser.org.slug}
+    assert "resource_fields" not in call_kwargs
 
 
 @patch("ddpui.api.dbt_api.create_audit_log")
@@ -1256,7 +1252,11 @@ def test_put_switch_git_repo_creates_audit_log_with_existing_secret(
     assert call_kwargs["org"] == orguser.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.UPDATE
-    assert call_kwargs["resource_fields"]["org"] == orguser.org.slug
+    assert "org" not in call_kwargs["resource_fields"]
+    assert set(call_kwargs["resource_fields"].keys()) == {
+        "gitrepo_url",
+        "is_repo_managed_by_system",
+    }
 
 
 @patch("ddpui.api.dbt_api.create_audit_log")
@@ -1290,7 +1290,7 @@ def test_post_dbt_makedocs_creates_audit_log(
     assert call_kwargs["org"] == orguser.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.EXECUTE
-    assert call_kwargs["resource_fields"] == {"org": orguser.org.slug}
+    assert "resource_fields" not in call_kwargs
 
 
 @patch("ddpui.api.dbt_api.create_audit_log")
@@ -1314,7 +1314,7 @@ def test_post_run_dbt_commands_creates_audit_log(
     assert call_kwargs["org"] == orguser.org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.EXECUTE
-    assert call_kwargs["resource_fields"] == {"org": orguser.org.slug}
+    assert "resource_fields" not in call_kwargs
 
 
 @patch("ddpui.api.dbt_api.create_audit_log")
@@ -1352,7 +1352,6 @@ def test_post_dbt_publish_changes_creates_audit_log(mock_audit_log, seed_db, org
     assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_fields"] == {
-        "org": orguser.org.slug,
         "commit_message": {"old": None, "new": "Test commit"},
         "pushed_to_remote": {"old": None, "new": True},
     }

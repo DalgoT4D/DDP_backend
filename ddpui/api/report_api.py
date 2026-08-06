@@ -236,15 +236,8 @@ def delete_snapshot(request, snapshot_id: int):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture snapshot name before deletion
     try:
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-        snapshot_name = snapshot.title
-    except SnapshotNotFoundError:
-        snapshot_name = str(snapshot_id)
-
-    try:
-        ReportService.delete_snapshot(snapshot_id, org, orguser)
+        snapshot_name = ReportService.delete_snapshot(snapshot_id, org, orguser)
 
         create_audit_log(
             org=org,
@@ -557,8 +550,7 @@ def delete_comment(request, snapshot_id: int, comment_id: int):
     org = orguser.org
 
     try:
-        comment = CommentService.get_comment(comment_id, org)
-        CommentService.delete_comment(
+        deleted_info = CommentService.delete_comment(
             comment_id=comment_id,
             org=org,
             orguser=orguser,
@@ -570,11 +562,7 @@ def delete_comment(request, snapshot_id: int, comment_id: int):
             resource_type=AuditLogResourceType.COMMENT,
             resource_id=str(comment_id),
             action=AuditLogAction.DELETE,
-            resource_fields={
-                "content": comment.content,
-                "target_type": comment.target_type,
-                "snapshot": comment.snapshot.title if comment.snapshot else "",
-            },
+            resource_fields=deleted_info,
         )
 
         return api_response(success=True, message="Comment deleted")

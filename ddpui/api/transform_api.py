@@ -78,7 +78,7 @@ def create_dbt_project(request, payload: DbtProjectSchema):
             resource_type=AuditLogResourceType.DBT,
             resource_id=str(orgdbt.id),
             action=AuditLogAction.CREATE,
-            resource_fields={"name": org.slug},
+            resource_fields={"default_schema": payload.default_schema},
         )
 
     return {"message": f"Project {org.slug} created successfully"}
@@ -197,7 +197,6 @@ def sync_sources(request):
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
         action=AuditLogAction.EXECUTE,
-        resource_fields={"name": org.slug},
     )
 
     return {"task_id": task_id, "hashkey": hashkey}
@@ -1186,7 +1185,6 @@ def sync_remote_dbtproject_to_canvas(request):
         resource_type=AuditLogResourceType.DBT,
         resource_id=str(orgdbt.id),
         action=AuditLogAction.UPDATE,
-        resource_fields={"name": org.slug},
     )
 
     return result

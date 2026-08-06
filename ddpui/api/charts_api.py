@@ -1247,12 +1247,8 @@ def delete_chart(request, chart_id: int):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture chart name before deletion
-    chart = Chart.objects.filter(id=chart_id, org=org).first()
-    chart_name = chart.title if chart else str(chart_id)
-
     try:
-        ChartService.delete_chart(chart_id, org, orguser)
+        chart_name = ChartService.delete_chart(chart_id, org, orguser)
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
@@ -1280,12 +1276,9 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
     if not payload.chart_ids:
         raise HttpError(400, "No chart IDs provided")
 
-    # Capture chart names before deletion
-    charts = Chart.objects.filter(id__in=payload.chart_ids, org=org)
-    chart_names = {chart.id: chart.title for chart in charts}
-
     try:
         result = ChartService.bulk_delete_charts(payload.chart_ids, org, orguser)
+        deleted_titles = result.pop("deleted_titles", [])
 
         # Log single audit entry for bulk delete
         deleted_count = result.get("deleted_count", 0)
@@ -1296,7 +1289,7 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
                 resource_type=AuditLogResourceType.CHART,
                 resource_id=",".join(str(cid) for cid in payload.chart_ids),
                 action=AuditLogAction.DELETE,
-                resource_fields={"titles": list(chart_names.values())},
+                resource_fields={"titles": deleted_titles},
             )
 
         return {

@@ -738,7 +738,11 @@ def post_organization_v1(request, payload: CreateOrgSchema):
         resource_type=AuditLogResourceType.ORG,
         resource_id=str(org.id),
         action=AuditLogAction.CREATE,
-        resource_fields={"name": org.name},
+        resource_fields={
+            "base_plan": payload.base_plan,
+            "subscription_duration": payload.subscription_duration,
+            "superset_included": payload.superset_included,
+        },
     )
 
     logger.info(f"{orguser.user.email} created new org {org.name}")
@@ -757,24 +761,19 @@ def delete_organization_warehouses_v1(request):
     if org.base_plan() == OrgType.DEMO:
         raise HttpError(403, "insufficient permissions")
 
-    # Capture warehouse info before deletion for audit log
-    warehouse = OrgWarehouse.objects.filter(org=org).first()
-    warehouse_type = warehouse.wtype if warehouse else ""
-    warehouse_destination_id = warehouse.airbyte_destination_id if warehouse else ""
-
     cleanup_src = OrgCleanupService(org, dry_run=False)
 
     cleanup_src.delete_orchestrate_pipelines()
-    cleanup_src.delete_warehouse()
+    warehouse_info = cleanup_src.delete_warehouse()
     cleanup_src.delete_transformation_layer()
 
     create_audit_log(
         org=org,
         orguser=orguser,
         resource_type=AuditLogResourceType.WAREHOUSE,
-        resource_id=warehouse_destination_id or str(org.id),
+        resource_id=warehouse_info["airbyte_destination_id"] or str(org.id),
         action=AuditLogAction.DELETE,
-        resource_fields={"wtype": warehouse_type},
+        resource_fields={"name": warehouse_info["name"]},
     )
 
     return {"success": 1}
@@ -965,7 +964,7 @@ def upload_logo_file(request, file: UploadedFile = File(...)):
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(orguser.org.id),
             action=AuditLogAction.UPDATE if had_logo else AuditLogAction.CREATE,
-            resource_fields={"org": org.name, "logo_url": org.logo_url},
+            resource_fields={"logo_url": org.logo_url},
         )
 
         return api_response(
@@ -1001,7 +1000,7 @@ def upload_logo_from_url(request, payload: OrgLogoUrlPayload):
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(orguser.org.id),
             action=AuditLogAction.UPDATE if had_logo else AuditLogAction.CREATE,
-            resource_fields={"org": org.name, "logo_url": org.logo_url},
+            resource_fields={"logo_url": org.logo_url},
         )
 
         return api_response(
@@ -1032,7 +1031,6 @@ def delete_logo(request):
             resource_type=AuditLogResourceType.ORG,
             resource_id=str(orguser.org.id),
             action=AuditLogAction.DELETE,
-            resource_fields={"org": orguser.org.name},
         )
 
         return api_response(success=True, message="Logo deleted successfully")

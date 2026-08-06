@@ -210,12 +210,8 @@ def delete_dashboard(request, dashboard_id: int):
     orguser: OrgUser = request.orguser
     org = orguser.org
 
-    # Capture dashboard name before deletion
-    dashboard = Dashboard.objects.filter(id=dashboard_id, org=org).first()
-    dashboard_name = dashboard.title if dashboard else str(dashboard_id)
-
     try:
-        DashboardService.delete_dashboard(dashboard_id, org, orguser)
+        dashboard_name = DashboardService.delete_dashboard(dashboard_id, org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
     except DashboardPermissionError as err:

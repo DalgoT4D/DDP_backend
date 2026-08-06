@@ -404,8 +404,7 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
 def delete_alert(request, alert_id: int):
     orguser: OrgUser = request.orguser
     try:
-        alert = AlertService.get_alert(alert_id, orguser.org)
-        AlertService.delete_alert(alert_id, orguser.org, orguser)
+        alert_name = AlertService.delete_alert(alert_id, orguser.org, orguser)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
     except AlertPermissionError as e:
@@ -417,7 +416,7 @@ def delete_alert(request, alert_id: int):
         resource_type=AuditLogResourceType.ALERT,
         resource_id=str(alert_id),
         action=AuditLogAction.DELETE,
-        resource_fields={"name": alert.name},
+        resource_fields={"name": alert_name},
     )
 
     return api_response(success=True)
