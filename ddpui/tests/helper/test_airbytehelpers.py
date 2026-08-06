@@ -848,6 +848,51 @@ def test_update_destination_bigquery_config(
     "ddpui.ddpairbyte.airbyte_service.update_destination",
     mock_update_destination=Mock(),
 )
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+    mock_retrieve=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.update_warehouse_credentials",
+    mock_update_creds=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_secret=Mock(),
+)
+def test_update_destination_rotates_creds_in_secret_block(
+    mock_secret: Mock,
+    mock_update_creds: Mock,
+    mock_retrieve: Mock,
+    mock_update_destination: Mock,
+):
+    """User rotates warehouse password → new creds must flow through to the
+    dbt-profile SECRET block. Without this, dbt keeps using stale cached creds
+    and users see mysterious auth failures."""
+    org = Org.objects.create(name="org", slug="org")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
+
+    mock_update_destination.return_value = {"destinationId": "dst"}
+    mock_retrieve.return_value = {"host": "h", "port": "5432", "password": "old-password"}
+    mock_update_creds.return_value = None
+
+    payload = AirbyteDestinationUpdate(
+        name="wh",
+        destinationDefId="def",
+        config={"host": "h", "port": "5432", "password": "NEW-PASSWORD"},
+    )
+    update_destination(org, "dst", payload)
+
+    # Third arg to create_or_update_dbt_profile_secret_blk carries the NEW creds
+    args = mock_secret.call_args.args
+    creds_passed = args[2]
+    assert creds_passed["password"] == "NEW-PASSWORD"
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.update_destination",
+    mock_update_destination=Mock(),
+)
 def test_update_destination_snowflake_rejected(mock_update_destination: Mock):
     """update_destination raises ValueError for snowflake wtype (only postgres + bigquery supported)."""
     org = Org.objects.create(name="org", slug="org")
@@ -1587,6 +1632,139 @@ def test_update_connection_saves_post_sync_transform(
     assert call_kwargs["connection_id"] == "conn-id"
     assert call_kwargs["connection_name"] == "updated-conn"
     assert "extra" in call_kwargs
+
+    # cleanup
+    sync_orgtask.delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_update_connection_in_multiple_pipelines_upserts_block_once(
+    mock_get_connection,
+    mock_update_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+):
+    """Regression protection for the pivot's motivation.
+
+    Previously (deployment-params approach), a connection in N pipelines needed
+    N deployment updates, and the code used .first() → only 1 got updated.
+    Under the block approach, ONE upsert covers all pipelines: at flow-run
+    time each pipeline's deployment reads the block by connection_id."""
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace, task=sync_task, connection_id="conn-id"
+    )
+    # Connection is used in TWO pipelines
+    dataflow1 = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="pipeline-A",
+        dataflow_type="orchestrate",
+        deployment_id="dep-A",
+    )
+    dataflow2 = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="pipeline-B",
+        dataflow_type="orchestrate",
+        deployment_id="dep-B",
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow1, orgtask=sync_orgtask)
+    DataflowOrgTask.objects.create(dataflow=dataflow2, orgtask=sync_orgtask)
+
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "operationIds": [],
+        "syncCatalog": {},
+        "name": "shared-conn",
+    }
+    mock_update_connection.return_value = {"connectionId": "conn-id"}
+
+    new_transform = {
+        "ops": [
+            {
+                "type": "cast",
+                "schema": "raw",
+                "table": "orders",
+                "config": {"amount": "numeric"},
+            }
+        ]
+    }
+    payload = AirbyteConnectionUpdate(
+        name="shared-conn",
+        streams=[{"name": "orders"}],
+        syncCatalog={"streams": []},
+        catalogId="cat-id",
+        post_sync_transform=new_transform,
+    )
+    _, error = update_connection(org_with_workspace, "conn-id", payload)
+    assert error is None
+
+    # Block upserted exactly once — not per-pipeline. Both pipelines will read
+    # this same block at their next flow-run.
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id"
+
+    # cleanup
+    DataflowOrgTask.objects.filter(dataflow__in=[dataflow1, dataflow2]).delete()
+    dataflow1.delete()
+    dataflow2.delete()
+    sync_orgtask.delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_update_connection_clears_casts_upserts_empty_extra(
+    mock_get_connection,
+    mock_update_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+):
+    """User removes all casts from a connection → block must be upserted with
+    empty post_sync_ops. If we skip the upsert, the block keeps running stale
+    casts and the "turn off" in UI is silently ignored."""
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace,
+        task=sync_task,
+        connection_id="conn-id",
+        post_sync_transform={
+            "ops": [{"type": "cast", "schema": "s", "table": "t", "config": {"a": "int"}}]
+        },
+    )
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "operationIds": [],
+        "syncCatalog": {},
+        "name": "conn",
+    }
+    mock_update_connection.return_value = {"connectionId": "conn-id"}
+
+    # Payload with no post_sync_transform — casts turned off in UI
+    payload = AirbyteConnectionUpdate(
+        name="conn",
+        streams=[{"name": "orders"}],
+        syncCatalog={"streams": []},
+        catalogId="cat-id",
+    )
+    _, error = update_connection(org_with_workspace, "conn-id", payload)
+    assert error is None
+
+    sync_orgtask.refresh_from_db()
+    assert sync_orgtask.post_sync_transform in (None, {})
+
+    # Block MUST be upserted so the runner sees empty ops on next sync
+    mock_upsert_conn_block.assert_called_once()
+    extra = mock_upsert_conn_block.call_args.kwargs["extra"]
+    assert extra["post_sync_ops"] == []
 
     # cleanup
     sync_orgtask.delete()

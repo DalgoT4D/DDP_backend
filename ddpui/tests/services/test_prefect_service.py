@@ -31,6 +31,7 @@ from ddpui.ddpprefect.prefect_service import (
     create_secret_block,
     upsert_secret_block,
     delete_secret_block,
+    upsert_airbyte_connection_block,
     get_flow_runs_by_deployment_id,
     set_deployment_schedule,
     get_filtered_deployments,
@@ -305,6 +306,32 @@ def test_upsert_secret_block(mock_put: Mock):
 def test_delete_secret_block(mock_delete: Mock):
     delete_secret_block("blockid")
     mock_delete.assert_called_once_with("blockid")
+
+
+@patch("ddpui.ddpprefect.prefect_service.prefect_put")
+def test_upsert_airbyte_connection_block_http_payload(mock_put: Mock):
+    """Contract test: backend PUT hits blocks/airbyte/connection/ with the exact field
+    names the proxy schema expects. If either side drifts, blocks upsert with empty
+    extra and post-sync casts silently stop firing."""
+    mock_put.return_value = {"block_id": "blk-id", "cleaned_block_name": "conn-uuid"}
+
+    extra = {"env": {"dbt-profile-secret-block": "sec"}, "post_sync_ops": [{"type": "cast"}]}
+    upsert_airbyte_connection_block(
+        server_block_name="srv-blk",
+        connection_id="conn-uuid",
+        connection_name="my-conn",
+        extra=extra,
+    )
+    mock_put.assert_called_once_with(
+        "blocks/airbyte/connection/",
+        {
+            "serverBlockName": "srv-blk",
+            "connectionId": "conn-uuid",
+            "connectionBlockName": "conn-uuid",
+            "connectionName": "my-conn",
+            "extra": extra,
+        },
+    )
 
 
 # =============================================================================
