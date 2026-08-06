@@ -87,7 +87,9 @@ class Alert(models.Model):
     last_evaluated_at = models.DateTimeField(null=True, blank=True)  # UTC
 
     # Audit
-    created_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="alerts_created")
+    created_by = models.ForeignKey(
+        OrgUser, on_delete=models.SET_NULL, null=True, related_name="alerts_created"
+    )
     last_modified_by = models.ForeignKey(
         OrgUser,
         on_delete=models.SET_NULL,

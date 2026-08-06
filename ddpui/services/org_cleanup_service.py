@@ -7,6 +7,10 @@ from ninja.errors import HttpError
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask
+from ddpui.models.userpreferences import UserPreferences
+from ddpui.models.org_plans import OrgPlans
+from ddpui.models.org_preferences import OrgPreferences
+from ddpui.models.llm import LlmSession
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -18,6 +22,7 @@ from ddpui.core.git_manager import GitManager, GitManagerError
 from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
+from ddpui.utils.s3_utils import bulk_delete_files, list_objects
 
 logger = CustomLogger("ddpui")
 
@@ -56,6 +61,9 @@ class OrgCleanupService:
 
     def delete_transformation_layer(self):
         """
+        0. clean up everything Elementary-related (S3 reports, EDR OrgTask,
+           EDR Prefect deployment) — elementary only makes sense with dbt,
+           so tear it down first before the dbt state disappears.
         1. delete all transformation OrgTask(s) of type - git, dbt, dbtcloud. \
             We should make sure no tasks are being used in any orchestrate pipelines
         2. delete all deployments in prefect related to transformation OrgTask(s) eg. dbt run
@@ -63,6 +71,8 @@ class OrgCleanupService:
         4. delete the dbt workspace on disk
         5. delete OrgDbt object and the link to org
         """
+        self.delete_elementary_setup()
+
         delete_transform_orgtask_ids = []
         for org_task in OrgTask.objects.filter(
             org=self.org, task__type__in=["dbt", "git", "dbtcloud"]
@@ -77,10 +87,15 @@ class OrgCleanupService:
             delete_transform_orgtask_ids.append(org_task.id)
 
         # delete deployments in prefect related to transform tasks
-        for dataflow_orgtask in DataflowOrgTask.objects.filter(
-            orgtask__id__in=delete_transform_orgtask_ids
-        ).all():
-            dataflow = dataflow_orgtask.dataflow
+        # iterate over distinct dataflows (a chained manual dataflow has
+        # multiple DataflowOrgTask rows pointing at the same dataflow — the
+        # cascade delete during the loop would otherwise invalidate later rows)
+        dataflow_ids = set(
+            DataflowOrgTask.objects.filter(
+                orgtask__id__in=delete_transform_orgtask_ids
+            ).values_list("dataflow_id", flat=True)
+        )
+        for dataflow in OrgDataFlowv1.objects.filter(id__in=dataflow_ids):
             logger.info(
                 f"Will delete dataflow deployment: {dataflow.deployment_name} from prefect & DB"
             )
@@ -262,6 +277,28 @@ class OrgCleanupService:
                 secretsmanager.delete_warehouse_credentials(warehouse)
                 logger.info("deleted warehouse credentials from secrets manager")
 
+                # Delete the dbt-profile Secret block (runner-flow artifact) if
+                # this org has dbt set up. FK lives on OrgDbt; deleting the
+                # Prefect block + OrgPrefectBlockv1 row is our responsibility
+                # here since the warehouse is being torn down.
+                dbt_profile_secret_block = (
+                    self.org.dbt.dbt_profile_secret_block if self.org.dbt else None
+                )
+                if dbt_profile_secret_block:
+                    try:
+                        prefect_service.delete_secret_block(dbt_profile_secret_block.block_id)
+                        logger.info(
+                            f"deleted dbt-profile secret block {dbt_profile_secret_block.block_name} in prefect"
+                        )
+                    except Exception as err:  # pylint: disable=broad-exception-caught
+                        logger.error(
+                            "error deleting dbt-profile secret block %s in prefect: %s",
+                            dbt_profile_secret_block.block_name,
+                            str(err),
+                        )
+                    dbt_profile_secret_block.delete()
+                    logger.info("deleted OrgPrefectBlockv1 row for dbt-profile secret block")
+
                 try:
                     airbyte_service.delete_destination(
                         self.org.airbyte_workspace_id, warehouse.airbyte_destination_id
@@ -324,17 +361,34 @@ class OrgCleanupService:
 
     def delete_orgusers(self):
         """
-        deletes all org users
+        deletes all org users; first removes UserPreferences rows that FK to
+        each OrgUser (they don't CASCADE) so the OrgUser delete doesn't
+        violate the FK constraint.
         """
         for orguser in OrgUser.objects.filter(org=self.org):
             logger.info("will delete orguser %s", orguser.user.email)
             if not self.dry_run:
+                n_prefs = UserPreferences.objects.filter(orguser=orguser).count()
+                if n_prefs:
+                    logger.info(
+                        "deleting %s UserPreferences row(s) attached to orguser %s",
+                        n_prefs,
+                        orguser.user.email,
+                    )
+                    UserPreferences.objects.filter(orguser=orguser).delete()
                 orguser.delete()
 
-    def delete_edr_pipelines(self):
+    def delete_elementary_setup(self):
+        """Clean up everything Elementary-related for this org:
+          - Prefect deployment(s) for the EDR send-report task
+          - EDR OrgTask row(s)
+          - Historical HTML reports in S3 (prefix `reports/<slug>.`)
+
+        elementary_profiles/profiles.yml on disk is inside the dbt project
+        directory, which gets nuked by delete_transformation_layer's
+        shutil.rmtree — no separate cleanup needed for that.
         """
-        delete edr pipeline (in prefect & db) for the org setup for elementary reports
-        """
+        # 1. EDR OrgTasks + their Prefect deployments
         delete_orgtask_ids = [
             ot.id for ot in OrgTask.objects.filter(org=self.org, task__type__in=["edr"])
         ]
@@ -354,10 +408,41 @@ class OrgCleanupService:
                 dataflow.delete()
                 logger.info(f"deleted dataflow {dataflow.deployment_name} from db")
 
-        logger.info(f"will delete {len(delete_orgtask_ids)} orgtasks")
+        logger.info(f"will delete {len(delete_orgtask_ids)} EDR orgtasks")
         if not self.dry_run:
             OrgTask.objects.filter(id__in=delete_orgtask_ids).delete()
-            logger.info(f"deleted {len(delete_orgtask_ids)} orgtasks")
+            logger.info(f"deleted {len(delete_orgtask_ids)} EDR orgtasks")
+
+        # 2. Elementary reports in S3 (prefix scoped to this org's slug)
+        bucket = os.getenv("ELEMENTARY_S3_BUCKET")
+        if not bucket:
+            logger.info("ELEMENTARY_S3_BUCKET not configured — skipping S3 report cleanup")
+            return
+
+        prefix = f"reports/{self.org.slug}."
+        # Paginate — an org could have hundreds of daily reports accumulated
+        keys: list[str] = []
+        start_after: str | None = None
+        while True:
+            try:
+                page = list_objects(bucket, prefix=prefix, start_after=start_after, max_keys=1000)
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logger.error(f"failed to list S3 reports for {self.org.slug}: {err}")
+                return
+            if not page:
+                break
+            keys.extend(obj["Key"] for obj in page)
+            if len(page) < 1000:
+                break
+            start_after = page[-1]["Key"]
+
+        logger.info(f"will delete {len(keys)} S3 report(s) for {self.org.slug}")
+        if not self.dry_run and keys:
+            try:
+                bulk_delete_files(bucket, keys)
+                logger.info(f"deleted {len(keys)} S3 report(s) for {self.org.slug}")
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logger.error(f"failed to bulk delete S3 reports for {self.org.slug}: {err}")
 
     def delete_org(self):
         # delete all orchestrate pipelines
@@ -375,8 +460,9 @@ class OrgCleanupService:
         # delete org users
         self.delete_orgusers()
 
-        # delete edr pipeline and tasks
-        self.delete_edr_pipelines()
+        # Elementary cleanup (S3 reports + EDR pipeline + OrgTask) already
+        # ran as part of delete_transformation_layer above — no separate call
+        # needed here.
 
         # delete airbyte server block
         for block in OrgPrefectBlockv1.objects.filter(org=self.org, block_type=AIRBYTESERVER).all():
@@ -398,6 +484,21 @@ class OrgCleanupService:
             if os.path.exists(org_dir):
                 shutil.rmtree(org_dir)
                 logger.info(f"deleted org directory from disk {org_dir}")
+
+        # delete rows whose FK to Org does not cascade at the DB level even
+        # though the Django model declares on_delete=CASCADE (mismatch between
+        # model definition and actual Postgres constraint from an older migration)
+        for model_cls, label in (
+            (OrgPlans, "OrgPlans"),
+            (OrgPreferences, "OrgPreferences"),
+            (LlmSession, "LlmSession"),
+        ):
+            n = model_cls.objects.filter(org=self.org).count()
+            if n:
+                logger.info(f"will delete {n} {label} row(s) for org")
+                if not self.dry_run:
+                    model_cls.objects.filter(org=self.org).delete()
+                    logger.info(f"deleted {n} {label} row(s) for org")
 
         # delete org object itself
         logger.info(f"will delete org {self.org.name} from DB")

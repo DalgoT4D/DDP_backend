@@ -6,9 +6,9 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-    # This migration depends on the previous one (0167_orguser_has_seen_rbac_notice)
+    # This migration depends on the previous one (0171_orgwarehouse_org_unique)
     dependencies = [
-        ("ddpui", "0167_orguser_has_seen_rbac_notice"),
+        ("ddpui", "0171_orgwarehouse_org_unique"),
     ]
 
     # The operations to perform

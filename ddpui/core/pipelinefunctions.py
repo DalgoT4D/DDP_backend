@@ -112,12 +112,26 @@ def setup_dbt_core_task_config(
     seq: int = 1,
 ):
     """constructs the prefect payload for a dbt job"""
+    # Populate env for the runner flow (proxy/prefect_flows_runner.py). Old flow
+    # ignores env; keeping cli_profile_block above means a rollback stays safe.
+    # Keys use the same hyphen convention as `secret-git-pull-url-block`.
+    orgdbt = org_task.org.dbt
+    env = {}
+    if orgdbt and orgdbt.dbt_profile_secret_block:
+        env["dbt-profile-secret-block"] = orgdbt.dbt_profile_secret_block.block_name
+    else:
+        logger.warning(
+            "OrgDbt for org=%s has no dbt_profile_secret_block — runner-mode deployments will fail. "
+            "Run create_or_update_org_cli_block to create the Secret block.",
+            org_task.org.slug,
+        )
+
     return PrefectDbtTaskSetup(
         seq=seq,
         slug=org_task.task.slug,
         commands=[f"{dbt_project_params.dbt_binary} {org_task.get_task_parameters()}"],
         type=DBTCORE,
-        env={},
+        env=env,
         working_dir=dbt_project_params.project_dir,
         profiles_dir=f"{dbt_project_params.project_dir}/profiles/",
         project_dir=dbt_project_params.project_dir,
@@ -203,12 +217,29 @@ def setup_git_clone_shell_task_config(
     )
 
 
-def setup_edr_send_report_task_config(
-    org_task: OrgTask, project_dir: str, venv_binary: str, seq: int = 1
-):
-    """constructs the prefect payload for edr"""
-    # shell_env = {"PATH": str(dbt_env_dir / "venv/bin"), "shell": "/bin/bash"}
-    shell_env = {"PATH": venv_binary, "shell": "/bin/bash"}  # venv_binary: ..../venv/bin
+def setup_edr_send_report_task_config(org_task: OrgTask, project_dir: str, seq: int = 1):
+    """Constructs the prefect payload for the EDR (elementary send-report) task.
+
+    Runner-side (prefect-proxy/proxy/prefect_flows_runner.py:shellopjob) uses:
+      - env["dbt-profile-secret-block"] → to load creds and write profiles.yml
+        + elementary_profiles/profiles.yml at flow-run start.
+      - commands → runs `edr send-report ...` with AWS creds appended from
+        the `edr-s3-creds` Secret block.
+
+    Both `edr` and `dbt` binaries are on the worker's PATH (installed in the
+    runner image + local prefect-proxy venv), so we don't prepend a venv
+    path anymore.
+    """
+    orgdbt = org_task.org.dbt
+    shell_env = {"shell": "/bin/bash"}
+    if orgdbt and orgdbt.dbt_profile_secret_block:
+        shell_env["dbt-profile-secret-block"] = orgdbt.dbt_profile_secret_block.block_name
+    else:
+        logger.warning(
+            "OrgDbt for org=%s has no dbt_profile_secret_block — EDR runs will fail. "
+            "Set up Elementary first so the block is created.",
+            org_task.org.slug,
+        )
     return PrefectShellTaskSetup(
         commands=[
             org_task.task.type + " " + org_task.get_task_parameters(),
@@ -276,7 +307,6 @@ def pipeline_with_orgtasks(
             task_config = setup_edr_send_report_task_config(
                 org_task,
                 dbt_project_params.project_dir,
-                dbt_project_params.venv_binary,
             ).to_json()
         elif org_task.task.slug == TASK_DBTCLOUD_JOB:
             task_config = setup_dbt_cloud_task_config(

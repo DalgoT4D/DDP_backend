@@ -25,6 +25,7 @@ TRANSFORM_TASKS_SEQ = {
     TASK_DBTRUN: 5,
     TASK_DBTTEST: 6,
     TASK_DBTCLOUD_JOB: 20,
+    TASK_GENERATE_EDR: 25,
 }
 # when a new pipeline is created; these are the transform tasks being pushed by default
 DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
@@ -37,6 +38,10 @@ DEFAULT_TRANSFORM_TASKS_IN_PIPELINE = [
 # Adding a new task here will work for any new orgtask created
 # But for the current ones a script would need to be run to set them with a deployment
 LONG_RUNNING_TASKS = [TASK_DBTRUN, TASK_DBTSEED, TASK_DBTTEST, TASK_DBTCLOUD_JOB]
+
+# Auto-managed transform tasks: hidden from the Transform tab UI and the
+# CreateTask dropdown. Auto-prepended before every long-running transform deployment.
+TRANSFORM_TASKS_DEPENDENCIES = [TASK_GITPULL, TASK_GITCLONE, TASK_DBTCLEAN, TASK_DBTDEPS]
 
 # airbyte sync timeout in deployment params
 PREFECT_AIRBYTE_TASKS_TIMEOUT = int(

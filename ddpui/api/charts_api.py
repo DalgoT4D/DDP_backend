@@ -19,6 +19,7 @@ from ddpui.models.dashboard import DashboardFilter
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
+from ddpui.core.charts.pivot_service import get_pivot_table_data
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.chart_service import (
     ChartService,
@@ -151,6 +152,13 @@ def generate_chart_data_and_config(payload: ChartDataPayload, org_warehouse, cha
     if payload.chart_type == "map":
         return generate_map_data_and_config(payload, org_warehouse, chart_id)
 
+    # Handle pivot tables — completely separate pipeline with ROLLUP and rotation.
+    # Short-circuit before the generic build/execute so the query runs only once.
+    if payload.chart_type == "pivot_table":
+        pivot_data = get_pivot_table_data(org_warehouse, payload)
+        logger.info(f"Successfully generated pivot table data for {chart_id_str}")
+        return {"data": pivot_data, "echarts_config": {}}
+
     # Get warehouse client
     warehouse = charts_service.get_warehouse_client(org_warehouse)
 
@@ -244,7 +252,6 @@ def generate_map_data_and_config(payload: ChartDataPayload, org_warehouse, chart
         geojson.geojson_data,
         payload.geographic_column,
         payload.value_column,
-        None,  # aggregate_func removed - using metrics
         payload.customizations,
         payload.metrics,
         selected_metric_index,
@@ -301,7 +308,7 @@ def list_charts(
             chart_type=chart.chart_type,
             schema_name=chart.schema_name,
             table_name=chart.table_name,
-            created_by=chart.created_by.user.email,
+            created_by=chart.created_by.user.email if chart.created_by else None,
             extra_config=chart.extra_config,
             created_at=chart.created_at,
             updated_at=chart.updated_at,
@@ -862,7 +869,6 @@ def generate_map_chart_data(request, payload: ChartDataPayload):
         geojson.geojson_data,
         payload.geographic_column,
         payload.value_column,
-        None,  # aggregate_func removed - using metrics
         payload.customizations or {},
         payload.metrics,
         selected_metric_index,
@@ -1029,7 +1035,7 @@ def get_chart(request, chart_id: int):
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
-        created_by=chart.created_by.user.email,
+        created_by=chart.created_by.user.email if chart.created_by else None,
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
@@ -1164,7 +1170,7 @@ def create_chart(request, payload: ChartCreate):
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
-        created_by=chart.created_by.user.email,
+        created_by=chart.created_by.user.email if chart.created_by else None,
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
@@ -1233,7 +1239,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         chart_type=chart.chart_type,
         schema_name=chart.schema_name,
         table_name=chart.table_name,
-        created_by=chart.created_by.user.email,
+        created_by=chart.created_by.user.email if chart.created_by else None,
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,

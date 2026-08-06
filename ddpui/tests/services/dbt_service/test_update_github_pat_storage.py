@@ -22,7 +22,12 @@ def test_update_github_pat_storage_new_pat_creation(
 
     # Mock responses
     mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
-    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "test-block-id"}
+    # prefect-proxy always echoes back the block_name it persisted (sanitized).
+    # For "test-org" no chars need stripping, so the returned name matches the input.
+    mock_prefect_service.upsert_secret_block.return_value = {
+        "block_id": "test-block-id",
+        "block_name": "test-org-git-pull-url",
+    }
     mock_secretsmanager.save_github_pat.return_value = "new-secret-key"
 
     # Execute
@@ -69,7 +74,12 @@ def test_update_github_pat_storage_existing_pat_update(
     mock_generate_oauth_url.return_value = (
         "https://oauth2:updated-pat-token@github.com/test/repo.git"
     )
-    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "test-block-id"}
+    # prefect-proxy always echoes back the block_name it persisted (sanitized).
+    # For "test-org" no chars need stripping, so the returned name matches the input.
+    mock_prefect_service.upsert_secret_block.return_value = {
+        "block_id": "test-block-id",
+        "block_name": "test-org-git-pull-url",
+    }
 
     # Execute
     result = update_github_pat_storage(org, git_repo_url, access_token, existing_secret)
@@ -114,7 +124,10 @@ def test_update_github_pat_storage_prefect_block_already_exists(
 
     # Mock responses
     mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
-    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "updated-block-id"}
+    mock_prefect_service.upsert_secret_block.return_value = {
+        "block_id": "updated-block-id",
+        "block_name": "test-org-git-pull-url",
+    }
     mock_secretsmanager.save_github_pat.return_value = "new-secret-key"
 
     # Execute
@@ -178,7 +191,12 @@ def test_update_github_pat_storage_secretsmanager_error(
 
     # Mock responses
     mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
-    mock_prefect_service.upsert_secret_block.return_value = {"block_id": "test-block-id"}
+    # prefect-proxy always echoes back the block_name it persisted (sanitized).
+    # For "test-org" no chars need stripping, so the returned name matches the input.
+    mock_prefect_service.upsert_secret_block.return_value = {
+        "block_id": "test-block-id",
+        "block_name": "test-org-git-pull-url",
+    }
     mock_secretsmanager.save_github_pat.side_effect = Exception("Secrets manager error")
 
     # Execute and verify exception is raised
@@ -212,3 +230,42 @@ def test_update_github_pat_storage_oauth_url_generation_error(
     # Verify subsequent services were not called
     mock_prefect_service.upsert_secret_block.assert_not_called()
     mock_secretsmanager.save_github_pat.assert_not_called()
+
+
+@patch("ddpui.ddpdbt.dbt_service.secretsmanager")
+@patch("ddpui.ddpdbt.dbt_service.prefect_service")
+@patch("ddpui.ddpdbt.dbt_service.GitManager.generate_oauth_url_static")
+@pytest.mark.django_db
+def test_update_github_pat_storage_stores_sanitized_block_name(
+    mock_generate_oauth_url, mock_prefect_service, mock_secretsmanager
+):
+    """When org.slug contains characters prefect-proxy strips (underscores, etc),
+    Django must store the sanitized block name that Prefect actually persisted,
+    NOT the raw slug-based name — otherwise deployments running Secret.load()
+    hit a 404 because the two names disagree."""
+    # Setup: org slug with underscores — prefect-proxy sanitizes them away
+    org = Org.objects.create(name="new_org_test", slug="new_org_test")
+    git_repo_url = "https://github.com/test/repo.git"
+    access_token = "test-pat-token"
+
+    # Mock: proxy sanitizes "new_org_test-git-pull-url" -> "neworgtest-git-pull-url"
+    mock_generate_oauth_url.return_value = "https://oauth2:test-pat-token@github.com/test/repo.git"
+    mock_prefect_service.upsert_secret_block.return_value = {
+        "block_id": "test-block-id",
+        "block_name": "neworgtest-git-pull-url",
+    }
+    mock_secretsmanager.save_github_pat.return_value = "new-secret-key"
+
+    # Execute
+    update_github_pat_storage(org, git_repo_url, access_token)
+
+    # Verify: Django stores the sanitized name (what Prefect actually has),
+    # NOT the raw f"{org.slug}-git-pull-url" input.
+    created_block = OrgPrefectBlockv1.objects.get(
+        org=org, block_type=SECRET, block_name="neworgtest-git-pull-url"
+    )
+    assert created_block.block_id == "test-block-id"
+
+    assert not OrgPrefectBlockv1.objects.filter(
+        org=org, block_type=SECRET, block_name="new_org_test-git-pull-url"
+    ).exists()

@@ -3,7 +3,7 @@
 from django.core.management.base import BaseCommand
 
 from ddpui.models.org import Org, OrgDataFlowv1
-from ddpui.models.tasks import DataflowOrgTask
+from ddpui.models.tasks import OrgTask, DataflowOrgTask
 from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 
 
@@ -20,9 +20,33 @@ class Command(BaseCommand):
             action="store_true",
             help="Create missing links between OrgTask and OrgDataFlowv1",
         )
+        parser.add_argument(
+            "--refresh-all",
+            action="store_true",
+            help="Update deployment params for all orgs that already have an EDR dataflow (does not create new ones)",
+        )
 
     def handle(self, *args, **options):
-        from ddpui.ddpdbt.elementary_service import create_edr_sendreport_dataflow
+        from ddpui.ddpdbt.elementary_service import ensure_edr_sendreport_dataflow
+        from ddpui.utils.constants import TASK_GENERATE_EDR
+
+        if options["refresh_all"]:
+            # Only update orgs that already have an EDR dataflow — do not create new ones
+            edr_orgtask_ids = OrgTask.objects.filter(task__slug=TASK_GENERATE_EDR).values_list(
+                "id", flat=True
+            )
+            existing_dfots = DataflowOrgTask.objects.filter(
+                orgtask_id__in=edr_orgtask_ids
+            ).select_related("orgtask__org", "dataflow")
+
+            for dfot in existing_dfots:
+                org = dfot.orgtask.org
+                if not org.dbt:
+                    print(f"{org.slug}: no dbt config, skipping")
+                    continue
+                ensure_edr_sendreport_dataflow(org, dfot.dataflow.cron or "0 0 * * *")
+                print(f"{org.slug}: updated")
+            return
 
         if options["fix_links"]:
             for org in Org.objects.exclude(dbt__isnull=True):
@@ -58,12 +82,4 @@ class Command(BaseCommand):
             print(f"OrgDbt for {org.slug} not found")
             return
 
-        org_task = get_edr_send_report_task(org)
-        if org_task is None:
-            print("creating OrgTask for edr-send-report")
-            org_task = get_edr_send_report_task(org, create=True)
-
-        dataflow_orgtask = DataflowOrgTask.objects.filter(orgtask=org_task).first()
-
-        if dataflow_orgtask is None:
-            dataflow = create_edr_sendreport_dataflow(org, org_task, options["cron"])
+        dataflow = ensure_edr_sendreport_dataflow(org, options["cron"])

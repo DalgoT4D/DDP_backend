@@ -72,7 +72,7 @@ def list_metrics(
             column=m.column,
             aggregation=m.aggregation,
             column_expression=m.column_expression,
-            created_by=m.created_by.user.email,
+            created_by=m.created_by.user.email if m.created_by else None,
             created_at=m.created_at,
             updated_at=m.updated_at,
         )
@@ -135,7 +135,7 @@ def create_metric(request, payload: MetricPayload):
         column=metric.column,
         aggregation=metric.aggregation,
         column_expression=metric.column_expression,
-        created_by=metric.created_by.user.email,
+        created_by=metric.created_by.user.email if metric.created_by else None,
         created_at=metric.created_at,
         updated_at=metric.updated_at,
     )
@@ -183,7 +183,7 @@ def get_metric(request, metric_id: int):
         column=metric.column,
         aggregation=metric.aggregation,
         column_expression=metric.column_expression,
-        created_by=metric.created_by.user.email,
+        created_by=metric.created_by.user.email if metric.created_by else None,
         created_at=metric.created_at,
         updated_at=metric.updated_at,
     )
@@ -234,7 +234,7 @@ def update_metric(request, metric_id: int, payload: MetricPayload):
         column=metric.column,
         aggregation=metric.aggregation,
         column_expression=metric.column_expression,
-        created_by=metric.created_by.user.email,
+        created_by=metric.created_by.user.email if metric.created_by else None,
         created_at=metric.created_at,
         updated_at=metric.updated_at,
     )
