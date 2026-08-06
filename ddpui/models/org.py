@@ -145,6 +145,10 @@ class Org(models.Model):
     viz_login_type = models.CharField(choices=OrgVizLoginType.choices(), max_length=50, null=True)
     dalgouser_superset_creds_key = models.TextField(null=True)
     website = models.CharField(max_length=1000, null=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text="False deactivates the org: its users are blocked at permission-load. Reversible.",
+    )
     queue_config = models.JSONField(
         default=get_default_queue_config,
         help_text="Queue configuration for different task types (scheduled_pipeline_queue, connection_sync_queue, transform_task_queue, edr_queue)",

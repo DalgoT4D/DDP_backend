@@ -72,6 +72,15 @@ class OrgUser(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "per-(user, org) active flag; distinct from User.is_active. "
+            "False deactivates this user in THIS org only (blocked at "
+            "permission-load); their membership of other orgs is unaffected. "
+            "See features/admin-portal/v1/plan.md §4.1."
+        ),
+    )
     email_verified = models.BooleanField(default=False)
     llm_optin = models.BooleanField(default=False)  # deprecated
     has_seen_rbac_notice = models.BooleanField(
@@ -146,6 +155,7 @@ class OrgUserResponse(Schema):
     subscription_plan: str | None = None
     work_domain: str | None = None
     has_seen_rbac_notice: bool = False
+    is_platform_admin: bool = False
 
 
 class Invitation(models.Model):
@@ -153,6 +163,19 @@ class Invitation(models.Model):
 
     invited_email = models.CharField(max_length=50)
     invited_by = models.ForeignKey(OrgUser, on_delete=models.CASCADE)
+    invited_in_org = models.ForeignKey(
+        Org,
+        on_delete=models.CASCADE,
+        null=True,
+        related_name="invitations",
+        help_text=(
+            "the org this invite grants membership of. Explicit because a "
+            "platform admin inviting cross-org is not a member of the target "
+            "org, so invited_by.org is NOT the target org. Nullable for "
+            "backfill; old rows fall back to invited_by.org. See "
+            "features/admin-portal/v1/plan.md §4.4."
+        ),
+    )
     invited_on = models.DateTimeField()
     invite_code = models.CharField(max_length=36)
     invited_new_role = models.ForeignKey(Role, on_delete=models.CASCADE, null=True)

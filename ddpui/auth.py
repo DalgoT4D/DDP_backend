@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken, TokenErro
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from django.contrib.auth.models import User
 
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import RolePermission
 from ddpui.utils import thread
 from ddpui.utils.redis_client import RedisClient
@@ -60,6 +60,26 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
+def platform_admin_required(view):
+    """
+    gate a view on the global UserAttributes.is_platform_admin flag.
+
+    unlike @has_permission (which checks per-org permission slugs), this expresses
+    cross-org authority: a Dalgo ops user acting on orgs they don't belong to.
+    mirrors the @has_permission wrapper pattern above (request is args[0]).
+    """
+
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        request = args[0]
+        ua = UserAttributes.objects.filter(user=request.orguser.user).first()
+        if not (ua and ua.is_platform_admin):
+            raise HttpError(403, "platform admin access required")
+        return view(*args, **kwargs)
+
+    return wrapper
+
+
 def set_roles_and_permissions_in_redis(
     redis_client: RedisClient, role_permissions_key: str
 ) -> dict:
@@ -91,8 +111,11 @@ def blacklist_jti_in_redis(token_str, token_class):
 class CustomJwtAuthMiddleware(HttpBearer):
     """the authenticate() function is called on every authenticated request via django middleware"""
 
+    # the cookie this middleware reads the access token from
+    cookie_name = "access_token"
+
     def __call__(self, request):
-        cookie_token = request.COOKIES.get("access_token")
+        cookie_token = request.COOKIES.get(self.cookie_name)
 
         if not cookie_token:
             return super().__call__(request)
@@ -145,6 +168,24 @@ class CustomJwtAuthMiddleware(HttpBearer):
             if orguser is not None:
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
+
+                # A deactivated org blocks all of its users at permission-load, so every
+                # gated endpoint 403s. Enforced here (not via empty permissions) because
+                # @has_permission's bare-except turns an empty-permissions 403 into a 404 —
+                # this raises a real 403. Reactivating the org restores access. See
+                # features/admin-portal/v1/plan.md §4.2.
+                if not orguser.org.is_active:
+                    raise HttpError(403, "your organization has been deactivated")
+
+                # A per-org-deactivated user is blocked in THIS org only. `orguser` is
+                # the specific (user, org) row resolved from the x-dalgo-org header, so
+                # this never touches the user's membership of any OTHER org (a different
+                # OrgUser row). Same 403 rationale as the org check above; reactivating
+                # the user in this org restores access. See plan.md §4.2. The field is
+                # non-null (default True, backfilled from User.is_active), so an active
+                # user is never blocked here.
+                if not orguser.is_active:
+                    raise HttpError(403, "your access to this organization has been deactivated")
 
                 redis_client = RedisClient.get_instance()
                 orguser_role_id = None
