@@ -58,6 +58,33 @@ def test_polling_celery_no_stp():
     )
 
 
+@patch("ddpui.websockets.airbyte_consumer.time")
+@patch("ddpui.websockets.airbyte_consumer.SingleTaskProgress.fetch")
+def test_polling_celery_empty_progress_race(mock_fetch, mock_time):
+    """An empty progress list (race between __init__ and add) must not crash."""
+    consumer = Mock(respond=Mock())
+    task_key = uuid4().hex
+
+    # Simulate the race: first two fetches return [] (the Celery task's
+    # __init__ has reset the key but add() hasn't run yet), then a
+    # completed entry appears.
+    mock_fetch.side_effect = [
+        [],  # 1st fetch: empty list (initial check)
+        [],  # 2nd fetch: still empty (inside loop after sleep)
+        [{"status": TaskProgressStatus.COMPLETED, "result": "catalog-data"}],
+    ]
+
+    polling_celery(consumer, task_key)
+
+    consumer.respond.assert_called_once_with(
+        WebsocketResponse(
+            data={"status": TaskProgressStatus.COMPLETED, "result": "catalog-data"},
+            message="Successfully fetched source schema",
+            status=WebsocketResponseStatus.SUCCESS,
+        )
+    )
+
+
 def test_polling_celery_failed():
     """tests polling_celery"""
     consumer = Mock(respond=Mock())

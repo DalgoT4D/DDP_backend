@@ -182,6 +182,13 @@ class SchemaCatalogConsumer(BaseConsumer):
         polling_celery(self, task_key)
 
 
+def _get_last_status(task_progress):
+    """Return the last status from task_progress, or None if missing/empty."""
+    if not task_progress:
+        return None
+    return task_progress[-1]["status"]
+
+
 def polling_celery(consumer, task_key):
     """Polling celery to get the task progress"""
     task_progress = SingleTaskProgress.fetch(task_key)
@@ -195,14 +202,16 @@ def polling_celery(consumer, task_key):
         )
         return
 
-    last_status = task_progress[-1]["status"]
+    last_status = _get_last_status(task_progress)
 
     # Loop to check task progress every two seconds.
-    while last_status == TaskProgressStatus.RUNNING:
+    # A None status (empty progress list) means the Celery task hasn't
+    # written its first entry yet, so keep polling.
+    while last_status in (TaskProgressStatus.RUNNING, None):
         logger.info(f"Polling {task_key}")
         time.sleep(2)
         task_progress = SingleTaskProgress.fetch(task_key)
-        last_status = None if task_progress is None else task_progress[-1]["status"]
+        last_status = _get_last_status(task_progress)
         logger.info(f"Last status: {last_status}")
 
     if last_status == TaskProgressStatus.FAILED:
