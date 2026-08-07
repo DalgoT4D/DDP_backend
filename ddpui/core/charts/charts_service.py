@@ -979,7 +979,14 @@ def apply_chart_sorting(
                     or f"{matching_metric.aggregation}_{matching_metric.column}"
                 )
         else:
-            # It's a dimension column - use as-is
+            # Validate the column is a grouped dimension before adding to ORDER BY.
+            # Sorting by a column not in GROUP BY causes a PostgreSQL GroupingError.
+            dimensions = normalize_dimensions(payload) if payload else []
+            if dimensions and column_name not in dimensions:
+                logger.warning(
+                    f"Skipping sort column '{column_name}': not a metric alias or grouped dimension"
+                )
+                continue
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
