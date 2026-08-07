@@ -21,13 +21,18 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
+    SourceGoogleOAuthConsentCreate,
+    SourceGoogleOAuthCreate,
+    SourceGoogleOAuthUpdate,
 )
+from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
 
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
+from ddpui.core.oauth import google_oauth_service
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
@@ -115,6 +120,73 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
     )
     logger.info("created source having id " + source["sourceId"])
     return {"sourceId": source["sourceId"]}
+
+
+@airbyte_router.post("/sources/oauth/consent/")
+@has_permission(["can_create_source"])
+def post_source_oauth_consent(request, payload: SourceGoogleOAuthConsentCreate):
+    """Start the Google OAuth flow: build the Google consent URL and mint a state nonce.
+
+    Dalgo builds the URL itself (client_id from env, redirect_uri = Dalgo's own backend
+    callback); Airbyte is not involved. Returns {authUrl}; the state nonce stays server-side.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceName)
+
+
+@airbyte_router.get("/sources/oauth/callback", auth=None)
+def get_source_oauth_callback(request, state: str = None, code: str = None, error: str = None):
+    """Google's redirect target after consent. PUBLIC — no JWT (a browser redirect carries
+    none); the unguessable `state` nonce is the authentication.
+
+    Exchanges the auth code for a refresh_token server-side, stashes it under an opaque
+    `refresh_token_ref`, and 302s the popup back to the frontend callback page carrying only
+    that `refresh_token_ref` (or an `error`). The auth code and refresh_token never reach the
+    browser.
+    """
+    return HttpResponseRedirect(
+        google_oauth_service.oauth_callback_redirect_url(state, code, error)
+    )
+
+
+@airbyte_router.post("/sources/oauth/create/")
+@has_permission(["can_create_source"])
+def post_source_oauth_create(request, payload: SourceGoogleOAuthCreate):
+    """Create a NEW source from a redeemed OAuth `refresh_token_ref`.
+
+    Redeems the `refresh_token_ref` for the stashed refresh_token, builds the connector
+    credentials (client_id/secret from env), merges them into the config, and creates the
+    source. The refresh_token never travels through the browser.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return airbytehelpers.create_oauth_source(orguser, payload)
+
+
+@airbyte_router.put("/sources/oauth/{source_id}")
+@has_permission(["can_edit_source"])
+def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthUpdate):
+    """Re-authenticate an EXISTING source from a redeemed OAuth `refresh_token_ref`.
+
+    Same as create, but updates the source named in the URL path. The source must belong to
+    the caller's own workspace (enforced in the service layer). The refresh_token never
+    travels through the browser.
+
+    ONLY for the re-authenticate action (frontend calls this after a fresh consent+callback
+    round redeems a ref). Editing a source's config/streams WITHOUT re-authenticating goes
+    through the plain PUT /sources/{source_id} instead — it never needs a refresh_token_ref
+    and never touches stored credentials.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return airbytehelpers.update_oauth_source(orguser, source_id, payload)
 
 
 @airbyte_router.put("/sources/{source_id}")

@@ -1063,9 +1063,7 @@ def test_create_elementary_profile_macro_target_mismatch(
     with open(dbt_project_file, "w") as f:
         yaml.safe_dump({"name": "test_project", "profile": "test_profile"}, f)
 
-    mock_gather_params.return_value = Mock(
-        project_dir=str(project_dir), dbt_binary="test-dbt"
-    )
+    mock_gather_params.return_value = Mock(project_dir=str(project_dir), dbt_binary="test-dbt")
     # elementary macro emits target: default — does NOT match the dbt profile
     mock_subprocess.return_value = """elementary:
   target: default
