@@ -1,4 +1,5 @@
 import os
+import re
 import django
 from decimal import Decimal
 from django.core.management import call_command
@@ -159,6 +160,25 @@ def test_distribution_chart_query_uniqueness_of_query_id(
     query_id3 = distribution_chart_query.query_id()
 
     assert query_id2 != query_id3
+
+
+def test_distribution_chart_group_by_uses_case_expression(
+    distribution_chart_query: DistributionChart,
+):
+    """GROUP BY must use the CASE expression, not the string alias 'category'.
+    PostgreSQL raises GroupingError when GROUP BY references a SELECT alias
+    instead of the underlying expression."""
+    query = distribution_chart_query.generate_sql()
+    compiled = query.compile(compile_kwargs={"literal_binds": True})
+    sql = re.sub(r"\s+", " ", str(compiled)).strip()
+
+    # Find the last GROUP BY clause (the outer query's, not the subquery's)
+    all_group_bys = list(re.finditer(r"GROUP BY (.+?)(?:ORDER BY|$)", sql))
+    assert len(all_group_bys) >= 2, f"Expected at least 2 GROUP BY clauses in: {sql}"
+    outer_group_by = all_group_bys[-1].group(1).strip()
+    assert "CASE" in outer_group_by.upper(), (
+        f"Outer GROUP BY should use the CASE expression, not a column alias. Got: {outer_group_by}"
+    )
 
 
 # ============================== String length stats query ================================
