@@ -49,6 +49,7 @@ from ddpui.ddpairbyte.schema import (
 )
 from ddpui.ddpprefect.schema import (
     PrefectDataFlowCreateSchema3,
+    PrefectDataFlowUpdateSchema3,
 )
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.ddpprefect import prefect_service, schema, DBTCORE, AIRBYTESERVER
@@ -73,11 +74,12 @@ from ddpui.utils import secretsmanager
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
+    build_connection_block_extra,
 )
 from ddpui.core.orgtaskfunctions import fetch_orgtask_lock_v1
 from ddpui.models.tasks import TaskLock
 from ddpui.ddpdbt.elementary_service import create_elementary_profile, elementary_setup_status
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block, write_dbt_profiles_yml
+from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk, write_dbt_profiles_yml
 from ddpui.utils.redis_client import RedisClient
 
 logger = CustomLogger("airbyte")
@@ -320,12 +322,15 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
     try:
         with transaction.atomic():
             # create a sync deployment & dataflow
-            org_task = OrgTask.objects.create(
-                org=org, task=sync_task, connection_id=airbyte_conn["connectionId"]
+            sync_org_task = OrgTask.objects.create(
+                org=org,
+                task=sync_task,
+                connection_id=airbyte_conn["connectionId"],
+                post_sync_transform=payload.post_sync_transform or None,
             )
 
             sync_dataflow: OrgDataFlowv1 = create_airbyte_deployment(
-                org, org_task, org_airbyte_server_block
+                org, sync_org_task, org_airbyte_server_block
             )
 
             # create clear connection task & dataflow/deployment
@@ -342,6 +347,24 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
 
             ConnectionMeta.objects.create(
                 connection_id=airbyte_conn["connectionId"], connection_name=payload.name
+            )
+
+        # Always upsert the AirbyteConnection block so every connection has a corresponding
+        # Prefect block (carries the connection name + any post-sync ops). Consistent with
+        # update_connection which also always upserts.
+        try:
+            extra = build_connection_block_extra(sync_org_task)
+            prefect_service.upsert_airbyte_connection_block(
+                server_block_name=org_airbyte_server_block.block_name,
+                connection_id=airbyte_conn["connectionId"],
+                connection_name=payload.name,
+                extra=extra,
+            )
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            logger.error(
+                "Failed to upsert airbyte connection block for connection=%s: %s",
+                airbyte_conn["connectionId"],
+                str(err),
             )
 
     except Exception as err:
@@ -364,6 +387,7 @@ def create_connection(org: Org, payload: AirbyteConnectionCreate):
         "deploymentId": sync_dataflow.deployment_id,
         "resetConnDeploymentId": None,
         "clearConnDeploymentId": clear_dataflow.deployment_id,
+        "post_sync_transform": payload.post_sync_transform or None,
     }
     return res, None
 
@@ -657,6 +681,7 @@ def get_one_connection(org: Org, connection_id: str):
         ),
         "lock": lock,
         "resetConnDeploymentId": (reset_dataflow.deployment_id if reset_dataflow else None),
+        "post_sync_transform": org_task.post_sync_transform,
     }
 
     return res, None
@@ -704,6 +729,31 @@ def update_connection(org: Org, connection_id: str, payload: AirbyteConnectionUp
         ConnectionMeta.objects.filter(connection_id=connection_id).update(
             connection_name=connection["name"]
         )
+
+    # Update post_sync_transform on the sync OrgTask and refresh the connection block's extra.
+    sync_org_task = OrgTask.objects.filter(
+        org=org, connection_id=connection_id, task__slug=TASK_AIRBYTESYNC
+    ).first()
+    if sync_org_task:
+        sync_org_task.post_sync_transform = payload.post_sync_transform or None
+        sync_org_task.save(update_fields=["post_sync_transform"])
+
+        server_block = OrgPrefectBlockv1.objects.filter(org=org, block_type=AIRBYTESERVER).first()
+        if server_block:
+            try:
+                extra = build_connection_block_extra(sync_org_task)
+                prefect_service.upsert_airbyte_connection_block(
+                    server_block_name=server_block.block_name,
+                    connection_id=connection_id,
+                    connection_name=connection.get("name", ""),
+                    extra=extra,
+                )
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "Failed to upsert airbyte connection block for connection=%s: %s",
+                    connection_id,
+                    str(err),
+                )
 
     return res, None
 
@@ -792,7 +842,7 @@ def get_sync_job_history_for_connection(
     return res, None
 
 
-def update_destination(org: Org, destination_id: str, payload: AirbyteDestinationUpdate):
+def update_destination(org: Org, destination_id: str, payload: AirbyteDestinationUpdate) -> dict:
     """updates an airbyte destination and dbt cli profile if credentials changed"""
     destination = airbyte_service.update_destination(
         destination_id, payload.name, payload.config, payload.destinationDefId
@@ -804,63 +854,46 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         warehouse.name = payload.name
         warehouse.save()
 
-    dbt_credentials = {}
+    airbyte_creds = {}
     if warehouse.wtype == "postgres":
-        dbt_credentials = update_dict_but_not_stars(payload.config)
+        airbyte_creds = update_dict_but_not_stars(payload.config)
         # i've forgotten why we have this here, airbyte sends "database" - RC
-        if "dbname" in dbt_credentials:
-            dbt_credentials["database"] = dbt_credentials["dbname"]
+        if "dbname" in airbyte_creds:
+            airbyte_creds["database"] = airbyte_creds["dbname"]
 
     elif warehouse.wtype == "bigquery":
         if not re.match(r"^\*+$", payload.config["credentials_json"]):
-            dbt_credentials = json.loads(payload.config["credentials_json"])
+            airbyte_creds = json.loads(payload.config["credentials_json"])
 
-        dbt_credentials["dataset_location"] = payload.config["dataset_location"]
-        dbt_credentials["transformation_priority"] = payload.config["transformation_priority"]
+        airbyte_creds["dataset_location"] = payload.config["dataset_location"]
+        airbyte_creds["transformation_priority"] = payload.config["transformation_priority"]
 
         if warehouse.bq_location != payload.config["dataset_location"]:
             warehouse.bq_location = payload.config["dataset_location"]
             warehouse.save()
 
-    elif warehouse.wtype == "snowflake":
-        dbt_credentials = update_dict_but_not_stars(payload.config)
-
     else:
-        return None, "unknown warehouse type " + warehouse.wtype
+        raise ValueError("unknown warehouse type " + warehouse.wtype)
 
     curr_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
 
-    # copy over the value of keys that are missing from in dbt_credentials (these are probably that have all '*****')
+    # copy over the value of keys that are missing from in airbyte_creds (these are probably that have all '*****')
     for key, value in curr_credentials.items():
-        if key not in dbt_credentials:
-            dbt_credentials[key] = value
+        if key not in airbyte_creds:
+            airbyte_creds[key] = value
 
-    secretsmanager.update_warehouse_credentials(warehouse, dbt_credentials)
+    secretsmanager.update_warehouse_credentials(warehouse, airbyte_creds)
 
-    # if the dbt workspace is setup, refresh CLI block + warehouse Secret block
-    # + elementary's profile
-    if org.dbt:
-        (_, _), error = create_or_update_org_cli_block(org, warehouse, dbt_credentials)
-        if error:
-            return None, error
+    create_or_update_dbt_profile_secret_blk(org, warehouse, airbyte_creds)
 
-        if elementary_setup_status(org) == "set-up":
-            # Write profiles.yml directly on disk (was: prefect_service.run_dbt_task_sync
-            # of `dbt debug` — a Prefect roundtrip just to materialize the file).
-            logger.info("writing profiles/profiles.yml for elementary refresh")
-            write_dbt_profiles_yml(org)
-
-            logger.info("recreating elementary_profiles/profiles.yml")
-            create_elementary_profile(org)
-
-    return destination, None
+    return destination
 
 
-def create_warehouse(org: Org, payload: OrgWarehouseSchema):
+def create_warehouse(org: Org, payload: OrgWarehouseSchema) -> OrgWarehouse:
     """creates a warehouse for an org"""
 
-    if payload.wtype not in ["postgres", "bigquery", "snowflake"]:
-        return None, "unrecognized warehouse type " + payload.wtype
+    if payload.wtype not in ["postgres", "bigquery"]:
+        raise ValueError(f"unknown warehouse type {payload.wtype}")
 
     destination = airbyte_service.create_destination(
         org.airbyte_workspace_id,
@@ -870,33 +903,14 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
     )
     logger.info("created destination having id " + destination["destinationId"])
 
-    # prepare the dbt credentials from airbyteConfig
-    dbt_credentials = None
-    if payload.wtype == "postgres":
-        # host, database, port, username, password
-        # jdbc_url_params
-        # ssl: true | false
-        # ssl_mode:
-        #   mode: disable | allow | prefer | require | verify-ca | verify-full
-        #   ca_certificate: string if mode is require, verify-ca, or verify-full
-        #   client_key_password: string if mode is verify-full
-        # tunnel_method:
-        #   tunnel_method = NO_TUNNEL | SSH_KEY_AUTH | SSH_PASSWORD_AUTH
-        #   tunnel_host: string if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
-        #   tunnel_port: int if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
-        #   tunnel_user: string if SSH_KEY_AUTH | SSH_PASSWORD_AUTH
-        #   ssh_key: string if SSH_KEY_AUTH
-        #   tunnel_user_password: string if SSH_PASSWORD_AUTH
-        dbt_credentials = payload.airbyteConfig
-    elif payload.wtype == "bigquery":
+    airbyte_creds = None
+    if payload.wtype == "bigquery":
         credentials_json = json.loads(payload.airbyteConfig["credentials_json"])
-        dbt_credentials = credentials_json
-        dbt_credentials["dataset_location"] = payload.airbyteConfig["dataset_location"]
-        dbt_credentials["transformation_priority"] = payload.airbyteConfig[
-            "transformation_priority"
-        ]
-    elif payload.wtype == "snowflake":
-        dbt_credentials = payload.airbyteConfig
+        airbyte_creds = credentials_json
+        airbyte_creds["dataset_location"] = payload.airbyteConfig["dataset_location"]
+        airbyte_creds["transformation_priority"] = payload.airbyteConfig["transformation_priority"]
+    else:  # postgres
+        airbyte_creds = payload.airbyteConfig
 
     destination_definition = airbyte_service.get_destination_definition(
         org.airbyte_workspace_id, payload.destinationDefId
@@ -911,17 +925,15 @@ def create_warehouse(org: Org, payload: OrgWarehouseSchema):
         airbyte_docker_repository=destination_definition["dockerRepository"],
         airbyte_docker_image_tag=destination_definition["dockerImageTag"],
     )
-    credentials_lookupkey = secretsmanager.save_warehouse_credentials(warehouse, dbt_credentials)
+    credentials_lookupkey = secretsmanager.save_warehouse_credentials(warehouse, airbyte_creds)
     warehouse.credentials = credentials_lookupkey
     if "dataset_location" in destination["connectionConfiguration"]:
         warehouse.bq_location = destination["connectionConfiguration"]["dataset_location"]
     warehouse.save()
 
-    # this has been moved from here
-    # we want to map cli profile block to orgdbt
-    # create_or_update_org_cli_block(org, warehouse, dbt_credentials)
+    create_or_update_dbt_profile_secret_blk(org, warehouse, airbyte_creds)
 
-    return None, None
+    return warehouse
 
 
 def get_warehouses(org: Org):

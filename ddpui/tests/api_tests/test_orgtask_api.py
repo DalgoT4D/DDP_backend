@@ -17,15 +17,12 @@ from ddpui.api.orgtask_api import (
     delete_system_transformation_tasks,
     get_prefect_transformation_tasks,
     post_system_transformation_tasks,
-    post_run_prefect_org_task,
 )
 from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, DDP_WORK_QUEUE, MANUL_DBT_WORK_QUEUE
-from ddpui.ddpprefect.schema import PrefectShellTaskSetup
 from ddpui.models.org import Org, OrgDbt, OrgPrefectBlockv1, OrgWarehouse
 from ddpui.models.role_based_access import Role, RolePermission, Permission
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask, Task, TaskType
-from ddpui.utils.constants import TASK_DBTDEPS, TASK_GITPULL, TASK_GENERATE_EDR
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -275,11 +272,8 @@ def test_post_system_transformation_tasks_warehouse_not_setup(orguser_dbt_worksp
 )
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
-    create_secret_block=Mock(
+    upsert_secret_block=Mock(
         return_value={"block_id": "git-secret-blk", "block_name": "git-secret-blk"}
-    ),
-    create_dbt_cli_profile_block=Mock(
-        return_value={"block_id": "cli-blk-id", "block_name": "cli-blk-name"}
     ),
     create_dataflow_v1=Mock(
         return_value={"deployment": {"id": "test-deploy-id", "name": "test-deploy-name"}}
@@ -289,9 +283,8 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
     orguser_dbt_workspace,
     seed_master_tasks_db,
 ):
-    """POST /tasks/transform/ success with postgres warehouse; verifies one
-    Prefect deployment is created per LONG_RUNNING system task (dbt-run,
-    dbt-test, dbt-seed)."""
+    """POST /tasks/transform/ with postgres warehouse — one Prefect deployment
+    is created per LONG_RUNNING system task (dbt-run, dbt-test, dbt-seed)."""
     from ddpui.ddpprefect import prefect_service
 
     request = mock_request(orguser_dbt_workspace)
@@ -318,11 +311,8 @@ def test_post_system_transformation_tasks_success_postgres_warehouse(
 )
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
-    create_secret_block=Mock(
+    upsert_secret_block=Mock(
         return_value={"block_id": "git-secret-blk", "block_name": "git-secret-blk"}
-    ),
-    create_dbt_cli_profile_block=Mock(
-        return_value={"block_id": "cli-blk-id", "block_name": "cli-blk-name"}
     ),
     create_dataflow_v1=Mock(
         return_value={"deployment": {"id": "test-deploy-id", "name": "test-deploy-name"}}
@@ -336,9 +326,8 @@ def test_post_system_transformation_tasks_success_bigquery_warehouse(
     orguser_dbt_workspace,
     seed_master_tasks_db,
 ):
-    """POST /tasks/transform/ success with bigquery warehouse; verifies one
-    Prefect deployment is created per LONG_RUNNING system task (dbt-run,
-    dbt-test, dbt-seed)."""
+    """POST /tasks/transform/ with bigquery warehouse — one Prefect deployment
+    is created per LONG_RUNNING system task (dbt-run, dbt-test, dbt-seed)."""
     from ddpui.ddpprefect import prefect_service
 
     request = mock_request(orguser_dbt_workspace)
@@ -368,133 +357,13 @@ def test_get_prefect_transformation_tasks_success(orguser_transform_tasks):
 @patch.multiple(
     "ddpui.ddpprefect.prefect_service",
     delete_secret_block=Mock(return_value=True),
-    delete_dbt_cli_profile_block=Mock(return_value=True),
     delete_deployment_by_id=Mock(return_value=True),
 )
 def test_delete_system_transformation_tasks_success(orguser_transform_tasks):
-    """tests DELETE /tasks/transform/ success"""
+    """DELETE /tasks/transform/ removes all system OrgTasks and the git-pull SECRET block."""
     request = mock_request(orguser_transform_tasks)
 
     delete_system_transformation_tasks(request)
 
     assert OrgTask.objects.filter(org=request.orguser.org, task__is_system=True).count() == 0
     assert OrgPrefectBlockv1.objects.filter(org=request.orguser.org, block_type=SECRET).count() == 0
-    assert (
-        OrgPrefectBlockv1.objects.filter(org=request.orguser.org, block_type=DBTCLIPROFILE).count()
-        == 0
-    )
-
-
-def test_post_run_prefect_org_task_invalid_task_id(orguser_transform_tasks):
-    """tests POST /tasks/{orgtask_uuid}/run/ failure by invalid task id"""
-    request = mock_request(orguser_transform_tasks)
-
-    with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(request, 0)
-    assert str(excinfo.value) == "invalid input type"
-
-    with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(request, uuid.uuid4())
-    assert str(excinfo.value) == "task not found"
-
-
-def test_post_run_prefect_org_task_invalid_task_type(orguser_transform_tasks):
-    """tests POST /tasks/{orgtask_uuid}/run/ failure by invalid task type"""
-    request = mock_request(orguser_transform_tasks)
-
-    airbyte_task_config = {
-        "type": "airbyte",
-        "slug": "airbyte-sync",
-        "label": "AIRBYTE sync",
-        "command": None,
-    }
-    task = Task.objects.create(**airbyte_task_config)
-
-    org_task = OrgTask.objects.create(task=task, org=request.orguser.org, uuid=uuid.uuid4())
-
-    if org_task is None:
-        raise Exception("Task not found")
-
-    with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(request, org_task.uuid)
-    assert str(excinfo.value) == "task not supported"
-
-
-def test_post_run_prefect_org_task_no_dbt_workspace(orguser_transform_tasks):
-    """tests POST /tasks/{orgtask_uuid}/run/ failure by not setting up dbt workspace"""
-    orguser_transform_tasks.org.dbt = None
-    request = mock_request(orguser_transform_tasks)
-
-    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_DBTDEPS).first()
-
-    if org_task is None:
-        raise Exception("Task not found")
-
-    with pytest.raises(HttpError) as excinfo:
-        post_run_prefect_org_task(request, org_task.uuid)
-    assert str(excinfo.value) == "dbt is not configured for this client"
-
-
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    run_shell_task_sync=Mock(return_value=True),
-)
-def test_post_run_prefect_org_task_git_pull_success(orguser_transform_tasks):
-    """tests POST /tasks/{orgtask_id}/run/ success"""
-
-    request = mock_request(orguser_transform_tasks)
-
-    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_GITPULL).first()
-
-    if org_task is None:
-        raise Exception("Task not found")
-
-    post_run_prefect_org_task(request, org_task.uuid)
-
-
-@patch.multiple(
-    "ddpui.ddpprefect.prefect_service",
-    run_dbt_task_sync=Mock(return_value=True),
-)
-def test_post_run_prefect_org_task_dbt_deps_success(orguser_transform_tasks):
-    """tests POST /tasks/{orgtask_uuid}/run/ success"""
-
-    request = mock_request(orguser_transform_tasks)
-
-    org_task = OrgTask.objects.filter(org=request.orguser.org, task__slug=TASK_DBTDEPS).first()
-
-    if org_task is None:
-        raise Exception("Task not found")
-
-    post_run_prefect_org_task(request, org_task.uuid)
-
-
-def test_post_run_prefect_org_task_generate_edr(
-    orguser_dbt_workspace, seed_master_tasks_db, seed_db
-):
-    """tests POST /tasks/{orgtask_uuid}/run/ success"""
-
-    request = mock_request(orguser_dbt_workspace)
-    task = Task.objects.filter(slug=TASK_GENERATE_EDR).first()
-
-    org_task = OrgTask.objects.create(org=request.orguser.org, task=task, uuid=uuid.uuid4())
-
-    with patch(
-        "ddpui.api.orgtask_api.setup_edr_send_report_task_config"
-    ) as setup_edr_send_report_task_config_mock:
-        with patch(
-            "ddpui.ddpprefect.prefect_service.run_shell_task_sync"
-        ) as run_shell_task_sync_mock:
-            task_config = PrefectShellTaskSetup(
-                type="",
-                slug="",
-                commands=[],
-                working_dir="",
-                env={},
-                orgtask_uuid=str(org_task.uuid),
-            )
-            setup_edr_send_report_task_config_mock.return_value = task_config
-            run_shell_task_sync_mock.return_value = "retval"
-            retval = post_run_prefect_org_task(request, org_task.uuid)
-            assert retval == "retval"
-            run_shell_task_sync_mock.assert_called_once_with(task_config)

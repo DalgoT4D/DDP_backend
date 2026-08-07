@@ -100,7 +100,7 @@ class Command(BaseCommand):
                 ok += 1
 
                 # Patch deployments so DBTCORE task_configs carry the runner env key.
-                _patch_deployments_for_org(org)
+                _patch_deployments_for_org(org, warehouse)
             except Exception as err:  # pylint: disable=broad-exception-caught
                 print(f"  [fail] {org.slug}: {err}")
                 failed += 1
@@ -108,15 +108,17 @@ class Command(BaseCommand):
         print(f"\nDone. ok={ok} skipped={skipped} failed={failed}")
 
 
-def _patch_deployments_for_org(org: Org):
+def _patch_deployments_for_org(org: Org, warehouse: OrgWarehouse):
     """Ensure every DBTCORE task_config for this org's deployments has
     env["dbt-profile-secret-block"] populated. Skips deployments already
     up-to-date."""
-    if not org.dbt or not org.dbt.dbt_profile_secret_block:
-        print(f"    [warn] {org.slug}: no dbt_profile_secret_block FK — skipping deployment patch")
+    if not warehouse.dbt_profile_secret_block:
+        print(
+            f"    [warn] {org.slug}: no dbt_profile_secret_block on warehouse — skipping deployment patch"
+        )
         return
 
-    block_name = org.dbt.dbt_profile_secret_block.block_name
+    block_name = warehouse.dbt_profile_secret_block.block_name
     desired_env = {"dbt-profile-secret-block": block_name}
 
     for dataflow in OrgDataFlowv1.objects.filter(org=org):

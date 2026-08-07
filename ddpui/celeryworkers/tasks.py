@@ -34,7 +34,6 @@ from ddpui.ddpdbt.elementary_service import (
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -83,7 +82,6 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
     get_flow_run_graphs,
-    update_dbt_core_block_schema,
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
@@ -548,13 +546,6 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
                 "result": str(err),
             }
         )
-
-
-@app.task(bind=False)
-def update_dbt_core_block_schema_task(block_name, default_schema):
-    """single http PUT request to the prefect-proxy"""
-    logger.info("updating default_schema of %s to %s", block_name, default_schema)
-    update_dbt_core_block_schema(block_name, default_schema)
 
 
 @app.task()
