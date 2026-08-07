@@ -164,12 +164,12 @@ class StringLengthStats(ColInsight):
         mode_subquery = (
             self.builder.reset()
             .add_column(length_col.label(f"{col.name}_len"))
-            .add_column(func.count().label("count"))
+            .add_column(func.count().label("_frequency"))
             .where_clause(length_col.isnot(None))
             .fetch_from(self.db_table, self.db_schema)
             .group_cols_by(f"{col.name}_len")
             .having_clause(func.count() > 1)
-            .order_cols_by([("count", "desc"), (f"{col.name}_len", "desc")])
+            .order_cols_by([("_frequency", "desc"), (f"{col.name}_len", "desc")])
             .limit_rows(5)
             .subquery(alias="mode_subquery")
         )
@@ -201,7 +201,7 @@ class StringLengthStats(ColInsight):
             .add_column(select([mode_subquery.c[f"{col.name}_len"]]).limit(1).label("mode"))
             .add_column(
                 select([func.array_agg(mode_subquery.c[f"{col.name}_len"])])
-                .where(mode_subquery.c["count"] == select([mode_subquery.c["count"]]).limit(1))
+                .where(mode_subquery.c["_frequency"] == select([mode_subquery.c["_frequency"]]).limit(1))
                 .label("other_modes")
             )
         )
