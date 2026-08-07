@@ -16,6 +16,9 @@ ddpui/
 └── utils/                       # Shared helpers
 ```
 
+AI features (Chat with Data, report summaries) live in `ddpui/core/ai/` — its
+`CLAUDE.md` maps the package and how to extend it (new tools, agents, scopes).
+
 | Layer         | Responsible for                                                                       | Should not                                          |
 |---------------|---------------------------------------------------------------------------------------|-----------------------------------------------------|
 | **API**       | HTTP I/O, permissions, schema validation, exception → HTTP, `api_response` wrapping   | Business logic, ORM queries, external calls         |

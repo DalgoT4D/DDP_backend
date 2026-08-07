@@ -125,6 +125,20 @@ class Dashboard(models.Model):
     def __str__(self):
         return f"{self.title} ({self.dashboard_type})"
 
+    def component_ids(self, comp_type: str) -> list[int]:
+        """IDs of one component type across all tabs, deduplicated — the single
+        tabs[].components walk shared by reports, KPIs, and chat scope.
+        Components carry their id under "<type>Id" ("chart" -> "chartId")."""
+        id_key = f"{comp_type}Id"
+        ids = []
+        for tab in self.tabs or []:
+            for component in (tab.get("components") or {}).values():
+                if component.get("type") == comp_type:
+                    ref = component.get("config", {}).get(id_key)
+                    if ref:
+                        ids.append(ref)
+        return list(dict.fromkeys(ids))
+
     def to_json(self):
         """Return JSON representation"""
         return {

@@ -9,6 +9,7 @@ from ddpui.html.elementary import get_elementary_report
 
 from ddpui.core.datainsights.generate_result import DataInsightsConsumer
 from ddpui.websockets.airbyte_consumer import SchemaCatalogConsumer, SourceCheckConnectionConsumer
+from ddpui.websockets.chat_with_data_consumer import ChatWithDataConsumer
 from ddpui.websockets.airbyte_consumer import DestinationCheckConnectionConsumer
 
 
@@ -42,4 +43,5 @@ ws_urlpatterns = [
         DestinationCheckConnectionConsumer.as_asgi(),
     ),
     path("wss/airbyte/connection/schema_catalog", SchemaCatalogConsumer.as_asgi()),
+    path("wss/chat-with-data/<int:session_id>/", ChatWithDataConsumer.as_asgi()),
 ]
