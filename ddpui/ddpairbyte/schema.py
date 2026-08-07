@@ -34,9 +34,12 @@ class AirbyteSourceUpdateCheckConnection(Schema):
 
 
 class SourceGoogleOAuthConsentCreate(Schema):
-    """Request to start the Google OAuth consent flow for a source"""
+    """Request to start the Google OAuth consent flow for a source. `sourceName` is the
+    source-definition name (e.g. "Google Sheets") the frontend already has from the same
+    workspace catalog it got `sourceDefId` from — it is the OAuth registry key."""
 
     sourceDefId: str
+    sourceName: str
 
 
 class SourceGoogleOAuthCreate(Schema):
@@ -51,6 +54,7 @@ class SourceGoogleOAuthCreate(Schema):
     endpoint (PUT /sources/oauth/{source_id}) instead."""
 
     sourceDefId: str
+    sourceName: str
     name: str
     config: dict
     refresh_token_ref: str
@@ -64,6 +68,7 @@ class SourceGoogleOAuthUpdate(Schema):
     the caller's own workspace. `config` must NOT include a `credentials` block."""
 
     sourceDefId: str
+    sourceName: str
     name: str
     config: dict
     refresh_token_ref: str
@@ -102,6 +107,7 @@ class AirbyteConnectionCreate(Schema):
     syncCatalog: dict
     destinationId: Optional[str] = None
     destinationSchema: Optional[str] = None
+    post_sync_transform: Optional[dict] = None
 
 
 class AirbyteConnectionCreateResponse(Schema):
@@ -120,6 +126,7 @@ class AirbyteConnectionCreateResponse(Schema):
     lock: Optional[dict] = None
     isRunning: bool = False
     resetConnDeploymentId: Optional[str] = None
+    post_sync_transform: Optional[dict] = None
 
 
 class AirbyteGetConnectionsResponse(Schema):
@@ -149,6 +156,7 @@ class AirbyteConnectionUpdate(Schema):
     catalogId: str
     destinationId: Optional[str] = None
     destinationSchema: Optional[str] = None
+    post_sync_transform: Optional[dict] = None
 
 
 # response schemas

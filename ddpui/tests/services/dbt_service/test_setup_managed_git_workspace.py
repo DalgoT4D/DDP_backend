@@ -179,7 +179,9 @@ def test_setup_managed_git_workspace_cli_profile_creation_failure():
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
 
     # Mock to fail at CLI profile creation step
-    with patch("ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block") as mock_create_cli_block:
+    with patch(
+        "ddpui.ddpdbt.dbt_service.create_or_update_dbt_profile_secret_blk"
+    ) as mock_create_cli_block:
         # Mock CLI block creation failure
         mock_create_cli_block.return_value = (None, "Failed to create CLI profile")
 

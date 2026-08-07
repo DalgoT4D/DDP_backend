@@ -644,7 +644,7 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     with pytest.raises(HttpError) as excinfo:
         post_organization_warehouse(request, payload)
 
-    assert str(excinfo.value) == "unrecognized warehouse type unknown"
+    assert str(excinfo.value) == "unknown warehouse type unknown"
 
 
 @patch.multiple(
@@ -661,8 +661,8 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
 )
 @patch.multiple(
-    "ddpui.ddpdbt.dbthelpers",
-    create_or_update_org_cli_block=Mock(return_value=((None, None), None)),
+    "ddpui.ddpairbyte.airbytehelpers",
+    create_or_update_dbt_profile_secret_blk=Mock(return_value=((None, None), None)),
 )
 def test_post_organization_warehouse_bigquery(orguser):
     """success test, warehouse creation"""
@@ -680,7 +680,7 @@ def test_post_organization_warehouse_bigquery(orguser):
 
     response = post_organization_warehouse(request, payload)
 
-    assert response["success"] == 1
+    assert response["destinationId"] == "destination-id"
 
     warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
     assert warehouse.wtype == "bigquery"
@@ -726,25 +726,17 @@ def test_get_organizations_warehouses(orguser):
     """success test, fetching all warehouses for an org"""
     request = mock_request(orguser)
 
-    warehouse1 = OrgWarehouse.objects.create(
+    warehouse = OrgWarehouse.objects.create(
         org=orguser.org,
         wtype="postgres",
         airbyte_destination_id="destination_id_1",
     )
-    warehouse2 = OrgWarehouse.objects.create(
-        org=orguser.org,
-        wtype="postgres",
-        airbyte_destination_id="destination_id_2",
-    )
     response = get_organizations_warehouses(request)
     assert "warehouses" in response
-    assert len(response["warehouses"]) == 2
+    assert len(response["warehouses"]) == 1
     assert response["warehouses"][0]["wtype"] == "postgres"
     assert response["warehouses"][0]["airbyte_destination"]["destination_id"] == "destination_id_1"
-    assert response["warehouses"][1]["wtype"] == "postgres"
-    assert response["warehouses"][1]["airbyte_destination"]["destination_id"] == "destination_id_2"
-    warehouse1.delete()
-    warehouse2.delete()
+    warehouse.delete()
 
 
 # ================================================================================

@@ -134,7 +134,7 @@ def post_source_oauth_consent(request, payload: SourceGoogleOAuthConsentCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceDefId)
+    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceName)
 
 
 @airbyte_router.get("/sources/oauth/callback", auth=None)
@@ -176,6 +176,11 @@ def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthU
     Same as create, but updates the source named in the URL path. The source must belong to
     the caller's own workspace (enforced in the service layer). The refresh_token never
     travels through the browser.
+
+    ONLY for the re-authenticate action (frontend calls this after a fresh consent+callback
+    round redeems a ref). Editing a source's config/streams WITHOUT re-authenticating goes
+    through the plain PUT /sources/{source_id} instead — it never needs a refresh_token_ref
+    and never touches stored credentials.
     """
     orguser: OrgUser = request.orguser
     if orguser.org.airbyte_workspace_id is None:
@@ -626,9 +631,13 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    destination, error = airbytehelpers.update_destination(orguser.org, destination_id, payload)
-    if error:
-        raise HttpError(400, error)
+    try:
+        destination = airbytehelpers.update_destination(orguser.org, destination_id, payload)
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(500, "failed to update destination") from error
 
     return {"destinationId": destination["destinationId"]}
 

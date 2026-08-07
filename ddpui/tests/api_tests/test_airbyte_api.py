@@ -62,8 +62,8 @@ logger = CustomLogger("ddpui-pytest")
 
 pytestmark = pytest.mark.django_db
 
-# the oauth registry is keyed by source-definition NAME, so the id here is deliberately an
-# arbitrary value — it only has to resolve to GSHEETS_NAME in this workspace's catalog
+# the oauth registry is keyed by source-definition NAME (sent by the client alongside the
+# id); the id itself is only used for the Airbyte create_source/update_source calls
 GSHEETS_DEF_ID = "workspace-specific-gsheets-def-id"
 
 
@@ -322,39 +322,29 @@ def _use_fake_redis(monkeypatch):
     return fake_redis
 
 
-def _mock_source_definition(monkeypatch, name=GSHEETS_NAME):
-    """the oauth flow resolves the sourceDefId to a source-definition NAME against the org's
-    own workspace catalog — that name is the oauth registry key"""
-    monkeypatch.setattr(
-        "ddpui.ddpairbyte.airbyte_service.get_source_definition",
-        lambda workspace_id, sourcedef_id: {
-            "sourceDefinitionId": sourcedef_id,
-            "name": name,
-        },
-    )
-
-
 # ---- consent: Dalgo builds the Google URL -----------------------------------
 def test_post_source_oauth_consent_without_workspace(seed_db, orguser):
     """consent endpoint requires an airbyte workspace"""
     request = mock_request(orguser)
 
     with pytest.raises(HttpError) as excinfo:
-        post_source_oauth_consent(request, SourceGoogleOAuthConsentCreate(sourceDefId="fake-id"))
+        post_source_oauth_consent(
+            request, SourceGoogleOAuthConsentCreate(sourceDefId="fake-id", sourceName="fake-name")
+        )
 
     assert str(excinfo.value) == "create an airbyte workspace first"
 
 
 def test_post_source_oauth_consent_builds_google_url(seed_db, orguser_workspace, monkeypatch):
-    """consent builds the Google consent URL itself and mints a state nonce; Airbyte is only
-    consulted to resolve the sourceDefId to the connector name"""
+    """consent builds the Google consent URL itself and mints a state nonce, keyed off the
+    client-supplied sourceName (the frontend already has this from the same workspace
+    catalog it got sourceDefId from)"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    _mock_source_definition(monkeypatch)
     request = mock_request(orguser_workspace)
 
     result = post_source_oauth_consent(
-        request, SourceGoogleOAuthConsentCreate(sourceDefId=GSHEETS_DEF_ID)
+        request, SourceGoogleOAuthConsentCreate(sourceDefId=GSHEETS_DEF_ID, sourceName=GSHEETS_NAME)
     )
 
     parsed = urlparse(result["authUrl"])
@@ -527,7 +517,6 @@ def test_post_source_oauth_create_success(seed_db, orguser_workspace, monkeypatc
     """create redeems the ref, injects all-three credentials server-side, creates the source"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    _mock_source_definition(monkeypatch)
     ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME)
     request = mock_request(orguser_workspace)
 
@@ -535,6 +524,7 @@ def test_post_source_oauth_create_success(seed_db, orguser_workspace, monkeypatc
         request,
         SourceGoogleOAuthCreate(
             sourceDefId=GSHEETS_DEF_ID,
+            sourceName=GSHEETS_NAME,
             name="my sheet",
             config={"spreadsheet_id": "https://sheet"},
             refresh_token_ref=ref,
@@ -573,7 +563,6 @@ def test_put_source_oauth_update_reauth(seed_db, orguser_workspace, monkeypatch)
     """the update endpoint re-authenticates an existing source in the caller's workspace"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    _mock_source_definition(monkeypatch)
     ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME)
     request = mock_request(orguser_workspace)
 
@@ -582,6 +571,7 @@ def test_put_source_oauth_update_reauth(seed_db, orguser_workspace, monkeypatch)
         "existing-src-id",
         SourceGoogleOAuthUpdate(
             sourceDefId=GSHEETS_DEF_ID,
+            sourceName=GSHEETS_NAME,
             name="my sheet",
             config={"spreadsheet_id": "https://sheet"},
             refresh_token_ref=ref,
@@ -626,6 +616,7 @@ def test_put_source_oauth_update_foreign_source_rejected(seed_db, orguser_worksp
             "foreign-src-id",
             SourceGoogleOAuthUpdate(
                 sourceDefId=GSHEETS_DEF_ID,
+                sourceName=GSHEETS_NAME,
                 name="my sheet",
                 config={"spreadsheet_id": "https://sheet"},
                 refresh_token_ref=ref,
@@ -640,7 +631,6 @@ def test_post_source_oauth_create_expired_ref(seed_db, orguser_workspace, monkey
     """a missing/expired ref is rejected"""
     _oauth_env(monkeypatch)
     _use_fake_redis(monkeypatch)
-    _mock_source_definition(monkeypatch)
     request = mock_request(orguser_workspace)
 
     with pytest.raises(HttpError) as excinfo:
@@ -648,6 +638,7 @@ def test_post_source_oauth_create_expired_ref(seed_db, orguser_workspace, monkey
             request,
             SourceGoogleOAuthCreate(
                 sourceDefId=GSHEETS_DEF_ID,
+                sourceName=GSHEETS_NAME,
                 name="my sheet",
                 config={},
                 refresh_token_ref="never-issued",
@@ -663,7 +654,6 @@ def test_post_source_oauth_create_foreign_ref_rejected(
     """a ref minted for org A's OrgUser cannot be redeemed by an OrgUser from a different org"""
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
-    _mock_source_definition(monkeypatch)
     ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME)
     request = mock_request(orguser_workspace_b)
 
@@ -671,7 +661,11 @@ def test_post_source_oauth_create_foreign_ref_rejected(
         post_source_oauth_create(
             request,
             SourceGoogleOAuthCreate(
-                sourceDefId=GSHEETS_DEF_ID, name="my sheet", config={}, refresh_token_ref=ref
+                sourceDefId=GSHEETS_DEF_ID,
+                sourceName=GSHEETS_NAME,
+                name="my sheet",
+                config={},
+                refresh_token_ref=ref,
             ),
         )
 
@@ -683,15 +677,17 @@ def test_post_source_oauth_create_wrong_sourcedef_rejected(seed_db, orguser_work
     _oauth_env(monkeypatch)
     fake_redis = _use_fake_redis(monkeypatch)
     ref = _seed_ref(fake_redis, orguser_workspace, GSHEETS_NAME)
-    # the def id passed in resolves to a different connector than the one the ref was minted for
-    _mock_source_definition(monkeypatch, name="Google Analytics")
     request = mock_request(orguser_workspace)
 
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_create(
             request,
             SourceGoogleOAuthCreate(
-                sourceDefId="a-different-id", name="my sheet", config={}, refresh_token_ref=ref
+                sourceDefId="a-different-id",
+                sourceName="Google Analytics",
+                name="my sheet",
+                config={},
+                refresh_token_ref=ref,
             ),
         )
 
@@ -701,15 +697,15 @@ def test_post_source_oauth_create_wrong_sourcedef_rejected(seed_db, orguser_work
 def test_post_source_oauth_consent_unsupported_source_rejected(
     seed_db, orguser_workspace, monkeypatch
 ):
-    """a source whose definition name is not in the oauth registry is rejected by name, not id"""
+    """a source whose name is not in the oauth registry is rejected by name, not id"""
     _oauth_env(monkeypatch)
     _use_fake_redis(monkeypatch)
-    _mock_source_definition(monkeypatch, name="Postgres")
     request = mock_request(orguser_workspace)
 
     with pytest.raises(HttpError) as excinfo:
         post_source_oauth_consent(
-            request, SourceGoogleOAuthConsentCreate(sourceDefId=GSHEETS_DEF_ID)
+            request,
+            SourceGoogleOAuthConsentCreate(sourceDefId=GSHEETS_DEF_ID, sourceName="Postgres"),
         )
 
     assert str(excinfo.value) == "oauth is not supported for this source"

@@ -803,6 +803,10 @@ def test_ensure_edr_sendreport_dataflow_updates_existing(
     assert update_payload.deployment_params["config"]["tasks"] == [{"task": "config"}]
 
 
+@patch.dict(
+    os.environ,
+    {"PREFECT_WORKER_POOL_NAME": "test_workpool", "PREFECT_EKS_WORKER_POOL_NAME": "eks_workpool"},
+)
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
 @patch("ddpui.ddpdbt.elementary_service.setup_git_clone_shell_task_config")
@@ -821,9 +825,6 @@ def test_ensure_edr_sendreport_dataflow_eks(
 ):
     """on EKS (is_workpool_eks=True on edr_queue) a git-clone task is prepended"""
     import json as _json
-
-    os.environ["PREFECT_WORKER_POOL_NAME"] = "test_workpool"
-    os.environ["PREFECT_EKS_WORKER_POOL_NAME"] = "eks_workpool"
 
     # Ensure git-clone Task exists in DB
     from ddpui.utils.constants import TASK_GITCLONE
@@ -868,9 +869,6 @@ def test_ensure_edr_sendreport_dataflow_eks(
     assert len(tasks) == 2
     assert tasks[0]["slug"] == "git-clone"
     assert tasks[1]["slug"] == "generate-edr"
-
-    # cleanup
-    del os.environ["PREFECT_EKS_WORKER_POOL_NAME"]
 
 
 def test_create_elementary_profile_no_dbt(org):
@@ -1063,9 +1061,7 @@ def test_create_elementary_profile_macro_target_mismatch(
     with open(dbt_project_file, "w") as f:
         yaml.safe_dump({"name": "test_project", "profile": "test_profile"}, f)
 
-    mock_gather_params.return_value = Mock(
-        project_dir=str(project_dir), dbt_binary="test-dbt"
-    )
+    mock_gather_params.return_value = Mock(project_dir=str(project_dir), dbt_binary="test-dbt")
     # elementary macro emits target: default — does NOT match the dbt profile
     mock_subprocess.return_value = """elementary:
   target: default

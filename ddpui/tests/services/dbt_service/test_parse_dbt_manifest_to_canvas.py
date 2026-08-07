@@ -117,8 +117,6 @@ def test_parse_dbt_manifest_to_canvas_success(sample_manifest, org_with_dbt_work
     ]
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
-    ) as mock_get_profile, patch(
         "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
     ) as mock_connect, patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
@@ -126,15 +124,6 @@ def test_parse_dbt_manifest_to_canvas_success(sample_manifest, org_with_dbt_work
     ) as mock_creds, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
     ) as mock_run_dbt:
-        # Mock the profile block content
-        mock_get_profile.return_value = {
-            "profile": {
-                "test_profile": {
-                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
-                }
-            }
-        }
-
         result = parse_dbt_manifest_to_canvas(
             org_with_dbt_workspace, orgdbt, warehouse, sample_manifest, refresh=False
         )

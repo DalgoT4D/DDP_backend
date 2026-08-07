@@ -23,8 +23,6 @@ from ddpui.core.oauth.google_oauth_provider import (
     oauth_client_id,
     oauth_client_secret,
 )
-from ddpui.ddpairbyte import airbyte_service
-from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
@@ -33,10 +31,10 @@ logger = CustomLogger("ddpui.core.oauth")
 
 # state: CSRF nonce bound to the orguser that started the flow (consent -> callback window)
 OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
-OAUTH_STATE_TTL_SECONDS = 60  # 1 minute
+OAUTH_STATE_TTL_SECONDS = 120  # 2 minutes
 # refresh_token_ref: opaque handle to a stashed refresh_token (callback -> create-source window)
 OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX = "airbyte_oauth_refresh_token_ref"
-OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 60  # 1 minute
+OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 120  # 2 minutes
 
 
 class OAuthStateData(Schema):
@@ -81,18 +79,6 @@ def _frontend_oauth_callback_url() -> str:
     if not frontend_url:
         raise HttpError(500, "frontend url is not configured")
     return f"{frontend_url.rstrip('/')}/oauth/airbyte/callback"
-
-
-def resolve_source_name(org: Org, source_def_id: str) -> str:
-    """Resolve an Airbyte `sourceDefinitionId` to its source-definition NAME against the org's
-    own workspace catalog.
-
-    The OAuth registry is keyed by name because definition ids vary per connector version and
-    per Airbyte install. Resolving server-side (rather than trusting a client-supplied name)
-    keeps the name authoritative: it is whatever this workspace's catalog says. Raises 404 if
-    the definition is not in this workspace."""
-    sourcedef = airbyte_service.get_source_definition(org.airbyte_workspace_id, source_def_id)
-    return sourcedef.get("name", "")
 
 
 def _store_oauth_state(orguser: OrgUser, source_name: str) -> str:
@@ -155,14 +141,13 @@ def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_na
     return stored.refresh_token
 
 
-def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
+def get_source_oauth_consent(orguser: OrgUser, source_name: str) -> dict:
     """Start the Google OAuth flow: mint a state nonce and build the Google consent URL.
 
     Dalgo (not Airbyte) owns the flow. client_id comes from env, redirect_uri is Dalgo's
     own backend callback, scopes come from the source's provider entry. `access_type=offline`
     + `prompt=consent` guarantee Google returns a refresh_token on every authorization
     (including re-auth of an existing source)."""
-    source_name = resolve_source_name(orguser.org, source_def_id)
     connector = get_connector(source_name)
     state = _store_oauth_state(orguser, source_name)
     params = {
@@ -178,11 +163,11 @@ def get_source_oauth_consent(orguser: OrgUser, source_def_id: str) -> dict:
     return {"authUrl": f"{GOOGLE_OAUTH_AUTH_URL}?{urlencode(params)}"}
 
 
-def exchange_google_oauth_code(code: str) -> dict:
-    """Exchange the authorization code for tokens directly with Google (server-side).
+def exchange_google_oauth_code(code: str) -> str:
+    """Exchange the authorization code for a refresh_token directly with Google (server-side).
 
-    Returns Google's token response. Raises if the exchange failed or no refresh_token came
-    back (which happens if access_type=offline/prompt=consent were dropped)."""
+    Raises if the exchange failed or no refresh_token came back (which happens if
+    access_type=offline/prompt=consent were dropped)."""
     try:
         response = requests.post(
             GOOGLE_OAUTH_TOKEN_URL,
@@ -212,7 +197,7 @@ def exchange_google_oauth_code(code: str) -> dict:
     if "refresh_token" not in tokens:
         logger.error("google token exchange returned no refresh_token: keys=%s", list(tokens))
         raise HttpError(400, "oauth did not return a refresh token")
-    return tokens
+    return tokens["refresh_token"]
 
 
 def complete_source_oauth(state: str, code: str) -> str:
@@ -220,8 +205,8 @@ def complete_source_oauth(state: str, code: str) -> str:
     Google, stash the refresh_token under a fresh refresh_token_ref, and return the ref. The
     state nonce is the authentication — it recovers the orguser that started the flow."""
     stored = _read_oauth_state(state)
-    tokens = exchange_google_oauth_code(code)
-    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, tokens["refresh_token"])
+    refresh_token = exchange_google_oauth_code(code)
+    return _store_refresh_token_ref(stored.orguser_id, stored.source_name, refresh_token)
 
 
 def oauth_callback_redirect_url(state: str, code: str, error: str) -> str:
