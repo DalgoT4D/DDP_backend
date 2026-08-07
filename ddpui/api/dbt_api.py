@@ -13,7 +13,9 @@ from ddpui.models.tasks import (
     TaskProgressHashPrefix,
 )
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.core.dbtfunctions import preprocess_airbyte_creds_for_dbt
 from ddpui.ddpdbt import dbt_service, elementary_service
+from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk
 from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import (
     OrgDbtTarget,
@@ -25,7 +27,6 @@ from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.models.tasks import Task, TaskType, OrgTask, OrgTaskGeneratedBy
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.git_manager import GitManager, GitManagerError, GitStatusSummary
-from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.orguserhelpers import from_orguser
@@ -322,6 +323,23 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
             f"Successfully updated the cli profile block's schema : {cli_profile_block.block_name}"
         )
 
+    # Re-upsert the dbt-profile Secret block so the runner reads the new schema.
+    airbyte_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    if airbyte_creds:
+        dbt_project_params = None
+        try:
+            dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "gather_dbt_project_params failed for org=%s (%s); proceeding without it",
+                org.slug,
+                err,
+            )
+        dbt_creds, profile_extras = preprocess_airbyte_creds_for_dbt(
+            warehouse, airbyte_creds, dbt_project_params
+        )
+        create_or_update_dbt_profile_secret_blk(org, warehouse, dbt_creds, profile_extras)
+
     return {"success": 1}
 
 
@@ -395,55 +413,61 @@ def get_elementary_setup_status(request):
     return result
 
 
-@dbt_router.get("/check-dbt-files")
+@dbt_router.post("/elementary/check")
 @has_permission(["can_view_dbt_workspace"])
-def get_check_dbt_files(request):
-    """checks that the dbt project is set up for elementary"""
+def post_elementary_check(request):
+    """Preflight check for Elementary setup — pull latest dbt code and verify
+    the org's dbt repo has the required elementary config in packages.yml and
+    dbt_project.yml.
+
+    Returns either:
+      {"status": "ready"}                                            OR
+      {"status": "needs_repo_changes", "exists": {...}, "missing": {...}}
+    """
     orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
+
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not os.path.exists(project_dir):
+        raise HttpError(400, "create the dbt env first")
+
+    # 1. Pull latest dbt code
+    try:
+        pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+        GitManager(repo_local_path=project_dir, pat=pat).pull_changes()
+    except Exception as err:
+        raise HttpError(500, f"git pull failed: {err}") from err
+
+    # 2. Check for elementary config in the pulled files
     error, result = elementary_service.check_dbt_files(orguser.org)
     if error:
         raise HttpError(400, error)
 
-    return result
+    if result.get("missing"):
+        return {
+            "status": "needs_repo_changes",
+            "exists": result.get("exists", {}),
+            "missing": result["missing"],
+        }
+    return {"status": "ready"}
 
 
-@dbt_router.post("/create-elementary-tracking-tables/")
-@has_permission(["can_view_dbt_workspace"])
-def post_create_elementary_tracking_tables(request):
-    """prepare the dbt docs single html via prefect deployment"""
+@dbt_router.post("/elementary/install")
+@has_permission(["can_edit_dbt_workspace"])
+def post_elementary_install(request):
+    """Dispatch the consolidated Elementary install celery task. The task runs
+    three sub-steps (profile → package install → report deployment) and emits
+    progress under the returned task_id + hashkey — poll /api/tasks/{id}."""
+    from ddpui.celeryworkers.tasks import install_elementary
+
     orguser: OrgUser = request.orguser
-    result = elementary_service.create_elementary_tracking_tables(orguser.org)
-    if "error" in result:
-        raise HttpError(400, result["error"])
+    org = orguser.org
+    if org.dbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
 
-    return result
-
-
-@dbt_router.post("/create-elementary-profile/")
-@has_permission(["can_view_dbt_workspace"])
-def post_create_elementary_profile(request):
-    """prepare the dbt docs single html via prefect deployment"""
-    orguser: OrgUser = request.orguser
-    result = elementary_service.create_elementary_profile(orguser.org)
-    if "error" in result:
-        raise HttpError(400, result["error"])
-
-    return result
-
-
-@dbt_router.post("/create-edr-deployment/")
-@has_permission(["can_view_dbt_workspace"])
-def post_create_edr_sendreport_dataflow(request):
-    """prepare the dbt docs single html via prefect deployment"""
-    orguser: OrgUser = request.orguser
-
-    org_task = get_edr_send_report_task(orguser.org)
-    if org_task is None:
-        logger.info("creating OrgTask for edr-send-report for %s", orguser.org.slug)
-        org_task = get_edr_send_report_task(orguser.org, create=True)
-
-    result = elementary_service.create_edr_sendreport_dataflow(orguser.org, org_task, "0 0 * * *")
-    if "error" in result:
-        raise HttpError(400, result["error"])
-
-    return result
+    task_id = str(uuid4())
+    hashkey = f"{TaskProgressHashPrefix.INSTALLELEMENTARY.value}-{org.slug}"
+    install_elementary.delay(org.id, task_id, hashkey)
+    return {"task_id": task_id, "hashkey": hashkey}
