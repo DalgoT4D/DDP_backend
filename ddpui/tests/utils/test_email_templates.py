@@ -22,6 +22,8 @@ from ddpui.utils.email_templates import (
     render_alert_email,
     render_mention_email,
     render_share_report_email,
+    render_trial_verification_email,
+    render_trial_welcome_email,
 )
 
 
@@ -151,6 +153,37 @@ def test_render_alert_email_escapes_alert_name_in_headline():
     # The literal <b> must not survive into the HTML headline
     assert "<b>Injected</b>" not in html_
     assert "&lt;b&gt;Injected&lt;/b&gt;" in html_
+
+
+# ── Trial emails ─────────────────────────────────────────────────────────
+
+
+def test_render_trial_verification_email_basic_shape():
+    plain, html_ = render_trial_verification_email("https://app.dalgo.org/verify?token=abc")
+
+    # Plain-text contract
+    assert "https://app.dalgo.org/verify?token=abc" in plain
+    assert "24 hours" in plain
+
+    # HTML contract — shell + body
+    assert "Dalgo" in html_  # wordmark
+    assert "#00897B" in html_  # brand teal from shell
+    assert "https://app.dalgo.org/verify?token=abc" in html_
+    assert "Verify email" in html_  # CTA label
+    assert "24 hours" in html_
+
+
+def test_render_trial_welcome_email_basic_shape():
+    plain, html_ = render_trial_welcome_email("https://app.dalgo.org/login")
+
+    # Plain-text contract
+    assert "https://app.dalgo.org/login" in plain
+
+    # HTML contract — shell + body
+    assert "Dalgo" in html_
+    assert "#00897B" in html_
+    assert "https://app.dalgo.org/login" in html_
+    assert "Log in" in html_  # CTA label
 
 
 # ── Shell single-source-of-truth guard ───────────────────────────────────
