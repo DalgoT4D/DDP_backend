@@ -25,6 +25,7 @@ from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.charts_api import (
     get_chart_data,
     get_chart_data_preview,
+    get_chart_data_preview_total_rows,
     generate_chart_data_and_config,
 )
 from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
@@ -344,6 +345,67 @@ class TestGetChartDataPreviewMultipleDimensions:
         assert "region" in response.columns
         assert "country" in response.columns
         assert len(response.data) > 0
+
+    def test_preview_null_dimensions_returns_400(self, orguser, org_warehouse, seed_db):
+        """Test preview returns 400 when dimensions are all null/empty"""
+        request = mock_request(orguser)
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=None,
+            dimension_col=None,
+            extra_dimension=None,
+            metrics=None,
+        )
+
+        with pytest.raises(HttpError) as exc_info:
+            get_chart_data_preview(request, payload, page=0, limit=10)
+
+        assert exc_info.value.status_code == 400
+
+    def test_preview_empty_dimensions_list_returns_400(self, orguser, org_warehouse, seed_db):
+        """Test preview returns 400 when dimensions is an empty list"""
+        request = mock_request(orguser)
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=[],
+            dimension_col=None,
+            extra_dimension=None,
+            metrics=None,
+        )
+
+        with pytest.raises(HttpError) as exc_info:
+            get_chart_data_preview(request, payload, page=0, limit=10)
+
+        assert exc_info.value.status_code == 400
+
+
+class TestGetChartDataPreviewTotalRowsValidation:
+    """Tests for get_chart_data_preview_total_rows with missing dimensions"""
+
+    def test_total_rows_null_dimensions_returns_400(self, orguser, org_warehouse, seed_db):
+        """Test total rows returns 400 when dimensions are all null/empty"""
+        request = mock_request(orguser)
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=None,
+            dimension_col=None,
+            extra_dimension=None,
+            metrics=None,
+        )
+
+        with pytest.raises(HttpError) as exc_info:
+            get_chart_data_preview_total_rows(request, payload)
+
+        assert exc_info.value.status_code == 400
 
 
 # ================================================================================
