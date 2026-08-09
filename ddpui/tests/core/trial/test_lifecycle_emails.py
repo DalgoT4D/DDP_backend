@@ -315,6 +315,30 @@ def test_sweep_leaves_flag_unset_when_the_send_fails():
     assert prefs.trial_emails_sent == {}
 
 
+def test_sweep_stamps_the_flag_only_after_the_send_returns():
+    """the send must observably happen before the flag is stamped, not merely appear to.
+
+    A mock with no side_effect can't tell "stamp then send" from "send then stamp" — both
+    orderings return the same value. Instead, the mocked sender's side_effect reads the row from
+    the DATABASE at the moment it is called and asserts trial_emails_sent is still {}. If the
+    stamp were ever moved above the send, this assertion inside the mock would fail.
+    """
+    _, orguser = _make_trial("trial-i", days_ago=3)
+
+    def _assert_not_yet_stamped(*args, **kwargs):
+        prefs = UserPreferences.objects.get(orguser=orguser)
+        assert prefs.trial_emails_sent == {}
+
+    with patch(
+        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email",
+        side_effect=_assert_not_yet_stamped,
+    ):
+        assert run_trial_lifecycle_sweep() == 1
+
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert EMAIL_DAY3 in prefs.trial_emails_sent
+
+
 def test_sweep_continues_after_one_trial_raises():
     """one bad row must not stop the run"""
     _make_trial("trial-g", days_ago=3)

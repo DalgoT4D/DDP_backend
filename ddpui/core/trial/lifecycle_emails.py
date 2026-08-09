@@ -191,31 +191,44 @@ def send_decided_email(kind, to_email, completed, day_number, total_days, end_da
 def process_trial(org_plan: OrgPlans, now) -> str:
     """Decide, send and stamp for ONE trial. Returns the email kind sent, or None.
 
-    The whole read-decide-send-stamp sequence runs under `select_for_update` on the
-    UserPreferences row so two overlapping sweeps cannot both decide to send. The flag is
-    written only AFTER the send returns, so an SES failure leaves it unset and the next run
-    retries.
+    Deliberately NOT "decide, stamp, send": the send happens outside any transaction, and the
+    flag is written only after it returns successfully. Sending first means a failure has an
+    obvious, safe outcome — nothing is stamped, the sweep's per-trial `except` in
+    `run_trial_lifecycle_sweep` logs it and moves on, and the next hourly run retries the send.
+    It also means the SES HTTPS round trip no longer happens while a Postgres row lock is held
+    open — since the sweep loop is serial, one hung SES call could otherwise stall the whole run.
+
+    This makes delivery at-least-once rather than exactly-once: because the stamp is written in
+    its own later transaction, two sweeps that happen to overlap within the same hour could, in
+    principle, both decide to send before either has stamped, so the same email could go out
+    twice. That is an accepted trade-off of moving the send outside the lock, not an oversight.
     """
     org = org_plan.org
-    orguser = OrgUser.objects.filter(org=org).select_related("user").first()
+    # `.order_by("id")` pins the recipient to the earliest-created OrgUser for this org — the
+    # trial's original owner. Without it, `.first()` on an unordered queryset has no defined
+    # result in Postgres; if a trial org ever gains a second OrgUser, a later run could pick a
+    # different one, and since `trial_emails_sent` lives on that user's own UserPreferences row,
+    # the newly-picked user has an empty flags dict and the whole email ladder restarts.
+    orguser = OrgUser.objects.filter(org=org).select_related("user").order_by("id").first()
     if orguser is None:
         logger.warning("trial org %s has no orguser; skipping lifecycle email", org.slug)
         return None
 
+    prefs, _ = UserPreferences.objects.get_or_create(orguser=orguser)
+    day_number, total_days = trial_window(org_plan.start_date, org_plan.end_date, now)
+    completed = completed_flows(prefs.trial_walkthrough)
+    kind = decide_email(day_number, len(completed), prefs.trial_emails_sent, now, org_plan.end_date)
+    if kind is None:
+        return None
+
+    # Outside any transaction, on purpose — see the docstring above. If this raises, nothing
+    # below runs: no flag is stamped, and the caller's except clause retries next run.
+    send_decided_email(
+        kind, orguser.user.email, completed, day_number, total_days, org_plan.end_date
+    )
+
     with transaction.atomic():
-        prefs, _ = UserPreferences.objects.select_for_update().get_or_create(orguser=orguser)
-        day_number, total_days = trial_window(org_plan.start_date, org_plan.end_date, now)
-        completed = completed_flows(prefs.trial_walkthrough)
-        kind = decide_email(
-            day_number, len(completed), prefs.trial_emails_sent, now, org_plan.end_date
-        )
-        if kind is None:
-            return None
-
-        send_decided_email(
-            kind, orguser.user.email, completed, day_number, total_days, org_plan.end_date
-        )
-
+        prefs = UserPreferences.objects.select_for_update().get(orguser=orguser)
         stamped = dict(prefs.trial_emails_sent or {})
         for flag in FLAGS_STAMPED_BY[kind]:
             stamped[flag] = now.isoformat()
@@ -246,6 +259,12 @@ def run_trial_lifecycle_sweep(now=None) -> int:
             if process_trial(org_plan, now):
                 sent += 1
         except Exception as err:  # skipcq PYL-W0703
-            # one bad trial must not stop the sweep
-            logger.error("trial lifecycle email failed for org %s: %s", org_plan.org.slug, err)
+            # one bad trial must not stop the sweep. exc_info=True keeps the traceback so a
+            # decision-logic bug (e.g. KeyError) doesn't look identical to a genuine SES outage.
+            logger.error(
+                "trial lifecycle email failed for org %s: %s",
+                org_plan.org.slug,
+                err,
+                exc_info=True,
+            )
     return sent
