@@ -22,6 +22,8 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         {"slug": item.permission.slug, "name": item.permission.name} for item in role_permissions
     ]
 
+    plan_start, plan_end = orguser.org.plan_window() if orguser.org else (None, None)
+
     response = OrgUserResponse(
         user_id=orguser.user.id,
         email=orguser.user.email,
@@ -32,6 +34,8 @@ def from_orguser(orguser: OrgUser) -> OrgUserResponse:
         wtype=warehouse.wtype if warehouse else None,
         is_demo=orguser.org.base_plan() == OrgType.DEMO if orguser.org else False,
         subscription_plan=orguser.org.base_plan() if orguser.org else None,
+        plan_start_date=plan_start,
+        plan_end_date=plan_end,
         work_domain=orguser.work_domain,
         has_seen_rbac_notice=orguser.has_seen_rbac_notice,
     )

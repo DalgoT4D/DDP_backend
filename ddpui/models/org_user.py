@@ -144,6 +144,14 @@ class OrgUserResponse(Schema):
     landing_dashboard_id: int | None = None
     org_default_dashboard_id: int | None = None
     subscription_plan: str | None = None
+    # The org plan's validity window (OrgPlans.start_date/end_date), null when the org has no
+    # OrgPlans row or the row leaves them unset. The frontend's trial countdown and lifecycle
+    # nudges compute every day number from these — see `Org.plan_window`. Shipped on the
+    # currentuser payload rather than left to the /org-plan endpoint so the trial UI can gate on
+    # mount without a second request, and so it shares this backend's dates rather than
+    # re-deriving a window from `org.created_at`.
+    plan_start_date: datetime | None = None
+    plan_end_date: datetime | None = None
     work_domain: str | None = None
     has_seen_rbac_notice: bool = False
 

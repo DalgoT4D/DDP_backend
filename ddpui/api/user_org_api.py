@@ -115,13 +115,19 @@ def get_current_user_v2(request, org_slug: str = None):
         ),
         Prefetch(
             "org",
-            queryset=Org.objects.prefetch_related(
+            queryset=Org.objects.select_related(
+                # reverse OneToOne — pulled in the same query so `base_plan()`/`plan_window()`
+                # below don't fire one SELECT per org the user belongs to
+                "org_plans",
+            ).prefetch_related(
                 "orgtncs",  # Assuming 'orgtnc' is a related name from Org to its related model
             ),
         ),
     ):
         if curr_orguser.org.orgtncs.exists():
             curr_orguser.org.tnc_accepted = curr_orguser.org.orgtncs.exists()
+
+        plan_start, plan_end = curr_orguser.org.plan_window() if curr_orguser.org else (None, None)
 
         res.append(
             OrgUserResponse(
@@ -142,6 +148,8 @@ def get_current_user_v2(request, org_slug: str = None):
                 landing_dashboard_id=curr_orguser.landing_dashboard_id,
                 org_default_dashboard_id=org_default_dashboard,
                 subscription_plan=(curr_orguser.org.base_plan() if curr_orguser.org else None),
+                plan_start_date=plan_start,
+                plan_end_date=plan_end,
                 work_domain=curr_orguser.work_domain,
                 has_seen_rbac_notice=curr_orguser.has_seen_rbac_notice,
             )
