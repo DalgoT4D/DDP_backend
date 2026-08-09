@@ -31,6 +31,9 @@ from ddpui.utils.email_templates import (
     render_trial_midpoint_email,
     render_trial_pre_end_email,
     render_trial_post_deletion_email,
+    render_trial_day3_not_started_email,
+    render_trial_day3_in_progress_email,
+    render_trial_completion_email,
 )
 
 
@@ -479,3 +482,76 @@ def test_text_link_escapes_url():
     html_out = _render_trial_text_link("Call", 'https://x/"onmouseover="alert(1)')
     assert 'onmouseover="alert(1)' not in html_out
     assert "&quot;" in html_out
+
+
+def test_day3_not_started_shows_both_rows_unticked():
+    """email A nudges a user who has completed nothing — no ticks, one CTA"""
+    plain, html_out = render_trial_day3_not_started_email(
+        "https://app.example", "https://cal.example"
+    )
+    assert "Ready to see Dalgo in action?" in html_out
+    assert "Build your first insight" in html_out
+    assert "Setup an automated data pipeline" in html_out
+    # product_tour is never tracked, so "Explore the platform" must not appear
+    assert "Explore the platform" not in html_out
+    assert html_out.count("&#10003;") == 0
+    assert "OPEN WORKSPACE" in html_out
+    assert "Ready to see Dalgo in action?" in plain
+
+
+def test_day3_in_progress_ticks_completed_flow_and_lists_it_first():
+    """email B ticks the finished flow and puts it at the top of the list"""
+    plain, html_out = render_trial_day3_in_progress_email(
+        "insights", "https://app.example", "https://cal.example"
+    )
+    assert "Pick up where you left off" in html_out
+    assert html_out.count("&#10003;") == 1
+    assert html_out.index("Build your first insight") < html_out.index(
+        "Setup an automated data pipeline"
+    )
+    assert "CONTINUE WHERE I LEFT OFF" in html_out
+    # the mockup's [first insight/automated pipeline] placeholders are resolved, not literal
+    assert "[first insight" not in html_out
+    assert "You've built your first insight" in plain
+    assert "automated data pipeline" in plain
+
+
+def test_day3_in_progress_reverses_order_for_the_other_flow():
+    """completing the pipeline flow instead puts that row first, ticked"""
+    _, html_out = render_trial_day3_in_progress_email(
+        "automate_pipeline", "https://app.example", "https://cal.example"
+    )
+    assert html_out.index("Setup an automated data pipeline") < html_out.index(
+        "Build your first insight"
+    )
+    assert html_out.count("&#10003;") == 1
+
+
+def test_completion_email_ticks_both_and_offers_two_ctas():
+    """email C congratulates and offers UPGRADE plus KEEP EXPLORING"""
+    plain, html_out = render_trial_completion_email(
+        "https://upgrade.example", "https://app.example", "https://cal.example"
+    )
+    assert "Congratulations" in html_out
+    assert html_out.count("&#10003;") == 2
+    assert "UPGRADE" in html_out
+    assert "KEEP EXPLORING" in html_out
+    assert "https://upgrade.example" in html_out
+    assert "Congratulations" in plain
+
+
+def test_all_three_carry_testimonial_and_call_link():
+    """the testimonial block and footer link are common to A, B and C"""
+    renders = [
+        render_trial_day3_not_started_email("https://app.example", "https://cal.example"),
+        render_trial_day3_in_progress_email(
+            "insights", "https://app.example", "https://cal.example"
+        ),
+        render_trial_completion_email(
+            "https://upgrade.example", "https://app.example", "https://cal.example"
+        ),
+    ]
+    for _, html_out in renders:
+        assert "SEE WHAT'S POSSIBLE" in html_out
+        assert "Schedule a call with us" in html_out
+        assert "https://cal.example" in html_out

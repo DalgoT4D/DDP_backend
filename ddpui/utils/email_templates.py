@@ -760,6 +760,152 @@ def render_trial_post_deletion_email(
     return plain_text, _render_trial_email_shell(body_html)
 
 
+# Checklist copy for the two tracked walkthrough flows, keyed by the flow name used in
+# UserPreferences.trial_walkthrough. product_tour is deliberately absent — it is not tracked by
+# any lifecycle email and must never appear as a checklist row.
+TRIAL_FLOW_COPY = {
+    "insights": (
+        "Build your first insight",
+        "Build out your first dashboard and share it",
+    ),
+    "automate_pipeline": (
+        "Setup an automated data pipeline",
+        "Setup your data to be updated, cleaned and computed regularly",
+    ),
+}
+
+# Short forms used in email B's subhead, e.g. "You've built your first insight. Next, go
+# ahead with your automated data pipeline."
+_TRIAL_FLOW_SHORT = {
+    "insights": "first insight",
+    "automate_pipeline": "automated data pipeline",
+}
+
+
+def _trial_footer_html(schedule_call_url: str) -> str:
+    """Testimonial block plus the schedule-a-call link — the shared tail of emails A, B and C."""
+    return _render_trial_testimonial() + _render_trial_text_link(
+        "Schedule a call with us", schedule_call_url
+    )
+
+
+def render_trial_day3_not_started_email(workspace_url: str, schedule_call_url: str) -> tuple:
+    """Template A — day 3, no walkthrough completed yet.
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    safe_workspace_url = html.escape(workspace_url)
+    items = [(False, *TRIAL_FLOW_COPY[flow]) for flow in ("insights", "automate_pipeline")]
+
+    plain_text = (
+        "Ready to see Dalgo in action?\n"
+        "\n"
+        "Your workspace is setup. Try out one of these guides to get started on Dalgo today\n"
+        "\n" + "\n".join(f"- {title}: {subtitle}" for _, title, subtitle in items) + "\n\n"
+        f"Open your workspace: {workspace_url}\n"
+        f"Schedule a call with us: {schedule_call_url}\n"
+    )
+
+    body_html = f"""\
+              <p style="margin:0 0 8px; font-size:22px; color:#111827; font-weight:800; line-height:1.3;">
+                Ready to see Dalgo in action?
+              </p>
+              <p style="margin:0 0 24px; font-size:15px; color:#4b5563; line-height:1.6;">
+                Your workspace is setup. Try out one of these guides to get started on Dalgo today
+              </p>
+              {_render_trial_checklist(items)}
+              {_render_trial_cta_button("OPEN WORKSPACE", safe_workspace_url)}
+              {_trial_footer_html(schedule_call_url)}"""
+
+    return plain_text, _render_trial_email_shell(body_html)
+
+
+def render_trial_day3_in_progress_email(
+    completed_flow: str, workspace_url: str, schedule_call_url: str
+) -> tuple:
+    """Template B — day 3, exactly one walkthrough completed.
+
+    Args:
+        completed_flow: "insights" or "automate_pipeline" — the one already finished. It is
+            ticked and listed first; the other is the one the copy points at next.
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    remaining_flow = "automate_pipeline" if completed_flow == "insights" else "insights"
+    safe_workspace_url = html.escape(workspace_url)
+    items = [
+        (True, *TRIAL_FLOW_COPY[completed_flow]),
+        (False, *TRIAL_FLOW_COPY[remaining_flow]),
+    ]
+    subhead = (
+        f"You've built your {_TRIAL_FLOW_SHORT[completed_flow]}."
+        f" Next, go ahead with your {_TRIAL_FLOW_SHORT[remaining_flow]}"
+    )
+
+    plain_text = (
+        "Pick up where you left off\n"
+        "\n"
+        f"{subhead}\n"
+        "\n" + "\n".join(f"- {title}: {subtitle}" for _, title, subtitle in items) + "\n\n"
+        f"Continue where you left off: {workspace_url}\n"
+        f"Schedule a call with us: {schedule_call_url}\n"
+    )
+
+    body_html = f"""\
+              <p style="margin:0 0 8px; font-size:22px; color:#111827; font-weight:800; line-height:1.3;">
+                Pick up where you left off
+              </p>
+              <p style="margin:0 0 24px; font-size:15px; color:#4b5563; line-height:1.6;">
+                {html.escape(subhead)}
+              </p>
+              {_render_trial_checklist(items)}
+              {_render_trial_cta_button("CONTINUE WHERE I LEFT OFF", safe_workspace_url)}
+              {_trial_footer_html(schedule_call_url)}"""
+
+    return plain_text, _render_trial_email_shell(body_html)
+
+
+def render_trial_completion_email(
+    upgrade_url: str, workspace_url: str, schedule_call_url: str
+) -> tuple:
+    """Template C — both walkthroughs completed, on or after day 3.
+
+    Returns:
+        (plain_text_body, html_body) tuple
+    """
+    safe_upgrade_url = html.escape(upgrade_url)
+    safe_workspace_url = html.escape(workspace_url)
+    items = [(True, *TRIAL_FLOW_COPY[flow]) for flow in ("insights", "automate_pipeline")]
+
+    plain_text = (
+        "Congratulations you've completed your tour of Dalgo.\n"
+        "\n"
+        "Upgrade to a full account, talk to us or explore the platform further.\n"
+        "\n" + "\n".join(f"- {title}: {subtitle}" for _, title, subtitle in items) + "\n\n"
+        f"Upgrade: {upgrade_url}\n"
+        f"Keep exploring: {workspace_url}\n"
+        f"Schedule a call with us: {schedule_call_url}\n"
+    )
+
+    body_html = f"""\
+              <p style="margin:0 0 8px; font-size:22px; color:#111827; font-weight:800; line-height:1.3;">
+                Congratulations you've completed your tour of Dalgo.
+              </p>
+              <p style="margin:0 0 24px; font-size:15px; color:#4b5563; line-height:1.6;">
+                Upgrade to a full account, talk to us or explore the platform further.
+              </p>
+              {_render_trial_checklist(items)}
+              <table cellpadding="0" cellspacing="0"><tr>
+                <td>{_render_trial_cta_button("UPGRADE", safe_upgrade_url)}</td>
+                <td style="padding-left:12px;">{_render_trial_cta_button("KEEP EXPLORING", safe_workspace_url, primary=False)}</td>
+              </tr></table>
+              {_trial_footer_html(schedule_call_url)}"""
+
+    return plain_text, _render_trial_email_shell(body_html)
+
+
 # ── Alert email ──────────────────────────────────────────────────────────
 
 
