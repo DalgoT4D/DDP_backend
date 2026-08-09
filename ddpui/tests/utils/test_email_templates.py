@@ -20,6 +20,9 @@ from types import SimpleNamespace
 
 from ddpui.utils import email_templates
 from ddpui.utils.email_templates import (
+    _render_trial_checklist,
+    _render_trial_testimonial,
+    _render_trial_text_link,
     render_alert_email,
     render_mention_email,
     render_share_report_email,
@@ -428,3 +431,51 @@ def test_work_domain_labels_cover_the_signup_form_options():
         "consultant",
         "field_worker",
     }
+
+
+# ── Trial email helper components ────────────────────────────────────────
+
+
+def test_checklist_marks_done_and_pending_rows_differently():
+    """a completed row shows the tick glyph, a pending row does not"""
+    html_out = _render_trial_checklist(
+        [
+            (True, "Build your first insight", "Build out your first dashboard and share it"),
+            (False, "Setup an automated data pipeline", "Setup your data to be updated"),
+        ]
+    )
+    assert "Build your first insight" in html_out
+    assert "Setup an automated data pipeline" in html_out
+    # the green tick is drawn once — only for the completed row
+    assert html_out.count("&#10003;") == 1
+
+
+def test_checklist_escapes_titles_and_subtitles():
+    """caller-supplied copy is escaped, never injected raw"""
+    html_out = _render_trial_checklist([(False, "<script>x</script>", "a & b")])
+    assert "<script>" not in html_out
+    assert "&lt;script&gt;" in html_out
+    assert "a &amp; b" in html_out
+
+
+def test_testimonial_contains_quote_and_attribution():
+    """the SEE WHAT'S POSSIBLE block is fixed copy, identical in all three emails"""
+    html_out = _render_trial_testimonial()
+    assert "SEE WHAT'S POSSIBLE" in html_out
+    assert "Anindita" in html_out
+    assert "SNEHA" in html_out
+
+
+def test_text_link_renders_label_and_href_with_arrow():
+    """the footer link carries its label, the url, and the trailing arrow glyph"""
+    html_out = _render_trial_text_link("Schedule a call with us", "https://cal.example/x")
+    assert 'href="https://cal.example/x"' in html_out
+    assert "Schedule a call with us" in html_out
+    assert "&#8599;" in html_out
+
+
+def test_text_link_escapes_url():
+    """a url containing a quote cannot break out of the href attribute"""
+    html_out = _render_trial_text_link("Call", 'https://x/"onmouseover="alert(1)')
+    assert 'onmouseover="alert(1)' not in html_out
+    assert "&quot;" in html_out

@@ -462,6 +462,61 @@ def _render_trial_progress_bar(day_number: int, total_days: int, danger: bool = 
               </table>"""
 
 
+def _render_trial_checklist(items: list) -> str:
+    """The circle/tick checklist used by the day-3 and completion emails.
+
+    Each item is ``(done, title, subtitle)``. A done row gets a filled green disc with a tick;
+    a pending row gets an empty grey-outlined circle. Distinct from
+    ``_render_trial_action_list``, which draws emoji icons inside a bordered box — this list has
+    no border and encodes progress, not suggestions.
+    """
+    rows = []
+    for done, title, subtitle in items:
+        marker = (
+            '<div style="width:26px; height:26px; border-radius:13px; background-color:#16a34a;'
+            ' color:#ffffff; text-align:center; line-height:26px; font-size:14px;">&#10003;</div>'
+            if done
+            else '<div style="width:26px; height:26px; border-radius:13px;'
+            ' border:2px solid #d1d5db; box-sizing:border-box;"></div>'
+        )
+        rows.append(
+            f"""
+                <tr>
+                  <td width="26" valign="top" style="padding:0 14px 20px 0;">{marker}</td>
+                  <td valign="top" style="padding:0 0 20px 0;">
+                    <div style="font-size:15px; color:#111827; font-weight:700; line-height:1.4;">{html.escape(title)}</div>
+                    <div style="font-size:14px; color:#4b5563; line-height:1.5; margin-top:2px;">{html.escape(subtitle)}</div>
+                  </td>
+                </tr>"""
+        )
+    return f"""
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;">{"".join(rows)}
+              </table>"""
+
+
+def _render_trial_testimonial() -> str:
+    """The grey "SEE WHAT'S POSSIBLE" quote block. Fixed copy — identical in all three
+    progress emails, so it takes no arguments."""
+    return """
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc; border-radius:8px; margin:16px 0 24px;">
+                <tr>
+                  <td style="padding:20px 22px;">
+                    <div style="font-size:12px; color:#00897B; font-weight:700; letter-spacing:0.08em; margin-bottom:10px;">SEE WHAT'S POSSIBLE</div>
+                    <div style="font-size:15px; color:#111827; font-weight:700; line-height:1.55;">&ldquo;After each day of reporting, we are able to see the reports reflecting the changes automatically. That visibility has brought a lot of meaningful impact to the team&rdquo;</div>
+                    <div style="font-size:13px; color:#6b7280; margin-top:10px;">&mdash; Anindita, SNEHA</div>
+                  </td>
+                </tr>
+              </table>"""
+
+
+def _render_trial_text_link(label: str, url: str) -> str:
+    """The teal text link with a trailing up-right arrow, used as the email footer."""
+    return (
+        f'<a href="{html.escape(url, quote=True)}" style="color:#00897B; font-size:15px;'
+        f' font-weight:700; text-decoration:none;">{html.escape(label)} &#8599;</a>'
+    )
+
+
 def render_verify_email(verification_url: str) -> tuple:
     """Template 1 — sent right after signup, before the account is usable.
 
