@@ -177,7 +177,16 @@ def post_source_oauth_create(request, payload: SourceGoogleOAuthCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return airbytehelpers.create_oauth_source(orguser, payload)
+    res = airbytehelpers.create_oauth_source(orguser, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=res.get("sourceId", ""),
+        action=AuditLogAction.CREATE,
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
+    return res
 
 
 @airbyte_router.put("/sources/oauth/{source_id}")
@@ -198,7 +207,16 @@ def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthU
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return airbytehelpers.update_oauth_source(orguser, source_id, payload)
+    res = airbytehelpers.update_oauth_source(orguser, source_id, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=res.get("sourceId", ""),
+        action=AuditLogAction.UPDATE,
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
+    return res
 
 
 @airbyte_router.put("/sources/{source_id}")
