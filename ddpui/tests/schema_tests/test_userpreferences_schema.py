@@ -1,6 +1,6 @@
 """Schema tests for the UserPreferences trial JSONField contracts.
 
-`TrialWalkthroughState` and `TrialEmailsSentState` document what may live inside two JSON
+`TrialWalkthroughFlowState` and `TrialEmailsSentState` document what may live inside two JSON
 columns. A schema that documents a shape is only worth having if it cannot silently fall behind
 the code that writes that shape — so most of these tests assert the two stay in lockstep with
 their writers rather than re-testing pydantic.
@@ -19,22 +19,12 @@ from ddpui.schemas.userpreferences_schema import (
     TrialEmailsSentState,
     TrialWalkthroughFlow,
     TrialWalkthroughFlowState,
-    TrialWalkthroughState,
 )
-
-
-def test_walkthrough_state_covers_every_accepted_flow():
-    """The column schema must hold a key for every flow the endpoint accepts.
-
-    Adding a fourth flow to the Literal without adding it here would leave a value the API
-    writes but the documented contract denies.
-    """
-    assert set(TrialWalkthroughState.model_fields) == set(get_args(TrialWalkthroughFlow))
 
 
 def test_tracked_flows_are_all_real_walkthrough_flows():
     """TRACKED_FLOWS drives the completion email; a typo there would silently never complete."""
-    assert set(TRACKED_FLOWS) <= set(TrialWalkthroughState.model_fields)
+    assert set(TRACKED_FLOWS) <= set(get_args(TrialWalkthroughFlow))
 
 
 def test_emails_sent_state_covers_every_stamped_flag():

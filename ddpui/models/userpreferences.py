@@ -17,9 +17,9 @@ class UserPreferences(models.Model):
         null=True,
         blank=True,
     )
-    # Shape: `TrialWalkthroughState` in ddpui/schemas/userpreferences_schema.py — keyed by flow
-    # name ("product_tour" | "insights" | "automate_pipeline"), each value a
-    # `TrialWalkthroughFlowState` ({"skipped": bool, "completed": bool}, never both true).
+    # Shape: `{flow: TrialWalkthroughFlowState}` — see ddpui/schemas/userpreferences_schema.py.
+    # Keyed by flow name ("product_tour" | "insights" | "automate_pipeline"), each value
+    # {"skipped": bool, "completed": bool}, never both true.
     # Per-step progress and which fork (sample/own_data) stays in the frontend's localStorage;
     # this is only the final-state gate deciding whether to offer that flow again.
     trial_walkthrough = models.JSONField(default=dict, blank=True)

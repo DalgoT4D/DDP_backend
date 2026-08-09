@@ -31,36 +31,25 @@ class UpdateTrialWalkthroughSchema(Schema):
 
 
 class TrialWalkthroughFlowState(Schema):
-    """One flow's entry inside the `UserPreferences.trial_walkthrough` JSONField.
+    """One entry inside the `UserPreferences.trial_walkthrough` JSONField.
 
-    The two flags are mutually exclusive by construction: the endpoint replaces the whole
-    entry on every write, so completing a flow skipped earlier clears `skipped` in the same
-    write. Only the FINAL state lives here — per-step progress and which fork the user took
-    (sample data vs their own) stay in the frontend's localStorage.
+    The column is `{flow: TrialWalkthroughFlowState}`, keyed by `TrialWalkthroughFlow` — it
+    starts as `{}` for every user and gains one key at a time, written only by
+    `PUT /api/userpreferences/trial-walkthrough` when the frontend reports a flow finished or
+    dismissed. An absent key means the user has neither completed nor skipped that flow.
+
+    The two flags are mutually exclusive by construction: the endpoint replaces the whole entry
+    on every write, so completing a flow skipped earlier clears `skipped` in the same write.
+    Only the FINAL state lives here — per-step progress and which fork the user took (sample
+    data vs their own) stay in the frontend's localStorage.
+
+    NB `product_tour` is stored here but deliberately does NOT count toward trial completion —
+    see `TRACKED_FLOWS` in `ddpui/core/trial/lifecycle_emails.py`, which counts only `insights`
+    and `automate_pipeline`.
     """
 
     skipped: bool = False
     completed: bool = False
-
-
-class TrialWalkthroughState(Schema):
-    """The whole `UserPreferences.trial_walkthrough` JSONField — every key it can hold.
-
-    Starts as `{}` for every user and gains one key at a time, written only by
-    `PUT /api/userpreferences/trial-walkthrough` when the frontend reports a flow finished or
-    dismissed. A key that is absent means the user has neither completed nor skipped that flow.
-
-    NB `product_tour` is tracked here but deliberately does NOT count toward trial completion —
-    see `TRACKED_FLOWS` in `ddpui/core/trial/lifecycle_emails.py`, which counts only `insights`
-    and `automate_pipeline`.
-
-    This schema is the contract for the column; it is not what the endpoint accepts (that is
-    `UpdateTrialWalkthroughSchema`, one flow at a time).
-    """
-
-    product_tour: Optional[TrialWalkthroughFlowState] = None
-    insights: Optional[TrialWalkthroughFlowState] = None
-    automate_pipeline: Optional[TrialWalkthroughFlowState] = None
 
 
 class TrialEmailsSentState(Schema):
