@@ -52,6 +52,8 @@ from ddpui.core.pipelinefunctions import (
     fetch_pipeline_lock_v1,
 )
 from ddpui.auth import has_permission
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 orgtask_router = Router()
 logger = CustomLogger("ddpui")
@@ -97,6 +99,15 @@ def post_orgtask(request, payload: CreateOrgTaskPayload):
             )
 
             dataflow = create_prefect_deployment_for_dbtcore_task(orgtask, dbt_project_params)
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgtask.uuid),
+        action=AuditLogAction.CREATE,
+        resource_fields={"name": orgtask.task.slug},
+    )
 
     return {
         **model_to_dict(orgtask, fields=["parameters"]),
@@ -176,6 +187,14 @@ def post_system_transformation_tasks(request):
     _, error = create_default_transform_tasks(org, dbt_project_params)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(org.dbt.id),
+        action=AuditLogAction.CREATE,
+    )
 
     return {"success": 1}
 
@@ -271,9 +290,10 @@ def get_prefect_transformation_tasks(request, include_edr: bool = False):
 def delete_system_transformation_tasks(request):
     """delete tasks and related objects for an org"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     secret_block = OrgPrefectBlockv1.objects.filter(
-        org=orguser.org,
+        org=org,
         block_type=SECRET,
     ).first()
     if secret_block:
@@ -281,7 +301,7 @@ def delete_system_transformation_tasks(request):
         prefect_service.delete_secret_block(secret_block.block_id)
         secret_block.delete()
 
-    orgdbt = orguser.org.dbt
+    orgdbt = org.dbt
     if orgdbt is None:
         raise HttpError(400, "dbt is not configured for this client")
 
@@ -293,6 +313,8 @@ def delete_system_transformation_tasks(request):
                 f"Failed deleting orgtask with id {org_task.id} of type {org_task.task.slug}. Skipping and continuing to next task deletion"
             )
             continue
+
+    return {"success": 1}
 
 
 @orgtask_router.delete("{orgtask_uuid}/")
@@ -338,12 +360,24 @@ def post_delete_orgtask(request, orgtask_uuid):  # pylint: disable=unused-argume
     ):
         raise HttpError(403, "Cannot delete the orgtask since its part of a pipeline")
 
+    task_uuid = str(org_task.uuid)
+    task_slug = org_task.task.slug
+
     _, error = delete_orgtask(org_task)
 
     if error:
         logger.info(
-            f"Failed deleting orgtask with id {org_task.id} of type {org_task.task.slug}. Skipping and continuing to next task deletion"
+            f"Failed deleting orgtask with id {org_task.id} of type {task_slug}. Skipping and continuing to next task deletion"
         )
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=task_uuid,
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": task_slug},
+    )
 
     return {"success": 1}

@@ -45,6 +45,8 @@ from ddpui.schemas.chart_schemas import (
     GeoJSONUpload,
 )
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
 
@@ -996,6 +998,15 @@ def download_chart_data_csv(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{chart_type}_{table_name}_{timestamp}.csv"
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CHART,
+        resource_id="",
+        action=AuditLogAction.EXPORT,
+        resource_fields={"format": "csv"},
+    )
+
     # Stream response using common function
     response = StreamingHttpResponse(
         stream_chart_data_csv(org_warehouse, payload, page_size=5000),
@@ -1099,6 +1110,7 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
 def create_chart(request, payload: ChartCreate):
     """Create a new chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # ChartData / ChartService operate on dicts internally; ChartCreate.extra_config
     # is a typed sub-schema (validated already), so convert back here.
@@ -1128,6 +1140,22 @@ def create_chart(request, payload: ChartCreate):
 
         logger.info(f"Chart {chart.id} saved successfully (type={chart.chart_type})")
 
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart.id),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "title": payload.title,
+                "description": payload.description or "",
+                "chart_type": payload.chart_type,
+                "schema_name": payload.schema_name,
+                "table_name": payload.table_name,
+                "extra_config": extra_config,
+            },
+        )
+
     except ChartValidationError as e:
         logger.error(f"Chart validation error: {e.message}")
         raise HttpError(400, e.message) from None
@@ -1154,6 +1182,7 @@ def create_chart(request, payload: ChartCreate):
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # ChartUpdate.extra_config is a typed sub-schema when chart_type was sent
     # alongside it; otherwise it's still a raw dict (or None). Either way the
@@ -1165,7 +1194,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
     try:
         chart = ChartService.update_chart(
             chart_id=chart_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             title=payload.title,
             description=payload.description,
@@ -1173,6 +1202,30 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
             schema_name=payload.schema_name,
             table_name=payload.table_name,
             extra_config=extra_config,
+        )
+
+        # ChartService.update_chart only touches a field when it's not None —
+        # a genuine partial patch. Only fields actually present in this
+        # request are logged, using that exact same criterion. "title" is the
+        # exception: always included (current value, not just when touched)
+        # so the row stays self-identifying without a separate name column.
+        raw_resource_fields = {
+            "title": payload.title,
+            "description": payload.description,
+            "chart_type": payload.chart_type,
+            "schema_name": payload.schema_name,
+            "table_name": payload.table_name,
+            "extra_config": extra_config,
+        }
+        resource_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+        resource_fields["title"] = chart.title
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.CHART,
+            resource_id=str(chart_id),
+            action=AuditLogAction.UPDATE,
+            resource_fields=resource_fields,
         )
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
@@ -1198,13 +1251,23 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        ChartService.delete_chart(chart_id, orguser.org, orguser)
+        chart_name = ChartService.delete_chart(chart_id, org, orguser)
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CHART,
+        resource_id=str(chart_id),
+        action=AuditLogAction.DELETE,
+        resource_fields={"title": chart_name},
+    )
 
     return {"success": True}
 
@@ -1214,12 +1277,27 @@ def delete_chart(request, chart_id: int):
 def bulk_delete_charts(request, payload: BulkDeleteRequest):
     """Delete multiple charts"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     if not payload.chart_ids:
         raise HttpError(400, "No chart IDs provided")
 
     try:
-        result = ChartService.bulk_delete_charts(payload.chart_ids, orguser.org, orguser)
+        result = ChartService.bulk_delete_charts(payload.chart_ids, org, orguser)
+        deleted_titles = result.pop("deleted_titles", [])
+
+        # Log single audit entry for bulk delete
+        deleted_count = result.get("deleted_count", 0)
+        if deleted_count > 0:
+            create_audit_log(
+                org=org,
+                orguser=orguser,
+                resource_type=AuditLogResourceType.CHART,
+                resource_id=",".join(str(cid) for cid in payload.chart_ids),
+                action=AuditLogAction.DELETE,
+                resource_fields={"titles": deleted_titles},
+            )
+
         return {
             "success": True,
             **result,

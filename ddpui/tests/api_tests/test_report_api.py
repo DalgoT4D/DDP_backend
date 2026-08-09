@@ -40,8 +40,17 @@ from ddpui.api.report_api import (
     toggle_report_sharing,
     get_report_sharing_status,
     list_dashboard_datetime_columns,
+    create_comment,
+    update_comment,
+    delete_comment,
 )
-from ddpui.schemas.report_schema import SnapshotCreate, SnapshotUpdate, DateColumnSchema
+from ddpui.schemas.report_schema import (
+    SnapshotCreate,
+    SnapshotUpdate,
+    DateColumnSchema,
+    CommentCreate,
+    CommentUpdate,
+)
 from ddpui.schemas.dashboard_schema import ShareToggle
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
@@ -786,3 +795,215 @@ class TestListDashboardDatetimeColumns:
             with pytest.raises(HttpError) as exc_info:
                 list_dashboard_datetime_columns(request, sample_dashboard.id)
             assert exc_info.value.status_code == 502
+
+
+# ================================================================================
+# Audit Log Tests for Reports
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+class TestReportAuditLogs:
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_create_snapshot_creates_audit_log(
+        self, mock_audit_log, orguser, sample_dashboard, sample_filter, sample_chart, seed_db
+    ):
+        """Test that creating a report snapshot creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = SnapshotCreate(
+            dashboard_id=sample_dashboard.id,
+            title="Audit Log Test Report",
+            date_column=DateColumnSchema(
+                schema_name="public", table_name="orders", column_name="created_at"
+            ),
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+        )
+
+        response = create_snapshot(request, payload)
+
+        # Response is wrapped with api_response: {"success": True, "data": {...}}
+        assert response["data"]["title"] == "Audit Log Test Report"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.CREATE
+
+        # period_start/period_end are Python `date` objects — the default
+        # JSONField encoder can't serialize those, so they must be converted
+        # to strings before being logged (silently breaks the background
+        # write otherwise, since create_audit_log never raises).
+        resource_fields = call_kwargs["resource_fields"]
+        assert resource_fields["title"] == "Audit Log Test Report"
+        assert resource_fields["dashboard"] == sample_dashboard.title
+        assert resource_fields["period_start"] == "2025-01-01"
+        assert isinstance(resource_fields["period_start"], str)
+        assert resource_fields["period_end"] == "2025-03-31"
+        assert resource_fields["date_column"]["column_name"] == "created_at"
+
+        # Cleanup
+        ReportSnapshot.objects.filter(title="Audit Log Test Report").delete()
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_update_snapshot_creates_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """Test that updating a report snapshot creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = SnapshotUpdate(summary="Updated summary text")
+
+        response = update_snapshot(request, sample_snapshot.id, payload)
+
+        # Response is wrapped with api_response: {"success": True, "data": {...}}
+        assert response["data"]["summary"] == "Updated summary text"
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.UPDATE
+        assert call_kwargs["resource_id"] == str(sample_snapshot.id)
+        assert call_kwargs["resource_fields"] == {
+            "title": sample_snapshot.title,
+            "summary": "Updated summary text",
+        }
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_update_snapshot_without_summary_skips_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """SnapshotUpdate's only field is summary — a request that doesn't
+        send it has nothing to log, matching this endpoint's pre-existing
+        behavior (it already skipped logging when nothing changed)."""
+        request = mock_request(orguser)
+        payload = SnapshotUpdate()
+
+        update_snapshot(request, sample_snapshot.id, payload)
+
+        mock_audit_log.assert_not_called()
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_delete_snapshot_creates_audit_log(self, mock_audit_log, orguser, org, seed_db):
+        """Test that deleting a report snapshot creates an audit log entry."""
+        snapshot = ReportSnapshot.objects.create(
+            title="Report To Delete",
+            date_column={
+                "schema_name": "public",
+                "table_name": "orders",
+                "column_name": "created_at",
+            },
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 3, 31),
+            frozen_dashboard={},
+            frozen_chart_configs={},
+            created_by=orguser,
+            org=org,
+        )
+        snapshot_id = snapshot.id
+
+        request = mock_request(orguser)
+        delete_snapshot(request, snapshot_id)
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.DELETE
+        assert call_kwargs["resource_id"] == str(snapshot_id)
+        assert call_kwargs["resource_fields"] == {"title": "Report To Delete"}
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_toggle_sharing_creates_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """Test that toggling report sharing creates an audit log entry."""
+        request = mock_request(orguser)
+        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
+        assert call_kwargs["action"] == AuditLogAction.SHARE
+        assert call_kwargs["resource_id"] == str(sample_snapshot.id)
+        assert call_kwargs["resource_fields"] == {
+            "title": sample_snapshot.title,
+            "is_public": {"old": False, "new": True},
+        }
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_create_comment_creates_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """Test that creating a comment creates an audit log entry."""
+        request = mock_request(orguser)
+        payload = CommentCreate(target_type="summary", content="Nice trend this quarter.")
+
+        create_comment(request, sample_snapshot.id, payload)
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["org"] == orguser.org
+        assert call_kwargs["resource_type"] == AuditLogResourceType.COMMENT
+        assert call_kwargs["action"] == AuditLogAction.CREATE
+        assert call_kwargs["resource_fields"] == {
+            "content": "Nice trend this quarter.",
+            "target_type": "summary",
+            "snapshot": sample_snapshot.title,
+        }
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_update_comment_creates_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """Test that updating a comment creates an audit log entry."""
+        request = mock_request(orguser)
+        comment = create_comment(
+            request,
+            sample_snapshot.id,
+            CommentCreate(target_type="summary", content="Original text."),
+        )
+        mock_audit_log.reset_mock()
+
+        update_comment(
+            request,
+            sample_snapshot.id,
+            comment["data"]["id"],
+            CommentUpdate(content="Edited text."),
+        )
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["resource_type"] == AuditLogResourceType.COMMENT
+        assert call_kwargs["action"] == AuditLogAction.UPDATE
+        assert call_kwargs["resource_fields"] == {
+            "content": "Edited text.",
+            "target_type": "summary",
+            "snapshot": sample_snapshot.title,
+        }
+
+    @patch("ddpui.api.report_api.create_audit_log")
+    def test_delete_comment_creates_audit_log(
+        self, mock_audit_log, orguser, sample_snapshot, seed_db
+    ):
+        """Deleting a comment logs its content, captured before deletion."""
+        request = mock_request(orguser)
+        comment = create_comment(
+            request,
+            sample_snapshot.id,
+            CommentCreate(target_type="summary", content="To be deleted."),
+        )
+        mock_audit_log.reset_mock()
+
+        delete_comment(request, sample_snapshot.id, comment["data"]["id"])
+
+        mock_audit_log.assert_called_once()
+        call_kwargs = mock_audit_log.call_args[1]
+        assert call_kwargs["resource_type"] == AuditLogResourceType.COMMENT
+        assert call_kwargs["action"] == AuditLogAction.DELETE
+        assert call_kwargs["resource_id"] == str(comment["data"]["id"])
+        assert call_kwargs["resource_fields"] == {
+            "content": "To be deleted.",
+            "target_type": "summary",
+            "snapshot": sample_snapshot.title,
+        }
