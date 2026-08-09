@@ -25,6 +25,13 @@ TRIAL_ORG_NAME_PREFIX = "Trial"
 # the reaper silently match nothing.
 TRIAL_ORG_SLUG_PREFIX = "trial-"
 
+# The prefix alone is too loose to delete on: a real org named "Trial Foundation" slugs to
+# "trial-foundation" and would match. Every clone slug is `trial-<email_hash8>-<label>` and
+# `email_hash8` is an 8-char slice of a sha256 hexdigest, so requiring those 8 hex chars is a
+# marker no human-chosen org name realistically collides with. Used both as a Django `__regex`
+# lookup (Postgres `~`) and via `re` for in-Python checks; slugs are always lowercase.
+TRIAL_ORG_SLUG_REGEX = r"^trial-[0-9a-f]{8}-"
+
 # gap between orgs in a `--expired` reap. One teardown hits Airbyte, GitHub, Prefect AND the
 # shared trials RDS; firing several back-to-back would burst all four at once, on instances also
 # serving live users and live clones. Spacing them keeps the load flat.

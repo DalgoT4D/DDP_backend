@@ -49,7 +49,8 @@ def test_cleanup_deletes_org_db_and_user(mock_delete_org, mock_drop):
     role, _ = Role.objects.get_or_create(
         slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1}
     )
-    org = Org.objects.create(name="Trial x", slug="trial-x")
+    # a real clone slug, `trial-<8 hex>-<label>` — the shape the command matches on
+    org = Org.objects.create(name="Trial x", slug=f"trial-{email_hash8('t@x.org')}-x")
     user = User.objects.create_user(username="t@x.org", email="t@x.org")
     OrgUser.objects.create(user=user, org=org, new_role=role)
 
@@ -218,3 +219,39 @@ def test_reap_task_delegates_to_the_command(mock_call_command):
 
     assert reap_expired_trial_orgs() == "reaped 2 expired trial(s)"
     mock_call_command.assert_called_once_with("cleanup_trial_clone", expired=True)
+
+
+@patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
+@patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
+def test_reap_never_touches_the_users_other_org(mock_delete_org, mock_drop):
+    """A trial email later invited into a REAL org must not take that org down with the trial.
+
+    account_exists_for_email blocks a trial for an email that already has an OrgUser, but nothing
+    stops the invitation going the other way afterwards — and this runs unattended at midnight.
+    """
+    role, _ = Role.objects.get_or_create(
+        slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1}
+    )
+    trial_org = make_trial("dual@x.org")
+    real_org = Org.objects.create(name="Acme Health", slug="acme-health")
+    user = User.objects.get(username="dual@x.org")
+    OrgUser.objects.create(user=user, org=real_org, new_role=role)
+
+    call_command("cleanup_trial_clone", "--expired")
+
+    mock_delete_org.assert_called_once_with(trial_org)
+    assert Org.objects.filter(slug="acme-health").exists()
+    # and the login survives, because the user still belongs to the real org
+    assert User.objects.filter(username="dual@x.org").exists()
+
+
+@patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
+@patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
+def test_expired_skips_org_merely_named_trial(mock_delete_org, mock_drop):
+    """ "Trial Foundation" slugs to `trial-foundation` — a prefix match would reap it."""
+    make_trial("named@x.org", slug="trial-foundation")
+
+    call_command("cleanup_trial_clone", "--expired")
+
+    mock_delete_org.assert_not_called()
+    assert Org.objects.filter(slug="trial-foundation").exists()
