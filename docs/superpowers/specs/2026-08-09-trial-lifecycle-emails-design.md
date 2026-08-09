@@ -215,10 +215,24 @@ Add `trial_emails_sent` to `UserPreferences.to_json()` for parity with the other
 
 ### Concurrency
 
-A JSON field carries no DB-level uniqueness, so two overlapping sweeps could both decide to send.
-The read-decide-send-stamp sequence therefore runs inside `transaction.atomic()` with
-`select_for_update()` on the `UserPreferences` row. The flag is written **after** a successful
-send, so an SES failure leaves the flag unset and the next run retries.
+The flag is written **after** a successful send, so an SES failure leaves the flag unset and the
+next run retries.
+
+The send happens **outside** any database transaction. An earlier draft of this spec wrapped the
+whole read-decide-send-stamp sequence in `transaction.atomic()` with `select_for_update()`; that
+was amended during implementation because it made the failure mode worse, not better. With the
+send inside the transaction, a `save()` or commit failure *after* the email had already gone out
+rolled the block back, left the flag unpersisted, and caused the next hourly run to send the same
+email again — and it held a `FOR UPDATE` row lock open across an SES round trip, so one hung call
+could stall the serial sweep.
+
+The shipped shape is: read and decide, send, then stamp inside a short `transaction.atomic()` that
+re-selects the row `select_for_update()` before writing.
+
+The consequence, stated plainly: delivery is **at-least-once**, not exactly-once. Because the send
+no longer happens under a held lock, two sweeps overlapping within the same hour could in principle
+both send before either stamps. That is an accepted trade-off — the sweep is hourly and serial, and
+a duplicate nudge is a milder failure than a missed expiry warning.
 
 ## Templates
 
