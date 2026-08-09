@@ -9,6 +9,11 @@ from ddpui.utils.aws_client import AWSClient
 from ddpui.utils.email_templates import (
     render_verify_email,
     render_trial_welcome_email,
+    render_trial_day3_not_started_email,
+    render_trial_day3_in_progress_email,
+    render_trial_completion_email,
+    render_trial_midpoint_email,
+    render_trial_pre_end_email,
 )
 
 
@@ -112,6 +117,68 @@ def send_trial_welcome_email(to_email: str, login_url: str) -> None:
     """sent once a free-trial clone finishes — so the user gets in even if they closed the tab"""
     subject = "Welcome to Dalgo — your trial workspace is ready"
     text_body, html_body = render_trial_welcome_email(login_url)
+    send_html_message(to_email, subject, text_body, html_body)
+
+
+def send_trial_day3_not_started_email(
+    to_email: str, workspace_url: str, schedule_call_url: str
+) -> None:
+    """day-3 nudge for a trial user who has completed no walkthrough yet"""
+    subject = "Ready to see Dalgo in action?"
+    text_body, html_body = render_trial_day3_not_started_email(workspace_url, schedule_call_url)
+    send_html_message(to_email, subject, text_body, html_body)
+
+
+def send_trial_day3_in_progress_email(
+    to_email: str, completed_flow: str, workspace_url: str, schedule_call_url: str
+) -> None:
+    """day-3 nudge for a trial user who has completed exactly one walkthrough"""
+    subject = "Pick up where you left off"
+    text_body, html_body = render_trial_day3_in_progress_email(
+        completed_flow, workspace_url, schedule_call_url
+    )
+    send_html_message(to_email, subject, text_body, html_body)
+
+
+def send_trial_completion_email(
+    to_email: str, upgrade_url: str, workspace_url: str, schedule_call_url: str
+) -> None:
+    """sent once both tracked walkthroughs are complete, on or after day 3"""
+    subject = "You've completed your tour of Dalgo"
+    text_body, html_body = render_trial_completion_email(
+        upgrade_url, workspace_url, schedule_call_url
+    )
+    send_html_message(to_email, subject, text_body, html_body)
+
+
+def send_trial_midpoint_email(
+    to_email: str, day_number: int, total_days: int, upgrade_url: str, schedule_call_url: str
+) -> None:
+    """mid-trial nudge, e.g. day 7 of 14"""
+    subject = "You're halfway through your Dalgo trial"
+    text_body, html_body = render_trial_midpoint_email(
+        day_number, total_days, upgrade_url, schedule_call_url
+    )
+    send_html_message(to_email, subject, text_body, html_body)
+
+
+def send_trial_pre_end_email(
+    to_email: str,
+    day_number: int,
+    total_days: int,
+    end_date: str,
+    upgrade_url: str,
+    schedule_call_url: str,
+) -> None:
+    """expiry warning, sent two days before the trial ends.
+
+    `end_date` is already formatted for display (e.g. "15 Aug 2026") — the renderer does no
+    date maths of its own.
+    """
+    subject = f"{total_days - day_number} days left in your Dalgo trial"
+    text_body, html_body = render_trial_pre_end_email(
+        day_number, total_days, end_date, upgrade_url, schedule_call_url
+    )
     send_html_message(to_email, subject, text_body, html_body)
 
 

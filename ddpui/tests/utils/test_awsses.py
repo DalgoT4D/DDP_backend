@@ -8,6 +8,11 @@ from ddpui.utils.awsses import (
     send_youve_been_added_email,
     send_trial_verification_email,
     send_trial_welcome_email,
+    send_trial_day3_not_started_email,
+    send_trial_day3_in_progress_email,
+    send_trial_completion_email,
+    send_trial_midpoint_email,
+    send_trial_pre_end_email,
 )
 
 
@@ -96,3 +101,57 @@ def test_send_trial_welcome_email():
         assert "login_url" in args[2]  # plain-text body
         assert "login_url" in args[3]  # html body
         assert "#00897B" in args[3]  # Dalgo shell
+
+
+def test_send_trial_day3_not_started_email():
+    """sends the html+text pair with the day-3 not-started subject"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send:
+        send_trial_day3_not_started_email("to@x.org", "https://app", "https://cal")
+        assert mock_send.call_count == 1
+        to_email, subject, text_body, html_body = mock_send.call_args[0]
+        assert to_email == "to@x.org"
+        assert subject == "Ready to see Dalgo in action?"
+        assert "Ready to see Dalgo in action?" in text_body
+        assert "OPEN WORKSPACE" in html_body
+
+
+def test_send_trial_day3_in_progress_email_passes_completed_flow_through():
+    """the completed flow reaches the renderer, so the right row is ticked"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send:
+        send_trial_day3_in_progress_email(
+            "to@x.org", "automate_pipeline", "https://app", "https://cal"
+        )
+        _, subject, _, html_body = mock_send.call_args[0]
+        assert subject == "Pick up where you left off"
+        assert html_body.index("Setup an automated data pipeline") < html_body.index(
+            "Build your first insight"
+        )
+
+
+def test_send_trial_completion_email():
+    """the completion email carries the upgrade url"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send:
+        send_trial_completion_email("to@x.org", "https://upgrade", "https://app", "https://cal")
+        _, subject, _, html_body = mock_send.call_args[0]
+        assert subject == "You've completed your tour of Dalgo"
+        assert "https://upgrade" in html_body
+
+
+def test_send_trial_midpoint_email():
+    """the midpoint email renders the day-of-total progress bar"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send:
+        send_trial_midpoint_email("to@x.org", 7, 14, "https://upgrade", "https://cal")
+        _, subject, _, html_body = mock_send.call_args[0]
+        assert subject == "You're halfway through your Dalgo trial"
+        assert "Day 7 of 14" in html_body
+
+
+def test_send_trial_pre_end_email():
+    """the pre-end email shows the remaining days and the formatted end date"""
+    with patch("ddpui.utils.awsses.send_html_message") as mock_send:
+        send_trial_pre_end_email(
+            "to@x.org", 12, 14, "15 Aug 2026", "https://upgrade", "https://cal"
+        )
+        _, subject, _, html_body = mock_send.call_args[0]
+        assert subject == "2 days left in your Dalgo trial"
+        assert "15 Aug 2026" in html_body
