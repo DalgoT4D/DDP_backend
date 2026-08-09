@@ -278,7 +278,8 @@ def test_clone_tears_down_db_on_step2_mid_failure(
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
     mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
-    mock_create_wh.return_value = (None, "create_warehouse blew up")
+    # create_warehouse raises on failure — it does not return a (result, error) pair
+    mock_create_wh.side_effect = Exception("create_warehouse blew up")
     mock_cleanup_instance = mock_cleanup_cls.return_value
 
     with pytest.raises(RuntimeError, match="create_warehouse failed"):
@@ -334,7 +335,8 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
     mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
     mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
     mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
-    mock_create_wh.return_value = (None, "create_warehouse blew up")
+    # create_warehouse raises on failure — it does not return a (result, error) pair
+    mock_create_wh.side_effect = Exception("create_warehouse blew up")
     # delete_org() itself explodes during teardown
     mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
 
@@ -1338,15 +1340,10 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
         config={"type": "rename"},
     )
 
-    cli_profile_block = OrgPrefectBlockv1.objects.create(
-        org=trial_org,
-        block_type=DBTCLIPROFILE,
-        block_id="trial-dbt-cli-block-id",
-        block_name="trial-dbt-cli-block-name",
-    )
+    # deliberately NO cli_profile_block — that field is legacy (only migration 0143 wrote it) and
+    # setup_managed_git_workspace does not set it. _step_dbt must not depend on it.
     trial_dbt = _make_orgdbt("trial-dbt")
     trial_dbt.transform_type = "github"  # setup hardcodes GIT; _step_dbt must mirror 'ui'
-    trial_dbt.cli_profile_block = cli_profile_block
     trial_dbt.save()
 
     def fake_setup(org, project_name, default_schema):
@@ -1380,9 +1377,7 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
     assert run.manifest["dbt_files_copied"] == mock_regen.return_value
 
     mock_dbt_project_manager.gather_dbt_project_params.assert_called_once_with(trial_org, trial_dbt)
-    mock_create_transform_tasks.assert_called_once_with(
-        trial_org, cli_profile_block, gathered_params
-    )
+    mock_create_transform_tasks.assert_called_once_with(trial_org, gathered_params)
     assert run.manifest["dbt_transform_tasks_created"] is True
 
 

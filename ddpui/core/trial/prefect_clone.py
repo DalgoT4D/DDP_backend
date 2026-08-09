@@ -170,9 +170,7 @@ def build_pipeline_payload(
     )
 
 
-def _rebake_manual_deployment_params(
-    dataflow: OrgDataFlowv1, org: Org, cli_block, dbt_project_params
-) -> None:
+def _rebake_manual_deployment_params(dataflow: OrgDataFlowv1, org: Org, dbt_project_params) -> None:
     """Rebuild a manual (Transform-page) deployment's baked `deployment_params` from its linked
     OrgTasks' CURRENT parameters and push them to Prefect.
 
@@ -192,7 +190,6 @@ def _rebake_manual_deployment_params(
     task_configs, err = pipeline_with_orgtasks(
         org,
         chain,
-        cli_block=cli_block,
         dbt_project_params=dbt_project_params,
         gitrepo_url=org.dbt.gitrepo_url if org.dbt else None,
     )
@@ -231,9 +228,9 @@ def sync_transform_tasks_and_deployments(template: Org, trial_org: Org) -> dict:
     Returns counts for the run manifest.
     """
     trial_dbt = trial_org.dbt
-    if trial_dbt is None or trial_dbt.cli_profile_block is None:
+    if trial_dbt is None:
         raise TrialCloneError(
-            f"trial org {trial_org.slug} has no dbt workspace/cli profile block; "
+            f"trial org {trial_org.slug} has no dbt workspace; "
             "step 5 must run before transform-task sync"
         )
 
@@ -246,7 +243,6 @@ def sync_transform_tasks_and_deployments(template: Org, trial_org: Org) -> dict:
         _resolve_trial_transform_orgtask(template_orgtask, trial_org)
         standalone_seen += 1
 
-    cli_block = trial_dbt.cli_profile_block
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(trial_org, trial_dbt)
     deployments_created = 0
     deployments_rebaked = 0
@@ -259,12 +255,10 @@ def sync_transform_tasks_and_deployments(template: Org, trial_org: Org) -> dict:
             .first()
         )
         if manual_link is None:
-            create_prefect_deployment_for_dbtcore_task(org_task, cli_block, dbt_project_params)
+            create_prefect_deployment_for_dbtcore_task(org_task, dbt_project_params)
             deployments_created += 1
         elif org_task.parameters:
-            _rebake_manual_deployment_params(
-                manual_link.dataflow, trial_org, cli_block, dbt_project_params
-            )
+            _rebake_manual_deployment_params(manual_link.dataflow, trial_org, dbt_project_params)
             deployments_rebaked += 1
 
     return {

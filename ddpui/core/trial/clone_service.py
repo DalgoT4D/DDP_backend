@@ -273,9 +273,12 @@ def _step_warehouse(run: CloneRun) -> None:
         destinationDefId=dest_def_id,
         airbyteConfig=airbyte_config,
     )
-    _, err = create_warehouse(run.trial_org, wh_payload)
-    if err:
-        raise TrialCloneError(f"create_warehouse failed: {err}")
+    # create_warehouse returns the OrgWarehouse itself and raises on failure — it is NOT a
+    # (result, error) helper like most of airbytehelpers
+    try:
+        create_warehouse(run.trial_org, wh_payload)
+    except Exception as err:  # skipcq PYL-W0703
+        raise TrialCloneError(f"create_warehouse failed: {err}") from err
 
     run.manifest["trial_destination_defid"] = dest_def_id
 
@@ -518,13 +521,11 @@ def _step_dbt(run: CloneRun) -> None:
     run.manifest["dbt_models"] = len(model_map)
     run.manifest["dbt_files_copied"] = copied_files
 
-    if trial_dbt.cli_profile_block is None:
-        raise TrialCloneError(
-            "trial org's dbt workspace has no cli_profile_block; "
-            "setup_managed_git_workspace should have set it"
-        )
+    # NB: no cli_profile_block check here — that field is legacy (only migration 0143 ever wrote
+    # it). dbt credentials now come from the org's dbt-profile Secret block, which
+    # setup_managed_git_workspace creates via create_or_update_dbt_profile_secret_blk.
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(run.trial_org, trial_dbt)
-    create_default_transform_tasks(run.trial_org, trial_dbt.cli_profile_block, dbt_project_params)
+    create_default_transform_tasks(run.trial_org, dbt_project_params)
     run.manifest["dbt_transform_tasks_created"] = True
 
 

@@ -253,19 +253,18 @@ def test_clone_orchestrate_dataflows_calls_create_pipeline_per_template_dataflow
 # ---------------------------------------------------------------------------
 
 
-def _make_trial_with_cli_block():
-    """trial org whose OrgDbt has a cli_profile_block, as step 5 guarantees before step 6."""
-    from ddpui.models.org import OrgPrefectBlockv1
+def _make_trial_with_dbt():
+    """trial org whose OrgDbt is set, as step 5 guarantees before step 6.
 
+    No cli_profile_block: that field is legacy (only migration 0143 wrote it) and step 5's
+    setup_managed_git_workspace does not set it — dbt credentials come from the org's
+    dbt-profile Secret block instead.
+    """
     template = Org.objects.create(name="tmpl-sync", slug="tmpl-sync")
     template.dbt = _make_orgdbt("tmpl-sync")
     template.save()
     trial_org = Org.objects.create(name="Trial sync", slug="trial-sync")
     trial_dbt = _make_orgdbt("trial-sync")
-    cli_block = OrgPrefectBlockv1.objects.create(
-        org=trial_org, block_type="dbt cli profile", block_name="trial-sync-cli", block_id="b-1"
-    )
-    trial_dbt.cli_profile_block = cli_block
     trial_dbt.save()
     trial_org.dbt = trial_dbt
     trial_org.save()
@@ -283,7 +282,7 @@ def test_sync_transform_tasks_copies_standalone_params_and_fixes_deployments(
     the trial (adopting the param-less step-5 row); (b) the manual deployment that step 5 baked
     with empty params must be rebaked with the copied params; (c) a second parameter variant
     minted fresh must get a manual deployment created (step 5 never made one for it)."""
-    template, trial_org = _make_trial_with_cli_block()
+    template, trial_org = _make_trial_with_dbt()
     dbt_task = Task.objects.create(
         type=TaskType.DBT, slug="dbt-run", label="DBT run", command="run"
     )
