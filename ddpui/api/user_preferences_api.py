@@ -6,6 +6,7 @@ from ddpui.schemas.userpreferences_schema import (
     CreateUserPreferencesSchema,
     UpdateUserPreferencesSchema,
     UpdateTrialWalkthroughSchema,
+    TrialWalkthroughFlowState,
 )
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
@@ -93,10 +94,9 @@ def update_trial_walkthrough(request, payload: UpdateTrialWalkthroughSchema):
     # stale `skipped` in the same write. `completed` is checked first so a caller sending both
     # resolves to completed rather than storing a contradiction.
     walkthrough = dict(user_preferences.trial_walkthrough or {})
-    if payload.completed:
-        walkthrough[payload.flow] = {"skipped": False, "completed": True}
-    else:
-        walkthrough[payload.flow] = {"skipped": True, "completed": False}
+    walkthrough[payload.flow] = TrialWalkthroughFlowState(
+        skipped=not payload.completed, completed=bool(payload.completed)
+    ).model_dump()
 
     user_preferences.trial_walkthrough = walkthrough
     user_preferences.save()

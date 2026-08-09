@@ -13,11 +13,13 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from pydantic import ValidationError
 
 from ddpui.core.trial.constants import TRIAL_DURATION_DAYS
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
+from ddpui.schemas.userpreferences_schema import TrialWalkthroughFlowState
 from ddpui.utils.awsses import (
     send_trial_day3_not_started_email,
     send_trial_day3_in_progress_email,
@@ -51,14 +53,25 @@ def completed_flows(trial_walkthrough: dict) -> list:
     """Tracked walkthrough flows this user has COMPLETED, in TRACKED_FLOWS order.
 
     `skipped: true` is not completion — a user who dismissed a walkthrough has not seen what it
-    teaches, so they still deserve the nudge. Malformed entries (None, a bare string) count as
-    not completed rather than raising, because this JSON is written by the frontend.
+    teaches, so they still deserve the nudge.
+
+    Each entry is parsed through `TrialWalkthroughFlowState`, the schema that also defines what
+    the endpoint writes. Malformed entries (None, a bare string, a non-bool flag) count as not
+    completed rather than raising: this JSON is written by the frontend, and one bad entry must
+    not take down a nightly sweep over every live trial.
     """
     walkthrough = trial_walkthrough or {}
     done = []
     for flow in TRACKED_FLOWS:
         entry = walkthrough.get(flow)
-        if isinstance(entry, dict) and entry.get("completed") is True:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            state = TrialWalkthroughFlowState(**entry)
+        except ValidationError:
+            logger.warning("ignoring malformed trial_walkthrough entry for flow %s", flow)
+            continue
+        if state.completed:
             done.append(flow)
     return done
 
