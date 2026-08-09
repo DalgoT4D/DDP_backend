@@ -10,7 +10,21 @@ Design: docs/superpowers/specs/2026-08-09-trial-lifecycle-emails-design.md
 
 from datetime import timedelta
 
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
 from ddpui.core.trial.clone_service import TRIAL_DURATION_DAYS
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
+from ddpui.models.org_user import OrgUser
+from ddpui.models.userpreferences import UserPreferences
+from ddpui.utils.awsses import (
+    send_trial_day3_not_started_email,
+    send_trial_day3_in_progress_email,
+    send_trial_completion_email,
+    send_trial_midpoint_email,
+    send_trial_pre_end_email,
+)
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.lifecycle_emails")
@@ -136,3 +150,102 @@ def decide_email(day_number: int, completed_count: int, flags: dict, now, end_da
         return EMAIL_PRE_END
 
     return None
+
+
+# How OrgPlans.end_date is formatted for the pre-end email, which takes a display string and
+# does no date maths of its own.
+END_DATE_DISPLAY_FORMAT = "%d %b %Y"
+
+
+def send_decided_email(kind, to_email, completed, day_number, total_days, end_date) -> None:
+    """Dispatch to the sender for `kind`.
+
+    Which of the two day-3 templates goes out is decided here, from how many flows are
+    complete — the ladder returns a single EMAIL_DAY3 decision because both templates share
+    one dedupe flag.
+    """
+    workspace_url = settings.FRONTEND_URL_V2 or ""
+    upgrade_url = settings.TRIAL_UPGRADE_URL
+    call_url = settings.TRIAL_SCHEDULE_CALL_URL
+
+    if kind == EMAIL_DAY3:
+        if completed:
+            send_trial_day3_in_progress_email(to_email, completed[0], workspace_url, call_url)
+        else:
+            send_trial_day3_not_started_email(to_email, workspace_url, call_url)
+    elif kind == EMAIL_COMPLETION:
+        send_trial_completion_email(to_email, upgrade_url, workspace_url, call_url)
+    elif kind == EMAIL_MIDPOINT:
+        send_trial_midpoint_email(to_email, day_number, total_days, upgrade_url, call_url)
+    elif kind == EMAIL_PRE_END:
+        send_trial_pre_end_email(
+            to_email,
+            day_number,
+            total_days,
+            end_date.strftime(END_DATE_DISPLAY_FORMAT),
+            upgrade_url,
+            call_url,
+        )
+
+
+def process_trial(org_plan: OrgPlans, now) -> str:
+    """Decide, send and stamp for ONE trial. Returns the email kind sent, or None.
+
+    The whole read-decide-send-stamp sequence runs under `select_for_update` on the
+    UserPreferences row so two overlapping sweeps cannot both decide to send. The flag is
+    written only AFTER the send returns, so an SES failure leaves it unset and the next run
+    retries.
+    """
+    org = org_plan.org
+    orguser = OrgUser.objects.filter(org=org).select_related("user").first()
+    if orguser is None:
+        logger.warning("trial org %s has no orguser; skipping lifecycle email", org.slug)
+        return None
+
+    with transaction.atomic():
+        prefs, _ = UserPreferences.objects.select_for_update().get_or_create(orguser=orguser)
+        day_number, total_days = trial_window(org_plan.start_date, org_plan.end_date, now)
+        completed = completed_flows(prefs.trial_walkthrough)
+        kind = decide_email(
+            day_number, len(completed), prefs.trial_emails_sent, now, org_plan.end_date
+        )
+        if kind is None:
+            return None
+
+        send_decided_email(
+            kind, orguser.user.email, completed, day_number, total_days, org_plan.end_date
+        )
+
+        stamped = dict(prefs.trial_emails_sent or {})
+        for flag in FLAGS_STAMPED_BY[kind]:
+            stamped[flag] = now.isoformat()
+        prefs.trial_emails_sent = stamped
+        prefs.save(update_fields=["trial_emails_sent"])
+
+    logger.info("sent trial '%s' email to %s (org %s)", kind, orguser.user.email, org.slug)
+    return kind
+
+
+def run_trial_lifecycle_sweep(now=None) -> int:
+    """Send any due trial lifecycle emails. Returns how many went out.
+
+    Runs hourly. Postgres does the date filtering, so this only ever iterates live free trials —
+    a handful of rows. Every trial past day 3 keeps matching the query on every run; the
+    per-user flags, not the query, are what stop duplicates.
+    """
+    now = now or timezone.now()
+    org_plans = OrgPlans.objects.filter(
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date__isnull=False,
+        end_date__gt=now,
+    ).select_related("org")
+
+    sent = 0
+    for org_plan in org_plans:
+        try:
+            if process_trial(org_plan, now):
+                sent += 1
+        except Exception as err:  # skipcq PYL-W0703
+            # one bad trial must not stop the sweep
+            logger.error("trial lifecycle email failed for org %s: %s", org_plan.org.slug, err)
+    return sent

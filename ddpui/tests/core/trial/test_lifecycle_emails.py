@@ -1,8 +1,16 @@
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 import pytz
 
+from django.contrib.auth.models import User
+from django.utils import timezone
+
+from ddpui.models.org import Org
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
+from ddpui.models.org_user import OrgUser
+from ddpui.models.userpreferences import UserPreferences
 from ddpui.core.trial.lifecycle_emails import (
     decide_email,
     FLAGS_STAMPED_BY,
@@ -12,6 +20,7 @@ from ddpui.core.trial.lifecycle_emails import (
     EMAIL_PRE_END,
     completed_flows,
     trial_window,
+    run_trial_lifecycle_sweep,
 )
 
 
@@ -192,3 +201,163 @@ def test_decide_email_normalizes_none_flags():
     result = decide_email(3, 0, None, at, END)
     # With no flags, day 3 without completion should return EMAIL_DAY3
     assert result == EMAIL_DAY3
+
+
+pytestmark = pytest.mark.django_db
+
+
+def _make_trial(slug, days_ago, completed=(), plan=OrgPlanType.FREE_TRIAL.value, duration=14):
+    """a free-trial org whose plan started `days_ago` days ago, with the given flows completed"""
+    now = timezone.now()
+    org = Org.objects.create(slug=slug, name=slug, airbyte_workspace_id=None)
+    OrgPlans.objects.create(
+        org=org,
+        base_plan=plan,
+        start_date=now - timedelta(days=days_ago),
+        end_date=now - timedelta(days=days_ago) + timedelta(days=duration),
+    )
+    user = User.objects.create(username=f"{slug}@x.org", email=f"{slug}@x.org")
+    orguser = OrgUser.objects.create(user=user, org=org)
+    UserPreferences.objects.create(
+        orguser=orguser,
+        trial_walkthrough={flow: {"completed": True} for flow in completed},
+    )
+    return org, orguser
+
+
+def test_sweep_sends_not_started_email_on_day_three():
+    """a day-3 trial with nothing completed gets email A and is flagged"""
+    org, orguser = _make_trial("trial-a", days_ago=3)
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email") as mock_send:
+        assert run_trial_lifecycle_sweep() == 1
+        mock_send.assert_called_once()
+        assert mock_send.call_args[0][0] == "trial-a@x.org"
+
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert EMAIL_DAY3 in prefs.trial_emails_sent
+
+
+def test_sweep_sends_in_progress_email_with_the_completed_flow():
+    """one completed flow routes to email B, and the flow name is passed through"""
+    _make_trial("trial-b", days_ago=3, completed=("insights",))
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_in_progress_email") as mock_send:
+        assert run_trial_lifecycle_sweep() == 1
+        assert mock_send.call_args[0][1] == "insights"
+
+
+def test_sweep_sends_completion_email_and_stamps_both_flags():
+    """both flows complete sends C and locks out the day-3 email"""
+    _, orguser = _make_trial("trial-c", days_ago=5, completed=("insights", "automate_pipeline"))
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_completion_email") as mock_send:
+        assert run_trial_lifecycle_sweep() == 1
+        mock_send.assert_called_once()
+
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert EMAIL_COMPLETION in prefs.trial_emails_sent
+    assert EMAIL_DAY3 in prefs.trial_emails_sent
+
+
+def test_sweep_is_idempotent():
+    """a second sweep with unchanged state sends nothing"""
+    _make_trial("trial-d", days_ago=3)
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"):
+        assert run_trial_lifecycle_sweep() == 1
+        assert run_trial_lifecycle_sweep() == 0
+
+
+def test_sweep_sends_one_email_per_run():
+    """a day-7 trial with no flags gets the day-3 email first, midpoint on the next run"""
+    _make_trial("trial-e", days_ago=7)
+    with patch(
+        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"
+    ) as mock_a, patch("ddpui.core.trial.lifecycle_emails.send_trial_midpoint_email") as mock_mid:
+        assert run_trial_lifecycle_sweep() == 1
+        assert mock_a.call_count == 1
+        assert mock_mid.call_count == 0
+        assert run_trial_lifecycle_sweep() == 1
+        assert mock_mid.call_count == 1
+
+
+def test_sweep_skips_non_trial_plans():
+    """only Free Trial plans are swept"""
+    _make_trial("paid-org", days_ago=5, plan=OrgPlanType.DALGO.value)
+    assert run_trial_lifecycle_sweep() == 0
+
+
+def test_sweep_skips_expired_trials():
+    """a trial past its end_date has dropped out of the query"""
+    _make_trial("trial-old", days_ago=20)
+    assert run_trial_lifecycle_sweep() == 0
+
+
+def test_sweep_skips_plans_without_a_start_date():
+    """a null start_date cannot produce a day number"""
+    org = Org.objects.create(slug="trial-nostart", name="x", airbyte_workspace_id=None)
+    OrgPlans.objects.create(
+        org=org,
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date=None,
+        end_date=timezone.now() + timedelta(days=5),
+    )
+    assert run_trial_lifecycle_sweep() == 0
+
+
+def test_sweep_leaves_flag_unset_when_the_send_fails():
+    """an SES failure must not mark the email as sent — the next run retries"""
+    _, orguser = _make_trial("trial-f", days_ago=3)
+    with patch(
+        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email",
+        side_effect=Exception("ses down"),
+    ):
+        assert run_trial_lifecycle_sweep() == 0
+
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert prefs.trial_emails_sent == {}
+
+
+def test_sweep_continues_after_one_trial_raises():
+    """one bad row must not stop the run"""
+    _make_trial("trial-g", days_ago=3)
+    _make_trial("trial-h", days_ago=3)
+    calls = {"n": 0}
+
+    def _flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise Exception("ses down")
+
+    with patch(
+        "ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email",
+        side_effect=_flaky,
+    ):
+        assert run_trial_lifecycle_sweep() == 1
+    assert calls["n"] == 2
+
+
+def test_sweep_skips_a_trial_with_no_orguser():
+    """a half-reaped trial has no recipient"""
+    org = Org.objects.create(slug="trial-orphan", name="x", airbyte_workspace_id=None)
+    OrgPlans.objects.create(
+        org=org,
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date=timezone.now() - timedelta(days=3),
+        end_date=timezone.now() + timedelta(days=11),
+    )
+    assert run_trial_lifecycle_sweep() == 0
+
+
+def test_sweep_creates_missing_preferences_rather_than_skipping():
+    """a missing prefs row must not deny email A to the users it targets"""
+    org = Org.objects.create(slug="trial-noprefs", name="x", airbyte_workspace_id=None)
+    OrgPlans.objects.create(
+        org=org,
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date=timezone.now() - timedelta(days=3),
+        end_date=timezone.now() + timedelta(days=11),
+    )
+    user = User.objects.create(username="noprefs@x.org", email="noprefs@x.org")
+    OrgUser.objects.create(user=user, org=org)
+
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"):
+        assert run_trial_lifecycle_sweep() == 1
+    assert UserPreferences.objects.filter(orguser__org=org).exists()
