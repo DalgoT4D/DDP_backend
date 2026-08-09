@@ -175,3 +175,16 @@ def test_flags_stamped_by_other_emails_are_self_only():
     assert FLAGS_STAMPED_BY[EMAIL_DAY3] == (EMAIL_DAY3,)
     assert FLAGS_STAMPED_BY[EMAIL_MIDPOINT] == (EMAIL_MIDPOINT,)
     assert FLAGS_STAMPED_BY[EMAIL_PRE_END] == (EMAIL_PRE_END,)
+
+
+def test_pre_end_does_not_repeat():
+    """rule 4 is the last rule, so nothing downstream masks a missing dedupe guard"""
+    flags = {EMAIL_DAY3: "x", EMAIL_MIDPOINT: "y", EMAIL_PRE_END: "z"}
+    assert _decide(13, 0, flags) is None
+
+
+def test_decide_email_normalizes_none_flags():
+    """flags param can be None; the function normalizes it to {}"""
+    # Call decide_email directly with None instead of {} to exercise the normalization line
+    at = START + timedelta(days=0)
+    assert decide_email(0, 0, None, at, END) is None

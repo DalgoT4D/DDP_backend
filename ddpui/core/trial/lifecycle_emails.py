@@ -76,8 +76,10 @@ def trial_window(start_date, end_date, now) -> tuple:
 
 
 # Which flag keys each decision writes once its email has been sent. The completion email
-# stamps `day3` as well as its own key: without that, the next hourly run would see "no day3
-# flag" and fire the in-progress email on top of the congratulations email.
+# stamps both `completion` and `day3` to prevent the in-progress email from firing on top of it.
+# This is belt-and-braces: rule 2's `EMAIL_COMPLETION not in flags` guard independently prevents
+# it, AND the stamp prevents a later run from seeing "no day3 flag" and firing the nudge. Both
+# mechanisms should remain — deleting either invites the duplicate.
 FLAGS_STAMPED_BY = {
     EMAIL_DAY3: (EMAIL_DAY3,),
     EMAIL_COMPLETION: (EMAIL_COMPLETION, EMAIL_DAY3),
