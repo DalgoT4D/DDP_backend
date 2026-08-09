@@ -1130,7 +1130,10 @@ def test_put_dbt_schema_v1_creates_audit_log(
     payload = OrgDbtTarget(target_configs_schema="new-schema")
     request = mock_request(orguser)
 
-    with patch("ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block"):
+    with patch("ddpui.api.dbt_api.create_or_update_dbt_profile_secret_blk"), patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "db.example.com"},
+    ):
         put_dbt_schema_v1(request, payload)
 
     mock_audit_log.assert_called_once()

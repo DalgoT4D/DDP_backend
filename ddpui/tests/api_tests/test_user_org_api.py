@@ -695,12 +695,9 @@ def test_post_organization_warehouse_bigquery(orguser):
     "ddpui.utils.secretsmanager",
     save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
 )
-@patch.multiple(
-    "ddpui.ddpdbt.dbthelpers",
-    create_or_update_org_cli_block=Mock(return_value=((None, None), None)),
-)
+@patch("ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk")
 @patch("ddpui.api.user_org_api.create_audit_log")
-def test_post_organization_warehouse_creates_audit_log(mock_audit_log, orguser):
+def test_post_organization_warehouse_creates_audit_log(mock_audit_log, mock_dbt_profile_blk, orguser):
     """Creating a warehouse logs wtype/name only — never airbyteConfig, which
     carries the actual warehouse connection credentials."""
     request = mock_request(orguser)

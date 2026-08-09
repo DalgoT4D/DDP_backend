@@ -791,7 +791,7 @@ def test_put_airbyte_connection_v1_creates_audit_log(mock_audit_log, orguser_wor
     assert call_kwargs["action"] == AuditLogAction.UPDATE
     assert call_kwargs["resource_fields"] == {
         "name": "connection-name",
-        "streams": ["orders"],
+        "streams": [{"streamName": "orders", "streamNamespace": "public"}],
         "destinationSchema": "dest-schema",
     }
     assert "syncCatalog" not in call_kwargs["resource_fields"]
@@ -1118,10 +1118,10 @@ def test_put_airbyte_destination_creates_audit_log(mock_audit_log, orguser_works
     )
 
     with patch("ddpui.ddpairbyte.airbytehelpers.update_destination") as update_destination_mock:
-        update_destination_mock.return_value = (
-            {"destinationId": destination_id, "name": "Updated Destination"},
-            None,
-        )
+        update_destination_mock.return_value = {
+            "destinationId": destination_id,
+            "name": "Updated Destination",
+        }
         put_airbyte_destination_v1(request, destination_id, payload)
 
     mock_audit_log.assert_called_once()
