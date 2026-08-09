@@ -31,6 +31,8 @@ def test_clone_trial_org_task_success(mock_clone, mock_taskprogress_cls):
     # as the RBAC role_slug. role_slug=None lets clone_template_org apply its own default
     # (ACCOUNT_MANAGER_ROLE).
     assert payload.role_slug is None
+    # it IS forwarded as work_domain, the plain job-title field on OrgUser
+    assert payload.work_domain == "account-manager"
     assert callable(kwargs["progress"])
 
     # exercise the progress callback passed to clone_template_org
@@ -67,6 +69,8 @@ def test_clone_trial_org_task_never_forwards_client_role_as_rbac_role(
     payload = args[0]
     assert payload.role_slug != "super-admin"
     assert payload.role_slug is None
+    # it lands in work_domain instead, which grants nothing
+    assert payload.work_domain == "super-admin"
 
 
 @patch("ddpui.core.trial.tasks.TaskProgress")

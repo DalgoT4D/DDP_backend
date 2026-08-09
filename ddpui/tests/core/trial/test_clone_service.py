@@ -497,6 +497,31 @@ def test_step_org_and_user_creates_org_and_admin(mock_create_org, mock_create_pl
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
 @patch("ddpui.core.trial.clone_service.create_organization")
+def test_step_org_and_user_stores_work_domain_without_touching_role(
+    mock_create_org, mock_create_plan
+):
+    """The signup job title is persisted as metadata; it must never become the RBAC role.
+
+    The value passed here is the exact escalation an attacker would attempt — posting
+    role="super-admin" on the public signup form.
+    """
+    Role.objects.get_or_create(slug=ACCOUNT_MANAGER_ROLE, defaults={"name": "admin", "level": 1})
+    Role.objects.get_or_create(slug="super-admin", defaults={"name": "Super User", "level": 5})
+    template = Org.objects.create(name="tmpl-wd", slug="tmpl-wd")
+    trial_org = Org.objects.create(name="Trial wd", slug="trial-wd", airbyte_workspace_id="ws-wd")
+    mock_create_org.return_value = (trial_org, None)
+    mock_create_plan.return_value = (Mock(), None)
+
+    run = CloneRun(template=template, trial_email="wd@b.org", work_domain="super-admin")
+    clone_service._step_org_and_user(run)
+
+    orguser = OrgUser.objects.filter(org=trial_org).first()
+    assert orguser.work_domain == "super-admin"
+    assert orguser.new_role.slug == ACCOUNT_MANAGER_ROLE
+
+
+@patch("ddpui.core.trial.clone_service.create_org_plan")
+@patch("ddpui.core.trial.clone_service.create_organization")
 def test_step_org_and_user_sets_trial_plan_validity_window(mock_create_org, mock_create_plan):
     """The plan payload must carry a real validity window — start now, end +TRIAL_DURATION_DAYS —
     so the trial actually expires (None/None would mean a forever-trial)."""

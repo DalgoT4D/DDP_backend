@@ -64,9 +64,14 @@ class TrialCloneRequest(Schema):
 
     `org_name`/`role_slug` are optional overrides applied in Step 1; when None the template's
     name / ACCOUNT_MANAGER_ROLE are used (see `_step_org_and_user`).
+
+    `work_domain` is the job-title the user picked on the signup form (see the `role` field
+    above). It is stored as plain metadata on the created OrgUser and is NEVER an RBAC role —
+    keep it strictly separate from `role_slug`.
     """
 
     template_org_id: int
     trial_email: str
     org_name: Optional[str] = None
     role_slug: Optional[str] = None
+    work_domain: Optional[str] = None

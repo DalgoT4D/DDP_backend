@@ -66,6 +66,7 @@ class CloneRun:
     trial_email: str
     org_name: str | None = None
     role_slug: str | None = None
+    work_domain: str | None = None
     trial_org: Org | None = None
     trial_orguser: OrgUser | None = None
     timings: dict = field(default_factory=dict)
@@ -150,8 +151,15 @@ def _step_org_and_user(run: CloneRun) -> None:
     if admin_role is None:
         raise TrialCloneError(f"role {role_slug} not found (load role fixtures)")
 
+    # work_domain is the signup form's job-title pick (M&E / Program Manager / …) — the same
+    # field the post-invitation signup writes. Metadata only; `new_role` above is the ONLY
+    # thing that grants permissions, and it never comes from client input.
     orguser = OrgUser.objects.create(
-        user=user, org=trial_org, new_role=admin_role, email_verified=False
+        user=user,
+        org=trial_org,
+        new_role=admin_role,
+        email_verified=False,
+        work_domain=run.work_domain,
     )
     run.trial_orguser = orguser
     UserAttributes.objects.get_or_create(user=user, defaults={"email_verified": False})
@@ -634,6 +642,7 @@ def clone_template_org(payload: TrialCloneRequest, progress=None) -> CloneRun:
         trial_email=payload.trial_email,
         org_name=payload.org_name,
         role_slug=payload.role_slug,
+        work_domain=payload.work_domain,
     )
     logger.info(f"starting clone from template {template.slug} for {payload.trial_email}")
 

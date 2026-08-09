@@ -24,9 +24,13 @@ from ddpui.ddpprefect import (
     prefect_service,
 )
 from ddpui.utils.awsses import send_text_message
+from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.email_templates import build_subscription_request_email
 from ddpui.utils.redis_client import RedisClient
 
 orgpreference_router = Router()
+
+logger = CustomLogger("ddpui.api.org_preferences_api")
 
 
 @orgpreference_router.post("/")
@@ -200,8 +204,18 @@ def get_org_plans(request):
 @orgpreference_router.post("/org-plan/upgrade")
 @has_permission(["can_initiate_org_plan_upgrade"])
 def initiate_upgrade_dalgo_plan(request):
-    """User can click on the upgrade button from the settings panel
-    which will trigger email to biz dev team"""
+    """Register a subscription/upgrade request and notify the biz-dev team by email.
+
+    Reached from two surfaces: the Billing settings page and the free-trial countdown pill in
+    the header. Both are once-per-org — `OrgPlans.upgrade_requested` is the flag, so a second
+    click (or a second browser tab) is a no-op that still returns 200 with
+    `already_requested: True` rather than an error, because from the user's point of view
+    their request IS registered.
+
+    Recipients come from the BIZ_DEV_EMAILS env var (comma-separated) so they can be changed
+    without a deploy. If it is unset or empty we deliberately leave `upgrade_requested` False:
+    nobody was told, so a later correctly-configured retry must still be able to send.
+    """
     orguser: OrgUser = request.orguser
     org = orguser.org
 
@@ -212,19 +226,33 @@ def initiate_upgrade_dalgo_plan(request):
 
     # trigger emails only once
     if org_plan.upgrade_requested:
-        return {"success": True, "res": "Upgrade request already sent"}
+        return {"success": True, "already_requested": True, "res": "Upgrade request already sent"}
 
-    biz_dev_emails = os.getenv("BIZ_DEV_EMAILS", []).split(",")
+    biz_dev_emails = [
+        email.strip() for email in os.getenv("BIZ_DEV_EMAILS", "").split(",") if email.strip()
+    ]
+    if not biz_dev_emails:
+        logger.error(
+            "BIZ_DEV_EMAILS is not configured; subscription request from org %s was not emailed",
+            org.slug,
+        )
+        raise HttpError(500, "Could not send the request, please contact support")
 
-    message = "Upgrade plan request from org: {org_name} with plan: {plan_name}".format(
-        org_name=org.name, plan_name=org_plan.features
-    )
-    subject = "Upgrade plan request from org: {org_name}".format(org_name=org.name)
+    subject, message = build_subscription_request_email(org, orguser, org_plan, timezone.now())
 
+    # send per-recipient so one bad/bouncing address cannot stop the others
+    delivered = 0
     for email in biz_dev_emails:
-        send_text_message(email, subject, message)
+        try:
+            send_text_message(email, subject, message)
+            delivered += 1
+        except Exception as err:  # skipcq PYL-W0703
+            logger.error("failed to email subscription request to %s: %s", email, err)
+
+    if delivered == 0:
+        raise HttpError(500, "Could not send the request, please contact support")
 
     org_plan.upgrade_requested = True
     org_plan.save()
 
-    return {"success": True}
+    return {"success": True, "already_requested": False}

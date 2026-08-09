@@ -27,10 +27,10 @@ def clone_trial_org_task(
 ):  # pylint: disable=unused-argument
     """Run clone_template_org for a free-trial signup, reporting progress into Redis.
 
-    `role` is the job-title captured on the public signup form — it is metadata ONLY (stored
-    on the activation token for potential future use, e.g. analytics) and must NEVER be used
-    as the RBAC role_slug for the cloned OrgUser: it is client-supplied and an attacker could
-    submit role="super-admin" to self-grant elevated permissions. A trial user always gets
+    `role` is the job-title captured on the public signup form — it is metadata ONLY (persisted
+    as `OrgUser.work_domain`, the same field the post-invitation signup writes) and must NEVER
+    be used as the RBAC role_slug for the cloned OrgUser: it is client-supplied and an attacker
+    could submit role="super-admin" to self-grant elevated permissions. A trial user always gets
     clone_template_org's own default role (ACCOUNT_MANAGER_ROLE) by passing role_slug=None.
 
     Releases the per-email running-clone lock in a `finally` so the email is freed the moment the
@@ -51,6 +51,7 @@ def clone_trial_org_task(
                 trial_email=email,
                 org_name=org_name,
                 role_slug=None,
+                work_domain=role,
             ),
             progress=lambda n, label: progress.add(
                 {"step": n, "message": label, "status": "running"}

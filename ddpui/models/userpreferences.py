@@ -17,6 +17,11 @@ class UserPreferences(models.Model):
         null=True,
         blank=True,
     )
+    # Keyed by flow name ("product_tour" | "insights" | "automate_pipeline"), each value
+    # {"skipped": bool, "completed": bool} — never both true. Per-step progress and which
+    # fork (sample/own_data) stays in the frontend's localStorage; this is only the
+    # final-state gate deciding whether to offer that flow again.
+    trial_walkthrough = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -26,4 +31,5 @@ class UserPreferences(models.Model):
             "enable_email_notifications": self.enable_email_notifications,
             "disclaimer_shown": self.disclaimer_shown,
             "last_visited_transform_tab": self.last_visited_transform_tab,
+            "trial_walkthrough": self.trial_walkthrough,
         }
