@@ -523,8 +523,6 @@ def render_verify_email(verification_url: str) -> tuple:
     Returns:
         (plain_text_body, html_body) tuple
     """
-    safe_url = html.escape(verification_url)
-
     plain_text = (
         f"Welcome to Dalgo\n"
         f"\n"
@@ -543,7 +541,7 @@ def render_verify_email(verification_url: str) -> tuple:
               <p style="margin:0 0 28px; font-size:15px; color:#4b5563; line-height:1.6;">
                 You're one step away from turning your programme data into live and actionable insights.
               </p>
-              {_render_trial_cta_button("VERIFY EMAIL", safe_url)}
+              {_render_trial_cta_button("VERIFY EMAIL", verification_url)}
               <p style="margin:20px 0 0; font-size:13px; color:#9ca3af;">
                 This link expires in 24 hours.
               </p>"""
@@ -561,7 +559,6 @@ def render_trial_welcome_email(workspace_url: str, trial_days: int = 14) -> tupl
     Returns:
         (plain_text_body, html_body) tuple
     """
-    safe_url = html.escape(workspace_url)
     actions = [
         ("\U0001f5fa️", "Explore the platform", "Take a quick tour of Dalgo's capabilities"),
         ("\U0001f4ca", "Build your first insight", "Build out your first dashboard and share it"),
@@ -591,7 +588,7 @@ def render_trial_welcome_email(workspace_url: str, trial_days: int = 14) -> tupl
               </p>
               {_render_trial_action_list(actions)}
               <div style="margin-top:24px;">
-                {_render_trial_cta_button("OPEN MY WORKSPACE", safe_url)}
+                {_render_trial_cta_button("OPEN MY WORKSPACE", workspace_url)}
               </div>"""
 
     return plain_text, _render_trial_email_shell(body_html, badge=f"Trial · {trial_days} days")
@@ -606,8 +603,6 @@ def render_trial_midpoint_email(
         (plain_text_body, html_body) tuple
     """
     days_left = total_days - day_number
-    safe_upgrade_url = html.escape(upgrade_url)
-    safe_call_url = html.escape(schedule_call_url)
     actions = [
         (
             "\U0001f514",
@@ -645,8 +640,8 @@ def render_trial_midpoint_email(
               </p>
               {_render_trial_action_list(actions)}
               <table cellpadding="0" cellspacing="0" style="margin-top:24px;"><tr>
-                <td>{_render_trial_cta_button("UPGRADE", safe_upgrade_url)}</td>
-                <td style="padding-left:12px;">{_render_trial_cta_button("SCHEDULE A CALL", safe_call_url, primary=False)}</td>
+                <td>{_render_trial_cta_button("UPGRADE", upgrade_url)}</td>
+                <td style="padding-left:12px;">{_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url, primary=False)}</td>
               </tr></table>"""
 
     return plain_text, _render_trial_email_shell(body_html, badge=f"Trial · {days_left} days left")
@@ -670,8 +665,6 @@ def render_trial_pre_end_email(
     """
     days_left = total_days - day_number
     safe_end_date = html.escape(end_date)
-    safe_upgrade_url = html.escape(upgrade_url)
-    safe_call_url = html.escape(schedule_call_url)
 
     plain_text = (
         f"{days_left} days left in your trial\n"
@@ -695,8 +688,8 @@ def render_trial_pre_end_email(
                 Your trial ends on {safe_end_date}, following which your workspace and its data will be permanently deleted. To keep working on Dalgo, upgrade now or schedule a call with us.
               </p>
               <table cellpadding="0" cellspacing="0"><tr>
-                <td>{_render_trial_cta_button("UPGRADE", safe_upgrade_url)}</td>
-                <td style="padding-left:12px;">{_render_trial_cta_button("SCHEDULE A CALL", safe_call_url, primary=False)}</td>
+                <td>{_render_trial_cta_button("UPGRADE", upgrade_url)}</td>
+                <td style="padding-left:12px;">{_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url, primary=False)}</td>
               </tr></table>"""
 
     return plain_text, _render_trial_email_shell(body_html, badge=f"Trial · {days_left} days left")
@@ -715,7 +708,6 @@ def render_trial_post_deletion_email(
     Returns:
         (plain_text_body, html_body) tuple
     """
-    safe_call_url = html.escape(schedule_call_url)
     safe_quote = html.escape(testimonial_quote)
     safe_author = html.escape(testimonial_author)
 
@@ -745,7 +737,7 @@ def render_trial_post_deletion_email(
                 If you wish to setup a permanent account, provision another trial, or share your experience with us, we'd love to chat.
               </p>
               <div style="margin-bottom:28px;">
-                {_render_trial_cta_button("SCHEDULE A CALL", safe_call_url)}
+                {_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url)}
               </div>
               <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb; border-radius:8px;">
                 <tr>
@@ -795,7 +787,6 @@ def render_trial_day3_not_started_email(workspace_url: str, schedule_call_url: s
     Returns:
         (plain_text_body, html_body) tuple
     """
-    safe_workspace_url = html.escape(workspace_url)
     items = [(False, *TRIAL_FLOW_COPY[flow]) for flow in ("insights", "automate_pipeline")]
 
     plain_text = (
@@ -815,7 +806,7 @@ def render_trial_day3_not_started_email(workspace_url: str, schedule_call_url: s
                 Your workspace is setup. Try out one of these guides to get started on Dalgo today
               </p>
               {_render_trial_checklist(items)}
-              {_render_trial_cta_button("OPEN WORKSPACE", safe_workspace_url)}
+              {_render_trial_cta_button("OPEN WORKSPACE", workspace_url)}
               {_trial_footer_html(schedule_call_url)}"""
 
     return plain_text, _render_trial_email_shell(body_html)
@@ -834,7 +825,6 @@ def render_trial_day3_in_progress_email(
         (plain_text_body, html_body) tuple
     """
     remaining_flow = "automate_pipeline" if completed_flow == "insights" else "insights"
-    safe_workspace_url = html.escape(workspace_url)
     items = [
         (True, *TRIAL_FLOW_COPY[completed_flow]),
         (False, *TRIAL_FLOW_COPY[remaining_flow]),
@@ -861,7 +851,7 @@ def render_trial_day3_in_progress_email(
                 {html.escape(subhead)}
               </p>
               {_render_trial_checklist(items)}
-              {_render_trial_cta_button("CONTINUE WHERE I LEFT OFF", safe_workspace_url)}
+              {_render_trial_cta_button("CONTINUE WHERE I LEFT OFF", workspace_url)}
               {_trial_footer_html(schedule_call_url)}"""
 
     return plain_text, _render_trial_email_shell(body_html)
@@ -875,8 +865,6 @@ def render_trial_completion_email(
     Returns:
         (plain_text_body, html_body) tuple
     """
-    safe_upgrade_url = html.escape(upgrade_url)
-    safe_workspace_url = html.escape(workspace_url)
     items = [(True, *TRIAL_FLOW_COPY[flow]) for flow in ("insights", "automate_pipeline")]
 
     plain_text = (
@@ -898,8 +886,8 @@ def render_trial_completion_email(
               </p>
               {_render_trial_checklist(items)}
               <table cellpadding="0" cellspacing="0"><tr>
-                <td>{_render_trial_cta_button("UPGRADE", safe_upgrade_url)}</td>
-                <td style="padding-left:12px;">{_render_trial_cta_button("KEEP EXPLORING", safe_workspace_url, primary=False)}</td>
+                <td>{_render_trial_cta_button("UPGRADE", upgrade_url)}</td>
+                <td style="padding-left:12px;">{_render_trial_cta_button("KEEP EXPLORING", workspace_url, primary=False)}</td>
               </tr></table>
               {_trial_footer_html(schedule_call_url)}"""
 

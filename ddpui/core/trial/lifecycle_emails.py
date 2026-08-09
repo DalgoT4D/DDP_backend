@@ -14,7 +14,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from ddpui.core.trial.clone_service import TRIAL_DURATION_DAYS
+from ddpui.core.trial.constants import TRIAL_DURATION_DAYS
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.userpreferences import UserPreferences
@@ -228,7 +228,7 @@ def process_trial(org_plan: OrgPlans, now) -> str:
     )
 
     with transaction.atomic():
-        prefs = UserPreferences.objects.select_for_update().get(orguser=orguser)
+        prefs, _ = UserPreferences.objects.select_for_update().get_or_create(orguser=orguser)
         stamped = dict(prefs.trial_emails_sent or {})
         for flag in FLAGS_STAMPED_BY[kind]:
             stamped[flag] = now.isoformat()

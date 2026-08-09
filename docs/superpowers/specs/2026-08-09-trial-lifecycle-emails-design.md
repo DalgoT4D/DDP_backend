@@ -94,7 +94,9 @@ One sweep, one ladder, one place to read the rules.
 
 ### Cadence
 
-Hourly. The query is indexed and returns a handful of rows, so the cost is the same as daily, but
+Hourly. `OrgPlans` has no index on `base_plan`, `start_date` or `end_date`, so the query is a
+sequential scan — but the table is one row per Org, so that scan is cheap and returns a handful of
+rows. The cost is the same as daily, but
 the completion email lands within an hour of the user finishing rather than up to a day later. The
 day-3 and day-7 emails land at whatever hour corresponds to the user's signup time either way.
 

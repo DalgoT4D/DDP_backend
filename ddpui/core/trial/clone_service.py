@@ -15,6 +15,7 @@ from ddpui.core.trial.warehouse_provision import (
 )
 from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.core.orgfunctions import create_organization, create_org_plan
+from ddpui.core.trial.constants import TRIAL_DURATION_DAYS  # noqa: F401 re-exported
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.schemas.trial_schema import TrialCloneRequest
@@ -47,11 +48,6 @@ from ddpui.utils import feature_flags
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
-
-# every trial expires this many days after the clone; OrgPlans.start_date/end_date are set from
-# this at clone time so plan-expiry checks (and any expiry-based reaping) have real dates to work
-# with instead of the None/None an unbounded plan would get.
-TRIAL_DURATION_DAYS = 14
 
 
 @dataclass

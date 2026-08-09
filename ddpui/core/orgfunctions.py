@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from django.utils.text import slugify
 
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui import settings
 from ddpui.models.org import Org
@@ -166,10 +167,6 @@ def create_organization(payload: CreateOrgSchema):
     org.save()
 
     try:
-        # imported lazily to avoid a circular import: ddpui.celeryworkers.tasks now imports
-        # from ddpui.core.trial.lifecycle_emails, which (via clone_service) imports this module
-        from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
-
         workspace = airbytehelpers.setup_airbyte_workspace_v1(org.slug, org)
         # add custom sources to this workspace
         add_custom_connectors_to_workspace.delay(

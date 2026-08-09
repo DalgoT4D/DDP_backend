@@ -1,10 +1,12 @@
+import re
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytz
 
 from django.contrib.auth.models import User
+from django.test import override_settings
 from django.utils import timezone
 
 from ddpui.models.org import Org
@@ -18,10 +20,12 @@ from ddpui.core.trial.lifecycle_emails import (
     EMAIL_COMPLETION,
     EMAIL_MIDPOINT,
     EMAIL_PRE_END,
+    TRACKED_FLOWS,
     completed_flows,
     trial_window,
     run_trial_lifecycle_sweep,
 )
+from ddpui.utils.email_templates import TRIAL_FLOW_COPY
 
 
 UTC = pytz.UTC
@@ -192,6 +196,14 @@ def test_pre_end_does_not_repeat():
     assert _decide(13, 0, flags) is None
 
 
+def test_tracked_flows_matches_flow_copy_contract():
+    """TRACKED_FLOWS (lifecycle_emails) and TRIAL_FLOW_COPY (email_templates) must name the
+    same set of flows — decide_email hands a flow name to send_decided_email, which looks it
+    up in TRIAL_FLOW_COPY via TRIAL_FLOW_COPY[flow]; a flow present in one but not the other
+    raises KeyError at send time, on a live day-3 email."""
+    assert set(TRACKED_FLOWS) == set(TRIAL_FLOW_COPY)
+
+
 def test_decide_email_normalizes_none_flags():
     """flags param can be None; the function normalizes it to {}"""
     # Call decide_email directly with None to exercise the normalization line.
@@ -276,6 +288,56 @@ def test_sweep_sends_one_email_per_run():
         assert mock_mid.call_count == 0
         assert run_trial_lifecycle_sweep() == 1
         assert mock_mid.call_count == 1
+
+
+def test_sweep_sends_pre_end_email_with_a_formatted_end_date():
+    """the highest-stakes email — it warns the workspace and its data are about to be
+    permanently deleted — has, until now, only been covered at the decision-ladder level.
+    This exercises the full sweep: a day-12 trial on a 14-day window is 2 days from
+    end_date, so rule 4 fires. The dispatcher's only real logic
+    (`end_date.strftime(END_DATE_DISPLAY_FORMAT)`) must hand the sender a display STRING
+    like "15 Aug 2026", never the raw datetime — `render_trial_pre_end_email` calls
+    `html.escape` on it, which raises TypeError on a non-str.
+    """
+    org, orguser = _make_trial("trial-pre-end", days_ago=12)
+    # simulate the day-3 and midpoint emails having already gone out on earlier sweeps —
+    # otherwise the ladder's earlier rules (which this trial also matches, being past both
+    # thresholds) would win and this run would send email A, not the pre-end warning.
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    prefs.trial_emails_sent = {EMAIL_DAY3: "x", EMAIL_MIDPOINT: "y"}
+    prefs.save()
+
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_pre_end_email") as mock_send:
+        assert run_trial_lifecycle_sweep() == 1
+        mock_send.assert_called_once()
+
+    args = mock_send.call_args[0]
+    end_date_arg = args[3]
+    assert isinstance(end_date_arg, str)
+    # matches "%d %b %Y", e.g. "15 Aug 2026" — day is zero-padded, month is a 3-letter abbrev
+    assert re.fullmatch(r"\d{2} [A-Za-z]{3} \d{4}", end_date_arg)
+
+    expected = org.org_plans.end_date.strftime("%d %b %Y")
+    assert end_date_arg == expected
+
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert EMAIL_PRE_END in prefs.trial_emails_sent
+
+
+@override_settings(TRIAL_UPGRADE_URL="https://up", TRIAL_SCHEDULE_CALL_URL="https://cal")
+def test_sweep_passes_upgrade_and_schedule_call_urls_to_the_right_parameter():
+    """send_decided_email passes UPGRADE_URL and SCHEDULE_CALL_URL positionally into
+    send_trial_completion_email(to_email, upgrade_url, workspace_url, schedule_call_url) — a
+    transposition of the two settings would be invisible at sweep level while both are ""
+    in every other test. Pin each value to its actual parameter position."""
+    _make_trial("trial-urls", days_ago=5, completed=("insights", "automate_pipeline"))
+    with patch("ddpui.core.trial.lifecycle_emails.send_trial_completion_email") as mock_send:
+        assert run_trial_lifecycle_sweep() == 1
+        mock_send.assert_called_once()
+
+    _, upgrade_url_arg, _workspace_url_arg, schedule_call_url_arg = mock_send.call_args[0]
+    assert upgrade_url_arg == "https://up"
+    assert schedule_call_url_arg == "https://cal"
 
 
 def test_sweep_skips_non_trial_plans():
@@ -401,3 +463,28 @@ def test_superseded_expiry_task_is_gone():
     import ddpui.celeryworkers.tasks as tasks_module
 
     assert not hasattr(tasks_module, "check_org_plan_expiry_notify_people")
+
+
+def test_trial_lifecycle_emails_is_registered_as_an_hourly_beat_task():
+    """a wrong interval or a dropped add_periodic_task call for this task would pass the
+    entire suite today — nothing else exercises setup_periodic_tasks. Call it with a mock
+    sender and assert the specific call this task needs is present, regardless of how many
+    other periodic tasks are registered alongside it."""
+    from ddpui.celeryworkers.tasks import setup_periodic_tasks
+
+    mock_sender = MagicMock()
+    setup_periodic_tasks(mock_sender)
+
+    matching_calls = [
+        call
+        for call in mock_sender.add_periodic_task.call_args_list
+        if call.kwargs.get("name") == "trial lifecycle emails"
+        or "trial lifecycle emails" in call.args
+    ]
+    assert len(matching_calls) == 1, "expected exactly one 'trial lifecycle emails' beat entry"
+
+    call = matching_calls[0]
+    interval = (
+        call.args[0] if call.args else call.kwargs.get("run_every") or call.kwargs.get("schedule")
+    )
+    assert interval == 3600.0

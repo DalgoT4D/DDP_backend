@@ -234,6 +234,52 @@ def test_post_deletion_email_has_testimonial_and_no_badge():
     assert "BHUMI" in plain
 
 
+def test_cta_url_with_query_string_survives_round_trip():
+    """A URL with a `&`-joined query string must appear in the CTA `href` with exactly one
+    level of HTML-escaping.
+
+    Before the fix, every caller pre-escaped the URL with ``html.escape`` and then handed
+    the already-escaped string to ``_render_trial_cta_button``, which escaped it again —
+    turning ``&src=trial`` into ``&amp;amp;src=trial``. A browser resolves ``&amp;`` back to
+    a literal ``&``, so the second query parameter would actually arrive named ``amp;src``.
+    """
+    url = "https://app.dalgo.org/settings/billing?utm=email&src=trial"
+    _, html_body = render_trial_midpoint_email(
+        day_number=7,
+        total_days=14,
+        upgrade_url=url,
+        schedule_call_url="https://cal.com/dalgo",
+    )
+    assert "&amp;amp;" not in html_body
+    assert 'href="https://app.dalgo.org/settings/billing?utm=email&amp;src=trial"' in html_body
+
+
+def test_all_cta_call_sites_single_escape_a_query_string_url():
+    """Every trial-lifecycle renderer with a CTA button must single-escape a query-string
+    URL, not just the midpoint email exercised above."""
+    url = "https://app.dalgo.org/x?a=1&b=2"
+    expected_href = 'href="https://app.dalgo.org/x?a=1&amp;b=2"'
+
+    renders = [
+        render_verify_email(url),
+        render_trial_welcome_email(url),
+        render_trial_pre_end_email(
+            day_number=12,
+            total_days=14,
+            end_date="15 Aug 2026",
+            upgrade_url=url,
+            schedule_call_url="https://cal.example",
+        ),
+        render_trial_post_deletion_email(url),
+        render_trial_day3_not_started_email(url, "https://cal.example"),
+        render_trial_day3_in_progress_email("insights", url, "https://cal.example"),
+        render_trial_completion_email(url, "https://app.example", "https://cal.example"),
+    ]
+    for _, html_body in renders:
+        assert "&amp;amp;" not in html_body
+        assert expected_href in html_body
+
+
 def test_trial_emails_escape_untrusted_input():
     """end_date/urls are the only caller-supplied strings in these 5 — confirm
     they're HTML-escaped like every other render_* in this module."""
