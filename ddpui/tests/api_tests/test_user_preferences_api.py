@@ -2,6 +2,7 @@ import os
 import django
 import pytest
 from ninja.errors import HttpError
+from pydantic import ValidationError
 from ddpui.models.org import Org
 from ddpui.models.role_based_access import Permission, Role, RolePermission
 from ddpui.models.userpreferences import UserPreferences
@@ -13,10 +14,12 @@ from ddpui.api.user_preferences_api import (
     create_user_preferences,
     get_user_preferences,
     update_user_preferences,
+    update_trial_walkthrough,
 )
 from ddpui.schemas.userpreferences_schema import (
     CreateUserPreferencesSchema,
     UpdateUserPreferencesSchema,
+    UpdateTrialWalkthroughSchema,
 )
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
@@ -141,6 +144,7 @@ def test_get_user_preferences_success(orguser, user_preferences):
         "last_visited_transform_tab": user_preferences.last_visited_transform_tab,
         "is_llm_active": False,
         "enable_llm_requested": False,
+        "trial_walkthrough": {},
     }
 
 
@@ -158,6 +162,7 @@ def test_get_user_preferences_success_if_not_exist(orguser):
         "last_visited_transform_tab": None,
         "is_llm_active": False,
         "enable_llm_requested": False,
+        "trial_walkthrough": {},
     }
     assert UserPreferences.objects.filter(orguser=orguser).exists()
 
@@ -194,6 +199,86 @@ def test_update_transform_tab_preference(orguser, user_preferences):
     assert response["success"] is True
     updated_preferences = UserPreferences.objects.get(orguser=user_preferences.orguser)
     assert updated_preferences.last_visited_transform_tab == "ui"
+
+
+def test_update_trial_walkthrough_skipped(orguser):
+    """skipping a flow with no prior state records it as skipped, not completed"""
+    request = mock_request(orguser)
+    payload = UpdateTrialWalkthroughSchema(flow="product_tour", skipped=True)
+
+    response = update_trial_walkthrough(request, payload)
+
+    assert response["success"] is True
+    assert response["res"] == {"product_tour": {"skipped": True, "completed": False}}
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert prefs.trial_walkthrough == {"product_tour": {"skipped": True, "completed": False}}
+
+
+def test_update_trial_walkthrough_completing_after_skip_clears_skipped(orguser):
+    """finishing a flow that was previously skipped clears the skipped flag"""
+    request = mock_request(orguser)
+    update_trial_walkthrough(request, UpdateTrialWalkthroughSchema(flow="insights", skipped=True))
+
+    response = update_trial_walkthrough(
+        request, UpdateTrialWalkthroughSchema(flow="insights", completed=True)
+    )
+
+    assert response["res"]["insights"] == {"skipped": False, "completed": True}
+
+
+def test_update_trial_walkthrough_merges_without_clobbering_other_flows(orguser):
+    """updating one flow must not wipe out the other two already-recorded flows"""
+    request = mock_request(orguser)
+    update_trial_walkthrough(
+        request, UpdateTrialWalkthroughSchema(flow="product_tour", completed=True)
+    )
+    update_trial_walkthrough(
+        request, UpdateTrialWalkthroughSchema(flow="automate_pipeline", skipped=True)
+    )
+
+    response = update_trial_walkthrough(
+        request, UpdateTrialWalkthroughSchema(flow="insights", completed=True)
+    )
+
+    assert response["res"] == {
+        "product_tour": {"skipped": False, "completed": True},
+        "automate_pipeline": {"skipped": True, "completed": False},
+        "insights": {"skipped": False, "completed": True},
+    }
+
+
+def test_update_trial_walkthrough_feature_nudge_merges_alongside_flows(orguser):
+    """dismissing a feature nudge records it under its own key and leaves the flows alone"""
+    request = mock_request(orguser)
+    update_trial_walkthrough(request, UpdateTrialWalkthroughSchema(flow="insights", completed=True))
+
+    response = update_trial_walkthrough(
+        request, UpdateTrialWalkthroughSchema(flow="reports_nudge", completed=True)
+    )
+
+    assert response["res"] == {
+        "insights": {"skipped": False, "completed": True},
+        "reports_nudge": {"skipped": False, "completed": True},
+    }
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert prefs.trial_walkthrough["reports_nudge"] == {"skipped": False, "completed": True}
+
+
+def test_update_trial_walkthrough_rejects_unknown_flow(orguser):
+    """the Literal is the whitelist — an unrecognised key never reaches the dict"""
+    with pytest.raises(ValidationError):
+        UpdateTrialWalkthroughSchema(flow="not_a_real_flow", completed=True)
+
+
+def test_update_trial_walkthrough_requires_skipped_or_completed(orguser):
+    """neither flag set is a client error, not a silent no-op"""
+    request = mock_request(orguser)
+    payload = UpdateTrialWalkthroughSchema(flow="insights")
+
+    with pytest.raises(HttpError) as excinfo:
+        update_trial_walkthrough(request, payload)
+
+    assert str(excinfo.value) == "Set either skipped or completed"
 
 
 def test_get_user_preferences_with_transform_tab(orguser):
