@@ -1095,7 +1095,7 @@ def test_put_airbyte_destination_success(orguser_workspace):
             "destinationId": destination_id,
             "name": "Updated Destination",
         }
-        update_destination_mock.return_value = (updated_destination, None)
+        update_destination_mock.return_value = updated_destination
 
         response = put_airbyte_destination_v1(request, destination_id, payload)
 

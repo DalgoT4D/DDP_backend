@@ -99,7 +99,6 @@ class PipelineService:
 
         dbt_orgtasks = []
         git_orgtasks = []
-        dbt_cloud_orgtasks = []
         edr_orgtasks = []
         auto_managed_dbt_orgtasks = []
 
@@ -129,13 +128,10 @@ class PipelineService:
                 continue
             elif org_task.task.type == TaskType.DBT:
                 dbt_orgtasks.append(org_task)
-            elif org_task.task.type == TaskType.DBTCLOUD:
-                dbt_cloud_orgtasks.append(org_task)
             elif org_task.task.type == TaskType.EDR:
                 edr_orgtasks.append(org_task)
 
         logger.info(f"{len(dbt_orgtasks)} DBT cli tasks being pushed to the pipeline")
-        logger.info(f"{len(dbt_cloud_orgtasks)} Dbt cloud tasks being pushed to the pipeline")
 
         # Auto-add git step when there are DBT or EDR tasks (both need the repo on disk on EKS)
         if len(dbt_orgtasks) > 0 or len(edr_orgtasks) > 0:
@@ -155,35 +151,13 @@ class PipelineService:
             dbt_deps_orgtask = PipelineService.get_or_create_dbt_deps_orgtask(org)
             auto_managed_dbt_orgtasks = [dbt_clean_orgtask, dbt_deps_orgtask]
 
-        # dbt cli profile block - only needed if we have DBT tasks
-        cli_block = None
-        if len(dbt_orgtasks) > 0:
-            cli_block = orgdbt.cli_profile_block if orgdbt else None
-            if not cli_block:
-                raise PipelineConfigurationError("dbt cli profile not found")
-
-        # dbt cloud creds block
-        dbt_cloud_creds_block = None
-        if len(dbt_cloud_orgtasks) > 0:
-            dbt_cloud_creds_block = orgdbt.dbtcloud_creds_block if orgdbt else None
-            if not dbt_cloud_creds_block:
-                raise PipelineConfigurationError("dbt cloud creds block not found")
-
         # get the deployment task configs
-        all_orgtasks = (
-            git_orgtasks
-            + auto_managed_dbt_orgtasks
-            + dbt_orgtasks
-            + dbt_cloud_orgtasks
-            + edr_orgtasks
-        )
+        all_orgtasks = git_orgtasks + auto_managed_dbt_orgtasks + dbt_orgtasks + edr_orgtasks
         task_configs, error = pipeline_with_orgtasks(
             org,
             all_orgtasks,
-            cli_block=cli_block,
             dbt_project_params=dbt_project_params,
             start_seq=len(existing_task_configs),
-            dbt_cloud_creds_block=dbt_cloud_creds_block,
             gitrepo_url=orgdbt.gitrepo_url if orgdbt else None,
         )
         if error:
@@ -472,7 +446,7 @@ class PipelineService:
             {"uuid": dataflow_orgtask.orgtask.uuid, "seq": dataflow_orgtask.seq}
             for dataflow_orgtask in DataflowOrgTask.objects.filter(
                 dataflow=org_data_flow,
-                orgtask__task__type__in=[TaskType.DBT, TaskType.DBTCLOUD, TaskType.EDR],
+                orgtask__task__type__in=[TaskType.DBT, TaskType.EDR],
             )
             .exclude(orgtask__task__slug__in=auto_managed_slugs)
             .all()

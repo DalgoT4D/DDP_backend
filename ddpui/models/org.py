@@ -256,6 +256,13 @@ class OrgWarehouse(models.Model):
         max_length=10, null=True
     )
     bq_location = models.CharField(max_length=100, null=True)
+    dbt_profile_secret_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="warehouse_dbt_profile_secret_block",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

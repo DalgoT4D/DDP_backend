@@ -259,7 +259,9 @@ def create_elementary_profile(org: Org):
     # Extract elementary's schema from the macro output. BQ emits it under
     # `dataset` (BQ terminology), postgres/snowflake under `schema`.
     if elementary_profile["elementary"]["outputs"][elementary_target]["type"] == "bigquery":
-        elementary_schema = elementary_profile["elementary"]["outputs"][elementary_target]["dataset"]
+        elementary_schema = elementary_profile["elementary"]["outputs"][elementary_target][
+            "dataset"
+        ]
     else:
         elementary_schema = elementary_profile["elementary"]["outputs"][elementary_target]["schema"]
 

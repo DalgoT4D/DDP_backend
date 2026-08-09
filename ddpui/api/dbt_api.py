@@ -359,7 +359,7 @@ def post_dbt_makedocs(request):
 @dbt_router.put("/v1/schema/")
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_schema_v1(request, payload: OrgDbtTarget):
-    """Update the target_configs.schema for the dbt cli profile block"""
+    """Update the org's default schema and refresh the dbt-profile Secret block."""
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.dbt is None:
@@ -381,35 +381,11 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
         resource_fields={"default_schema": payload.target_configs_schema},
     )
 
-    cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
-
-    if cli_profile_block:
-        logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
-        prefect_service.update_dbt_cli_profile_block(
-            block_name=cli_profile_block.block_name,
-            target=payload.target_configs_schema,
-            wtype=warehouse.wtype,
-        )
-        logger.info(
-            f"Successfully updated the cli profile block's schema : {cli_profile_block.block_name}"
-        )
-
     # Re-upsert the dbt-profile Secret block so the runner reads the new schema.
     airbyte_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
-    if airbyte_creds:
-        dbt_project_params = None
-        try:
-            dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            logger.warning(
-                "gather_dbt_project_params failed for org=%s (%s); proceeding without it",
-                org.slug,
-                err,
-            )
-        dbt_creds, profile_extras = preprocess_airbyte_creds_for_dbt(
-            warehouse, airbyte_creds, dbt_project_params
-        )
-        create_or_update_dbt_profile_secret_blk(org, warehouse, dbt_creds, profile_extras)
+    if not airbyte_creds:
+        raise HttpError(500, "warehouse credentials not found")
+    create_or_update_dbt_profile_secret_blk(org, warehouse, airbyte_creds)
 
     return {"success": 1}
 

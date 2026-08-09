@@ -171,9 +171,9 @@ class Command(BaseCommand):
             return list(OrgDataFlowv1.objects.filter(id__in=dataflow_ids, dataflow_type="manual"))
 
         elif queue_type == "transform_task_queue":
-            # Get manual dataflows with dbt, github, or dbtcloud tasks
+            # Get manual dataflows with dbt or github tasks
             transform_org_tasks = OrgTask.objects.filter(
-                org=org, task__type__in=[TaskType.DBT, TaskType.GIT, TaskType.DBTCLOUD]
+                org=org, task__type__in=[TaskType.DBT, TaskType.GIT]
             )
 
             dataflow_ids: Set[str] = set()

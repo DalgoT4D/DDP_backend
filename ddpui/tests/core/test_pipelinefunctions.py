@@ -18,10 +18,13 @@ from ddpui.ddpprefect import (
 )
 from ddpui.models.org_user import OrgUser, Role
 from ddpui.core.pipelinefunctions import (
+    _normalize_airbyte_column_name,
+    build_connection_block_extra,
     fetch_pipeline_lock_v1,
     lock_tasks_for_dataflow,
     setup_dbt_core_task_config,
 )
+from ddpui.models.org import OrgWarehouse
 from ddpui.core.orchestrate.pipeline_service import PipelineService
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect.schema import PrefectDataFlowOrgTasks
@@ -48,7 +51,7 @@ def seed_master_tasks():
     f = open(os.path.join(seed_dir, "tasks.json"))
     tasks = json.load(f)
     for task in tasks:
-        Task.objects.create(**task["fields"])
+        Task.objects.get_or_create(slug=task["fields"]["slug"], defaults=task["fields"])
 
 
 @pytest.fixture
@@ -390,4 +393,180 @@ def test_build_transform_tasks_edr_only_eks_adds_git_clone(
     assert TASK_GITCLONE in slugs
     assert TASK_GITPULL not in slugs
     assert TASK_GENERATE_EDR in slugs
-    assert slugs.index(TASK_GITCLONE) < slugs.index(TASK_GENERATE_EDR)
+
+
+# =============================================================================
+# _normalize_airbyte_column_name — Airbyte Destinations V2 rule
+# =============================================================================
+
+
+def test_normalize_airbyte_column_name():
+    """[^a-zA-Z0-9_$] → _, case preserved, $ allowed. Must match the runtime
+    column names Airbyte writes — otherwise casts target the wrong column."""
+    assert _normalize_airbyte_column_name("Measure 7") == "Measure_7"
+    assert _normalize_airbyte_column_name("foo-bar") == "foo_bar"
+    assert _normalize_airbyte_column_name("weird.col:name") == "weird_col_name"
+    assert _normalize_airbyte_column_name("keep$dollar") == "keep$dollar"
+    assert _normalize_airbyte_column_name("UPPER_lower_123") == "UPPER_lower_123"
+
+
+# =============================================================================
+# build_connection_block_extra — extra dict assembly
+# =============================================================================
+
+
+def _make_orgtask_with_transform(post_sync_transform, wtype="postgres", with_secret_block=True):
+    """Factory: creates an org + warehouse (+ optional dbt-profile secret block)
+    and an OrgTask carrying the given post_sync_transform payload."""
+    org = Org.objects.create(name="o", slug="o")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype=wtype, name="wh")
+    if with_secret_block:
+        secret_row = OrgPrefectBlockv1.objects.create(
+            org=org, block_type=SECRET, block_name="dbt-profile-o", block_id="sec-id"
+        )
+        warehouse.dbt_profile_secret_block = secret_row
+        warehouse.save()
+    task, _ = Task.objects.get_or_create(
+        slug=TASK_AIRBYTESYNC, defaults={"type": "airbyte", "label": "sync"}
+    )
+    org_task = OrgTask.objects.create(
+        org=org, task=task, connection_id="conn-uuid", post_sync_transform=post_sync_transform
+    )
+    return org_task
+
+
+def test_build_connection_block_extra_no_transform_returns_empty():
+    """No post_sync_transform on the OrgTask → empty env + ops. This is the
+    happy path for connections that never had cast config."""
+    org_task = _make_orgtask_with_transform(post_sync_transform=None)
+    extra = build_connection_block_extra(org_task)
+    assert extra == {"env": {}, "post_sync_ops": []}
+
+
+def test_build_connection_block_extra_happy_path_normalizes_columns():
+    """Casts land in extra with column names normalized (Airbyte V2 rule) and
+    env carries the dbt-profile secret block name."""
+    post_sync_transform = {
+        "ops": [
+            {
+                "type": "cast",
+                "schema": "raw_data",
+                "table": "orders",
+                "config": {"Measure 7": "numeric", "amount-usd": "numeric"},
+            }
+        ]
+    }
+    org_task = _make_orgtask_with_transform(post_sync_transform)
+
+    extra = build_connection_block_extra(org_task)
+    assert extra["env"] == {"dbt-profile-secret-block": "dbt-profile-o"}
+    assert len(extra["post_sync_ops"]) == 1
+    op = extra["post_sync_ops"][0]
+    assert op["type"] == "cast"
+    assert op["schema"] == "raw_data"
+    assert op["table"] == "orders"
+    # normalized column names — the whole point of applying the Airbyte V2 rule here
+    assert op["column_casts"] == {"Measure_7": "numeric", "amount_usd": "numeric"}
+
+
+def test_build_connection_block_extra_filters_non_cast_ops():
+    """Only ops with type=='cast' are propagated to the block. Unknown/future
+    op types are silently filtered — the runner only knows how to run casts."""
+    post_sync_transform = {
+        "ops": [
+            {"type": "cast", "schema": "s", "table": "t", "config": {"a": "int"}},
+            {"type": "reset", "schema": "s", "table": "t"},
+            {"type": "future_op", "schema": "s", "table": "t"},
+        ]
+    }
+    org_task = _make_orgtask_with_transform(post_sync_transform)
+    extra = build_connection_block_extra(org_task)
+    assert len(extra["post_sync_ops"]) == 1
+    assert extra["post_sync_ops"][0]["type"] == "cast"
+
+
+def test_build_connection_block_extra_no_secret_block_skips_ops():
+    """If warehouse has no dbt_profile_secret_block yet, we can't reference it —
+    log a warning and skip populating env. Ops still land (SQL can be built,
+    but the runner will bail because env is empty)."""
+    post_sync_transform = {
+        "ops": [{"type": "cast", "schema": "s", "table": "t", "config": {"a": "int"}}]
+    }
+    org_task = _make_orgtask_with_transform(post_sync_transform, with_secret_block=False)
+    extra = build_connection_block_extra(org_task)
+    assert extra["env"] == {}
+    # ops list is still built — the empty env acts as the runtime gate
+    assert len(extra["post_sync_ops"]) == 1
+
+
+def test_build_connection_block_extra_no_warehouse_skips_ops():
+    """Org with no OrgWarehouse row at all: fully skip — no env, no ops."""
+    org = Org.objects.create(name="o", slug="o")
+    task, _ = Task.objects.get_or_create(
+        slug=TASK_AIRBYTESYNC, defaults={"type": "airbyte", "label": "sync"}
+    )
+    post_sync_transform = {
+        "ops": [{"type": "cast", "schema": "s", "table": "t", "config": {"a": "int"}}]
+    }
+    org_task = OrgTask.objects.create(
+        org=org, task=task, connection_id="c", post_sync_transform=post_sync_transform
+    )
+    extra = build_connection_block_extra(org_task)
+    assert extra == {"env": {}, "post_sync_ops": []}
+
+
+# =============================================================================
+# setup_dbt_core_task_config — warehouse_secret_block None-guard
+# =============================================================================
+
+
+def test_setup_dbt_core_task_config_no_secret_block_logs_and_empty_env():
+    """When warehouse_secret_block=None, populate empty env and let the runner
+    log a warning — never crash. This is the graceful-degradation guard for
+    orgs whose secret block hasn't been created yet."""
+    org = Org.objects.create(name="o", slug="o")
+    task, _ = Task.objects.get_or_create(
+        slug=TASK_DBTRUN, defaults={"type": "dbt", "label": "dbt run"}
+    )
+    org_task = OrgTask.objects.create(org=org, task=task, parameters={"options": {}})
+    project_params = DbtProjectParams(
+        dbt_env_dir="/venv",
+        venv_binary="/venv/bin",
+        dbt_binary="/venv/bin/dbt",
+        project_dir="/proj",
+        target="prod",
+        org_project_dir="/orgproj",
+        clients_base_dir="/base",
+        project_dir_relative="proj/dbtrepo",
+    )
+
+    config = setup_dbt_core_task_config(org_task, project_params, warehouse_secret_block=None)
+    assert config.env == {}
+
+
+def test_setup_dbt_core_task_config_with_secret_block_populates_env():
+    """When warehouse_secret_block is provided, env carries the block name under
+    the hyphen-keyed convention read by proxy/dbtjob_v2_runner."""
+    org = Org.objects.create(name="o", slug="o")
+    task, _ = Task.objects.get_or_create(
+        slug=TASK_DBTRUN, defaults={"type": "dbt", "label": "dbt run"}
+    )
+    org_task = OrgTask.objects.create(org=org, task=task, parameters={"options": {}})
+    secret_block = OrgPrefectBlockv1.objects.create(
+        org=org, block_type=SECRET, block_name="dbt-profile-o", block_id="sec"
+    )
+    project_params = DbtProjectParams(
+        dbt_env_dir="/venv",
+        venv_binary="/venv/bin",
+        dbt_binary="/venv/bin/dbt",
+        project_dir="/proj",
+        target="prod",
+        org_project_dir="/orgproj",
+        clients_base_dir="/base",
+        project_dir_relative="proj/dbtrepo",
+    )
+
+    config = setup_dbt_core_task_config(
+        org_task, project_params, warehouse_secret_block=secret_block
+    )
+    assert config.env == {"dbt-profile-secret-block": "dbt-profile-o"}

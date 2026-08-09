@@ -643,7 +643,7 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     with pytest.raises(HttpError) as excinfo:
         post_organization_warehouse(request, payload)
 
-    assert str(excinfo.value) == "unrecognized warehouse type unknown"
+    assert str(excinfo.value) == "unknown warehouse type unknown"
 
 
 @patch.multiple(
@@ -660,8 +660,8 @@ def test_post_organization_warehouse_unknownwtype(orguser):
     save_warehouse_credentials=Mock(return_value="credentials_lookupkey"),
 )
 @patch.multiple(
-    "ddpui.ddpdbt.dbthelpers",
-    create_or_update_org_cli_block=Mock(return_value=((None, None), None)),
+    "ddpui.ddpairbyte.airbytehelpers",
+    create_or_update_dbt_profile_secret_blk=Mock(return_value=((None, None), None)),
 )
 def test_post_organization_warehouse_bigquery(orguser):
     """success test, warehouse creation"""
@@ -679,7 +679,7 @@ def test_post_organization_warehouse_bigquery(orguser):
 
     response = post_organization_warehouse(request, payload)
 
-    assert response["success"] == 1
+    assert response["destinationId"] == "destination-id"
 
 
 @patch.multiple(
