@@ -556,7 +556,10 @@ def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1
     assert Dashboard.objects.filter(id=dashboard.id).exists()
 
     # an admin can delete it (the requestor orguser fixture holds the admin role)
-    assert DashboardService.delete_dashboard(dashboard.id, orguser.org, orguser) == "orphaned-dashboard"
+    assert (
+        DashboardService.delete_dashboard(dashboard.id, orguser.org, orguser)
+        == "orphaned-dashboard"
+    )
     assert not Dashboard.objects.filter(id=dashboard.id).exists()
     member_user.delete()
     user.delete()
@@ -697,7 +700,9 @@ def test_post_organization_warehouse_bigquery(orguser):
 )
 @patch("ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk")
 @patch("ddpui.api.user_org_api.create_audit_log")
-def test_post_organization_warehouse_creates_audit_log(mock_audit_log, mock_dbt_profile_blk, orguser):
+def test_post_organization_warehouse_creates_audit_log(
+    mock_audit_log, mock_dbt_profile_blk, orguser
+):
     """Creating a warehouse logs wtype/name only — never airbyteConfig, which
     carries the actual warehouse connection credentials."""
     request = mock_request(orguser)

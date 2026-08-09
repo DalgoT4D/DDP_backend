@@ -51,7 +51,6 @@ airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
 
-
 @airbyte_router.get("/source_definitions")
 @has_permission(["can_view_sources"])
 def get_airbyte_source_definitions(request):

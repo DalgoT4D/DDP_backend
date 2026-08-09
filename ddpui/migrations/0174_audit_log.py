@@ -5,44 +5,108 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ddpui', '0173_orgtask_post_sync_transform'),
+        ("ddpui", "0173_orgtask_post_sync_transform"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='AuditLog',
+            name="AuditLog",
             fields=[
-                ('id', models.BigAutoField(primary_key=True, serialize=False)),
-                ('orguser_email', models.EmailField(blank=True, max_length=255)),
-                ('resource_type', models.CharField(choices=[('auth', 'Auth'), ('user', 'User'), ('org', 'Org'), ('org_user', 'Org User'), ('invitation', 'Invitation'), ('warehouse', 'Warehouse'), ('data_source', 'Data Source'), ('connection', 'Connection'), ('pipeline', 'Pipeline'), ('dbt', 'dbt'), ('dashboard', 'Dashboard'), ('chart', 'Chart'), ('metric', 'Metric'), ('kpi', 'KPI'), ('report', 'Report'), ('comment', 'Comment'), ('alert', 'Alert')], max_length=50)),
-                ('resource_id', models.CharField(blank=True, max_length=255)),
-                ('action', models.CharField(choices=[('create', 'Create'), ('update', 'Update'), ('delete', 'Delete'), ('execute', 'Execute'), ('share', 'Share'), ('export', 'Export'), ('login', 'Login'), ('logout', 'Logout'), ('password_reset_requested', 'Password Reset Requested'), ('password_reset_completed', 'Password Reset Completed'), ('password_changed', 'Password Changed'), ('email_verified', 'Email Verified')], max_length=50)),
-                ('resource_fields', models.JSONField(blank=True, default=dict)),
-                ('timestamp', models.DateTimeField(auto_now_add=True)),
-                ('org', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='audit_logs', to='ddpui.org')),
-                ('orguser', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='audit_logs', to='ddpui.orguser')),
+                ("id", models.BigAutoField(primary_key=True, serialize=False)),
+                ("orguser_email", models.EmailField(blank=True, max_length=255)),
+                (
+                    "resource_type",
+                    models.CharField(
+                        choices=[
+                            ("auth", "Auth"),
+                            ("user", "User"),
+                            ("org", "Org"),
+                            ("org_user", "Org User"),
+                            ("invitation", "Invitation"),
+                            ("warehouse", "Warehouse"),
+                            ("data_source", "Data Source"),
+                            ("connection", "Connection"),
+                            ("pipeline", "Pipeline"),
+                            ("dbt", "dbt"),
+                            ("dashboard", "Dashboard"),
+                            ("chart", "Chart"),
+                            ("metric", "Metric"),
+                            ("kpi", "KPI"),
+                            ("report", "Report"),
+                            ("comment", "Comment"),
+                            ("alert", "Alert"),
+                        ],
+                        max_length=50,
+                    ),
+                ),
+                ("resource_id", models.CharField(blank=True, max_length=255)),
+                (
+                    "action",
+                    models.CharField(
+                        choices=[
+                            ("create", "Create"),
+                            ("update", "Update"),
+                            ("delete", "Delete"),
+                            ("execute", "Execute"),
+                            ("share", "Share"),
+                            ("export", "Export"),
+                            ("login", "Login"),
+                            ("logout", "Logout"),
+                            ("password_reset_requested", "Password Reset Requested"),
+                            ("password_reset_completed", "Password Reset Completed"),
+                            ("password_changed", "Password Changed"),
+                            ("email_verified", "Email Verified"),
+                        ],
+                        max_length=50,
+                    ),
+                ),
+                ("resource_fields", models.JSONField(blank=True, default=dict)),
+                ("timestamp", models.DateTimeField(auto_now_add=True)),
+                (
+                    "org",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="audit_logs",
+                        to="ddpui.org",
+                    ),
+                ),
+                (
+                    "orguser",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="audit_logs",
+                        to="ddpui.orguser",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'audit_log',
-                'ordering': ['-timestamp'],
+                "db_table": "audit_log",
+                "ordering": ["-timestamp"],
             },
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['org', 'timestamp'], name='auditlog_org_ts_idx'),
+            model_name="auditlog",
+            index=models.Index(fields=["org", "timestamp"], name="auditlog_org_ts_idx"),
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['org', 'orguser', 'timestamp'], name='auditlog_org_orguser_idx'),
+            model_name="auditlog",
+            index=models.Index(
+                fields=["org", "orguser", "timestamp"], name="auditlog_org_orguser_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['org', 'resource_type', 'timestamp'], name='auditlog_org_restype_idx'),
+            model_name="auditlog",
+            index=models.Index(
+                fields=["org", "resource_type", "timestamp"], name="auditlog_org_restype_idx"
+            ),
         ),
         migrations.AddIndex(
-            model_name='auditlog',
-            index=models.Index(fields=['org', 'action', 'timestamp'], name='auditlog_org_action_idx'),
+            model_name="auditlog",
+            index=models.Index(
+                fields=["org", "action", "timestamp"], name="auditlog_org_action_idx"
+            ),
         ),
     ]
