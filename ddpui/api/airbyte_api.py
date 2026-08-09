@@ -46,25 +46,6 @@ airbyte_router = Router()
 logger = CustomLogger("airbyte")
 
 
-def _summarize_streams(streams: list) -> list:
-    """Stream names for audit logging — not the full syncCatalog, which is
-    internal Airbyte schema plumbing (field types per stream), not something
-    meaningful to a human reading the log.
-
-    `streams` is untyped (`list`) at the schema level and callers have sent
-    both plain stream-name strings and {streamName, streamNamespace} dicts —
-    handle both rather than assuming one shape.
-    """
-    names = []
-    for s in streams:
-        if isinstance(s, dict):
-            name = s.get("streamName")
-            if name:
-                names.append(name)
-        elif isinstance(s, str) and s:
-            names.append(s)
-    return names
-
 
 @airbyte_router.get("/source_definitions")
 @has_permission(["can_view_sources"])
@@ -500,7 +481,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         action=AuditLogAction.CREATE,
         resource_fields={
             "name": payload.name,
-            "streams": _summarize_streams(payload.streams),
+            "streams": payload.streams,
             "destinationSchema": payload.destinationSchema or "",
         },
     )
@@ -567,7 +548,7 @@ def put_airbyte_connection_v1(
         action=AuditLogAction.UPDATE,
         resource_fields={
             "name": payload.name,
-            "streams": _summarize_streams(payload.streams),
+            "streams": payload.streams,
             "destinationSchema": payload.destinationSchema or "",
         },
     )
