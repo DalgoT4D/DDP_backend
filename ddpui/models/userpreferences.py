@@ -22,6 +22,12 @@ class UserPreferences(models.Model):
     # fork (sample/own_data) stays in the frontend's localStorage; this is only the
     # final-state gate deciding whether to offer that flow again.
     trial_walkthrough = models.JSONField(default=dict, blank=True)
+    # Which automated trial emails have already gone out, keyed by email kind
+    # ("day3" | "completion" | "midpoint" | "pre_end") with an ISO-8601 send timestamp as the
+    # value. A sibling of trial_walkthrough rather than a key inside it: that field is keyed by
+    # flow name and is iterated by the frontend's flow-gate logic, which must not trip over
+    # send-flags. Written only by the trial lifecycle-email sweep.
+    trial_emails_sent = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
 
@@ -32,4 +38,5 @@ class UserPreferences(models.Model):
             "disclaimer_shown": self.disclaimer_shown,
             "last_visited_transform_tab": self.last_visited_transform_tab,
             "trial_walkthrough": self.trial_walkthrough,
+            "trial_emails_sent": self.trial_emails_sent,
         }

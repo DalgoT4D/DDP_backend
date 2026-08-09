@@ -268,3 +268,20 @@ def test_get_user_preferences_with_transform_tab(orguser):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"]["last_visited_transform_tab"] == "github"
+
+
+def test_trial_emails_sent_defaults_to_empty_dict(orguser):
+    """a fresh UserPreferences row has no emails recorded as sent"""
+    prefs = UserPreferences.objects.create(orguser=orguser)
+    assert prefs.trial_emails_sent == {}
+
+
+def test_trial_emails_sent_round_trips_and_appears_in_to_json(orguser):
+    """flags written to the field survive a reload and are exposed via to_json"""
+    prefs = UserPreferences.objects.create(orguser=orguser)
+    prefs.trial_emails_sent = {"day3": "2026-08-09T10:00:00+00:00"}
+    prefs.save()
+
+    prefs.refresh_from_db()
+    assert prefs.trial_emails_sent == {"day3": "2026-08-09T10:00:00+00:00"}
+    assert prefs.to_json()["trial_emails_sent"] == {"day3": "2026-08-09T10:00:00+00:00"}
