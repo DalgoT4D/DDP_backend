@@ -1279,6 +1279,17 @@ def clear_stuck_locks():
 
 
 @app.task()
+def reap_expired_trial_orgs():
+    """delete free-trial orgs whose 14-day window has ended; runs nightly at midnight UTC
+
+    Thin wrapper — selection and teardown live in the `cleanup_trial_clone` management command,
+    the same one run by hand with --email, so the scheduled reap and the manual cleanup cannot
+    drift apart.
+    """
+    return call_command("cleanup_trial_clone", expired=True)
+
+
+@app.task()
 def send_trial_lifecycle_emails():
     """send any due free-trial lifecycle emails; runs hourly
 
@@ -1335,6 +1346,15 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         3600.0,
         send_trial_lifecycle_emails.s(),
         name="trial lifecycle emails",
+    )
+
+    # reap expired free trials; nightly at midnight UTC (settings.TIME_ZONE is UTC). Deletion is
+    # heavy external I/O per org, so the command spaces the orgs out itself — see
+    # TRIAL_REAP_STAGGER_SECONDS.
+    sender.add_periodic_task(
+        crontab(minute=0, hour=0),
+        reap_expired_trial_orgs.s(),
+        name="reap expired free-trial orgs",
     )
 
     # sync airbyte job stats for connections; every 24 hours

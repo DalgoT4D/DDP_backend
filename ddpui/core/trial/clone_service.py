@@ -15,7 +15,10 @@ from ddpui.core.trial.warehouse_provision import (
 )
 from ddpui.services.org_cleanup_service import OrgCleanupService
 from ddpui.core.orgfunctions import create_organization, create_org_plan
-from ddpui.core.trial.constants import TRIAL_DURATION_DAYS  # noqa: F401 re-exported
+from ddpui.core.trial.constants import (  # noqa: F401 TRIAL_DURATION_DAYS re-exported
+    TRIAL_DURATION_DAYS,
+    TRIAL_ORG_NAME_PREFIX,
+)
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.schemas.trial_schema import TrialCloneRequest
@@ -104,7 +107,7 @@ def _step_org_and_user(run: CloneRun) -> None:
     # blank. The hash CANNOT go at the end — a long org name would push it past the 20-char cut and
     # break slug uniqueness.
     org_label = (run.org_name or template.name).strip()
-    trial_name = f"Trial {email_hash8(run.trial_email)} {org_label}"[:50]
+    trial_name = f"{TRIAL_ORG_NAME_PREFIX} {email_hash8(run.trial_email)} {org_label}"[:50]
     # the trial plan gets a real validity window (now → now + TRIAL_DURATION_DAYS) — ISO strings
     # because CreateOrgSchema types these as str; Django parses them into the DateTimeFields on
     # the OrgPlans row `create_org_plan` creates.

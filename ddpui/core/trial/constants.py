@@ -12,3 +12,20 @@ whole clone pipeline. See ``ddpui/core/trial/clone_service.py`` and
 # this at clone time so plan-expiry checks (and any expiry-based reaping) have real dates to work
 # with instead of the None/None an unbounded plan would get.
 TRIAL_DURATION_DAYS = 14
+
+# First word of every clone-created org's name — see `_step_org_and_user` in clone_service.
+TRIAL_ORG_NAME_PREFIX = "Trial"
+
+# ...and the slug prefix that follows from it, since `create_organization` derives
+# `org.slug = slugify(org.name)[:20]`. This is the ONLY marker that a clone created an org, so
+# it is what the expired-trial reaper filters on: `OrgPlans.base_plan == FREE_TRIAL` alone is
+# NOT safe, because `create_org_plan` lets an admin put a real customer org on the Free Trial
+# plan, and reaping those would delete a paying org and its warehouse. Keep in sync with
+# TRIAL_ORG_NAME_PREFIX above — a change to the org-name shape that isn't mirrored here makes
+# the reaper silently match nothing.
+TRIAL_ORG_SLUG_PREFIX = "trial-"
+
+# gap between orgs in a `--expired` reap. One teardown hits Airbyte, GitHub, Prefect AND the
+# shared trials RDS; firing several back-to-back would burst all four at once, on instances also
+# serving live users and live clones. Spacing them keeps the load flat.
+TRIAL_REAP_STAGGER_SECONDS = 30

@@ -38,6 +38,10 @@ app.conf.task_default_queue = "default"
 app.conf.task_routes = {
     "ddpui.celeryworkers.tasks.run_dbt_commands": {"queue": "canvas_dbt"},
     "ddpui.core.trial.tasks.clone_trial_org_task": {"queue": "trial_clone"},
+    # teardown is minutes of Airbyte/GitHub/Prefect/RDS I/O per org; on `default` it would block
+    # notifications, webhooks and lock cleanup. trial_clone is already the isolated, autoscaling
+    # queue for this work, so this needs no new worker in deploy.
+    "ddpui.celeryworkers.tasks.reap_expired_trial_orgs": {"queue": "trial_clone"},
     "alerts.dispatch_due_alerts": {"queue": "alerts"},
     "alerts.evaluate_alert": {"queue": "alerts"},
 }
