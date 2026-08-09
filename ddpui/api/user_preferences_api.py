@@ -78,15 +78,24 @@ def update_trial_walkthrough(request, payload: UpdateTrialWalkthroughSchema):
     other two, and enforces skipped/completed as mutually exclusive."""
     orguser: OrgUser = request.orguser
 
-    if payload.completed is None and payload.skipped is None:
-        raise HttpError(400, "Set either skipped or completed")
+    # Rejects an all-falsy payload, not just an all-None one. `{"completed": false}` passes a
+    # `is None` check but matches neither branch below, so it used to return 200 having written
+    # nothing — a silent no-op the caller reads as success. There is no "un-complete" or
+    # "un-skip" operation: a flow only ever moves forward, so the only meaningful request sets
+    # one of these to true.
+    if not payload.completed and not payload.skipped:
+        raise HttpError(400, "Set either skipped or completed to true")
 
     user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
 
+    # Each write replaces the WHOLE flow object rather than patching one key, which is what
+    # keeps skipped/completed mutually exclusive: completing a flow skipped earlier clears the
+    # stale `skipped` in the same write. `completed` is checked first so a caller sending both
+    # resolves to completed rather than storing a contradiction.
     walkthrough = dict(user_preferences.trial_walkthrough or {})
     if payload.completed:
         walkthrough[payload.flow] = {"skipped": False, "completed": True}
-    elif payload.skipped:
+    else:
         walkthrough[payload.flow] = {"skipped": True, "completed": False}
 
     user_preferences.trial_walkthrough = walkthrough

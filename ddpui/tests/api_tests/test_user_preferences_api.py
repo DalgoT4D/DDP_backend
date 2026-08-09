@@ -254,7 +254,40 @@ def test_update_trial_walkthrough_requires_skipped_or_completed(orguser):
     with pytest.raises(HttpError) as excinfo:
         update_trial_walkthrough(request, payload)
 
-    assert str(excinfo.value) == "Set either skipped or completed"
+    assert str(excinfo.value) == "Set either skipped or completed to true"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        UpdateTrialWalkthroughSchema(flow="insights", completed=False),
+        UpdateTrialWalkthroughSchema(flow="insights", skipped=False),
+        UpdateTrialWalkthroughSchema(flow="insights", skipped=False, completed=False),
+    ],
+)
+def test_update_trial_walkthrough_rejects_explicit_false(orguser, payload):
+    """an explicit false is a client error too — it used to 200 having written nothing.
+
+    There is no un-complete/un-skip operation, so a falsy flag can only be a caller mistake,
+    and answering 200 to it makes that mistake invisible.
+    """
+    request = mock_request(orguser)
+
+    with pytest.raises(HttpError) as excinfo:
+        update_trial_walkthrough(request, payload)
+
+    assert str(excinfo.value) == "Set either skipped or completed to true"
+    assert not UserPreferences.objects.filter(orguser=orguser).exists()
+
+
+def test_update_trial_walkthrough_completed_wins_over_skipped(orguser):
+    """a caller sending both must not store a contradiction"""
+    request = mock_request(orguser)
+    payload = UpdateTrialWalkthroughSchema(flow="insights", skipped=True, completed=True)
+
+    response = update_trial_walkthrough(request, payload)
+
+    assert response["res"]["insights"] == {"skipped": False, "completed": True}
 
 
 def test_get_user_preferences_with_transform_tab(orguser):
