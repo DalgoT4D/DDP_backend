@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import Dict, Optional, Literal
 from ninja import Schema
 
 
@@ -33,10 +33,18 @@ class UpdateTrialWalkthroughSchema(Schema):
 class TrialWalkthroughFlowState(Schema):
     """One entry inside the `UserPreferences.trial_walkthrough` JSONField.
 
-    The column is `{flow: TrialWalkthroughFlowState}`, keyed by `TrialWalkthroughFlow` — it
-    starts as `{}` for every user and gains one key at a time, written only by
+    The column is `TrialWalkthrough` — this schema is a single value in it::
+
+        {
+            "product_tour":      {"skipped": false, "completed": true},
+            "insights":          {"skipped": true,  "completed": false},
+            "automate_pipeline": {"skipped": false, "completed": true}
+        }
+
+    It starts as `{}` for every user and gains one key at a time, written only by
     `PUT /api/userpreferences/trial-walkthrough` when the frontend reports a flow finished or
-    dismissed. An absent key means the user has neither completed nor skipped that flow.
+    dismissed. An absent key means the user has neither completed nor skipped that flow, so
+    `{}` and the three-key example above are both valid states of the same column.
 
     The two flags are mutually exclusive by construction: the endpoint replaces the whole entry
     on every write, so completing a flow skipped earlier clears `skipped` in the same write.
@@ -52,13 +60,29 @@ class TrialWalkthroughFlowState(Schema):
     completed: bool = False
 
 
+# The `UserPreferences.trial_walkthrough` column in one line: keyed by flow, one state each.
+# An alias rather than a model because the column is a mapping whose keys are the values of a
+# Literal — a model would have to restate those three names a second time, which is exactly the
+# duplication that lets a schema drift from the code that writes it.
+TrialWalkthrough = Dict[TrialWalkthroughFlow, TrialWalkthroughFlowState]
+
+
 class TrialEmailsSentState(Schema):
-    """The whole `UserPreferences.trial_emails_sent` JSONField — every key it can hold.
+    """The whole `UserPreferences.trial_emails_sent` JSONField — every key it can hold::
+
+        {
+            "day3":       "2026-08-12T09:04:11.201+00:00",
+            "completion": "2026-08-14T17:04:09.882+00:00",
+            "midpoint":   "2026-08-16T09:04:10.417+00:00",
+            "pre_end":    "2026-08-21T09:04:12.006+00:00"
+        }
 
     Each value is the ISO-8601 timestamp of when that email went out; a key is present if and
-    only if the email has been sent, which is what stops the hourly sweep sending it twice.
-    Written only by `ddpui/core/trial/lifecycle_emails.py`, never by the frontend, and never
-    returned by `GET /api/userpreferences/`.
+    only if the email has been sent, which is what stops the hourly sweep sending it twice. So
+    a trial on day 5 that has had one email looks like `{"day3": "2026-08-12T09:04:11.201+00:00"}`
+    and a brand-new trial looks like `{}`. Written only by
+    `ddpui/core/trial/lifecycle_emails.py`, never by the frontend, and never returned by
+    `GET /api/userpreferences/`.
 
     `day3` covers BOTH day-3 templates (not-started and in-progress) because only one of them
     can ever fire for a given user. The completion email stamps `completion` AND `day3`, so a
