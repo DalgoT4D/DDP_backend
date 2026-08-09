@@ -8,6 +8,8 @@ was sent in `UserPreferences.trial_emails_sent` so nothing goes out twice.
 Design: docs/superpowers/specs/2026-08-09-trial-lifecycle-emails-design.md
 """
 
+from datetime import timedelta
+
 from ddpui.core.trial.clone_service import TRIAL_DURATION_DAYS
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -71,3 +73,64 @@ def trial_window(start_date, end_date, now) -> tuple:
         )
         total_days = TRIAL_DURATION_DAYS
     return day_number, total_days
+
+
+# Which flag keys each decision writes once its email has been sent. The completion email
+# stamps `day3` as well as its own key: without that, the next hourly run would see "no day3
+# flag" and fire the in-progress email on top of the congratulations email.
+FLAGS_STAMPED_BY = {
+    EMAIL_DAY3: (EMAIL_DAY3,),
+    EMAIL_COMPLETION: (EMAIL_COMPLETION, EMAIL_DAY3),
+    EMAIL_MIDPOINT: (EMAIL_MIDPOINT,),
+    EMAIL_PRE_END: (EMAIL_PRE_END,),
+}
+
+
+def decide_email(day_number: int, completed_count: int, flags: dict, now, end_date):
+    """Pick the ONE email due for this trial right now, or None.
+
+    Rules are checked in order and the first match wins — at most one email per trial per run.
+    A rule that was also eligible fires on a later run an hour later, so two emails never land
+    in the same inbox at the same moment.
+
+    Args:
+        day_number: full days elapsed since OrgPlans.start_date
+        completed_count: how many of TRACKED_FLOWS are complete (0, 1 or 2)
+        flags: the user's `trial_emails_sent` dict
+        now / end_date: used only by the pre-end rule
+
+    Returns:
+        one of the EMAIL_* constants, or None
+    """
+    flags = flags or {}
+
+    # 1. Both walkthroughs done, on or after day 3. Sits above the day-3 rule so a user who
+    #    finished everything by day 3 gets the congratulations, not the "pick up where you
+    #    left off" nudge.
+    if (
+        day_number >= DAY3_THRESHOLD_DAYS
+        and completed_count == len(TRACKED_FLOWS)
+        and EMAIL_COMPLETION not in flags
+    ):
+        return EMAIL_COMPLETION
+
+    # 2. The day-3 nudge — which of the two templates is chosen by the caller from
+    #    completed_count. Guarded on the completion flag as well as its own so it can never
+    #    follow a congratulations email.
+    if (
+        day_number >= DAY3_THRESHOLD_DAYS
+        and EMAIL_DAY3 not in flags
+        and EMAIL_COMPLETION not in flags
+    ):
+        return EMAIL_DAY3
+
+    # 3 & 4. Date-driven lifecycle nudges. Unconditional on progress — they still fire for a
+    #        user who already received the completion email, because an upgrade prompt and an
+    #        expiry warning serve a different purpose from the progress nudges.
+    if day_number >= MIDPOINT_THRESHOLD_DAYS and EMAIL_MIDPOINT not in flags:
+        return EMAIL_MIDPOINT
+
+    if now >= end_date - timedelta(days=PRE_END_DAYS_BEFORE) and EMAIL_PRE_END not in flags:
+        return EMAIL_PRE_END
+
+    return None
