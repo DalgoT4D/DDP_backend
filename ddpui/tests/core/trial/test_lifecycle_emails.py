@@ -185,6 +185,10 @@ def test_pre_end_does_not_repeat():
 
 def test_decide_email_normalizes_none_flags():
     """flags param can be None; the function normalizes it to {}"""
-    # Call decide_email directly with None instead of {} to exercise the normalization line
-    at = START + timedelta(days=0)
-    assert decide_email(0, 0, None, at, END) is None
+    # Call decide_email directly with None to exercise the normalization line.
+    # Use day >= 3 so rule 2's `EMAIL_DAY3 not in flags` is actually evaluated with None.
+    # Without the normalization, this would raise TypeError: argument of type 'NoneType' is not iterable.
+    at = START + timedelta(days=3)
+    result = decide_email(3, 0, None, at, END)
+    # With no flags, day 3 without completion should return EMAIL_DAY3
+    assert result == EMAIL_DAY3
