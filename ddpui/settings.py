@@ -334,6 +334,13 @@ SIMPLE_JWT = {
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
+# Destinations for the UPGRADE and SCHEDULE-A-CALL buttons in the trial lifecycle emails.
+# Both default to empty: the buttons still render, but an empty href is a dead click, so these
+# must be populated before the lifecycle emails are enabled in production. See
+# docs/superpowers/specs/2026-08-09-trial-lifecycle-emails-design.md, "Open decisions".
+TRIAL_UPGRADE_URL = os.getenv("TRIAL_UPGRADE_URL", "")
+TRIAL_SCHEDULE_CALL_URL = os.getenv("TRIAL_SCHEDULE_CALL_URL", "")
+
 # Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
 RENDER_SECRET = os.getenv("RENDER_SECRET")
 
