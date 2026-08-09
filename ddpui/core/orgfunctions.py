@@ -13,7 +13,6 @@ from ddpui.models.org import Org
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
-from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 from ddpui.utils.http import dalgo_get, dalgo_head
 from ddpui.utils.s3_utils import upload_file, delete_file
 from ddpui.core.org_logo.exceptions import (
@@ -167,6 +166,10 @@ def create_organization(payload: CreateOrgSchema):
     org.save()
 
     try:
+        # imported lazily to avoid a circular import: ddpui.celeryworkers.tasks now imports
+        # from ddpui.core.trial.lifecycle_emails, which (via clone_service) imports this module
+        from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
+
         workspace = airbytehelpers.setup_airbyte_workspace_v1(org.slug, org)
         # add custom sources to this workspace
         add_custom_connectors_to_workspace.delay(

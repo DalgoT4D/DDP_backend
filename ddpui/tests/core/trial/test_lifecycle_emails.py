@@ -385,3 +385,19 @@ def test_sweep_creates_missing_preferences_rather_than_skipping():
     with patch("ddpui.core.trial.lifecycle_emails.send_trial_day3_not_started_email"):
         assert run_trial_lifecycle_sweep() == 1
     assert UserPreferences.objects.filter(orguser__org=org).exists()
+
+
+def test_celery_task_delegates_to_the_sweep():
+    """the task is a thin wrapper — all logic lives in the sweep"""
+    from ddpui.celeryworkers.tasks import send_trial_lifecycle_emails
+
+    with patch("ddpui.celeryworkers.tasks.run_trial_lifecycle_sweep", return_value=3) as mock_sweep:
+        assert send_trial_lifecycle_emails() == 3
+        mock_sweep.assert_called_once_with()
+
+
+def test_superseded_expiry_task_is_gone():
+    """check_org_plan_expiry_notify_people duplicated the midpoint and pre-end emails"""
+    import ddpui.celeryworkers.tasks as tasks_module
+
+    assert not hasattr(tasks_module, "check_org_plan_expiry_notify_people")

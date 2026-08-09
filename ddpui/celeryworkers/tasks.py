@@ -13,7 +13,6 @@ from django.core.management import call_command
 from django.utils.text import slugify
 
 from celery.schedules import crontab
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
 from ddpui.celeryworkers.alert_tasks import dispatch_due_alerts
 from ddpui.settings import PRODUCTION
@@ -33,7 +32,7 @@ from ddpui.ddpdbt.elementary_service import (
 )
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
-from ddpui.models.org_plans import OrgPlans, OrgPlanType
+from ddpui.core.trial.lifecycle_emails import run_trial_lifecycle_sweep
 from ddpui.models.org import (
     Org,
     OrgDbt,
@@ -1127,34 +1126,6 @@ def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W
     do_handle_prefect_webhook(flow_run_id, state)
 
 
-@app.task()
-def check_org_plan_expiry_notify_people():
-    """sends an email to the org's account manager to notify them that their plan will expire in a week"""
-    roles_to_notify = [ACCOUNT_MANAGER_ROLE]
-    first_reminder = 7
-    second_reminder = 2
-
-    for org in Org.objects.all():
-        org_plan = OrgPlans.objects.filter(org=org).first()
-        if not org_plan or not org_plan.end_date:
-            continue
-        if org_plan.base_plan != OrgPlanType.FREE_TRIAL:
-            continue
-        # send a notification 7 days before the plan expires
-        if (org_plan.end_date - datetime.now(pytz.utc)).days in [first_reminder, second_reminder]:
-            try:
-                org_users = OrgUser.objects.filter(
-                    org=org,
-                    new_role__slug__in=roles_to_notify,
-                )
-                message = f"""Your Dalgo plan for {org.name} will expire on {org_plan.end_date.strftime("%b %d, %Y")}. Please reach out to the Dalgo team at support@dalgo.org and renew your subscription to continue using the platform's services."""
-                subject = "Dalgo plan expiry"
-                for orguser in org_users:
-                    send_text_message(orguser.user.email, subject, message)
-            except Exception as err:
-                logger.error(err)
-
-
 @app.task(bind=False)
 def check_for_long_running_flow_runs():
     """checks for long-running flow runs in prefect"""
@@ -1307,6 +1278,16 @@ def clear_stuck_locks():
     return processed_count
 
 
+@app.task()
+def send_trial_lifecycle_emails():
+    """send any due free-trial lifecycle emails; runs hourly
+
+    Thin wrapper — the decision ladder and all the sending live in
+    ddpui/core/trial/lifecycle_emails.py.
+    """
+    return run_trial_lifecycle_sweep()
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1347,11 +1328,13 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
             name="check for long-running flow-runs",
         )
 
-    # check org plan expiry & notify users; daily at midnight
+    # free-trial lifecycle emails (day-3 nudges, completion, midpoint, pre-end); every hour.
+    # Hourly rather than daily so the completion email lands within an hour of the user
+    # finishing their second walkthrough. Supersedes the old check_org_plan_expiry task.
     sender.add_periodic_task(
-        crontab(minute=0, hour=0),
-        check_org_plan_expiry_notify_people.s(),
-        name="check org plan expiry and notify the right people",
+        3600.0,
+        send_trial_lifecycle_emails.s(),
+        name="trial lifecycle emails",
     )
 
     # sync airbyte job stats for connections; every 24 hours
