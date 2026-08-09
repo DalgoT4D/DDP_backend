@@ -47,7 +47,7 @@ OrgPlans.objects.filter(
     base_plan=OrgPlanType.FREE_TRIAL.value,
     end_date__isnull=False,
     end_date__lte=now,
-    org__slug__startswith=TRIAL_ORG_SLUG_PREFIX,   # "trial-"
+    org__slug__regex=TRIAL_ORG_SLUG_REGEX,   # r"^trial-[0-9a-f]{8}-"
 ).select_related("org")
 ```
 
@@ -57,20 +57,50 @@ Three filters, each load-bearing:
 - **`end_date <= now`** — no grace period. A trial is reaped on the first nightly run after its
   window closes. The pre-end lifecycle email already warns the user two days out
   (`PRE_END_DAYS_BEFORE` in `ddpui/core/trial/lifecycle_emails.py`).
-- **`org.slug` starts with `trial-`** — the critical one. `base_plan` alone is **not** safe:
-  `create_org_plan` (`ddpui/core/orgfunctions.py`) lets an admin put any org, including a real
-  customer, on the Free Trial plan. Filtering on `base_plan` + `end_date` alone would delete
-  those orgs and their warehouses once the plan lapsed. The slug prefix is the only marker that
-  a clone created the org — `clone_service` builds every trial slug as
-  `trial-<email_hash8>-<label>`.
+- **`org.slug` matches `^trial-[0-9a-f]{8}-`** — the critical one. `base_plan` alone is **not**
+  safe: `create_org_plan` (`ddpui/core/orgfunctions.py`) lets an admin put any org, including a
+  real customer, on the Free Trial plan. Filtering on `base_plan` + `end_date` alone would delete
+  those orgs and their warehouses once the plan lapsed. The slug is the only marker that a clone
+  created the org — `clone_service` builds every trial slug as `trial-<email_hash8>-<label>`.
+  Matching the *shape* of the hash (`email_hash8` is an 8-char slice of a sha256 hexdigest)
+  rather than the bare `trial-` prefix keeps out a real org merely named "Trial Foundation",
+  which slugs to `trial-foundation`.
 
 A user who upgrades falls out of the query for free: an upgrade moves `base_plan` off
 `FREE_TRIAL`, so the row stops matching.
 
-`TRIAL_ORG_SLUG_PREFIX = "trial-"` moves into `ddpui/core/trial/constants.py`, next to
-`TRIAL_DURATION_DAYS`, and both `clone_service` (which builds the slug) and the command (which
-filters on it) use it. Two places deriving the same prefix independently is how the reaper
-silently stops matching after a slug-format change.
+`TRIAL_ORG_NAME_PREFIX`, `TRIAL_ORG_SLUG_PREFIX` and `TRIAL_ORG_SLUG_REGEX` move into
+`ddpui/core/trial/constants.py`, next to `TRIAL_DURATION_DAYS`. `clone_service` builds the org
+name from the name constant and the command matches on the regex, so the code that *mints* the
+slug and the code that *filters* on it are tied together. Two places deriving the same shape
+independently is how the reaper silently stops matching after a slug-format change.
+
+### The deletion path must respect the same boundary
+
+The query is not the only place the boundary has to hold. `purge_email` collects orgs two ways —
+via the resolved user's `OrgUser` rows, and via the deterministic `trial-<hash8>` slug — and the
+first of those originally returned **every** org the user belonged to. That is fine for a human
+typing `--email` at a specific trial, and dangerous under an unattended nightly job: a trial
+email later invited into a real org would have taken that org's Airbyte workspace and warehouse
+down with the trial.
+
+`account_exists_for_email` blocks a trial for an email that already has an `OrgUser`, but nothing
+blocks the invitation going the other way afterwards. So the `OrgUser` branch is filtered through
+`is_trial_slug()` too, and skipped orgs are logged. This command reaps trials; a non-trial org is
+never its business, by either selector.
+
+Deleting the Django `User` follows from the same rule: it cascades the user's remaining `OrgUser`
+rows away, so it only happens when no non-trial membership survives. In the normal case — one
+trial, one `OrgUser` — nothing changes.
+
+### Why the reaper resolves an email at all
+
+Selection needs no user. The email is needed for the three resources that live *outside* the org
+graph and are unreachable from the org row: the RDS database and role (named
+`ft_<sanitized-local-part>_<hash8>_db` / `_user`, and the local part is not recoverable from the
+slug, which carries only the hash), the leftover Django `User`, and the redis clone lock.
+Deleting the org without them would leave the abandoned database on the shared trials RDS — the
+main thing this task exists to clean up.
 
 ## Load shaping
 
@@ -173,7 +203,9 @@ this kind of work, and it requires no new worker in deploy.
 
 ## Testing
 
-- selection excludes a non-`trial-` slug org on the Free Trial plan (the customer-org footgun)
+- selection excludes a non-trial-slug org on the Free Trial plan (the customer-org footgun)
+- selection excludes an org merely *named* "Trial …" (`trial-foundation`)
+- a trial user who also belongs to a real org keeps that org, and keeps their login
 - selection excludes an unexpired trial and a non-`FREE_TRIAL` plan
 - an expired trial org is purged
 - one org raising does not abort the loop — later orgs still purged, error logged
