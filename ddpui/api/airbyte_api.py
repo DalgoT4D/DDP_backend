@@ -572,6 +572,7 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
             "name": payload.name,
             "streams": payload.streams,
             "destinationSchema": payload.destinationSchema or "",
+            "post_sync_transform": payload.post_sync_transform,
         },
     )
     return res
@@ -639,6 +640,7 @@ def put_airbyte_connection_v1(
             "name": payload.name,
             "streams": payload.streams,
             "destinationSchema": payload.destinationSchema or "",
+            "post_sync_transform": payload.post_sync_transform,
         },
     )
 

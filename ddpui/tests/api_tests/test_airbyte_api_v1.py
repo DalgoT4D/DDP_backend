@@ -616,6 +616,7 @@ def test_post_airbyte_connection_v1_creates_audit_log(
         "name": "conn-name",
         "streams": ["stream_1", "stream_2"],
         "destinationSchema": "dest-schema",
+        "post_sync_transform": None,
     }
     assert "syncCatalog" not in call_kwargs["resource_fields"]
 
@@ -793,6 +794,7 @@ def test_put_airbyte_connection_v1_creates_audit_log(mock_audit_log, orguser_wor
         "name": "connection-name",
         "streams": [{"streamName": "orders", "streamNamespace": "public"}],
         "destinationSchema": "dest-schema",
+        "post_sync_transform": None,
     }
     assert "syncCatalog" not in call_kwargs["resource_fields"]
 
