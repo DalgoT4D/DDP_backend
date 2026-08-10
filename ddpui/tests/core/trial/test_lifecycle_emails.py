@@ -421,7 +421,7 @@ def test_sweep_continues_after_one_trial_raises():
 
 
 def test_sweep_skips_a_trial_with_no_orguser():
-    """a half-reaped trial has no recipient"""
+    """a half-deleted trial has no recipient"""
     org = Org.objects.create(slug="trial-orphan", name="x", airbyte_workspace_id=None)
     OrgPlans.objects.create(
         org=org,

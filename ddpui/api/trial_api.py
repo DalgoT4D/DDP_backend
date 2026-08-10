@@ -21,6 +21,7 @@ from ddpui.core.trial.activation import (
     release_clone_lock,
 )
 from ddpui.core.trial.clone_service import account_exists_for_email
+from ddpui.core.trial.signup_record import record_signup
 from ddpui.core.trial.tasks import clone_trial_org_task
 from ddpui.models.org import Org
 from ddpui.models.org_user import UserAttributes
@@ -31,8 +32,11 @@ from ddpui.schemas.trial_schema import (
     TrialSignupSchema,
 )
 from ddpui.utils.awsses import send_trial_verification_email
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.taskprogress import TaskProgress
+
+logger = CustomLogger("ddpui.api.trial_api")
 
 trial_router = Router()
 
@@ -63,6 +67,15 @@ def trial_signup(request, payload: TrialSignupSchema):  # pylint: disable=unused
     # surfaces at /activate, after the user has received a link and chosen a password.
     if not Org.objects.filter(slug=settings.TEMPLATE_ORG_SLUG).exists():
         raise HttpError(500, "template org not configured")
+
+    # the durable record of this signup, written BEFORE the verification email — it is the only
+    # trace that survives the day-14 delete (which deletes the org, orguser, plan and django user).
+    # Best-effort: a bookkeeping failure must not stop a real user getting their trial, so it is
+    # logged and swallowed rather than 500ing a signup that is otherwise fine.
+    try:
+        record_signup(payload)
+    except Exception as err:  # skipcq PYL-W0703
+        logger.error(f"failed to record trial signup for {payload.email}: {err}", exc_info=True)
 
     token = create_activation_token(
         ActivationTokenData(email=payload.email, org_name=payload.org_name, role=payload.role)
@@ -125,7 +138,7 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
 
     try:
         # get_or_create doubles as the "dangling user" guard: a User may already exist here from
-        # a previous failed/reaped trial attempt (teardown removes the OrgUser but not the User) —
+        # a previous failed/deleted trial attempt (teardown removes the OrgUser but not the User) —
         # either way we (re)set the chosen password ourselves rather than relying on the clone's
         # own get_or_create, which only sets a password when it creates the row.
         user, _ = User.objects.get_or_create(username=email, defaults={"email": email})

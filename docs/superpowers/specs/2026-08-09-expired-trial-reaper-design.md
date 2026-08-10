@@ -1,7 +1,22 @@
 # Expired free-trial reaper — design
 
 Date: 2026-08-09
-Status: approved
+Status: approved, partially superseded — see the amendment below
+
+> **Amendment, 2026-08-10 — schedule and naming.** The design below is still accurate about
+> *what* gets selected and *how* it is torn down. Two things changed:
+>
+> 1. **Nightly → hourly.** The beat entry is now `crontab(minute=0)`, not
+>    `crontab(minute=0, hour=0)`. `end_date` is a real timestamp, so a trial cloned at 16:45
+>    expires at 16:45 on day 14; the midnight schedule handed it another seven hours. With an
+>    hourly sweep and the unchanged `end_date <= now` selection, deletion lands on the first
+>    hour boundary at or after expiry — 17:00, never 16:00, never early. A run is not bounded
+>    by an hour, so the command now takes a Redis mutex (`TRIAL_DELETE_LOCK_KEY`) and a tick
+>    that overlaps the previous run exits instead of double-deleting the same orgs.
+> 2. **"Reap" → "delete".** `reap_expired_trial_orgs` is `delete_expired_trial_orgs`,
+>    `Command.reap_expired` is `Command.delete_expired_trials`, and
+>    `TRIAL_REAP_STAGGER_SECONDS` is `TRIAL_DELETE_STAGGER_SECONDS`. Read the old names below
+>    as their new equivalents.
 
 ## Problem
 

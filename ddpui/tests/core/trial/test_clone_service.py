@@ -4,6 +4,7 @@ from unittest.mock import patch, Mock
 import pytest
 from django.contrib.auth.models import User
 from django.test import override_settings
+from django.utils import timezone
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType, OrgDbtOperation
 from ddpui.models.org_user import OrgUser, UserAttributes
@@ -14,7 +15,8 @@ from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.trial import clone_service
 from ddpui.core.trial.clone_service import CloneRun
 from ddpui.core.trial.exceptions import TrialAccountExistsError
-from ddpui.schemas.trial_schema import TrialCloneRequest, TrialDbParams
+from ddpui.core.trial.signup_record import record_signup
+from ddpui.schemas.trial_schema import TrialCloneRequest, TrialDbParams, TrialSignupSchema
 
 pytestmark = pytest.mark.django_db
 
@@ -975,7 +977,7 @@ def test_account_exists_for_email_true_when_user_exists():
 
 
 def test_account_exists_true_only_with_orguser():
-    """A bare Django User with zero OrgUsers (e.g. left dangling by a failed/reaped trial
+    """A bare Django User with zero OrgUsers (e.g. left dangling by a failed/deleted trial
     clone) must NOT count as an existing account — only a User WITH an OrgUser does."""
     org = Org.objects.create(name="guard-org2", slug="guard-org2")
     _make_orguser(org, "has-account@x.org")
@@ -1485,13 +1487,13 @@ def test_clone_wires_step_viz_last(mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, 
 
 
 @patch("ddpui.core.trial.clone_service.OrgCleanupService")
-def test_delete_trial_org_reaps_kpis_metrics_before_delete_org(mock_cleanup_cls):
+def test_delete_trial_org_deletes_kpis_metrics_before_delete_org(mock_cleanup_cls):
     """Metric.org is PROTECT and KPIs PROTECT their Metric, so delete_trial_org must remove KPIs
     then Metrics before OrgCleanupService.delete_org() — otherwise org.delete() raises
     ProtectedError and leaves an orphan whose name blocks the next clone."""
     from ddpui.models.metric import Metric, KPI
 
-    org = Org.objects.create(name="Trial reap", slug="trial-reap")
+    org = Org.objects.create(name="Trial delete", slug="trial-delete")
     metric = Metric.objects.create(
         org=org, name="m1", schema_name="s", table_name="t", column="c", aggregation="sum"
     )
@@ -1503,3 +1505,75 @@ def test_delete_trial_org_reaps_kpis_metrics_before_delete_org(mock_cleanup_cls)
     assert Metric.objects.filter(org=org).count() == 0
     mock_cleanup_cls.assert_called_once_with(org, dry_run=False)
     mock_cleanup_cls.return_value.delete_org.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TrialSignup record: stamped only when the clone actually finished
+# ---------------------------------------------------------------------------
+
+
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_successful_clone_stamps_trial_start_on_the_signup_record(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7
+):
+    started = timezone.now()
+
+    def set_start(run):
+        run.trial_start = started
+
+    mock_s1.side_effect = set_start
+    template = Org.objects.create(name="tmpl", slug="tmpl")
+    record = record_signup(TrialSignupSchema(email="a@b.org", org_name="Acme", role="Lead"))
+
+    clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+    )
+
+    record.refresh_from_db()
+    assert record.trial_start_date == started
+
+
+@patch("ddpui.core.trial.clone_service._teardown")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_failed_clone_leaves_trial_start_unstamped(mock_s1, mock_teardown):
+    """A failed clone is torn down and never deleted, so a stamped record would read forever as a
+    live trial. The record stays open with trial_start_date NULL."""
+    mock_s1.side_effect = Exception("boom")
+    template = Org.objects.create(name="tmpl", slug="tmpl")
+    record = record_signup(TrialSignupSchema(email="a@b.org", org_name="Acme", role="Lead"))
+
+    with pytest.raises(Exception, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    record.refresh_from_db()
+    assert record.trial_start_date is None
+    assert record.deleted_at is None
+
+
+@patch("ddpui.core.trial.clone_service.record_trial_start")
+@patch("ddpui.core.trial.clone_service._step_viz")
+@patch("ddpui.core.trial.clone_service._step_prefect")
+@patch("ddpui.core.trial.clone_service._step_dbt")
+@patch("ddpui.core.trial.clone_service._step_connections")
+@patch("ddpui.core.trial.clone_service._step_sources")
+@patch("ddpui.core.trial.clone_service._step_warehouse")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_record_stamp_failure_does_not_fail_a_finished_clone(
+    mock_s1, mock_s2, mock_s3, mock_s4, mock_s5, mock_s6, mock_s7, mock_record
+):
+    mock_record.side_effect = Exception("db down")
+    template = Org.objects.create(name="tmpl", slug="tmpl")
+
+    run = clone_service.clone_template_org(
+        TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+    )
+
+    assert isinstance(run, CloneRun)

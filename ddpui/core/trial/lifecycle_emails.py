@@ -58,7 +58,7 @@ def completed_flows(trial_walkthrough: dict) -> list:
     Each entry is parsed through `TrialWalkthroughFlowState`, the schema that also defines what
     the endpoint writes. Malformed entries (None, a bare string, a non-bool flag) count as not
     completed rather than raising: this JSON is written by the frontend, and one bad entry must
-    not take down a nightly sweep over every live trial.
+    not take down an hourly sweep over every live trial.
     """
     walkthrough = trial_walkthrough or {}
     done = []

@@ -9,7 +9,7 @@ whole clone pipeline. See ``ddpui/core/trial/clone_service.py`` and
 """
 
 # every trial expires this many days after the clone; OrgPlans.start_date/end_date are set from
-# this at clone time so plan-expiry checks (and any expiry-based reaping) have real dates to work
+# this at clone time so plan-expiry checks (and any expiry-based deletion) have real dates to work
 # with instead of the None/None an unbounded plan would get.
 TRIAL_DURATION_DAYS = 14
 
@@ -18,11 +18,11 @@ TRIAL_ORG_NAME_PREFIX = "Trial"
 
 # ...and the slug prefix that follows from it, since `create_organization` derives
 # `org.slug = slugify(org.name)[:20]`. This is the ONLY marker that a clone created an org, so
-# it is what the expired-trial reaper filters on: `OrgPlans.base_plan == FREE_TRIAL` alone is
+# it is what the expired-trial deleter filters on: `OrgPlans.base_plan == FREE_TRIAL` alone is
 # NOT safe, because `create_org_plan` lets an admin put a real customer org on the Free Trial
-# plan, and reaping those would delete a paying org and its warehouse. Keep in sync with
+# plan, and deleting those would destroy a paying org and its warehouse. Keep in sync with
 # TRIAL_ORG_NAME_PREFIX above — a change to the org-name shape that isn't mirrored here makes
-# the reaper silently match nothing.
+# the expired-trial deleter silently match nothing.
 TRIAL_ORG_SLUG_PREFIX = "trial-"
 
 # The prefix alone is too loose to delete on: a real org named "Trial Foundation" slugs to
@@ -32,7 +32,20 @@ TRIAL_ORG_SLUG_PREFIX = "trial-"
 # lookup (Postgres `~`) and via `re` for in-Python checks; slugs are always lowercase.
 TRIAL_ORG_SLUG_REGEX = r"^trial-[0-9a-f]{8}-"
 
-# gap between orgs in a `--expired` reap. One teardown hits Airbyte, GitHub, Prefect AND the
+# gap between orgs in a `--expired` delete. One teardown hits Airbyte, GitHub, Prefect AND the
 # shared trials RDS; firing several back-to-back would burst all four at once, on instances also
 # serving live users and live clones. Spacing them keeps the load flat.
-TRIAL_REAP_STAGGER_SECONDS = 30
+TRIAL_DELETE_STAGGER_SECONDS = 30
+
+# Global mutex for `--expired`. The delete runs HOURLY, but a run is not bounded by an hour:
+# TRIAL_DELETE_STAGGER_SECONDS alone puts ~120 orgs at the hour mark before teardown time is even
+# counted. Without this lock a long run would still be deleting when the next tick fires, and both
+# runs would select the same not-yet-deleted orgs — two concurrent teardowns of one org, hitting
+# Airbyte/GitHub/Prefect/RDS twice with half of the calls operating on already-deleted resources.
+TRIAL_DELETE_LOCK_KEY = "trial-delete-expired-running"
+
+# Dead-worker backstop for the lock above; the deletion releases it in a `finally`, so this only
+# matters if the process is killed mid-run. Sized well above a realistic run (stagger + teardown
+# for a large batch) yet short enough that a wedged lock self-heals in a couple of ticks — a
+# stale lock only DELAYS deletion, it never deletes anything early.
+TRIAL_DELETE_LOCK_TTL_SECONDS = 2 * 60 * 60

@@ -174,7 +174,7 @@ celery -A ddpui worker -Q trial_clone -n trial_clone --autoscale=4,1 -l info
 Without it, `clone_trial_org_task` sits in the `trial_clone` queue forever and every signup
 hangs on the progress screen until the frontend's 420s ceiling.
 
-The nightly reaper (`reap_expired_trial_orgs`) is routed to this queue too.
+The hourly expired-trial deletion (`delete_expired_trial_orgs`) is routed to this queue too.
 
 ### Beat is required
 
@@ -187,10 +187,11 @@ Beat drives both new periodic tasks:
 | Task | Schedule | Effect if beat is missing |
 |---|---|---|
 | `send_trial_lifecycle_emails` | hourly | no day-3 / completion / midpoint / pre-end emails |
-| `reap_expired_trial_orgs` | `crontab(minute=0, hour=0)` — midnight UTC | expired trials accumulate forever |
+| `delete_expired_trial_orgs` | `crontab(minute=0)` — every hour on the hour, UTC | expired trials accumulate forever |
 
 - [ ] Exactly **one** beat process across the deployment. Two beats double-fire every periodic
-      task, including the reaper.
+      task, including the deletion sweep — though that one also takes a Redis mutex
+      (`TRIAL_DELETE_LOCK_KEY`), so a double-fire exits instead of deleting the same org twice.
 - [ ] Existing `default` and `canvas_dbt` workers unchanged — but they must be **restarted** to
       pick up the new task registrations.
 - [ ] Add the new worker to whatever supervises the others (systemd / supervisor / k8s
@@ -205,11 +206,12 @@ from ddpui.celery import app
 app.finalize()
 for n, e in app.conf.beat_schedule.items():
     if 'trial' in n: print(n, '->', e['schedule'])
-print('route:', app.conf.task_routes.get('ddpui.celeryworkers.tasks.reap_expired_trial_orgs'))
+print('route:', app.conf.task_routes.get('ddpui.celeryworkers.tasks.delete_expired_trial_orgs'))
 "
 ```
 
-Expect the hourly email entry, the midnight crontab, and `{'queue': 'trial_clone'}`.
+Expect the hourly email entry, the hourly `crontab(minute=0)` deletion entry, and
+`{'queue': 'trial_clone'}`.
 
 ---
 
@@ -217,13 +219,13 @@ Expect the hourly email entry, the midnight crontab, and `{'queue': 'trial_clone
 
 Run in order; each is safe.
 
-1. **Reaper dry pass** — prints what it would delete and reaps only genuinely expired trials.
-   On a fresh staging this should report `0 expired trial(s) to reap`:
+1. **Deletion dry pass** — prints what it would delete and deletes only genuinely expired trials.
+   On a fresh staging this should report `0 expired trial(s) to delete`:
    ```bash
    python manage.py cleanup_trial_clone --expired
    ```
-   If it reports a non-zero count you did not expect, stop and inspect before letting midnight
-   arrive.
+   If it reports a non-zero count you did not expect, stop and inspect before the next hourly tick
+   tick arrives.
 
 2. **Admin RDS connectivity** — the clone's step 2 needs `CREATEDB` and `CREATEROLE`:
    ```bash
@@ -236,7 +238,7 @@ Run in order; each is safe.
 3. **End-to-end signup** through the frontend: signup → verification email → activate →
    progress screen → auto-login → the cloned org's dashboards render.
 
-4. **Tear the test trial down** and confirm the reaper's own path works:
+4. **Tear the test trial down** and confirm the deletion path works:
    ```bash
    python manage.py cleanup_trial_clone --email <the-test-email>
    ```
@@ -255,7 +257,7 @@ Run in order; each is safe.
 - **Two trial clocks.** The backend counts trial days from `OrgPlans.start_date`; the frontend
   badge and day-7/13/14 nudges count from `org.created_at` with its own `TRIAL_PERIOD_DAYS = 14`.
   They agree today because the clone writes both within milliseconds, and diverge the moment a
-  plan window is edited by hand. The day-13/14 modal names a deletion date the reaper does not
+  plan window is edited by hand. The day-13/14 modal names a deletion date the backend does not
   use.
 - **`.env.template` is incomplete** — the six ⚠️ variables above are absent from it.
 
@@ -265,7 +267,7 @@ Run in order; each is safe.
 
 - **Stop new trials:** unset `TEMPLATE_ORG_SLUG`. Signup then returns 503 with a clear message
   rather than half-creating anything.
-- **Stop the reaper:** stop beat, or drop its `add_periodic_task` entry. Nothing else deletes
+- **Stop the deletion sweep:** stop beat, or drop its `add_periodic_task` entry. Nothing else deletes
   orgs on a schedule.
 - **Stop the emails:** same beat entry removal, or blank the CTA URLs and accept dead buttons.
 

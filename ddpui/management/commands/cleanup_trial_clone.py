@@ -1,19 +1,29 @@
 """Fully delete trial accounts created by the Free Trial clone.
 
-Reaps everything a trial creates:
+Deletes everything a trial creates:
 - the trial Org and all its external resources (Airbyte workspace, managed dbt GitHub repo,
   Prefect deployments/blocks, warehouse secret, OrgUser) via OrgCleanupService
 - the dedicated trials-RDS database + owner role (ft_<email>_db / ft_<email>_user)
 - the leftover Django User (OrgCleanupService removes the OrgUser but not the User)
+
+One thing is deliberately NOT deleted: the `TrialSignup` record (ddpui/models/trial_signup.py).
+It has no FK to any of the above, so nothing cascades it away, and this command stamps its
+`deleted_at` on the way past. After a deletion that record is the only remaining trace that the
+trial ever existed — who signed up, for what org, in what role, and when it was torn down.
 
 Two ways to pick what gets deleted, sharing one teardown path:
 
     python manage.py cleanup_trial_clone --email <trial-email>   # one account, by hand
     python manage.py cleanup_trial_clone --expired               # every trial past its end_date
 
-`--expired` is what the nightly `reap_expired_trial_orgs` celery task runs. Keeping it in this
-command rather than in a separate service means the scheduled reap and the manual cleanup can
-never drift apart, and the nightly job can be rehearsed by hand at any time.
+`--expired` is what the hourly `delete_expired_trial_orgs` celery task runs. Keeping it in this
+command rather than in a separate service means the scheduled delete and the manual cleanup can
+never drift apart, and the scheduled job can be rehearsed by hand at any time.
+
+Why hourly: `end_date` is a real timestamp (clone time + TRIAL_DURATION_DAYS), so a trial started
+16:45 expires at 16:45 on day 14. Selection is `end_date <= timezone.now()` evaluated per run, so
+an hourly sweep deletes it on the first hour boundary AT OR AFTER expiry — 17:00, never 16:00 and
+never early. A daily midnight sweep instead gave it another seven hours of life.
 """
 
 import re
@@ -31,8 +41,11 @@ from ddpui.core.trial.activation import CLONE_LOCK_PREFIX
 from ddpui.core.trial.constants import (
     TRIAL_ORG_SLUG_PREFIX,
     TRIAL_ORG_SLUG_REGEX,
-    TRIAL_REAP_STAGGER_SECONDS,
+    TRIAL_DELETE_LOCK_KEY,
+    TRIAL_DELETE_LOCK_TTL_SECONDS,
+    TRIAL_DELETE_STAGGER_SECONDS,
 )
+from ddpui.core.trial.signup_record import record_deletion
 from ddpui.core.trial.warehouse_provision import drop_trial_database, email_hash8
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
@@ -61,8 +74,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if options["expired"]:
-            reaped = self.reap_expired()
-            return f"reaped {reaped} expired trial(s)"
+            deleted = self.delete_expired_trials()
+            return f"deleted {deleted} expired trial(s)"
 
         self.purge_email(options["email"])
         return None
@@ -93,35 +106,61 @@ class Command(BaseCommand):
             .order_by("id")
         )
 
-    def reap_expired(self) -> int:
-        """Delete every expired trial, one at a time with a gap. Returns how many were reaped."""
-        org_plans = list(self.expired_trial_plans(timezone.now()))
-        self.stdout.write(f"{len(org_plans)} expired trial(s) to reap")
+    def delete_expired_trials(self) -> int:
+        """Delete every expired trial, under a global lock. Returns how many were deleted.
 
-        reaped = 0
+        The lock makes concurrent deletes impossible. It matters because the schedule is hourly
+        while a run is NOT bounded by an hour — TRIAL_DELETE_STAGGER_SECONDS alone reaches
+        the hour mark at ~120 orgs. Overlapping runs would both select the same rows (nothing is marked
+        in-progress; a row only stops matching once its org row is gone) and tear the same org
+        down twice.
+
+        Returning 0 when the lock is held is correct, not a skipped delete: the run that owns the
+        lock is working through the very same queryset, and anything it misses is picked up by
+        the next tick an hour later.
+        """
+        redis = RedisClient.get_instance()
+        if not redis.set(TRIAL_DELETE_LOCK_KEY, "1", nx=True, ex=TRIAL_DELETE_LOCK_TTL_SECONDS):
+            logger.info("an expired-trial deletion is already running; skipping this one")
+            self.stdout.write("an expired-trial deletion is already running; skipping")
+            return 0
+
+        try:
+            return self.delete_expired_trials_unlocked()
+        finally:
+            # release on the way out (success OR crash) so the next hourly tick isn't blocked by
+            # the TTL. `delete` is idempotent — safe if the TTL already fired.
+            redis.delete(TRIAL_DELETE_LOCK_KEY)
+
+    def delete_expired_trials_unlocked(self) -> int:
+        """Delete every expired trial, one at a time with a gap. Returns how many were deleted."""
+        org_plans = list(self.expired_trial_plans(timezone.now()))
+        self.stdout.write(f"{len(org_plans)} expired trial(s) to delete")
+
+        deleted = 0
         for index, org_plan in enumerate(org_plans):
             # sleep at the TOP of the iteration, not the bottom, so a failed org still gets its
             # gap before the next one starts — a failing org is frequently an overloaded or
             # unreachable one, which is exactly when firing the next teardown is worst.
             if index > 0:
-                time.sleep(TRIAL_REAP_STAGGER_SECONDS)
+                time.sleep(TRIAL_DELETE_STAGGER_SECONDS)
 
             org = org_plan.org
             try:
                 # one bad org must not strand the rest. exc_info=True keeps the traceback, so a
                 # logic bug here doesn't read the same as an Airbyte/RDS outage.
                 self.purge_expired_org(org)
-                reaped += 1
+                deleted += 1
             except Exception as err:  # skipcq PYL-W0703
-                logger.error("trial reap failed for org %s: %s", org.slug, err, exc_info=True)
+                logger.error("trial delete failed for org %s: %s", org.slug, err, exc_info=True)
 
         self.stdout.write(
-            self.style.SUCCESS(f"reaped {reaped} of {len(org_plans)} expired trial(s)")
+            self.style.SUCCESS(f"deleted {deleted} of {len(org_plans)} expired trial(s)")
         )
-        return reaped
+        return deleted
 
     def purge_expired_org(self, org: Org) -> None:
-        """Reap one expired trial org by handing its owner's email to the --email path.
+        """Delete one expired trial org by handing its owner's email to the --email path.
 
         `.order_by("id")` pins this to the earliest-created OrgUser — the trial's original owner —
         the same rule `lifecycle_emails.process_trial` uses; `.first()` on an unordered queryset
@@ -133,12 +172,14 @@ class Command(BaseCommand):
         """
         orguser = OrgUser.objects.filter(org=org).select_related("user").order_by("id").first()
         if orguser is None:
-            # No OrgUser means no email, and both the RDS drop and the Django-user delete are
-            # keyed by email — there is no way to compute `ft_<hash>_db` for an org whose owner
-            # is already gone. Delete what we can reach and say plainly what leaked.
+            # No OrgUser means no email, and the RDS drop, the Django-user delete and the
+            # TrialSignup stamp are all keyed by email — there is no way to compute
+            # `ft_<hash>_db` for an org whose owner is already gone. Delete what we can reach and
+            # say plainly what leaked. The TrialSignup record stays open (deleted_at NULL); it is
+            # closable by hand with `--email` once the owner's address is known.
             logger.warning(
-                "expired trial org %s has no orguser; deleting the org only — "
-                "its trials-RDS database and role are left behind",
+                "expired trial org %s has no orguser; deleting the org only — its trials-RDS "
+                "database and role are left behind and its TrialSignup record stays open",
                 org.slug,
             )
             self.stdout.write(f"deleting orphan org {org.slug} (no orguser; RDS db left behind)")
@@ -158,10 +199,10 @@ class Command(BaseCommand):
         The OrgUser branch is filtered to TRIAL SLUGS ONLY, and that filter is load-bearing.
         Without it this returns every org the user belongs to — so a trial email that was later
         invited into a real org would take that org's Airbyte workspace and warehouse down with
-        the trial, and the nightly `--expired` reap would do it unattended.
+        the trial, and the hourly `--expired` sweep would do it unattended.
         `account_exists_for_email` stops a trial being created for an email that already has an
         OrgUser, but nothing stops the invitation going the other way afterwards. This command
-        reaps trials; a non-trial org is never its business.
+        deletes trials; a non-trial org is never its business.
         """
         target_orgs = {}
         skipped = []
@@ -200,6 +241,15 @@ class Command(BaseCommand):
         # always attempt the RDS drop — the db/role names are deterministic from the email, so
         # this cleans up even if the org row was already deleted but the db leaked.
         drop_trial_database(email)
+
+        # Close the durable TrialSignup record — its deleted_at is the whole reason anything is
+        # left to know this trial existed once the rows below are gone. Best-effort: the account
+        # IS deleted by this point, and raising here would log the org as a failed delete (and, in
+        # the --expired loop, keep retrying an org that no longer exists).
+        try:
+            record_deletion(email)
+        except Exception as err:  # skipcq PYL-W0703
+            logger.error("failed to stamp deleted_at for trial %s: %s", email, err, exc_info=True)
 
         # Deleting the User cascades its remaining OrgUser rows away, so it must only happen once
         # the user has no membership left. A trial email that was invited into a real org keeps

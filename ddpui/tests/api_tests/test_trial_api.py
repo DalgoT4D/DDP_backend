@@ -21,6 +21,7 @@ from django.contrib.auth.models import User
 from django.conf import settings
 
 from ddpui.models.org import Org
+from ddpui.models.trial_signup import TrialSignup
 from ddpui.api.trial_api import (
     trial_signup,
     trial_activate,
@@ -86,6 +87,57 @@ class TestTrialSignup:
             trial_signup(None, payload)
 
         assert exc.value.status_code == 400
+
+    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.create_activation_token")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    def test_signup_opens_the_durable_record(
+        self, mock_exists, mock_create_token, mock_send_email, seed_template_org
+    ):
+        """The TrialSignup row is written here — before verification — because it is the only
+        trace of this person that survives the day-14 delete."""
+        mock_exists.return_value = False
+
+        trial_signup(
+            None, TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        )
+
+        record = TrialSignup.objects.get(email="a@b.org")
+        assert record.org_name == "Acme"
+        assert record.role == "account-manager"
+        assert record.signed_up_at is not None
+        assert record.trial_start_date is None
+        assert record.deleted_at is None
+
+    @patch("ddpui.api.trial_api.record_signup")
+    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.create_activation_token")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    def test_signup_survives_a_record_failure(
+        self, mock_exists, mock_create_token, mock_send_email, mock_record, seed_template_org
+    ):
+        """Bookkeeping must never cost a real user their trial."""
+        mock_exists.return_value = False
+        mock_record.side_effect = Exception("db down")
+
+        result = trial_signup(
+            None, TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        )
+
+        assert result == {"status": "verification_sent"}
+        mock_send_email.assert_called_once()
+
+    @patch("ddpui.api.trial_api.send_trial_verification_email")
+    @patch("ddpui.api.trial_api.create_activation_token")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    def test_invalid_email_writes_no_record(self, mock_exists, mock_create_token, mock_send_email):
+        with pytest.raises(HttpError):
+            trial_signup(
+                None,
+                TrialSignupSchema(email="not-an-email", org_name="Acme", role="account-manager"),
+            )
+
+        assert TrialSignup.objects.count() == 0
 
     @patch("ddpui.api.trial_api.send_trial_verification_email")
     @patch("ddpui.api.trial_api.create_activation_token")

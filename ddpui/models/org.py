@@ -246,7 +246,7 @@ class Org(models.Model):
         clone-created trial the two happen to coincide, but an org put on a trial plan later (or
         one whose window an admin adjusted via `createorgplan`) has a window that has nothing to
         do with when the org row was made. Everything that counts trial days — the lifecycle
-        email sweep, the expired-trial reaper, and the frontend countdown/nudges — must read
+        email sweep, the expired-trial deleter, and the frontend countdown/nudges — must read
         these two dates so they cannot drift apart.
         """
         if not hasattr(self, "org_plans"):

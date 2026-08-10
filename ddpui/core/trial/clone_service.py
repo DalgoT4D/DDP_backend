@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from ddpui.models.org import Org, OrgWarehouse, OrgFeatureFlag
 from ddpui.core.trial.exceptions import TrialAccountExistsError, TrialCloneError
+from ddpui.core.trial.signup_record import record_trial_start
 from ddpui.core.trial.timing import step_timer
 from ddpui.core.trial.warehouse_provision import (
     provision_trial_database,
@@ -68,6 +69,10 @@ class CloneRun:
     work_domain: str | None = None
     trial_org: Org | None = None
     trial_orguser: OrgUser | None = None
+    # start of the trial window, as written to OrgPlans.start_date in step 1. Carried here so the
+    # end of a successful clone can stamp the same instant onto the durable TrialSignup record
+    # without re-reading OrgPlans.
+    trial_start: datetime | None = None
     timings: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
 
@@ -86,7 +91,7 @@ STEP_LABELS = {
 def account_exists_for_email(email: str) -> bool:
     """True if a real Dalgo account exists for this email — a User WITH at least one OrgUser.
 
-    A bare User row with zero OrgUsers (e.g. left dangling by a failed/reaped trial clone,
+    A bare User row with zero OrgUsers (e.g. left dangling by a failed/deleted trial clone,
     since teardown/deleteorg remove the OrgUser but not the Django User) is NOT an account and
     must not block a retry.
     """
@@ -112,6 +117,7 @@ def _step_org_and_user(run: CloneRun) -> None:
     # because CreateOrgSchema types these as str; Django parses them into the DateTimeFields on
     # the OrgPlans row `create_org_plan` creates.
     trial_start = timezone.now()
+    run.trial_start = trial_start
     org_payload = CreateOrgSchema(
         name=trial_name,
         base_plan=OrgPlanType.FREE_TRIAL.value,
@@ -571,7 +577,7 @@ def delete_trial_org(org: Org) -> None:
     on_delete=PROTECT FK (KPIs in turn PROTECT their Metric) — so the moment a trial is cloned
     from a template that has metrics/KPIs (they get copied by viz_clone), the final `org.delete()`
     inside `delete_org()` raises ProtectedError, leaving the org row + OrgUser half-removed and the
-    org NAME still taken (which then blocks the next clone for that email). Reap KPIs, then Metrics
+    org NAME still taken (which then blocks the next clone for that email). Delete KPIs, then Metrics
     (Alerts CASCADE off Metric), before handing the rest to OrgCleanupService.
     """
     KPI.objects.filter(org=org).delete()  # KPI.metric is PROTECT → KPIs must go before Metrics
@@ -598,9 +604,9 @@ def _teardown(run: CloneRun) -> None:
 
     if run.trial_org:
         # Metric/KPI have PROTECT FKs that OrgCleanupService.delete_org() doesn't handle — so
-        # delete_trial_org() reaps those first (see its docstring). Chart/Dashboard/DashboardFilter/
-        # Alert/ReportSnapshot are org=CASCADE (or have no org FK) and are reaped by delete_org().
-        # sources+connections (Steps 4-5) are also reaped by delete_org() -> delete_warehouse()
+        # delete_trial_org() deletes those first (see its docstring). Chart/Dashboard/DashboardFilter/
+        # Alert/ReportSnapshot are org=CASCADE (or have no org FK) and are deleted by delete_org().
+        # sources+connections (Steps 4-5) are also deleted by delete_org() -> delete_warehouse()
         # (deletes each connection's airbyte OrgTask) -> delete_airbyte_workspace() (sources +
         # workspace) — no extra Airbyte teardown needed here as long as run.trial_org exists.
         try:
@@ -669,5 +675,14 @@ def clone_template_org(payload: TrialCloneRequest, progress=None) -> CloneRun:
         except Exception as cleanup_err:
             logger.error(f"best-effort teardown failed for template {template.slug}: {cleanup_err}")
         raise
+
+    # all 7 steps landed — stamp the start date onto the durable TrialSignup record. Only now, not
+    # in step 1: a failed clone is torn down and never deleted, so a stamped record would read as a
+    # live trial forever. Best-effort — bookkeeping must not turn a finished clone into a failure.
+    try:
+        record_trial_start(run.trial_email, run.trial_start)
+    except Exception as record_err:  # skipcq PYL-W0703
+        logger.error(f"failed to stamp trial_start for {run.trial_email}: {record_err}")
+
     logger.info(f"clone from template {template.slug} completed; timings={run.timings}")
     return run

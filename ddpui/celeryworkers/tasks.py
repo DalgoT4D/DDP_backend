@@ -1290,12 +1290,12 @@ def purge_old_audit_logs() -> int:
 
 
 @app.task()
-def reap_expired_trial_orgs():
-    """delete free-trial orgs whose 14-day window has ended; runs nightly at midnight UTC
+def delete_expired_trial_orgs():
+    """delete free-trial orgs whose 14-day window has ended; runs hourly on the hour (UTC)
 
     Thin wrapper — selection and teardown live in the `cleanup_trial_clone` management command,
-    the same one run by hand with --email, so the scheduled reap and the manual cleanup cannot
-    drift apart.
+    the same one run by hand with --email, so the scheduled delete and the manual cleanup cannot
+    drift apart. That command also holds the mutex that keeps two hourly ticks from overlapping.
     """
     return call_command("cleanup_trial_clone", expired=True)
 
@@ -1359,13 +1359,22 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         name="trial lifecycle emails",
     )
 
-    # reap expired free trials; nightly at midnight UTC (settings.TIME_ZONE is UTC). Deletion is
-    # heavy external I/O per org, so the command spaces the orgs out itself — see
-    # TRIAL_REAP_STAGGER_SECONDS.
+    # delete expired free trials; every hour on the hour (settings.TIME_ZONE is UTC).
+    #
+    # Hourly, not nightly, so a trial dies close to the time of day it was created: OrgPlans
+    # .end_date is clone-time + TRIAL_DURATION_DAYS, the command selects `end_date <= now()`
+    # evaluated per run, so a trial started 16:45 is deleted at 17:00 on day 14 — the first hour
+    # boundary AT OR AFTER expiry, never 16:00 and never early. Nightly-at-midnight gave that
+    # same trial another seven hours.
+    #
+    # A run is not bounded by an hour (deletion is heavy external I/O per org and the command
+    # spaces the orgs out itself — see TRIAL_DELETE_STAGGER_SECONDS), so the command takes a
+    # Redis mutex; a tick that lands while the previous run is still going exits immediately
+    # instead of double-deleting the same orgs.
     sender.add_periodic_task(
-        crontab(minute=0, hour=0),
-        reap_expired_trial_orgs.s(),
-        name="reap expired free-trial orgs",
+        crontab(minute=0),
+        delete_expired_trial_orgs.s(),
+        name="delete expired free-trial orgs",
     )
 
     # sync airbyte job stats for connections; every 24 hours
