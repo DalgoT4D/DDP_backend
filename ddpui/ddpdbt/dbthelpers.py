@@ -151,7 +151,9 @@ def write_dbt_profiles_yml(org: Org) -> Path:
 
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
-    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds)
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(
+        warehouse, airbyte_creds, dbt_project_params
+    )
 
     dbt_project_filename = Path(dbt_project_params.project_dir) / "dbt_project.yml"
     if not dbt_project_filename.exists():

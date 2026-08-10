@@ -1,4 +1,7 @@
 import os
+from typing import Union
+
+from ddpui.ddpdbt.schema import DbtProjectParams
 
 # Fixed target label used inside profiles.yml. Matches proxy/prefect_flows_runner.py:DBT_TARGET
 # so backend-generated profiles.yml and runner-generated ones use the same key.
