@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0173_orgtask_post_sync_transform"),
+        ("ddpui", "0174_audit_log"),
     ]
 
     operations = [
