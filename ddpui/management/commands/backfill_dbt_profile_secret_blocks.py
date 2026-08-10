@@ -18,9 +18,7 @@ CLI profile blocks are not touched.
 from django.core.management.base import BaseCommand
 
 from ddpui.core.dbtfunctions import preprocess_airbyte_creds_for_dbt
-from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk
-from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCORE
 from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
@@ -64,18 +62,8 @@ class Command(BaseCommand):
                     skipped += 1
                     continue
 
-                dbt_project_params: DbtProjectParams | None = None
-                try:
-                    dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-                except Exception as err:  # pylint: disable=broad-exception-caught
-                    # SSL cert path needs dbt_project_params; non-SSL orgs are fine
-                    print(
-                        f"  [warn] {org.slug}: gather_dbt_project_params failed ({err}); "
-                        "proceeding without it"
-                    )
-
                 dbt_creds, profile_extras = preprocess_airbyte_creds_for_dbt(
-                    warehouse, airbyte_creds, dbt_project_params
+                    warehouse, airbyte_creds
                 )
 
                 if options["dry_run"]:
