@@ -374,22 +374,16 @@ def build_multi_metric_query(
 
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
-        for metric in payload.metrics:
+        aliases = deduplicate_metric_aliases(payload.metrics, dimensions)
+        for metric, alias in zip(payload.metrics, aliases):
             # Expression path: inline raw SQL expression
             if metric.column_expression:
-                alias = metric.alias or "expression_metric"
                 query_builder.add_column(literal_column(metric.column_expression).label(alias))
                 continue
 
             # Simple path: column + aggregation
             if not metric.aggregation:
                 raise ValueError(f"Aggregation function is required for metric")
-
-            # Shared alias rule (count-all prefix, uniqueness) — same func pivot uses,
-            # so every chart type builds SQL aliases identically. Aliases are only dict
-            # keys in the result set, not validated as SQL identifiers, so human-readable
-            # display names with spaces/special chars (e.g. "Total Count") are fine.
-            alias = metric_sql_alias(metric)
 
             query_builder.add_aggregate_column(
                 metric.column,
@@ -421,6 +415,33 @@ def metric_sql_alias(metric) -> str:
     return metric.alias or f"{metric.aggregation}_{metric.column}"
 
 
+def deduplicate_metric_aliases(
+    metrics: List, dimension_names: Optional[List[str]] = None
+) -> List[str]:
+    """Return a list of unique SQL aliases, one per metric, preserving order.
+
+    Appends ``_2``, ``_3``, … when a base alias collides with a dimension column
+    name or with a previously seen metric alias.  The caller must zip the
+    returned list with *metrics* so that both the SQL SELECT and the
+    result-reading code use the same de-duplicated alias for each metric.
+    """
+    used: set[str] = set()
+    if dimension_names:
+        used.update(dimension_names)
+
+    result: list[str] = []
+    for metric in metrics:
+        base_alias = metric_sql_alias(metric)
+        alias = base_alias
+        counter = 2
+        while alias in used:
+            alias = f"{base_alias}_{counter}"
+            counter += 1
+        used.add(alias)
+        result.append(alias)
+    return result
+
+
 def metric_display_name(metric) -> str:
     """User-facing header label for a metric."""
     if metric.column_expression:
@@ -428,6 +449,16 @@ def metric_display_name(metric) -> str:
     if metric.aggregation.lower() == "count" and metric.column is None:
         return metric.alias or "count_all"
     return metric.alias or f"{metric.aggregation}_{metric.column}"
+
+
+def _chart_display_name(metric) -> str:
+    """Display name used by chart transform / preview — matches the historical
+    inline formatting so existing frontends keep getting the same column headers."""
+    if metric.column_expression:
+        return metric.alias or "Expression"
+    if metric.aggregation and metric.aggregation.lower() == "count" and metric.column is None:
+        return metric.alias or "Total Count"
+    return metric.alias or f"{metric.aggregation}({metric.column})"
 
 
 def build_pivot_table_query(
@@ -464,8 +495,12 @@ def build_pivot_table_query(
 
     # Add metrics to SELECT — calculated metrics are raw aggregate expressions, the
     # rest are column + aggregation (same split the non-pivot query path uses).
-    for metric in payload.metrics:
-        alias = metric_sql_alias(metric)
+    # De-duplicate against row and column dimension labels to avoid ambiguous aliases.
+    pivot_dimension_names = list(payload.row_dimensions) + [
+        f"pivot_col_{i}" for i in range(len(col_dims))
+    ]
+    aliases = deduplicate_metric_aliases(payload.metrics, pivot_dimension_names)
+    for metric, alias in zip(payload.metrics, aliases):
         if metric.column_expression:
             query_builder.add_column(literal_column(metric.column_expression).label(alias))
         else:
@@ -1073,18 +1108,17 @@ def execute_chart_query(
 
     # Handle metrics - metrics are required for all charts (except table charts without metrics)
     if payload.metrics:
-        for metric in payload.metrics:
-            if metric.column_expression:
-                alias = metric.alias or "expression_metric"
-            elif (
-                metric.aggregation
-                and metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            else:
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
+        # Collect dimension names used in this query for alias de-duplication
+        dim_names = []
+        if payload.chart_type == "table" and payload.dimensions:
+            dim_names = [d for d in payload.dimensions if d and d.strip()]
+        elif payload.chart_type != "number" and payload.dimension_col:
+            dim_names = [payload.dimension_col]
+            if payload.extra_dimension:
+                dim_names.append(payload.extra_dimension)
+
+        aliases = deduplicate_metric_aliases(payload.metrics, dim_names)
+        for alias in aliases:
             column_mapping.append((alias, col_index))
             col_index += 1
 
@@ -1103,6 +1137,17 @@ def transform_data_for_chart(
 
     # Get custom null label from customizations if provided
     null_label = payload.customizations.get("nullValueLabel") if payload.customizations else None
+
+    # Pre-compute de-duplicated SQL aliases so result reading matches the query.
+    _dim_names: List[str] = []
+    if payload.chart_type == "table" and payload.dimensions:
+        _dim_names = [d for d in payload.dimensions if d and d.strip()]
+    else:
+        if payload.dimension_col:
+            _dim_names.append(payload.dimension_col)
+        if payload.extra_dimension:
+            _dim_names.append(payload.extra_dimension)
+    _aliases = deduplicate_metric_aliases(payload.metrics, _dim_names) if payload.metrics else []
 
     if payload.chart_type == "bar":
         # All charts use aggregated (metrics-based) approach
@@ -1128,18 +1173,10 @@ def transform_data_for_chart(
                     grouped_data[dimension] = {}
 
                 # Store each metric value for this dimension-x_value combination
-                for metric in payload.metrics:
-                    if (
-                        metric.aggregation
-                        and metric.aggregation.lower() == "count"
-                        and metric.column is None
-                    ):
-                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    else:
-                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-                    # Create key for this metric
-                    metric_key = metric.alias or f"{metric.aggregation}_{metric.column or 'all'}"
+                for idx, metric in enumerate(payload.metrics):
+                    alias = _aliases[idx]
+                    # Use de-duplicated alias as dict key so entries stay unique
+                    metric_key = alias
 
                     if metric_key not in grouped_data[dimension]:
                         grouped_data[dimension][metric_key] = {}
@@ -1163,7 +1200,7 @@ def transform_data_for_chart(
             if len(payload.metrics) > 1:
                 for dimension, metrics_data in grouped_data.items():
                     for metric_key, values in metrics_data.items():
-                        display_name = f"{dimension} - {metric_key}"
+                        display_name = f"{dimension} - {_chart_display_name(payload.metrics[_aliases.index(metric_key)])}"
                         series_data.append(
                             {
                                 "name": display_name,
@@ -1211,17 +1248,9 @@ def transform_data_for_chart(
             series_data = []
             legend_data = []
 
-            for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
-                else:
-                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            for idx, metric in enumerate(payload.metrics):
+                alias = _aliases[idx]
+                display_name = _chart_display_name(metric)
 
                 metric_data = [row.get(alias, 0) for row in results]
 
@@ -1246,17 +1275,8 @@ def transform_data_for_chart(
             return {}
 
         # Use first metric for pie charts
-        metric = payload.metrics[0]
-        if metric.column_expression:
-            # Expression metric: alias must match the query's label (metric.alias or fallback).
-            alias = metric.alias or "expression_metric"
-            display_name = metric.alias or "Expression"
-        elif metric.aggregation and metric.aggregation.lower() == "count" and metric.column is None:
-            alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-            display_name = metric.alias or "Total Count"
-        else:
-            alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-            display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+        alias = _aliases[0]
+        display_name = _chart_display_name(payload.metrics[0])
 
         pie_data = []
         for row in results:
@@ -1338,18 +1358,10 @@ def transform_data_for_chart(
                     grouped_data[dimension] = {}
 
                 # Store each metric value for this dimension-x_value combination
-                for metric in payload.metrics:
-                    if (
-                        metric.aggregation
-                        and metric.aggregation.lower() == "count"
-                        and metric.column is None
-                    ):
-                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    else:
-                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-
-                    # Create key for this metric
-                    metric_key = metric.alias or f"{metric.aggregation}_{metric.column or 'all'}"
+                for idx, metric in enumerate(payload.metrics):
+                    alias = _aliases[idx]
+                    # Use de-duplicated alias as dict key so entries stay unique
+                    metric_key = alias
 
                     if metric_key not in grouped_data[dimension]:
                         grouped_data[dimension][metric_key] = {}
@@ -1373,7 +1385,7 @@ def transform_data_for_chart(
             if len(payload.metrics) > 1:
                 for dimension, metrics_data in grouped_data.items():
                     for metric_key, values in metrics_data.items():
-                        display_name = f"{dimension} - {metric_key}"
+                        display_name = f"{dimension} - {_chart_display_name(payload.metrics[_aliases.index(metric_key)])}"
                         series_data.append(
                             {
                                 "name": display_name,
@@ -1419,17 +1431,9 @@ def transform_data_for_chart(
             series_data = []
             legend_data = []
 
-            for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
-                else:
-                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+            for idx, metric in enumerate(payload.metrics):
+                alias = _aliases[idx]
+                display_name = _chart_display_name(metric)
 
                 series_data.append(
                     {
@@ -1512,42 +1516,19 @@ def transform_data_for_chart(
 
             # Add all metric columns if present
             if payload.metrics:
-                for metric in payload.metrics:
-                    if (
-                        metric.aggregation
-                        and metric.aggregation.lower() == "count"
-                        and metric.column is None
-                    ):
-                        alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                        display_name = metric.alias or "Total Count"
-                    else:
-                        alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                        display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-
+                for idx, metric in enumerate(payload.metrics):
+                    alias = _aliases[idx]
+                    display_name = _chart_display_name(metric)
                     row_data[display_name] = row.get(alias, 0)
 
             table_data.append(row_data)
 
         # Build columns list from dimensions + metrics (not from data keys)
         # This ensures all configured columns are included even if data is empty
-        columns_list = []
-        # Add all dimension columns
-        for dim_col in dimensions:
-            columns_list.append(dim_col)
-        # Add all metric columns
+        columns_list = list(dimensions)
         if payload.metrics:
             for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
-                else:
-                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-                columns_list.append(display_name)
+                columns_list.append(_chart_display_name(metric))
 
         return {
             "tableData": table_data,
@@ -1561,23 +1542,9 @@ def transform_data_for_chart(
                 return {"value": None, "metric_name": "No data", "is_null": True}
 
             # Use first metric for number charts
-            metric = payload.metrics[0]
+            alias = _aliases[0]
+            display_name = _chart_display_name(payload.metrics[0])
             row = results[0] if results else {}
-
-            if metric.column_expression:
-                # Expression metric: alias must match the query's label (metric.alias or fallback).
-                alias = metric.alias or "expression_metric"
-                display_name = metric.alias or "Expression"
-            elif (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                display_name = metric.alias or "Total Count"
-            else:
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
 
             value = row.get(alias, 0)
 
@@ -1641,18 +1608,10 @@ def get_chart_data_table_preview(
 
     # Handle multiple metrics (if present)
     if payload.metrics:
-        for metric in payload.metrics:
-            # Handle COUNT(*) case - SQL alias includes count_all_ prefix
-            if (
-                metric.aggregation
-                and metric.aggregation.lower() == "count"
-                and metric.column is None
-            ):
-                alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                display_name = metric.alias or "Total Count"
-            else:
-                alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                display_name = metric.alias or f"{metric.aggregation}({metric.column})"
+        aliases = deduplicate_metric_aliases(payload.metrics, dimensions)
+        for idx, metric in enumerate(payload.metrics):
+            alias = aliases[idx]
+            display_name = _chart_display_name(metric)
             # Use SQL alias for column_mapping to match query results
             # Use display_name for columns array to match transform_data_for_chart
             column_mapping.append((alias, col_index))
@@ -1669,6 +1628,7 @@ def get_chart_data_table_preview(
 
     # Transform data to use display_names instead of aliases for metrics
     # This ensures consistency with transform_data_for_chart
+    aliases = deduplicate_metric_aliases(payload.metrics, dimensions) if payload.metrics else []
     transformed_data = []
     for row in data_dicts:
         transformed_row = {}
@@ -1687,18 +1647,9 @@ def get_chart_data_table_preview(
 
         # Transform metric columns from alias to display_name
         if payload.metrics:
-            for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    alias = f"count_all_{metric.alias}" if metric.alias else "count_all"
-                    display_name = metric.alias or "Total Count"
-                else:
-                    alias = metric.alias or f"{metric.aggregation}_{metric.column}"
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-
+            for idx, metric in enumerate(payload.metrics):
+                alias = aliases[idx]
+                display_name = _chart_display_name(metric)
                 # Map from alias (query result key) to display_name (column name)
                 transformed_row[display_name] = row.get(alias, 0)
 
@@ -1717,15 +1668,7 @@ def get_chart_data_table_preview(
         expected_columns = dimensions.copy()
         if payload.metrics:
             for metric in payload.metrics:
-                if (
-                    metric.aggregation
-                    and metric.aggregation.lower() == "count"
-                    and metric.column is None
-                ):
-                    display_name = metric.alias or "Total Count"
-                else:
-                    display_name = metric.alias or f"{metric.aggregation}({metric.column})"
-                expected_columns.append(display_name)
+                expected_columns.append(_chart_display_name(metric))
 
         missing_cols = [col for col in expected_columns if col not in transformed_data[0]]
         if missing_cols:

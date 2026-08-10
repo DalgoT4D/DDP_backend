@@ -10,7 +10,7 @@ from ddpui.core.charts.pivot_transform import rotate_to_pivot
 from ddpui.core.charts.charts_service import (
     build_chart_query,
     get_warehouse_client,
-    metric_sql_alias,
+    deduplicate_metric_aliases,
     metric_display_name,
 )
 from ddpui.utils.custom_logger import CustomLogger
@@ -32,7 +32,13 @@ def get_pivot_table_data(
 
     # Metric SQL aliases (for reading result columns) and display headers — the alias
     # rule is shared with build_pivot_table_query so producer/consumer can't drift.
-    metric_aliases = [metric_sql_alias(m) for m in payload.metrics or []]
+    # De-duplicate against dimension labels to stay in sync with the SQL query.
+    pivot_dimension_names = list(payload.row_dimensions or []) + [
+        f"pivot_col_{i}" for i in range(len(col_dims))
+    ]
+    metric_aliases = deduplicate_metric_aliases(
+        payload.metrics or [], pivot_dimension_names
+    )
     metric_display_names = [metric_display_name(m) for m in payload.metrics or []]
 
     # Build & execute ROLLUP query over all rows (rotate_to_pivot handles empty results)
