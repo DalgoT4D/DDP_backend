@@ -335,11 +335,21 @@ FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
 # Destinations for the UPGRADE and SCHEDULE-A-CALL buttons in the trial lifecycle emails.
-# Both default to empty: the buttons still render, but an empty href is a dead click, so these
-# must be populated before the lifecycle emails are enabled in production. See
+#
+# TRIAL_UPGRADE_URL still defaults to empty: the button renders, but an empty href is a dead
+# click, so it must be populated before the lifecycle emails are enabled in production. See
 # docs/superpowers/specs/2026-08-09-trial-lifecycle-emails-design.md, "Open decisions".
+#
+# SCHEDULE-A-CALL has a real default so the emails are never sent with a dead button, and it
+# matches the link the frontend uses (BOOK_A_CALL_URL in webapp_v2 constants/trial.ts) — the two
+# should point at the same booking page. Still env-overridable per deployment.
+DEFAULT_TRIAL_SCHEDULE_CALL_URL = "https://calendly.com/priyesh-projecttech4dev/30min"
+
 TRIAL_UPGRADE_URL = os.getenv("TRIAL_UPGRADE_URL", "")
-TRIAL_SCHEDULE_CALL_URL = os.getenv("TRIAL_SCHEDULE_CALL_URL", "")
+# `or`, not a getenv default: every deployment that copied .env.template has the key present but
+# EMPTY, and os.getenv returns "" for that — a plain default would never apply where it's needed
+# most, and the emails would go out with a dead button.
+TRIAL_SCHEDULE_CALL_URL = os.getenv("TRIAL_SCHEDULE_CALL_URL") or DEFAULT_TRIAL_SCHEDULE_CALL_URL
 
 # Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
 RENDER_SECRET = os.getenv("RENDER_SECRET")
