@@ -28,8 +28,10 @@ from ddpui.ddpairbyte.schema import (
 from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
 
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgType
+from ddpui.models.org import OrgType, ConnectionMeta
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
 from ddpui.core.oauth import google_oauth_service
@@ -119,6 +121,16 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.config,
     )
     logger.info("created source having id " + source["sourceId"])
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        action=AuditLogAction.CREATE,
+        # Never log payload.config — it holds connection credentials for
+        # whichever source type this is (host, port, username, password, etc).
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
     return {"sourceId": source["sourceId"]}
 
 
@@ -165,7 +177,16 @@ def post_source_oauth_create(request, payload: SourceGoogleOAuthCreate):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return airbytehelpers.create_oauth_source(orguser, payload)
+    res = airbytehelpers.create_oauth_source(orguser, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=res.get("sourceId", ""),
+        action=AuditLogAction.CREATE,
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
+    return res
 
 
 @airbyte_router.put("/sources/oauth/{source_id}")
@@ -186,7 +207,16 @@ def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthU
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    return airbytehelpers.update_oauth_source(orguser, source_id, payload)
+    res = airbytehelpers.update_oauth_source(orguser, source_id, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=res.get("sourceId", ""),
+        action=AuditLogAction.UPDATE,
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
+    return res
 
 
 @airbyte_router.put("/sources/{source_id}")
@@ -217,6 +247,16 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         source_id, payload.name, payload.config, payload.sourceDefId
     )
     logger.info("updated source having id " + source["sourceId"])
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        action=AuditLogAction.UPDATE,
+        # Never log payload.config — may contain connection credentials.
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
     return {"sourceId": source["sourceId"]}
 
 
@@ -371,6 +411,15 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         payload.config,
     )
     logger.info("created destination having id " + destination["destinationId"])
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=destination["destinationId"],
+        action=AuditLogAction.CREATE,
+        # Never log payload.config — warehouse connection credentials.
+        resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
+    )
     return {"destinationId": destination["destinationId"]}
 
 
@@ -513,6 +562,19 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, error)
 
     logger.debug(res)
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=res.get("connectionId", ""),
+        action=AuditLogAction.CREATE,
+        resource_fields={
+            "name": payload.name,
+            "streams": payload.streams,
+            "destinationSchema": payload.destinationSchema or "",
+            "post_sync_transform": payload.post_sync_transform,
+        },
+    )
     return res
 
 
@@ -568,6 +630,20 @@ def put_airbyte_connection_v1(
     if error:
         raise HttpError(400, error)
 
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "name": payload.name,
+            "streams": payload.streams,
+            "destinationSchema": payload.destinationSchema or "",
+            "post_sync_transform": payload.post_sync_transform,
+        },
+    )
+
     return res
 
 
@@ -582,9 +658,22 @@ def delete_airbyte_connection_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture connection name before deletion for audit log
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    connection_name = connection_meta.connection_name if connection_meta else connection_id
+
     _, error = deleteconnection.delete_org_connection(org, connection_id)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": connection_name},
+    )
 
     return {"success": 1}
 
@@ -639,6 +728,16 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
         logger.exception(error)
         raise HttpError(500, "failed to update destination") from error
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=destination["destinationId"],
+        action=AuditLogAction.UPDATE,
+        # Never log payload.config — warehouse connection credentials.
+        resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
+    )
+
     return {"destinationId": destination["destinationId"]}
 
 
@@ -652,9 +751,25 @@ def delete_airbyte_source_v1(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture source name before deletion for audit log
+    try:
+        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
+        source_name = source.get("name", source_id)
+    except Exception:
+        source_name = source_id
+
     _, error = airbytehelpers.delete_source(orguser.org, source_id)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source_id,
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": source_name},
+    )
 
     return {"success": 1}
 
@@ -702,6 +817,18 @@ def schedule_update_connection_schema(
         raise HttpError(400, "create an airbyte workspace first")
 
     airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
+
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    connection_name = connection_meta.connection_name if connection_meta else connection_id
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        action=AuditLogAction.UPDATE,
+        resource_fields={"name": connection_name, "cron": payload.cron},
+    )
 
     return {"success": 1}
 

@@ -6,6 +6,8 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
 )
@@ -78,6 +80,21 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
             logger.warning(
                 f"Failed to create git pull OrgTask for org {org.slug}: {str(e)}. Git operation was successful."
             )
+
+        # Refresh orgdbt to pick up the values switch_git_repository_v1 just wrote
+        orgdbt.refresh_from_db()
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            action=AuditLogAction.UPDATE,
+            resource_fields={
+                "gitrepo_url": orgdbt.gitrepo_url,
+                "is_repo_managed_by_system": orgdbt.is_repo_managed_by_system,
+            },
+        )
 
         return result
     except Exception as e:
@@ -157,13 +174,30 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
                 "commit_result": commit_result,
             }
 
-    return {
+    result = {
         "success": True,
         "message": "Changes published successfully",
         "committed": committed,
         "pushed": pushed,
         "commit_result": commit_result,
     }
+
+    # Record what was published in the audit log
+    resource_fields = {
+        "commit_message": {"old": None, "new": payload.commit_message},
+        "pushed_to_remote": {"old": None, "new": pushed},
+    }
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.UPDATE,
+        resource_fields=resource_fields,
+    )
+
+    return result
 
 
 @dbt_router.get("/git_status/", response=GitStatusSummary)
@@ -210,7 +244,17 @@ def dbt_delete(request):
     if org is None:
         raise HttpError(400, "create an organization first")
 
+    orgdbt = org.dbt
     OrgCleanupService(org, dry_run=False).delete_transformation_layer()
+
+    if orgdbt:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            action=AuditLogAction.DELETE,
+        )
 
     return from_orguser(orguser)
 
@@ -257,6 +301,14 @@ def post_dbt_git_pull(request):
     except Exception as error:
         raise HttpError(500, str(error)) from error
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.EXECUTE,
+    )
+
     return {"success": True}
 
 
@@ -291,7 +343,17 @@ def post_dbt_makedocs(request):
     redis.set(redis_key, htmlfilename.encode("utf-8"))
     redis.expire(redis_key, 3600 * 24)
 
-    return {"token": token.hex}
+    result = {"token": token.hex}
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orguser.org.dbt.id) if orguser.org.dbt else str(orguser.org.id),
+        action=AuditLogAction.EXECUTE,
+    )
+
+    return result
 
 
 @dbt_router.put("/v1/schema/")
@@ -309,6 +371,15 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org.dbt.default_schema = payload.target_configs_schema
     org.dbt.save()
     logger.info("updated orgdbt")
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(org.dbt.id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={"default_schema": payload.target_configs_schema},
+    )
 
     # Re-upsert the dbt-profile Secret block so the runner reads the new schema.
     airbyte_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
@@ -353,6 +424,14 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
     taskprogress.add({"message": "Added dbt commands in queue", "status": "queued"})
 
     run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.model_dump() if payload else None)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.EXECUTE,
+    )
 
     return {"task_id": task_id}
 

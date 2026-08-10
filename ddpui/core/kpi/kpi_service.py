@@ -317,7 +317,9 @@ class KPIService:
         return dashboards_with_kpi
 
     @staticmethod
-    def delete_kpi(kpi_id: int, org: Org, orguser: OrgUser) -> bool:
+    def delete_kpi(kpi_id: int, org: Org, orguser: OrgUser) -> str:
+        """Delete a KPI. Returns its name, so callers (e.g. the API layer's
+        audit log) don't need a separate fetch of their own."""
         kpi = KPIService.get_kpi(kpi_id, org)
 
         # Authorize before computing dashboard usage so a non-owner is denied
@@ -336,7 +338,7 @@ class KPIService:
         kpi_name = kpi.name
         kpi.delete()
         logger.info(f"Deleted KPI '{kpi_name}' (id={kpi_id}) by {orguser.user.email}")
-        return True
+        return kpi_name
 
     @staticmethod
     def get_kpi_summary(org: Org) -> List[dict]:

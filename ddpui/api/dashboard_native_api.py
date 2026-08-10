@@ -47,6 +47,8 @@ from ddpui.schemas.dashboard_schema import (
     LandingPageResponse,
     LandingPageResolveResponse,
 )
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 
 logger = CustomLogger("ddpui")
 
@@ -94,6 +96,7 @@ def get_dashboard(request, dashboard_id: int):
 def create_dashboard(request, payload: DashboardCreate):
     """Create a new dashboard"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     dashboard_data = DashboardData(
         title=payload.title,
@@ -103,7 +106,7 @@ def create_dashboard(request, payload: DashboardCreate):
     dashboard = DashboardService.create_dashboard(dashboard_data, orguser)
 
     # --- Custom logic for org default and landing dashboard (permission-driven) ---
-    has_org_default = Dashboard.objects.filter(org=orguser.org, is_org_default=True).exists()
+    has_org_default = Dashboard.objects.filter(org=org, is_org_default=True).exists()
 
     # If no org default dashboard exists, assign based on permission
     if not has_org_default:
@@ -116,6 +119,19 @@ def create_dashboard(request, payload: DashboardCreate):
                 orguser.landing_dashboard = dashboard
                 orguser.save(update_fields=["landing_dashboard"])
 
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        action=AuditLogAction.CREATE,
+        resource_fields={
+            "title": payload.title,
+            "description": payload.description or "",
+            "grid_columns": payload.grid_columns,
+        },
+    )
+
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 
 
@@ -124,11 +140,21 @@ def create_dashboard(request, payload: DashboardCreate):
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
+
+    # Snapshot pre-update state so the audit log can skip fields that are
+    # present in the payload but identical to what's already saved — e.g.
+    # the save-on-tab-away flow re-sending the full current state with
+    # nothing actually edited. This is a targeted exception to the rest of
+    # the platform's "no prior-state diffing" design (see plan.md), scoped
+    # only to this "should we log at all" decision — the logged content is
+    # still the curated new-state snapshot below, never an old/new pair.
+    old_dashboard = Dashboard.objects.filter(id=dashboard_id, org=org).first()
 
     try:
         dashboard = DashboardService.update_dashboard(
             dashboard_id=dashboard_id,
-            org=orguser.org,
+            org=org,
             orguser=orguser,
             data=payload,
         )
@@ -136,6 +162,44 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
         raise HttpError(404, "Dashboard not found") from err
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
+
+    # DashboardService.update_dashboard only touches a field when it's not
+    # None — a genuine partial patch (auto-save may only send one field).
+    raw_resource_fields = {
+        "title": payload.title,
+        "description": payload.description,
+        "grid_columns": payload.grid_columns,
+        "target_screen_size": payload.target_screen_size,
+        "tabs": [tab.model_dump() for tab in payload.tabs] if payload.tabs is not None else None,
+        "filter_layout": payload.filter_layout,
+        "is_published": payload.is_published,
+    }
+    touched_fields = {k: v for k, v in raw_resource_fields.items() if v is not None}
+
+    def _blank_normalized(value):
+        """Treat None and "" as equivalent. Dashboard.description defaults to
+        None in the DB, but the frontend always sends "" when a field has no
+        value — without this, that mismatch alone looks like a real change."""
+        return value if value not in (None, "") else None
+
+    resource_fields = (
+        {
+            k: v
+            for k, v in touched_fields.items()
+            if _blank_normalized(v) != _blank_normalized(getattr(old_dashboard, k))
+        }
+        if old_dashboard
+        else touched_fields
+    )
+    if resource_fields:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DASHBOARD,
+            resource_id=str(dashboard_id),
+            action=AuditLogAction.UPDATE,
+            resource_fields={**resource_fields, "title": dashboard.title},
+        )
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 
@@ -145,15 +209,25 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
 def delete_dashboard(request, dashboard_id: int):
     """Delete a dashboard"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        DashboardService.delete_dashboard(dashboard_id, orguser.org, orguser)
+        dashboard_name = DashboardService.delete_dashboard(dashboard_id, org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
     except DashboardPermissionError as err:
         raise HttpError(403, err.message) from err
     except DashboardLockedError as err:
         raise HttpError(423, "Cannot delete a locked dashboard") from err
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.DELETE,
+        resource_fields={"title": dashboard_name},
+    )
 
     return {"success": True}
 
@@ -163,11 +237,12 @@ def delete_dashboard(request, dashboard_id: int):
 def duplicate_dashboard(request, dashboard_id: int):
     """Duplicate a dashboard with all its configurations and filters"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # Get the original dashboard
     try:
         original_dashboard = Dashboard.objects.prefetch_related("filters").get(
-            id=dashboard_id, org=orguser.org
+            id=dashboard_id, org=org
         )
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
@@ -206,9 +281,16 @@ def duplicate_dashboard(request, dashboard_id: int):
         )
         new_dashboard.save()
 
-        logger.info(
-            f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {orguser.org.id}"
-        )
+        logger.info(f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {org.id}")
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(new_dashboard.id),
+        action=AuditLogAction.CREATE,
+        resource_fields={"title": new_dashboard.title},
+    )
 
     return DashboardResponse(**DashboardService.get_dashboard_response(new_dashboard))
 
@@ -397,9 +479,10 @@ def get_filter_options(
 def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
     """Toggle public sharing for a dashboard"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=org)
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
@@ -445,9 +528,21 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
         response_data["public_share_token"] = dashboard.public_share_token
 
     # Audit logging
-    action = "enabled_public_sharing" if is_public else "disabled_public_sharing"
+    action_desc = "enabled_public_sharing" if is_public else "disabled_public_sharing"
     logger.info(
-        f"Dashboard {dashboard_id} sharing {action} by user {orguser.user.email}, token: {dashboard.public_share_token}"
+        f"Dashboard {dashboard_id} sharing {action_desc} by user {orguser.user.email}, token: {dashboard.public_share_token}"
+    )
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.SHARE,
+        resource_fields={
+            "title": dashboard.title,
+            "is_public": {"old": not is_public, "new": is_public},
+        },
     )
 
     return DashboardShareResponse(**response_data)
@@ -500,10 +595,11 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
 def set_personal_landing_dashboard(request, dashboard_id: int):
     """Set a dashboard as user's personal landing page"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # Check if dashboard exists and belongs to user's org
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=org)
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
@@ -514,6 +610,19 @@ def set_personal_landing_dashboard(request, dashboard_id: int):
     logger.info(
         f"User {orguser.user.email} set dashboard {dashboard.title} as personal landing page"
     )
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "title": dashboard.title,
+            "personal_landing_page": {"old": False, "new": True},
+        },
+    )
+
     return LandingPageResponse(success=True, message="Dashboard set as personal landing page")
 
 
@@ -543,16 +652,17 @@ def remove_personal_landing_dashboard(request):
 def set_org_default_dashboard(request, dashboard_id: int):
     """Set a dashboard as organization's default landing page (Admin only)"""
     orguser: OrgUser = request.orguser
+    org = orguser.org
 
     # Check if dashboard exists and belongs to user's org
     try:
-        dashboard = Dashboard.objects.get(id=dashboard_id, org=orguser.org)
+        dashboard = Dashboard.objects.get(id=dashboard_id, org=org)
     except Dashboard.DoesNotExist as err:
         raise HttpError(404, "Dashboard not found") from err
 
     with transaction.atomic():
         # Remove previous org default
-        Dashboard.objects.filter(org=orguser.org, is_org_default=True).update(is_org_default=False)
+        Dashboard.objects.filter(org=org, is_org_default=True).update(is_org_default=False)
 
         # Set new org default
         dashboard.is_org_default = True
@@ -561,6 +671,19 @@ def set_org_default_dashboard(request, dashboard_id: int):
     logger.info(
         f"User {orguser.user.email} set dashboard {dashboard.title} as org default landing page"
     )
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DASHBOARD,
+        resource_id=str(dashboard_id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "title": dashboard.title,
+            "is_org_default": {"old": False, "new": True},
+        },
+    )
+
     return LandingPageResponse(
         success=True, message="Dashboard set as organization default landing page"
     )
