@@ -30,6 +30,7 @@ from ddpui.schemas.trial_schema import (
     TrialActivateSchema,
     TrialCloneParams,
     TrialSignupSchema,
+    TrialValidatePasswordSchema,
 )
 from ddpui.utils.awsses import send_trial_verification_email
 from ddpui.utils.custom_logger import CustomLogger
@@ -86,6 +87,33 @@ def trial_signup(request, payload: TrialSignupSchema):  # pylint: disable=unused
     return {"status": "verification_sent"}
 
 
+@trial_router.post("/validate-password")
+def trial_validate_password(
+    request, payload: TrialValidatePasswordSchema
+):  # pylint: disable=unused-argument
+    """run the AUTH_PASSWORD_VALIDATORS against a candidate password, and nothing else
+
+    Exists purely so the activate screen can tell the user their password is weak *on the
+    password form*, with Django's own reason. Without it the only feedback is /trial/activate's
+    400, which arrives one screen later and is indistinguishable from an expired link unless the
+    client parses the error detail. The frontend cannot replicate CommonPasswordValidator without
+    shipping Django's 20k-word list to the browser, so it asks the authority instead.
+
+    Stateless and token-free on purpose: it creates nothing, reveals nothing about any account,
+    and takes no email — so there is nothing to enumerate. /trial/activate keeps its own
+    validate_password call; this endpoint is UX, never the security boundary.
+    """
+    try:
+        validate_password(payload.password)
+    except ValidationError as err:
+        # Django's own messages ("This password is too common.", "This password is too short…"),
+        # passed through verbatim — a generic "password is weak" leaves the user guessing which
+        # rule they broke and what to change.
+        raise HttpError(400, " ".join(err.messages)) from err
+
+    return {"valid": True}
+
+
 @trial_router.post("/activate")
 def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=unused-argument
     """set the chosen password on the trial user and enqueue the clone task
@@ -110,7 +138,12 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
     try:
         validate_password(payload.password)
     except ValidationError as err:
-        raise HttpError(400, "password does not meet requirements") from err
+        # keep the "password does not meet requirements" prefix stable — the frontend matches on
+        # it to tell this 400 apart from the expired-token 400 above, which shares the status.
+        # Django's own messages are appended so the user is told which rule they broke.
+        raise HttpError(
+            400, f"password does not meet requirements: {' '.join(err.messages)}"
+        ) from err
 
     # I1: check for a real account — the token may be old (up to 24h TTL) and the email may
     # have since become a real account (e.g. the user signed up normally, or a previous

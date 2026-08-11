@@ -39,6 +39,16 @@ class TrialActivateSchema(Schema):
     password: str
 
 
+class TrialValidatePasswordSchema(Schema):
+    """payload for POST /trial/validate-password.
+
+    Deliberately password-only: this endpoint runs Django's validators and nothing else, so it
+    needs no activation token and touches no state.
+    """
+
+    password: str
+
+
 class ActivationTokenData(Schema):
     """what an activation token stores in redis: the signup form fields, replayed at
     /trial/activate once the user clicks the emailed verification link.

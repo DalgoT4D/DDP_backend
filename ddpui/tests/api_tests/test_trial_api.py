@@ -27,12 +27,14 @@ from ddpui.api.trial_api import (
     trial_activate,
     trial_retry,
     trial_status,
+    trial_validate_password,
 )
 from ddpui.schemas.trial_schema import (
     ActivationTokenData,
     TrialActivateSchema,
     TrialCloneParams,
     TrialSignupSchema,
+    TrialValidatePasswordSchema,
 )
 
 pytestmark = pytest.mark.django_db
@@ -323,6 +325,10 @@ class TestTrialActivate:
             trial_activate(None, payload)
 
         assert exc.value.status_code == 400
+        # the prefix is a contract: the frontend matches on it to tell this 400 apart from the
+        # expired-token 400, which shares the status code. Django's reason follows it.
+        assert str(exc.value).startswith("password does not meet requirements:")
+        assert "too short" in str(exc.value)
         assert not User.objects.filter(username="weak@b.org").exists()
         mock_consume.assert_not_called()
         mock_lock.assert_not_called()
@@ -571,3 +577,47 @@ class TestTrialStatus:
             "status": "pending",
             "started_at": None,
         }
+
+
+class TestTrialValidatePassword:
+    """POST /trial/validate-password — the pre-flight check the activate screen calls so a
+    weak password is reported on the password form instead of one screen later, as an
+    /activate 400 the client can't tell apart from an expired link."""
+
+    def test_strong_password_is_valid(self):
+        result = trial_validate_password(
+            None, TrialValidatePasswordSchema(password=STRONG_PASSWORD)
+        )
+        assert result == {"valid": True}
+
+    def test_short_password_rejected_with_django_reason(self):
+        with pytest.raises(HttpError) as exc:
+            trial_validate_password(None, TrialValidatePasswordSchema(password="Ab1!x"))
+        assert exc.value.status_code == 400
+        assert "too short" in str(exc.value)
+
+    def test_common_password_rejected_with_django_reason(self):
+        """the rule the frontend cannot mirror without shipping Django's 20k-word list —
+        the whole reason this endpoint exists."""
+        with pytest.raises(HttpError) as exc:
+            trial_validate_password(None, TrialValidatePasswordSchema(password="password123"))
+        assert exc.value.status_code == 400
+        assert "too common" in str(exc.value)
+
+    def test_all_numeric_password_rejected(self):
+        with pytest.raises(HttpError) as exc:
+            trial_validate_password(None, TrialValidatePasswordSchema(password="4831067295"))
+        assert exc.value.status_code == 400
+        assert "entirely numeric" in str(exc.value)
+
+    def test_empty_password_rejected(self):
+        with pytest.raises(HttpError) as exc:
+            trial_validate_password(None, TrialValidatePasswordSchema(password=""))
+        assert exc.value.status_code == 400
+
+    def test_creates_no_user(self):
+        """it validates a string and nothing else — no state, no account, nothing to enumerate."""
+        before = User.objects.count()
+        with pytest.raises(HttpError):
+            trial_validate_password(None, TrialValidatePasswordSchema(password="password"))
+        assert User.objects.count() == before
