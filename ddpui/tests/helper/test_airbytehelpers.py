@@ -14,6 +14,8 @@ from ddpui.ddpairbyte.airbytehelpers import (
     delete_source,
     create_airbyte_deployment,
     create_connection,
+    update_connection,
+    get_one_connection,
     get_sync_job_history_for_connection,
     schedule_update_connection_schema,
     fetch_and_update_airbyte_job_details,
@@ -23,6 +25,7 @@ from ddpui.ddpairbyte.airbytehelpers import (
 from ddpui.ddpairbyte.schema import (
     AirbyteDestinationUpdate,
     AirbyteConnectionCreate,
+    AirbyteConnectionUpdate,
     AirbyteConnectionSchemaUpdateSchedule,
 )
 from ddpui.models.role_based_access import Role
@@ -117,17 +120,23 @@ def task():
 @pytest.fixture
 def sync_task():
     """a pytest fixture which creates a Task object"""
-    task_ = Task.objects.create(slug=TASK_AIRBYTESYNC, label=TASK_AIRBYTESYNC)
+    task_, created = Task.objects.get_or_create(
+        slug=TASK_AIRBYTESYNC, defaults={"label": TASK_AIRBYTESYNC}
+    )
     yield task_
-    task_.delete()
+    if created:
+        task_.delete()
 
 
 @pytest.fixture
 def clear_task():
     """a pytest fixture which creates a Task object"""
-    task_ = Task.objects.create(slug=TASK_AIRBYTECLEAR, label=TASK_AIRBYTECLEAR)
+    task_, created = Task.objects.get_or_create(
+        slug=TASK_AIRBYTECLEAR, defaults={"label": TASK_AIRBYTECLEAR}
+    )
     yield task_
-    task_.delete()
+    if created:
+        task_.delete()
 
 
 @pytest.fixture
@@ -639,8 +648,8 @@ def test_create_connection(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
-    mock_create_or_update_org_cli_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
 )
 @patch(
     "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
@@ -648,7 +657,7 @@ def test_create_connection(
 )
 def test_update_destination_name(
     mock_run_dbt_task_sync: Mock,
-    mock_create_or_update_org_cli_block: Mock,
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -672,7 +681,7 @@ def test_update_destination_name(
     mock_dbt_project_params = Mock(
         dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
     )
-    mock_create_or_update_org_cli_block.return_value = (
+    mock_create_or_update_dbt_profile_secret_blk.return_value = (
         (mock_cli_profile_block, mock_dbt_project_params),
         None,
     )
@@ -680,14 +689,13 @@ def test_update_destination_name(
     payload = AirbyteDestinationUpdate(
         name="new-name", destinationDefId="destinationDefId", config={}
     )
-    response, error = update_destination(org, "destination_id", payload)
-    assert error is None
+    response = update_destination(org, "destination_id", payload)
     assert response == {"destinationId": "DESTINATION_ID"}
 
     warehouse.refresh_from_db()
 
     assert warehouse.name == "new-name"
-    mock_create_or_update_org_cli_block.assert_called_once()
+    mock_create_or_update_dbt_profile_secret_blk.assert_called_once()
 
 
 @patch(
@@ -703,8 +711,8 @@ def test_update_destination_name(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
-    mock_create_or_update_org_cli_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
 )
 @patch(
     "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
@@ -712,7 +720,7 @@ def test_update_destination_name(
 )
 def test_update_destination_postgres_config(
     mock_run_dbt_task_sync: Mock,
-    mock_create_or_update_org_cli_block: Mock,
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -742,12 +750,11 @@ def test_update_destination_postgres_config(
     mock_dbt_project_params = Mock(
         dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
     )
-    mock_create_or_update_org_cli_block.return_value = (
+    mock_create_or_update_dbt_profile_secret_blk.return_value = (
         (mock_cli_profile_block, mock_dbt_project_params),
         None,
     )
-    response, error = update_destination(org, "destination_id", payload)
-    assert error is None
+    response = update_destination(org, "destination_id", payload)
     assert response == {"destinationId": "DESTINATION_ID"}
 
     mock_update_warehouse_credentials.assert_called_once_with(
@@ -757,7 +764,7 @@ def test_update_destination_postgres_config(
             "port": "123",
         },
     )
-    mock_create_or_update_org_cli_block.assert_called_once()
+    mock_create_or_update_dbt_profile_secret_blk.assert_called_once()
 
 
 @patch(
@@ -773,8 +780,8 @@ def test_update_destination_postgres_config(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
-    mock_create_or_update_org_cli_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
 )
 @patch(
     "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
@@ -782,7 +789,7 @@ def test_update_destination_postgres_config(
 )
 def test_update_destination_bigquery_config(
     mock_run_dbt_task_sync: Mock,
-    mock_create_or_update_org_cli_block: Mock,
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
@@ -816,12 +823,11 @@ def test_update_destination_bigquery_config(
     mock_dbt_project_params = Mock(
         dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
     )
-    mock_create_or_update_org_cli_block.return_value = (
+    mock_create_or_update_dbt_profile_secret_blk.return_value = (
         (mock_cli_profile_block, mock_dbt_project_params),
         None,
     )
-    response, error = update_destination(org, "destination_id", payload)
-    assert error is None
+    response = update_destination(org, "destination_id", payload)
     assert response == {"destinationId": "DESTINATION_ID"}
 
     mock_update_warehouse_credentials.assert_called_once_with(
@@ -832,7 +838,7 @@ def test_update_destination_bigquery_config(
             "transformation_priority": "batch",
         },
     )
-    mock_create_or_update_org_cli_block.assert_called_once()
+    mock_create_or_update_dbt_profile_secret_blk.assert_called_once()
 
     warehouse.refresh_from_db()
     assert warehouse.bq_location == "LOCATION"
@@ -844,65 +850,62 @@ def test_update_destination_bigquery_config(
 )
 @patch(
     "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
-    mock_retrieve_warehouse_credentials=Mock(),
+    mock_retrieve=Mock(),
 )
 @patch(
     "ddpui.utils.secretsmanager.update_warehouse_credentials",
-    mock_update_warehouse_credentials=Mock(),
+    mock_update_creds=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
-    mock_create_or_update_org_cli_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_secret=Mock(),
 )
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
-    mock_run_dbt_task_sync=Mock(),
-)
-def test_update_destination_snowflake_config(
-    mock_run_dbt_task_sync: Mock,
-    mock_create_or_update_org_cli_block: Mock,
-    mock_update_warehouse_credentials: Mock,
-    mock_retrieve_warehouse_credentials: Mock,
+def test_update_destination_rotates_creds_in_secret_block(
+    mock_secret: Mock,
+    mock_update_creds: Mock,
+    mock_retrieve: Mock,
     mock_update_destination: Mock,
 ):
-    """test update_destination"""
+    """User rotates warehouse password → new creds must flow through to the
+    dbt-profile SECRET block. Without this, dbt keeps using stale cached creds
+    and users see mysterious auth failures."""
     org = Org.objects.create(name="org", slug="org")
-    # Create OrgDbt to enable dbt functionality
-    org_dbt = OrgDbt.objects.create(
-        gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
-    )
-    org.dbt = org_dbt
-    org.save()
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
 
-    mock_update_destination.return_value = {
-        "destinationId": "DESTINATION_ID",
-    }
-    mock_retrieve_warehouse_credentials.return_value = {"credentials": {"password": "*****"}}
-    mock_update_warehouse_credentials.return_value = None
+    mock_update_destination.return_value = {"destinationId": "dst"}
+    mock_retrieve.return_value = {"host": "h", "port": "5432", "password": "old-password"}
+    mock_update_creds.return_value = None
+
+    payload = AirbyteDestinationUpdate(
+        name="wh",
+        destinationDefId="def",
+        config={"host": "h", "port": "5432", "password": "NEW-PASSWORD"},
+    )
+    update_destination(org, "dst", payload)
+
+    # Third arg to create_or_update_dbt_profile_secret_blk carries the NEW creds
+    args = mock_secret.call_args.args
+    creds_passed = args[2]
+    assert creds_passed["password"] == "NEW-PASSWORD"
+
+
+@patch(
+    "ddpui.ddpairbyte.airbyte_service.update_destination",
+    mock_update_destination=Mock(),
+)
+def test_update_destination_snowflake_rejected(mock_update_destination: Mock):
+    """update_destination raises ValueError for snowflake wtype (only postgres + bigquery supported)."""
+    org = Org.objects.create(name="org", slug="org")
+    OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
+    mock_update_destination.return_value = {"destinationId": "DESTINATION_ID"}
 
     payload = AirbyteDestinationUpdate(
         name="name",
         destinationDefId="destinationDefId",
         config={"credentials": {"password": "newpassword"}},
     )
-    mock_cli_profile_block = Mock(block_name="block-name")
-    mock_dbt_project_params = Mock(
-        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
-    )
-    mock_create_or_update_org_cli_block.return_value = (
-        (mock_cli_profile_block, mock_dbt_project_params),
-        None,
-    )
-    response, error = update_destination(org, "destination_id", payload)
-    assert error is None
-    assert response == {"destinationId": "DESTINATION_ID"}
-
-    mock_update_warehouse_credentials.assert_called_once_with(
-        warehouse,
-        {"credentials": {"password": "newpassword"}},
-    )
-    mock_create_or_update_org_cli_block.assert_called_once()
+    with pytest.raises(ValueError, match="unknown warehouse type snowflake"):
+        update_destination(org, "destination_id", payload)
 
 
 @patch(
@@ -918,103 +921,58 @@ def test_update_destination_snowflake_config(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
-    mock_create_or_update_org_cli_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.write_dbt_profiles_yml",
+    mock_write_dbt_profiles_yml=Mock(),
 )
 @patch(
     "ddpui.ddpairbyte.airbytehelpers.create_elementary_profile",
     mock_create_elementary_profile=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.prefect_service.run_dbt_task_sync",
-    mock_run_dbt_task_sync=Mock(),
-)
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.uuid4",
-    mock_uuid4=Mock(),
-)
-@patch(
-    "ddpui.ddpairbyte.airbytehelpers.timezone",
-    mock_uuid4=Mock(),
-)
-@patch(
     "ddpui.ddpairbyte.airbytehelpers.elementary_setup_status",
-    mock_uuid4=Mock(),
+    mock_elementary_setup_status=Mock(),
 )
-def test_update_destination_cliprofile(
+def test_update_destination_does_not_refresh_elementary(
     mock_elementary_setup_status: Mock,
-    mock_timezone: Mock,
-    mock_uuid4: Mock,
-    mock_run_dbt_task_sync: Mock,
     mock_create_elementary_profile: Mock,
-    mock_create_or_update_org_cli_block: Mock,
+    mock_write_dbt_profiles_yml: Mock,
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
 ):
-    """test update_destination"""
+    """update_destination refreshes the dbt-profile SECRET block only — it does not
+    materialize profiles.yml or refresh elementary's profile, even when elementary is set up."""
     org = Org.objects.create(name="org", slug="org")
-    # Create OrgDbt to enable dbt functionality
     org_dbt = OrgDbt.objects.create(
         gitrepo_url="https://github.com/test/repo", project_dir="/path/to/dbt/project"
     )
     org.dbt = org_dbt
     org.save()
-    warehouse = OrgWarehouse.objects.create(org=org, wtype="snowflake", name="name")
+    OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
 
-    mock_update_destination.return_value = {
-        "destinationId": "DESTINATION_ID",
-    }
-    mock_retrieve_warehouse_credentials.return_value = {"credentials": {"password": "*****"}}
+    mock_update_destination.return_value = {"destinationId": "DESTINATION_ID"}
+    mock_retrieve_warehouse_credentials.return_value = {}
     mock_update_warehouse_credentials.return_value = None
+    mock_elementary_setup_status.return_value = "set-up"
 
     payload = AirbyteDestinationUpdate(
         name="name",
         destinationDefId="destinationDefId",
-        config={
-            "credentials": {"password": "newpassword"},
-            "dataset_location": "LOCATIUON",
-        },
+        config={"host": "new-host", "port": "5432", "password": "newpassword"},
     )
-
-    OrgPrefectBlockv1.objects.create(org=org, block_type=DBTCLIPROFILE, block_name="cliblockname")
-
-    mock_cli_profile_block = Mock(block_name="block-name")
-    mock_dbt_project_params = Mock(
-        dbt_binary="dbt-binary", project_dir="dbt-project-dir", working_dir="dbt-project-dir"
-    )
-    mock_create_or_update_org_cli_block.return_value = (
-        (mock_cli_profile_block, mock_dbt_project_params),
-        None,
-    )
-    mock_uuid4.return_value = "fake-uuid"
-    mock_timezone.as_ist = Mock(return_value=Mock(isoformat=Mock(return_value="isoformatted-time")))
-
-    mock_elementary_setup_status.return_value = "set-up"
-
-    response, error = update_destination(org, "destination_id", payload)
-    assert error is None
+    response = update_destination(org, "destination_id", payload)
     assert response == {"destinationId": "DESTINATION_ID"}
 
-    mock_create_or_update_org_cli_block.assert_called_once_with(org, warehouse, payload.config)
-    mock_create_elementary_profile.assert_called_once_with(org)
-
-    dbtdebugtask = schema.PrefectDbtTaskSetup(
-        seq=1,
-        slug="dbt-debug",
-        commands=["dbt-binary debug"],
-        type=DBTCORE,
-        env={},
-        working_dir="dbt-project-dir",
-        profiles_dir="dbt-project-dir/profiles/",
-        project_dir="dbt-project-dir",
-        cli_profile_block="block-name",
-        cli_args=[],
-        orgtask_uuid="fake-uuid",
-        flow_name="org-dbt-debug",
-        flow_run_name="isoformatted-time",
-    )
-    mock_run_dbt_task_sync.assert_called_once_with(dbtdebugtask)
+    # SECRET block is refreshed (this is the new refresh path)
+    mock_create_or_update_dbt_profile_secret_blk.assert_called_once()
+    # Legacy on-disk refresh paths must NOT be called
+    mock_write_dbt_profiles_yml.assert_not_called()
+    mock_create_elementary_profile.assert_not_called()
 
 
 @patch("ddpui.ddpairbyte.airbyte_service.get_connections", mock_get_connections=Mock())
@@ -1458,16 +1416,16 @@ def test_fetch_and_update_org_schema_changes_api_error(
     mock_update_warehouse_credentials=Mock(),
 )
 @patch(
-    "ddpui.ddpairbyte.airbytehelpers.create_or_update_org_cli_block",
-    mock_create_or_update_org_cli_block=Mock(),
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
 )
 def test_update_destination_no_dbt_workspace(
-    mock_create_or_update_org_cli_block: Mock,
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
     mock_update_warehouse_credentials: Mock,
     mock_retrieve_warehouse_credentials: Mock,
     mock_update_destination: Mock,
 ):
-    """test update_destination when dbt workspace is not setup (org.dbt is None)"""
+    """update_destination refreshes the dbt-profile SECRET block even when org.dbt is None."""
     # Create org without dbt workspace
     org = Org.objects.create(name="org", slug="org", dbt=None)
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="name")
@@ -1484,10 +1442,9 @@ def test_update_destination_no_dbt_workspace(
         config={"host": "newhost", "port": "5433"},
     )
 
-    response, error = update_destination(org, "destination_id", payload)
+    response = update_destination(org, "destination_id", payload)
 
     # Should complete successfully
-    assert error is None
     assert response == {"destinationId": "DESTINATION_ID"}
 
     # Verify warehouse name was updated
@@ -1500,5 +1457,368 @@ def test_update_destination_no_dbt_workspace(
         {"host": "newhost", "port": "5433"},
     )
 
-    # Verify create_or_update_org_cli_block was NOT called since dbt workspace is not setup
-    mock_create_or_update_org_cli_block.assert_not_called()
+    # Verify secret block refresh still happens even without org.dbt
+    mock_create_or_update_dbt_profile_secret_blk.assert_called_once_with(
+        org, warehouse, {"host": "newhost", "port": "5433"}
+    )
+
+
+# ================================================================================
+# M2 — post_sync_transform round-trip tests
+# ================================================================================
+
+POST_SYNC_TRANSFORM = {
+    "ops": [
+        {
+            "type": "cast",
+            "schema": "dest",
+            "table": "orders",
+            "config": {"amount": "numeric"},
+        }
+    ]
+}
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
+@patch("ddpui.ddpairbyte.airbytehelpers.logger")
+def test_create_connection_saves_post_sync_transform(
+    mock_logger,
+    mock_create_airbyte_deployment,
+    mock_delete_connection,
+    mock_create_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+    clear_task,
+):
+    """post_sync_transform is persisted on the sync OrgTask + the AirbyteConnection block is upserted."""
+    mock_create_connection.return_value = {
+        "connectionId": "conn-id",
+        "sourceId": "src-id",
+        "destinationId": "dst-id",
+        "sourceCatalogId": "cat-id",
+        "syncCatalog": {},
+        "status": "active",
+        "name": "test-conn",
+    }
+    new_dataflow = Mock(clear_conn_dataflow=None)
+    mock_create_airbyte_deployment.return_value = new_dataflow
+
+    payload = AirbyteConnectionCreate(
+        name="test-conn",
+        sourceId="src-id",
+        streams=[],
+        catalogId="cat-id",
+        syncCatalog={"streams": []},
+        post_sync_transform=POST_SYNC_TRANSFORM,
+    )
+
+    result, error = create_connection(org_with_workspace, payload)
+
+    assert error is None
+    assert result["post_sync_transform"] == POST_SYNC_TRANSFORM
+
+    # The sync OrgTask should have post_sync_transform set
+    sync_orgtask = OrgTask.objects.filter(
+        org=org_with_workspace,
+        connection_id="conn-id",
+        task=sync_task,
+    ).first()
+    assert sync_orgtask is not None
+    assert sync_orgtask.post_sync_transform == POST_SYNC_TRANSFORM
+
+    # The AirbyteConnection block should have been upserted with the right identifiers
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id"
+    assert call_kwargs["connection_name"] == "test-conn"
+    assert "extra" in call_kwargs
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.create_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.delete_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.create_airbyte_deployment")
+@patch("ddpui.ddpairbyte.airbytehelpers.logger")
+def test_create_connection_no_transform_still_upserts(
+    mock_logger,
+    mock_create_airbyte_deployment,
+    mock_delete_connection,
+    mock_create_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+    clear_task,
+):
+    """Even without post_sync_transform, the block is upserted so every connection has one
+    (consistent with update_connection). extra will just have empty env/ops."""
+    mock_create_connection.return_value = {
+        "connectionId": "conn-id-2",
+        "sourceId": "src-id",
+        "destinationId": "dst-id",
+        "sourceCatalogId": "cat-id",
+        "syncCatalog": {},
+        "status": "active",
+        "name": "no-cast-conn",
+    }
+    mock_create_airbyte_deployment.return_value = Mock(clear_conn_dataflow=None)
+
+    payload = AirbyteConnectionCreate(
+        name="no-cast-conn",
+        sourceId="src-id",
+        streams=[],
+        catalogId="cat-id",
+        syncCatalog={"streams": []},
+    )
+
+    _, error = create_connection(org_with_workspace, payload)
+
+    assert error is None
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id-2"
+    assert call_kwargs["connection_name"] == "no-cast-conn"
+    # extra carries empty env/ops but the block is still created for consistency
+    assert call_kwargs["extra"] == {"env": {}, "post_sync_ops": []}
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_update_connection_saves_post_sync_transform(
+    mock_get_connection,
+    mock_update_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+):
+    """update_connection persists post_sync_transform on OrgTask + upserts the AirbyteConnection block."""
+    # Create existing sync OrgTask
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace, task=sync_task, connection_id="conn-id"
+    )
+
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "operationIds": [],
+        "syncCatalog": {},
+        "name": "updated-conn",
+    }
+    mock_update_connection.return_value = {"connectionId": "conn-id"}
+
+    payload = AirbyteConnectionUpdate(
+        name="updated-conn",
+        streams=[{"name": "orders"}],
+        syncCatalog={"streams": []},
+        catalogId="cat-id",
+        post_sync_transform=POST_SYNC_TRANSFORM,
+    )
+
+    _, error = update_connection(org_with_workspace, "conn-id", payload)
+
+    assert error is None
+
+    sync_orgtask.refresh_from_db()
+    assert sync_orgtask.post_sync_transform == POST_SYNC_TRANSFORM
+
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id"
+    assert call_kwargs["connection_name"] == "updated-conn"
+    assert "extra" in call_kwargs
+
+    # cleanup
+    sync_orgtask.delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_update_connection_in_multiple_pipelines_upserts_block_once(
+    mock_get_connection,
+    mock_update_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+):
+    """Regression protection for the pivot's motivation.
+
+    Previously (deployment-params approach), a connection in N pipelines needed
+    N deployment updates, and the code used .first() → only 1 got updated.
+    Under the block approach, ONE upsert covers all pipelines: at flow-run
+    time each pipeline's deployment reads the block by connection_id."""
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace, task=sync_task, connection_id="conn-id"
+    )
+    # Connection is used in TWO pipelines
+    dataflow1 = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="pipeline-A",
+        dataflow_type="orchestrate",
+        deployment_id="dep-A",
+    )
+    dataflow2 = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="pipeline-B",
+        dataflow_type="orchestrate",
+        deployment_id="dep-B",
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow1, orgtask=sync_orgtask)
+    DataflowOrgTask.objects.create(dataflow=dataflow2, orgtask=sync_orgtask)
+
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "operationIds": [],
+        "syncCatalog": {},
+        "name": "shared-conn",
+    }
+    mock_update_connection.return_value = {"connectionId": "conn-id"}
+
+    new_transform = {
+        "ops": [
+            {
+                "type": "cast",
+                "schema": "raw",
+                "table": "orders",
+                "config": {"amount": "numeric"},
+            }
+        ]
+    }
+    payload = AirbyteConnectionUpdate(
+        name="shared-conn",
+        streams=[{"name": "orders"}],
+        syncCatalog={"streams": []},
+        catalogId="cat-id",
+        post_sync_transform=new_transform,
+    )
+    _, error = update_connection(org_with_workspace, "conn-id", payload)
+    assert error is None
+
+    # Block upserted exactly once — not per-pipeline. Both pipelines will read
+    # this same block at their next flow-run.
+    mock_upsert_conn_block.assert_called_once()
+    call_kwargs = mock_upsert_conn_block.call_args.kwargs
+    assert call_kwargs["connection_id"] == "conn-id"
+
+    # cleanup
+    DataflowOrgTask.objects.filter(dataflow__in=[dataflow1, dataflow2]).delete()
+    dataflow1.delete()
+    dataflow2.delete()
+    sync_orgtask.delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.prefect_service.upsert_airbyte_connection_block")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.update_connection")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_update_connection_clears_casts_upserts_empty_extra(
+    mock_get_connection,
+    mock_update_connection,
+    mock_upsert_conn_block,
+    org_with_workspace,
+    sync_task,
+):
+    """User removes all casts from a connection → block must be upserted with
+    empty post_sync_ops. If we skip the upsert, the block keeps running stale
+    casts and the "turn off" in UI is silently ignored."""
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace,
+        task=sync_task,
+        connection_id="conn-id",
+        post_sync_transform={
+            "ops": [{"type": "cast", "schema": "s", "table": "t", "config": {"a": "int"}}]
+        },
+    )
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "operationIds": [],
+        "syncCatalog": {},
+        "name": "conn",
+    }
+    mock_update_connection.return_value = {"connectionId": "conn-id"}
+
+    # Payload with no post_sync_transform — casts turned off in UI
+    payload = AirbyteConnectionUpdate(
+        name="conn",
+        streams=[{"name": "orders"}],
+        syncCatalog={"streams": []},
+        catalogId="cat-id",
+    )
+    _, error = update_connection(org_with_workspace, "conn-id", payload)
+    assert error is None
+
+    sync_orgtask.refresh_from_db()
+    assert sync_orgtask.post_sync_transform in (None, {})
+
+    # Block MUST be upserted so the runner sees empty ops on next sync
+    mock_upsert_conn_block.assert_called_once()
+    extra = mock_upsert_conn_block.call_args.kwargs["extra"]
+    assert extra["post_sync_ops"] == []
+
+    # cleanup
+    sync_orgtask.delete()
+
+
+@patch("ddpui.ddpairbyte.airbytehelpers.fetch_orgtask_lock_v1")
+@patch("ddpui.ddpairbyte.airbytehelpers.TaskLock")
+@patch("ddpui.ddpairbyte.airbytehelpers.airbyte_service.get_connection")
+def test_get_one_connection_includes_post_sync_transform(
+    mock_get_connection,
+    mock_task_lock,
+    mock_fetch_lock,
+    org_with_workspace,
+    sync_task,
+):
+    """get_one_connection includes post_sync_transform from the OrgTask."""
+    sync_orgtask = OrgTask.objects.create(
+        org=org_with_workspace,
+        task=sync_task,
+        connection_id="conn-id",
+        post_sync_transform=POST_SYNC_TRANSFORM,
+    )
+    dataflow = OrgDataFlowv1.objects.create(
+        org=org_with_workspace,
+        name="manual-dep",
+        deployment_name="manual-dep",
+        deployment_id="dep-id",
+        dataflow_type="manual",
+        reset_conn_dataflow=None,
+    )
+    DataflowOrgTask.objects.create(dataflow=dataflow, orgtask=sync_orgtask)
+
+    mock_get_connection.return_value = {
+        "connectionId": "conn-id",
+        "sourceId": "src-id",
+        "destinationId": "dst-id",
+        "catalogId": "cat-id",
+        "status": "active",
+        "namespaceDefinition": "destination",
+        "namespaceFormat": "",
+        "syncCatalog": {},
+        "source": {"name": "src-name"},
+        "destination": {"name": "dst-name"},
+        "name": "test-conn",
+    }
+    mock_task_lock.objects.filter.return_value.first.return_value = None
+    mock_fetch_lock.return_value = None
+
+    result, error = get_one_connection(org_with_workspace, "conn-id")
+
+    assert error is None
+    assert result["post_sync_transform"] == POST_SYNC_TRANSFORM
+
+    # cleanup
+    DataflowOrgTask.objects.filter(orgtask=sync_orgtask).delete()
+    dataflow.delete()
+    sync_orgtask.delete()

@@ -278,7 +278,9 @@ class MetricService:
         return metric
 
     @staticmethod
-    def delete_metric(metric_id: int, org: Org, orguser: OrgUser) -> bool:
+    def delete_metric(metric_id: int, org: Org, orguser: OrgUser) -> str:
+        """Delete a metric. Returns its name, so callers (e.g. the API layer's
+        audit log) don't need a separate fetch of their own."""
         metric = MetricService.get_metric(metric_id, org)
 
         # Authorize before computing consumers so a non-owner is denied without
@@ -297,7 +299,7 @@ class MetricService:
         metric_name = metric.name
         metric.delete()
         logger.info(f"Deleted metric '{metric_name}' (id={metric_id}) by {orguser.user.email}")
-        return True
+        return metric_name
 
     @staticmethod
     def preview_metric_value(metric_id: int, org: Org) -> dict:

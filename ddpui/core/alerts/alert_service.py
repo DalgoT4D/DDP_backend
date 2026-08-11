@@ -362,7 +362,9 @@ class AlertService:
         return alert
 
     @staticmethod
-    def delete_alert(alert_id: int, org: Org, orguser: OrgUser) -> None:
+    def delete_alert(alert_id: int, org: Org, orguser: OrgUser) -> str:
+        """Delete an alert. Returns its name, so callers (e.g. the API layer's
+        audit log) don't need a separate fetch of their own."""
         alert = AlertService.get_alert(alert_id, org)
         # Only allow deletion if the user is the owner (creator) or an admin
         if not can_delete_resource(orguser, alert):
@@ -370,6 +372,7 @@ class AlertService:
         alert_name = alert.name
         alert.delete()
         logger.info(f"Deleted alert '{alert_name}' (id={alert_id}) by {orguser.user.email}")
+        return alert_name
 
     @staticmethod
     def dry_run(org: Org, payload: AlertTestRequest) -> AlertTestResponse:

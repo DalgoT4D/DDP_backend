@@ -6,6 +6,8 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.celeryworkers.tasks import (
     run_dbt_commands,
 )
@@ -13,7 +15,9 @@ from ddpui.models.tasks import (
     TaskProgressHashPrefix,
 )
 from ddpui.utils.taskprogress import TaskProgress
+from ddpui.core.dbtfunctions import preprocess_airbyte_creds_for_dbt
 from ddpui.ddpdbt import dbt_service, elementary_service
+from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk
 from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import (
     OrgDbtTarget,
@@ -25,7 +29,6 @@ from ddpui.models.org_user import OrgUser, OrgUserResponse
 from ddpui.models.tasks import Task, TaskType, OrgTask, OrgTaskGeneratedBy
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.git_manager import GitManager, GitManagerError, GitStatusSummary
-from ddpui.core.orgtaskfunctions import get_edr_send_report_task
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.dbtdocs import create_single_html
 from ddpui.utils.orguserhelpers import from_orguser
@@ -77,6 +80,21 @@ def put_switch_git_repo(request, payload: OrgDbtConnectGitRemote):
             logger.warning(
                 f"Failed to create git pull OrgTask for org {org.slug}: {str(e)}. Git operation was successful."
             )
+
+        # Refresh orgdbt to pick up the values switch_git_repository_v1 just wrote
+        orgdbt.refresh_from_db()
+
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            action=AuditLogAction.UPDATE,
+            resource_fields={
+                "gitrepo_url": orgdbt.gitrepo_url,
+                "is_repo_managed_by_system": orgdbt.is_repo_managed_by_system,
+            },
+        )
 
         return result
     except Exception as e:
@@ -156,13 +174,30 @@ def post_dbt_publish_changes(request, payload: OrgDbtChangesPublish):
                 "commit_result": commit_result,
             }
 
-    return {
+    result = {
         "success": True,
         "message": "Changes published successfully",
         "committed": committed,
         "pushed": pushed,
         "commit_result": commit_result,
     }
+
+    # Record what was published in the audit log
+    resource_fields = {
+        "commit_message": {"old": None, "new": payload.commit_message},
+        "pushed_to_remote": {"old": None, "new": pushed},
+    }
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.UPDATE,
+        resource_fields=resource_fields,
+    )
+
+    return result
 
 
 @dbt_router.get("/git_status/", response=GitStatusSummary)
@@ -209,7 +244,17 @@ def dbt_delete(request):
     if org is None:
         raise HttpError(400, "create an organization first")
 
+    orgdbt = org.dbt
     OrgCleanupService(org, dry_run=False).delete_transformation_layer()
+
+    if orgdbt:
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.DBT,
+            resource_id=str(orgdbt.id),
+            action=AuditLogAction.DELETE,
+        )
 
     return from_orguser(orguser)
 
@@ -256,6 +301,14 @@ def post_dbt_git_pull(request):
     except Exception as error:
         raise HttpError(500, str(error)) from error
 
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.EXECUTE,
+    )
+
     return {"success": True}
 
 
@@ -290,13 +343,23 @@ def post_dbt_makedocs(request):
     redis.set(redis_key, htmlfilename.encode("utf-8"))
     redis.expire(redis_key, 3600 * 24)
 
-    return {"token": token.hex}
+    result = {"token": token.hex}
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orguser.org.dbt.id) if orguser.org.dbt else str(orguser.org.id),
+        action=AuditLogAction.EXECUTE,
+    )
+
+    return result
 
 
 @dbt_router.put("/v1/schema/")
 @has_permission(["can_edit_dbt_workspace"])
 def put_dbt_schema_v1(request, payload: OrgDbtTarget):
-    """Update the target_configs.schema for the dbt cli profile block"""
+    """Update the org's default schema and refresh the dbt-profile Secret block."""
     orguser: OrgUser = request.orguser
     org = orguser.org
     if org.dbt is None:
@@ -309,18 +372,20 @@ def put_dbt_schema_v1(request, payload: OrgDbtTarget):
     org.dbt.save()
     logger.info("updated orgdbt")
 
-    cli_profile_block: OrgPrefectBlockv1 = org.dbt.cli_profile_block
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(org.dbt.id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={"default_schema": payload.target_configs_schema},
+    )
 
-    if cli_profile_block:
-        logger.info(f"Updating the cli profile block's schema : {cli_profile_block.block_name}")
-        prefect_service.update_dbt_cli_profile_block(
-            block_name=cli_profile_block.block_name,
-            target=payload.target_configs_schema,
-            wtype=warehouse.wtype,
-        )
-        logger.info(
-            f"Successfully updated the cli profile block's schema : {cli_profile_block.block_name}"
-        )
+    # Re-upsert the dbt-profile Secret block so the runner reads the new schema.
+    airbyte_creds = secretsmanager.retrieve_warehouse_credentials(warehouse)
+    if not airbyte_creds:
+        raise HttpError(500, "warehouse credentials not found")
+    create_or_update_dbt_profile_secret_blk(org, warehouse, airbyte_creds)
 
     return {"success": 1}
 
@@ -360,6 +425,14 @@ def post_run_dbt_commands(request, payload: TaskParameters = None):
 
     run_dbt_commands.delay(org.id, orgdbt.id, task_id, payload.model_dump() if payload else None)
 
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DBT,
+        resource_id=str(orgdbt.id),
+        action=AuditLogAction.EXECUTE,
+    )
+
     return {"task_id": task_id}
 
 
@@ -395,55 +468,61 @@ def get_elementary_setup_status(request):
     return result
 
 
-@dbt_router.get("/check-dbt-files")
+@dbt_router.post("/elementary/check")
 @has_permission(["can_view_dbt_workspace"])
-def get_check_dbt_files(request):
-    """checks that the dbt project is set up for elementary"""
+def post_elementary_check(request):
+    """Preflight check for Elementary setup — pull latest dbt code and verify
+    the org's dbt repo has the required elementary config in packages.yml and
+    dbt_project.yml.
+
+    Returns either:
+      {"status": "ready"}                                            OR
+      {"status": "needs_repo_changes", "exists": {...}, "missing": {...}}
+    """
     orguser: OrgUser = request.orguser
+    orgdbt = orguser.org.dbt
+    if orgdbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
+
+    project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
+    if not os.path.exists(project_dir):
+        raise HttpError(400, "create the dbt env first")
+
+    # 1. Pull latest dbt code
+    try:
+        pat = secretsmanager.retrieve_github_pat(orgdbt.gitrepo_access_token_secret)
+        GitManager(repo_local_path=project_dir, pat=pat).pull_changes()
+    except Exception as err:
+        raise HttpError(500, f"git pull failed: {err}") from err
+
+    # 2. Check for elementary config in the pulled files
     error, result = elementary_service.check_dbt_files(orguser.org)
     if error:
         raise HttpError(400, error)
 
-    return result
+    if result.get("missing"):
+        return {
+            "status": "needs_repo_changes",
+            "exists": result.get("exists", {}),
+            "missing": result["missing"],
+        }
+    return {"status": "ready"}
 
 
-@dbt_router.post("/create-elementary-tracking-tables/")
-@has_permission(["can_view_dbt_workspace"])
-def post_create_elementary_tracking_tables(request):
-    """prepare the dbt docs single html via prefect deployment"""
+@dbt_router.post("/elementary/install")
+@has_permission(["can_edit_dbt_workspace"])
+def post_elementary_install(request):
+    """Dispatch the consolidated Elementary install celery task. The task runs
+    three sub-steps (profile → package install → report deployment) and emits
+    progress under the returned task_id + hashkey — poll /api/tasks/{id}."""
+    from ddpui.celeryworkers.tasks import install_elementary
+
     orguser: OrgUser = request.orguser
-    result = elementary_service.create_elementary_tracking_tables(orguser.org)
-    if "error" in result:
-        raise HttpError(400, result["error"])
+    org = orguser.org
+    if org.dbt is None:
+        raise HttpError(400, "dbt is not configured for this client")
 
-    return result
-
-
-@dbt_router.post("/create-elementary-profile/")
-@has_permission(["can_view_dbt_workspace"])
-def post_create_elementary_profile(request):
-    """prepare the dbt docs single html via prefect deployment"""
-    orguser: OrgUser = request.orguser
-    result = elementary_service.create_elementary_profile(orguser.org)
-    if "error" in result:
-        raise HttpError(400, result["error"])
-
-    return result
-
-
-@dbt_router.post("/create-edr-deployment/")
-@has_permission(["can_view_dbt_workspace"])
-def post_create_edr_sendreport_dataflow(request):
-    """prepare the dbt docs single html via prefect deployment"""
-    orguser: OrgUser = request.orguser
-
-    org_task = get_edr_send_report_task(orguser.org)
-    if org_task is None:
-        logger.info("creating OrgTask for edr-send-report for %s", orguser.org.slug)
-        org_task = get_edr_send_report_task(orguser.org, create=True)
-
-    result = elementary_service.create_edr_sendreport_dataflow(orguser.org, org_task, "0 0 * * *")
-    if "error" in result:
-        raise HttpError(400, result["error"])
-
-    return result
+    task_id = str(uuid4())
+    hashkey = f"{TaskProgressHashPrefix.INSTALLELEMENTARY.value}-{org.slug}"
+    install_elementary.delay(org.id, task_id, hashkey)
+    return {"task_id": task_id, "hashkey": hashkey}
