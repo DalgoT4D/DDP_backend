@@ -1307,6 +1307,17 @@ def clear_stuck_locks():
     return processed_count
 
 
+@app.task(name="maintenance.purge_old_audit_logs")
+def purge_old_audit_logs() -> int:
+    """Purge audit log entries older than AUDIT_LOG_RETENTION_DAYS.
+
+    Calls the management command to do the actual work. Returns the number
+    of deleted entries.
+    """
+    call_command("purge_old_audit_logs")
+    return 0  # The command logs the count; we don't have easy access to it here
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1359,4 +1370,11 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour=0),
         sync_airbyte_job_stats_for_all_connections.s(last_n_days=2),
         name="sync airbyte job stats for all connections",
+    )
+
+    # purge old audit logs; monthly on the 1st at 2am
+    sender.add_periodic_task(
+        crontab(minute=0, hour=2, day_of_month=1),
+        purge_old_audit_logs.s(),
+        name="purge old audit logs",
     )
