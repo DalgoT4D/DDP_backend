@@ -5,9 +5,21 @@ shapes passed between the trial core modules (activation-token / clone-params re
 provisioned-warehouse connection params, and the clone_template_org input).
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from ninja import Schema
+
+# the "Function" options both signup forms offer — this one and the post-invitation signup
+# (AcceptInvitationSchema.work_domain). Stored on OrgUser.work_domain / TrialSignup.role:
+# metadata only, never an RBAC role_slug. Old rows still hold retired slugs; move them with
+# `manage.py migrate_work_domains`.
+WorkDomain = Literal[
+    "monitoring_evaluation",
+    "program_implementation",
+    "data_technology",
+    "leadership",
+    "external_consultant",
+]
 
 
 class TrialSignupSchema(Schema):
@@ -15,7 +27,9 @@ class TrialSignupSchema(Schema):
 
     email: str
     org_name: str
-    role: str
+    # the "Function" pick on the form; only the current options are accepted, retired slugs
+    # (still present in the DB on older rows) are not
+    role: WorkDomain
 
 
 class TrialActivateSchema(Schema):
@@ -30,7 +44,8 @@ class ActivationTokenData(Schema):
     /trial/activate once the user clicks the emailed verification link.
 
     `role` is the job-title captured on the signup form — metadata only, NEVER an RBAC
-    role_slug (client-supplied; see `clone_trial_org_task`).
+    role_slug (client-supplied; see `clone_trial_org_task`). Left as a plain str on purpose: a
+    token minted before the option list changed must still activate, not 422.
     """
 
     email: str

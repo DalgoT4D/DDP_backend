@@ -92,7 +92,7 @@ def test_upgrade_emails_every_recipient_and_sets_flag(
     assert "test-sub-org-slug" in message
     assert "subuser@example.com" in message
     # both roles are present and distinct: job title vs RBAC role
-    assert "Monitoring & Evaluation" in message
+    assert "Monitoring and Evaluation" in message
     assert "Dalgo role:   Admin" in message
 
 

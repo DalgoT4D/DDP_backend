@@ -55,12 +55,12 @@ class TestTrialSignup:
         mock_exists.return_value = False
         mock_create_token.return_value = "tok123"
 
-        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
         result = trial_signup(None, payload)
 
         assert result == {"status": "verification_sent"}
         mock_create_token.assert_called_once_with(
-            ActivationTokenData(email="a@b.org", org_name="Acme", role="account-manager")
+            ActivationTokenData(email="a@b.org", org_name="Acme", role="data_technology")
         )
         mock_send_email.assert_called_once()
         args, _ = mock_send_email.call_args
@@ -73,7 +73,7 @@ class TestTrialSignup:
     def test_existing_account_returns_409(self, mock_exists, mock_create_token, mock_send_email):
         mock_exists.return_value = True
 
-        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
         with pytest.raises(HttpError) as exc:
             trial_signup(None, payload)
 
@@ -82,7 +82,7 @@ class TestTrialSignup:
         mock_send_email.assert_not_called()
 
     def test_invalid_email_returns_400(self):
-        payload = TrialSignupSchema(email="not-an-email", org_name="Acme", role="account-manager")
+        payload = TrialSignupSchema(email="not-an-email", org_name="Acme", role="data_technology")
         with pytest.raises(HttpError) as exc:
             trial_signup(None, payload)
 
@@ -99,12 +99,12 @@ class TestTrialSignup:
         mock_exists.return_value = False
 
         trial_signup(
-            None, TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+            None, TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
         )
 
         record = TrialSignup.objects.get(email="a@b.org")
         assert record.org_name == "Acme"
-        assert record.role == "account-manager"
+        assert record.role == "data_technology"
         assert record.signed_up_at is not None
         assert record.trial_start_date is None
         assert record.deleted_at is None
@@ -121,7 +121,7 @@ class TestTrialSignup:
         mock_record.side_effect = Exception("db down")
 
         result = trial_signup(
-            None, TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+            None, TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
         )
 
         assert result == {"status": "verification_sent"}
@@ -134,7 +134,7 @@ class TestTrialSignup:
         with pytest.raises(HttpError):
             trial_signup(
                 None,
-                TrialSignupSchema(email="not-an-email", org_name="Acme", role="account-manager"),
+                TrialSignupSchema(email="not-an-email", org_name="Acme", role="data_technology"),
             )
 
         assert TrialSignup.objects.count() == 0
@@ -149,7 +149,7 @@ class TestTrialSignup:
         mock_exists.return_value = False
         monkeypatch.setattr(settings, "FRONTEND_URL_V2", "")
 
-        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
         with pytest.raises(HttpError) as exc:
             trial_signup(None, payload)
 
@@ -168,7 +168,7 @@ class TestTrialSignup:
         mock_exists.return_value = False
         monkeypatch.setattr(settings, "TEMPLATE_ORG_SLUG", "nonexistent-template")
 
-        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="account-manager")
+        payload = TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
         with pytest.raises(HttpError) as exc:
             trial_signup(None, payload)
 
@@ -189,7 +189,7 @@ def _mock_redis(mock_redis_cls):
 
 
 def _token_data(email="new@b.org"):
-    return ActivationTokenData(email=email, org_name="Acme", role="account-manager")
+    return ActivationTokenData(email=email, org_name="Acme", role="data_technology")
 
 
 class TestTrialActivate:
@@ -232,7 +232,7 @@ class TestTrialActivate:
             TrialCloneParams(
                 email="new@b.org",
                 org_name="Acme",
-                role="account-manager",
+                role="data_technology",
                 template_org_id=seed_template_org.id,
             ),
         )
@@ -246,7 +246,7 @@ class TestTrialActivate:
         assert isinstance(start_calls[0].args[1], int)
         assert start_calls[0].kwargs.get("ex") == 86400
         mock_clone_task.delay.assert_called_once_with(
-            result["task_id"], seed_template_org.id, "new@b.org", "Acme", "account-manager"
+            result["task_id"], seed_template_org.id, "new@b.org", "Acme", "data_technology"
         )
 
     @patch("ddpui.api.trial_api.peek_activation_token")
@@ -448,7 +448,7 @@ class TestTrialRetry:
         mock_fetch.return_value = TrialCloneParams(
             email="r@b.org",
             org_name="Acme",
-            role="account-manager",
+            role="data_technology",
             template_org_id=42,
         )
         mock_exists.return_value = False
@@ -460,7 +460,7 @@ class TestTrialRetry:
         assert result == {"task_id": "task-9", "email": "r@b.org"}
         mock_lock.assert_called_once_with("r@b.org")
         mock_clone_task.delay.assert_called_once_with(
-            "task-9", 42, "r@b.org", "Acme", "account-manager"
+            "task-9", 42, "r@b.org", "Acme", "data_technology"
         )
         # elapsed clock re-anchored to this retry
         start_calls = [
@@ -500,7 +500,7 @@ class TestTrialRetry:
         mock_fetch.return_value = TrialCloneParams(
             email="done@b.org",
             org_name="Acme",
-            role="account-manager",
+            role="data_technology",
             template_org_id=42,
         )
         mock_exists.return_value = True
@@ -524,7 +524,7 @@ class TestTrialRetry:
         mock_fetch.return_value = TrialCloneParams(
             email="busy@b.org",
             org_name="Acme",
-            role="account-manager",
+            role="data_technology",
             template_org_id=42,
         )
         mock_exists.return_value = False

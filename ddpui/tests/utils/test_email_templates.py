@@ -17,6 +17,9 @@ from pathlib import Path
 import pytest
 
 from types import SimpleNamespace
+from typing import get_args
+
+from ddpui.schemas.trial_schema import WorkDomain
 
 from ddpui.utils import email_templates
 from ddpui.utils.email_templates import (
@@ -430,7 +433,7 @@ def test_subscription_request_email_renders_both_blocks():
         "Requested by\n"
         "  Name:         Himanshu Dube\n"
         "  Email:        himanshu@projecttech4dev.org\n"
-        "  Job title:    Monitoring & Evaluation\n"
+        "  Function:     Monitoring and Evaluation\n"
         "  Dalgo role:   Admin\n"
         "  Requested at: 2026-08-08 11:04 UTC\n"
     )
@@ -448,7 +451,7 @@ def test_subscription_request_email_falls_back_for_missing_values():
     assert "  Type:         —\n" in body
     assert "  Created:      —\n" in body
     assert "  Name:         —\n" in body
-    assert "  Job title:    —\n" in body
+    assert "  Function:     —\n" in body
     assert "  Dalgo role:   —\n" in body
 
 
@@ -456,7 +459,7 @@ def test_subscription_request_email_passes_through_unknown_work_domain():
     """A slug added to the form but not yet to WORK_DOMAIN_LABELS must still show up."""
     org, orguser, org_plan = _fake_request_actors(work_domain="brand_new_option")
     _, body = email_templates.build_subscription_request_email(org, orguser, org_plan, REQUESTED_AT)
-    assert "  Job title:    brand_new_option\n" in body
+    assert "  Function:     brand_new_option\n" in body
 
 
 def test_subscription_request_email_converts_datetimes_to_utc():
@@ -470,16 +473,8 @@ def test_subscription_request_email_converts_datetimes_to_utc():
 
 
 def test_work_domain_labels_cover_the_signup_form_options():
-    """Guards the sync with TRIAL_ROLE_OPTIONS in the frontend's constants/trial.ts."""
-    assert set(email_templates.WORK_DOMAIN_LABELS) == {
-        "none",
-        "monitoring_evaluation",
-        "program_manager",
-        "data_tech",
-        "leadership",
-        "consultant",
-        "field_worker",
-    }
+    """Every option a signup can submit must have a label to render."""
+    assert set(get_args(WorkDomain)) <= set(email_templates.WORK_DOMAIN_LABELS)
 
 
 # ── Trial email helper components ────────────────────────────────────────

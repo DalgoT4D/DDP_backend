@@ -23,7 +23,7 @@ from ddpui.schemas.trial_schema import TrialSignupSchema
 pytestmark = pytest.mark.django_db
 
 
-def signup_payload(email="a@b.org", org_name="Acme", role="Data Lead"):
+def signup_payload(email="a@b.org", org_name="Acme", role="data_technology"):
     return TrialSignupSchema(email=email, org_name=org_name, role=role)
 
 
@@ -32,7 +32,7 @@ def test_record_signup_creates_open_record():
 
     assert record.email == "a@b.org"
     assert record.org_name == "Acme"
-    assert record.role == "Data Lead"
+    assert record.role == "data_technology"
     assert record.signed_up_at is not None
     # not a trial yet, and not deleted — the open state
     assert record.trial_start_date is None
@@ -41,13 +41,13 @@ def test_record_signup_creates_open_record():
 
 def test_repeat_signup_updates_the_open_record_instead_of_adding_a_row():
     """Re-requesting the verification email is not a second trial."""
-    first = record_signup(signup_payload(org_name="Acme", role="Data Lead"))
-    second = record_signup(signup_payload(org_name="Acme Renamed", role="Director"))
+    first = record_signup(signup_payload(org_name="Acme", role="data_technology"))
+    second = record_signup(signup_payload(org_name="Acme Renamed", role="leadership"))
 
     assert second.id == first.id
     assert TrialSignup.objects.filter(email="a@b.org").count() == 1
     assert second.org_name == "Acme Renamed"
-    assert second.role == "Director"
+    assert second.role == "leadership"
 
 
 def test_record_trial_start_stamps_the_open_record():
@@ -78,7 +78,7 @@ def test_record_deletion_closes_the_open_record():
     # the signup facts survive the deletion — that is the whole point of the table
     assert record.email == "a@b.org"
     assert record.org_name == "Acme"
-    assert record.role == "Data Lead"
+    assert record.role == "data_technology"
 
 
 def test_record_deletion_keeps_the_original_timestamp_on_a_rerun():

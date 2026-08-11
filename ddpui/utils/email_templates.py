@@ -965,18 +965,15 @@ def render_alert_email(alert, rendered_body: str) -> tuple:
 # no branding — because they are read as a work item, not as a Dalgo email.
 
 
-# OrgUser.work_domain stores the slug the signup form submitted; these are the labels the
-# form showed the user. Kept in sync with TRIAL_ROLE_OPTIONS in the frontend's
-# constants/trial.ts (and the same list on the post-invitation signup page). An unknown or
-# newly-added slug falls through to the raw value rather than being dropped.
+# labels for OrgUser.work_domain (the signup form's "Function" pick — trial_schema.WorkDomain).
+# An unknown slug falls through to the raw value rather than being dropped, so a row not yet
+# moved by `manage.py migrate_work_domains` still renders.
 WORK_DOMAIN_LABELS = {
-    "none": "None / Prefer not to say",
-    "monitoring_evaluation": "Monitoring & Evaluation",
-    "program_manager": "Program Manager",
-    "data_tech": "Data & Tech",
-    "leadership": "Leadership (COO, Founder, CTO etc.)",
-    "consultant": "Consultant",
-    "field_worker": "Field worker",
+    "monitoring_evaluation": "Monitoring and Evaluation",
+    "program_implementation": "Program Implementation",
+    "data_technology": "Data and Technology",
+    "leadership": "Leadership (Founder, COO, CTO, etc.)",
+    "external_consultant": "External Consultant",
 }
 
 # rendered in place of any field the DB does not have a value for
@@ -1032,7 +1029,7 @@ def build_subscription_request_email(org, orguser, org_plan, requested_at) -> tu
         "Requested by\n"
         f"  Name:         {full_name or _MISSING}\n"
         f"  Email:        {user.email if user else _MISSING}\n"
-        f"  Job title:    {WORK_DOMAIN_LABELS.get(work_domain, work_domain) or _MISSING}\n"
+        f"  Function:     {WORK_DOMAIN_LABELS.get(work_domain, work_domain) or _MISSING}\n"
         f"  Dalgo role:   {role.name if role else _MISSING}\n"
         f"  Requested at: {_fmt_datetime_utc(requested_at)}\n"
     )

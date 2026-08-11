@@ -15,6 +15,7 @@ from ddpui.models.org import Org
 from ddpui.models.role_based_access import Role
 
 from ddpui.schemas.org_schema import OrgSchema
+from ddpui.schemas.trial_schema import WorkDomain
 
 
 class UserAttributes(models.Model):
@@ -192,7 +193,8 @@ class AcceptInvitationSchema(Schema):
     password: Optional[
         str
     ] = None  # the password is required only when the user has no platform account
-    work_domain: Optional[str] = None
+    # the "Function" pick on the post-invitation signup form; same options as trial signup
+    work_domain: Optional[WorkDomain] = None
 
 
 class ForgotPasswordSchema(Schema):

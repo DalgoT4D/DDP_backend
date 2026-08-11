@@ -1529,7 +1529,9 @@ def test_successful_clone_stamps_trial_start_on_the_signup_record(
 
     mock_s1.side_effect = set_start
     template = Org.objects.create(name="tmpl", slug="tmpl")
-    record = record_signup(TrialSignupSchema(email="a@b.org", org_name="Acme", role="Lead"))
+    record = record_signup(
+        TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
+    )
 
     clone_service.clone_template_org(
         TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
@@ -1546,7 +1548,9 @@ def test_failed_clone_leaves_trial_start_unstamped(mock_s1, mock_teardown):
     live trial. The record stays open with trial_start_date NULL."""
     mock_s1.side_effect = Exception("boom")
     template = Org.objects.create(name="tmpl", slug="tmpl")
-    record = record_signup(TrialSignupSchema(email="a@b.org", org_name="Acme", role="Lead"))
+    record = record_signup(
+        TrialSignupSchema(email="a@b.org", org_name="Acme", role="data_technology")
+    )
 
     with pytest.raises(Exception, match="boom"):
         clone_service.clone_template_org(
