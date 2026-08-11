@@ -82,6 +82,8 @@ class Dashboard(models.Model):
     is_published = models.BooleanField(default=False)
     published_at = models.DateTimeField(null=True, blank=True)
 
+    is_private = models.BooleanField(default=False)
+
     # Public sharing configuration
     is_public = models.BooleanField(
         default=False, help_text="If True, dashboard is accessible via public URL"

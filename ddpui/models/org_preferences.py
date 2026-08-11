@@ -22,7 +22,7 @@ class OrgPreferences(models.Model):
     enable_discord_notifications = models.BooleanField(default=False)
     discord_webhook = models.URLField(blank=True, null=True)
     default_analyst_level = models.CharField(
-        max_length=10, choices=AccessLevel.choices, default=AccessLevel.VIEW
+        max_length=10, choices=AccessLevel.choices, default=AccessLevel.EDIT
     )
     default_member_level = models.CharField(
         max_length=10, choices=AccessLevel.choices, default=AccessLevel.VIEW
