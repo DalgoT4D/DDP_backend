@@ -11,6 +11,7 @@ Everything here is a plain column, copied at write time.
 Lifecycle of one row:
 
     POST /trial/signup       -> row created (email, org_name, role, signed_up_at)
+    POST /trial/activate     -> tnc_accepted set True ("Accept and Continue" on the consent screen)
     clone completes          -> trial_start_date stamped
     day-14 delete              -> deleted_at stamped
 
@@ -36,6 +37,15 @@ class TrialSignup(models.Model):
     # when the signup form was submitted. Stamped before email verification, so rows exist for
     # people who never clicked the link or whose clone failed.
     signed_up_at = models.DateTimeField()
+    # whether the user ticked "I've read and accept the Privacy Policy" and pressed "Accept and
+    # Continue" on the consent screen. False on a fresh signup row and stamped True by
+    # POST /trial/activate — that endpoint is only reachable from the consent screen, whose button
+    # stays disabled until the box is ticked, so reaching it IS the acceptance. Stays False for
+    # anyone who signed up, got the email, and never accepted; never reset back to False once True,
+    # because a repeat signup (allowed while the record is open) does not un-accept an acceptance.
+    # Stamped BEFORE the account is created, so a failed activation or a failed clone still leaves
+    # an open row that records the acceptance — that row is the audience for follow-up mail.
+    tnc_accepted = models.BooleanField(default=False)
     # start of the trial window (mirrors OrgPlans.start_date). NULL until a clone succeeds. No
     # end_date column: the window is a fixed TRIAL_DURATION_DAYS long, and `deleted_at` already
     # records when the trial actually ended.

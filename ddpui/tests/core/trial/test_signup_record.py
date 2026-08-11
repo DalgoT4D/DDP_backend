@@ -15,16 +15,22 @@ from ddpui.core.trial.signup_record import (
     open_record_for_email,
     record_deletion,
     record_signup,
+    record_tnc_accepted,
     record_trial_start,
 )
 from ddpui.models.trial_signup import TrialSignup
-from ddpui.schemas.trial_schema import TrialSignupSchema
+from ddpui.schemas.trial_schema import ActivationTokenData, TrialSignupSchema
 
 pytestmark = pytest.mark.django_db
 
 
 def signup_payload(email="a@b.org", org_name="Acme", role="data_technology"):
     return TrialSignupSchema(email=email, org_name=org_name, role=role)
+
+
+def token_data(email="a@b.org", org_name="Acme", role="data_technology"):
+    """what POST /trial/activate reads out of the activation token"""
+    return ActivationTokenData(email=email, org_name=org_name, role=role)
 
 
 def test_record_signup_creates_open_record():
@@ -37,6 +43,19 @@ def test_record_signup_creates_open_record():
     # not a trial yet, and not deleted — the open state
     assert record.trial_start_date is None
     assert record.deleted_at is None
+    # the consent screen comes later in the flow; nothing has been accepted yet
+    assert record.tnc_accepted is False
+
+
+def test_record_tnc_accepted_marks_the_open_record():
+    record_signup(signup_payload())
+
+    record_tnc_accepted(token_data())
+
+    record = TrialSignup.objects.get(email="a@b.org")
+    assert record.tnc_accepted is True
+    # acceptance alone is not a started trial — the clone stamps that
+    assert record.trial_start_date is None
 
 
 def test_repeat_signup_updates_the_open_record_instead_of_adding_a_row():
@@ -48,6 +67,38 @@ def test_repeat_signup_updates_the_open_record_instead_of_adding_a_row():
     assert TrialSignup.objects.filter(email="a@b.org").count() == 1
     assert second.org_name == "Acme Renamed"
     assert second.role == "leadership"
+
+
+def test_record_tnc_accepted_creates_the_record_when_the_signup_write_was_lost():
+    """`record_signup` is best-effort, so its row may never have been written. Rebuild it from the
+    activation token instead of losing every later write point for this trial."""
+    record_tnc_accepted(token_data(email="lost@b.org", org_name="Acme", role="leadership"))
+
+    record = TrialSignup.objects.get(email="lost@b.org")
+    assert record.tnc_accepted is True
+    # rebuilt from the token, so the form fields survive; only signed_up_at is approximated
+    assert record.org_name == "Acme"
+    assert record.role == "leadership"
+    assert record.signed_up_at is not None
+    assert record.deleted_at is None
+
+
+def test_record_tnc_accepted_does_not_add_a_row_when_one_is_open():
+    record_signup(signup_payload())
+
+    record_tnc_accepted(token_data())
+
+    assert TrialSignup.objects.filter(email="a@b.org").count() == 1
+
+
+def test_repeat_signup_does_not_withdraw_an_acceptance():
+    """Asking for another verification email is not un-accepting the terms."""
+    record_signup(signup_payload())
+    record_tnc_accepted(token_data())
+
+    second = record_signup(signup_payload(org_name="Acme Renamed"))
+
+    assert second.tnc_accepted is True
 
 
 def test_record_trial_start_stamps_the_open_record():

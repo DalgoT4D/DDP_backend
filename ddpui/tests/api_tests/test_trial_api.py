@@ -19,6 +19,7 @@ django.setup()
 from ninja.errors import HttpError
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.utils import timezone
 
 from ddpui.models.org import Org
 from ddpui.models.trial_signup import TrialSignup
@@ -250,6 +251,63 @@ class TestTrialActivate:
         mock_clone_task.delay.assert_called_once_with(
             result["task_id"], seed_template_org.id, "new@b.org", "Acme", "data_technology"
         )
+
+    @patch("ddpui.api.trial_api.clone_trial_org_task")
+    @patch("ddpui.api.trial_api.store_clone_params")
+    @patch("ddpui.api.trial_api.acquire_clone_lock")
+    @patch("ddpui.api.trial_api.RedisClient")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_activate_marks_tnc_accepted_on_the_signup_record(
+        self,
+        mock_peek,
+        mock_consume,
+        mock_exists,
+        mock_redis_cls,
+        mock_lock,
+        mock_store,
+        mock_clone_task,
+        seed_template_org,
+    ):
+        """This endpoint IS the consent screen's "Accept and Continue" — it must record that."""
+        record = TrialSignup.objects.create(email="new@b.org", signed_up_at=timezone.now())
+        mock_peek.return_value = _token_data()
+        mock_consume.return_value = _token_data()
+        mock_exists.return_value = False
+        mock_lock.return_value = True
+        _mock_redis(mock_redis_cls)
+
+        trial_activate(None, TrialActivateSchema(token="tok123", password=STRONG_PASSWORD))
+
+        record.refresh_from_db()
+        assert record.tnc_accepted is True
+        # accepting is not a started trial — clone_template_org stamps that on success
+        assert record.trial_start_date is None
+
+    @patch("ddpui.api.trial_api.acquire_clone_lock")
+    @patch("ddpui.api.trial_api.RedisClient")
+    @patch("ddpui.api.trial_api.account_exists_for_email")
+    @patch("ddpui.api.trial_api.consume_activation_token")
+    @patch("ddpui.api.trial_api.peek_activation_token")
+    def test_tnc_acceptance_survives_a_failed_activation(
+        self, mock_peek, mock_consume, mock_exists, mock_redis_cls, mock_lock
+    ):
+        """The acceptance happened even though no account got created — the row stays open with
+        tnc_accepted True, so follow-up mail can still reach this person."""
+        record = TrialSignup.objects.create(email="weak@b.org", signed_up_at=timezone.now())
+        mock_peek.return_value = _token_data("weak@b.org")
+        mock_exists.return_value = False
+        mock_lock.return_value = True
+        _mock_redis(mock_redis_cls)
+
+        with pytest.raises(HttpError) as exc:
+            trial_activate(None, TrialActivateSchema(token="tok123", password="short"))
+
+        assert exc.value.status_code == 400
+        record.refresh_from_db()
+        assert record.tnc_accepted is True
+        assert record.deleted_at is None
 
     @patch("ddpui.api.trial_api.peek_activation_token")
     def test_invalid_token_returns_400(self, mock_peek):

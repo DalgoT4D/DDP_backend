@@ -1,8 +1,9 @@
 """Read/write the standalone TrialSignup record — the only trace of a trial that survives day 14.
 
-Three write points, one per lifecycle stage (see ddpui/models/trial_signup.py):
+Four write points, one per lifecycle stage (see ddpui/models/trial_signup.py):
 
     POST /trial/signup              -> record_signup()
+    POST /trial/activate            -> record_tnc_accepted()
     clone_template_org() succeeds   -> record_trial_start()
     cleanup_trial_clone deletion    -> record_deletion()
 
@@ -21,7 +22,7 @@ from datetime import datetime
 from django.utils import timezone
 
 from ddpui.models.trial_signup import TrialSignup
-from ddpui.schemas.trial_schema import TrialSignupSchema
+from ddpui.schemas.trial_schema import ActivationTokenData, TrialSignupSchema
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.signup_record")
@@ -62,6 +63,45 @@ def record_signup(payload: TrialSignupSchema) -> TrialSignup:
     record.role = payload.role
     record.signed_up_at = now
     record.save(update_fields=["org_name", "role", "signed_up_at"])
+    return record
+
+
+def record_tnc_accepted(payload: ActivationTokenData) -> TrialSignup:
+    """Mark this email as having accepted the terms, on "Accept and Continue".
+
+    Called from POST /trial/activate as early as the email is known — BEFORE the password is
+    validated, the user row is written or the clone is enqueued. Every one of those can fail, and
+    an acceptance that already happened must survive the failure: the open row (a failed clone is
+    torn down but never deleted, so `deleted_at` stays NULL) is what a later follow-up mail is
+    sent against.
+
+    Creates the record when there is no open one, rather than no-op'ing. `record_signup` is
+    best-effort at its call site, so a blip there used to cascade: no row to mark here, none to
+    stamp at clone-success, none to close at the day-14 delete — a trial that ran its full 14 days
+    and left no trace, the exact thing this table exists to prevent. The activation token carries
+    the same email/org_name/role the signup form submitted, so this write point can rebuild the
+    row on its own. Only `signed_up_at` is approximated (activate time, minutes after the real
+    submission) — the alternative is a NOT NULL violation, and an approximate date beats no row.
+
+    One-way: never written back to False. A repeat POST /trial/signup while the record is open
+    updates org_name/role/signed_up_at and deliberately leaves this field alone — asking for a
+    second verification email is not withdrawing consent.
+    """
+    record = open_record_for_email(payload.email)
+    if record is None:
+        logger.warning(
+            f"no open trial signup record for {payload.email} at tnc acceptance; creating one"
+        )
+        return TrialSignup.objects.create(
+            email=payload.email,
+            org_name=payload.org_name,
+            role=payload.role,
+            signed_up_at=timezone.now(),
+            tnc_accepted=True,
+        )
+
+    record.tnc_accepted = True
+    record.save(update_fields=["tnc_accepted"])
     return record
 
 

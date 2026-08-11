@@ -21,7 +21,7 @@ from ddpui.core.trial.activation import (
     release_clone_lock,
 )
 from ddpui.core.trial.clone_service import account_exists_for_email
-from ddpui.core.trial.signup_record import record_signup
+from ddpui.core.trial.signup_record import record_signup, record_tnc_accepted
 from ddpui.core.trial.tasks import clone_trial_org_task
 from ddpui.models.org import Org
 from ddpui.models.org_user import UserAttributes
@@ -132,6 +132,19 @@ def trial_activate(request, payload: TrialActivateSchema):  # pylint: disable=un
         raise HttpError(400, "invalid or expired link")
 
     email = data.email
+
+    # This endpoint IS "Accept and Continue": the consent screen keeps the button disabled until
+    # the Privacy Policy box is ticked, and nothing else posts here. Recorded FIRST, before the
+    # password check / user row / clone enqueue below — all of which can fail — because the
+    # acceptance happened either way and the open record is what later follow-up mail is sent
+    # against. Best-effort, like the other three write points: bookkeeping never 500s an
+    # activation the user is entitled to. The whole token is passed, not just the email: if the
+    # signup-time write failed there is no row to mark, and org_name/role are what let this call
+    # rebuild it instead of losing the trial's bookkeeping for good.
+    try:
+        record_tnc_accepted(data)
+    except Exception as err:  # skipcq PYL-W0703
+        logger.error(f"failed to record tnc acceptance for {email}: {err}", exc_info=True)
 
     # I3: reject an empty/weak password before anything else — token stays valid, the user
     # fixes their password and resubmits the same link.
