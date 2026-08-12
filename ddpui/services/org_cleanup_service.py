@@ -4,6 +4,8 @@ import os
 import shutil
 from ninja.errors import HttpError
 
+from django.db import connection
+
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask
@@ -11,6 +13,7 @@ from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.llm import LlmSession
+from ddpui.models.metric import KPI, Metric
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -502,6 +505,17 @@ class OrgCleanupService:
                 if not self.dry_run:
                     model_cls.objects.filter(org=self.org).delete()
                     logger.info(f"deleted {n} {label} row(s) for org")
+
+        # KPI.metric is on_delete=PROTECT, so KPIs block Metric deletion which blocks Org deletion.
+        # Delete KPIs first, then Metrics explicitly before org.delete() cascades.
+        kpi_n = KPI.objects.filter(org=self.org).count()
+        metric_n = Metric.objects.filter(org=self.org).count()
+        if kpi_n or metric_n:
+            logger.info(f"will delete {kpi_n} KPI(s) and {metric_n} Metric(s) for org")
+            if not self.dry_run:
+                KPI.objects.filter(org=self.org).delete()
+                Metric.objects.filter(org=self.org).delete()
+                logger.info(f"deleted {kpi_n} KPI(s) and {metric_n} Metric(s) for org")
 
         # delete org object itself
         logger.info(f"will delete org {self.org.name} from DB")
