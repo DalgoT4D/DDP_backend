@@ -27,7 +27,7 @@ from django.db.models import Model, Q
 from ddpui.core.access import shareable_types
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser, OrgUserGroupMember
-from ddpui.models.resource_share import AccessLevel, LEVEL_RANK, ResourceShare, ResourceSharePrincipalType
+from ddpui.models.resource_share import AccessLevel, ResourceShare, ResourceSharePrincipalType, max_access_level
 from ddpui.models.role_based_access import RoleSlug
 
 
@@ -70,13 +70,14 @@ def _grants_map(
     group_levels: dict[str, str] = {}
     for row in rows:
         if row.principal_type == ResourceSharePrincipalType.USER:
-            user_levels[row.resource_id] = row.access_level
+            user_levels[row.resource_id] = max_access_level(user_levels.get(row.resource_id), row.access_level)
         else:
-            best = group_levels.get(row.resource_id)
-            if best is None or LEVEL_RANK[row.access_level] > LEVEL_RANK[best]:
-                group_levels[row.resource_id] = row.access_level
+            group_levels[row.resource_id] = max_access_level(group_levels.get(row.resource_id), row.access_level)
 
-    return {**group_levels, **user_levels}  # user rows override group rows
+    return {
+        rid: max_access_level(user_levels.get(rid), group_levels.get(rid))
+        for rid in user_levels.keys() | group_levels.keys()
+    }
 
 
 def _hide_no_access(level: str) -> Optional[str]:
@@ -89,7 +90,7 @@ def get_user_access(orguser: OrgUser, rtype: str, resource_id) -> Optional[str]:
     """What can this orguser do with this resource? "edit", "view", or None
     (invisible — the caller should treat it exactly like a missing resource)."""
     entry = shareable_types.get_rtype_entry(rtype)
-    row = entry["model"].objects.filter(org=orguser.org, pk=resource_id).values("created_by_id").first()
+    row = entry["model"].objects.filter(org=orguser.org, pk=resource_id).values("created_by_id", "is_private").first()
     if row is None:
         return None
 
@@ -100,10 +101,9 @@ def get_user_access(orguser: OrgUser, rtype: str, resource_id) -> Optional[str]:
 
     grants = _grants_map(orguser, rtype, [resource_id])
     granted = grants.get(str(resource_id))
-    if granted is not None:
+    if row["is_private"]:
         return _hide_no_access(granted)
-
-    return _hide_no_access(_org_floor(orguser))
+    return _hide_no_access(max_access_level(granted, _org_floor(orguser)))
 
 
 def get_user_access_map(
@@ -122,10 +122,12 @@ def get_user_access_map(
     for resource in resources:
         if resource.created_by_id is not None and resource.created_by_id == orguser.id:
             levels[resource.pk] = AccessLevel.EDIT
-        elif str(resource.pk) in grants:
-            levels[resource.pk] = _hide_no_access(grants[str(resource.pk)])
         else:
-            levels[resource.pk] = _hide_no_access(floor)
+            granted = grants.get(str(resource.pk))
+            if resource.is_private:
+                levels[resource.pk] = _hide_no_access(granted)
+            else:
+                levels[resource.pk] = _hide_no_access(max_access_level(granted, floor))
     return levels
 
 
@@ -142,4 +144,9 @@ def accessible_filter(orguser: OrgUser, rtype: str) -> Q:
 
     if _org_floor(orguser) == AccessLevel.NO_ACCESS:
         return Q(created_by=orguser) | Q(id__in=allowed_ids)
-    return Q(created_by=orguser) | ~Q(id__in=denied_ids)
+    # Floor applies only to non-private resources; private resources need an explicit grant.
+    return (
+        Q(created_by=orguser)
+        | Q(id__in=allowed_ids)
+        | (Q(is_private=False) & ~Q(id__in=denied_ids))
+    )

@@ -6,9 +6,11 @@ from datetime import date as date_type, datetime, timezone
 from django.db.models import Q
 from sqlalchemy import column, literal_column, func, and_
 
+from ddpui.core.access.access_control import accessible_filter
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core.charts.charts_service import (
@@ -127,7 +129,7 @@ class KPIService:
             )
 
     @staticmethod
-    def kpi_to_response(kpi: KPI) -> KPIResponse:
+    def kpi_to_response(kpi: KPI, access_level: Optional[str] = None) -> KPIResponse:
         """Convert a KPI model instance to KPIResponse schema."""
         m = kpi.metric
         return KPIResponse(
@@ -159,6 +161,7 @@ class KPIService:
             created_by=kpi.created_by.user.email if kpi.created_by else None,
             created_at=kpi.created_at,
             updated_at=kpi.updated_at,
+            access_level=access_level,
         )
 
     @staticmethod
@@ -182,13 +185,14 @@ class KPIService:
     @staticmethod
     def list_kpis(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
         program_tag: Optional[str] = None,
         metric_type: Optional[str] = None,
     ) -> tuple:
-        query = Q(org=org)
+        query = Q(org=org) & accessible_filter(orguser, ResourceType.KPI)
 
         if search:
             query &= Q(name__icontains=search) | Q(program_tags__icontains=search)

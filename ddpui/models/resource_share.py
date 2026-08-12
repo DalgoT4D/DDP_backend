@@ -6,18 +6,12 @@ The resource pointer is deliberately soft — ``resource_type`` + a string
 warehouse "schema.table" identifiers. Do not "improve" this into a FK.
 """
 
-from enum import Enum
+from typing import Optional
 
 from django.db import models
 
 from ddpui.models.org import Org
 from ddpui.models.org_user import Invitation, OrgUser
-
-
-class ResourceType(str, Enum):
-    DASHBOARD = "dashboard"
-    CHART = "chart"
-    REPORT = "report"
 
 
 class AccessLevel(models.TextChoices):
@@ -34,10 +28,17 @@ class AccessLevel(models.TextChoices):
 LEVEL_RANK = {AccessLevel.NO_ACCESS: 0, AccessLevel.VIEW: 1, AccessLevel.EDIT: 2}
 
 
+def max_access_level(*levels: Optional[str]) -> Optional[str]:
+    """Return the highest AccessLevel from args, skipping None. Returns None if all None."""
+    valid = [l for l in levels if l is not None]
+    return max(valid, key=lambda l: LEVEL_RANK[l]) if valid else None
+
+
 class ResourceType(models.TextChoices):
     DASHBOARD = "dashboard", "Dashboard"
     CHART = "chart", "Chart"
     REPORT = "report", "Report"
+    KPI = "kpi", "KPI"
 
 
 class ResourceSharePrincipalType(models.TextChoices):

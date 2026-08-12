@@ -118,9 +118,10 @@ class SnapshotResponse(Schema):
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    access_level: Optional[str] = None  # "view" | "edit"
 
     @classmethod
-    def from_model(cls, snapshot) -> "SnapshotResponse":
+    def from_model(cls, snapshot, access_level: Optional[str] = None) -> "SnapshotResponse":
         """Create response from ReportSnapshot model instance"""
         return cls(
             id=snapshot.id,
@@ -135,6 +136,7 @@ class SnapshotResponse(Schema):
             created_by=snapshot.created_by.user.email if snapshot.created_by else None,
             created_at=snapshot.created_at,
             updated_at=snapshot.updated_at,
+            access_level=access_level,
         )
 
 

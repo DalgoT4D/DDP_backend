@@ -17,9 +17,10 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission, has_access
-from ddpui.models.resource_share import ResourceType
+from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
 from ddpui.core.access import access_control
 from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.core.access.resource_share import sync_dashboard_cascade
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.services.dashboard_service import (
     DashboardService,
@@ -95,6 +96,9 @@ def get_dashboard(request, dashboard_id: int):
         dashboard = DashboardService.get_dashboard(dashboard_id, orguser.org)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
+
+    if access_control.get_user_access(orguser, ResourceType.DASHBOARD, dashboard_id) is None:
+        raise HttpError(403, "you do not have access to this dashboard")
 
     return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
 
@@ -174,6 +178,9 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     except DashboardLockedError as err:
         raise HttpError(423, err.message) from err
 
+    if payload.tabs is not None:
+        sync_dashboard_cascade(dashboard)
+
     # DashboardService.update_dashboard only touches a field when it's not
     # None — a genuine partial patch (auto-save may only send one field).
     raw_resource_fields = {
@@ -233,6 +240,13 @@ def delete_dashboard(request, dashboard_id: int):
         raise HttpError(403, err.message) from err
     except DashboardLockedError as err:
         raise HttpError(423, "Cannot delete a locked dashboard") from err
+
+    ResourceShare.objects.filter(
+        org=org, resource_type=ResourceType.DASHBOARD, resource_id=str(dashboard_id)
+    ).delete()
+    AccessRequest.objects.filter(
+        org=org, resource_type=ResourceType.DASHBOARD, resource_id=str(dashboard_id)
+    ).delete()
 
     create_audit_log(
         org=org,

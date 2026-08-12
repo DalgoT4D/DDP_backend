@@ -9,9 +9,11 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from ddpui.core.access.access_control import accessible_filter
 from ddpui.core.access.ownership import can_delete_resource, is_creator_or_admin
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.metric import KPI
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.report import ReportSnapshot
@@ -596,22 +598,13 @@ class ReportService:
     @staticmethod
     def list_snapshots(
         org: Org,
+        orguser: OrgUser,
         search: Optional[str] = None,
         dashboard_title: Optional[str] = None,
         created_by_email: Optional[str] = None,
     ) -> List[ReportSnapshot]:
-        """List all snapshots for an organization with optional filtering.
-
-        Args:
-            org: The organization to list snapshots for
-            search: Optional search term to filter snapshots by title (case-insensitive)
-            dashboard_title: Optional filter for snapshots from dashboards with matching title
-            created_by_email: Optional filter for snapshots created by user with matching email
-
-        Returns:
-            List[ReportSnapshot]: List of matching snapshots ordered by creation date (newest first)
-        """
-        query = Q(org=org)
+        """List snapshots for an org that the orguser is allowed to see."""
+        query = Q(org=org) & accessible_filter(orguser, ResourceType.REPORT)
         if search:
             query &= Q(title__icontains=search)
         if dashboard_title:

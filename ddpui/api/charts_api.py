@@ -13,9 +13,11 @@ from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
 
 from ddpui.auth import has_permission
+from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilter
+from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
@@ -291,6 +293,7 @@ def list_charts(
 
     charts, total = ChartService.list_charts(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -299,7 +302,8 @@ def list_charts(
 
     total_pages = (total + page_size - 1) // page_size  # Ceiling division
 
-    # Build response for each chart
+    access_map = get_user_access_map(orguser, ResourceType.CHART, charts)
+
     chart_responses = [
         ChartResponse(
             id=chart.id,
@@ -312,6 +316,7 @@ def list_charts(
             extra_config=chart.extra_config,
             created_at=chart.created_at,
             updated_at=chart.updated_at,
+            access_level=access_map.get(chart.id),
         )
         for chart in charts
     ]
@@ -1028,6 +1033,10 @@ def get_chart(request, chart_id: int):
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
 
+    access = get_user_access(orguser, ResourceType.CHART, chart_id)
+    if access is None:
+        raise HttpError(403, "you do not have access to this chart")
+
     return ChartResponse(
         id=chart.id,
         title=chart.title,
@@ -1039,6 +1048,7 @@ def get_chart(request, chart_id: int):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=access,
     )
 
 
@@ -1053,6 +1063,9 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
         raise HttpError(404, "Chart not found") from None
+
+    if get_user_access(orguser, ResourceType.CHART, chart_id) is None:
+        raise HttpError(403, "you do not have access to this chart")
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -1259,6 +1272,13 @@ def delete_chart(request, chart_id: int):
         raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    ResourceShare.objects.filter(
+        org=org, resource_type=ResourceType.CHART, resource_id=str(chart_id)
+    ).delete()
+    AccessRequest.objects.filter(
+        org=org, resource_type=ResourceType.CHART, resource_id=str(chart_id)
+    ).delete()
 
     create_audit_log(
         org=org,

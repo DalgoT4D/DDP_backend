@@ -10,6 +10,7 @@ from typing import Optional, TypedDict
 from django.db.models import Model
 
 from ddpui.models.dashboard import Dashboard
+from ddpui.models.metric import KPI
 from ddpui.models.org import Org
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.resource_share import ResourceType
@@ -24,6 +25,7 @@ RTYPES: dict[ResourceType, ShareableTypeEntry] = {
     ResourceType.DASHBOARD: {"model": Dashboard},
     ResourceType.CHART: {"model": Chart},
     ResourceType.REPORT: {"model": ReportSnapshot},
+    ResourceType.KPI: {"model": KPI},
 }
 
 

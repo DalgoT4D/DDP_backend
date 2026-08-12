@@ -53,6 +53,7 @@ from ddpui.models.org_wren import OrgWren
 from ddpui.models.role_based_access import Role, RolePermission
 from ddpui.models.org import OrgWarehouse, Org, OrgType
 from ddpui.models.org_preferences import OrgPreferences
+from ddpui.models.resource_share import ResourceShare, ResourceSharePrincipalType
 
 from ddpui.schemas.org_schema import OrgSchema, CreateOrgSchema, OrgLogoResponse, OrgLogoUrlPayload
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
@@ -665,6 +666,11 @@ def delete_user_group(request, group_id: int):
     if not can_delete_resource(orguser, group):
         raise HttpError(403, "only the group creator or an admin can delete this group")
 
+    ResourceShare.objects.filter(
+        org=group.org,
+        principal_type=ResourceSharePrincipalType.GROUP,
+        principal_id=group.id,
+    ).delete()
     group.delete()
     return {"success": 1}
 

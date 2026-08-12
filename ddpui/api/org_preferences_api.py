@@ -19,6 +19,7 @@ from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from django.db import transaction
 from ddpui.auth import has_permission
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import LEVEL_RANK
 from ddpui.ddpdbt import elementary_service
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
@@ -137,6 +138,9 @@ def update_access_defaults(request, payload: UpdateAccessDefaultsSchema):
     org_preferences = OrgPreferences.objects.filter(org=org).first()
     if org_preferences is None:
         org_preferences = OrgPreferences.objects.create(org=org)
+
+    if LEVEL_RANK[payload.default_member_level] > LEVEL_RANK[payload.default_analyst_level]:
+        raise HttpError(400, "member floor cannot exceed analyst floor")
 
     org_preferences.default_analyst_level = payload.default_analyst_level
     org_preferences.default_member_level = payload.default_member_level

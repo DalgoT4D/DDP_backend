@@ -8,6 +8,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
+from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.core.reports.comment_service import CommentService
 from ddpui.core.reports.exceptions import (
     CommentNotFoundError,
@@ -21,6 +22,7 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
 from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.celeryworkers.report_tasks import send_report_email_task
@@ -63,11 +65,16 @@ def list_snapshots(
     orguser: OrgUser = request.orguser
     snapshots = ReportService.list_snapshots(
         orguser.org,
+        orguser=orguser,
         search=search,
         dashboard_title=dashboard_title,
         created_by_email=created_by,
     )
-    return api_response(success=True, data=[SnapshotResponse.from_model(s) for s in snapshots])
+    access_map = get_user_access_map(orguser, ResourceType.REPORT, snapshots)
+    return api_response(
+        success=True,
+        data=[SnapshotResponse.from_model(s, access_level=access_map.get(s.id)) for s in snapshots],
+    )
 
 
 @report_router.post("/", response=ApiResponse[SnapshotResponse])
@@ -137,9 +144,13 @@ def get_snapshot_view(request, snapshot_id: int):
     orguser: OrgUser = request.orguser
     try:
         view_data = ReportService.get_snapshot_view_data(snapshot_id, orguser.org)
-        return api_response(success=True, data=SnapshotViewResponse.from_view_data(view_data))
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
+
+    if get_user_access(orguser, ResourceType.REPORT, snapshot_id) is None:
+        raise HttpError(403, "you do not have access to this report")
+
+    return api_response(success=True, data=SnapshotViewResponse.from_view_data(view_data))
 
 
 @report_router.get("/{snapshot_id}/charts/{chart_id}/data/", response=ChartDataResponse)
@@ -238,6 +249,13 @@ def delete_snapshot(request, snapshot_id: int):
 
     try:
         snapshot_name = ReportService.delete_snapshot(snapshot_id, org, orguser)
+
+        ResourceShare.objects.filter(
+            org=org, resource_type=ResourceType.REPORT, resource_id=str(snapshot_id)
+        ).delete()
+        AccessRequest.objects.filter(
+            org=org, resource_type=ResourceType.REPORT, resource_id=str(snapshot_id)
+        ).delete()
 
         create_audit_log(
             org=org,

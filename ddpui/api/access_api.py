@@ -9,11 +9,19 @@ from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.core.access import resource_share, shareable_types
-from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.core.access.access_control import get_user_access
+from ddpui.core.access.ownership import is_creator_or_admin, transfer_ownership, OwnershipError
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import AccessLevel, AccessRequest, AccessRequestStatus
 from ddpui.schemas.access.resource_share_schema import (
+    AccessRequestSchema,
     AddGrantsPayload,
+    GrantsListResponse,
+    PrivateTogglePayload,
+    RequestAccessPayload,
+    RespondToRequestPayload,
     ShareRowSchema,
+    TransferOwnershipPayload,
     UpdateGrantPayload,
 )
 from ddpui.utils.custom_logger import CustomLogger
@@ -37,30 +45,33 @@ def _fetch_resource_or_404(request, rtype: str, resource_id):
     return orguser, resource
 
 
-def _require_owner_or_admin(orguser: OrgUser, resource, action: str) -> None:
-    if not is_creator_or_admin(orguser, resource):
-        raise HttpError(
-            403, f"only the {resource.__class__.__name__.lower()} owner or an admin can {action}"
-        )
+def _require_edit_or_admin(orguser: OrgUser, rtype: str, resource, action: str) -> None:
+    if is_creator_or_admin(orguser, resource):
+        return
+    if get_user_access(orguser, rtype, resource.pk) == AccessLevel.EDIT:
+        return
+    raise HttpError(403, f"edit access required to {action}")
 
 
 # ---------------------------------------------------------------------------
 # Grants
 
 
-@access_router.get("/{rtype}/{resource_id}/grants", response=list[ShareRowSchema])
+@access_router.get("/{rtype}/{resource_id}/grants", response=GrantsListResponse)
 def list_resource_grants(request, rtype: str, resource_id: str):
     """List everyone with access to this resource."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
-    _require_owner_or_admin(orguser, resource, "view sharing")
-    return resource_share.list_grants(orguser.org, rtype, resource_id)
+    _require_edit_or_admin(orguser, rtype, resource, "view sharing")
+    shares = resource_share.list_grants(orguser.org, rtype, resource_id)
+    caller_is_owner = getattr(resource, "created_by_id", None) == orguser.id
+    return GrantsListResponse(shares=shares, caller_is_owner=caller_is_owner)
 
 
 @access_router.post("/{rtype}/{resource_id}/grants", response=list[ShareRowSchema])
 def add_resource_grants(request, rtype: str, resource_id: str, payload: AddGrantsPayload):
     """Apply staged chips from the share modal — bulk add/update."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
-    _require_owner_or_admin(orguser, resource, "modify sharing")
+    _require_edit_or_admin(orguser, rtype, resource, "modify sharing")
     try:
         resource_share.add_grants(
             orguser,
@@ -84,7 +95,7 @@ def update_resource_grant(
 ):
     """Change the access level on one existing row."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
-    _require_owner_or_admin(orguser, resource, "modify sharing")
+    _require_edit_or_admin(orguser, rtype, resource, "modify sharing")
     try:
         resource_share.update_grant(orguser, share_id, payload.access_level)
     except resource_share.GrantError as err:
@@ -99,9 +110,172 @@ def update_resource_grant(
 def remove_resource_grant(request, rtype: str, resource_id: str, share_id: int):
     """Remove one share row (revoke access)."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
-    _require_owner_or_admin(orguser, resource, "modify sharing")
+    _require_edit_or_admin(orguser, rtype, resource, "modify sharing")
     try:
         resource_share.remove_grant(orguser, share_id)
     except resource_share.GrantError as err:
         raise HttpError(400, str(err)) from err
     return resource_share.list_grants(orguser.org, rtype, resource_id)
+
+
+# ---------------------------------------------------------------------------
+# Private toggle
+
+
+@access_router.patch("/{rtype}/{resource_id}/private")
+def toggle_private(request, rtype: str, resource_id: str, payload: PrivateTogglePayload):
+    """Mark a resource private (floor-based access bypassed) or public."""
+    orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
+    _require_edit_or_admin(orguser, rtype, resource, "change privacy")
+
+    resource.is_private = payload.is_private
+    update_fields = ["is_private"]
+
+    if payload.is_private:
+        if hasattr(resource, "is_public"):
+            resource.is_public = False
+            update_fields.append("is_public")
+        if hasattr(resource, "public_share_token"):
+            resource.public_share_token = None
+            update_fields.append("public_share_token")
+
+    resource.save(update_fields=update_fields)
+    return {"is_private": resource.is_private}
+
+
+# ---------------------------------------------------------------------------
+# Ownership transfer
+
+
+@access_router.post("/{rtype}/{resource_id}/transfer-ownership")
+def transfer_resource_ownership(
+    request, rtype: str, resource_id: str, payload: TransferOwnershipPayload
+):
+    """Transfer ownership of a resource to another org member."""
+    orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
+    try:
+        transfer_ownership(orguser, rtype, resource, payload.to_orguser_id)
+    except OwnershipError as err:
+        raise HttpError(400, str(err)) from err
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Request access
+
+
+def _access_request_to_schema(req: AccessRequest) -> AccessRequestSchema:
+    return AccessRequestSchema(
+        id=req.id,
+        requester_id=req.requester_id,
+        requester_email=req.requester.user.email,
+        requested_level=req.requested_level,
+        note=req.note,
+        status=req.status,
+        created_at=req.created_at.isoformat(),
+    )
+
+
+@access_router.post("/{rtype}/{resource_id}/request-access", response=AccessRequestSchema)
+def create_access_request(
+    request, rtype: str, resource_id: str, payload: RequestAccessPayload
+):
+    """Submit a request for access to a resource the caller cannot currently see."""
+    orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
+
+    existing_access = get_user_access(orguser, rtype, resource.pk)
+    if existing_access is not None:
+        raise HttpError(409, "you already have access to this resource")
+
+    if AccessRequest.objects.filter(
+        org=orguser.org,
+        resource_type=rtype,
+        resource_id=str(resource_id),
+        requester=orguser,
+        status=AccessRequestStatus.PENDING,
+    ).exists():
+        raise HttpError(409, "a pending request already exists for this resource")
+
+    req = AccessRequest.objects.create(
+        org=orguser.org,
+        resource_type=rtype,
+        resource_id=str(resource_id),
+        requester=orguser,
+        requested_level=payload.requested_level,
+        note=payload.note,
+    )
+    req.refresh_from_db()
+    req.requester = orguser
+    return _access_request_to_schema(req)
+
+
+@access_router.get("/{rtype}/{resource_id}/request-access", response=list[AccessRequestSchema])
+def list_access_requests(request, rtype: str, resource_id: str):
+    """List pending access requests for this resource. Requires Edit access."""
+    orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
+    _require_edit_or_admin(orguser, rtype, resource, "view access requests")
+
+    requests = (
+        AccessRequest.objects.filter(
+            org=orguser.org,
+            resource_type=rtype,
+            resource_id=str(resource_id),
+            status=AccessRequestStatus.PENDING,
+        )
+        .select_related("requester__user")
+        .order_by("created_at")
+    )
+    return [_access_request_to_schema(r) for r in requests]
+
+
+@access_router.post("/{rtype}/{resource_id}/request-access/{req_id}/respond")
+def respond_to_access_request(
+    request, rtype: str, resource_id: str, req_id: int, payload: RespondToRequestPayload
+):
+    """Approve or decline a pending access request."""
+    orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
+    _require_edit_or_admin(orguser, rtype, resource, "respond to access requests")
+
+    req = (
+        AccessRequest.objects.filter(
+            id=req_id,
+            org=orguser.org,
+            resource_type=rtype,
+            resource_id=str(resource_id),
+        )
+        .select_related("requester__user")
+        .first()
+    )
+    if req is None:
+        raise HttpError(404, "access request not found")
+    if req.status != AccessRequestStatus.PENDING:
+        raise HttpError(409, "request has already been decided")
+
+    if payload.decision == "approved":
+        granted_level = payload.granted_level or req.requested_level
+        try:
+            from ddpui.schemas.access.resource_share_schema import PrincipalGrantPayload
+            from ddpui.models.resource_share import ResourceSharePrincipalType
+
+            resource_share.add_grants(
+                orguser,
+                rtype,
+                resource_id,
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type=ResourceSharePrincipalType.USER,
+                        principal_id=req.requester_id,
+                        access_level=granted_level,
+                    )
+                ],
+                pending_grants=[],
+                invite_role_uuid=None,
+            )
+        except resource_share.GrantError as err:
+            raise HttpError(400, str(err)) from err
+        req.status = AccessRequestStatus.APPROVED
+    else:
+        req.status = AccessRequestStatus.DECLINED
+
+    req.save(update_fields=["status", "updated_at"])
+    return {"success": True, "status": req.status}

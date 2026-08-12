@@ -6,7 +6,9 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
+from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
 from ddpui.schemas.kpi_schema import (
     KPICreate,
     KPIUpdate,
@@ -63,6 +65,7 @@ def list_kpis(
 
     kpis, total = KPIService.list_kpis(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -72,8 +75,10 @@ def list_kpis(
 
     total_pages = (total + page_size - 1) // page_size
 
+    access_map = get_user_access_map(orguser, ResourceType.KPI, kpis)
+
     return KPIListResponse(
-        data=[KPIService.kpi_to_response(kpi) for kpi in kpis],
+        data=[KPIService.kpi_to_response(kpi, access_level=access_map.get(kpi.id)) for kpi in kpis],
         total=total,
         page=page,
         page_size=page_size,
@@ -132,6 +137,9 @@ def get_kpi(request, kpi_id: int):
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 
+    if get_user_access(orguser, ResourceType.KPI, kpi_id) is None:
+        raise HttpError(403, "you do not have access to this KPI")
+
     return KPIService.kpi_to_response(kpi)
 
 
@@ -189,6 +197,13 @@ def delete_kpi(request, kpi_id: int):
         raise HttpError(400, e.message) from None
     except KPIPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    ResourceShare.objects.filter(
+        org=org, resource_type=ResourceType.KPI, resource_id=str(kpi_id)
+    ).delete()
+    AccessRequest.objects.filter(
+        org=org, resource_type=ResourceType.KPI, resource_id=str(kpi_id)
+    ).delete()
 
     create_audit_log(
         org=org,
