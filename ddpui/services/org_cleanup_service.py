@@ -451,6 +451,8 @@ class OrgCleanupService:
                 logger.error(f"failed to bulk delete S3 reports for {self.org.slug}: {err}")
 
     def delete_org(self):
+        org_pk = self.org.pk  # save pk now; cascades below may set self.org.pk = None
+
         # delete all orchestrate pipelines
         self.delete_orchestrate_pipelines()
 
@@ -520,5 +522,11 @@ class OrgCleanupService:
         # delete org object itself
         logger.info(f"will delete org {self.org.name} from DB")
         if not self.dry_run:
-            self.org.delete()
-            logger.info(f"deleted org {self.org.name} from DB")
+            if org_pk is None:
+                logger.warning("org pk is None — org may have already been deleted, skipping")
+            else:
+                deleted, _ = Org.objects.filter(pk=org_pk).delete()
+                if deleted:
+                    logger.info(f"deleted org {self.org.name} from DB")
+                else:
+                    logger.warning(f"org {self.org.name} was not found in DB, may have already been deleted")
