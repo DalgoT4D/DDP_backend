@@ -50,7 +50,7 @@ class TestNormalizeDimensions:
         assert "country" in result
 
     def test_table_chart_without_dimensions_array(self):
-        """Test normalize_dimensions returns empty list when no dimensions array for table chart"""
+        """Test normalize_dimensions falls back to dimension_col/extra_dimension for table chart"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="public",
@@ -62,7 +62,73 @@ class TestNormalizeDimensions:
 
         result = charts_service.normalize_dimensions(payload)
 
-        assert len(result) == 0
+        assert len(result) == 2
+        assert "KEY" in result
+        assert "region" in result
+
+    def test_table_chart_fallback_dimension_col_only(self):
+        """Test normalize_dimensions falls back to dimension_col alone when extra_dimension is not set"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test",
+            dimensions=None,
+            dimension_col="KEY",
+        )
+
+        result = charts_service.normalize_dimensions(payload)
+
+        assert len(result) == 1
+        assert "KEY" in result
+
+    def test_table_chart_fallback_extra_dimension_only(self):
+        """Test normalize_dimensions falls back to extra_dimension alone when dimension_col is not set"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test",
+            dimensions=None,
+            extra_dimension="region",
+        )
+
+        result = charts_service.normalize_dimensions(payload)
+
+        assert len(result) == 1
+        assert "region" in result
+
+    def test_table_chart_empty_dimensions_list_fallback(self):
+        """Test normalize_dimensions falls back when dimensions is an empty list"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test",
+            dimensions=[],
+            dimension_col="KEY",
+            extra_dimension="region",
+        )
+
+        result = charts_service.normalize_dimensions(payload)
+
+        assert len(result) == 2
+        assert "KEY" in result
+        assert "region" in result
+
+    def test_table_chart_whitespace_dimensions_fallback(self):
+        """Test normalize_dimensions falls back when dimensions has only whitespace entries"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test",
+            dimensions=["", "   "],
+            dimension_col="KEY",
+            extra_dimension="region",
+        )
+
+        result = charts_service.normalize_dimensions(payload)
+
+        assert len(result) == 2
+        assert "KEY" in result
+        assert "region" in result
 
     def test_table_chart_filters_empty_dimensions(self):
         """Test normalize_dimensions filters out empty strings"""
