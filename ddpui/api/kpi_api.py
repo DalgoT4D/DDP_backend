@@ -259,6 +259,9 @@ def get_kpi_data(
     """
     orguser: OrgUser = request.orguser
 
+    if get_user_access(orguser, ResourceType.KPI, kpi_id) is None:
+        raise HttpError(403, "you do not have access to this kpi")
+
     # Parse dashboard filters JSON
     parsed_dashboard_filters = None
     if dashboard_filters:
