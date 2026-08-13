@@ -160,3 +160,10 @@ platform-notifications/
 
 .vscode/
 .claude/worktrees/
+
+# Required for trial org creation
+.template_source_creds.json
+# MANAGED-SA bridge: Dalgo-managed Google service-account key. Never commit a private key.
+.dalgo_service_json_key.json
+
+

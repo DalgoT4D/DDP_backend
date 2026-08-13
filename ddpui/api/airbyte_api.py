@@ -1,5 +1,6 @@
 """Dalgo API for Airbyte"""
 
+import json
 import os
 from typing import List
 from ninja.errors import HttpError
@@ -34,7 +35,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgType, ConnectionMeta
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
-from ddpui.core.oauth import google_oauth_service
+from ddpui.core.oauth import google_oauth_service, google_service_account
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
@@ -113,6 +114,11 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
         payload.config = whitelisted_config
         logger.info("whitelisted the source config")
+
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceName, payload.config
+    )
 
     source = airbyte_service.create_source(
         orguser.org.airbyte_workspace_id,
@@ -243,6 +249,11 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         payload.config = whitelisted_config
         logger.info("whitelisted the source config for update")
 
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceName, payload.config
+    )
+
     source = airbyte_service.update_source(
         source_id, payload.name, payload.config, payload.sourceDefId
     )
@@ -283,6 +294,11 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
         payload.config = whitelisted_config
         logger.info("whitelisted the source config")
 
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceName, payload.config
+    )
+
     response = airbyte_service.check_source_connection(orguser.org.airbyte_workspace_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
@@ -314,11 +330,26 @@ def post_airbyte_check_source_for_update(
         payload.config = whitelisted_config
         logger.info("whitelisted the source config for update")
 
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceName, payload.config
+    )
+
     response = airbyte_service.check_source_connection_for_update(source_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
         "logs": response["jobInfo"]["logs"]["logLines"],
     }
+
+
+@airbyte_router.get("/sources/google_sheets/managed_service_account/")
+@has_permission(["can_view_sources"])
+def get_managed_google_service_account(request):  # pylint: disable=unused-argument
+    """MANAGED-SA bridge — the address users share their spreadsheet with, or null when the
+    deployment ships no key (which is how the UI knows the option is off). Only the client_email
+    is exposed; the key itself never leaves the backend."""
+    key = google_service_account.managed_service_account_json()
+    return {"email": json.loads(key).get("client_email") if key else None}
 
 
 @airbyte_router.get("/sources")
