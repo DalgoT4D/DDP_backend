@@ -704,6 +704,7 @@ class ReportService:
             ),
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
             "dashboard_id": snapshot.frozen_dashboard.get("dashboard_id"),
+            "is_private": snapshot.is_private,
         }
 
         return {

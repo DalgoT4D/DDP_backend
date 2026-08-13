@@ -162,6 +162,7 @@ class KPIService:
             created_at=kpi.created_at,
             updated_at=kpi.updated_at,
             access_level=access_level,
+            is_private=kpi.is_private,
         )
 
     @staticmethod

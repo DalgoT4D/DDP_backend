@@ -72,6 +72,7 @@ class ChartResponse(Schema):
     created_at: datetime
     updated_at: datetime
     access_level: Optional[str] = None  # "view" | "edit"; None for admins/owners (implicit edit)
+    is_private: bool = False
 
 
 class ChartConfig(Schema):

@@ -22,7 +22,7 @@ from ddpui.core.reports.exceptions import (
 from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
-from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
 from ddpui.schemas.chart_schemas import ChartDataResponse
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.celeryworkers.report_tasks import send_report_email_task
@@ -114,7 +114,7 @@ def create_snapshot(request, payload: SnapshotCreate):
 
         return api_response(
             success=True,
-            data=SnapshotResponse.from_model(s),
+            data=SnapshotResponse.from_model(s, access_level=AccessLevel.EDIT),
             message="Snapshot created successfully",
         )
     except SnapshotValidationError as err:
@@ -147,10 +147,13 @@ def get_snapshot_view(request, snapshot_id: int):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
-    if get_user_access(orguser, ResourceType.REPORT, snapshot_id) is None:
+    access = get_user_access(orguser, ResourceType.REPORT, snapshot_id)
+    if access is None:
         raise HttpError(403, "you do not have access to this report")
 
-    return api_response(success=True, data=SnapshotViewResponse.from_view_data(view_data))
+    return api_response(
+        success=True, data=SnapshotViewResponse.from_view_data(view_data, access_level=access)
+    )
 
 
 @report_router.get("/{snapshot_id}/charts/{chart_id}/data/", response=ChartDataResponse)

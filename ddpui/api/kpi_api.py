@@ -8,7 +8,7 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
-from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
 from ddpui.schemas.kpi_schema import (
     KPICreate,
     KPIUpdate,
@@ -123,7 +123,7 @@ def create_kpi(request, payload: KPICreate):
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
 
-    return KPIService.kpi_to_response(kpi)
+    return KPIService.kpi_to_response(kpi, access_level=AccessLevel.EDIT)
 
 
 @kpi_router.get("/{kpi_id}/", response=KPIResponse)
@@ -137,10 +137,11 @@ def get_kpi(request, kpi_id: int):
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 
-    if get_user_access(orguser, ResourceType.KPI, kpi_id) is None:
+    access = get_user_access(orguser, ResourceType.KPI, kpi_id)
+    if access is None:
         raise HttpError(403, "you do not have access to this KPI")
 
-    return KPIService.kpi_to_response(kpi)
+    return KPIService.kpi_to_response(kpi, access_level=access)
 
 
 @kpi_router.put("/{kpi_id}/", response=KPIResponse)
@@ -179,7 +180,9 @@ def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
 
-    return KPIService.kpi_to_response(kpi)
+    return KPIService.kpi_to_response(
+        kpi, access_level=get_user_access(orguser, ResourceType.KPI, kpi_id)
+    )
 
 
 @kpi_router.delete("/{kpi_id}/")
@@ -258,9 +261,6 @@ def get_kpi_data(
       - dashboard_filters: JSON-encoded {filter_id: value} dict from dashboard
     """
     orguser: OrgUser = request.orguser
-
-    if get_user_access(orguser, ResourceType.KPI, kpi_id) is None:
-        raise HttpError(403, "you do not have access to this kpi")
 
     # Parse dashboard filters JSON
     parsed_dashboard_filters = None

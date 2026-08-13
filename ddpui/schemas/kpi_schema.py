@@ -71,6 +71,7 @@ class KPIResponse(Schema):
     created_at: datetime
     updated_at: datetime
     access_level: Optional[str] = None  # "view" | "edit"
+    is_private: bool = False
 
 
 class KPIListResponse(Schema):

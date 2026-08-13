@@ -87,6 +87,7 @@ class DashboardResponse(Schema):
     # The requestor's own level on this dashboard ("view" | "edit") — the UI
     # mirrors enforcement from this; never "no_access" (those rows are hidden).
     access_level: Optional[str] = None
+    is_private: bool = False
 
 
 # =============================================================================

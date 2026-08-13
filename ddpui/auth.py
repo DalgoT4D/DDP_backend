@@ -34,7 +34,7 @@ GUEST_ROLE = RoleSlug.MEMBER
 # ownership.py imports the constants from this module, so importing the access
 # package any earlier would hit a partially-initialized ddpui.auth.
 from ddpui.core.access import access_control, shareable_types
-from ddpui.models.resource_share import AccessLevel
+from ddpui.models.resource_share import AccessLevel, LEVEL_RANK
 
 
 def has_permission(permission_slugs: list):
@@ -88,7 +88,7 @@ def has_access(rtype: str, required_level: str = AccessLevel.VIEW, get_resource_
             level = access_control.get_user_access(request.orguser, rtype, resource_id)
             if level is None:
                 raise HttpError(404, f"{rtype} not found")
-            if access_control.LEVEL_RANK[level] < access_control.LEVEL_RANK[required_level]:
+            if LEVEL_RANK[level] < LEVEL_RANK[required_level]:
                 raise HttpError(403, f"you have {level}-only access")
             return api_endpoint(*args, **kwargs)
 

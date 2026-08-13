@@ -17,7 +17,7 @@ from ddpui.models.dashboard import (
 )
 from ddpui.models.org_user import OrgUser
 from ddpui.auth import has_permission, has_access
-from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
 from ddpui.core.access import access_control
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.core.access.resource_share import sync_dashboard_cascade
@@ -97,10 +97,13 @@ def get_dashboard(request, dashboard_id: int):
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    if access_control.get_user_access(orguser, ResourceType.DASHBOARD, dashboard_id) is None:
+    access = access_control.get_user_access(orguser, ResourceType.DASHBOARD, dashboard_id)
+    if access is None:
         raise HttpError(403, "you do not have access to this dashboard")
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard), access_level=access
+    )
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -144,7 +147,9 @@ def create_dashboard(request, payload: DashboardCreate):
         },
     )
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard), access_level=AccessLevel.EDIT
+    )
 
 
 @dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
@@ -219,7 +224,10 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             resource_fields={**resource_fields, "title": dashboard.title},
         )
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    access = access_control.get_user_access(orguser, ResourceType.DASHBOARD, dashboard_id)
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(dashboard), access_level=access
+    )
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")
@@ -321,7 +329,9 @@ def duplicate_dashboard(request, dashboard_id: int):
         resource_fields={"title": new_dashboard.title},
     )
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(new_dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(new_dashboard), access_level=AccessLevel.EDIT
+    )
 
 
 # Dashboard Lock endpoints

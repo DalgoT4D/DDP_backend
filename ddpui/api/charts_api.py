@@ -17,7 +17,7 @@ from ddpui.core.access.access_control import get_user_access, get_user_access_ma
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilter
-from ddpui.models.resource_share import AccessRequest, ResourceShare, ResourceType
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
@@ -317,6 +317,7 @@ def list_charts(
             created_at=chart.created_at,
             updated_at=chart.updated_at,
             access_level=access_map.get(chart.id),
+            is_private=chart.is_private,
         )
         for chart in charts
     ]
@@ -388,7 +389,7 @@ class MapDataOverlayPayload(Schema):
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_dashboards"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
     """Get map data overlay (separate from GeoJSON) for data visualization"""
     orguser = request.orguser
@@ -1049,6 +1050,7 @@ def get_chart(request, chart_id: int):
         created_at=chart.created_at,
         updated_at=chart.updated_at,
         access_level=access,
+        is_private=chart.is_private,
     )
 
 
@@ -1063,9 +1065,6 @@ def get_chart_data_by_id(request, chart_id: int, dashboard_filters: Optional[str
         chart = Chart.objects.get(id=chart_id, org=orguser.org)
     except Chart.DoesNotExist:
         raise HttpError(404, "Chart not found") from None
-
-    if get_user_access(orguser, ResourceType.CHART, chart_id) is None:
-        raise HttpError(403, "you do not have access to this chart")
 
     # Get org warehouse
     org_warehouse = OrgWarehouse.objects.filter(org=orguser.org).first()
@@ -1187,6 +1186,8 @@ def create_chart(request, payload: ChartCreate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=AccessLevel.EDIT,
+        is_private=chart.is_private,
     )
 
 
@@ -1256,6 +1257,8 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=get_user_access(orguser, ResourceType.CHART, chart_id),
+        is_private=chart.is_private,
     )
 
 

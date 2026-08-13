@@ -119,6 +119,7 @@ class SnapshotResponse(Schema):
     created_at: datetime
     updated_at: datetime
     access_level: Optional[str] = None  # "view" | "edit"
+    is_private: bool = False
 
     @classmethod
     def from_model(cls, snapshot, access_level: Optional[str] = None) -> "SnapshotResponse":
@@ -137,6 +138,7 @@ class SnapshotResponse(Schema):
             created_at=snapshot.created_at,
             updated_at=snapshot.updated_at,
             access_level=access_level,
+            is_private=snapshot.is_private,
         )
 
 
@@ -146,11 +148,14 @@ class SnapshotViewResponse(Schema):
     dashboard_data: Dict[str, Any]
     report_metadata: Dict[str, Any]
     frozen_chart_configs: Dict[str, Any]
+    access_level: Optional[str] = None  # "view" | "edit"
 
     @classmethod
-    def from_view_data(cls, view_data: dict) -> "SnapshotViewResponse":
+    def from_view_data(
+        cls, view_data: dict, access_level: Optional[str] = None
+    ) -> "SnapshotViewResponse":
         """Create response from view data dict"""
-        return cls(**view_data)
+        return cls(**view_data, access_level=access_level)
 
 
 class DatetimeColumnResponse(Schema):
