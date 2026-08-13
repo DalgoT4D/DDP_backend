@@ -22,6 +22,7 @@ class Migration(migrations.Migration):
                 ("org_name", models.CharField(blank=True, max_length=255, null=True)),
                 ("role", models.CharField(blank=True, max_length=255, null=True)),
                 ("signed_up_at", models.DateTimeField()),
+                ("tnc_accepted", models.BooleanField(default=False)),
                 ("trial_start_date", models.DateTimeField(blank=True, null=True)),
                 ("deleted_at", models.DateTimeField(blank=True, null=True)),
             ],
