@@ -178,7 +178,6 @@ def send_decided_email(kind, to_email, completed, day_number, total_days, end_da
     one dedupe flag.
     """
     workspace_url = settings.FRONTEND_URL_V2 or ""
-    upgrade_url = settings.TRIAL_UPGRADE_URL
     call_url = settings.TRIAL_SCHEDULE_CALL_URL
 
     if kind == EMAIL_DAY3:
@@ -187,16 +186,15 @@ def send_decided_email(kind, to_email, completed, day_number, total_days, end_da
         else:
             send_trial_day3_not_started_email(to_email, workspace_url, call_url)
     elif kind == EMAIL_COMPLETION:
-        send_trial_completion_email(to_email, upgrade_url, workspace_url, call_url)
+        send_trial_completion_email(to_email, workspace_url, call_url)
     elif kind == EMAIL_MIDPOINT:
-        send_trial_midpoint_email(to_email, day_number, total_days, upgrade_url, call_url)
+        send_trial_midpoint_email(to_email, day_number, total_days, call_url)
     elif kind == EMAIL_PRE_END:
         send_trial_pre_end_email(
             to_email,
             day_number,
             total_days,
             end_date.strftime(END_DATE_DISPLAY_FORMAT),
-            upgrade_url,
             call_url,
         )
 

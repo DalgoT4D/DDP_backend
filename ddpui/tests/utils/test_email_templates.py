@@ -195,18 +195,17 @@ def test_welcome_email_lists_three_actions_and_badge():
     assert "https://app.dalgo.org/impact" in html_body
 
 
-def test_midpoint_email_computes_days_left_and_shows_both_ctas():
+def test_midpoint_email_computes_days_left_and_shows_the_cta():
     plain, html_body = render_trial_midpoint_email(
         day_number=7,
         total_days=14,
-        upgrade_url="https://app.dalgo.org/upgrade",
         schedule_call_url="https://cal.com/dalgo",
     )
     assert "Trial · 7 days left</span>" in html_body
     assert "Day 7 of 14" in html_body
     assert "You're halfway through your trial period" in html_body
-    assert "UPGRADE" in html_body and "SCHEDULE A CALL" in html_body
-    assert "https://app.dalgo.org/upgrade" in html_body
+    assert "SCHEDULE A CALL" in html_body
+    assert "UPGRADE" not in html_body
     assert "https://cal.com/dalgo" in html_body
     assert "7 days left" in plain
 
@@ -216,7 +215,6 @@ def test_pre_end_email_shows_danger_gradient_and_end_date():
         day_number=12,
         total_days=14,
         end_date="15 Aug 2026",
-        upgrade_url="https://app.dalgo.org/upgrade",
         schedule_call_url="https://cal.com/dalgo",
     )
     assert "2 days left in your trial" in html_body
@@ -250,8 +248,7 @@ def test_cta_url_with_query_string_survives_round_trip():
     _, html_body = render_trial_midpoint_email(
         day_number=7,
         total_days=14,
-        upgrade_url=url,
-        schedule_call_url="https://cal.com/dalgo",
+        schedule_call_url=url,
     )
     assert "&amp;amp;" not in html_body
     assert 'href="https://app.dalgo.org/settings/billing?utm=email&amp;src=trial"' in html_body
@@ -270,13 +267,12 @@ def test_all_cta_call_sites_single_escape_a_query_string_url():
             day_number=12,
             total_days=14,
             end_date="15 Aug 2026",
-            upgrade_url=url,
-            schedule_call_url="https://cal.example",
+            schedule_call_url=url,
         ),
         render_trial_post_deletion_email(url),
         render_trial_day3_not_started_email(url, "https://cal.example"),
         render_trial_day3_in_progress_email("insights", url, "https://cal.example"),
-        render_trial_completion_email(url, "https://app.example", "https://cal.example"),
+        render_trial_completion_email(url, "https://cal.example"),
     ]
     for _, html_body in renders:
         assert "&amp;amp;" not in html_body
@@ -290,7 +286,6 @@ def test_trial_emails_escape_untrusted_input():
         day_number=12,
         total_days=14,
         end_date="<script>alert(1)</script>",
-        upgrade_url="https://x/y",
         schedule_call_url="https://x/z",
     )
     assert "<script>" not in html_body
@@ -568,16 +563,14 @@ def test_day3_in_progress_reverses_order_for_the_other_flow():
     assert html_out.count("&#10003;") == 1
 
 
-def test_completion_email_ticks_both_and_offers_two_ctas():
-    """email C congratulates and offers UPGRADE plus KEEP EXPLORING"""
-    plain, html_out = render_trial_completion_email(
-        "https://upgrade.example", "https://app.example", "https://cal.example"
-    )
+def test_completion_email_ticks_both_and_offers_keep_exploring():
+    """email C congratulates and offers KEEP EXPLORING — there is no upgrade CTA"""
+    plain, html_out = render_trial_completion_email("https://app.example", "https://cal.example")
     assert "Congratulations" in html_out
     assert html_out.count("&#10003;") == 2
-    assert "UPGRADE" in html_out
     assert "KEEP EXPLORING" in html_out
-    assert "https://upgrade.example" in html_out
+    assert "UPGRADE" not in html_out
+    assert "https://app.example" in html_out
     assert "Congratulations" in plain
 
 
@@ -588,9 +581,7 @@ def test_all_three_carry_testimonial_and_call_link():
         render_trial_day3_in_progress_email(
             "insights", "https://app.example", "https://cal.example"
         ),
-        render_trial_completion_email(
-            "https://upgrade.example", "https://app.example", "https://cal.example"
-        ),
+        render_trial_completion_email("https://app.example", "https://cal.example"),
     ]
     for _, html_out in renders:
         assert "SEE WHAT'S POSSIBLE" in html_out

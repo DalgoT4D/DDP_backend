@@ -324,19 +324,19 @@ def test_sweep_sends_pre_end_email_with_a_formatted_end_date():
     assert EMAIL_PRE_END in prefs.trial_emails_sent
 
 
-@override_settings(TRIAL_UPGRADE_URL="https://up", TRIAL_SCHEDULE_CALL_URL="https://cal")
-def test_sweep_passes_upgrade_and_schedule_call_urls_to_the_right_parameter():
-    """send_decided_email passes UPGRADE_URL and SCHEDULE_CALL_URL positionally into
-    send_trial_completion_email(to_email, upgrade_url, workspace_url, schedule_call_url) — a
-    transposition of the two settings would be invisible at sweep level while both are ""
-    in every other test. Pin each value to its actual parameter position."""
+@override_settings(FRONTEND_URL_V2="https://app", TRIAL_SCHEDULE_CALL_URL="https://cal")
+def test_sweep_passes_workspace_and_schedule_call_urls_to_the_right_parameter():
+    """send_decided_email passes FRONTEND_URL_V2 and SCHEDULE_CALL_URL positionally into
+    send_trial_completion_email(to_email, workspace_url, schedule_call_url) — a transposition
+    of the two settings would be invisible at sweep level while both are "" in every other
+    test. Pin each value to its actual parameter position."""
     _make_trial("trial-urls", days_ago=5, completed=("insights", "automate_pipeline"))
     with patch("ddpui.core.trial.lifecycle_emails.send_trial_completion_email") as mock_send:
         assert run_trial_lifecycle_sweep() == 1
         mock_send.assert_called_once()
 
-    _, upgrade_url_arg, _workspace_url_arg, schedule_call_url_arg = mock_send.call_args[0]
-    assert upgrade_url_arg == "https://up"
+    _, workspace_url_arg, schedule_call_url_arg = mock_send.call_args[0]
+    assert workspace_url_arg == "https://app"
     assert schedule_call_url_arg == "https://cal"
 
 

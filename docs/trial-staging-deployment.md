@@ -54,8 +54,7 @@ deployer following the template alone will not know to set them. They are marked
 
 | Variable | Notes |
 |---|---|
-| `TRIAL_UPGRADE_URL` | **empty renders a dead button** in the emails |
-| `TRIAL_SCHEDULE_CALL_URL` | same |
+| `TRIAL_SCHEDULE_CALL_URL` | falls back to the team's booking page when blank; set to override |
 | `FRONTEND_URL_V2` | already required elsewhere; the emails and the verification link use it |
 | `SES_SENDER_EMAIL` | already required; see the sandbox note above |
 
@@ -76,7 +75,7 @@ from django.conf import settings
 from ddpui.models.org import Org
 print('template org found:', Org.objects.filter(slug=settings.TEMPLATE_ORG_SLUG).exists())
 print('trials rds host  :', settings.TRIALS_RDS_HOST)
-print('upgrade url set  :', bool(settings.TRIAL_UPGRADE_URL))
+print('call url set     :', bool(settings.TRIAL_SCHEDULE_CALL_URL))
 "
 ```
 
@@ -247,8 +246,8 @@ Run in order; each is safe.
 
 ## 6. Known gaps — decide before enabling, not after
 
-- **Trial email CTAs.** `TRIAL_UPGRADE_URL` and `TRIAL_SCHEDULE_CALL_URL` default to empty and
-  render as dead buttons. Either populate them or hold the hourly sweep.
+- **Trial email CTA.** `TRIAL_SCHEDULE_CALL_URL` falls back to the team's booking page in
+  `settings.py`; set it explicitly if staging should point somewhere else.
 - **Frontend nudges 422.** The frontend sends `reports_nudge`, `alerts_nudge` and
   `metrics_nudge` to `PUT /api/userpreferences/trial-walkthrough`; the backend `Literal` accepts
   only `product_tour`, `insights`, `automate_pipeline`. The write fails silently (the frontend

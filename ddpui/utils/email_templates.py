@@ -594,9 +594,7 @@ def render_trial_welcome_email(workspace_url: str, trial_days: int = 14) -> tupl
     return plain_text, _render_trial_email_shell(body_html, badge=f"Trial · {trial_days} days")
 
 
-def render_trial_midpoint_email(
-    day_number: int, total_days: int, upgrade_url: str, schedule_call_url: str
-) -> tuple:
+def render_trial_midpoint_email(day_number: int, total_days: int, schedule_call_url: str) -> tuple:
     """Template 3 — mid-trial nudge (e.g. day 7 of 14).
 
     Returns:
@@ -626,7 +624,6 @@ def render_trial_midpoint_email(
         f" Many NGOs run their whole M&E on Dalgo, we'd love for yours to be one of them."
         f" Explore other functionality offered by Dalgo\n"
         f"\n" + "\n".join(f"- {title}: {subtitle}" for _, title, subtitle in actions) + f"\n\n"
-        f"Upgrade: {upgrade_url}\n"
         f"Schedule a call: {schedule_call_url}\n"
     )
 
@@ -639,10 +636,9 @@ def render_trial_midpoint_email(
                 You've got {days_left} days left to see what Dalgo can do for your programme. Many NGOs run their whole M&E on Dalgo, we'd love for yours to be one of them. Explore other functionality offered by Dalgo
               </p>
               {_render_trial_action_list(actions)}
-              <table cellpadding="0" cellspacing="0" style="margin-top:24px;"><tr>
-                <td>{_render_trial_cta_button("UPGRADE", upgrade_url)}</td>
-                <td style="padding-left:12px;">{_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url, primary=False)}</td>
-              </tr></table>"""
+              <div style="margin-top:24px;">
+                {_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url)}
+              </div>"""
 
     return plain_text, _render_trial_email_shell(body_html, badge=f"Trial · {days_left} days left")
 
@@ -651,7 +647,6 @@ def render_trial_pre_end_email(
     day_number: int,
     total_days: int,
     end_date: str,
-    upgrade_url: str,
     schedule_call_url: str,
 ) -> tuple:
     """Template 4 — pre-end warning (e.g. day 12 of 14, "2 days left").
@@ -672,10 +667,9 @@ def render_trial_pre_end_email(
         f"Day {day_number} of {total_days}\n"
         f"\n"
         f"Your trial ends on {end_date}, following which your workspace and its data"
-        f" will be permanently deleted. To keep working on Dalgo, upgrade now or"
-        f" schedule a call with us.\n"
+        f" will be permanently deleted. To keep working on Dalgo, schedule a call"
+        f" with us.\n"
         f"\n"
-        f"Upgrade: {upgrade_url}\n"
         f"Schedule a call: {schedule_call_url}\n"
     )
 
@@ -685,12 +679,9 @@ def render_trial_pre_end_email(
                 {days_left} days left in your trial
               </p>
               <p style="margin:0 0 24px; font-size:15px; color:#4b5563; line-height:1.6;">
-                Your trial ends on {safe_end_date}, following which your workspace and its data will be permanently deleted. To keep working on Dalgo, upgrade now or schedule a call with us.
+                Your trial ends on {safe_end_date}, following which your workspace and its data will be permanently deleted. To keep working on Dalgo, schedule a call with us.
               </p>
-              <table cellpadding="0" cellspacing="0"><tr>
-                <td>{_render_trial_cta_button("UPGRADE", upgrade_url)}</td>
-                <td style="padding-left:12px;">{_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url, primary=False)}</td>
-              </tr></table>"""
+              {_render_trial_cta_button("SCHEDULE A CALL", schedule_call_url)}"""
 
     return plain_text, _render_trial_email_shell(body_html, badge=f"Trial · {days_left} days left")
 
@@ -857,9 +848,7 @@ def render_trial_day3_in_progress_email(
     return plain_text, _render_trial_email_shell(body_html)
 
 
-def render_trial_completion_email(
-    upgrade_url: str, workspace_url: str, schedule_call_url: str
-) -> tuple:
+def render_trial_completion_email(workspace_url: str, schedule_call_url: str) -> tuple:
     """Template C — both walkthroughs completed, on or after day 3.
 
     Returns:
@@ -870,9 +859,8 @@ def render_trial_completion_email(
     plain_text = (
         "Congratulations you've completed your tour of Dalgo.\n"
         "\n"
-        "Upgrade to a full account, talk to us or explore the platform further.\n"
+        "Talk to us or explore the platform further.\n"
         "\n" + "\n".join(f"- {title}: {subtitle}" for _, title, subtitle in items) + "\n\n"
-        f"Upgrade: {upgrade_url}\n"
         f"Keep exploring: {workspace_url}\n"
         f"Schedule a call with us: {schedule_call_url}\n"
     )
@@ -882,13 +870,10 @@ def render_trial_completion_email(
                 Congratulations you've completed your tour of Dalgo.
               </p>
               <p style="margin:0 0 24px; font-size:15px; color:#4b5563; line-height:1.6;">
-                Upgrade to a full account, talk to us or explore the platform further.
+                Talk to us or explore the platform further.
               </p>
               {_render_trial_checklist(items)}
-              <table cellpadding="0" cellspacing="0"><tr>
-                <td>{_render_trial_cta_button("UPGRADE", upgrade_url)}</td>
-                <td style="padding-left:12px;">{_render_trial_cta_button("KEEP EXPLORING", workspace_url, primary=False)}</td>
-              </tr></table>
+              {_render_trial_cta_button("KEEP EXPLORING", workspace_url)}
               {_trial_footer_html(schedule_call_url)}"""
 
     return plain_text, _render_trial_email_shell(body_html)

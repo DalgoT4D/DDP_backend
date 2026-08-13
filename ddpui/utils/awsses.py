@@ -140,25 +140,19 @@ def send_trial_day3_in_progress_email(
     send_html_message(to_email, subject, text_body, html_body)
 
 
-def send_trial_completion_email(
-    to_email: str, upgrade_url: str, workspace_url: str, schedule_call_url: str
-) -> None:
+def send_trial_completion_email(to_email: str, workspace_url: str, schedule_call_url: str) -> None:
     """sent once both tracked walkthroughs are complete, on or after day 3"""
     subject = "You've completed your tour of Dalgo"
-    text_body, html_body = render_trial_completion_email(
-        upgrade_url, workspace_url, schedule_call_url
-    )
+    text_body, html_body = render_trial_completion_email(workspace_url, schedule_call_url)
     send_html_message(to_email, subject, text_body, html_body)
 
 
 def send_trial_midpoint_email(
-    to_email: str, day_number: int, total_days: int, upgrade_url: str, schedule_call_url: str
+    to_email: str, day_number: int, total_days: int, schedule_call_url: str
 ) -> None:
     """mid-trial nudge, e.g. day 7 of 14"""
     subject = "You're halfway through your Dalgo trial"
-    text_body, html_body = render_trial_midpoint_email(
-        day_number, total_days, upgrade_url, schedule_call_url
-    )
+    text_body, html_body = render_trial_midpoint_email(day_number, total_days, schedule_call_url)
     send_html_message(to_email, subject, text_body, html_body)
 
 
@@ -167,7 +161,6 @@ def send_trial_pre_end_email(
     day_number: int,
     total_days: int,
     end_date: str,
-    upgrade_url: str,
     schedule_call_url: str,
 ) -> None:
     """expiry warning, sent two days before the trial ends.
@@ -177,7 +170,7 @@ def send_trial_pre_end_email(
     """
     subject = f"{total_days - day_number} days left in your Dalgo trial"
     text_body, html_body = render_trial_pre_end_email(
-        day_number, total_days, end_date, upgrade_url, schedule_call_url
+        day_number, total_days, end_date, schedule_call_url
     )
     send_html_message(to_email, subject, text_body, html_body)
 
