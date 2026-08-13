@@ -18,12 +18,25 @@ class UpdateUserPreferencesSchema(Schema):
     last_visited_transform_tab: Optional[Literal["ui", "github"]] = None
 
 
-TrialWalkthroughFlow = Literal["product_tour", "insights", "automate_pipeline"]
+# The first three are guided walkthroughs. The `*_nudge` keys are one-shot feature coachmarks
+# shown on every visit to /reports, /alerts or /metrics until dismissed — they belong to no flow
+# and only ever write completed=True. Both kinds share this Literal, and the endpoint, because
+# both are "has this user been shown X" bookkeeping on the same dict.
+TrialWalkthroughFlow = Literal[
+    "product_tour",
+    "insights",
+    "automate_pipeline",
+    "reports_nudge",
+    "alerts_nudge",
+    "metrics_nudge",
+]
 
 
 class UpdateTrialWalkthroughSchema(Schema):
     """Marks one trial-walkthrough flow skipped or completed. Never both true — completing
-    a previously-skipped flow clears skipped on the same write."""
+    a previously-skipped flow clears skipped on the same write.
+
+    A feature nudge only ever writes completed=True (dismissed); it has no skipped state."""
 
     flow: TrialWalkthroughFlow
     skipped: Optional[bool] = None

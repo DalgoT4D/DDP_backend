@@ -246,6 +246,34 @@ def test_update_trial_walkthrough_merges_without_clobbering_other_flows(orguser)
     }
 
 
+def test_update_trial_walkthrough_feature_nudge_merges_alongside_flows(orguser):
+    """dismissing a feature nudge records it under its own key and leaves the flows alone"""
+    request = mock_request(orguser)
+    update_trial_walkthrough(request, UpdateTrialWalkthroughSchema(flow="insights", completed=True))
+
+    response = update_trial_walkthrough(
+        request, UpdateTrialWalkthroughSchema(flow="reports_nudge", completed=True)
+    )
+
+    assert response["res"] == {
+        "insights": {"skipped": False, "completed": True},
+        "reports_nudge": {"skipped": False, "completed": True},
+    }
+    prefs = UserPreferences.objects.get(orguser=orguser)
+    assert prefs.trial_walkthrough["reports_nudge"] == {"skipped": False, "completed": True}
+
+
+@pytest.mark.parametrize("nudge", ["reports_nudge", "alerts_nudge", "metrics_nudge"])
+def test_update_trial_walkthrough_accepts_every_feature_nudge(orguser, nudge):
+    """all three nudge keys are in the Literal — a missing one silently 422s the coachmark, so
+    the dismissal never sticks and it reappears on every visit"""
+    response = update_trial_walkthrough(
+        mock_request(orguser), UpdateTrialWalkthroughSchema(flow=nudge, completed=True)
+    )
+
+    assert response["res"][nudge] == {"skipped": False, "completed": True}
+
+
 def test_update_trial_walkthrough_requires_skipped_or_completed(orguser):
     """neither flag set is a client error, not a silent no-op"""
     request = mock_request(orguser)

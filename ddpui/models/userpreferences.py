@@ -18,10 +18,14 @@ class UserPreferences(models.Model):
         blank=True,
     )
     # Shape: `{flow: TrialWalkthroughFlowState}` — see ddpui/schemas/userpreferences_schema.py.
-    # Keyed by flow name ("product_tour" | "insights" | "automate_pipeline"), each value
-    # {"skipped": bool, "completed": bool}, never both true.
-    # Per-step progress and which fork (sample/own_data) stays in the frontend's localStorage;
-    # this is only the final-state gate deciding whether to offer that flow again.
+    # Two kinds of entry, same {"skipped": bool, "completed": bool} value, never both true:
+    #  - guided flows, keyed "product_tour" | "insights" | "automate_pipeline". Per-step progress
+    #    and which fork (sample/own_data) stays in the frontend's localStorage; this is only the
+    #    final-state gate deciding whether to offer that flow again.
+    #  - one-shot feature nudges, keyed "reports_nudge" | "alerts_nudge" | "metrics_nudge". A
+    #    trial user landing on /reports, /alerts or /metrics gets a coachmark on every visit
+    #    until they dismiss it, which writes completed=True. They never set skipped.
+    # An absent key means "not decided" / "not yet dismissed" for both kinds.
     trial_walkthrough = models.JSONField(default=dict, blank=True)
     # Shape: `TrialEmailsSentState` in ddpui/schemas/userpreferences_schema.py — which automated
     # trial emails have gone out, keyed by email kind ("day3" | "completion" | "midpoint" |
