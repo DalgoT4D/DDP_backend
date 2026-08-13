@@ -87,7 +87,7 @@ def list_dashboards(
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
 @has_permission(["can_view_dashboards"])
-@has_access(ResourceType.DASHBOARD, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def get_dashboard(request, dashboard_id: int):
     """Get a specific dashboard"""
     orguser: OrgUser = request.orguser
@@ -97,12 +97,8 @@ def get_dashboard(request, dashboard_id: int):
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    access = access_control.get_user_access(orguser, ResourceType.DASHBOARD, dashboard_id)
-    if access is None:
-        raise HttpError(403, "you do not have access to this dashboard")
-
     return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard), access_level=access
+        **DashboardService.get_dashboard_response(dashboard), access_level=request.access_level
     )
 
 
@@ -155,7 +151,7 @@ def create_dashboard(request, payload: DashboardCreate):
 @dashboard_native_router.put("/{dashboard_id}/", response=DashboardResponse)
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
     """Update dashboard with auto-save support"""
@@ -224,16 +220,15 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             resource_fields={**resource_fields, "title": dashboard.title},
         )
 
-    access = access_control.get_user_access(orguser, ResourceType.DASHBOARD, dashboard_id)
     return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard), access_level=access
+        **DashboardService.get_dashboard_response(dashboard), access_level=request.access_level
     )
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")
 @has_permission(["can_delete_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def delete_dashboard(request, dashboard_id: int):
     """Delete a dashboard"""
@@ -270,7 +265,7 @@ def delete_dashboard(request, dashboard_id: int):
 
 @dashboard_native_router.post("/{dashboard_id}/duplicate/", response=DashboardResponse)
 @has_permission(["can_create_dashboards"])
-@has_access(ResourceType.DASHBOARD, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def duplicate_dashboard(request, dashboard_id: int):
     """Duplicate a dashboard with all its configurations and filters"""
     orguser: OrgUser = request.orguser
@@ -338,7 +333,7 @@ def duplicate_dashboard(request, dashboard_id: int):
 @dashboard_native_router.post("/{dashboard_id}/lock/", response=LockResponse)
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def lock_dashboard(request, dashboard_id: int):
     """Lock dashboard for editing"""
@@ -361,7 +356,7 @@ def lock_dashboard(request, dashboard_id: int):
 @dashboard_native_router.put("/{dashboard_id}/lock/refresh/")
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def refresh_dashboard_lock(request, dashboard_id: int):
     """Refresh dashboard lock to extend expiry"""
@@ -390,7 +385,7 @@ def refresh_dashboard_lock(request, dashboard_id: int):
 @dashboard_native_router.delete("/{dashboard_id}/lock/")
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def unlock_dashboard(request, dashboard_id: int):
     """Unlock dashboard"""
@@ -410,7 +405,7 @@ def unlock_dashboard(request, dashboard_id: int):
 @dashboard_native_router.post("/{dashboard_id}/filters/", response=DashboardFilterResponse)
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def create_filter(request, dashboard_id: int, payload: FilterCreate):
     """Add a filter to dashboard"""
@@ -439,7 +434,7 @@ def create_filter(request, dashboard_id: int, payload: FilterCreate):
     "/{dashboard_id}/filters/{filter_id}/", response=DashboardFilterResponse
 )
 @has_permission(["can_view_dashboards"])
-@has_access(ResourceType.DASHBOARD, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def get_filter(request, dashboard_id: int, filter_id: int):
     """Get a specific dashboard filter"""
     orguser: OrgUser = request.orguser
@@ -459,7 +454,7 @@ def get_filter(request, dashboard_id: int, filter_id: int):
 )
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpdate):
     """Update a dashboard filter"""
@@ -485,7 +480,7 @@ def update_filter(request, dashboard_id: int, filter_id: int, payload: FilterUpd
 @dashboard_native_router.delete("/{dashboard_id}/filters/{filter_id}/")
 @has_permission(["can_view_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def delete_filter(request, dashboard_id: int, filter_id: int):
     """Delete a dashboard filter"""
@@ -535,7 +530,7 @@ def get_filter_options(
 @dashboard_native_router.put("/{dashboard_id}/share/")
 @has_permission(["can_share_dashboards"])
 @has_access(
-    ResourceType.DASHBOARD, "edit", get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
+    ResourceType.DASHBOARD, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("dashboard_id")
 )
 def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShareToggle):
     """Toggle public sharing for a dashboard"""
@@ -582,7 +577,7 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
 
         # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
         FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         response_data[
             "public_url"
         ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
@@ -611,7 +606,7 @@ def toggle_dashboard_sharing(request, dashboard_id: int, payload: DashboardShare
 
 @dashboard_native_router.get("/{dashboard_id}/share/")
 @has_permission(["can_view_dashboards"])
-@has_access(ResourceType.DASHBOARD, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def get_dashboard_sharing_status(request, dashboard_id: int):
     """Get dashboard sharing status"""
     orguser: OrgUser = request.orguser
@@ -637,7 +632,7 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
 
         # Use FRONTEND_URL_V2 for webapp_v2, fallback to FRONTEND_URL, then localhost
         FRONTEND_URL_V2 = getattr(settings, "FRONTEND_URL_V2", None)
-        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3001")
+        frontend_url = FRONTEND_URL_V2 or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         response_data[
             "public_url"
         ] = f"{frontend_url}/share/dashboard/{dashboard.public_share_token}"
@@ -654,6 +649,7 @@ def get_dashboard_sharing_status(request, dashboard_id: int):
     "/landing-page/set-personal/{dashboard_id}", response=LandingPageResponse
 )
 @has_permission(["can_view_dashboards", "can_create_dashboards"])
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def set_personal_landing_dashboard(request, dashboard_id: int):
     """Set a dashboard as user's personal landing page"""
     orguser: OrgUser = request.orguser
@@ -711,6 +707,7 @@ def remove_personal_landing_dashboard(request):
     "/landing-page/set-org-default/{dashboard_id}", response=LandingPageResponse
 )
 @has_permission(["can_manage_org_default_dashboard"])
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def set_org_default_dashboard(request, dashboard_id: int):
     """Set a dashboard as organization's default landing page (Admin only)"""
     orguser: OrgUser = request.orguser

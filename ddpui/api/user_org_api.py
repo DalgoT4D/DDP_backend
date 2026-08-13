@@ -23,7 +23,7 @@ from ddpui.auth import (
     blacklist_jti_in_redis,
 )
 from ddpui.core import orgfunctions, orguserfunctions
-from ddpui.core.access.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
 from ddpui.models.org_user import (
@@ -663,7 +663,7 @@ def delete_user_group(request, group_id: int):
     if group is None:
         raise HttpError(404, "group not found")
 
-    if not can_delete_resource(orguser, group):
+    if not is_creator_or_admin(orguser, group):
         raise HttpError(403, "only the group creator or an admin can delete this group")
 
     ResourceShare.objects.filter(

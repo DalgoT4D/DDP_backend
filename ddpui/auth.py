@@ -61,7 +61,7 @@ def has_permission(permission_slugs: list):
     return decorator
 
 
-def has_access(rtype: str, required_level: str = AccessLevel.VIEW, get_resource_id=None):
+def has_access(rtype: str, required_level: str, get_resource_id=None):
     """Gate that checks the requestor has at least ``required_level`` on the
     named resource.
 
@@ -90,6 +90,7 @@ def has_access(rtype: str, required_level: str = AccessLevel.VIEW, get_resource_
                 raise HttpError(404, f"{rtype} not found")
             if LEVEL_RANK[level] < LEVEL_RANK[required_level]:
                 raise HttpError(403, f"you have {level}-only access")
+            request.access_level = level
             return api_endpoint(*args, **kwargs)
 
         return wrapper

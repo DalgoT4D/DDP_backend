@@ -7,7 +7,7 @@ from django.http import HttpResponse
 from ninja import Router
 from ninja.errors import HttpError
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, has_access
 from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.core.reports.comment_service import CommentService
 from ddpui.core.reports.exceptions import (
@@ -139,6 +139,7 @@ def get_mentionable_users(request):
 
 @report_router.get("/{snapshot_id}/view/", response=ApiResponse[SnapshotViewResponse])
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def get_snapshot_view(request, snapshot_id: int):
     """Get snapshot view data for rendering"""
     orguser: OrgUser = request.orguser
@@ -147,12 +148,9 @@ def get_snapshot_view(request, snapshot_id: int):
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
 
-    access = get_user_access(orguser, ResourceType.REPORT, snapshot_id)
-    if access is None:
-        raise HttpError(403, "you do not have access to this report")
-
     return api_response(
-        success=True, data=SnapshotViewResponse.from_view_data(view_data, access_level=access)
+        success=True,
+        data=SnapshotViewResponse.from_view_data(view_data, access_level=request.access_level),
     )
 
 
@@ -217,6 +215,7 @@ def get_report_kpi_data(
 
 @report_router.put("/{snapshot_id}/", response=ApiResponse[SnapshotUpdateResponse])
 @has_permission(["can_edit_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
     """Update a snapshot"""
     orguser: OrgUser = request.orguser
@@ -249,6 +248,7 @@ def update_snapshot(request, snapshot_id: int, payload: SnapshotUpdate):
 
 @report_router.delete("/{snapshot_id}/", response=ApiResponse[SnapshotDeleteResponse])
 @has_permission(["can_delete_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def delete_snapshot(request, snapshot_id: int):
     """Delete a snapshot"""
     orguser: OrgUser = request.orguser
@@ -287,6 +287,7 @@ def delete_snapshot(request, snapshot_id: int):
 
 @report_router.post("/{snapshot_id}/export/pdf/", response={200: None})
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def export_report_pdf(request, snapshot_id: int):
     """Generate PDF of report via Playwright and return as download.
 
@@ -325,6 +326,7 @@ def export_report_pdf(request, snapshot_id: int):
     response=ApiResponse[List[DatetimeColumnResponse]],
 )
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.DASHBOARD, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("dashboard_id"))
 def list_dashboard_datetime_columns(request, dashboard_id: int):
     """Discover datetime columns from all tables used by a dashboard's charts."""
     orguser: OrgUser = request.orguser
@@ -342,6 +344,7 @@ def list_dashboard_datetime_columns(request, dashboard_id: int):
 
 @report_router.put("/{snapshot_id}/share/", response=ApiResponse[ShareResponse])
 @has_permission(["can_share_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
     """Toggle public sharing for a report snapshot"""
     orguser: OrgUser = request.orguser
@@ -371,6 +374,7 @@ def toggle_report_sharing(request, snapshot_id: int, payload: ShareToggle):
 
 @report_router.get("/{snapshot_id}/share/", response=ApiResponse[ShareStatus])
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def get_report_sharing_status(request, snapshot_id: int):
     """Get report sharing status"""
     orguser: OrgUser = request.orguser
@@ -391,6 +395,7 @@ def get_report_sharing_status(request, snapshot_id: int):
     response=ApiResponse[ReportShareViaEmailResponse],
 )
 @has_permission(["can_share_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def share_report_via_email(request, snapshot_id: int, payload: ReportShareViaEmailRequest):
     """Send the report as a PDF attachment to the given email addresses."""
     orguser: OrgUser = request.orguser
@@ -421,6 +426,7 @@ def share_report_via_email(request, snapshot_id: int, payload: ReportShareViaEma
 
 @report_router.get("/{snapshot_id}/comments/states/", response=ApiResponse[CommentStatesResponse])
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def get_comment_states(request, snapshot_id: int):
     """Get icon states for all targets in a snapshot"""
     orguser: OrgUser = request.orguser
@@ -441,6 +447,7 @@ def get_comment_states(request, snapshot_id: int):
 
 @report_router.post("/{snapshot_id}/comments/mark-read/", response=ApiResponse)
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def mark_as_read(request, snapshot_id: int, payload: MarkReadRequest):
     """Mark a target's comments as read"""
     orguser: OrgUser = request.orguser
@@ -459,6 +466,7 @@ def mark_as_read(request, snapshot_id: int, payload: MarkReadRequest):
 
 @report_router.get("/{snapshot_id}/comments/", response=ApiResponse[List[CommentResponse]])
 @has_permission(["can_view_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def list_comments(
     request,
     snapshot_id: int,
@@ -486,6 +494,7 @@ def list_comments(
 
 @report_router.post("/{snapshot_id}/comments/", response=ApiResponse[CommentResponse])
 @has_permission(["can_edit_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def create_comment(request, snapshot_id: int, payload: CommentCreate):
     """Create a comment on a report snapshot"""
     orguser: OrgUser = request.orguser
@@ -529,6 +538,7 @@ def create_comment(request, snapshot_id: int, payload: CommentCreate):
 
 @report_router.put("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse[CommentResponse])
 @has_permission(["can_edit_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentUpdate):
     """Update a comment (author-only)"""
     orguser: OrgUser = request.orguser
@@ -569,6 +579,7 @@ def update_comment(request, snapshot_id: int, comment_id: int, payload: CommentU
 
 @report_router.delete("/{snapshot_id}/comments/{comment_id}/", response=ApiResponse)
 @has_permission(["can_edit_dashboards"])
+@has_access(ResourceType.REPORT, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("snapshot_id"))
 def delete_comment(request, snapshot_id: int, comment_id: int):
     """Delete a comment (author-only)"""
     orguser: OrgUser = request.orguser

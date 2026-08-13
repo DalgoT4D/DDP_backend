@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from django.db.models import Q
 
 from ddpui.core.access.access_control import accessible_filter
-from ddpui.core.access.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.resource_share import ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
@@ -236,7 +236,7 @@ class ChartService:
         chart = ChartService.get_chart(chart_id, org)
 
         # Only allow deletion if the user is the owner or an admin
-        if not can_delete_resource(orguser, chart):
+        if not is_creator_or_admin(orguser, chart):
             raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
@@ -277,7 +277,7 @@ class ChartService:
             logger.warning(f"Charts not found or not accessible: {missing_ids}")
 
         # Same owner-or-admin rule as single delete: skip charts the user may not delete
-        deletable = [chart for chart in charts if can_delete_resource(orguser, chart)]
+        deletable = [chart for chart in charts if is_creator_or_admin(orguser, chart)]
         forbidden_ids = sorted(set(found_ids) - {chart.id for chart in deletable})
         if forbidden_ids:
             logger.warning(

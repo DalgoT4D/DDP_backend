@@ -18,7 +18,7 @@ from ddpui.core.alerts.exceptions import (
     AlertPermissionError,
     AlertValidationError,
 )
-from ddpui.core.access.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
@@ -367,7 +367,7 @@ class AlertService:
         audit log) don't need a separate fetch of their own."""
         alert = AlertService.get_alert(alert_id, org)
         # Only allow deletion if the user is the owner (creator) or an admin
-        if not can_delete_resource(orguser, alert):
+        if not is_creator_or_admin(orguser, alert):
             raise AlertPermissionError("Only the owner or an admin can delete this alert.")
         alert_name = alert.name
         alert.delete()

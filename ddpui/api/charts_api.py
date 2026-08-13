@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, has_access
 from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
@@ -1025,6 +1025,7 @@ def download_chart_data_csv(
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_charts"])
+@has_access(ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser: OrgUser = request.orguser
@@ -1033,10 +1034,6 @@ def get_chart(request, chart_id: int):
         chart = ChartService.get_chart(chart_id, orguser.org)
     except ChartNotFoundError:
         raise HttpError(404, "Chart not found") from None
-
-    access = get_user_access(orguser, ResourceType.CHART, chart_id)
-    if access is None:
-        raise HttpError(403, "you do not have access to this chart")
 
     return ChartResponse(
         id=chart.id,
@@ -1049,7 +1046,7 @@ def get_chart(request, chart_id: int):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
-        access_level=access,
+        access_level=request.access_level,
         is_private=chart.is_private,
     )
 
@@ -1193,6 +1190,7 @@ def create_chart(request, payload: ChartCreate):
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
+@has_access(ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
@@ -1257,13 +1255,14 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
-        access_level=get_user_access(orguser, ResourceType.CHART, chart_id),
+        access_level=request.access_level,
         is_private=chart.is_private,
     )
 
 
 @charts_router.delete("/{chart_id}/")
 @has_permission(["can_delete_charts"])
+@has_access(ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser: OrgUser = request.orguser
@@ -1332,6 +1331,7 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
 @has_permission(["can_view_charts"])
+@has_access(ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
 def get_chart_dashboards(request, chart_id: int):
     """Get list of dashboards that use this chart"""
     orguser: OrgUser = request.orguser

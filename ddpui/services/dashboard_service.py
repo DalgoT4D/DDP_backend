@@ -18,7 +18,7 @@ from sqlalchemy import text, distinct, column
 from sqlalchemy.dialects import postgresql
 
 from ddpui.core.access import access_control
-from ddpui.core.access.ownership import can_delete_resource
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.resource_share import ResourceType
 from ddpui.models.dashboard import (
     Dashboard,
@@ -428,7 +428,7 @@ class DashboardService:
             raise DashboardPermissionError("Cannot delete the organization's default dashboard.")
 
         # Only allow deletion if the user is the owner or an admin
-        if not can_delete_resource(orguser, dashboard):
+        if not is_creator_or_admin(orguser, dashboard):
             raise DashboardPermissionError("Only the owner or an admin can delete this dashboard.")
 
         # Check if dashboard is landing page for any user

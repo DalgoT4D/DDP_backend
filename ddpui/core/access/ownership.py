@@ -27,11 +27,6 @@ def is_creator_or_admin(orguser: OrgUser, resource) -> bool:
     return orguser.new_role.slug in (ADMIN_ROLE, SUPER_ADMIN_ROLE)
 
 
-def can_delete_resource(orguser: OrgUser, resource) -> bool:
-    """Return True if orguser may delete resource — creator or admin."""
-    return is_creator_or_admin(orguser, resource)
-
-
 def transfer_ownership(caller: OrgUser, rtype: str, resource, to_orguser_id: int) -> None:
     """Transfer ``created_by`` on ``resource`` to another org member.
 

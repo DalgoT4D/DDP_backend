@@ -10,7 +10,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from ddpui.core.access.access_control import accessible_filter
-from ddpui.core.access.ownership import can_delete_resource, is_creator_or_admin
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import ResourceType
@@ -754,7 +754,7 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        if not can_delete_resource(orguser, snapshot):
+        if not is_creator_or_admin(orguser, snapshot):
             raise SnapshotPermissionError("Only the owner or an admin can delete this report.")
 
         snapshot_title = snapshot.title
@@ -874,7 +874,7 @@ class ReportService:
             settings, "FRONTEND_URL", None
         )
         if not frontend_url:
-            frontend_url = "http://localhost:3001"
+            frontend_url = "http://localhost:3000"
         return frontend_url
 
     @staticmethod

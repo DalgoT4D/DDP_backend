@@ -5,7 +5,7 @@ from typing import Optional
 from ninja import Router
 from ninja.errors import HttpError
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, has_access
 from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
@@ -128,6 +128,7 @@ def create_kpi(request, payload: KPICreate):
 
 @kpi_router.get("/{kpi_id}/", response=KPIResponse)
 @has_permission(["can_view_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def get_kpi(request, kpi_id: int):
     """Get a specific KPI"""
     orguser: OrgUser = request.orguser
@@ -137,15 +138,12 @@ def get_kpi(request, kpi_id: int):
     except KPINotFoundError:
         raise HttpError(404, "KPI not found") from None
 
-    access = get_user_access(orguser, ResourceType.KPI, kpi_id)
-    if access is None:
-        raise HttpError(403, "you do not have access to this KPI")
-
-    return KPIService.kpi_to_response(kpi, access_level=access)
+    return KPIService.kpi_to_response(kpi, access_level=request.access_level)
 
 
 @kpi_router.put("/{kpi_id}/", response=KPIResponse)
 @has_permission(["can_edit_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     """Update a KPI"""
 
@@ -180,13 +178,12 @@ def update_kpi(request, kpi_id: int, payload: KPIUpdate):
     except KPIValidationError as e:
         raise HttpError(400, e.message) from None
 
-    return KPIService.kpi_to_response(
-        kpi, access_level=get_user_access(orguser, ResourceType.KPI, kpi_id)
-    )
+    return KPIService.kpi_to_response(kpi, access_level=request.access_level)
 
 
 @kpi_router.delete("/{kpi_id}/")
 @has_permission(["can_delete_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def delete_kpi(request, kpi_id: int):
     """Delete a KPI"""
     orguser: OrgUser = request.orguser
@@ -222,6 +219,7 @@ def delete_kpi(request, kpi_id: int):
 
 @kpi_router.get("/{kpi_id}/dashboards/", response=list)
 @has_permission(["can_view_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def get_kpi_dashboards(request, kpi_id: int):
     """Get list of dashboards that use this KPI."""
     orguser: OrgUser = request.orguser
@@ -233,6 +231,7 @@ def get_kpi_dashboards(request, kpi_id: int):
 
 @kpi_router.get("/{kpi_id}/consumers/")
 @has_permission(["can_view_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def get_kpi_consumers(request, kpi_id: int):
     """List dashboards and alerts that reference this KPI (for the consumers UI)."""
     orguser: OrgUser = request.orguser
@@ -293,6 +292,7 @@ def get_kpi_data(
 
 @kpi_router.get("/{kpi_id}/notes/", response=list[AnnotationEntryResponse])
 @has_permission(["can_view_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def list_annotations(request, kpi_id: int):
     """List all annotation entries for a KPI."""
     orguser: OrgUser = request.orguser
@@ -304,6 +304,7 @@ def list_annotations(request, kpi_id: int):
 
 @kpi_router.post("/{kpi_id}/notes/", response=AnnotationEntryResponse)
 @has_permission(["can_edit_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def create_annotation(request, kpi_id: int, payload: AnnotationEntryCreate):
     """Create an annotation entry."""
     orguser: OrgUser = request.orguser
@@ -315,6 +316,7 @@ def create_annotation(request, kpi_id: int, payload: AnnotationEntryCreate):
 
 @kpi_router.put("/{kpi_id}/notes/{entry_id}/", response=AnnotationEntryResponse)
 @has_permission(["can_edit_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def update_annotation(request, kpi_id: int, entry_id: int, payload: AnnotationEntryUpdate):
     """Update an annotation entry."""
     orguser: OrgUser = request.orguser
@@ -326,6 +328,7 @@ def update_annotation(request, kpi_id: int, entry_id: int, payload: AnnotationEn
 
 @kpi_router.delete("/{kpi_id}/notes/{entry_id}/")
 @has_permission(["can_edit_kpis"])
+@has_access(ResourceType.KPI, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("kpi_id"))
 def delete_annotation(request, kpi_id: int, entry_id: int):
     """Delete an annotation entry."""
     orguser: OrgUser = request.orguser
