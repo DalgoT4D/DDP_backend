@@ -66,6 +66,7 @@ from ddpui.utils.constants import (
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
+    resolve_stars,
     from_timestamp,
     nice_bytes,
     get_integer_env_var,
@@ -854,9 +855,13 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         warehouse.name = payload.name
         warehouse.save()
 
+    curr_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    # payload is the authoritative source of truth; only replace starred values
+    # from curr_credentials — never carry over keys absent from the new payload
     airbyte_creds = {}
     if warehouse.wtype == "postgres":
-        airbyte_creds = update_dict_but_not_stars(payload.config)
+        airbyte_creds = resolve_stars(payload.config, curr_credentials)
         # i've forgotten why we have this here, airbyte sends "database" - RC
         if "dbname" in airbyte_creds:
             airbyte_creds["database"] = airbyte_creds["dbname"]
@@ -874,13 +879,6 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
 
     else:
         raise ValueError("unknown warehouse type " + warehouse.wtype)
-
-    curr_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
-
-    # copy over the value of keys that are missing from in airbyte_creds (these are probably that have all '*****')
-    for key, value in curr_credentials.items():
-        if key not in airbyte_creds:
-            airbyte_creds[key] = value
 
     secretsmanager.update_warehouse_credentials(warehouse, airbyte_creds)
 
