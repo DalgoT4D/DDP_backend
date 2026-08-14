@@ -63,7 +63,6 @@ class AdminOrgSchema(Schema):
     slug: str | None
     viz_url: str | None
     base_plan: str | None
-    is_active: bool
     user_count: int
 
     @classmethod
@@ -75,7 +74,6 @@ class AdminOrgSchema(Schema):
             slug=org.slug,
             viz_url=org.viz_url,
             base_plan=org.base_plan(),
-            is_active=org.is_active,
             user_count=user_count,
         )
 
@@ -111,17 +109,14 @@ class AdminOrgUserSchema(Schema):
     orguser_id: int
     email: str
     new_role_slug: str | None
-    # per-org active flag (OrgUser.is_active) — NOT the global User.is_active
-    is_active: bool
 
     @classmethod
     def from_model(cls, orguser: OrgUser) -> "AdminOrgUserSchema":
-        """Build the response from an OrgUser (per-org is_active, not the global flag)."""
+        """Build the response from an OrgUser."""
         return cls(
             orguser_id=orguser.id,
             email=orguser.user.email,
             new_role_slug=orguser.new_role.slug if orguser.new_role else None,
-            is_active=orguser.is_active,
         )
 
 

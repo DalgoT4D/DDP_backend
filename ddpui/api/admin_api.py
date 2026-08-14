@@ -144,22 +144,6 @@ def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
     return _admin_org_response(org)
 
 
-@admin_router.post("/orgs/{org_id}/deactivate", response=AdminOrgSchema)
-@platform_admin_required
-def post_admin_org_deactivate(request, org_id: int):
-    """Deactivate an org (reversible). Its users are then blocked at permission-load."""
-    org = _get_org_or_404(org_id)
-    return _admin_org_response(admin_service.set_org_active(org, False))
-
-
-@admin_router.post("/orgs/{org_id}/reactivate", response=AdminOrgSchema)
-@platform_admin_required
-def post_admin_org_reactivate(request, org_id: int):
-    """Reactivate a deactivated org — its users can use the app again."""
-    org = _get_org_or_404(org_id)
-    return _admin_org_response(admin_service.set_org_active(org, True))
-
-
 # ======================= Users tab (M4) ======================================
 # Cross-org user management inside a target org. Every endpoint takes the target
 # org in the URL and goes through admin_service (invite_user / change_orguser_role /
@@ -241,30 +225,6 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
         raise HttpError(400, error)
 
     orguser.refresh_from_db()
-    return AdminOrgUserSchema.from_model(orguser)
-
-
-@admin_router.post("/orgs/{org_id}/users/{orguser_id}/deactivate", response=AdminOrgUserSchema)
-@platform_admin_required
-def post_admin_org_user_deactivate(request, org_id: int, orguser_id: int):
-    """
-    Deactivate a user in THIS org only (sets OrgUser.is_active=False, NOT
-    User.is_active). Blocked at permission-load for this org; the user's membership
-    of any other org is unaffected. See plan.md §4.1 / §4.2.
-    """
-    org = _get_org_or_404(org_id)
-    orguser = _get_orguser_or_404(org, orguser_id)
-    orguser = admin_service.set_orguser_active(orguser, False)
-    return AdminOrgUserSchema.from_model(orguser)
-
-
-@admin_router.post("/orgs/{org_id}/users/{orguser_id}/reactivate", response=AdminOrgUserSchema)
-@platform_admin_required
-def post_admin_org_user_reactivate(request, org_id: int, orguser_id: int):
-    """Reactivate a user in this org (OrgUser.is_active=True)."""
-    org = _get_org_or_404(org_id)
-    orguser = _get_orguser_or_404(org, orguser_id)
-    orguser = admin_service.set_orguser_active(orguser, True)
     return AdminOrgUserSchema.from_model(orguser)
 
 

@@ -30,13 +30,9 @@ from ddpui.api.admin_api import (
     post_admin_org,
     get_admin_org,
     put_admin_org,
-    post_admin_org_deactivate,
-    post_admin_org_reactivate,
     get_admin_org_users,
     post_admin_org_user_invite,
     put_admin_org_user_role,
-    post_admin_org_user_deactivate,
-    post_admin_org_user_reactivate,
     get_admin_org_user_removal_impact,
     delete_admin_org_user,
     delete_admin_org_invitation,
@@ -69,7 +65,6 @@ from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import (
-    CustomJwtAuthMiddleware,
     ACCOUNT_MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     ANALYST_ROLE,
@@ -77,7 +72,6 @@ from ddpui.auth import (
 )
 from ddpui.core.admin import admin_service
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
-from rest_framework_simplejwt.tokens import AccessToken
 
 pytestmark = pytest.mark.django_db
 
@@ -194,7 +188,7 @@ def test_admin_stats_returns_counts_for_platform_admin(orguser):
     assert response.total_users == 1  # one distinct user across both orgs
 
 
-# ---- org lifecycle: list / create / detail / edit / deactivate / reactivate ----
+# ---- org lifecycle: list / create / detail / edit -----------------------------
 
 
 @pytest.fixture
@@ -213,14 +207,13 @@ def test_admin_orgs_forbidden_for_non_platform_admin(orguser):
 
 
 def test_admin_list_orgs(platform_admin_request):
-    """lists every org (active + inactive) with user counts"""
+    """lists every org, including ones marked inactive at the model level"""
     Org.objects.create(name="Alpha Org", slug="alpha-org")
     Org.objects.create(name="Beta Org", slug="beta-org", is_active=False)
     response = get_admin_orgs(platform_admin_request)
     by_name = {o.name: o for o in response}
     assert "Alpha Org" in by_name
-    assert by_name["Alpha Org"].is_active is True
-    assert by_name["Beta Org"].is_active is False
+    assert "Beta Org" in by_name
 
 
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
@@ -234,7 +227,6 @@ def test_admin_create_org_happy_path(mock_setup_airbyte, mock_connectors, platfo
 
     assert response.name == "Bhumi"
     assert response.slug == "bhumi"
-    assert response.is_active is True
     org = Org.objects.filter(name="Bhumi").first()
     assert org is not None
     assert OrgPlans.objects.filter(org=org).count() == 1
@@ -312,23 +304,8 @@ def test_admin_edit_org_updates_base_plan(platform_admin_request):
     assert response.base_plan == "Dalgo"
 
 
-def test_admin_deactivate_and_reactivate_org(platform_admin_request):
-    """deactivate flips is_active False; reactivate flips it back True"""
-    org = Org.objects.create(name="Toggle Org", slug="toggle-org", is_active=True)
-
-    deactivated = post_admin_org_deactivate(platform_admin_request, org.id)
-    org.refresh_from_db()
-    assert org.is_active is False
-    assert deactivated.is_active is False
-
-    reactivated = post_admin_org_reactivate(platform_admin_request, org.id)
-    org.refresh_from_db()
-    assert org.is_active is True
-    assert reactivated.is_active is True
-
-
 # ============================================================================
-# Milestone 4 — Users tab: invite / role / deactivate / remove / cancel invite
+# Milestone 4 — Users tab: invite / role / remove / cancel invite
 # ============================================================================
 # The platform admin (the `orguser` fixture, in "admin-test-org") is NOT a member
 # of the target orgs below — every test exercises the cross-org path.
@@ -463,52 +440,18 @@ def test_admin_change_role_wrong_org_404(platform_admin_request, akshara, bhumi)
     assert excinfo.value.status_code == 404
 
 
-# ---- per-org deactivate: isolation --------------------------------------------
-
-
-def test_admin_deactivate_user_in_org_only(platform_admin_request, akshara, bhumi):
-    """
-    DEACTIVATION SYMMETRY (acceptance): Priya is in both Akshara and Bhumi.
-    Deactivating her in Akshara sets ONLY the Akshara OrgUser inactive — her Bhumi
-    OrgUser stays active and the global User.is_active is untouched. Mirrors the M3
-    org-symmetry test.
-    """
-    priya_user = User.objects.create(username="priya@ngo.org", email="priya@ngo.org")
-    akshara_ou = OrgUser.objects.create(user=priya_user, org=akshara, new_role=_role(GUEST_ROLE))
-    bhumi_ou = OrgUser.objects.create(user=priya_user, org=bhumi, new_role=_role(GUEST_ROLE))
-
-    response = post_admin_org_user_deactivate(platform_admin_request, akshara.id, akshara_ou.id)
-
-    akshara_ou.refresh_from_db()
-    bhumi_ou.refresh_from_db()
-    priya_user.refresh_from_db()
-    assert akshara_ou.is_active is False  # deactivated HERE
-    assert response.is_active is False
-    assert bhumi_ou.is_active is True  # untouched in the other org
-    assert priya_user.is_active is True  # global flag never touched
-
-    # reactivation flips only the Akshara row back
-    post_admin_org_user_reactivate(platform_admin_request, akshara.id, akshara_ou.id)
-    akshara_ou.refresh_from_db()
-    bhumi_ou.refresh_from_db()
-    assert akshara_ou.is_active is True
-    assert bhumi_ou.is_active is True
-
-
 def test_admin_user_routes_refuse_an_orguser_from_another_org(
     platform_admin_request, akshara, bhumi
 ):
     """
     CROSS-ORG ISOLATION: every user route resolves the OrgUser through the target org in
     the URL, so passing a Bhumi orguser_id down Akshara's path is 404 — never a silent
-    mutation of the other org's user. The role route has its own test; these four are the
+    mutation of the other org's user. The role route has its own test; these two are the
     remaining mutating/reading routes that take an orguser_id.
     """
     bhumi_member = _make_member(bhumi, "victim@bhumi.org", GUEST_ROLE)
 
     for call in (
-        lambda: post_admin_org_user_deactivate(platform_admin_request, akshara.id, bhumi_member.id),
-        lambda: post_admin_org_user_reactivate(platform_admin_request, akshara.id, bhumi_member.id),
         lambda: get_admin_org_user_removal_impact(
             platform_admin_request, akshara.id, bhumi_member.id
         ),
@@ -518,9 +461,7 @@ def test_admin_user_routes_refuse_an_orguser_from_another_org(
             call()
         assert excinfo.value.status_code == 404
 
-    # the other org's user is untouched by any of the four attempts
-    bhumi_member.refresh_from_db()
-    assert bhumi_member.is_active is True
+    # the other org's user is untouched by either attempt
     assert OrgUser.objects.filter(id=bhumi_member.id).exists()
 
 
@@ -627,7 +568,7 @@ def test_admin_cancel_invite_is_org_scoped(platform_admin_request, akshara, bhum
 
 @patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 def test_admin_org_users_lists_members_and_pending(platform_admin_request, akshara):
-    """the Users tab payload lists members (with per-org status) and pending invites"""
+    """the Users tab payload lists members and pending invites"""
     member = _make_member(akshara, "member@akshara.org", GUEST_ROLE)
     post_admin_org_user_invite(
         platform_admin_request,
@@ -641,7 +582,6 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
 
     emails = {u.email for u in response.users}
     assert "member@akshara.org" in emails
-    assert all(u.is_active for u in response.users)
     invited_emails = {i.invited_email for i in response.invitations}
     assert "pending@akshara.org" in invited_emails
 
@@ -650,37 +590,11 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
 # Week 1 — full admin lifecycle flow (one continuous story, real DB state)
 # ============================================================================
 # This is NOT a per-milestone unit test. It runs the whole super-admin journey —
-# create org, invite, accept, change role, per-org + org-level deactivate/reactivate,
-# cancel invite, remove-with-orphaning — as ONE narrative against real rows, so it proves
+# create org, invite, accept, change role, cancel invite, remove-with-orphaning — as ONE
+# narrative against real rows, so it proves
 # the milestones COMPOSE, not just that each works in isolation. External deps only are
 # mocked: Airbyte (org create), Redis (unavailable in tests), and SES creds forced
 # absent so the invite exercises the real Part-1 dev fallback rather than a mocked email.
-
-
-def _load_permissions(user, org_slug):
-    """
-    Run the REAL CustomJwtAuthMiddleware for (user, org_slug) against REAL DB rows,
-    mocking only Redis (unavailable in tests). Returns the authenticated request on
-    success; raises HttpError exactly where the app enforces org / per-org-user
-    deactivation at permission-load (auth.py:173 / :183). This is how the flow proves a
-    user is BLOCKED or ALLOWED — real enforcement, not a flag read.
-    """
-    request = Mock()
-    request.headers = {"x-dalgo-org": org_slug}
-    token = str(AccessToken.for_user(user))
-    with patch("ddpui.auth.RedisClient.get_instance") as mock_redis, patch(
-        "ddpui.auth.set_roles_and_permissions_in_redis", return_value={}
-    ):
-        mock_redis.return_value.get.return_value = None
-        return CustomJwtAuthMiddleware().authenticate(request, token)
-
-
-def _assert_blocked(user, org_slug, expected_message):
-    """the middleware refuses this (user, org) at permission-load with a 403"""
-    with pytest.raises(HttpError) as excinfo:
-        _load_permissions(user, org_slug)
-    assert excinfo.value.status_code == 403
-    assert str(excinfo.value) == expected_message
 
 
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
@@ -691,27 +605,20 @@ def test_week1_full_admin_lifecycle_flow(
     """
     The whole Week-1 super-admin story end to end, on real DB state:
 
-      1. admin creates an org via the portal (active, ZERO members)
+      1. admin creates an org via the portal (ZERO members)
       2. admin invites a user by email + role — succeeds with NO real SES (Part 1)
       3. the user accepts — becomes an OrgUser of the target org at the right role
       4. admin changes the user's role
-      5. admin deactivates the user IN THIS ORG ONLY — blocked here, untouched elsewhere
-      6. admin reactivates the user — access restored
-      7. admin deactivates the ORG itself — user blocked despite being active
-      8. admin reactivates the org — access restored
-      9. admin invites a 2nd user then cancels it; a DIFFERENT org's invite can't be
+      5. admin invites a 2nd user then cancels it; a DIFFERENT org's invite can't be
          cancelled through this org's path (404) — org-scoping holds inside the flow
-     10. admin removes the first user — orphan-impact count available first, then their
+      6. admin removes the first user — orphan-impact count available first, then their
          content is orphaned (created_by NULLed, kept), not cascade-deleted
-
-    Blocking is proven through the real auth middleware (see _load_permissions).
     """
     admin_request = platform_admin_request
 
     # -- Step 1: create an org via the admin portal --------------------------------
     mock_setup_airbyte.return_value = Mock(workspaceId="ws-akshara")
     created = post_admin_org(admin_request, AdminCreateOrgSchema(name="Akshara"))
-    assert created.is_active is True
     assert created.user_count == 0  # a freshly created org has ZERO members
     org1 = Org.objects.get(id=created.id)
     assert OrgUser.objects.filter(org=org1).count() == 0
@@ -755,50 +662,11 @@ def test_week1_full_admin_lifecycle_flow(
     priya_ou.refresh_from_db()
     assert priya_ou.new_role.slug == ACCOUNT_MANAGER_ROLE
 
-    # -- Step 5: per-org deactivate — isolation across a SECOND org -----------------
-    # Priya is also a member of a second org. Deactivating her in org1 must not touch
-    # org2 at all. (Real second Org + OrgUser row, per the brief.)
+    # a second org that Priya also belongs to — used below to prove removal is org-scoped
     org2 = Org.objects.create(name="Bhumi", slug="bhumi")
     priya_ou2 = OrgUser.objects.create(user=priya_user, org=org2, new_role=_role(GUEST_ROLE))
-    # sanity: before any deactivation she can load permissions in BOTH orgs
-    assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
-    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
 
-    post_admin_org_user_deactivate(admin_request, org1.id, priya_ou.id)
-    priya_ou.refresh_from_db()
-    priya_ou2.refresh_from_db()
-    priya_user.refresh_from_db()
-    assert priya_ou.is_active is False
-    assert priya_ou2.is_active is True  # the OTHER org is untouched
-    assert priya_user.is_active is True  # the global User flag is never touched
-    # (a) blocked in org1 at permission-load
-    _assert_blocked(priya_user, org1.slug, "your access to this organization has been deactivated")
-    # (b) org2 access completely unaffected
-    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
-
-    # -- Step 6: reactivate the user — access restored in org1 ---------------------
-    post_admin_org_user_reactivate(admin_request, org1.id, priya_ou.id)
-    priya_ou.refresh_from_db()
-    assert priya_ou.is_active is True
-    assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
-
-    # -- Step 7: deactivate the ORG itself — user blocked despite being active ------
-    post_admin_org_deactivate(admin_request, org1.id)
-    org1.refresh_from_db()
-    priya_ou.refresh_from_db()
-    assert org1.is_active is False
-    assert priya_ou.is_active is True  # the user is active; the ORG is what blocks now
-    _assert_blocked(priya_user, org1.slug, "your organization has been deactivated")
-    # org2 still fine — this org's deactivation is scoped to this org
-    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
-
-    # -- Step 8: reactivate the org — access restored again ------------------------
-    post_admin_org_reactivate(admin_request, org1.id)
-    org1.refresh_from_db()
-    assert org1.is_active is True
-    assert _load_permissions(priya_user, org1.slug).orguser.id == priya_ou.id
-
-    # -- Step 9: invite a second user, then cancel; cross-org cancel is 404 --------
+    # -- Step 5: invite a second user, then cancel; cross-org cancel is 404 --------
     with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
         "ddpui.utils.awsses._ses_available", return_value=False
     ):
@@ -831,7 +699,7 @@ def test_week1_full_admin_lifecycle_flow(
     assert excinfo.value.status_code == 404
     assert Invitation.objects.filter(id=bhumi_invite.id).exists()  # survived, org-scoped
 
-    # -- Step 10: removal-impact THEN remove the first user (content is orphaned) ---
+    # -- Step 6: removal-impact THEN remove the first user (content is orphaned) ----
     # content owned by Priya's org1 membership — removal orphans it (created_by→NULL,
     # kept), it is NOT cascade-deleted (Access Control v2 / PR #1428).
     dashboards = [
@@ -871,7 +739,6 @@ def test_week1_full_admin_lifecycle_flow(
     assert report.created_by is None  # orphaned (SET_NULL), not deleted
     # the remove is org-scoped: Priya's Bhumi membership is untouched
     assert OrgUser.objects.filter(id=priya_ou2.id).exists()
-    assert _load_permissions(priya_user, org2.slug).orguser.id == priya_ou2.id
 
 
 # ---- router auth: no separate admin session ----------------------------------

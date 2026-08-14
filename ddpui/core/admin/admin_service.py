@@ -133,17 +133,6 @@ def update_org(org: Org, payload: AdminUpdateOrgSchema) -> Org:
     return org
 
 
-def set_org_active(org: Org, is_active: bool) -> Org:
-    """
-    Deactivate (reversible) or reactivate an org. A deactivated org blocks all of its
-    users at permission-load; reactivating restores their access.
-    """
-    org.is_active = is_active
-    org.save()
-    logger.info("admin %s org %s", "reactivated" if is_active else "deactivated", org.slug)
-    return org
-
-
 # --------------------------------------------------------------------------- #
 # Org users + invitations
 # --------------------------------------------------------------------------- #
@@ -238,22 +227,6 @@ def get_invitation_in_org(org: Org, invitation_id: int) -> Optional[Invitation]:
 def delete_invitation(invitation: Invitation) -> None:
     """Cancel (delete) a pending invitation."""
     invitation.delete()
-
-
-def set_orguser_active(orguser: OrgUser, is_active: bool) -> OrgUser:
-    """
-    Deactivate/reactivate a user in THIS org only (OrgUser.is_active, NOT User.is_active).
-    Their membership of any other org is unaffected.
-    """
-    orguser.is_active = is_active
-    orguser.save(update_fields=["is_active"])
-    logger.info(
-        "admin %s %s in org %s",
-        "reactivated" if is_active else "deactivated",
-        orguser.user.email,
-        orguser.org.slug,
-    )
-    return orguser
 
 
 def removal_impact(orguser: OrgUser) -> Tuple[int, int, int]:
