@@ -124,7 +124,7 @@ def test_injection_skips_other_connectors(managed_key):  # pylint: disable=unuse
 
 
 def test_injection_skips_a_source_with_no_name(managed_key):  # pylint: disable=unused-argument
-    """`sourceName` is optional on the payload schema — an older client that omits it gets the
+    """`sourceDefName` is optional on the payload schema — an older client that omits it gets the
     old behaviour rather than a Google credentials block."""
     config = {"host": "localhost"}
 

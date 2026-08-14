@@ -105,13 +105,13 @@ def _build_oauth_source_config(
     return {**config, "credentials": credentials}
 
 
-def inject_managed_gsheets_credentials(source_name: str, config: dict) -> dict:
+def inject_managed_gsheets_credentials(source_def_name: str, config: dict) -> dict:
     """MANAGED-SA bridge — fill in Dalgo's own Google service-account key for a Google Sheets
     source that arrived without one. See `core/oauth/google_service_account.py` to remove it.
 
-    `source_name` is off the request payload, so this trusts the caller about the connector
+    `source_def_name` is off the request payload, so this trusts the caller about the connector
     type. Fine for an internal API; revisit if that changes."""
-    if source_name != GSHEETS_SOURCE_NAME:
+    if source_def_name != GSHEETS_SOURCE_NAME:
         return config
 
     key = google_service_account.managed_service_account_json()

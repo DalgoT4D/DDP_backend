@@ -117,7 +117,7 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
 
     # MANAGED-SA bridge — no-op unless the key env var is set.
     payload.config = airbytehelpers.inject_managed_gsheets_credentials(
-        payload.sourceName, payload.config
+        payload.sourceDefName, payload.config
     )
 
     source = airbyte_service.create_source(
@@ -251,7 +251,7 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
 
     # MANAGED-SA bridge — no-op unless the key env var is set.
     payload.config = airbytehelpers.inject_managed_gsheets_credentials(
-        payload.sourceName, payload.config
+        payload.sourceDefName, payload.config
     )
 
     source = airbyte_service.update_source(
@@ -296,7 +296,7 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
 
     # MANAGED-SA bridge — no-op unless the key env var is set.
     payload.config = airbytehelpers.inject_managed_gsheets_credentials(
-        payload.sourceName, payload.config
+        payload.sourceDefName, payload.config
     )
 
     response = airbyte_service.check_source_connection(orguser.org.airbyte_workspace_id, payload)
@@ -332,7 +332,7 @@ def post_airbyte_check_source_for_update(
 
     # MANAGED-SA bridge — no-op unless the key env var is set.
     payload.config = airbytehelpers.inject_managed_gsheets_credentials(
-        payload.sourceName, payload.config
+        payload.sourceDefName, payload.config
     )
 
     response = airbyte_service.check_source_connection_for_update(source_id, payload)
