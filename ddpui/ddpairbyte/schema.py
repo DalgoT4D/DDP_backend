@@ -18,7 +18,7 @@ class AirbyteSourceCreate(Schema):
     config: dict
     # MANAGED-SA bridge: source-DEFINITION name (e.g. "Google Sheets"). Optional — absent
     # means no managed-key injection.
-    sourceName: str = None
+    sourceDefName: str = None
 
 
 class AirbyteSourceUpdate(Schema):
@@ -29,7 +29,7 @@ class AirbyteSourceUpdate(Schema):
     sourceDefId: str
     # MANAGED-SA bridge: source-DEFINITION name (e.g. "Google Sheets"). Optional — absent
     # means no managed-key injection.
-    sourceName: str = None
+    sourceDefName: str = None
 
 
 class AirbyteSourceUpdateCheckConnection(Schema):
@@ -39,7 +39,7 @@ class AirbyteSourceUpdateCheckConnection(Schema):
     config: dict
     # MANAGED-SA bridge: source-DEFINITION name (e.g. "Google Sheets"). Optional — absent
     # means no managed-key injection.
-    sourceName: str = None
+    sourceDefName: str = None
 
 
 class SourceGoogleOAuthConsentCreate(Schema):

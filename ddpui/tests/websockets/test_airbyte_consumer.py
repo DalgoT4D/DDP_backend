@@ -207,7 +207,7 @@ def test_source_check_connection_demo_org(mock_airbyte_service, mock_airbyte_hel
     # back a MagicMock and overwrite the whitelisted config. Mirror what it really does for a
     # non-Google-Sheets source: return the config untouched.
     mock_airbyte_helpers.inject_managed_gsheets_credentials.side_effect = (
-        lambda source_name, config: config
+        lambda source_def_name, config: config
     )
     mock_airbyte_service.check_source_connection.return_value = {
         "jobInfo": {"succeeded": True, "logs": {"logLines": ["log1"]}}

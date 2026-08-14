@@ -60,7 +60,7 @@ class SourceCheckConnectionConsumer(BaseConsumer):
         # MANAGED-SA bridge — the check must see the same credentials the save will use,
         # or it fails on a config that would actually work.
         payload.config = airbytehelpers.inject_managed_gsheets_credentials(
-            payload.sourceName, payload.config
+            payload.sourceDefName, payload.config
         )
 
         try:
