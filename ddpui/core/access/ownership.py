@@ -1,6 +1,6 @@
-from ddpui.auth import ADMIN_ROLE, SUPER_ADMIN_ROLE
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import AccessLevel
+from ddpui.models.role_based_access import RoleSlug
 
 
 class OwnershipError(Exception):
@@ -24,7 +24,7 @@ def is_creator_or_admin(orguser: OrgUser, resource) -> bool:
         return True
     if orguser.new_role is None:
         return False
-    return orguser.new_role.slug in (ADMIN_ROLE, SUPER_ADMIN_ROLE)
+    return orguser.new_role.slug in (RoleSlug.ADMIN, RoleSlug.SUPER_ADMIN)
 
 
 def transfer_ownership(caller: OrgUser, rtype: str, resource, to_orguser_id: int) -> None:

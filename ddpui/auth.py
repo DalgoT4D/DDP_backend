@@ -70,8 +70,9 @@ def has_access(rtype: str, required_level: str, get_resource_id=None):
     The caller declares explicitly how to source the id — no naming conventions
     assumed.
 
-    Missing, cross-org, and invisible resources return 404. Insufficient level
-    returns 403.
+    Missing / cross-org resources return 404. Resources that exist but the
+    caller has no access on return 403. Insufficient level (e.g. view-only
+    trying to edit) also returns 403.
 
     Stack under ``@has_permission([...])`` (which populates ``request.orguser``).
     """
@@ -88,6 +89,8 @@ def has_access(rtype: str, required_level: str, get_resource_id=None):
             level = access_control.get_user_access(request.orguser, rtype, resource_id)
             if level is None:
                 raise HttpError(404, f"{rtype} not found")
+            if level == AccessLevel.NO_ACCESS:
+                raise HttpError(403, f"no access to this {rtype}")
             if LEVEL_RANK[level] < LEVEL_RANK[required_level]:
                 raise HttpError(403, f"you have {level}-only access")
             request.access_level = level

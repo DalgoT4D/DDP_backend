@@ -4,6 +4,7 @@ Endpoints are thin wrappers around ``ddpui.core.access.resource_share`` —
 this file owns authz gates, request-shape parsing, and HTTP error mapping.
 """
 
+from django.conf import settings
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -11,6 +12,7 @@ from ddpui.auth import has_permission
 from ddpui.core.access import resource_share, shareable_types
 from ddpui.core.access.access_control import get_user_access
 from ddpui.core.access.ownership import is_creator_or_admin, transfer_ownership, OwnershipError
+from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import AccessLevel, AccessRequest, AccessRequestStatus
 from ddpui.schemas.access.resource_share_schema import (
@@ -24,6 +26,7 @@ from ddpui.schemas.access.resource_share_schema import (
     TransferOwnershipPayload,
     UpdateGrantPayload,
 )
+from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from ddpui.utils.custom_logger import CustomLogger
 
 
@@ -51,6 +54,115 @@ def _require_edit_or_admin(orguser: OrgUser, rtype: str, resource, action: str) 
     if get_user_access(orguser, rtype, resource.pk) == AccessLevel.EDIT:
         return
     raise HttpError(403, f"edit access required to {action}")
+
+
+def _resource_title(resource) -> str:
+    """Best-effort human label for a resource across rtypes."""
+    return getattr(resource, "title", None) or getattr(resource, "name", None) or "resource"
+
+
+_RTYPE_URL_PATH = {
+    "dashboard": "dashboards",
+    "chart": "charts",
+    "report": "reports",
+}
+
+
+def _resource_url(rtype: str, resource_id, *, open_share: bool = False) -> str:
+    """Frontend URL for a resource; ``open_share`` deep-links to the share modal.
+
+    KPIs are a special case — there's no /kpis/{id} route, so the deep link
+    points at the KPI list page with a ``kpiId`` query param that the list
+    handles to open the share modal for that specific row.
+    """
+    frontend_url = (
+        getattr(settings, "FRONTEND_URL_V2", None)
+        or getattr(settings, "FRONTEND_URL", None)
+        or "http://localhost:3000"
+    ).rstrip("/")
+
+    if rtype == "kpi":
+        return (
+            f"{frontend_url}/kpis?openShare=true&kpiId={resource_id}"
+            if open_share
+            else f"{frontend_url}/kpis"
+        )
+
+    path = _RTYPE_URL_PATH.get(rtype, rtype + "s")
+    url = f"{frontend_url}/{path}/{resource_id}"
+    if open_share:
+        url += "?openShare=true"
+    return url
+
+
+def _notify_owner_of_new_request(req: AccessRequest, resource, rtype: str) -> None:
+    """Notify the resource owner that a new access request has been submitted.
+    No-op when the resource has no owner (legacy row with created_by=None)."""
+    owner = getattr(resource, "created_by", None)
+    if owner is None:
+        return
+    title = _resource_title(resource)
+    requester_role = getattr(getattr(req.requester, "new_role", None), "name", None)
+    requester_label = (
+        f"{req.requester.user.email} ({requester_role})"
+        if requester_role
+        else req.requester.user.email
+    )
+    resource_url = _resource_url(rtype, resource.pk, open_share=True)
+    body = (
+        f"{requester_label} requested {req.requested_level} access to "
+        f"{rtype} '{title}'.\n{resource_url}"
+    )
+    if req.note:
+        body += f'\nNote: "{req.note}"'
+    try:
+        create_notification(
+            NotificationDataSchema(
+                author=req.requester.user.email,
+                message=body,
+                email_subject=f"Access request for {title}",
+                urgent=False,
+                recipients=[owner.id],
+            )
+        )
+    except Exception as err:  # notification failure never blocks the API call
+        logger.error(f"access-request notification failed: {err}")
+
+
+def _notify_requester_of_response(
+    req: AccessRequest,
+    resource,
+    rtype: str,
+    responder: OrgUser,
+    granted_level: str | None,
+) -> None:
+    """Notify the requester of the owner's decision on their access request."""
+    title = _resource_title(resource)
+    resource_url = _resource_url(rtype, resource.pk)
+    if req.status == AccessRequestStatus.APPROVED:
+        body = (
+            f"{responder.user.email} approved your request for {rtype} '{title}' "
+            f"at {granted_level} level.\n{resource_url}"
+        )
+        subject = f"Access request approved: {title}"
+    else:
+        body = (
+            f"{responder.user.email} declined your request for {rtype} '{title}'.\n"
+            f"{resource_url}"
+        )
+        subject = f"Access request declined: {title}"
+    try:
+        create_notification(
+            NotificationDataSchema(
+                author=responder.user.email,
+                message=body,
+                email_subject=subject,
+                urgent=False,
+                recipients=[req.requester_id],
+            )
+        )
+    except Exception as err:
+        logger.error(f"access-response notification failed: {err}")
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +296,7 @@ def create_access_request(
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
 
     existing_access = get_user_access(orguser, rtype, resource.pk)
-    if existing_access is not None:
+    if existing_access not in (None, AccessLevel.NO_ACCESS):
         raise HttpError(409, "you already have access to this resource")
 
     if AccessRequest.objects.filter(
@@ -206,6 +318,7 @@ def create_access_request(
     )
     req.refresh_from_db()
     req.requester = orguser
+    _notify_owner_of_new_request(req, resource, rtype)
     return _access_request_to_schema(req)
 
 
@@ -251,6 +364,7 @@ def respond_to_access_request(
     if req.status != AccessRequestStatus.PENDING:
         raise HttpError(409, "request has already been decided")
 
+    granted_level = None
     if payload.decision == "approved":
         granted_level = payload.granted_level or req.requested_level
         try:
@@ -278,4 +392,5 @@ def respond_to_access_request(
         req.status = AccessRequestStatus.DECLINED
 
     req.save(update_fields=["status", "updated_at"])
+    _notify_requester_of_response(req, resource, rtype, orguser, granted_level)
     return {"success": True, "status": req.status}

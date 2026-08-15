@@ -161,7 +161,10 @@ def get_report_chart_data(
 ):
     """Get chart data for a specific chart in a report snapshot."""
     orguser: OrgUser = request.orguser
-    if get_user_access(orguser, ResourceType.REPORT, snapshot_id) is None:
+    _report_access = get_user_access(orguser, ResourceType.REPORT, snapshot_id)
+    if _report_access is None:
+        raise HttpError(404, "report not found")
+    if _report_access == AccessLevel.NO_ACCESS:
         raise HttpError(403, "you do not have access to this report")
     try:
         parsed_filters = None
@@ -188,7 +191,10 @@ def get_report_kpi_data(
 ):
     """Get KPI data for a specific KPI in a report snapshot."""
     orguser: OrgUser = request.orguser
-    if get_user_access(orguser, ResourceType.REPORT, snapshot_id) is None:
+    _report_access = get_user_access(orguser, ResourceType.REPORT, snapshot_id)
+    if _report_access is None:
+        raise HttpError(404, "report not found")
+    if _report_access == AccessLevel.NO_ACCESS:
         raise HttpError(403, "you do not have access to this report")
     try:
         parsed_filters = None

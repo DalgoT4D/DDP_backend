@@ -14,10 +14,6 @@ Precedence (first match wins):
 ``no_access`` at step 2 is the explicit deny — the only way to revoke one
 principal below a permissive org floor. This is precedence, not max-merge,
 on purpose.
-
-This module imports models only. ``ddpui.auth`` imports it for the ``has_access``
-decorator, and ``ownership.py`` imports ``ddpui.auth`` — importing auth here
-would create a cycle.
 """
 
 from typing import Iterable, Optional
@@ -25,6 +21,7 @@ from typing import Iterable, Optional
 from django.db.models import Model, Q
 
 from ddpui.core.access import shareable_types
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser, OrgUserGroupMember
 from ddpui.models.resource_share import AccessLevel, ResourceShare, ResourceSharePrincipalType, max_access_level
@@ -87,23 +84,30 @@ def _hide_no_access(level: str) -> Optional[str]:
 
 
 def get_user_access(orguser: OrgUser, rtype: str, resource_id) -> Optional[str]:
-    """What can this orguser do with this resource? "edit", "view", or None
-    (invisible — the caller should treat it exactly like a missing resource)."""
+    """What can this orguser do with this resource?
+
+    Returns:
+        None                  — resource does not exist in this org
+        AccessLevel.NO_ACCESS — resource exists but caller has no access
+        AccessLevel.VIEW/EDIT — caller's effective level
+    """
     entry = shareable_types.get_rtype_entry(rtype)
-    row = entry["model"].objects.filter(org=orguser.org, pk=resource_id).values("created_by_id", "is_private").first()
+    row = (
+        entry["model"].objects.filter(org=orguser.org, pk=resource_id)
+        .only("created_by_id", "is_private")
+        .first()
+    )
     if row is None:
         return None
 
-    if row["created_by_id"] is not None and row["created_by_id"] == orguser.id:
-        return AccessLevel.EDIT
-    if _is_admin(orguser):
+    if is_creator_or_admin(orguser, row):
         return AccessLevel.EDIT
 
     grants = _grants_map(orguser, rtype, [resource_id])
     granted = grants.get(str(resource_id))
-    if row["is_private"]:
-        return _hide_no_access(granted)
-    return _hide_no_access(max_access_level(granted, _org_floor(orguser)))
+    if row.is_private:
+        return granted or AccessLevel.NO_ACCESS
+    return max_access_level(granted, _org_floor(orguser)) or AccessLevel.NO_ACCESS
 
 
 def get_user_access_map(
