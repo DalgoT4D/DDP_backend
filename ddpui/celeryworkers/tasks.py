@@ -1350,27 +1350,19 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
             name="check for long-running flow-runs",
         )
 
-    # free-trial lifecycle emails (day-3 nudges, completion, midpoint, pre-end); every hour.
-    # Hourly rather than daily so the completion email lands within an hour of the user
-    # finishing their second walkthrough. Supersedes the old check_org_plan_expiry task.
+    # free-trial lifecycle emails (day-3 nudges, completion, midpoint, pre-end).
+    # crontab, not a 3600.0 interval — an interval re-anchors to beat's start time on every
+    # restart, so :00 would silently drift to :37.
     sender.add_periodic_task(
-        3600.0,
+        crontab(minute=0),
         send_trial_lifecycle_emails.s(),
         name="trial lifecycle emails",
     )
 
-    # delete expired free trials; every hour on the hour (settings.TIME_ZONE is UTC).
-    #
-    # Hourly, not nightly, so a trial dies close to the time of day it was created: OrgPlans
-    # .end_date is clone-time + TRIAL_DURATION_DAYS, the command selects `end_date <= now()`
-    # evaluated per run, so a trial started 16:45 is deleted at 17:00 on day 14 — the first hour
-    # boundary AT OR AFTER expiry, never 16:00 and never early. Nightly-at-midnight gave that
-    # same trial another seven hours.
-    #
-    # A run is not bounded by an hour (deletion is heavy external I/O per org and the command
-    # spaces the orgs out itself — see TRIAL_DELETE_STAGGER_SECONDS), so the command takes a
-    # Redis mutex; a tick that lands while the previous run is still going exits immediately
-    # instead of double-deleting the same orgs.
+    # delete expired free trials. Hourly, not nightly: end_date is clone-time + 14 days and the
+    # command selects `end_date <= now()`, so a trial started 16:45 dies at 17:00 on day 14 —
+    # never early. Nightly gave it another seven hours.
+    # No mutex — see the note above TRIAL_DELETE_STAGGER_SECONDS in core/trial/constants.py.
     sender.add_periodic_task(
         crontab(minute=0),
         delete_expired_trial_orgs.s(),

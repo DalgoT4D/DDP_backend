@@ -483,8 +483,12 @@ def test_trial_lifecycle_emails_is_registered_as_an_hourly_beat_task():
     ]
     assert len(matching_calls) == 1, "expected exactly one 'trial lifecycle emails' beat entry"
 
+    from celery.schedules import crontab
+
     call = matching_calls[0]
-    interval = (
+    schedule = (
         call.args[0] if call.args else call.kwargs.get("run_every") or call.kwargs.get("schedule")
     )
-    assert interval == 3600.0
+    # crontab, not a bare 3600.0 interval: an interval is anchored to beat's START time, so a
+    # restart at 09:37 moves every sweep to :37 past the hour until the next restart.
+    assert schedule == crontab(minute=0)
