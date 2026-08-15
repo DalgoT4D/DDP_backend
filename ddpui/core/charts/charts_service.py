@@ -430,6 +430,14 @@ def metric_display_name(metric) -> str:
     return metric.alias or f"{metric.aggregation}_{metric.column}"
 
 
+def _rollup_sets(dims: list) -> list[tuple]:
+    """Compute the grouping sets equivalent to ROLLUP(d1, d2, …, dn).
+
+    ROLLUP(d1, d2, d3) = GROUPING SETS((d1,d2,d3), (d1,d2), (d1), ())
+    """
+    return [tuple(dims[:i]) for i in range(len(dims), -1, -1)]
+
+
 def build_pivot_table_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -440,10 +448,11 @@ def build_pivot_table_query(
     pivot_col_0, pivot_col_1, ... in the SELECT with corresponding
     GROUPING markers _grp_pivot_col_0, _grp_pivot_col_1, ...
 
-    ROLLUP(pivot_col_0, pivot_col_1) produces:
-    - (val0, val1) — leaf cells
-    - (val0, NULL/_grp=1) — column subtotals for val0
-    - (NULL/_grp=1, NULL/_grp=1) — overall column total
+    When both row and column dimensions are present the grouping is expressed
+    as a single GROUPING SETS clause whose sets are the cross-product of the
+    row-ROLLUP expansion and the column-ROLLUP expansion.  This is semantically
+    identical to ``GROUP BY ROLLUP(row_dims), ROLLUP(col_dims)`` but avoids
+    BigQuery's restriction that ROLLUP must be the sole grouping element.
     """
     if not payload.row_dimensions:
         raise ValueError("At least one row dimension is required for pivot tables")
@@ -479,16 +488,22 @@ def build_pivot_table_query(
     for idx, col_dim in enumerate(col_dims):
         query_builder.add_grouping_column(column(col_dim), f"_grp_pivot_col_{idx}")
 
-    # GROUP BY row dimensions — use ROLLUP when subtotals/grand total are requested
+    # GROUP BY — when column dimensions exist, use a single GROUPING SETS clause
+    # whose sets are the cross-product of the row and column ROLLUP expansions.
+    # This avoids BigQuery's restriction: "GROUP BY clause only supports ROLLUP
+    # when there are no other grouping elements".
     row_group_exprs = [column(row_dim) for row_dim in payload.row_dimensions]
-    if needs_row_rollup:
+
+    if col_dims:
+        col_group_exprs = [column(col_dim) for col_dim in col_dims]
+        row_sets = _rollup_sets(row_group_exprs) if needs_row_rollup else [tuple(row_group_exprs)]
+        col_sets = _rollup_sets(col_group_exprs)
+        cross_sets = [r + c for r in row_sets for c in col_sets]
+        query_builder.group_cols_by_grouping_sets(*cross_sets)
+    elif needs_row_rollup:
         query_builder.group_cols_by_rollup(*row_group_exprs)
     else:
         query_builder.group_cols_by(*row_group_exprs)
-
-    # GROUP BY column dimensions — ROLLUP so column totals are identifiable
-    if col_dims:
-        query_builder.group_cols_by_rollup(*[column(col_dim) for col_dim in col_dims])
 
     # ORDER BY row dimensions then column dimensions for consistent output
     order_cols = [(dim, "asc") for dim in payload.row_dimensions]

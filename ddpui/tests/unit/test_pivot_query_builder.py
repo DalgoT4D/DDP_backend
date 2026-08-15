@@ -37,7 +37,7 @@ class TestBuildPivotQuery:
         return ow
 
     def test_pivot_query_has_rollup(self):
-        """Pivot table query should contain GROUP BY ROLLUP"""
+        """Pivot table query with both row and column dims uses GROUPING SETS"""
         payload = ChartDataPayload(
             chart_type="pivot_table",
             schema_name="public",
@@ -56,7 +56,7 @@ class TestBuildPivotQuery:
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         sql_upper = compiled.upper()
 
-        assert "ROLLUP" in sql_upper
+        assert "GROUPING SETS" in sql_upper or "GROUPING_SETS" in sql_upper
         assert "GROUPING" in sql_upper
         assert "_grp_district" in compiled
         assert "_grp_program" in compiled
@@ -175,11 +175,12 @@ class TestBuildPivotQuery:
         assert "GROUP BY" in sql_upper
 
     def test_pivot_query_compiles_for_bigquery(self):
-        """The pivot ROLLUP/GROUPING SQL must render under the BigQuery dialect.
+        """The pivot GROUPING SETS SQL must render under the BigQuery dialect.
 
-        BigQuery supports GROUP BY ROLLUP and the GROUPING() function, so the
-        dialect-agnostic builder should compile without error and still emit
-        both constructs (guards against a dialect-specific rendering regression).
+        BigQuery rejects GROUP BY with mixed ROLLUP and non-ROLLUP elements.
+        When both row and column dimensions are present the builder emits a
+        single GROUPING SETS clause (cross-product of the row and column ROLLUP
+        expansions) which BigQuery accepts.
         """
         from sqlalchemy_bigquery import BigQueryDialect
 
@@ -202,10 +203,12 @@ class TestBuildPivotQuery:
         )
         sql_upper = compiled.upper()
 
-        assert "ROLLUP" in sql_upper
+        assert "GROUPING SETS" in sql_upper or "GROUPING_SETS" in sql_upper
         assert "GROUPING" in sql_upper
         assert "_grp_pivot_col_0" in compiled
         assert "_grp_pivot_col_1" in compiled
+        # Must NOT have a separate ROLLUP alongside — BigQuery rejects that
+        assert "ROLLUP" not in sql_upper
 
     def test_pivot_query_supports_calculated_metric(self):
         """A calculated (column_expression) metric appears as a raw expression in the
@@ -229,7 +232,7 @@ class TestBuildPivotQuery:
         compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
         assert "SUM(amount)" in compiled
         assert "Avg Spend" in compiled  # alias present in SELECT
-        assert "ROLLUP" in compiled.upper()
+        assert "GROUPING" in compiled.upper()
 
     def test_pivot_query_supports_simple_and_calculated_together(self):
         payload = ChartDataPayload(
@@ -269,3 +272,75 @@ class TestBuildPivotQuery:
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
 
         assert "status" in compiled.lower()
+
+    def test_pivot_no_mixed_rollup_with_col_dims(self):
+        """When both row and column dims are present, SQL must NOT contain a bare
+        ROLLUP alongside other grouping elements — BigQuery rejects that."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["month_col"],
+            show_row_subtotals=True,
+            show_column_grand_total=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        sql_upper = compiled.upper()
+
+        # Must use GROUPING SETS, not bare ROLLUP
+        assert "GROUPING SETS" in sql_upper or "GROUPING_SETS" in sql_upper
+        assert "ROLLUP" not in sql_upper
+
+    def test_pivot_no_col_dims_still_uses_rollup(self):
+        """Without column dims a single ROLLUP is fine — no BigQuery conflict."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            show_row_subtotals=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+        sql_upper = compiled.upper()
+
+        assert "ROLLUP" in sql_upper
+        assert "GROUPING SETS" not in sql_upper
+
+    def test_pivot_grouping_sets_cross_product(self):
+        """GROUPING SETS must contain the cross-product of row and column ROLLUP
+        expansions so that subtotal/grand-total cells for every column are produced."""
+        payload = ChartDataPayload(
+            chart_type="pivot_table",
+            schema_name="public",
+            table_name="beneficiaries",
+            row_dimensions=["district"],
+            column_dimensions=["month_col"],
+            show_row_subtotals=True,
+            show_column_grand_total=True,
+            metrics=[
+                ChartMetric(column="id", aggregation="count", alias="Count"),
+            ],
+        )
+        ow = self._make_org_warehouse()
+        qb = build_chart_query(payload, ow)
+        compiled = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+
+        # ROLLUP(district) = {(district), ()}
+        # ROLLUP(month_col) = {(month_col), ()}
+        # Cross-product: (district, month_col), (district), (month_col), ()
+        assert "(district, month_col)" in compiled
+        assert "(district)" in compiled or "(district,)" in compiled
+        assert "(month_col)" in compiled or "(month_col,)" in compiled
+        # Empty set for grand total
+        assert "()" in compiled

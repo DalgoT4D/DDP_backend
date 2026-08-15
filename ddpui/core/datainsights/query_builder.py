@@ -1,5 +1,5 @@
 from sqlalchemy.sql.functions import Function
-from sqlalchemy import func
+from sqlalchemy import func, tuple_
 from sqlalchemy.sql.expression import (
     table,
     TableClause,
@@ -94,6 +94,24 @@ class AggQueryBuilder:
             else:
                 resolved.append(col)
         self.rollup_clauses.append(func.rollup(*resolved))
+        return self
+
+    def group_cols_by_grouping_sets(self, *sets_of_cols):
+        """Group by GROUPING SETS of the given column tuples.
+
+        Each argument is a tuple of column expressions representing one grouping set.
+        Produces GROUP BY GROUPING SETS((col1, col2), (col1), ()) etc.
+        """
+        sql_sets = []
+        for col_set in sets_of_cols:
+            resolved = []
+            for col in col_set:
+                if isinstance(col, str):
+                    resolved.append(column(col))
+                else:
+                    resolved.append(col)
+            sql_sets.append(tuple_(*resolved))
+        self.rollup_clauses.append(func.grouping_sets(*sql_sets))
         return self
 
     def add_grouping_column(self, col_expr, alias: str):
