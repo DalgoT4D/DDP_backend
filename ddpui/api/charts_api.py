@@ -642,6 +642,9 @@ def get_chart_data_preview(
         )
 
         return DataPreviewResponse(**response_data)
+    except ValueError as e:
+        logger.error(f"ValueError in chart data preview: {str(e)}")
+        raise HttpError(400, str(e)) from e
     except Exception as e:
         logger.error(f"Error in chart data preview: {str(e)}")
         import traceback

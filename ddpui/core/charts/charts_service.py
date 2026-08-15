@@ -430,6 +430,23 @@ def metric_display_name(metric) -> str:
     return metric.alias or f"{metric.aggregation}_{metric.column}"
 
 
+def _validate_unique_metric_aliases(metrics: list) -> None:
+    """Raise ValueError if any two metrics produce the same SQL alias.
+
+    Duplicate aliases cause SQLAlchemy to raise an ambiguous-column error
+    when converting result rows to dicts.
+    """
+    seen: dict[str, int] = {}
+    for idx, metric in enumerate(metrics):
+        alias = metric_sql_alias(metric)
+        if alias in seen:
+            raise ValueError(
+                f"Duplicate metric alias '{alias}' found at positions "
+                f"{seen[alias]} and {idx}. Each metric must have a unique alias."
+            )
+        seen[alias] = idx
+
+
 def build_pivot_table_query(
     payload: ChartDataPayload,
     query_builder: AggQueryBuilder,
@@ -505,6 +522,10 @@ def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
     """Build query using unified AggQueryBuilder for both raw and aggregated queries"""
+
+    # Validate metric aliases are unique to prevent ambiguous SQL column names
+    if payload.metrics and len(payload.metrics) > 1:
+        _validate_unique_metric_aliases(payload.metrics)
 
     # Get pagination parameters
     limit, offset = get_pagination_params(payload)
