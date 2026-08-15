@@ -421,6 +421,21 @@ def metric_sql_alias(metric) -> str:
     return metric.alias or f"{metric.aggregation}_{metric.column}"
 
 
+def _deduplicate_metrics(metrics: list) -> list:
+    """Remove duplicate metrics that would produce identical SQL column aliases.
+
+    Keeps the first occurrence of each metric based on its computed SQL alias.
+    """
+    seen_aliases: set[str] = set()
+    unique: list = []
+    for metric in metrics:
+        alias = metric_sql_alias(metric)
+        if alias not in seen_aliases:
+            seen_aliases.add(alias)
+            unique.append(metric)
+    return unique
+
+
 def metric_display_name(metric) -> str:
     """User-facing header label for a metric."""
     if metric.column_expression:
@@ -505,6 +520,10 @@ def build_chart_query(
     payload: ChartDataPayload, org_warehouse: OrgWarehouse = None
 ) -> AggQueryBuilder:
     """Build query using unified AggQueryBuilder for both raw and aggregated queries"""
+
+    # De-duplicate metrics so identical entries don't produce ambiguous SQL aliases
+    if payload.metrics:
+        payload.metrics = _deduplicate_metrics(payload.metrics)
 
     # Get pagination parameters
     limit, offset = get_pagination_params(payload)
