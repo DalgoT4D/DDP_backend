@@ -14,11 +14,8 @@ from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
-from ddpui.core.trial.constants import (
-    TRIAL_DELETE_LOCK_KEY,
-    TRIAL_DELETE_LOCK_TTL_SECONDS,
-    TRIAL_DELETE_STAGGER_SECONDS,
-)
+from ddpui.core.trial.activation import CLONE_LOCK_PREFIX
+from ddpui.core.trial.constants import TRIAL_DELETE_STAGGER_SECONDS
 from ddpui.core.trial.signup_record import record_signup
 from ddpui.core.trial.warehouse_provision import email_hash8
 from ddpui.schemas.trial_schema import TrialSignupSchema
@@ -166,8 +163,12 @@ def test_expired_continues_after_a_failure(mock_delete_org, mock_drop, mock_slee
     call_command("cleanup_trial_clone", "--expired")
 
     assert mock_delete_org.call_count == 2
-    # the failing org never reached its RDS drop; the healthy one did
-    mock_drop.assert_called_once_with("second@x.org")
+    # BOTH orgs reach their RDS drop — the failing one via purge_email's `finally`. The trial
+    # db+role live outside the org graph, so skipping the drop on a half-failed teardown would
+    # leak a real database on the shared trials RDS that nothing else ever reclaims.
+    assert mock_drop.call_args_list == [call("first@x.org"), call("second@x.org")]
+    # the failing org's teardown still aborts after the drop: its Django user survives, so the
+    # next hourly tick (the org row outlives a mid-way delete_org failure) retries the whole thing
     assert User.objects.filter(username="first@x.org").exists()
     assert not User.objects.filter(username="second@x.org").exists()
 
@@ -353,60 +354,19 @@ def test_expiry_selection_is_evaluated_against_the_run_time_not_a_fixed_hour():
 @patch("ddpui.management.commands.cleanup_trial_clone.RedisClient")
 @patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
 @patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
-def test_expired_exits_without_deleting_when_another_run_holds_the_lock(
-    mock_delete_org, mock_drop, mock_redis_cls
-):
-    """Hourly ticks can overlap — a run takes >1h once the batch is large enough. Two runs would
-    both select the same rows (nothing marks a row in-progress) and tear the same org down twice.
-    The loser of SET NX must delete nothing at all."""
+def test_expired_takes_no_mutex(mock_delete_org, mock_drop, mock_redis_cls):
+    """The sweep runs unsynchronised — see the note in core/trial/constants.py. The only redis
+    call it makes is clearing the per-email running-clone lock in purge_email; it must never
+    reintroduce a sweep-wide SET NX mutex without also re-adding an owner-token release."""
     make_trial("t@x.org")
     redis = Mock()
-    redis.set.return_value = False  # someone else holds it
     mock_redis_cls.get_instance.return_value = redis
 
     call_command("cleanup_trial_clone", "--expired")
 
-    mock_delete_org.assert_not_called()
-    mock_drop.assert_not_called()
-    assert User.objects.filter(username="t@x.org").exists()
-    redis.delete.assert_not_called()  # never release a lock this run does not own
-
-
-@patch("ddpui.management.commands.cleanup_trial_clone.RedisClient")
-@patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
-@patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
-def test_expired_takes_the_lock_with_nx_and_a_ttl_and_releases_it(
-    mock_delete_org, mock_drop, mock_redis_cls
-):
-    """NX is what makes it a mutex; the TTL is the dead-worker backstop. Releasing on the way out
-    means the next hourly tick isn't blocked for the whole TTL after a normal run."""
-    make_trial("t@x.org")
-    redis = Mock()
-    redis.set.return_value = True
-    mock_redis_cls.get_instance.return_value = redis
-
-    call_command("cleanup_trial_clone", "--expired")
-
-    redis.set.assert_any_call(TRIAL_DELETE_LOCK_KEY, "1", nx=True, ex=TRIAL_DELETE_LOCK_TTL_SECONDS)
-    assert call(TRIAL_DELETE_LOCK_KEY) in redis.delete.call_args_list
+    redis.set.assert_not_called()
+    assert redis.delete.call_args_list == [call(f"{CLONE_LOCK_PREFIX}t@x.org")]
     mock_delete_org.assert_called_once()
-
-
-@patch("ddpui.management.commands.cleanup_trial_clone.RedisClient")
-def test_expired_releases_the_lock_even_when_the_run_blows_up(mock_redis_cls):
-    """A crash inside the sweep must not wedge every later tick until the TTL fires."""
-    from ddpui.management.commands.cleanup_trial_clone import Command
-
-    redis = Mock()
-    redis.set.return_value = True
-    mock_redis_cls.get_instance.return_value = redis
-
-    command = Command()
-    with patch.object(Command, "delete_expired_trials_unlocked", side_effect=Exception("db gone")):
-        with pytest.raises(Exception, match="db gone"):
-            command.delete_expired_trials()
-
-    redis.delete.assert_called_once_with(TRIAL_DELETE_LOCK_KEY)
 
 
 def test_expired_deletion_is_registered_as_an_hourly_beat_task():
@@ -429,3 +389,38 @@ def test_expired_deletion_is_registered_as_an_hourly_beat_task():
     assert schedule == crontab(minute=0)
     # the old nightly schedule delayed a 16:45 trial to the next midnight
     assert schedule != crontab(minute=0, hour=0)
+
+
+@patch("ddpui.management.commands.cleanup_trial_clone.awsses.send_trial_ops_alert")
+@patch("ddpui.management.commands.cleanup_trial_clone.time.sleep")
+@patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
+@patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
+def test_expired_alerts_once_per_sweep_listing_every_failure(
+    mock_delete_org, mock_drop, mock_sleep, mock_alert
+):
+    """ONE mail per sweep, not one per org — a multi-hour Airbyte outage would otherwise mail
+    engineering per failing org per hourly tick. Every failed slug must be named so a repeat
+    offender is visible across ticks."""
+    make_trial("first@x.org")
+    make_trial("second@x.org")
+    mock_delete_org.side_effect = [Exception("airbyte unreachable"), Exception("github 502")]
+
+    call_command("cleanup_trial_clone", "--expired")
+
+    mock_alert.assert_called_once()
+    subject, body = mock_alert.call_args.args
+    assert subject == "cleanup failed for 2 org(s)"
+    assert f"trial-{email_hash8('first@x.org')}-acme" in body
+    assert f"trial-{email_hash8('second@x.org')}-acme" in body
+
+
+@patch("ddpui.management.commands.cleanup_trial_clone.awsses.send_trial_ops_alert")
+@patch("ddpui.management.commands.cleanup_trial_clone.drop_trial_database")
+@patch("ddpui.management.commands.cleanup_trial_clone.delete_trial_org")
+def test_expired_stays_silent_when_every_teardown_works(mock_delete_org, mock_drop, mock_alert):
+    """The hourly sweep runs 24x a day. It must only mail on failure."""
+    make_trial("fine@x.org")
+
+    call_command("cleanup_trial_clone", "--expired")
+
+    mock_alert.assert_not_called()

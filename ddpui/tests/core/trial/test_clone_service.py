@@ -1,5 +1,6 @@
 import uuid as uuid_module
-from unittest.mock import patch, Mock
+from datetime import timedelta
+from unittest.mock import patch, Mock, call
 
 import pytest
 from django.contrib.auth.models import User
@@ -7,12 +8,14 @@ from django.test import override_settings
 from django.utils import timezone
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.dbt_workflow import OrgDbtModel, OrgDbtModelType, OrgDbtOperation
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.role_based_access import Role
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.ddpprefect import DBTCLIPROFILE
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.core.trial import clone_service
+from ddpui.core.trial.constants import TEARDOWN_ATTEMPTS
 from ddpui.core.trial.clone_service import CloneRun
 from ddpui.core.trial.exceptions import TrialAccountExistsError
 from ddpui.core.trial.signup_record import record_signup
@@ -202,7 +205,8 @@ def test_clone_teardown_failure_does_not_mask_original_error(mock_s1, mock_clean
             TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
         )
 
-    mock_cleanup_cls.assert_called_once_with(trial_org, dry_run=False)
+    # retried TEARDOWN_ATTEMPTS times before giving up, and still didn't mask the original
+    assert mock_cleanup_cls.call_args_list == [call(trial_org, dry_run=False)] * TEARDOWN_ATTEMPTS
     mock_drop.assert_not_called()
 
 
@@ -347,9 +351,10 @@ def test_teardown_rds_drop_independent_of_delete_org_failure(
             TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
         )
 
-    # RDS drop still fired despite delete_org blowing up — no stranded db
+    # RDS drop still fired despite delete_org blowing up — no stranded db. It succeeds first
+    # try, so no retry; delete_org keeps failing and burns all its attempts.
     mock_drop.assert_called_once_with("a@b.org")
-    mock_cleanup_cls.return_value.delete_org.assert_called_once()
+    assert mock_cleanup_cls.return_value.delete_org.call_count == TEARDOWN_ATTEMPTS
 
 
 @patch("ddpui.core.trial.clone_service.drop_trial_database")
@@ -584,7 +589,6 @@ def test_step_org_and_user_copies_llm_preferences_not_discord(mock_create_org, m
     assert prefs.llm_optin_date is not None
     assert prefs.enable_discord_notifications is False
     assert prefs.discord_webhook is None
-    assert run.manifest["org_preferences_copied"] is True
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
@@ -632,7 +636,6 @@ def test_step_org_and_user_copies_template_feature_flags(mock_create_org, mock_c
 
     trial_flags = {f.flag_name: f.flag_value for f in OrgFeatureFlag.objects.filter(org=trial_org)}
     assert trial_flags == {"REPORTS": True, "DATA_QUALITY": False}
-    assert run.manifest["feature_flags_copied"] == 2
 
 
 @patch("ddpui.core.trial.clone_service.create_org_plan")
@@ -825,7 +828,6 @@ def test_step_warehouse_registers_trial_warehouse(
     assert args[1].destinationDefId == "pg-def-1"
     assert args[1].airbyteConfig["database"] == "trial_1"
     assert run.manifest["trial_warehouse_db"] == "trial_1"
-    assert run.manifest["trial_warehouse_role"] == "u"
 
 
 @patch("ddpui.core.trial.clone_service.settings")
@@ -1039,7 +1041,6 @@ def test_step_sources_recreates_from_config(mock_ab, mock_load, mock_validate):
     )
     mock_ab.create_custom_source_definition.assert_not_called()
     assert run.manifest["source_map"] == {"old-1": "new-1"}
-    assert run.manifest["source_ids"] == ["new-1"]
 
 
 @patch("ddpui.core.trial.clone_service.validate_template_source_configs", return_value=[])
@@ -1117,7 +1118,6 @@ def test_step_sources_remaps_custom_definitions(mock_ab, mock_load, mock_validat
         "def-cc-trial",
         {"token": "x"},
     )
-    assert run.manifest["custom_definitions_created"] == ["tech4dev/source-commcare"]
     assert run.manifest["source_map"] == {"old-k": "new-k", "old-c": "new-c"}
 
 
@@ -1221,7 +1221,6 @@ def test_step_connections_mirrors_template_stream_selection(mock_ab, mock_create
         }
     ]
     assert run.manifest["connection_map"] == {"old-conn-1": "new-conn-1"}
-    assert run.manifest["connection_ids"] == ["new-conn-1"]
 
 
 @patch("ddpui.core.trial.clone_service.ab_create_connection")
@@ -1370,17 +1369,14 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
     trial_model = OrgDbtModel.objects.get(orgdbt=trial_dbt)
     assert trial_model.name == "customers"
     assert trial_model.sql_path == "models/analytics/customers.sql"
-    assert OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt).count() == 1
+    # the v1 OrgDbtOperation table is deliberately not copied — nothing in the live UI4T flow
+    # writes or reads it (see copy_dbt_dag)
+    assert not OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt).exists()
 
     mock_regen.assert_called_once_with(template_dbt, trial_dbt)
-    assert run.manifest["dbt_mode"] == "repo_models_copy"
-    assert run.manifest["dbt_repo"] == trial_dbt.gitrepo_url
-    assert run.manifest["dbt_models"] == 1
-    assert run.manifest["dbt_files_copied"] == mock_regen.return_value
 
     mock_dbt_project_manager.gather_dbt_project_params.assert_called_once_with(trial_org, trial_dbt)
     mock_create_transform_tasks.assert_called_once_with(trial_org, gathered_params)
-    assert run.manifest["dbt_transform_tasks_created"] is True
 
 
 def test_step_dbt_raises_when_template_has_no_dbt():
@@ -1411,7 +1407,7 @@ def test_clone_wires_step_dbt_after_connections(
 
 @patch("ddpui.core.trial.clone_service.sync_transform_tasks_and_deployments")
 @patch("ddpui.core.trial.clone_service.clone_orchestrate_dataflows")
-def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows, mock_sync):
+def test_step_prefect_delegates_to_clone_and_sync(mock_clone_dataflows, mock_sync):
     template = Org.objects.create(name="tmpl-pf", slug="tmpl-pf")
     trial_org = Org.objects.create(name="Trial pf", slug="trial-pf")
     mock_clone_dataflows.return_value = ["dep-new"]
@@ -1429,8 +1425,6 @@ def test_step_prefect_delegates_and_records_deployment_ids(mock_clone_dataflows,
         template, trial_org, {"tmpl-conn-1": "trial-conn-1"}
     )
     mock_sync.assert_called_once_with(template, trial_org)
-    assert run.manifest["deployment_ids"] == ["dep-new"]
-    assert run.manifest["transform_task_sync"]["manual_deployments_rebaked"] == 1
 
 
 @patch("ddpui.core.trial.clone_service._step_viz")
@@ -1454,7 +1448,7 @@ def test_clone_wires_step_prefect_after_dbt(
 
 
 @patch("ddpui.core.trial.clone_service.clone_viz")
-def test_step_viz_delegates_and_records_manifest(mock_clone_viz):
+def test_step_viz_delegates_to_clone_viz(mock_clone_viz):
     template = Org.objects.create(name="tmpl-viz", slug="tmpl-viz")
     trial_org = Org.objects.create(name="Trial viz", slug="trial-viz")
     trial_user = _make_orguser(trial_org, "trial-viz-admin@x.org")
@@ -1466,7 +1460,6 @@ def test_step_viz_delegates_and_records_manifest(mock_clone_viz):
     clone_service._step_viz(run)
 
     mock_clone_viz.assert_called_once_with(template, trial_org, trial_user)
-    assert run.manifest["viz"] == {"metrics": 2, "kpis": 1}
 
 
 @patch("ddpui.core.trial.clone_service._step_viz")
@@ -1581,3 +1574,227 @@ def test_record_stamp_failure_does_not_fail_a_finished_clone(
     )
 
     assert isinstance(run, CloneRun)
+
+
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_retries_a_transient_delete_org_failure(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop, mock_sleep
+):
+    """Teardown runs ONCE — nothing re-runs it — so a single 502 from Airbyte/GitHub/Prefect
+    would strand the org for the rest of its 14-day window. A second attempt clears exactly
+    that, and the org is really gone (no backdated OrgPlans left behind)."""
+    template = Org.objects.create(name="tmpl-retry", slug="tmpl-retry")
+    trial_org = Org.objects.create(name="Trial Retry", slug="trial-retry")
+    OrgPlans.objects.create(
+        org=trial_org,
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date=timezone.now(),
+        end_date=timezone.now() + timedelta(days=14),
+    )
+
+    def fake_step1(run):
+        run.trial_org = trial_org
+
+    mock_s1.side_effect = fake_step1
+    # fails once, then succeeds
+    mock_cleanup_cls.return_value.delete_org.side_effect = [Exception("airbyte 502"), None]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    assert mock_cleanup_cls.return_value.delete_org.call_count == 2
+    # succeeded, so the plan window must NOT have been backdated for a sweep retry
+    plan = OrgPlans.objects.get(org=trial_org)
+    assert plan.end_date > timezone.now()
+
+
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_backdates_the_plan_when_delete_org_never_succeeds(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop, mock_sleep
+):
+    """A failed clone's OrgPlans still says `end_date = clone + 14 days`, and the hourly
+    `--expired` sweep selects on `end_date <= now` — so without this the leftover Airbyte
+    workspace, GitHub repo and Prefect deployments stay up for two weeks. Backdating hands the
+    org to the next hourly tick instead."""
+    template = Org.objects.create(name="tmpl-bd", slug="tmpl-bd")
+    trial_org = Org.objects.create(name="Trial BD", slug="trial-bd")
+    OrgPlans.objects.create(
+        org=trial_org,
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date=timezone.now(),
+        end_date=timezone.now() + timedelta(days=14),
+    )
+    mock_s1.side_effect = lambda run: setattr(run, "trial_org", trial_org)
+    mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    plan = OrgPlans.objects.get(org=trial_org)
+    assert plan.end_date <= timezone.now()  # the sweep will now pick it up within the hour
+
+
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_survives_an_org_with_no_plan_row(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop, mock_sleep
+):
+    """A clone that died between create_organization and create_org_plan leaves an org with no
+    OrgPlans row. The sweep selects THROUGH OrgPlans so it can never see that org — the backdate
+    must log loudly rather than raise (teardown must never mask the original exception)."""
+    template = Org.objects.create(name="tmpl-np", slug="tmpl-np")
+    trial_org = Org.objects.create(name="Trial NP", slug="trial-np")  # deliberately no OrgPlans
+    mock_s1.side_effect = lambda run: setattr(run, "trial_org", trial_org)
+    mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    assert not OrgPlans.objects.filter(org=trial_org).exists()
+
+
+@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_alerts_engineering_when_it_gives_up(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop, mock_sleep, mock_alert
+):
+    """A leaked Airbyte workspace / GitHub repo / RDS db is only ever reclaimed by a human running
+    the cleanup command — and the repo name is email-derived, so until then this person's retries
+    keep failing. A log line nobody reads is not enough; engineering gets mailed."""
+    template = Org.objects.create(name="tmpl-alert", slug="tmpl-alert")
+    trial_org = Org.objects.create(name="Trial Alert", slug="trial-alert")
+    mock_s1.side_effect = lambda run: setattr(run, "trial_org", trial_org)
+    mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    mock_alert.assert_called_once()
+    subject, body = mock_alert.call_args.args
+    assert "a@b.org" in subject
+    assert "trial-alert" in body
+    assert "cleanup_trial_clone --email a@b.org" in body
+
+
+@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_does_not_alert_when_it_succeeds(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop, mock_sleep, mock_alert
+):
+    """A clean teardown must stay silent — otherwise every failed clone mails engineering and the
+    alert stops meaning anything."""
+    template = Org.objects.create(name="tmpl-quiet", slug="tmpl-quiet")
+    trial_org = Org.objects.create(name="Trial Quiet", slug="trial-quiet")
+    mock_s1.side_effect = lambda run: setattr(run, "trial_org", trial_org)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    mock_alert.assert_not_called()
+
+
+@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service.create_warehouse")
+@patch("ddpui.core.trial.clone_service.airbyte_service")
+@patch("ddpui.core.trial.clone_service.retrieve_warehouse_credentials")
+@patch("ddpui.core.trial.clone_service.provision_trial_database")
+@patch("ddpui.core.trial.clone_service.settings")
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_sends_exactly_one_alert_even_when_both_actions_fail(
+    mock_s1,
+    mock_settings,
+    mock_provision,
+    mock_retrieve,
+    mock_ab,
+    mock_create_wh,
+    mock_cleanup_cls,
+    mock_drop,
+    mock_sleep,
+    mock_alert,
+):
+    """ONE mail per failed teardown, never one per action and never one per retry attempt —
+    otherwise a single bad clone mails engineering four times and the alert stops being read.
+    Both leaked resources must still be named in that single mail."""
+    template = Org.objects.create(name="tmpl-1mail", slug="tmpl-1mail", airbyte_workspace_id="ws-t")
+    OrgWarehouse.objects.create(
+        org=template, wtype="postgres", airbyte_destination_id="dest-t", credentials="x"
+    )
+    trial_org = Org.objects.create(name="Trial 1mail", slug="trial-1mail", airbyte_workspace_id="w")
+    mock_s1.side_effect = lambda run: setattr(run, "trial_org", trial_org)
+    mock_provision.return_value = TrialDbParams(
+        host="h", port=5432, database="ft_x_db", username="u", password="p"
+    )
+    mock_settings.TRIALS_RDS_HOST = "trials-rds-host"
+    mock_retrieve.return_value = {"host": "trials-rds-host", "database": "tmpl_db"}
+    mock_ab.get_destination.return_value = {"destinationDefinitionId": "pg-def-1"}
+    mock_create_wh.side_effect = Exception("create_warehouse blew up")
+    # BOTH teardown actions fail, every attempt
+    mock_drop.side_effect = Exception("rds unreachable")
+    mock_cleanup_cls.return_value.delete_org.side_effect = Exception("airbyte unreachable")
+
+    with pytest.raises(RuntimeError, match="create_warehouse failed"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    assert mock_drop.call_count == TEARDOWN_ATTEMPTS
+    assert mock_cleanup_cls.return_value.delete_org.call_count == TEARDOWN_ATTEMPTS
+    mock_alert.assert_called_once()
+    assert "trial-1mail" in mock_alert.call_args.args[1]
+
+
+@patch("ddpui.core.trial.clone_service.awsses.send_trial_ops_alert")
+@patch("ddpui.core.trial.clone_service.time.sleep")
+@patch("ddpui.core.trial.clone_service.drop_trial_database")
+@patch("ddpui.core.trial.clone_service.OrgCleanupService")
+@patch("ddpui.core.trial.clone_service._step_warehouse", side_effect=RuntimeError("boom"))
+@patch("ddpui.core.trial.clone_service._step_org_and_user")
+def test_teardown_does_not_alert_when_the_retry_rescues_it(
+    mock_s1, mock_s2, mock_cleanup_cls, mock_drop, mock_sleep, mock_alert
+):
+    """The whole point of the retry: a transient failure that the second attempt clears is NOT an
+    incident and must not mail anyone."""
+    template = Org.objects.create(name="tmpl-resc", slug="tmpl-resc")
+    trial_org = Org.objects.create(name="Trial Resc", slug="trial-resc")
+    mock_s1.side_effect = lambda run: setattr(run, "trial_org", trial_org)
+    mock_cleanup_cls.return_value.delete_org.side_effect = [Exception("airbyte 502"), None]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        clone_service.clone_template_org(
+            TrialCloneRequest(template_org_id=template.id, trial_email="a@b.org")
+        )
+
+    assert mock_cleanup_cls.return_value.delete_org.call_count == 2
+    mock_alert.assert_not_called()

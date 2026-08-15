@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -19,11 +20,13 @@ from ddpui.core.orgfunctions import create_organization, create_org_plan
 from ddpui.core.trial.constants import (  # noqa: F401 TRIAL_DURATION_DAYS re-exported
     TRIAL_DURATION_DAYS,
     TRIAL_ORG_NAME_PREFIX,
+    TEARDOWN_ATTEMPTS,
+    TEARDOWN_RETRY_DELAY_SECONDS,
 )
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.org_warehouse_schema import OrgWarehouseSchema
 from ddpui.schemas.trial_schema import TrialCloneRequest
-from ddpui.models.org_plans import OrgPlanType
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.org_user import OrgUser, UserAttributes
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.userpreferences import UserPreferences
@@ -48,7 +51,7 @@ from ddpui.ddpdbt.dbt_service import setup_managed_git_workspace
 from ddpui.core.orgtaskfunctions import create_default_transform_tasks
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
-from ddpui.utils import feature_flags
+from ddpui.utils import awsses, feature_flags
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.trial.clone_service")
@@ -58,8 +61,14 @@ logger = CustomLogger("ddpui.core.trial.clone_service")
 class CloneRun:
     """in-memory state carrier for a single template→trial clone run — no DB row.
 
-    Per-run state (timings, manifest of created resource ids, the trial org once it
-    exists) lives only for the lifetime of this call; nothing is persisted for it.
+    Per-run state (timings, manifest, the trial org once it exists) lives only for the
+    lifetime of this call; nothing is persisted for it.
+
+    `manifest` holds ONLY values a later step or `_teardown` reads back — keep it that way
+    rather than letting it grow into a write-only debug log:
+      - `trial_warehouse_db`  written by step 2, read by `_teardown` to drop the RDS db+role
+      - `source_map`          written by step 3, read by step 4 to remap connection sources
+      - `connection_map`      written by step 4, read by step 6 to remap deployment connections
     """
 
     template: Org
@@ -177,17 +186,13 @@ def _step_org_and_user(run: CloneRun) -> None:
     # without this the cloned report snapshots would exist but be invisible. The feature_flags
     # helpers validate against the FEATURE_FLAGS allowlist (a stale/unknown flag_name on the
     # template returns None and is skipped) and are idempotent on a retry.
-    flags_copied = 0
     for ff in OrgFeatureFlag.objects.filter(org=template):
         if ff.flag_value:
             copied = feature_flags.enable_feature_flag(ff.flag_name, trial_org)
         else:
             copied = feature_flags.disable_feature_flag(ff.flag_name, trial_org)
-        if copied:
-            flags_copied += 1
-        else:
+        if not copied:
             logger.warning(f"template flag {ff.flag_name} not in FEATURE_FLAGS allowlist; skipped")
-    run.manifest["feature_flags_copied"] = flags_copied
 
     # Copy the template's OrgPreferences LLM opt-in state — without this the trial gets the
     # lazily-created default row (llm_optin=False) and the AI-analysis features stay dead even
@@ -204,11 +209,6 @@ def _step_org_and_user(run: CloneRun) -> None:
             llm_optin_date=timezone.now() if template_prefs.llm_optin else None,
             enable_llm_request=template_prefs.enable_llm_request,
         )
-        run.manifest["org_preferences_copied"] = True
-
-    run.manifest["trial_org_slug"] = trial_org.slug
-    run.manifest["trial_workspace_id"] = trial_org.airbyte_workspace_id
-    run.manifest["trial_orguser_id"] = orguser.id
 
 
 def _step_warehouse(run: CloneRun) -> None:
@@ -238,7 +238,6 @@ def _step_warehouse(run: CloneRun) -> None:
     # record the teardown marker immediately — the RDS database already exists at this point,
     # so any failure below must still trigger drop_trial_database on the way out.
     run.manifest["trial_warehouse_db"] = trial_db_params.database
-    run.manifest["trial_warehouse_role"] = trial_db_params.username
 
     # reuse the template destination's definition id (not stored on OrgWarehouse)
     template_dest = airbyte_service.get_destination(
@@ -285,8 +284,6 @@ def _step_warehouse(run: CloneRun) -> None:
         create_warehouse(run.trial_org, wh_payload)
     except Exception as err:  # skipcq PYL-W0703
         raise TrialCloneError(f"create_warehouse failed: {err}") from err
-
-    run.manifest["trial_destination_defid"] = dest_def_id
 
 
 def _remap_source_definition_id(run: CloneRun, template_defid: str, defs_cache: dict) -> str:
@@ -337,7 +334,6 @@ def _remap_source_definition_id(run: CloneRun, template_defid: str, defs_cache: 
     new_defid = created_def["sourceDefinitionId"]
     defs_cache["trial_def_ids"].add(new_defid)
     defs_cache["trial_by_repo"][repo] = new_defid
-    run.manifest.setdefault("custom_definitions_created", []).append(repo)
     logger.info(f"registered custom source definition {repo} in trial workspace as {new_defid}")
     return new_defid
 
@@ -376,7 +372,6 @@ def _step_sources(run: CloneRun) -> None:
         created = airbyte_service.create_source(trial_ws, src["name"], trial_defid, config)
         source_map[src["sourceId"]] = created["sourceId"]
     run.manifest["source_map"] = source_map
-    run.manifest["source_ids"] = list(source_map.values())
 
 
 def _selected_stream_names(connection: dict) -> set:
@@ -457,7 +452,6 @@ def _step_connections(run: CloneRun) -> None:
             raise TrialCloneError(f"create_connection failed for {conn['name']}: {err}")
         connection_map[conn["connectionId"]] = res["connectionId"]
     run.manifest["connection_map"] = connection_map
-    run.manifest["connection_ids"] = list(connection_map.values())
 
 
 def _step_dbt(run: CloneRun) -> None:
@@ -465,9 +459,10 @@ def _step_dbt(run: CloneRun) -> None:
 
     `setup_managed_git_workspace` gives the trial the SAME dbt setup every new org gets: a
     managed GitHub repo with an empty scaffold, the cli-profile block, `org.dbt` set. Then
-    `copy_dbt_dag` copies the template's UI4T transform DAG as Django DB rows (legacy
-    OrgDbtModel/Operation/Edge rows AND the active CanvasNode/Edge rows, `sql_path=None` —
-    no files exist for them) so the trial's transform canvas renders the template's DAG.
+    `copy_dbt_dag` copies the template's UI4T transform DAG as Django DB rows (OrgDbtModel rows
+    plus the CanvasNode/CanvasEdge rows the transform UI renders) so the trial's transform
+    canvas renders the template's DAG. The v1 OrgDbtOperation/DbtEdge tables are not copied —
+    nothing in the live UI4T flow writes or reads them.
     Charts/dashboards read the warehouse tables Step 2 already copied server-side.
 
     The template's dbt CONTENT is deliberately NOT cloned in v1 — no repo-file copy, no
@@ -512,7 +507,7 @@ def _step_dbt(run: CloneRun) -> None:
         trial_dbt.transform_type = template_dbt.transform_type
         trial_dbt.save(update_fields=["transform_type"])
 
-    model_map = copy_dbt_dag(template_dbt, trial_dbt)
+    copy_dbt_dag(template_dbt, trial_dbt)
 
     # Copy the template repo's models/ directory VERBATIM into the trial repo (+ push) —
     # byte-identical dbt content (.sql files, sources.yml, model docs), guaranteed parity
@@ -520,19 +515,13 @@ def _step_dbt(run: CloneRun) -> None:
     # because the files land at the same project-relative paths. Without this content the
     # copied canvas is view-only — new models on copied sources fail dbt compilation and
     # `dbt run` has nothing to build.
-    copied_files = copy_repo_models_from_template(template_dbt, trial_dbt)
-
-    run.manifest["dbt_mode"] = "repo_models_copy"
-    run.manifest["dbt_repo"] = trial_dbt.gitrepo_url
-    run.manifest["dbt_models"] = len(model_map)
-    run.manifest["dbt_files_copied"] = copied_files
+    copy_repo_models_from_template(template_dbt, trial_dbt)
 
     # NB: no cli_profile_block check here — that field is legacy (only migration 0143 ever wrote
     # it). dbt credentials now come from the org's dbt-profile Secret block, which
     # setup_managed_git_workspace creates via create_or_update_dbt_profile_secret_blk.
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(run.trial_org, trial_dbt)
     create_default_transform_tasks(run.trial_org, dbt_project_params)
-    run.manifest["dbt_transform_tasks_created"] = True
 
 
 def _step_prefect(run: CloneRun) -> None:
@@ -546,17 +535,12 @@ def _step_prefect(run: CloneRun) -> None:
     new deployment + `OrgDataFlowv1` + `DataflowOrgTask` rows. Must run LAST: it needs both the
     trial connections (P3) and the trial dbt workspace (P4) to already exist.
     """
-    deployment_ids = clone_orchestrate_dataflows(
-        run.template, run.trial_org, run.manifest.get("connection_map", {})
-    )
-    run.manifest["deployment_ids"] = deployment_ids
+    clone_orchestrate_dataflows(run.template, run.trial_org, run.manifest.get("connection_map", {}))
 
     # then carry standalone template transform OrgTasks (not linked into any pipeline) and make
     # every manual Transform-page deployment's baked params match the copied OrgTask parameters —
     # see sync_transform_tasks_and_deployments.
-    run.manifest["transform_task_sync"] = sync_transform_tasks_and_deployments(
-        run.template, run.trial_org
-    )
+    sync_transform_tasks_and_deployments(run.template, run.trial_org)
 
 
 def _step_viz(run: CloneRun) -> None:
@@ -567,7 +551,7 @@ def _step_viz(run: CloneRun) -> None:
     OrgUser from Step 1 — independent of Steps 3-6 (Airbyte/dbt/Prefect); cloned charts/dashboards
     only render real data once Step 2's server-side warehouse copy has run.
     """
-    run.manifest["viz"] = clone_viz(run.template, run.trial_org, run.trial_orguser)
+    clone_viz(run.template, run.trial_org, run.trial_orguser)
 
 
 def delete_trial_org(org: Org) -> None:
@@ -585,22 +569,103 @@ def delete_trial_org(org: Org) -> None:
     OrgCleanupService(org, dry_run=False).delete_org()
 
 
+def _teardown_attempt(label: str, action, on_error: str) -> bool:
+    """Run one teardown action up to TEARDOWN_ATTEMPTS times. True if it eventually succeeded.
+
+    Teardown gets ONE shot — unlike the hourly `--expired` sweep, nothing re-runs it — so a lone
+    502 from Airbyte/GitHub/Prefect would otherwise strand the whole org until its OrgPlans window
+    expires 14 days later. A second attempt costs nothing and clears exactly that: transient
+    single-call failures. It does NOT clear a real outage; the backoff is deliberately tiny
+    because the caller is a celery task whose hard time limit is only CLONE_HARD_TIME_LIMIT -
+    CLONE_SOFT_TIME_LIMIT seconds after the soft one, and teardown shares that window.
+    """
+    for attempt in range(1, TEARDOWN_ATTEMPTS + 1):
+        try:
+            action()
+            if attempt > 1:
+                logger.info(f"{label} succeeded on attempt {attempt}")
+            return True
+        except Exception as err:  # skipcq PYL-W0703
+            last = attempt == TEARDOWN_ATTEMPTS
+            logger.error(
+                f"{on_error} (attempt {attempt}/{TEARDOWN_ATTEMPTS}): {err}",
+                exc_info=last,
+            )
+            if not last:
+                time.sleep(TEARDOWN_RETRY_DELAY_SECONDS)
+    return False
+
+
+def _expire_plan_for_retry(org: Org) -> None:
+    """Backdate the org's OrgPlans window so the hourly `--expired` sweep retries this teardown.
+
+    A failed clone's OrgPlans still carries `end_date = clone_time + TRIAL_DURATION_DAYS`, so
+    `cleanup_trial_clone --expired` (which selects on `end_date <= now`) would not look at this
+    org for another two weeks — leaving its Airbyte workspace, managed GitHub repo and Prefect
+    deployments up the whole time for a trial nobody can use. Backdating makes the next hourly
+    tick pick it up. Safe to do unconditionally here: we only reach this after teardown failed,
+    and the org is already unusable.
+
+    Best-effort by design — this runs inside teardown, which must never raise.
+    """
+    try:
+        updated = OrgPlans.objects.filter(org=org).update(end_date=timezone.now())
+        if updated:
+            logger.info(
+                f"backdated OrgPlans.end_date for {org.slug} so the hourly expired-trial "
+                "sweep retries this teardown"
+            )
+        else:
+            # no OrgPlans row (the clone died between create_organization and create_org_plan)
+            # — the sweep selects THROUGH OrgPlans, so nothing will ever find this org
+            # automatically. Say so loudly; it needs `cleanup_trial_clone --email`.
+            logger.error(
+                f"org {org.slug} has no OrgPlans row and its teardown failed — the hourly "
+                "expired-trial sweep cannot see it; clean it up with "
+                f"`cleanup_trial_clone --email {org.slug}`'s owner address"
+            )
+    except Exception as err:  # skipcq PYL-W0703
+        logger.error(f"failed to backdate OrgPlans for {org.slug}: {err}")
+
+
+def _alert_teardown_leak(run: CloneRun) -> None:
+    """Email engineering when teardown gave up. Deliberately terse — what leaked and why is in
+    the logs; this only has to get a human to go look. Never raises (see send_trial_ops_alert)."""
+    org_slug = run.trial_org.slug if run.trial_org else "(no org)"
+    awsses.send_trial_ops_alert(
+        f"teardown failed for {run.trial_email}",
+        f"org: {org_slug}\n"
+        f"email: {run.trial_email}\n\n"
+        f"Recover: python manage.py cleanup_trial_clone --email {run.trial_email}\n"
+        "Details in the server logs.",
+    )
+
+
 def _teardown(run: CloneRun) -> None:
     """Best-effort teardown of whatever got created before a mid-run failure.
 
     Guarded on what actually exists (run.trial_org / manifest markers). Wrapped by the
     caller in its own try/except so a teardown problem never masks the original exception.
+
+    Each action is retried — see `_teardown_attempt`. If the org delete still fails after that,
+    `OrgPlans.end_date` is backdated so the hourly `--expired` sweep retries within the hour
+    instead of leaving the Airbyte workspace, GitHub repo and Prefect deployments up for the
+    remaining 14 days of the (never-used) trial window.
     """
     # The two teardown actions are INDEPENDENTLY guarded: the trial RDS db+role live OUTSIDE
     # the org/Airbyte/Prefect graph, so if delete_org() throws mid-teardown (e.g. Airbyte
     # unreachable) the RDS drop must still run — otherwise that db+role leak. Drop the RDS
     # resources first (isolated, cheap) so they can't be stranded by a delete_org() failure.
+    leaked = False
+
     if run.manifest.get("trial_warehouse_db"):
-        try:
-            logger.info(f"dropping trial database for failed clone {run.trial_email}")
-            drop_trial_database(run.trial_email)
-        except Exception as rds_err:  # skipcq PYL-W0703
-            logger.error(f"failed to drop trial database for {run.trial_email}: {rds_err}")
+        logger.info(f"dropping trial database for failed clone {run.trial_email}")
+        if not _teardown_attempt(
+            f"drop trial database for {run.trial_email}",
+            lambda: drop_trial_database(run.trial_email),
+            f"failed to drop trial database for {run.trial_email}",
+        ):
+            leaked = True
 
     if run.trial_org:
         # Metric/KPI have PROTECT FKs that OrgCleanupService.delete_org() doesn't handle — so
@@ -609,13 +674,18 @@ def _teardown(run: CloneRun) -> None:
         # sources+connections (Steps 4-5) are also deleted by delete_org() -> delete_warehouse()
         # (deletes each connection's airbyte OrgTask) -> delete_airbyte_workspace() (sources +
         # workspace) — no extra Airbyte teardown needed here as long as run.trial_org exists.
-        try:
-            logger.info(
-                f"tearing down org+workspace for failed clone (template={run.template.slug})"
-            )
-            delete_trial_org(run.trial_org)
-        except Exception as org_err:  # skipcq PYL-W0703
-            logger.error(f"failed to delete_org during teardown ({run.template.slug}): {org_err}")
+        logger.info(f"tearing down org+workspace for failed clone (template={run.template.slug})")
+        deleted = _teardown_attempt(
+            f"delete_org for {run.trial_org.slug}",
+            lambda: delete_trial_org(run.trial_org),
+            f"failed to delete_org during teardown ({run.template.slug})",
+        )
+        if not deleted:
+            _expire_plan_for_retry(run.trial_org)
+            leaked = True
+
+    if leaked:
+        _alert_teardown_leak(run)
 
     # The Django User (+ its UserAttributes and the password set at /activate) is deliberately
     # KEPT across teardown. delete_org removes the OrgUser — so account_exists_for_email (which

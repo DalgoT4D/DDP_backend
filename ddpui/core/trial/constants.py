@@ -1,51 +1,39 @@
 """Leaf-module constants for the free-trial feature.
 
-Deliberately dependency-free: this module must be importable without pulling in
-Airbyte/dbt/Prefect/viz or any other heavyweight integration, so that both
-``clone_service`` (the full clone pipeline) and ``lifecycle_emails`` (the hourly
-sweep) can depend on it without ``lifecycle_emails`` transitively importing the
-whole clone pipeline. See ``ddpui/core/trial/clone_service.py`` and
-``ddpui/core/trial/lifecycle_emails.py`` for the two consumers.
+Dependency-free on purpose, so `lifecycle_emails` can import it without pulling in the
+whole clone pipeline via `clone_service`.
 """
 
-# every trial expires this many days after the clone; OrgPlans.start_date/end_date are set from
-# this at clone time so plan-expiry checks (and any expiry-based deletion) have real dates to work
-# with instead of the None/None an unbounded plan would get.
+# trial window; written to OrgPlans.start_date/end_date at clone time
 TRIAL_DURATION_DAYS = 14
 
-# First word of every clone-created org's name — see `_step_org_and_user` in clone_service.
+# first word of every clone-created org's name — see `_step_org_and_user`
 TRIAL_ORG_NAME_PREFIX = "Trial"
 
-# ...and the slug prefix that follows from it, since `create_organization` derives
-# `org.slug = slugify(org.name)[:20]`. This is the ONLY marker that a clone created an org, so
-# it is what the expired-trial deleter filters on: `OrgPlans.base_plan == FREE_TRIAL` alone is
-# NOT safe, because `create_org_plan` lets an admin put a real customer org on the Free Trial
-# plan, and deleting those would destroy a paying org and its warehouse. Keep in sync with
-# TRIAL_ORG_NAME_PREFIX above — a change to the org-name shape that isn't mirrored here makes
-# the expired-trial deleter silently match nothing.
+# slug prefix that follows, since create_organization does slugify(name)[:20].
+# Keep in sync with TRIAL_ORG_NAME_PREFIX or the expired-trial deleter matches nothing.
 TRIAL_ORG_SLUG_PREFIX = "trial-"
 
-# The prefix alone is too loose to delete on: a real org named "Trial Foundation" slugs to
-# "trial-foundation" and would match. Every clone slug is `trial-<email_hash8>-<label>` and
-# `email_hash8` is an 8-char slice of a sha256 hexdigest, so requiring those 8 hex chars is a
-# marker no human-chosen org name realistically collides with. Used both as a Django `__regex`
-# lookup (Postgres `~`) and via `re` for in-Python checks; slugs are always lowercase.
+# THE marker that a clone made an org. The expired-trial deleter filters on this, not on
+# base_plan — an admin can put a real customer on the FREE_TRIAL plan, and deleting those
+# would destroy a paying org. The 8 hex chars matter: bare "trial-" would also match a real
+# org named "Trial Foundation". Used as a Django __regex lookup and via `re`.
 TRIAL_ORG_SLUG_REGEX = r"^trial-[0-9a-f]{8}-"
 
-# gap between orgs in a `--expired` delete. One teardown hits Airbyte, GitHub, Prefect AND the
-# shared trials RDS; firing several back-to-back would burst all four at once, on instances also
-# serving live users and live clones. Spacing them keeps the load flat.
+# gap between orgs in an `--expired` sweep. One teardown hits Airbyte, GitHub, Prefect and the
+# shared trials RDS; back-to-back teardowns burst all four on instances also serving live users.
 TRIAL_DELETE_STAGGER_SECONDS = 30
 
-# Global mutex for `--expired`. The delete runs HOURLY, but a run is not bounded by an hour:
-# TRIAL_DELETE_STAGGER_SECONDS alone puts ~120 orgs at the hour mark before teardown time is even
-# counted. Without this lock a long run would still be deleting when the next tick fires, and both
-# runs would select the same not-yet-deleted orgs — two concurrent teardowns of one org, hitting
-# Airbyte/GitHub/Prefect/RDS twice with half of the calls operating on already-deleted resources.
-TRIAL_DELETE_LOCK_KEY = "trial-delete-expired-running"
+# A failed clone's teardown runs ONCE — nothing re-runs it — so one transient 502 from
+# Airbyte/GitHub/Prefect would strand the org. Retry each teardown action this many times.
+# The delay is tiny on purpose: teardown shares the celery task's hard-vs-soft time-limit
+# window (see CLONE_SOFT/HARD_TIME_LIMIT in core/trial/tasks.py), so it cannot afford real
+# backoff. This clears single-call blips, not an outage — for that, the org delete backdates
+# OrgPlans.end_date so the hourly `--expired` sweep picks it up.
+TEARDOWN_ATTEMPTS = 2
+TEARDOWN_RETRY_DELAY_SECONDS = 3
 
-# Dead-worker backstop for the lock above; the deletion releases it in a `finally`, so this only
-# matters if the process is killed mid-run. Sized well above a realistic run (stagger + teardown
-# for a large batch) yet short enough that a wedged lock self-heals in a couple of ticks — a
-# stale lock only DELAYS deletion, it never deletes anything early.
-TRIAL_DELETE_LOCK_TTL_SECONDS = 2 * 60 * 60
+# `--expired` runs with NO mutex, deliberately. Two overlapping sweeps would select the same
+# not-yet-deleted orgs and tear one down twice — but that needs a >1h run (~120 orgs) or a
+# second scheduler, and Dalgo runs one celery-beat on one EC2. If either changes, add a Redis
+# mutex with a TTL and an owner-token check on release.

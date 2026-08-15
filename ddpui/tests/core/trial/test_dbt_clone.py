@@ -30,7 +30,7 @@ def _make_orgdbt(org: Org) -> OrgDbt:
     )
 
 
-def test_copy_dbt_dag_copies_models_operations_edges():
+def test_copy_dbt_dag_copies_models_and_skips_v1_tables():
     template_org = Org.objects.create(name="tmpl", slug="tmpl")
     trial_org = Org.objects.create(name="trial", slug="trial")
     template_dbt = _make_orgdbt(template_org)
@@ -87,19 +87,14 @@ def test_copy_dbt_dag_copies_models_operations_edges():
     assert new_src.name == src_model.name
     assert new_dest.name == dest_model.name
 
-    trial_ops = list(OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt))
-    assert len(trial_ops) == 1
-    assert trial_ops[0].dbtmodel_id == new_dest.id
-    assert trial_ops[0].config == {"type": "rename"}
-    assert trial_ops[0].uuid is not None
-
-    trial_edges = list(DbtEdge.objects.filter(from_node__orgdbt=trial_dbt))
-    assert len(trial_edges) == 1
-    assert trial_edges[0].from_node_id == new_src.id
-    assert trial_edges[0].to_node_id == new_dest.id
+    # the v1 tables are deliberately NOT copied — nothing in the live UI4T flow reads them
+    assert not OrgDbtOperation.objects.filter(dbtmodel__orgdbt=trial_dbt).exists()
+    assert not DbtEdge.objects.filter(from_node__orgdbt=trial_dbt).exists()
 
     # template rows are untouched
     assert OrgDbtModel.objects.filter(orgdbt=template_dbt).count() == 2
+    assert OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt).count() == 1
+    assert DbtEdge.objects.filter(from_node__orgdbt=template_dbt).count() == 1
 
 
 def test_copy_dbt_dag_copies_canvas():
@@ -173,123 +168,6 @@ def test_copy_dbt_dag_copies_canvas():
 
     # template rows are untouched
     assert CanvasNode.objects.filter(orgdbt=template_dbt).count() == 3
-
-
-def test_copy_dbt_dag_remaps_input_models_uuid():
-    template_org = Org.objects.create(name="tmpl3", slug="tmpl3")
-    trial_org = Org.objects.create(name="trial3", slug="trial3")
-    template_dbt = _make_orgdbt(template_org)
-    trial_dbt = _make_orgdbt(trial_org)
-
-    parent_model = OrgDbtModel.objects.create(
-        orgdbt=template_dbt,
-        uuid=uuid_module.uuid4(),
-        name="stg_customers",
-        display_name="stg_customers",
-        schema="staging",
-        sql_path="models/staging/stg_customers.sql",
-        type=OrgDbtModelType.SOURCE,
-        source_name="raw",
-        output_cols=["id", "name"],
-        under_construction=False,
-    )
-    child_model = OrgDbtModel.objects.create(
-        orgdbt=template_dbt,
-        uuid=uuid_module.uuid4(),
-        name="customers",
-        display_name="customers",
-        schema="analytics",
-        sql_path="models/marts/customers.sql",
-        type=OrgDbtModelType.MODEL,
-        source_name=None,
-        output_cols=["id", "name"],
-        under_construction=False,
-    )
-
-    original_config = {
-        "type": "rename",
-        "input_models": [
-            {
-                "uuid": str(parent_model.uuid),
-                "name": parent_model.name,
-                "source_name": parent_model.source_name,
-                "schema": parent_model.schema,
-                "type": "source",
-            }
-        ],
-    }
-    OrgDbtOperation.objects.create(
-        dbtmodel=child_model,
-        uuid=uuid_module.uuid4(),
-        seq=1,
-        output_cols=["id", "name"],
-        config=original_config,
-    )
-
-    model_map = dbt_clone.copy_dbt_dag(template_dbt, trial_dbt)
-
-    new_parent = model_map[parent_model.id]
-    new_child = model_map[child_model.id]
-
-    trial_op = OrgDbtOperation.objects.get(dbtmodel=new_child)
-    assert trial_op.config["input_models"][0]["uuid"] == str(new_parent.uuid)
-    assert trial_op.config["input_models"][0]["name"] == parent_model.name
-    assert trial_op.config["input_models"][0]["schema"] == parent_model.schema
-
-    # template operation's config must be unmutated (deepcopy, not shared reference)
-    template_op = OrgDbtOperation.objects.get(dbtmodel=child_model)
-    assert template_op.config["input_models"][0]["uuid"] == str(parent_model.uuid)
-    assert original_config["input_models"][0]["uuid"] == str(parent_model.uuid)
-
-
-def test_copy_dbt_dag_handles_missing_or_none_config():
-    template_org = Org.objects.create(name="tmpl4", slug="tmpl4")
-    trial_org = Org.objects.create(name="trial4", slug="trial4")
-    template_dbt = _make_orgdbt(template_org)
-    trial_dbt = _make_orgdbt(trial_org)
-
-    model_none_config = OrgDbtModel.objects.create(
-        orgdbt=template_dbt,
-        uuid=uuid_module.uuid4(),
-        name="model_none",
-        display_name="model_none",
-        schema="analytics",
-        type=OrgDbtModelType.MODEL,
-    )
-    model_no_input_models = OrgDbtModel.objects.create(
-        orgdbt=template_dbt,
-        uuid=uuid_module.uuid4(),
-        name="model_no_input_models",
-        display_name="model_no_input_models",
-        schema="analytics",
-        type=OrgDbtModelType.MODEL,
-    )
-    OrgDbtOperation.objects.create(
-        dbtmodel=model_none_config,
-        uuid=uuid_module.uuid4(),
-        seq=1,
-        output_cols=[],
-        config=None,
-    )
-    OrgDbtOperation.objects.create(
-        dbtmodel=model_no_input_models,
-        uuid=uuid_module.uuid4(),
-        seq=1,
-        output_cols=[],
-        config={"type": "rename"},
-    )
-
-    # should not raise
-    model_map = dbt_clone.copy_dbt_dag(template_dbt, trial_dbt)
-
-    new_none_config_model = model_map[model_none_config.id]
-    new_no_input_models_model = model_map[model_no_input_models.id]
-
-    op1 = OrgDbtOperation.objects.get(dbtmodel=new_none_config_model)
-    assert op1.config is None
-
-    op2 = OrgDbtOperation.objects.get(dbtmodel=new_no_input_models_model)
-    assert op2.config == {"type": "rename"}
 
 
 def _make_warehouse(org: Org) -> OrgWarehouse:

@@ -1,25 +1,20 @@
 """Deep-copy the template org's dbt transform DAG onto a freshly-created trial OrgDbt.
 
-Copies BOTH the legacy row-model path (OrgDbtModel/OrgDbtOperation/DbtEdge) and the active v2
-canvas path (CanvasNode/CanvasEdge) — the two systems coexist today (canvas_models.py:1-3), so a
-clone that only copied one would leave the trial org's transform UI half-populated.
+Copies the OrgDbtModel rows (the dbt sources/models themselves) and the v2 canvas path
+(CanvasNode/CanvasEdge) that the transform UI actually renders.
 
-`copy_dbt_dag` copies the DB rows with `sql_path=None`; `regenerate_and_push` then materializes
-the trial repo's CONTENT from those copied rows — `sources.yml` for every SOURCE row and a
-`.sql` per MODEL row, regenerated from the copied operation chains (never by reading the
-template's repo) — and pushes it to the trial's managed repo. Without that content, the copied
-canvas is view-only: any new model built on a copied source/model fails dbt compilation
-("depends on a source/model ... which was not found") and `dbt run` has nothing to build.
-UI4T-built templates only; git-imported templates (no operation chains) raise.
+The v1 row-model tables — OrgDbtOperation and DbtEdge — are deliberately NOT copied. Nothing in
+the live UI4T flow writes them any more (`transform_api.py` creates OrgDbtModel + CanvasNode +
+CanvasEdge only); the sole remaining writer is the one-off
+`management/commands/github_to_ui4t.py` migration. Copying them produced rows no reader
+consumes. Operation state lives on `CanvasNode.operation_config` and is copied by
+`_copy_canvas`.
 
 `uuid` is never copied from the template row — every copy mints its own via `uuid.uuid4()`,
 matching how the rest of the codebase creates these rows (see
-`ddpui/core/dbtautomation_service.py`, `ddpui/api/transform_api.py`,
-`ddpui/management/commands/github_to_ui4t.py`) — `OrgDbtOperation.uuid` in particular is a
-NOT NULL unique field with no model-level default, so it must always be supplied explicitly.
+`ddpui/core/dbtautomation_service.py`, `ddpui/api/transform_api.py`).
 """
 
-import copy
 import shutil
 import tempfile
 import uuid
@@ -34,7 +29,7 @@ from ddpui.core.git_manager import GitManager
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.trial.exceptions import TrialCloneError
 from ddpui.models.canvas_models import CanvasEdge, CanvasNode, CanvasNodeType
-from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtModelType, OrgDbtOperation
+from ddpui.models.dbt_workflow import DbtEdge, OrgDbtModel, OrgDbtModelType
 from ddpui.models.org import Org, OrgDbt, OrgWarehouse
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -76,47 +71,12 @@ def _copy_canvas(template_dbt: OrgDbt, trial_dbt: OrgDbt, model_map: dict) -> No
             seq=edge.seq,
         )
 
-    # The mirror case — an edge INTO the template graph from an outside node — would be
-    # silently dropped by the from_node filter above, losing a dependency. Fail loud instead.
-    stray = (
-        CanvasEdge.objects.filter(to_node__orgdbt=template_dbt)
-        .exclude(from_node__orgdbt=template_dbt)
-        .first()
-    )
-    if stray is not None:
-        raise TrialCloneError(f"canvas edge {stray.id} comes from a node outside the template dbt")
-
-
-def _remap_operation_config(config, uuid_map: dict):
-    """Deep-copy `config` (an `OrgDbtOperation.config`) and, for operations whose config is a
-    dict with an `input_models` list (seq==1 primary input, plus multi-input ops such as
-    join/unionall at any seq), remap each entry's `uuid` (a reference to a parent
-    `OrgDbtModel.uuid`) via `uuid_map`. Never mutates the caller's `config`. Defensive against
-    `config` being None/non-dict, `input_models` being absent, and entries lacking a `uuid` or
-    referencing a uuid outside `uuid_map` (e.g. a cross-org/legacy reference) — those are left
-    untouched."""
-    new_config = copy.deepcopy(config)
-    if not isinstance(new_config, dict):
-        return new_config
-
-    input_models = new_config.get("input_models")
-    if not isinstance(input_models, list):
-        return new_config
-
-    for entry in input_models:
-        if not isinstance(entry, dict):
-            continue
-        old_uuid = entry.get("uuid")
-        if old_uuid is not None and str(old_uuid) in uuid_map:
-            entry["uuid"] = uuid_map[str(old_uuid)]
-
-    return new_config
-
 
 def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
-    """Deep-copy every OrgDbtModel/OrgDbtOperation/DbtEdge (legacy) AND CanvasNode/CanvasEdge
-    (active v2) row from `template_dbt` onto `trial_dbt`, re-parenting FKs to the new rows via
-    an old-model-id -> new-model old->new map.
+    """Deep-copy every OrgDbtModel row and every CanvasNode/CanvasEdge row from `template_dbt`
+    onto `trial_dbt`, re-parenting FKs to the new rows via an old-model-id -> new-model map.
+
+    The v1 OrgDbtOperation/DbtEdge tables are not copied — see this module's docstring.
 
     `sql_path` is copied AS-IS — `copy_repo_models_from_template` copies the template repo's
     `models/` directory verbatim into the trial repo, so every copied row's project-relative
@@ -126,7 +86,6 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
     Returns `model_map` (`{old OrgDbtModel.id: new OrgDbtModel}`).
     """
     model_map: dict = {}
-    uuid_map: dict = {}
     for m in OrgDbtModel.objects.filter(orgdbt=template_dbt):
         new_m = OrgDbtModel.objects.create(
             orgdbt=trial_dbt,
@@ -141,38 +100,6 @@ def copy_dbt_dag(template_dbt: OrgDbt, trial_dbt: OrgDbt) -> dict:
             under_construction=m.under_construction,
         )
         model_map[m.id] = new_m
-        if m.uuid is not None:
-            uuid_map[str(m.uuid)] = str(new_m.uuid)
-
-    for op in OrgDbtOperation.objects.filter(dbtmodel__orgdbt=template_dbt):
-        OrgDbtOperation.objects.create(
-            dbtmodel=model_map[op.dbtmodel_id],
-            uuid=uuid.uuid4(),
-            seq=op.seq,
-            output_cols=op.output_cols,
-            config=_remap_operation_config(op.config, uuid_map),
-        )
-
-    # Filter by from_node only, then guard the to_node lookup: a cross-orgdbt edge (producible
-    # by `github_to_ui4t.py`'s org-unscoped model lookups) must fail loud, not KeyError or be
-    # silently half-copied.
-    for e in DbtEdge.objects.filter(from_node__orgdbt=template_dbt):
-        if e.to_node_id not in model_map:
-            raise TrialCloneError(f"dbt edge {e.id} points at a model outside the template dbt")
-        DbtEdge.objects.create(
-            from_node=model_map[e.from_node_id],
-            to_node=model_map[e.to_node_id],
-        )
-
-    stray_edge = (
-        DbtEdge.objects.filter(to_node__orgdbt=template_dbt)
-        .exclude(from_node__orgdbt=template_dbt)
-        .first()
-    )
-    if stray_edge is not None:
-        raise TrialCloneError(
-            f"dbt edge {stray_edge.id} comes from a model outside the template dbt"
-        )
 
     _copy_canvas(template_dbt, trial_dbt, model_map)
 

@@ -5,7 +5,10 @@ import email.mime.multipart
 import email.mime.text
 import email.mime.application
 
+from django.conf import settings
+
 from ddpui.utils.aws_client import AWSClient
+from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.email_templates import (
     render_verify_email,
     render_trial_welcome_email,
@@ -15,6 +18,9 @@ from ddpui.utils.email_templates import (
     render_trial_midpoint_email,
     render_trial_pre_end_email,
 )
+
+
+logger = CustomLogger("ddpui.utils.awsses")
 
 
 def _get_ses_client():
@@ -213,3 +219,15 @@ You've been added to {org_name} by {added_by}.
 Open your dashboard at {url}
     """
     send_text_message(to_email, "Added to Dalgo Org", message)
+
+
+def send_trial_ops_alert(subject: str, body: str) -> None:
+    """Report a trial teardown/cleanup failure to the engineering address.
+
+    Best-effort and never raises: every caller is an error path that must not be replaced by a
+    mail error. A swallowed send is logged and the underlying failure is already in the logs.
+    """
+    try:
+        send_text_message(settings.TRIAL_ALERT_EMAIL, f"[Dalgo trials] {subject}", body)
+    except Exception as err:  # skipcq PYL-W0703
+        logger.error("failed to send trial ops alert %r: %s", subject, err)

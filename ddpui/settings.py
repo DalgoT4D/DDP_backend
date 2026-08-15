@@ -334,17 +334,12 @@ SIMPLE_JWT = {
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
-# Destination for the SCHEDULE-A-CALL button in the trial lifecycle emails.
-#
-# It has a real default so the emails are never sent with a dead button, and it matches the link
-# the frontend uses (BOOK_A_CALL_URL in webapp_v2 constants/trial.ts) — the two should point at
-# the same booking page. Still env-overridable per deployment.
-DEFAULT_TRIAL_SCHEDULE_CALL_URL = "https://calendly.com/priyesh-projecttech4dev/30min"
+# SCHEDULE-A-CALL button in the trial lifecycle emails. Keep in sync with BOOK_A_CALL_URL in
+# webapp_v2 constants/trial.ts.
+TRIAL_SCHEDULE_CALL_URL = os.getenv("TRIAL_SCHEDULE_CALL_URL")
 
-# `or`, not a getenv default: every deployment that copied .env.template has the key present but
-# EMPTY, and os.getenv returns "" for that — a plain default would never apply where it's needed
-# most, and the emails would go out with a dead button.
-TRIAL_SCHEDULE_CALL_URL = os.getenv("TRIAL_SCHEDULE_CALL_URL") or DEFAULT_TRIAL_SCHEDULE_CALL_URL
+# Where failed trial teardowns/cleanups are reported.
+TRIAL_ALERT_EMAIL = os.getenv("TRIAL_ALERT_EMAIL")
 
 # Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
 RENDER_SECRET = os.getenv("RENDER_SECRET")

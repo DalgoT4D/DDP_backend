@@ -41,12 +41,11 @@ from ddpui.core.trial.activation import CLONE_LOCK_PREFIX
 from ddpui.core.trial.constants import (
     TRIAL_ORG_SLUG_PREFIX,
     TRIAL_ORG_SLUG_REGEX,
-    TRIAL_DELETE_LOCK_KEY,
-    TRIAL_DELETE_LOCK_TTL_SECONDS,
     TRIAL_DELETE_STAGGER_SECONDS,
 )
 from ddpui.core.trial.signup_record import record_deletion
 from ddpui.core.trial.warehouse_provision import drop_trial_database, email_hash8
+from ddpui.utils import awsses
 from ddpui.utils.redis_client import RedisClient
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -107,37 +106,17 @@ class Command(BaseCommand):
         )
 
     def delete_expired_trials(self) -> int:
-        """Delete every expired trial, under a global lock. Returns how many were deleted.
+        """Delete every expired trial, one at a time with a gap. Returns how many were deleted.
 
-        The lock makes concurrent deletes impossible. It matters because the schedule is hourly
-        while a run is NOT bounded by an hour — TRIAL_DELETE_STAGGER_SECONDS alone reaches
-        the hour mark at ~120 orgs. Overlapping runs would both select the same rows (nothing is marked
-        in-progress; a row only stops matching once its org row is gone) and tear the same org
-        down twice.
-
-        Returning 0 when the lock is held is correct, not a skipped delete: the run that owns the
-        lock is working through the very same queryset, and anything it misses is picked up by
-        the next tick an hour later.
+        Runs unsynchronised — see the note above TRIAL_DELETE_STAGGER_SECONDS in
+        ddpui/core/trial/constants.py for why no mutex is needed at this deployment's volume,
+        and what to reinstate if that changes.
         """
-        redis = RedisClient.get_instance()
-        if not redis.set(TRIAL_DELETE_LOCK_KEY, "1", nx=True, ex=TRIAL_DELETE_LOCK_TTL_SECONDS):
-            logger.info("an expired-trial deletion is already running; skipping this one")
-            self.stdout.write("an expired-trial deletion is already running; skipping")
-            return 0
-
-        try:
-            return self.delete_expired_trials_unlocked()
-        finally:
-            # release on the way out (success OR crash) so the next hourly tick isn't blocked by
-            # the TTL. `delete` is idempotent — safe if the TTL already fired.
-            redis.delete(TRIAL_DELETE_LOCK_KEY)
-
-    def delete_expired_trials_unlocked(self) -> int:
-        """Delete every expired trial, one at a time with a gap. Returns how many were deleted."""
         org_plans = list(self.expired_trial_plans(timezone.now()))
         self.stdout.write(f"{len(org_plans)} expired trial(s) to delete")
 
         deleted = 0
+        failures = []
         for index, org_plan in enumerate(org_plans):
             # sleep at the TOP of the iteration, not the bottom, so a failed org still gets its
             # gap before the next one starts — a failing org is frequently an overloaded or
@@ -153,11 +132,32 @@ class Command(BaseCommand):
                 deleted += 1
             except Exception as err:  # skipcq PYL-W0703
                 logger.error("trial delete failed for org %s: %s", org.slug, err, exc_info=True)
+                failures.append((org.slug, str(err)))
+
+        if failures:
+            self.alert_sweep_failures(failures)
 
         self.stdout.write(
             self.style.SUCCESS(f"deleted {deleted} of {len(org_plans)} expired trial(s)")
         )
         return deleted
+
+    def alert_sweep_failures(self, failures: list) -> None:
+        """Email engineering once per sweep, naming the orgs that failed.
+
+        ONE summary, not one mail per org — a multi-hour Airbyte outage would otherwise mail per
+        failing org per hourly tick. Terse on purpose: the next tick retries automatically, so a
+        one-off needs no action; what matters is spotting the same slug hour after hour. Reasons
+        and tracebacks stay in the logs.
+        """
+        listed = "\n".join(f"- {slug}" for slug, _ in failures)
+        awsses.send_trial_ops_alert(
+            f"cleanup failed for {len(failures)} org(s)",
+            f"{listed}\n\n"
+            "Retries next hour. If the same orgs keep appearing:\n"
+            "    python manage.py cleanup_trial_clone --email <owner-address>\n"
+            "Details in the server logs.",
+        )
 
     def purge_expired_org(self, org: Org) -> None:
         """Delete one expired trial org by handing its owner's email to the --email path.
@@ -231,16 +231,23 @@ class Command(BaseCommand):
             )
             self.stdout.write(f"skipping non-trial org(s) for this email: {', '.join(skipped)}")
 
-        if target_orgs:
-            for org in target_orgs.values():
-                self.stdout.write(f"deleting org {org.slug} and its external resources ...")
-                delete_trial_org(org)
-        else:
-            self.stdout.write("no trial org found for this email (org may already be gone)")
-
-        # always attempt the RDS drop — the db/role names are deterministic from the email, so
-        # this cleans up even if the org row was already deleted but the db leaked.
-        drop_trial_database(email)
+        # The RDS drop is in a `finally` on purpose. delete_trial_org reaches Airbyte, GitHub and
+        # Prefect, so it can throw on any of their outages — and the trial db+role live OUTSIDE
+        # the org graph, so nothing else will ever reclaim them. Letting the exception skip the
+        # drop leaks a real database on the shared trials RDS every time a teardown half-fails.
+        # Same guard, same reasoning as `_teardown` in clone_service.py. The exception still
+        # propagates (the --expired loop logs it and moves on; a manual --email run shows it).
+        try:
+            if target_orgs:
+                for org in target_orgs.values():
+                    self.stdout.write(f"deleting org {org.slug} and its external resources ...")
+                    delete_trial_org(org)
+            else:
+                self.stdout.write("no trial org found for this email (org may already be gone)")
+        finally:
+            # the db/role names are deterministic from the email, so this cleans up even if the
+            # org row was already deleted but the db leaked.
+            drop_trial_database(email)
 
         # Close the durable TrialSignup record — its deleted_at is the whole reason anything is
         # left to know this trial existed once the rows below are gone. Best-effort: the account
