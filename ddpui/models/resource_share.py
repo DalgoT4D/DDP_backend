@@ -104,7 +104,14 @@ class ResourceShare(models.Model):
             ),
             # prevent duplicate cascade rows for the same principal+resource from the same parent share
             models.UniqueConstraint(
-                fields=["org", "resource_type", "resource_id", "principal_type", "principal_id", "parent"],
+                fields=[
+                    "org",
+                    "resource_type",
+                    "resource_id",
+                    "principal_type",
+                    "principal_id",
+                    "parent",
+                ],
                 condition=models.Q(parent__isnull=False),
                 name="uq_resource_share_cascade_grant",
             ),
@@ -152,7 +159,9 @@ class AccessRequest(models.Model):
     class Meta:
         db_table = "access_request"
         indexes = [
-            models.Index(fields=["org", "resource_type", "resource_id"], name="access_req_org_resource_idx"),
+            models.Index(
+                fields=["org", "resource_type", "resource_id"], name="access_req_org_resource_idx"
+            ),
         ]
         constraints = [
             models.UniqueConstraint(

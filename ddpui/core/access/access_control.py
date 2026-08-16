@@ -24,7 +24,12 @@ from ddpui.core.access import shareable_types
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser, OrgUserGroupMember
-from ddpui.models.resource_share import AccessLevel, ResourceShare, ResourceSharePrincipalType, max_access_level
+from ddpui.models.resource_share import (
+    AccessLevel,
+    ResourceShare,
+    ResourceSharePrincipalType,
+    max_access_level,
+)
 from ddpui.models.role_based_access import RoleSlug
 
 
@@ -67,9 +72,13 @@ def _grants_map(
     group_levels: dict[str, str] = {}
     for row in rows:
         if row.principal_type == ResourceSharePrincipalType.USER:
-            user_levels[row.resource_id] = max_access_level(user_levels.get(row.resource_id), row.access_level)
+            user_levels[row.resource_id] = max_access_level(
+                user_levels.get(row.resource_id), row.access_level
+            )
         else:
-            group_levels[row.resource_id] = max_access_level(group_levels.get(row.resource_id), row.access_level)
+            group_levels[row.resource_id] = max_access_level(
+                group_levels.get(row.resource_id), row.access_level
+            )
 
     return {
         rid: max_access_level(user_levels.get(rid), group_levels.get(rid))
@@ -93,7 +102,8 @@ def get_user_access(orguser: OrgUser, rtype: str, resource_id) -> Optional[str]:
     """
     entry = shareable_types.get_rtype_entry(rtype)
     row = (
-        entry["model"].objects.filter(org=orguser.org, pk=resource_id)
+        entry["model"]
+        .objects.filter(org=orguser.org, pk=resource_id)
         .only("created_by_id", "is_private")
         .first()
     )

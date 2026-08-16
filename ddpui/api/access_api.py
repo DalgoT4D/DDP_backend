@@ -4,7 +4,11 @@ Endpoints are thin wrappers around ``ddpui.core.access.resource_share`` —
 this file owns authz gates, request-shape parsing, and HTTP error mapping.
 """
 
+import secrets
+from typing import Optional
+
 from django.conf import settings
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -12,14 +16,19 @@ from ddpui.auth import has_permission
 from ddpui.core.access import resource_share, shareable_types
 from ddpui.core.access.access_control import get_user_access
 from ddpui.core.access.ownership import is_creator_or_admin, transfer_ownership, OwnershipError
+from ddpui.core.audit_log_service import create_audit_log
 from ddpui.core.notifications.notifications_functions import create_notification
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
+from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
 from ddpui.models.resource_share import AccessLevel, AccessRequest, AccessRequestStatus
 from ddpui.schemas.access.resource_share_schema import (
     AccessRequestSchema,
     AddGrantsPayload,
+    GeneralAccessPayload,
+    GeneralAccessState,
     GrantsListResponse,
-    PrivateTogglePayload,
+    OwnerInfo,
     RequestAccessPayload,
     RespondToRequestPayload,
     ShareRowSchema,
@@ -169,6 +178,45 @@ def _notify_requester_of_response(
 # Grants
 
 
+def _general_access_state(orguser: OrgUser, rtype: str, resource) -> GeneralAccessState:
+    """Snapshot the resource's current org-wide access mode for the share modal."""
+    supports_public = hasattr(resource, "is_public")
+    is_private = bool(getattr(resource, "is_private", False))
+    is_public = bool(getattr(resource, "is_public", False))
+    mode = "private" if is_private else ("public" if is_public else "everyone")
+
+    prefs = OrgPreferences.objects.filter(org=orguser.org).first()
+    allow_public_sharing = bool(prefs.allow_public_sharing) if prefs else True
+
+    public_url = None
+    token = getattr(resource, "public_share_token", None)
+    if is_public and token:
+        public_url = _public_share_url(rtype, token)
+
+    last_public_accessed = getattr(resource, "last_public_accessed", None)
+    return GeneralAccessState(
+        mode=mode,
+        supports_public=supports_public,
+        allow_public_sharing=allow_public_sharing,
+        public_url=public_url,
+        public_access_count=int(getattr(resource, "public_access_count", 0) or 0),
+        last_public_accessed=last_public_accessed.isoformat() if last_public_accessed else None,
+    )
+
+
+def _owner_info(resource) -> Optional[OwnerInfo]:
+    """Best-effort owner display info for the People-with-access section.
+    None on orphan resources whose ``created_by`` OrgUser was deleted."""
+    owner = getattr(resource, "created_by", None)
+    if owner is None:
+        return None
+    email = getattr(getattr(owner, "user", None), "email", None)
+    if not email:
+        return None
+    role_name = getattr(getattr(owner, "new_role", None), "name", None)
+    return OwnerInfo(email=email, role_name=role_name)
+
+
 @access_router.get("/{rtype}/{resource_id}/grants", response=GrantsListResponse)
 def list_resource_grants(request, rtype: str, resource_id: str):
     """List everyone with access to this resource."""
@@ -176,7 +224,12 @@ def list_resource_grants(request, rtype: str, resource_id: str):
     _require_edit_or_admin(orguser, rtype, resource, "view sharing")
     shares = resource_share.list_grants(orguser.org, rtype, resource_id)
     caller_is_owner = getattr(resource, "created_by_id", None) == orguser.id
-    return GrantsListResponse(shares=shares, caller_is_owner=caller_is_owner)
+    return GrantsListResponse(
+        shares=shares,
+        caller_is_owner=caller_is_owner,
+        general_access=_general_access_state(orguser, rtype, resource),
+        owner=_owner_info(resource),
+    )
 
 
 @access_router.post("/{rtype}/{resource_id}/grants", response=list[ShareRowSchema])
@@ -231,28 +284,106 @@ def remove_resource_grant(request, rtype: str, resource_id: str, share_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Private toggle
+# General access (Everyone / Private / Public)
 
 
-@access_router.patch("/{rtype}/{resource_id}/private")
-def toggle_private(request, rtype: str, resource_id: str, payload: PrivateTogglePayload):
-    """Mark a resource private (floor-based access bypassed) or public."""
+_PUBLIC_URL_PATH = {"dashboard": "dashboard", "report": "report"}
+
+
+def _public_share_url(rtype: str, token: str) -> str:
+    """Frontend URL for the anonymous-viewer share link."""
+    frontend_url = (
+        getattr(settings, "FRONTEND_URL_V2", None)
+        or getattr(settings, "FRONTEND_URL", None)
+        or "http://localhost:3000"
+    ).rstrip("/")
+    return f"{frontend_url}/share/{_PUBLIC_URL_PATH.get(rtype, rtype)}/{token}"
+
+
+@access_router.patch("/{rtype}/{resource_id}/general-access")
+def update_general_access(request, rtype: str, resource_id: str, payload: GeneralAccessPayload):
+    """Set the org-wide access mode for a resource.
+
+    - ``everyone`` — floor-based org access, no public link
+    - ``private`` — only explicitly-shared users
+    - ``public`` — floor-based org access + anyone with the link (dashboards/reports only)
+    """
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
-    _require_edit_or_admin(orguser, rtype, resource, "change privacy")
+    _require_edit_or_admin(orguser, rtype, resource, "change access")
 
-    resource.is_private = payload.is_private
-    update_fields = ["is_private"]
+    is_private = payload.mode == "private"
+    is_public = payload.mode == "public"
+    supports_public = hasattr(resource, "is_public")
 
-    if payload.is_private:
-        if hasattr(resource, "is_public"):
-            resource.is_public = False
-            update_fields.append("is_public")
-        if hasattr(resource, "public_share_token"):
-            resource.public_share_token = None
-            update_fields.append("public_share_token")
+    if is_public and not supports_public:
+        raise HttpError(400, f"public sharing not supported for {rtype}")
+
+    if is_public:
+        prefs = OrgPreferences.objects.filter(org=orguser.org).first()
+        if prefs and not prefs.allow_public_sharing:
+            raise HttpError(403, "public sharing is disabled by your admin")
+
+    update_fields: list[str] = []
+    prev_public = bool(getattr(resource, "is_public", False))
+
+    resource.is_private = is_private
+    update_fields.append("is_private")
+
+    if supports_public:
+        resource.is_public = is_public
+        update_fields.append("is_public")
+
+        if is_public:
+            if not getattr(resource, "public_share_token", None):
+                resource.public_share_token = secrets.token_urlsafe(48)
+                update_fields.append("public_share_token")
+            if hasattr(resource, "public_shared_at"):
+                resource.public_shared_at = timezone.now()
+                update_fields.append("public_shared_at")
+            if hasattr(resource, "public_disabled_at"):
+                resource.public_disabled_at = None
+                update_fields.append("public_disabled_at")
+        else:
+            if prev_public and hasattr(resource, "public_disabled_at"):
+                resource.public_disabled_at = timezone.now()
+                update_fields.append("public_disabled_at")
+            # Wipe the token only when going fully private — turning "public → everyone"
+            # keeps the token dormant for audit / re-enable, matching the existing
+            # dashboard/report toggle semantics.
+            if is_private and hasattr(resource, "public_share_token"):
+                resource.public_share_token = None
+                update_fields.append("public_share_token")
 
     resource.save(update_fields=update_fields)
-    return {"is_private": resource.is_private}
+
+    if supports_public and prev_public != is_public:
+        rtype_map = {
+            "dashboard": AuditLogResourceType.DASHBOARD,
+            "report": AuditLogResourceType.REPORT,
+        }
+        audit_rtype = rtype_map.get(rtype)
+        if audit_rtype is not None:
+            create_audit_log(
+                org=orguser.org,
+                orguser=orguser,
+                resource_type=audit_rtype,
+                resource_id=str(resource.pk),
+                action=AuditLogAction.SHARE,
+                resource_fields={
+                    "title": _resource_title(resource),
+                    "is_public": {"old": prev_public, "new": is_public},
+                },
+            )
+
+    response = {
+        "mode": payload.mode,
+        "is_private": resource.is_private,
+        "is_public": bool(getattr(resource, "is_public", False)),
+    }
+    if is_public and getattr(resource, "public_share_token", None):
+        response["public_url"] = _public_share_url(rtype, resource.public_share_token)
+        response["public_share_token"] = resource.public_share_token
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -289,9 +420,7 @@ def _access_request_to_schema(req: AccessRequest) -> AccessRequestSchema:
 
 
 @access_router.post("/{rtype}/{resource_id}/request-access", response=AccessRequestSchema)
-def create_access_request(
-    request, rtype: str, resource_id: str, payload: RequestAccessPayload
-):
+def create_access_request(request, rtype: str, resource_id: str, payload: RequestAccessPayload):
     """Submit a request for access to a resource the caller cannot currently see."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
 

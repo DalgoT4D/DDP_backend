@@ -13,6 +13,7 @@ AccessLevel = Literal["view", "edit"]
 PrincipalType = Literal["user", "group"]
 ShareRowKind = Literal["user", "group", "invitation"]
 ShareRowStatus = Literal["active", "pending"]
+GeneralAccessMode = Literal["everyone", "private", "public"]
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +47,31 @@ class ShareRowSchema(Schema):
     cascade_sources: list[CascadeSourceSchema] = []
 
 
+class OwnerInfo(Schema):
+    """Resource owner (``created_by``) surfaced separately from the shares list
+    since the owner has implicit Edit access — no ``ResourceShare`` row exists
+    for them. Null on orphan resources (creator was deleted from the org)."""
+
+    email: str
+    role_name: Optional[str] = None
+
+
+class GeneralAccessState(Schema):
+    """Current org-wide access state, embedded in the grants response so the
+    share modal can render its "General access" section from a single GET.
+
+    ``supports_public`` is False for rtypes that have no ``is_public`` field
+    (charts, KPIs) — the frontend hides the Public option accordingly.
+    """
+
+    mode: GeneralAccessMode  # "everyone" | "private" | "public"
+    supports_public: bool
+    allow_public_sharing: bool  # org-level; when False the Public option is disabled
+    public_url: Optional[str] = None
+    public_access_count: int = 0
+    last_public_accessed: Optional[str] = None
+
+
 class GrantsListResponse(Schema):
     """Wrapper returned by ``GET /api/access/{rtype}/{id}/grants``.
 
@@ -56,6 +82,8 @@ class GrantsListResponse(Schema):
 
     shares: list[ShareRowSchema]
     caller_is_owner: bool
+    general_access: GeneralAccessState
+    owner: Optional[OwnerInfo] = None
 
 
 # ---------------------------------------------------------------------------
@@ -99,10 +127,16 @@ class UpdateGrantPayload(Schema):
     access_level: AccessLevel
 
 
-class PrivateTogglePayload(Schema):
-    """Body for ``PATCH /api/access/{rtype}/{id}/private``."""
+class GeneralAccessPayload(Schema):
+    """Body for ``PATCH /api/access/{rtype}/{id}/general-access``.
 
-    is_private: bool
+    Maps 1:1 to the "General access" dropdown in the share modal:
+    - ``everyone`` — org-wide role-floor access, no public link
+    - ``private`` — only explicitly-shared users
+    - ``public`` — org-wide access plus anyone with the link
+    """
+
+    mode: GeneralAccessMode
 
 
 class TransferOwnershipPayload(Schema):

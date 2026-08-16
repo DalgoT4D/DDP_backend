@@ -1025,7 +1025,9 @@ def download_chart_data_csv(
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_charts"])
-@has_access(ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser: OrgUser = request.orguser
@@ -1190,7 +1192,9 @@ def create_chart(request, payload: ChartCreate):
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
-@has_access(ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
+@has_access(
+    ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
@@ -1262,7 +1266,9 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
 
 @charts_router.delete("/{chart_id}/")
 @has_permission(["can_delete_charts"])
-@has_access(ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
+@has_access(
+    ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser: OrgUser = request.orguser
@@ -1331,7 +1337,9 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
 @has_permission(["can_view_charts"])
-@has_access(ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id"))
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def get_chart_dashboards(request, chart_id: int):
     """Get list of dashboards that use this chart"""
     orguser: OrgUser = request.orguser

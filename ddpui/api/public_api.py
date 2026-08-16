@@ -38,6 +38,7 @@ from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core.kpi.kpi_service import KPIService
 from ddpui.core.kpi.exceptions import KPINotFoundError
+from django.db.models import Q
 from sqlalchemy import func, column, distinct, cast, Float, Date
 
 logger = CustomLogger("ddpui")
@@ -91,17 +92,49 @@ class PublicErrorResponse(Schema):
     is_valid: bool = False
 
 
+# Filter clause used everywhere we look up a public resource by token:
+# - resource is flagged public
+# - the resource's org has public sharing enabled at the org level (or has no
+#   preferences row yet — the model default is True, so we don't want a
+#   missing preferences row to lock everyone out).
+#
+# One place to enforce the admin toggle for every public dashboard/report
+# endpoint below.
+_PUBLIC_ORG_FILTER = Q(org__preferences__allow_public_sharing=True) | Q(
+    org__preferences__isnull=True
+)
+
+
+def _resolve_public_dashboard(token: str) -> Optional[Dashboard]:
+    """Fetch a public-shared dashboard by token, or None if the token is bad,
+    the dashboard isn't public, or the org has disabled public sharing.
+
+    Callers convert None → their local 404 error response shape.
+    """
+    return (
+        Dashboard.objects.filter(
+            _PUBLIC_ORG_FILTER,
+            public_share_token=token,
+            is_public=True,
+        )
+        .select_related("org", "created_by__user")
+        .first()
+    )
+
+
 @public_router.get(
     "/dashboards/{token}/", response={200: PublicDashboardResponse, 404: PublicErrorResponse}
 )
 def get_public_dashboard(request, token: str):
     """Get public dashboard by token - reuses authenticated dashboard logic"""
-    try:
-        # Find dashboard by token and ensure it's public
-        dashboard = Dashboard.objects.select_related("org", "created_by__user").get(
-            public_share_token=token, is_public=True
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public dashboard access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
         )
 
+    try:
         # Update access analytics
         Dashboard.objects.filter(id=dashboard.id).update(
             public_access_count=F("public_access_count") + 1, last_public_accessed=timezone.now()
@@ -131,11 +164,6 @@ def get_public_dashboard(request, token: str):
 
         return PublicDashboardResponse(**public_response_data)
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public dashboard access failed - token not found: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public dashboard access error: {str(e)}")
         return 404, PublicErrorResponse(error="Dashboard not accessible", is_valid=False)
@@ -159,17 +187,21 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
     WITHOUT THIS: Public dashboards cannot determine chart types or configurations,
     breaking all specialized chart rendering (maps, tables, etc.)
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(
+            f"Public chart metadata access failed - dashboard not found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        # Import required modules
+    try:
         from ddpui.models.visualization import Chart
 
-        # Get the chart and ensure it belongs to the dashboard's org
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+            return 404, PublicErrorResponse(error="Chart metadata unavailable", is_valid=False)
 
         return {
             "id": chart.id,
@@ -181,14 +213,6 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
             "description": chart.description,
             "is_valid": True,
         }
-
-    except Dashboard.DoesNotExist:
-        logger.warning(
-            f"Public chart metadata access failed - dashboard not found for token: {token}"
-        )
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public chart metadata error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Chart metadata unavailable", is_valid=False)
@@ -210,10 +234,14 @@ def get_public_chart_data(request, token: str, chart_id: int):
     KEEP IT: Doesn't hurt to have it, provides a consistent API pattern.
     It handles edge cases where the existing infrastructure might not work.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public chart access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
+    try:
         # Get dashboard filters from query params
         filters = {}
         filters_param = request.GET.get("dashboard_filters")
@@ -274,11 +302,6 @@ def get_public_chart_data(request, token: str, chart_id: int):
 
         return PublicChartDataResponse(**response_data)
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public chart access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public chart data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
@@ -392,20 +415,17 @@ def get_public_filter_preview(
     limit: int = 100,
 ):
     """Get public filter preview for a dashboard token"""
-    try:
-        # Verify token belongs to a public dashboard
-        try:
-            dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
-            org = dashboard.org
-        except Dashboard.DoesNotExist:
-            logger.warning(
-                f"Public filter preview access failed - no public dashboard found for token: {token}"
-            )
-            return 404, PublicErrorResponse(
-                error="Dashboard not found or no longer public", is_valid=False
-            )
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(
+            f"Public filter preview access failed - no public dashboard found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    try:
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
 
@@ -435,16 +455,16 @@ def get_public_report_filter_preview(
 ):
     """Get public filter preview for a report snapshot token"""
     try:
-        try:
-            snapshot = ReportSnapshot.objects.get(public_share_token=token, is_public=True)
-        except ReportSnapshot.DoesNotExist:
-            logger.warning(
-                f"Public report filter preview failed - no public report found for token: {token}"
-            )
-            return 404, PublicErrorResponse(
-                error="Report not found or no longer public", is_valid=False
-            )
+        snapshot = _get_public_report_snapshot(token, request=request)
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(
+            f"Public report filter preview failed - no public report found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
 
+    try:
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
@@ -466,11 +486,10 @@ def get_public_report_filter_preview(
 )
 def validate_public_dashboard(request, token: str):
     """Lightweight validation - check if token is valid"""
-    try:
-        dashboard = Dashboard.objects.only("title").get(public_share_token=token, is_public=True)
-        return PublicValidationResponse(is_valid=True, title=dashboard.title)
-    except Dashboard.DoesNotExist:
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
         return 404, PublicValidationResponse(is_valid=False, title=None)
+    return PublicValidationResponse(is_valid=True, title=dashboard.title)
 
 
 @public_router.post(
@@ -501,10 +520,14 @@ def get_public_chart_data_preview(
     WITHOUT THIS: Table charts in public dashboards cannot display data
     or handle pagination/sorting functionality.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public table data access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
+    try:
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
@@ -555,11 +578,6 @@ def get_public_chart_data_preview(
             "is_valid": True,
         }
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public table data access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public table data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
@@ -584,18 +602,19 @@ def get_public_geojson_data(request, token: str, geojson_id: int):
     WITHOUT THIS: Map charts in public dashboards show no geographic boundaries,
     appearing as blank/empty maps with no visual regions to display data on.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public geojson access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        # Import required modules
+    try:
         from ddpui.models.geojson import GeoJSON
         from django.shortcuts import get_object_or_404
 
-        # Get geojson with same logic as authenticated API
         geojson = get_object_or_404(GeoJSON, id=geojson_id)
 
-        # Check access permissions (allow default geojsons or org-specific ones)
         if not geojson.is_default and geojson.org_id != dashboard.org.id:
             raise Exception("Access denied to GeoJSON")
 
@@ -608,11 +627,6 @@ def get_public_geojson_data(request, token: str, geojson_id: int):
             "is_valid": True,
         }
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public geojson access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public geojson error for geojson {geojson_id}: {str(e)}")
         return 404, PublicErrorResponse(error="GeoJSON data unavailable", is_valid=False)
@@ -642,10 +656,14 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
     WITHOUT THIS: Map charts show geographic boundaries but no data overlay,
     appearing as blank maps with no population/value visualization.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
+    try:
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
@@ -771,11 +789,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
 
         return {"data": map_data, "is_valid": True, "count": len(map_data)}
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public map data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Map data unavailable", is_valid=False)
@@ -917,11 +930,12 @@ def download_public_chart_data_csv(
     Returns:
         StreamingHttpResponse with CSV data
     """
-    try:
-        # Verify dashboard is public and get organization
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public CSV download failed - dashboard not found for token: {token}")
+        raise HttpError(404, "Dashboard not found or no longer public")
 
-        # Get the chart and verify it belongs to the dashboard's organization
+    try:
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise HttpError(404, "Chart not found in dashboard's organization")
@@ -974,9 +988,6 @@ def download_public_chart_data_csv(
 
         return response
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public CSV download failed - dashboard not found for token: {token}")
-        raise HttpError(404, "Dashboard not found or no longer public")
     except Exception as e:
         logger.error(f"Public CSV download error for chart {chart_id}: {str(e)}")
         raise HttpError(500, f"CSV download failed: {str(e)}")
@@ -993,11 +1004,14 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
     """
     import json
 
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public total rows access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        # Get the chart and org warehouse
+    try:
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise Exception("Chart not found in dashboard's organization")
@@ -1062,11 +1076,6 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
 
         return {"total_rows": total_rows, "is_valid": True}
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public total rows access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
@@ -1086,9 +1095,8 @@ def get_public_kpi_data(
     dashboard_filters: Optional[str] = None,
 ):
     """Get KPI chart data for a public dashboard — no authentication required."""
-    try:
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
-    except Dashboard.DoesNotExist:
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
         return 404, PublicErrorResponse(
             error="Dashboard not found or no longer public", is_valid=False
         )
@@ -1140,9 +1148,14 @@ def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
     """Helper to lookup a report snapshot by token.
 
     If the request carries a valid X-Render-Secret header (matching
-    settings.RENDER_SECRET), the is_public check is skipped. This
-    allows server-side Playwright PDF rendering without toggling
-    the snapshot's public state.
+    settings.RENDER_SECRET), the is_public check is skipped and the
+    org's ``allow_public_sharing`` toggle is bypassed. This allows
+    server-side Playwright PDF rendering to work regardless of the
+    anonymous-viewer toggle (rendering is internal traffic, not a
+    public consumer).
+
+    On the anonymous path we additionally require the org to have
+    public sharing enabled — matches the dashboard helper.
 
     Raises ReportSnapshot.DoesNotExist if not found.
     """
@@ -1155,7 +1168,9 @@ def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
             )
 
     return ReportSnapshot.objects.select_related("org", "created_by__user").get(
-        public_share_token=token, is_public=True
+        _PUBLIC_ORG_FILTER,
+        public_share_token=token,
+        is_public=True,
     )
 
 

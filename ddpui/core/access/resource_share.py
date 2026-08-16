@@ -41,7 +41,7 @@ def _parse_inner_ids(tabs) -> dict:
     """Parse dashboard tabs JSON → {chart_ids: [...], kpi_ids: [...]}.
     Called at write-time only — never on the read path."""
     chart_ids, kpi_ids = [], []
-    for tab in (tabs or []):
+    for tab in tabs or []:
         for comp in (tab.get("components") or {}).values():
             cfg = comp.get("config", {})
             if comp.get("type") == "chart" and cfg.get("chartId"):
@@ -99,13 +99,13 @@ def sync_dashboard_cascade(dashboard: Dashboard) -> None:
                 defaults={"access_level": share.access_level, "created_by": share.created_by},
             )
 
-        ResourceShare.objects.filter(
-            parent=share, resource_type=ResourceType.CHART
-        ).exclude(resource_id__in=current_chart_ids).delete()
+        ResourceShare.objects.filter(parent=share, resource_type=ResourceType.CHART).exclude(
+            resource_id__in=current_chart_ids
+        ).delete()
 
-        ResourceShare.objects.filter(
-            parent=share, resource_type=ResourceType.KPI
-        ).exclude(resource_id__in=current_kpi_ids).delete()
+        ResourceShare.objects.filter(parent=share, resource_type=ResourceType.KPI).exclude(
+            resource_id__in=current_kpi_ids
+        ).delete()
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,9 @@ def list_grants(org: Org, rtype: str, resource_id) -> list[ShareRowSchema]:
 
     # Resolve principals in bulk.
     user_ids = [r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.USER]
-    group_ids = [r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.GROUP]
+    group_ids = [
+        r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.GROUP
+    ]
     users_by_id = {
         u.id: u
         for u in OrgUser.objects.filter(org=org, id__in=user_ids).select_related("user", "new_role")
@@ -174,9 +176,7 @@ def list_grants(org: Org, rtype: str, resource_id) -> list[ShareRowSchema]:
         direct_row = direct_rows[0] if direct_rows else None
         share_id = direct_row.id if direct_row else None
 
-        effective_level = max(
-            (r.access_level for r in prows), key=lambda lvl: LEVEL_RANK[lvl]
-        )
+        effective_level = max((r.access_level for r in prows), key=lambda lvl: LEVEL_RANK[lvl])
 
         cascade_sources = [
             cascade_source_by_parent_id[r.parent_id]
@@ -186,48 +186,54 @@ def list_grants(org: Org, rtype: str, resource_id) -> list[ShareRowSchema]:
 
         if ptype == "user" and pid in users_by_id:
             u = users_by_id[pid]
-            shares.append(ShareRowSchema(
-                share_id=share_id,
-                principal_type="user",
-                principal_id=pid,
-                email=u.user.email,
-                label=u.user.email,
-                role_or_group=u.new_role.name if u.new_role else None,
-                access_level=effective_level,
-                status="active",
-                cascade_sources=cascade_sources,
-            ))
+            shares.append(
+                ShareRowSchema(
+                    share_id=share_id,
+                    principal_type="user",
+                    principal_id=pid,
+                    email=u.user.email,
+                    label=u.user.email,
+                    role_or_group=u.new_role.name if u.new_role else None,
+                    access_level=effective_level,
+                    status="active",
+                    cascade_sources=cascade_sources,
+                )
+            )
         elif ptype == "group" and pid in groups_by_id:
             g = groups_by_id[pid]
-            shares.append(ShareRowSchema(
-                share_id=share_id,
-                principal_type="group",
-                principal_id=pid,
-                email=None,
-                label=g.name,
-                role_or_group="Group",
-                access_level=effective_level,
-                status="active",
-                cascade_sources=cascade_sources,
-            ))
+            shares.append(
+                ShareRowSchema(
+                    share_id=share_id,
+                    principal_type="group",
+                    principal_id=pid,
+                    email=None,
+                    label=g.name,
+                    role_or_group="Group",
+                    access_level=effective_level,
+                    status="active",
+                    cascade_sources=cascade_sources,
+                )
+            )
         elif ptype == "invitation":
             inv_row = direct_row or prows[0]
             if inv_row.invitation is not None:
-                shares.append(ShareRowSchema(
-                    share_id=share_id,
-                    principal_type="invitation",
-                    principal_id=None,
-                    email=inv_row.invitation.invited_email,
-                    label=inv_row.invitation.invited_email,
-                    role_or_group=(
-                        inv_row.invitation.invited_new_role.name
-                        if inv_row.invitation.invited_new_role
-                        else None
-                    ),
-                    access_level=effective_level,
-                    status="pending",
-                    cascade_sources=cascade_sources,
-                ))
+                shares.append(
+                    ShareRowSchema(
+                        share_id=share_id,
+                        principal_type="invitation",
+                        principal_id=None,
+                        email=inv_row.invitation.invited_email,
+                        label=inv_row.invitation.invited_email,
+                        role_or_group=(
+                            inv_row.invitation.invited_new_role.name
+                            if inv_row.invitation.invited_new_role
+                            else None
+                        ),
+                        access_level=effective_level,
+                        status="pending",
+                        cascade_sources=cascade_sources,
+                    )
+                )
         # Orphans (principal deleted) are silently skipped.
 
     return shares
@@ -335,7 +341,9 @@ def update_grant(orguser: OrgUser, share_id: int, access_level: AccessLevel) -> 
     if share is None:
         raise GrantError("share not found")
     if share.parent_id is not None:
-        raise GrantError("cascade-derived access cannot be changed directly; update via the parent dashboard")
+        raise GrantError(
+            "cascade-derived access cannot be changed directly; update via the parent dashboard"
+        )
 
     share.access_level = access_level
     share.save(update_fields=["access_level"])
