@@ -456,7 +456,7 @@ class TestGetSnapshotView:
     def test_view_success(self, mock_inject, orguser, sample_snapshot, seed_db):
         """Test successfully viewing a snapshot"""
         request = mock_request(orguser)
-        response = get_snapshot_view(request, sample_snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=sample_snapshot.id)
         assert response["success"] is True
         data = response["data"]
 
@@ -471,14 +471,14 @@ class TestGetSnapshotView:
         """Test viewing a nonexistent snapshot"""
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc_info:
-            get_snapshot_view(request, 99999)
+            get_snapshot_view(request, snapshot_id=99999)
         assert exc_info.value.status_code == 404
 
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_view_injects_period_into_filters(self, mock_inject, orguser, sample_snapshot, seed_db):
         """Test that the view response injects period dates into the matching filter"""
         request = mock_request(orguser)
-        response = get_snapshot_view(request, sample_snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=sample_snapshot.id)
         data = response["data"]
 
         # Find the datetime filter in dashboard_data
@@ -508,7 +508,7 @@ class TestUpdateSnapshot:
         """Test updating snapshot summary"""
         request = mock_request(orguser)
         payload = SnapshotUpdate(summary="Key findings: revenue up 15%")
-        response = update_snapshot(request, sample_snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=sample_snapshot.id, payload=payload)
 
         assert response["success"] is True
         assert response["data"]["summary"] == "Key findings: revenue up 15%"
@@ -521,7 +521,7 @@ class TestUpdateSnapshot:
         request = mock_request(orguser)
         payload = SnapshotUpdate(summary="test")
         with pytest.raises(HttpError) as exc_info:
-            update_snapshot(request, 99999, payload)
+            update_snapshot(request, snapshot_id=99999, payload=payload)
         assert exc_info.value.status_code == 404
 
 
@@ -537,7 +537,7 @@ class TestDeleteSnapshot:
         """Test deleting a snapshot"""
         snapshot_id = sample_snapshot.id
         request = mock_request(orguser)
-        response = delete_snapshot(request, snapshot_id)
+        response = delete_snapshot(request, snapshot_id=snapshot_id)
 
         assert response["success"] is True
         assert not ReportSnapshot.objects.filter(id=snapshot_id).exists()
@@ -546,14 +546,14 @@ class TestDeleteSnapshot:
         """Test deleting a nonexistent snapshot"""
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc_info:
-            delete_snapshot(request, 99999)
+            delete_snapshot(request, snapshot_id=99999)
         assert exc_info.value.status_code == 404
 
     def test_delete_by_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
         """Test that a user who did not create the snapshot cannot delete it"""
         request = mock_request(other_orguser)
         with pytest.raises(HttpError) as exc_info:
-            delete_snapshot(request, sample_snapshot.id)
+            delete_snapshot(request, snapshot_id=sample_snapshot.id)
         assert exc_info.value.status_code == 403
 
 
@@ -576,13 +576,13 @@ class TestListDashboardDatetimeColumns:
         """Test with nonexistent dashboard"""
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc_info:
-            list_dashboard_datetime_columns(request, 99999)
+            list_dashboard_datetime_columns(request, dashboard_id=99999)
         assert exc_info.value.status_code == 404
 
     def test_no_charts_returns_existing_filters(self, orguser, empty_dashboard, seed_db):
         """Test dashboard with no charts returns empty list (no filters either)"""
         request = mock_request(orguser)
-        response = list_dashboard_datetime_columns(request, empty_dashboard.id)
+        response = list_dashboard_datetime_columns(request, dashboard_id=empty_dashboard.id)
         assert response["success"] is True
         assert len(response["data"]) == 0
 
@@ -604,7 +604,7 @@ class TestListDashboardDatetimeColumns:
             mock_get_wc.return_value = mock_warehouse
 
             request = mock_request(orguser)
-            response = list_dashboard_datetime_columns(request, sample_dashboard.id)
+            response = list_dashboard_datetime_columns(request, dashboard_id=sample_dashboard.id)
 
         data = response["data"]
         # The existing datetime filter should be included and flagged
@@ -652,7 +652,7 @@ class TestListDashboardDatetimeColumns:
             mock_get_wc.return_value = mock_warehouse
 
             request = mock_request(orguser)
-            response = list_dashboard_datetime_columns(request, sample_dashboard.id)
+            response = list_dashboard_datetime_columns(request, dashboard_id=sample_dashboard.id)
 
         data = response["data"]
         # Should find the timestamp columns + existing filter (deduplicated)
@@ -674,7 +674,7 @@ class TestListDashboardDatetimeColumns:
 
             request = mock_request(orguser)
             with pytest.raises(HttpError) as exc_info:
-                list_dashboard_datetime_columns(request, sample_dashboard.id)
+                list_dashboard_datetime_columns(request, dashboard_id=sample_dashboard.id)
             assert exc_info.value.status_code == 502
 
 
@@ -734,7 +734,7 @@ class TestReportAuditLogs:
         request = mock_request(orguser)
         payload = SnapshotUpdate(summary="Updated summary text")
 
-        response = update_snapshot(request, sample_snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=sample_snapshot.id, payload=payload)
 
         # Response is wrapped with api_response: {"success": True, "data": {...}}
         assert response["data"]["summary"] == "Updated summary text"
@@ -759,7 +759,7 @@ class TestReportAuditLogs:
         request = mock_request(orguser)
         payload = SnapshotUpdate()
 
-        update_snapshot(request, sample_snapshot.id, payload)
+        update_snapshot(request, snapshot_id=sample_snapshot.id, payload=payload)
 
         mock_audit_log.assert_not_called()
 
@@ -783,7 +783,7 @@ class TestReportAuditLogs:
         snapshot_id = snapshot.id
 
         request = mock_request(orguser)
-        delete_snapshot(request, snapshot_id)
+        delete_snapshot(request, snapshot_id=snapshot_id)
 
         mock_audit_log.assert_called_once()
         call_kwargs = mock_audit_log.call_args[1]
@@ -804,7 +804,7 @@ class TestReportAuditLogs:
         request = mock_request(orguser)
         payload = CommentCreate(target_type="summary", content="Nice trend this quarter.")
 
-        create_comment(request, sample_snapshot.id, payload)
+        create_comment(request, snapshot_id=sample_snapshot.id, payload=payload)
 
         mock_audit_log.assert_called_once()
         call_kwargs = mock_audit_log.call_args[1]
@@ -825,16 +825,16 @@ class TestReportAuditLogs:
         request = mock_request(orguser)
         comment = create_comment(
             request,
-            sample_snapshot.id,
-            CommentCreate(target_type="summary", content="Original text."),
+            snapshot_id=sample_snapshot.id,
+            payload=CommentCreate(target_type="summary", content="Original text."),
         )
         mock_audit_log.reset_mock()
 
         update_comment(
             request,
-            sample_snapshot.id,
-            comment["data"]["id"],
-            CommentUpdate(content="Edited text."),
+            snapshot_id=sample_snapshot.id,
+            comment_id=comment["data"]["id"],
+            payload=CommentUpdate(content="Edited text."),
         )
 
         mock_audit_log.assert_called_once()
@@ -855,12 +855,14 @@ class TestReportAuditLogs:
         request = mock_request(orguser)
         comment = create_comment(
             request,
-            sample_snapshot.id,
-            CommentCreate(target_type="summary", content="To be deleted."),
+            snapshot_id=sample_snapshot.id,
+            payload=CommentCreate(target_type="summary", content="To be deleted."),
         )
         mock_audit_log.reset_mock()
 
-        delete_comment(request, sample_snapshot.id, comment["data"]["id"])
+        delete_comment(
+            request, snapshot_id=sample_snapshot.id, comment_id=comment["data"]["id"]
+        )
 
         mock_audit_log.assert_called_once()
         call_kwargs = mock_audit_log.call_args[1]

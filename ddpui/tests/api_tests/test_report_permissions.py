@@ -295,19 +295,19 @@ class TestReportViewPermissions:
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_guest_can_view_snapshot(self, mock_inject, guest_user, snapshot):
         request = mock_request(guest_user)
-        response = get_snapshot_view(request, snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_analyst_can_view_snapshot(self, mock_inject, analyst_user, snapshot):
         request = mock_request(analyst_user)
-        response = get_snapshot_view(request, snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
     @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
     def test_pipeline_manager_can_view_snapshot(self, mock_inject, pipeline_manager_user, snapshot):
         request = mock_request(pipeline_manager_user)
-        response = get_snapshot_view(request, snapshot.id)
+        response = get_snapshot_view(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
 
@@ -335,11 +335,13 @@ class TestGuestReportRestrictions:
     def test_guest_cannot_update_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = SnapshotUpdate(summary="Guest edit attempt")
-        assert_permission_denied(update_snapshot, request, snapshot.id, payload)
+        assert_permission_denied(
+            update_snapshot, request, snapshot_id=snapshot.id, payload=payload
+        )
 
     def test_guest_cannot_delete_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
-        assert_permission_denied(delete_snapshot, request, snapshot.id)
+        assert_permission_denied(delete_snapshot, request, snapshot_id=snapshot.id)
 
     # Removed test_guest_cannot_toggle_sharing — the toggle_report_sharing
     # endpoint was deleted; sharing now flows through PATCH /general-access
@@ -357,25 +359,25 @@ class TestNonGuestReportAccess:
     def test_super_admin_can_update_snapshot(self, super_admin_user, snapshot):
         request = mock_request(super_admin_user)
         payload = SnapshotUpdate(summary="Admin update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_account_manager_can_update_snapshot(self, account_manager_user, snapshot):
         request = mock_request(account_manager_user)
         payload = SnapshotUpdate(summary="AcctMgr update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_pipeline_manager_can_update_snapshot(self, pipeline_manager_user, snapshot):
         request = mock_request(pipeline_manager_user)
         payload = SnapshotUpdate(summary="PipeMgr update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_analyst_can_update_snapshot(self, analyst_user, snapshot):
         request = mock_request(analyst_user)
         payload = SnapshotUpdate(summary="Analyst update")
-        response = update_snapshot(request, snapshot.id, payload)
+        response = update_snapshot(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
 
@@ -390,16 +392,26 @@ class TestGuestCommentRestrictions:
     def test_guest_cannot_create_comment(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = CommentCreate(target_type="summary", content="Guest comment")
-        assert_permission_denied(create_comment, request, snapshot.id, payload)
+        assert_permission_denied(
+            create_comment, request, snapshot_id=snapshot.id, payload=payload
+        )
 
     def test_guest_cannot_update_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
         payload = CommentUpdate(content="Guest edit")
-        assert_permission_denied(update_comment, request, snapshot.id, comment.id, payload)
+        assert_permission_denied(
+            update_comment,
+            request,
+            snapshot_id=snapshot.id,
+            comment_id=comment.id,
+            payload=payload,
+        )
 
     def test_guest_cannot_delete_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
-        assert_permission_denied(delete_comment, request, snapshot.id, comment.id)
+        assert_permission_denied(
+            delete_comment, request, snapshot_id=snapshot.id, comment_id=comment.id
+        )
 
 
 # ================================================================================
@@ -412,18 +424,18 @@ class TestGuestCommentReadAccess:
 
     def test_guest_can_list_comments(self, guest_user, snapshot):
         request = mock_request(guest_user)
-        response = list_comments(request, snapshot.id, target_type="summary")
+        response = list_comments(request, snapshot_id=snapshot.id, target_type="summary")
         assert response["success"] is True
 
     def test_guest_can_get_comment_states(self, guest_user, snapshot):
         request = mock_request(guest_user)
-        response = get_comment_states(request, snapshot.id)
+        response = get_comment_states(request, snapshot_id=snapshot.id)
         assert response["success"] is True
 
     def test_guest_can_mark_as_read(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = MarkReadRequest(target_type="summary")
-        response = mark_as_read(request, snapshot.id, payload)
+        response = mark_as_read(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
 
     def test_guest_can_get_mentionable_users(self, guest_user):
@@ -444,7 +456,7 @@ class TestNonGuestCommentAccess:
     def test_super_admin_can_create_comment(self, mock_mentions, super_admin_user, snapshot):
         request = mock_request(super_admin_user)
         payload = CommentCreate(target_type="summary", content="Admin comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -454,7 +466,7 @@ class TestNonGuestCommentAccess:
     ):
         request = mock_request(account_manager_user)
         payload = CommentCreate(target_type="summary", content="AcctMgr comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -464,7 +476,7 @@ class TestNonGuestCommentAccess:
     ):
         request = mock_request(pipeline_manager_user)
         payload = CommentCreate(target_type="summary", content="PipeMgr comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -472,7 +484,7 @@ class TestNonGuestCommentAccess:
     def test_analyst_can_create_comment(self, mock_mentions, analyst_user, snapshot):
         request = mock_request(analyst_user)
         payload = CommentCreate(target_type="summary", content="Analyst comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         Comment.objects.filter(id=response["data"]["id"]).delete()
 
@@ -504,14 +516,14 @@ class TestDeleteOwnerCheck:
         """Analyst isn't the owner or an admin → 403 on delete."""
         request = mock_request(analyst_user)
         with pytest.raises(HttpError) as exc_info:
-            delete_snapshot(request, snapshot.id)
+            delete_snapshot(request, snapshot_id=snapshot.id)
         assert exc_info.value.status_code == 403
 
     def test_owner_can_delete(self, account_manager_user, snapshot):
         """Owner (creator) can delete the snapshot."""
         snapshot_id = snapshot.id
         request = mock_request(account_manager_user)
-        response = delete_snapshot(request, snapshot_id)
+        response = delete_snapshot(request, snapshot_id=snapshot_id)
         assert response["success"] is True
 
 
@@ -529,7 +541,7 @@ class TestPdfExportPermissions:
         The actual PDF generation may fail (no Playwright), but permission is granted."""
         request = mock_request(guest_user)
         try:
-            export_report_pdf(request, snapshot.id)
+            export_report_pdf(request, snapshot_id=snapshot.id)
         except HttpError as e:
             # 500 = PDF generation failure (expected without Playwright)
             # 403/404 = permission denied (should NOT happen)
@@ -538,7 +550,7 @@ class TestPdfExportPermissions:
     def test_analyst_can_access_pdf_export(self, analyst_user, snapshot):
         request = mock_request(analyst_user)
         try:
-            export_report_pdf(request, snapshot.id)
+            export_report_pdf(request, snapshot_id=snapshot.id)
         except HttpError as e:
             assert e.status_code == 500, f"Expected 500 (PDF gen failure), got {e.status_code}"
 
@@ -556,6 +568,6 @@ class TestDatetimeColumnsPermissions:
         Will get 404 because dashboard doesn't exist, not 403."""
         request = mock_request(guest_user)
         with pytest.raises(HttpError) as exc_info:
-            list_dashboard_datetime_columns(request, 99999)
+            list_dashboard_datetime_columns(request, dashboard_id=99999)
         # 404 = dashboard not found (permission passed), not 403
         assert exc_info.value.status_code == 404

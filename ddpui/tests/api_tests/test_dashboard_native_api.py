@@ -746,7 +746,7 @@ def test_update_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, sa
     request = mock_request(orguser)
     payload = DashboardUpdate(title="Updated Dashboard Title")
 
-    response = update_dashboard(request, sample_dashboard.id, payload)
+    response = update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     assert response.title == "Updated Dashboard Title"
     mock_audit_log.assert_called_once()
@@ -773,7 +773,7 @@ def test_update_dashboard_no_fields_touched_skips_audit_log(
     request = mock_request(orguser)
     payload = DashboardUpdate()
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     mock_audit_log.assert_not_called()
 
@@ -796,7 +796,7 @@ def test_update_dashboard_none_vs_empty_string_skips_audit_log(
     request = mock_request(orguser)
     payload = DashboardUpdate(description="")
 
-    update_dashboard(request, dashboard.id, payload)
+    update_dashboard(request, dashboard_id=dashboard.id, payload=payload)
 
     mock_audit_log.assert_not_called()
 
@@ -818,7 +818,7 @@ def test_update_dashboard_same_values_skips_audit_log(
         grid_columns=sample_dashboard.grid_columns,
     )
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     mock_audit_log.assert_not_called()
 
@@ -835,7 +835,7 @@ def test_update_dashboard_mixed_changed_and_unchanged_fields(
         description="A brand new description",  # changed
     )
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     mock_audit_log.assert_called_once()
     resource_fields = mock_audit_log.call_args[1]["resource_fields"]
@@ -863,7 +863,7 @@ def test_update_dashboard_tabs_logs_full_tabs_json(
         ]
     )
 
-    update_dashboard(request, sample_dashboard.id, payload)
+    update_dashboard(request, dashboard_id=sample_dashboard.id, payload=payload)
 
     call_kwargs = mock_audit_log.call_args[1]
     resource_fields = call_kwargs["resource_fields"]
@@ -901,7 +901,7 @@ def test_delete_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser, or
     dashboard_id = dashboard.id
 
     request = mock_request(orguser)
-    delete_dashboard(request, dashboard_id)
+    delete_dashboard(request, dashboard_id=dashboard_id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]
@@ -920,7 +920,7 @@ def test_duplicate_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser,
     """Test that duplicating a dashboard creates an audit log entry."""
     request = mock_request(orguser)
 
-    response = duplicate_dashboard(request, sample_dashboard.id)
+    response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
 
     assert "Copy" in response.title
     mock_audit_log.assert_called_once()
@@ -947,7 +947,7 @@ def test_set_personal_landing_dashboard_creates_audit_log(
     """Test that setting a personal landing dashboard creates an audit log entry with the title."""
     request = mock_request(orguser)
 
-    set_personal_landing_dashboard(request, sample_dashboard.id)
+    set_personal_landing_dashboard(request, dashboard_id=sample_dashboard.id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]
@@ -968,7 +968,7 @@ def test_set_org_default_dashboard_creates_audit_log(
     """Test that setting the org default dashboard creates an audit log entry with the title."""
     request = mock_request(orguser)
 
-    set_org_default_dashboard(request, sample_dashboard.id)
+    set_org_default_dashboard(request, dashboard_id=sample_dashboard.id)
 
     mock_audit_log.assert_called_once()
     call_kwargs = mock_audit_log.call_args[1]
