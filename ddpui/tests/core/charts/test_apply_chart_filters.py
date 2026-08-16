@@ -110,3 +110,56 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    # --- Boolean filter tests ---
+
+    def test_boolean_empty_string_skipped(self):
+        """Empty string value on a boolean column must produce no WHERE clause"""
+        sql = get_where_sql([make_filter("is_active", "equals", "", "boolean")])
+        assert len(sql) == 0
+
+    def test_boolean_true_string_coerced(self):
+        """String 'true' on a boolean column must become a proper boolean literal"""
+        sql = get_where_sql([make_filter("is_active", "equals", "true", "boolean")])
+        assert len(sql) == 1
+        assert "true" in sql[0].lower()
+
+    def test_boolean_false_string_coerced(self):
+        """String 'false' on a boolean column must become a proper boolean literal"""
+        sql = get_where_sql([make_filter("is_active", "equals", "false", "boolean")])
+        assert len(sql) == 1
+        assert "false" in sql[0].lower()
+
+    def test_boolean_python_bool_passthrough(self):
+        """Native Python bool values pass through without coercion"""
+        sql = get_where_sql([make_filter("is_active", "equals", True, "boolean")])
+        assert len(sql) == 1
+        assert "true" in sql[0].lower()
+
+    def test_boolean_not_equals_empty_string_skipped(self):
+        """Empty string value with not_equals on a boolean column must produce no clause"""
+        sql = get_where_sql([make_filter("is_active", "not_equals", "", "boolean")])
+        assert len(sql) == 0
+
+    def test_boolean_not_equals_true_coerced(self):
+        """not_equals with 'true' on boolean column generates valid SQL"""
+        sql = get_where_sql([make_filter("is_active", "not_equals", "true", "boolean")])
+        assert len(sql) == 1
+        assert "true" in sql[0].lower()
+
+    def test_boolean_bool_data_type_alias(self):
+        """data_type 'bool' is treated the same as 'boolean'"""
+        sql = get_where_sql([make_filter("is_active", "equals", "", "bool")])
+        assert len(sql) == 0
+        sql = get_where_sql([make_filter("is_active", "equals", "true", "bool")])
+        assert len(sql) == 1
+
+    def test_boolean_whitespace_only_skipped(self):
+        """Whitespace-only string on a boolean column is treated as empty"""
+        sql = get_where_sql([make_filter("is_active", "equals", "   ", "boolean")])
+        assert len(sql) == 0
+
+    def test_boolean_unrecognised_value_skipped(self):
+        """Unrecognised string value on a boolean column produces no clause"""
+        sql = get_where_sql([make_filter("is_active", "equals", "maybe", "boolean")])
+        assert len(sql) == 0

@@ -796,6 +796,39 @@ def _is_timestamp_date(filter_config: dict) -> bool:
     )
 
 
+BOOLEAN_TYPES = {"boolean", "bool"}
+
+BOOLEAN_TRUE_STRINGS = {"true", "1", "yes"}
+BOOLEAN_FALSE_STRINGS = {"false", "0", "no"}
+
+
+def _coerce_boolean_value(filter_config: dict):
+    """Coerce a boolean-typed filter value to a Python bool.
+
+    Returns the coerced bool, or None if the value is empty / not
+    a recognised boolean literal (the caller should skip the filter).
+    """
+    data_type = (filter_config.get("data_type") or "").lower()
+    if data_type not in BOOLEAN_TYPES:
+        return filter_config.get("value")
+
+    value = filter_config.get("value")
+
+    if isinstance(value, bool):
+        return value
+
+    if not isinstance(value, str) or value.strip() == "":
+        return None
+
+    normalised = value.strip().lower()
+    if normalised in BOOLEAN_TRUE_STRINGS:
+        return True
+    if normalised in BOOLEAN_FALSE_STRINGS:
+        return False
+
+    return None
+
+
 def _next_day(val: str) -> str:
     """Return the next day as yyyy-MM-dd string."""
     return (datetime.strptime(val, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -835,6 +868,15 @@ def apply_chart_filters(
 
         if not column_name or operator is None:
             continue
+
+        # Boolean coercion: convert string representations to Python bool,
+        # skip filters whose value resolves to None (e.g. empty string).
+        data_type = (filter_config.get("data_type") or "").lower()
+        if data_type in BOOLEAN_TYPES:
+            coerced = _coerce_boolean_value(filter_config)
+            if coerced is None:
+                continue
+            filter_config = {**filter_config, "value": coerced}
 
         # Timestamp date filters need day-range logic — keep full config
         if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):
