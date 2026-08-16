@@ -148,7 +148,10 @@ def test_owner_can_transfer_to_analyst_with_floor_edit(dashboard, owner_analyst,
     """Analyst floor=Edit gives the recipient implicit Edit — transfer succeeds."""
     request = mock_request(owner_analyst)
     transfer_resource_ownership(
-        request, "dashboard", str(dashboard.id), TransferOwnershipPayload(to_orguser_id=other_analyst.id)
+        request,
+        "dashboard",
+        str(dashboard.id),
+        TransferOwnershipPayload(to_orguser_id=other_analyst.id),
     )
     dashboard.refresh_from_db()
     assert dashboard.created_by_id == other_analyst.id
@@ -158,15 +161,16 @@ def test_admin_can_transfer_ownership_even_when_not_owner(dashboard, admin, othe
     """Admin who did not create the resource can still transfer it."""
     request = mock_request(admin)
     transfer_resource_ownership(
-        request, "dashboard", str(dashboard.id), TransferOwnershipPayload(to_orguser_id=other_analyst.id)
+        request,
+        "dashboard",
+        str(dashboard.id),
+        TransferOwnershipPayload(to_orguser_id=other_analyst.id),
     )
     dashboard.refresh_from_db()
     assert dashboard.created_by_id == other_analyst.id
 
 
-def test_owner_can_transfer_to_member_with_direct_edit_share(
-    org, dashboard, owner_analyst, member
-):
+def test_owner_can_transfer_to_member_with_direct_edit_share(org, dashboard, owner_analyst, member):
     """Member (floor=View) with a direct Edit share qualifies (spec line 271)."""
     _grant(org, dashboard, member, AccessLevel.EDIT)
     request = mock_request(owner_analyst)
@@ -232,7 +236,10 @@ def test_previous_owner_direct_shares_unchanged_after_transfer(
     prev_owner_share = _grant(org, dashboard, owner_analyst, AccessLevel.VIEW)
     request = mock_request(owner_analyst)
     transfer_resource_ownership(
-        request, "dashboard", str(dashboard.id), TransferOwnershipPayload(to_orguser_id=other_analyst.id)
+        request,
+        "dashboard",
+        str(dashboard.id),
+        TransferOwnershipPayload(to_orguser_id=other_analyst.id),
     )
     prev_owner_share.refresh_from_db()
     assert prev_owner_share.access_level == AccessLevel.VIEW
@@ -243,7 +250,10 @@ def test_transfer_updates_created_by(dashboard, owner_analyst, other_analyst):
     """The recipient is the new owner after transfer."""
     request = mock_request(owner_analyst)
     transfer_resource_ownership(
-        request, "dashboard", str(dashboard.id), TransferOwnershipPayload(to_orguser_id=other_analyst.id)
+        request,
+        "dashboard",
+        str(dashboard.id),
+        TransferOwnershipPayload(to_orguser_id=other_analyst.id),
     )
     dashboard.refresh_from_db()
     assert dashboard.created_by_id == other_analyst.id
@@ -482,7 +492,9 @@ def test_add_user_grant_creates_share_row(dashboard, owner_analyst, member):
     """Adding a user principal at Edit creates a ResourceShare row."""
     payload = AddGrantsPayload(
         principals=[
-            PrincipalGrantPayload(principal_type="user", principal_id=member.id, access_level="edit")
+            PrincipalGrantPayload(
+                principal_type="user", principal_id=member.id, access_level="edit"
+            )
         ]
     )
     add_resource_grants(mock_request(owner_analyst), "dashboard", str(dashboard.id), payload)
@@ -502,7 +514,9 @@ def test_edit_holder_can_reshare_spec_line_261(org, dashboard, other_analyst, me
     other_analyst has Edit via Analyst floor — should be able to add grants."""
     payload = AddGrantsPayload(
         principals=[
-            PrincipalGrantPayload(principal_type="user", principal_id=member.id, access_level="view")
+            PrincipalGrantPayload(
+                principal_type="user", principal_id=member.id, access_level="view"
+            )
         ]
     )
     add_resource_grants(mock_request(other_analyst), "dashboard", str(dashboard.id), payload)
@@ -515,7 +529,9 @@ def test_view_holder_cannot_add_grants(dashboard, member, owner_analyst):
     """Spec line 261: View-holders cannot share. Member has floor=View."""
     payload = AddGrantsPayload(
         principals=[
-            PrincipalGrantPayload(principal_type="user", principal_id=owner_analyst.id, access_level="view")
+            PrincipalGrantPayload(
+                principal_type="user", principal_id=owner_analyst.id, access_level="view"
+            )
         ]
     )
     with pytest.raises(HttpError) as exc:
@@ -685,7 +701,10 @@ def test_H02_dashboard_share_level_update_propagates_to_children(org, owner_anal
         resource_type=ResourceType.DASHBOARD, resource_id=str(d.id), principal_id=member.id
     )
     update_resource_grant(
-        mock_request(owner_analyst), "dashboard", str(d.id), parent.id,
+        mock_request(owner_analyst),
+        "dashboard",
+        str(d.id),
+        parent.id,
         UpdateGrantPayload(access_level="edit"),
     )
     child = ResourceShare.objects.get(
@@ -714,11 +733,18 @@ def test_H05_chart_removed_from_tabs_deletes_cascade_row(org, owner_analyst, mem
     chart_a = _chart(org, owner_analyst, "A")
     chart_b = _chart(org, owner_analyst, "B")
     d = Dashboard.objects.create(
-        title="D", org=org, created_by=owner_analyst,
-        tabs=[{"id": "t1", "components": {
-            "c1": {"type": "chart", "config": {"chartId": chart_a.id}},
-            "c2": {"type": "chart", "config": {"chartId": chart_b.id}},
-        }}],
+        title="D",
+        org=org,
+        created_by=owner_analyst,
+        tabs=[
+            {
+                "id": "t1",
+                "components": {
+                    "c1": {"type": "chart", "config": {"chartId": chart_a.id}},
+                    "c2": {"type": "chart", "config": {"chartId": chart_b.id}},
+                },
+            }
+        ],
     )
     _share_dashboard(owner_analyst, d, member, "view")
     # Remove chart_b from tabs then re-sync.
@@ -736,17 +762,18 @@ def test_H05_chart_removed_from_tabs_deletes_cascade_row(org, owner_analyst, mem
     ).exists()
 
 
-def test_H06_direct_grant_survives_when_chart_removed_from_dashboard(
-    org, owner_analyst, member
-):
+def test_H06_direct_grant_survives_when_chart_removed_from_dashboard(org, owner_analyst, member):
     """Cascade re-sync only touches rows with parent set — direct grants on
     the chart are unaffected."""
     chart = _chart(org, owner_analyst)
     d = _dashboard_with_inner(org, owner_analyst, chart.id)
 
     ResourceShare.objects.create(
-        org=org, resource_type=ResourceType.CHART, resource_id=str(chart.id),
-        principal_type=ResourceSharePrincipalType.USER, principal_id=member.id,
+        org=org,
+        resource_type=ResourceType.CHART,
+        resource_id=str(chart.id),
+        principal_type=ResourceSharePrincipalType.USER,
+        principal_id=member.id,
         access_level=AccessLevel.EDIT,
     )
     _share_dashboard(owner_analyst, d, member, "view")
@@ -756,8 +783,10 @@ def test_H06_direct_grant_survives_when_chart_removed_from_dashboard(
     sync_dashboard_cascade(d)
 
     direct = ResourceShare.objects.filter(
-        resource_type=ResourceType.CHART, resource_id=str(chart.id),
-        principal_id=member.id, parent__isnull=True,
+        resource_type=ResourceType.CHART,
+        resource_id=str(chart.id),
+        principal_id=member.id,
+        parent__isnull=True,
     ).first()
     assert direct is not None
     assert direct.access_level == AccessLevel.EDIT
@@ -784,7 +813,8 @@ def test_C02_dashboard_view_share_gives_view_on_inner_chart(org, owner_analyst, 
 def test_C05_no_access_floor_plus_cascade_visible(org, owner_analyst, member):
     """Member with no-access floor still sees cascade-shared chart."""
     OrgPreferences.objects.create(
-        org=org, default_member_level=AccessLevel.NO_ACCESS,
+        org=org,
+        default_member_level=AccessLevel.NO_ACCESS,
         default_analyst_level=AccessLevel.EDIT,
     )
     chart = _chart(org, owner_analyst)
@@ -797,7 +827,8 @@ def test_C06_deleting_dashboard_share_removes_chart_access(org, owner_analyst, m
     """After deleting the parent dashboard share, the chart is inaccessible
     (no floor, no direct grant)."""
     OrgPreferences.objects.create(
-        org=org, default_member_level=AccessLevel.NO_ACCESS,
+        org=org,
+        default_member_level=AccessLevel.NO_ACCESS,
         default_analyst_level=AccessLevel.EDIT,
     )
     chart = _chart(org, owner_analyst)
@@ -851,12 +882,11 @@ def test_C03_chart_in_two_dashboards_effective_access_is_max(org, owner_analyst,
     assert get_user_access(member, "chart", chart.id) == AccessLevel.EDIT
 
 
-def test_H07_chart_in_two_dashboards_survives_one_share_deletion(
-    org, owner_analyst, member
-):
+def test_H07_chart_in_two_dashboards_survives_one_share_deletion(org, owner_analyst, member):
     """Delete Dashboard A's Edit share → chart still accessible via Dashboard B's View."""
     OrgPreferences.objects.create(
-        org=org, default_member_level=AccessLevel.NO_ACCESS,
+        org=org,
+        default_member_level=AccessLevel.NO_ACCESS,
         default_analyst_level=AccessLevel.EDIT,
     )
     chart = _chart(org, owner_analyst)
@@ -884,7 +914,10 @@ def test_Q13_patch_directly_on_cascade_row_rejected(org, owner_analyst, member):
     )
     with pytest.raises(HttpError) as exc:
         update_resource_grant(
-            mock_request(owner_analyst), "chart", str(chart.id), cascade_row.id,
+            mock_request(owner_analyst),
+            "chart",
+            str(chart.id),
+            cascade_row.id,
             UpdateGrantPayload(access_level="edit"),
         )
     assert exc.value.status_code == 400
@@ -919,13 +952,13 @@ def _create_request(org, rtype, resource_id, requester):
     )
 
 
-def test_N01_dashboard_delete_removes_all_grants_and_requests(
-    org, owner_analyst, member
-):
+def test_N01_dashboard_delete_removes_all_grants_and_requests(org, owner_analyst, member):
     """Spec: on dashboard delete, ResourceShare + AccessRequest rows are cleaned."""
     from ddpui.api.dashboard_native_api import delete_dashboard
 
-    Dashboard.objects.create(title="Keep", org=org, created_by=owner_analyst)  # last-dashboard guard
+    Dashboard.objects.create(
+        title="Keep", org=org, created_by=owner_analyst
+    )  # last-dashboard guard
     d = Dashboard.objects.create(title="Doomed", org=org, created_by=owner_analyst)
     _create_share(org, ResourceType.DASHBOARD, d.id, member)
     _create_request(org, ResourceType.DASHBOARD, d.id, member)
@@ -958,9 +991,7 @@ def test_N02_chart_delete_removes_all_grants(org, owner_analyst, member):
     ).exists()
 
 
-def test_N03_report_delete_removes_all_grants_and_requests(
-    org, owner_analyst, member
-):
+def test_N03_report_delete_removes_all_grants_and_requests(org, owner_analyst, member):
     """Spec: report delete → ResourceShare + AccessRequest cleaned."""
     from ddpui.api.report_api import delete_snapshot
 
@@ -1030,9 +1061,7 @@ def test_N05_group_delete_removes_group_share_rows(org, owner_analyst, member):
     d.delete()
 
 
-def test_N06_group_member_removed_loses_group_access(
-    org, owner_analyst, member
-):
+def test_N06_group_member_removed_loses_group_access(org, owner_analyst, member):
     """Spec: removing a user from a group revokes their group-derived access
     on the next call to ``get_user_access``."""
     from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
@@ -1432,30 +1461,24 @@ def test_D01_private_plus_view_floor_no_access(private_dashboard, other_analyst)
         default_member_level=AccessLevel.VIEW,
     )
     assert (
-        get_user_access(other_analyst, "dashboard", private_dashboard.id)
-        == AccessLevel.NO_ACCESS
+        get_user_access(other_analyst, "dashboard", private_dashboard.id) == AccessLevel.NO_ACCESS
     )
 
 
 def test_D02_private_plus_edit_floor_no_access(private_dashboard, other_analyst):
     """Private + Analyst floor=Edit → floor still bypassed → no_access."""
     assert (
-        get_user_access(other_analyst, "dashboard", private_dashboard.id)
-        == AccessLevel.NO_ACCESS
+        get_user_access(other_analyst, "dashboard", private_dashboard.id) == AccessLevel.NO_ACCESS
     )
 
 
-def test_D03_private_plus_direct_edit_grant_gives_edit(
-    org, private_dashboard, member
-):
+def test_D03_private_plus_direct_edit_grant_gives_edit(org, private_dashboard, member):
     """Private + explicit user grant → grant applies (Edit)."""
     _grant(org, private_dashboard, member, AccessLevel.EDIT)
     assert get_user_access(member, "dashboard", private_dashboard.id) == AccessLevel.EDIT
 
 
-def test_D04_private_plus_direct_view_grant_gives_view(
-    org, private_dashboard, member
-):
+def test_D04_private_plus_direct_view_grant_gives_view(org, private_dashboard, member):
     """Private + explicit user grant → View grant applies as View."""
     _grant(org, private_dashboard, member, AccessLevel.VIEW)
     assert get_user_access(member, "dashboard", private_dashboard.id) == AccessLevel.VIEW
@@ -1474,10 +1497,7 @@ def test_D05_private_plus_cascade_edit_grant_gives_edit(org, owner_analyst, memb
 
 def test_D06_private_plus_owner_edit(private_dashboard, owner_analyst):
     """Owner always sees their own private resource at Edit."""
-    assert (
-        get_user_access(owner_analyst, "dashboard", private_dashboard.id)
-        == AccessLevel.EDIT
-    )
+    assert get_user_access(owner_analyst, "dashboard", private_dashboard.id) == AccessLevel.EDIT
 
 
 def test_D07_private_plus_admin_edit(private_dashboard, admin):
@@ -1485,9 +1505,7 @@ def test_D07_private_plus_admin_edit(private_dashboard, admin):
     assert get_user_access(admin, "dashboard", private_dashboard.id) == AccessLevel.EDIT
 
 
-def test_D08_accessible_filter_excludes_private_when_only_floor(
-    private_dashboard, other_analyst
-):
+def test_D08_accessible_filter_excludes_private_when_only_floor(private_dashboard, other_analyst):
     """accessible_filter on the list endpoint: floor-only access excludes
     private resources — they don't appear in the list."""
     OrgPreferences.objects.filter(org=private_dashboard.org).delete()
@@ -1503,21 +1521,15 @@ def test_D08_accessible_filter_excludes_private_when_only_floor(
     assert private_dashboard.id not in ids
 
 
-def test_D09_accessible_filter_includes_private_with_direct_grant(
-    org, private_dashboard, member
-):
+def test_D09_accessible_filter_includes_private_with_direct_grant(org, private_dashboard, member):
     """accessible_filter: private + explicit grantee → included."""
     _grant(org, private_dashboard, member, AccessLevel.VIEW)
     q = accessible_filter(member, "dashboard")
-    ids = list(
-        Dashboard.objects.filter(org=org).filter(q).values_list("id", flat=True)
-    )
+    ids = list(Dashboard.objects.filter(org=org).filter(q).values_list("id", flat=True))
     assert private_dashboard.id in ids
 
 
-def test_D10_accessible_filter_includes_private_via_cascade(
-    org, owner_analyst, member
-):
+def test_D10_accessible_filter_includes_private_via_cascade(org, owner_analyst, member):
     """accessible_filter for charts: private chart + cascade grant → included."""
     chart = _chart(org, owner_analyst)
     chart.is_private = True
@@ -1529,9 +1541,7 @@ def test_D10_accessible_filter_includes_private_via_cascade(
     assert chart.id in ids
 
 
-def test_D11_accessible_filter_includes_private_when_owner(
-    private_dashboard, owner_analyst
-):
+def test_D11_accessible_filter_includes_private_when_owner(private_dashboard, owner_analyst):
     """accessible_filter: owner sees their own private resource in the list."""
     q = accessible_filter(owner_analyst, "dashboard")
     ids = list(
@@ -1540,9 +1550,7 @@ def test_D11_accessible_filter_includes_private_when_owner(
     assert private_dashboard.id in ids
 
 
-def test_D12_get_user_access_map_private_no_grant_is_none(
-    private_dashboard, other_analyst
-):
+def test_D12_get_user_access_map_private_no_grant_is_none(private_dashboard, other_analyst):
     """get_user_access_map (list serialization) returns None for a private
     resource the caller has no access to — so the list drops it."""
     OrgPreferences.objects.filter(org=private_dashboard.org).delete()
@@ -1662,9 +1670,7 @@ def test_A04_analyst_no_access_floor_returns_no_access(dashboard, other_analyst)
         default_analyst_level=AccessLevel.NO_ACCESS,
         default_member_level=AccessLevel.NO_ACCESS,
     )
-    assert (
-        get_user_access(other_analyst, "dashboard", dashboard.id) == AccessLevel.NO_ACCESS
-    )
+    assert get_user_access(other_analyst, "dashboard", dashboard.id) == AccessLevel.NO_ACCESS
 
 
 def test_A05_admin_always_gets_edit_regardless_of_floor(dashboard, admin):
@@ -1897,9 +1903,7 @@ def test_B06_user_in_two_groups_gets_max_level(org, owner_analyst, no_access_mem
         d.delete()
 
 
-def test_C08_group_dashboard_share_cascades_to_members(
-    org, owner_analyst, no_access_member
-):
+def test_C08_group_dashboard_share_cascades_to_members(org, owner_analyst, no_access_member):
     """Group dashboard share → cascade child rows created for the group →
     group member gets chart access via that cascade row."""
     group = _group(org, owner_analyst)
@@ -1989,9 +1993,7 @@ def test_Q07_non_creator_analyst_cannot_rename_another_analysts_group(
 # ---------------------------------------------------------------------------
 
 
-def test_B01_edit_grant_on_no_access_floor_returns_edit(
-    org, owner_analyst, no_access_member
-):
+def test_B01_edit_grant_on_no_access_floor_returns_edit(org, owner_analyst, no_access_member):
     """Explicit Edit grant survives no-access floor → user reads Edit."""
     d = Dashboard.objects.create(title="D-B01", org=org, created_by=owner_analyst)
     try:
@@ -2001,9 +2003,7 @@ def test_B01_edit_grant_on_no_access_floor_returns_edit(
         d.delete()
 
 
-def test_B03_view_grant_on_no_access_floor_returns_view(
-    org, owner_analyst, no_access_member
-):
+def test_B03_view_grant_on_no_access_floor_returns_view(org, owner_analyst, no_access_member):
     d = Dashboard.objects.create(title="D-B03", org=org, created_by=owner_analyst)
     try:
         _grant(org, d, no_access_member, AccessLevel.VIEW)
@@ -2023,9 +2023,7 @@ def test_E01_no_floor_no_grants_no_ownership_empty_list(org, owner_analyst, no_a
         Dashboard.objects.filter(org=org, title="Someone else's").delete()
 
 
-def test_E02_no_floor_direct_grant_shows_only_granted(
-    org, owner_analyst, no_access_member
-):
+def test_E02_no_floor_direct_grant_shows_only_granted(org, owner_analyst, no_access_member):
     """Member with no-access floor + one direct grant → sees only that resource."""
     d_grant = Dashboard.objects.create(title="Granted", org=org, created_by=owner_analyst)
     d_other = Dashboard.objects.create(title="Other", org=org, created_by=owner_analyst)
@@ -2076,6 +2074,7 @@ from ddpui.core.orguserfunctions import accept_invitation_v1
 
 def _invitation(org, invited_by, email, role_slug=MEMBER_ROLE):
     from django.utils import timezone as _tz
+
     return Invitation.objects.create(
         invited_email=email,
         invited_by=invited_by,
