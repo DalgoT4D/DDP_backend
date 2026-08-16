@@ -860,9 +860,7 @@ class TestReportAuditLogs:
         )
         mock_audit_log.reset_mock()
 
-        delete_comment(
-            request, snapshot_id=sample_snapshot.id, comment_id=comment["data"]["id"]
-        )
+        delete_comment(request, snapshot_id=sample_snapshot.id, comment_id=comment["data"]["id"])
 
         mock_audit_log.assert_called_once()
         call_kwargs = mock_audit_log.call_args[1]

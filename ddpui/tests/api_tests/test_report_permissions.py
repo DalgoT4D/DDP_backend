@@ -335,9 +335,7 @@ class TestGuestReportRestrictions:
     def test_guest_cannot_update_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = SnapshotUpdate(summary="Guest edit attempt")
-        assert_permission_denied(
-            update_snapshot, request, snapshot_id=snapshot.id, payload=payload
-        )
+        assert_permission_denied(update_snapshot, request, snapshot_id=snapshot.id, payload=payload)
 
     def test_guest_cannot_delete_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
@@ -392,9 +390,7 @@ class TestGuestCommentRestrictions:
     def test_guest_cannot_create_comment(self, guest_user, snapshot):
         request = mock_request(guest_user)
         payload = CommentCreate(target_type="summary", content="Guest comment")
-        assert_permission_denied(
-            create_comment, request, snapshot_id=snapshot.id, payload=payload
-        )
+        assert_permission_denied(create_comment, request, snapshot_id=snapshot.id, payload=payload)
 
     def test_guest_cannot_update_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)

@@ -472,9 +472,7 @@ class TestUpdateComment:
         request = mock_request(other_orguser)
         payload = CommentUpdate(content="Trying to edit")
         with pytest.raises(HttpError) as exc:
-            update_comment(
-                request, snapshot_id=snapshot.id, comment_id=comment.id, payload=payload
-            )
+            update_comment(request, snapshot_id=snapshot.id, comment_id=comment.id, payload=payload)
         assert exc.value.status_code == 403
         comment.delete()
 
