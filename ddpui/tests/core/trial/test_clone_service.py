@@ -1317,13 +1317,14 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
     cli block), copies the template's UI4T DAG rows via copy_dbt_dag, then REGENERATES the trial
     repo's content by copying the template repo's models/ directory verbatim
     (copy_repo_models_from_template) so the trial user can create/edit/run models.
-    transform_type mirrors the template ('ui'), and the dbt system OrgTasks are still created."""
+    transform_type is forced to 'ui' so a delayed repo sync cannot mutate the copied canvas,
+    and the dbt system OrgTasks are still created."""
     template = Org.objects.create(name="tmpl-dbt", slug="tmpl-dbt")
     trial_org = Org.objects.create(name="Trial dbt", slug="trial-dbt")
 
+    # The production template is legacy-marked as github even though its authoritative graph was
+    # built in UI4T. The trial must not inherit that value.
     template_dbt = _make_orgdbt("tmpl-dbt")
-    template_dbt.transform_type = "ui"
-    template_dbt.save()
     template.dbt = template_dbt
     template.save()
     dest_model = OrgDbtModel.objects.create(
@@ -1345,7 +1346,7 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
     # deliberately NO cli_profile_block — that field is legacy (only migration 0143 wrote it) and
     # setup_managed_git_workspace does not set it. _step_dbt must not depend on it.
     trial_dbt = _make_orgdbt("trial-dbt")
-    trial_dbt.transform_type = "github"  # setup hardcodes GIT; _step_dbt must mirror 'ui'
+    trial_dbt.transform_type = "github"  # setup hardcodes GIT; _step_dbt must force UI ownership
     trial_dbt.save()
 
     def fake_setup(org, project_name, default_schema):
@@ -1364,7 +1365,8 @@ def test_step_dbt_sets_up_workspace_and_copies_ui4t_rows_only(
         trial_org, project_name="dbtrepo", default_schema="default_schema"
     )
     trial_dbt.refresh_from_db()
-    assert trial_dbt.transform_type == "ui"  # mirrored from template, not left GIT
+    assert template_dbt.transform_type == "github"
+    assert trial_dbt.transform_type == "ui"
 
     # DAG rows copied; sql_path preserved (repo files copied to the same relative paths)
     trial_model = OrgDbtModel.objects.get(orgdbt=trial_dbt)

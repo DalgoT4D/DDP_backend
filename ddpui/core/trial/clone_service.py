@@ -5,7 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from ddpui.models.org import Org, OrgWarehouse, OrgFeatureFlag
+from ddpui.models.org import Org, OrgFeatureFlag, OrgWarehouse, TransformType
 from ddpui.core.trial.exceptions import TrialAccountExistsError, TrialCloneError
 from ddpui.core.trial.signup_record import record_trial_start
 from ddpui.core.trial.timing import step_timer
@@ -504,12 +504,13 @@ def _step_dbt(run: CloneRun) -> None:
             "setup_managed_git_workspace did not set the trial org's dbt workspace"
         )
 
-    # setup_managed_git_workspace hardcodes transform_type=GIT; mirror the TEMPLATE's value
-    # instead — a UI4T template must stay `ui` on the trial, otherwise the repo-to-canvas sync
-    # path (`sync_remote_dbtproject_to_canvas`, gated on GIT) becomes active and can re-parse
-    # the empty scaffold repo right over the copied CanvasNode/CanvasEdge rows.
-    if trial_dbt.transform_type != template_dbt.transform_type:
-        trial_dbt.transform_type = template_dbt.transform_type
+    # The copied CanvasNode/CanvasEdge graph is authoritative for a trial. Keep the managed Git
+    # repo and PAT for publishing and pipelines, but mark the transform workspace as UI-owned so
+    # opening the canvas cannot re-parse the repo and append stale/source-only nodes. The
+    # template may itself still be marked GIT for legacy reasons, so mirroring its value is not
+    # sufficient protection.
+    if trial_dbt.transform_type != TransformType.UI:
+        trial_dbt.transform_type = TransformType.UI
         trial_dbt.save(update_fields=["transform_type"])
 
     model_map = copy_dbt_dag(template_dbt, trial_dbt)
