@@ -66,7 +66,11 @@ def create_default_transform_tasks(org: Org, dbt_project_params: DbtProjectParam
         raise ValueError("dbt is not configured for this org")
 
     for task in Task.objects.filter(type__in=[TaskType.DBT, TaskType.GIT], is_system=True).all():
-        org_task = OrgTask.objects.create(org=org, task=task, uuid=uuid.uuid4(), dbt=org.dbt)
+        # Use get_or_create: LONG_RUNNING_TASKS run create_prefect_deployment_for_dbtcore_task,
+        # which calls get_or_create_git_clone/pull_orgtask. Since git-clone (PK 13) has a higher
+        # PK than the dbt tasks, it gets pre-created there before the loop reaches it — causing
+        # a duplicate if we use plain create() here.
+        org_task, _ = OrgTask.objects.get_or_create(org=org, task=task, dbt=org.dbt)
 
         if task.slug in LONG_RUNNING_TASKS:
             # create deployment (auto-prepends git + dbt-clean + dbt-deps for dbt tasks)
