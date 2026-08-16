@@ -41,13 +41,11 @@ def _is_admin(orguser: OrgUser) -> bool:
 
 
 def _org_floor(orguser: OrgUser) -> str:
-    """The org-default level for this orguser's role. Analysts read the analyst
-    column; every other non-admin role reads the member column. A missing
-    OrgPreferences row means both floors are "view" (the model defaults)."""
-    prefs = OrgPreferences.objects.filter(org=orguser.org).first()
+    """Org-default access level for this orguser's role. Missing row → model defaults."""
+    prefs = OrgPreferences.objects.filter(org=orguser.org).first() or OrgPreferences()
     if orguser.new_role is not None and orguser.new_role.slug == RoleSlug.ANALYST:
-        return prefs.default_analyst_level if prefs else AccessLevel.VIEW
-    return prefs.default_member_level if prefs else AccessLevel.VIEW
+        return prefs.default_analyst_level
+    return prefs.default_member_level
 
 
 def _grants_map(
@@ -192,9 +190,9 @@ def get_access_map_for_resource(org, rtype: str, resource_id) -> dict[int, str]:
                 group_grants.get(s.principal_id), s.access_level
             )
 
-    prefs = OrgPreferences.objects.filter(org=org).first()
-    analyst_floor = prefs.default_analyst_level if prefs else AccessLevel.VIEW
-    member_floor = prefs.default_member_level if prefs else AccessLevel.VIEW
+    prefs = OrgPreferences.objects.filter(org=org).first() or OrgPreferences()
+    analyst_floor = prefs.default_analyst_level
+    member_floor = prefs.default_member_level
 
     result: dict[int, str] = {}
     for user in users:

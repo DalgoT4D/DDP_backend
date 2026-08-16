@@ -186,8 +186,8 @@ def _general_access_state(orguser: OrgUser, rtype: str, resource) -> GeneralAcce
     is_public = bool(getattr(resource, "is_public", False))
     mode = "private" if is_private else ("public" if is_public else "everyone")
 
-    prefs = OrgPreferences.objects.filter(org=orguser.org).first()
-    allow_public_sharing = bool(prefs.allow_public_sharing) if prefs else True
+    prefs = OrgPreferences.objects.filter(org=orguser.org).first() or OrgPreferences()
+    allow_public_sharing = bool(prefs.allow_public_sharing)
 
     public_url = None
     token = getattr(resource, "public_share_token", None)

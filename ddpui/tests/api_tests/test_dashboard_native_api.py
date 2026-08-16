@@ -38,8 +38,6 @@ from ddpui.api.dashboard_native_api import (
     create_filter,
     update_filter,
     delete_filter,
-    toggle_dashboard_sharing,
-    get_dashboard_sharing_status,
     set_personal_landing_dashboard,
     set_org_default_dashboard,
 )
@@ -47,7 +45,6 @@ from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
     DashboardUpdate,
     DashboardTabSchema,
-    DashboardShareToggle,
     FilterCreate,
     FilterUpdate,
 )
@@ -697,59 +694,10 @@ class TestDuplicateDashboardTabs:
 # ================================================================================
 
 
-class TestSharingPermissions:
-    """Sharing is manageable by the creator or an org admin — including
-    dashboards whose creator was deleted (created_by=None)."""
-
-    def test_admin_can_toggle_sharing_on_orphaned_dashboard(self, orguser, org, seed_db):
-        """an admin can make an orphaned dashboard public"""
-        dashboard = Dashboard.objects.create(title="Orphaned", org=org, created_by=None)
-        request = mock_request(orguser)
-
-        response = toggle_dashboard_sharing(
-            request, dashboard.id, DashboardShareToggle(is_public=True)
-        )
-
-        dashboard.refresh_from_db()
-        assert dashboard.is_public is True
-        assert dashboard.public_share_token
-        assert response.is_public is True
-        dashboard.delete()
-
-    def test_admin_can_view_sharing_status_of_orphaned_dashboard(self, orguser, org, seed_db):
-        """an admin can read the sharing status of an orphaned dashboard"""
-        dashboard = Dashboard.objects.create(
-            title="Orphaned", org=org, created_by=None, is_public=True
-        )
-        request = mock_request(orguser)
-
-        response = get_dashboard_sharing_status(request, dashboard.id)
-
-        assert response.is_public is True
-        dashboard.delete()
-
-    def test_non_admin_still_cannot_toggle_sharing_of_others_dashboard(self, orguser, org, seed_db):
-        """an analyst (has the share permission, not an admin) can neither toggle
-        nor view sharing of a dashboard they didn't create"""
-        dashboard = Dashboard.objects.create(title="Not theirs", org=org, created_by=orguser)
-        analyst_user = User.objects.create(username="analyst-share", email="analyst-share")
-        analyst = OrgUser.objects.create(
-            user=analyst_user, org=org, new_role=Role.objects.filter(slug=ANALYST_ROLE).first()
-        )
-        request = mock_request(analyst)
-
-        with pytest.raises(HttpError) as excinfo:
-            toggle_dashboard_sharing(request, dashboard.id, DashboardShareToggle(is_public=True))
-        assert "creator or an org admin" in str(excinfo.value)
-
-        with pytest.raises(HttpError) as excinfo:
-            get_dashboard_sharing_status(request, dashboard.id)
-        assert "creator or an org admin" in str(excinfo.value)
-
-        dashboard.refresh_from_db()
-        assert dashboard.is_public is False
-        dashboard.delete()
-        analyst_user.delete()
+# TestSharingPermissions removed — toggle_dashboard_sharing /
+# get_dashboard_sharing_status endpoints deleted when public/private
+# consolidated into PATCH /general-access. Coverage lives in
+# test_access_api.py (transfer + general-access sections).
 
 
 # ================================================================================
@@ -988,26 +936,8 @@ def test_duplicate_dashboard_creates_audit_log(mock_audit_log, seed_db, orguser,
     Dashboard.objects.filter(id=response.id).delete()
 
 
-@patch("ddpui.api.dashboard_native_api.create_audit_log")
-def test_toggle_dashboard_sharing_creates_audit_log(
-    mock_audit_log, seed_db, orguser, sample_dashboard
-):
-    """Test that toggling dashboard sharing creates an audit log entry with the title."""
-    request = mock_request(orguser)
-    payload = DashboardShareToggle(is_public=True)
-
-    toggle_dashboard_sharing(request, sample_dashboard.id, payload)
-
-    mock_audit_log.assert_called_once()
-    call_kwargs = mock_audit_log.call_args[1]
-    assert call_kwargs["org"] == orguser.org
-    assert call_kwargs["resource_type"] == AuditLogResourceType.DASHBOARD
-    assert call_kwargs["action"] == AuditLogAction.SHARE
-    assert call_kwargs["resource_id"] == str(sample_dashboard.id)
-    assert call_kwargs["resource_fields"] == {
-        "title": sample_dashboard.title,
-        "is_public": {"old": False, "new": True},
-    }
+# test_toggle_dashboard_sharing_creates_audit_log removed — audit-log-on-public-toggle
+# coverage moved to test_access_api.py via the /general-access endpoint.
 
 
 @patch("ddpui.api.dashboard_native_api.create_audit_log")

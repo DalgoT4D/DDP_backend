@@ -37,8 +37,6 @@ from ddpui.api.report_api import (
     get_snapshot_view,
     update_snapshot,
     delete_snapshot,
-    toggle_report_sharing,
-    get_report_sharing_status,
     list_dashboard_datetime_columns,
     create_comment,
     update_comment,
@@ -51,7 +49,6 @@ from ddpui.schemas.report_schema import (
     CommentCreate,
     CommentUpdate,
 )
-from ddpui.schemas.dashboard_schema import ShareToggle
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -560,127 +557,11 @@ class TestDeleteSnapshot:
         assert exc_info.value.status_code == 403
 
 
-# ================================================================================
-# Test toggle_report_sharing endpoint
-# ================================================================================
-
-
-class TestToggleReportSharing:
-    """Tests for toggle_report_sharing endpoint"""
-
-    def test_enable_sharing(self, orguser, sample_snapshot, seed_db):
-        """Test enabling public sharing generates token and URL"""
-        request = mock_request(orguser)
-        payload = ShareToggle(is_public=True)
-        response = toggle_report_sharing(request, sample_snapshot.id, payload)
-
-        data = response["data"]
-        assert data["is_public"] is True
-        assert data["public_url"] is not None
-        assert "/share/report/" in data["public_url"]
-        assert data["public_share_token"] is not None
-        assert data["message"] == "Report made public"
-
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.is_public is True
-        assert sample_snapshot.public_share_token is not None
-        assert sample_snapshot.public_shared_at is not None
-        assert sample_snapshot.public_disabled_at is None
-
-    def test_disable_sharing(self, orguser, sample_snapshot, seed_db):
-        """Test disabling public sharing"""
-        # First enable
-        request = mock_request(orguser)
-        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-
-        # Then disable
-        response = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
-
-        data = response["data"]
-        assert data["is_public"] is False
-        assert data["message"] == "Report made private"
-
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.is_public is False
-        assert sample_snapshot.public_disabled_at is not None
-
-    def test_enable_sharing_preserves_existing_token(self, orguser, sample_snapshot, seed_db):
-        """Test re-enabling sharing reuses the existing token"""
-        request = mock_request(orguser)
-        # Enable
-        resp1 = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-        token1 = resp1["data"]["public_share_token"]
-
-        # Disable
-        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=False))
-
-        # Re-enable
-        resp2 = toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-        token2 = resp2["data"]["public_share_token"]
-
-        assert token1 == token2
-
-    def test_sharing_not_found(self, orguser, seed_db):
-        """Test toggling sharing on nonexistent snapshot"""
-        request = mock_request(orguser)
-        payload = ShareToggle(is_public=True)
-        with pytest.raises(HttpError) as exc_info:
-            toggle_report_sharing(request, 99999, payload)
-        assert exc_info.value.status_code == 404
-
-    def test_sharing_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
-        """Test that non-creator cannot toggle sharing"""
-        request = mock_request(other_orguser)
-        payload = ShareToggle(is_public=True)
-        with pytest.raises(HttpError) as exc_info:
-            toggle_report_sharing(request, sample_snapshot.id, payload)
-        assert exc_info.value.status_code == 403
-
-
-# ================================================================================
-# Test get_report_sharing_status endpoint
-# ================================================================================
-
-
-class TestGetReportSharingStatus:
-    """Tests for get_report_sharing_status endpoint"""
-
-    def test_status_private_report(self, orguser, sample_snapshot, seed_db):
-        """Test sharing status for a private report"""
-        request = mock_request(orguser)
-        response = get_report_sharing_status(request, sample_snapshot.id)
-
-        data = response["data"]
-        assert data["is_public"] is False
-        assert data["public_access_count"] == 0
-
-    def test_status_public_report(self, orguser, sample_snapshot, seed_db):
-        """Test sharing status for a public report includes URL"""
-        request = mock_request(orguser)
-        # Enable sharing first
-        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-
-        response = get_report_sharing_status(request, sample_snapshot.id)
-
-        data = response["data"]
-        assert data["is_public"] is True
-        assert data["public_url"] is not None
-        assert "/share/report/" in data["public_url"]
-        assert data["public_shared_at"] is not None
-
-    def test_status_not_found(self, orguser, seed_db):
-        """Test sharing status for nonexistent snapshot"""
-        request = mock_request(orguser)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, 99999)
-        assert exc_info.value.status_code == 404
-
-    def test_status_non_creator_forbidden(self, other_orguser, sample_snapshot, seed_db):
-        """Test that non-creator cannot view sharing status"""
-        request = mock_request(other_orguser)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, sample_snapshot.id)
-        assert exc_info.value.status_code == 403
+# TestToggleReportSharing + TestGetReportSharingStatus removed —
+# toggle_report_sharing / get_report_sharing_status endpoints were deleted
+# when public/private consolidated into PATCH /api/access/{rtype}/{id}/general-access.
+# Coverage equivalents live in test_access_api.py (general-access section) and
+# test_public_report_api.py (TestAllowPublicSharingGate + TestPublicLinkStory7).
 
 
 # ================================================================================
@@ -912,24 +793,8 @@ class TestReportAuditLogs:
         assert call_kwargs["resource_id"] == str(snapshot_id)
         assert call_kwargs["resource_fields"] == {"title": "Report To Delete"}
 
-    @patch("ddpui.api.report_api.create_audit_log")
-    def test_toggle_sharing_creates_audit_log(
-        self, mock_audit_log, orguser, sample_snapshot, seed_db
-    ):
-        """Test that toggling report sharing creates an audit log entry."""
-        request = mock_request(orguser)
-        toggle_report_sharing(request, sample_snapshot.id, ShareToggle(is_public=True))
-
-        mock_audit_log.assert_called_once()
-        call_kwargs = mock_audit_log.call_args[1]
-        assert call_kwargs["org"] == orguser.org
-        assert call_kwargs["resource_type"] == AuditLogResourceType.REPORT
-        assert call_kwargs["action"] == AuditLogAction.SHARE
-        assert call_kwargs["resource_id"] == str(sample_snapshot.id)
-        assert call_kwargs["resource_fields"] == {
-            "title": sample_snapshot.title,
-            "is_public": {"old": False, "new": True},
-        }
+    # test_toggle_sharing_creates_audit_log removed — audit-log-on-public-toggle
+    # coverage moved to test_access_api.py via the /general-access endpoint.
 
     @patch("ddpui.api.report_api.create_audit_log")
     def test_create_comment_creates_audit_log(

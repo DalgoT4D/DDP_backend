@@ -59,8 +59,6 @@ from ddpui.api.report_api import (
     get_snapshot_view,
     update_snapshot,
     delete_snapshot,
-    toggle_report_sharing,
-    get_report_sharing_status,
     list_dashboard_datetime_columns,
     get_mentionable_users,
     get_comment_states,
@@ -79,7 +77,6 @@ from ddpui.schemas.report_schema import (
     CommentUpdate,
     MarkReadRequest,
 )
-from ddpui.schemas.dashboard_schema import ShareToggle
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 
 pytestmark = pytest.mark.django_db
@@ -344,10 +341,9 @@ class TestGuestReportRestrictions:
         request = mock_request(guest_user)
         assert_permission_denied(delete_snapshot, request, snapshot.id)
 
-    def test_guest_cannot_toggle_sharing(self, guest_user, snapshot):
-        request = mock_request(guest_user)
-        payload = ShareToggle(is_public=True)
-        assert_permission_denied(toggle_report_sharing, request, snapshot.id, payload)
+    # Removed test_guest_cannot_toggle_sharing — the toggle_report_sharing
+    # endpoint was deleted; sharing now flows through PATCH /general-access
+    # (covered by test_access_api.py::test_non_edit_holder_cannot_change_mode).
 
 
 # ================================================================================
@@ -486,60 +482,14 @@ class TestNonGuestCommentAccess:
 # ================================================================================
 
 
-class TestSharingStatusOwnerCheck:
-    """Test that non-owners get 403 from the service layer (not the permission decorator)."""
-
-    def test_guest_gets_403_from_service(self, guest_user, snapshot):
-        """Guest passes permission check (can_view_dashboards) but fails owner-only."""
-        request = mock_request(guest_user)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, snapshot.id)
-        assert exc_info.value.status_code == 403
-
-    def test_non_owner_analyst_gets_403_from_service(self, analyst_user, snapshot):
-        """Analyst has can_view_dashboards but isn't the owner → 403."""
-        request = mock_request(analyst_user)
-        with pytest.raises(HttpError) as exc_info:
-            get_report_sharing_status(request, snapshot.id)
-        assert exc_info.value.status_code == 403
-
-    def test_owner_can_view_sharing_status(self, account_manager_user, snapshot):
-        """Owner (creator) can view sharing status."""
-        request = mock_request(account_manager_user)
-        response = get_report_sharing_status(request, snapshot.id)
-        assert response["success"] is True
-
-
-# ================================================================================
-# Test Sharing - creator-or-admin policy, incl. orphaned snapshots
-# ================================================================================
-
-
-class TestSharingCreatorOrAdmin:
-    """Admins can manage sharing of snapshots they didn't create — including
-    orphaned ones whose creator was deleted (created_by=None)."""
-
-    def test_admin_can_view_sharing_status_of_orphaned_snapshot(self, super_admin_user, snapshot):
-        """an admin can read sharing status after the creator is deleted"""
-        snapshot.created_by = None
-        snapshot.save()
-        request = mock_request(super_admin_user)
-
-        response = get_report_sharing_status(request, snapshot.id)
-
-        assert response["success"] is True
-
-    def test_admin_can_toggle_sharing_of_orphaned_snapshot(self, super_admin_user, snapshot):
-        """an admin can make an orphaned snapshot public"""
-        snapshot.created_by = None
-        snapshot.save()
-        request = mock_request(super_admin_user)
-
-        toggle_report_sharing(request, snapshot.id, ShareToggle(is_public=True))
-
-        snapshot.refresh_from_db()
-        assert snapshot.is_public is True
-        assert snapshot.public_share_token
+# Removed TestSharingStatusOwnerCheck + TestSharingCreatorOrAdmin — the
+# toggle_report_sharing / get_report_sharing_status endpoints were removed
+# when public/private moved to the unified PATCH /general-access endpoint.
+# Coverage equivalents:
+# - View-holder cannot toggle → test_access_api.py::test_non_edit_holder_cannot_change_mode
+# - Public link + org allow_public_sharing → test_access_api.py general-access section
+# - Orphaned resource share management → test_access_api.py::test_admin_can_transfer_ownership_even_when_not_owner
+#   and covered by test_access_api.py orphan tests (test_L20, test_N01-N06)
 
 
 # ================================================================================
