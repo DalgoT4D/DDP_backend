@@ -10,6 +10,7 @@ from ninja import Schema
 
 
 AccessLevel = Literal["view", "edit"]
+EffectiveAccessLevel = Literal["no_access", "view", "edit"]
 PrincipalType = Literal["user", "group"]
 ShareRowKind = Literal["user", "group", "invitation"]
 ShareRowStatus = Literal["active", "pending"]
@@ -143,6 +144,18 @@ class TransferOwnershipPayload(Schema):
     """Body for ``POST /api/access/{rtype}/{id}/transfer-ownership``."""
 
     to_orguser_id: int
+
+
+class TransferCandidateSchema(Schema):
+    """One row in the transfer-ownership picker. ``access_level`` is the user's
+    effective level on the resource; only ``edit`` candidates are selectable.
+    ``is_owner`` marks the current owner (client hides them from the picker)."""
+
+    orguser_id: int
+    email: str
+    role_name: Optional[str] = None
+    access_level: EffectiveAccessLevel  # "no_access" | "view" | "edit"
+    is_owner: bool = False
 
 
 # ---------------------------------------------------------------------------

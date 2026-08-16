@@ -14,7 +14,7 @@ from ninja.errors import HttpError
 
 from ddpui.auth import has_permission
 from ddpui.core.access import resource_share, shareable_types
-from ddpui.core.access.access_control import get_user_access
+from ddpui.core.access.access_control import get_access_map_for_resource, get_user_access
 from ddpui.core.access.ownership import is_creator_or_admin, transfer_ownership, OwnershipError
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.core.notifications.notifications_functions import create_notification
@@ -32,6 +32,7 @@ from ddpui.schemas.access.resource_share_schema import (
     RequestAccessPayload,
     RespondToRequestPayload,
     ShareRowSchema,
+    TransferCandidateSchema,
     TransferOwnershipPayload,
     UpdateGrantPayload,
 )
@@ -401,6 +402,34 @@ def transfer_resource_ownership(
     except OwnershipError as err:
         raise HttpError(400, str(err)) from err
     return {"success": True}
+
+
+@access_router.get("/{rtype}/{resource_id}/candidates", response=list[TransferCandidateSchema])
+def list_transfer_candidates(request, rtype: str, resource_id: str):
+    """Every active user in the org with their effective access level on this
+    resource. The transfer-ownership picker uses this to disable users who
+    don't have Edit — only Edit-holders can become owners.
+
+    Restricted to creator or admin — mirrors the transfer-ownership endpoint
+    itself (no one else needs this list)."""
+    orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
+    if not is_creator_or_admin(orguser, resource):
+        raise HttpError(403, "only the owner or an admin can list transfer candidates")
+
+    access_map = get_access_map_for_resource(orguser.org, rtype, resource.pk)
+    owner_id = getattr(resource, "created_by_id", None)
+
+    users = OrgUser.objects.filter(org=orguser.org).select_related("user", "new_role")
+    return [
+        TransferCandidateSchema(
+            orguser_id=u.id,
+            email=u.user.email,
+            role_name=u.new_role.name if u.new_role else None,
+            access_level=access_map.get(u.id, "no_access"),
+            is_owner=owner_id is not None and u.id == owner_id,
+        )
+        for u in users
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -145,6 +145,80 @@ def get_user_access_map(
     return levels
 
 
+def get_access_map_for_resource(org, rtype: str, resource_id) -> dict[int, str]:
+    """Inverse of ``get_user_access``: for a single resource, return
+    ``{orguser_id: access_level}`` for every OrgUser in the org.
+
+    Used by the transfer-ownership candidate picker to gate which users can
+    be selected as the new owner (only Edit-level users qualify). Follows the
+    same precedence rules as ``get_user_access``.
+
+    Raises ``ValueError`` if the resource is not found in the org.
+    """
+    entry = shareable_types.get_rtype_entry(rtype)
+    resource = (
+        entry["model"]
+        .objects.filter(org=org, pk=resource_id)
+        .only("created_by_id", "is_private")
+        .first()
+    )
+    if resource is None:
+        raise ValueError(f"{rtype} {resource_id} not found")
+
+    is_private = bool(getattr(resource, "is_private", False))
+    owner_id = resource.created_by_id
+
+    users = list(OrgUser.objects.filter(org=org).select_related("new_role"))
+
+    memberships = OrgUserGroupMember.objects.filter(orguser__org=org).values_list(
+        "orguser_id", "group_id"
+    )
+    user_groups: dict[int, list[int]] = {}
+    for uid, gid in memberships:
+        user_groups.setdefault(uid, []).append(gid)
+
+    shares = ResourceShare.objects.filter(
+        org=org, resource_type=rtype, resource_id=str(resource_id)
+    )
+    user_grants: dict[int, str] = {}
+    group_grants: dict[int, str] = {}
+    for s in shares:
+        if s.principal_type == ResourceSharePrincipalType.USER and s.principal_id:
+            user_grants[s.principal_id] = max_access_level(
+                user_grants.get(s.principal_id), s.access_level
+            )
+        elif s.principal_type == ResourceSharePrincipalType.GROUP and s.principal_id:
+            group_grants[s.principal_id] = max_access_level(
+                group_grants.get(s.principal_id), s.access_level
+            )
+
+    prefs = OrgPreferences.objects.filter(org=org).first()
+    analyst_floor = prefs.default_analyst_level if prefs else AccessLevel.VIEW
+    member_floor = prefs.default_member_level if prefs else AccessLevel.VIEW
+
+    result: dict[int, str] = {}
+    for user in users:
+        if _is_admin(user) or (owner_id is not None and user.id == owner_id):
+            result[user.id] = AccessLevel.EDIT
+            continue
+
+        combined = user_grants.get(user.id)
+        for gid in user_groups.get(user.id, []):
+            combined = max_access_level(combined, group_grants.get(gid))
+
+        if is_private:
+            result[user.id] = combined or AccessLevel.NO_ACCESS
+        else:
+            floor = (
+                analyst_floor
+                if user.new_role and user.new_role.slug == RoleSlug.ANALYST
+                else member_floor
+            )
+            result[user.id] = max_access_level(combined, floor) or AccessLevel.NO_ACCESS
+
+    return result
+
+
 def accessible_filter(orguser: OrgUser, rtype: str) -> Q:
     """The same rule as one ORM filter, for list endpoints: which resources of
     this rtype may the orguser see at all (level >= view)? Compose it into the
