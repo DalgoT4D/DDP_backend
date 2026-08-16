@@ -121,21 +121,34 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
     then has no rights on those schemas (`intermediate`, `staging`, …), so the app's chart queries
     fail with "permission denied for schema intermediate" and dbt can't rebuild the models.
 
-    For each distinct non-system owner found in the copied db we make the admin a temporary member
-    of that role (rds_superuser is allowed to grant any role to itself, but REASSIGN still requires
-    actual membership in the source role), REASSIGN OWNED its objects to the ft role, then drop the
-    membership again. `public` (owned by `postgres`) is handled separately by the caller and
-    skipped here.
+    For each distinct non-system owner found in the copied db we make the admin a member of that
+    role (rds_superuser is allowed to grant any role to itself, but REASSIGN still requires actual
+    membership in the source role), then REASSIGN OWNED its objects to the ft role. `public`
+    (owned by `postgres`) is handled separately by the caller and skipped here.
 
-    OPS REQUIREMENT: the template DATABASE itself must be owned by the trials ADMIN user, and
-    the admin must not depend on a standing membership of the template warehouse role. Two
-    Postgres gotchas otherwise bite (both happened on staging, 2026-07-23):
-    - REASSIGN OWNED also transfers cluster-wide SHARED objects — if the template warehouse
-      role owns the template db, this REASSIGN silently hands the TEMPLATE db to the trial's
-      ft role (hijacking it and making the ft role's DROP ROLE fail at teardown);
-    - the REVOKE below destroys any standing `GRANT <template-owner> TO <admin>` membership,
-      so a copy that relied on that membership fails with InsufficientPrivilege on the NEXT
-      clone.
+    CONCURRENCY: the membership is granted but deliberately NEVER revoked. Trial dbs and ft roles
+    are per-email, but the template's owner role and the connecting admin are single cluster-wide
+    objects — so every concurrent clone issues the SAME `GRANT <template-owner> TO <admin>`, whose
+    membership row lives in the shared `pg_auth_members` catalog under a unique index on
+    (roleid, member). A revoke-after-use version raced two ways with 4 parallel clones on staging
+    (2026-08-15): two clones both saw "not a member" and both inserted, and the loser died with
+    UniqueViolation; and one clone's REVOKE landed while another was mid-REASSIGN, killing it with
+    InsufficientPrivilege. Keeping the membership removes both by construction — after the first
+    clone the row always exists, so the GRANT is a permanent no-op and nothing can delete it
+    mid-REASSIGN. The UniqueViolation below is caught only for the cold-start window (the very
+    first clones on a fresh instance, before any membership exists); a concurrent clone winning
+    that insert has produced exactly the state we wanted, so proceeding is correct. Safe to
+    swallow because _admin_connect is autocommit — the failed GRANT poisons no transaction.
+
+    The alternative (an advisory lock around the block) was rejected: it serializes clones for no
+    benefit here, and pg_advisory_lock is scoped per-database, so it would have to be taken on a
+    separate connection to the shared `postgres` db to work at all.
+
+    OPS REQUIREMENT: the template DATABASE itself must be owned by the trials ADMIN user.
+    REASSIGN OWNED also transfers cluster-wide SHARED objects — if the template warehouse role
+    owns the template db, this REASSIGN silently hands the TEMPLATE db to the trial's ft role
+    (hijacking it and making the ft role's DROP ROLE fail at teardown). Seen on staging
+    2026-07-23.
 
     Owner names come from the copied template db's own catalog — controlled template content, never
     user input — so interpolating them as identifiers does not cross a trust boundary.
@@ -163,9 +176,13 @@ def _reassign_copied_objects(cursor, ft_role: str) -> None:
         # grants issued by the caller.
         if owner == settings.TRIALS_RDS_ADMIN_USER:
             continue
-        cursor.execute(f'GRANT "{owner}" TO CURRENT_USER')
+        try:
+            cursor.execute(f'GRANT "{owner}" TO CURRENT_USER')
+        except psycopg2.errors.UniqueViolation:  # pylint: disable=no-member
+            # a concurrent clone created the identical membership microseconds earlier — the
+            # state we wanted now exists, so carry on to the REASSIGN (see CONCURRENCY above).
+            logger.info(f"membership of {owner} already created by a concurrent clone")
         cursor.execute(f'REASSIGN OWNED BY "{owner}" TO "{ft_role}"')
-        cursor.execute(f'REVOKE "{owner}" FROM CURRENT_USER')
         logger.info(f"reassigned template objects owned by {owner} to {ft_role}")
 
 

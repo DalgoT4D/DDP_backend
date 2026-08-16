@@ -1,5 +1,6 @@
 from unittest.mock import patch, MagicMock, call
 
+import psycopg2
 import pytest
 from ddpui.core.trial import warehouse_provision
 from ddpui.core.trial.warehouse_provision import (
@@ -358,15 +359,38 @@ def test_reassign_copied_objects_transfers_only_non_system_owners():
     stmts = [str(c.args[0]) for c in cursor.execute.call_args_list]
     joined = " ".join(stmts)
 
-    # the template owner is fully transferred (grant -> reassign -> revoke)
+    # the template owner is transferred (grant -> reassign); the membership is deliberately
+    # never revoked — see the CONCURRENCY note on _reassign_copied_objects
     assert 'GRANT "template_wh" TO CURRENT_USER' in joined
     assert f'REASSIGN OWNED BY "template_wh" TO "{ft_role}"' in joined
-    assert 'REVOKE "template_wh" FROM CURRENT_USER' in joined
+    assert "REVOKE" not in joined
 
     # ft_role / postgres / pg_* are never reassigned
     assert 'REASSIGN OWNED BY "postgres"' not in joined
     assert 'REASSIGN OWNED BY "pg_monitor"' not in joined
     assert f'REASSIGN OWNED BY "{ft_role}"' not in joined
+
+
+def test_reassign_survives_a_concurrent_clone_winning_the_grant():
+    """Cold-start race: two clones both find no membership and both GRANT; the loser gets
+    UniqueViolation on pg_auth_members. The membership it wanted now exists (the winner made it),
+    so the loser must swallow the error and still REASSIGN — not fail the whole clone."""
+    ft_role = "ft_x_user"
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [("template_wh",)]
+
+    def execute(sql, *args):
+        if sql.startswith('GRANT "template_wh"'):
+            raise psycopg2.errors.UniqueViolation(  # pylint: disable=no-member
+                'duplicate key value violates unique constraint "pg_auth_members_role_member_index"'
+            )
+
+    cursor.execute.side_effect = execute
+
+    _reassign_copied_objects(cursor, ft_role)  # must not raise
+
+    joined = " ".join(str(c.args[0]) for c in cursor.execute.call_args_list)
+    assert f'REASSIGN OWNED BY "template_wh" TO "{ft_role}"' in joined
 
 
 def test_reassign_copied_objects_noop_when_no_foreign_owners():
