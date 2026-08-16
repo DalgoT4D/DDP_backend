@@ -13,6 +13,8 @@ from ddpui.utils.awsses import (
     send_trial_completion_email,
     send_trial_midpoint_email,
     send_trial_pre_end_email,
+    biz_dev_recipients,
+    send_biz_dev_notification,
 )
 
 
@@ -153,3 +155,40 @@ def test_send_trial_pre_end_email():
         _, subject, _, html_body = mock_send.call_args[0]
         assert subject == "2 days left in your Dalgo trial"
         assert "15 Aug 2026" in html_body
+
+
+@patch.dict(os.environ, {"BIZ_DEV_EMAILS": " a@x.org , ,b@x.org"})
+def test_biz_dev_recipients_splits_and_drops_blanks():
+    assert biz_dev_recipients() == ["a@x.org", "b@x.org"]
+
+
+@patch.dict(os.environ, {"BIZ_DEV_EMAILS": ""})
+def test_biz_dev_recipients_empty_when_unset():
+    assert biz_dev_recipients() == []
+
+
+@patch.dict(os.environ, {"BIZ_DEV_EMAILS": "a@x.org,b@x.org"})
+def test_send_biz_dev_notification_mails_every_recipient():
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send:
+        send_biz_dev_notification("New org created: Acme", "body")
+
+    assert [call[0][0] for call in mock_send.call_args_list] == ["a@x.org", "b@x.org"]
+    mock_send.assert_any_call("a@x.org", "New org created: Acme", "body")
+
+
+@patch.dict(os.environ, {"BIZ_DEV_EMAILS": "a@x.org,b@x.org"})
+def test_send_biz_dev_notification_continues_past_a_failing_recipient():
+    """one bouncing address must not stop the rest, and must not raise at the call site"""
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send:
+        mock_send.side_effect = [Exception("bounced"), None]
+        send_biz_dev_notification("subject", "body")
+
+    assert mock_send.call_count == 2
+
+
+@patch.dict(os.environ, {"BIZ_DEV_EMAILS": ""})
+def test_send_biz_dev_notification_noops_when_unconfigured():
+    with patch("ddpui.utils.awsses.send_text_message") as mock_send:
+        send_biz_dev_notification("subject", "body")
+
+    mock_send.assert_not_called()

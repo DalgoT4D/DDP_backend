@@ -1,5 +1,4 @@
 import json
-import os
 from ninja import Router
 from ninja.errors import HttpError
 from django.utils import timezone
@@ -23,7 +22,7 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
 )
-from ddpui.utils.awsses import send_text_message
+from ddpui.utils.awsses import biz_dev_recipients, send_text_message
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.email_templates import build_subscription_request_email
 from ddpui.utils.redis_client import RedisClient
@@ -228,9 +227,7 @@ def initiate_upgrade_dalgo_plan(request):
     if org_plan.upgrade_requested:
         return {"success": True, "already_requested": True, "res": "Upgrade request already sent"}
 
-    biz_dev_emails = [
-        email.strip() for email in os.getenv("BIZ_DEV_EMAILS", "").split(",") if email.strip()
-    ]
+    biz_dev_emails = biz_dev_recipients()
     if not biz_dev_emails:
         logger.error(
             "BIZ_DEV_EMAILS is not configured; subscription request from org %s was not emailed",

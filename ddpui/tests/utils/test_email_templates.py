@@ -467,6 +467,47 @@ def test_subscription_request_email_converts_datetimes_to_utc():
     assert "  Created:      2026-08-01 09:12 UTC\n" in body
 
 
+# ── Internal new-org notification (plain text) ────────────────────────────
+
+
+def test_new_org_signup_email_renders_both_blocks():
+    org, orguser, org_plan = _fake_request_actors()
+
+    subject, body = email_templates.build_new_org_signup_email(
+        org, orguser, org_plan, org.created_at
+    )
+
+    assert subject == "New org created: Noora Health"
+    assert body == (
+        "A new org has been created.\n"
+        "\n"
+        "Org\n"
+        "  Name:         Noora Health\n"
+        "  Slug:         noora-health\n"
+        "  Type:         Free Trial\n"
+        "  Created:      2026-08-01 09:12 UTC\n"
+        "\n"
+        "Signed up by\n"
+        "  Name:         Himanshu Dube\n"
+        "  Email:        himanshu@projecttech4dev.org\n"
+        "  Function:     Monitoring and Evaluation\n"
+        "  Dalgo role:   Admin\n"
+    )
+
+
+def test_new_org_signup_email_falls_back_for_missing_values():
+    """Trial signup collects no name, and the plan/role lookups can come back empty."""
+    org, orguser, _ = _fake_request_actors(work_domain=None, full_name="", role_name=None)
+
+    _, body = email_templates.build_new_org_signup_email(org, orguser, None, None)
+
+    assert "  Type:         —\n" in body
+    assert "  Created:      —\n" in body
+    assert "  Name:         —\n" in body
+    assert "  Function:     —\n" in body
+    assert "  Dalgo role:   —\n" in body
+
+
 def test_work_domain_labels_cover_the_signup_form_options():
     """Every option a signup can submit must have a label to render."""
     assert set(get_args(WorkDomain)) <= set(email_templates.WORK_DOMAIN_LABELS)

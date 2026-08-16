@@ -155,3 +155,91 @@ def test_clone_task_timeout_records_failed_and_releases_lock(
     assert len(failed_calls) == 1
     assert failed_calls[0]["message"] == "clone failed"
     mock_release.assert_called_once_with("slow@b.org")
+
+
+def _run_with_org(org_name="Trial a1b2c3d4 Acme", slug="trial-a1b2c3d4-acme"):
+    """A CloneRun stand-in whose org/orguser render like real rows in the notification email."""
+    import datetime
+    from types import SimpleNamespace
+
+    run = MagicMock()
+    run.trial_org = SimpleNamespace(
+        name=org_name,
+        slug=slug,
+        created_at=datetime.datetime(2026, 8, 1, 9, 12, tzinfo=datetime.timezone.utc),
+    )
+    run.trial_orguser = SimpleNamespace(
+        user=SimpleNamespace(email="a@b.org", get_full_name=lambda: ""),
+        work_domain="monitoring_evaluation",
+        new_role=SimpleNamespace(name="Account Manager"),
+    )
+    return run
+
+
+@patch("ddpui.core.trial.tasks.awsses")
+@patch("ddpui.core.trial.tasks.OrgPlans")
+@patch("ddpui.core.trial.tasks.TaskProgress")
+@patch("ddpui.core.trial.tasks.clone_template_org")
+def test_clone_task_notifies_biz_dev_on_success(
+    mock_clone, mock_taskprogress_cls, mock_orgplans, mock_awsses
+):
+    """A finished clone means an org now exists — biz-dev is told, with the signup's details."""
+    from types import SimpleNamespace
+    from ddpui.core.trial.tasks import clone_trial_org_task
+
+    mock_taskprogress_cls.return_value = MagicMock()
+    mock_clone.return_value = _run_with_org()
+    mock_orgplans.objects.filter.return_value.first.return_value = SimpleNamespace(
+        base_plan="Free Trial"
+    )
+
+    clone_trial_org_task("task-notify", 5, "a@b.org", "Acme", "monitoring_evaluation")
+
+    subject, body = mock_awsses.send_biz_dev_notification.call_args[0]
+    assert subject == "New org created: Trial a1b2c3d4 Acme"
+    assert "A new org has been created." in body
+    assert "  Slug:         trial-a1b2c3d4-acme\n" in body
+    assert "  Type:         Free Trial\n" in body
+    assert "  Created:      2026-08-01 09:12 UTC\n" in body
+    assert "  Email:        a@b.org\n" in body
+    assert "  Function:     Monitoring and Evaluation\n" in body
+    assert "  Dalgo role:   Account Manager\n" in body
+
+
+@patch("ddpui.core.trial.tasks.awsses")
+@patch("ddpui.core.trial.tasks.OrgPlans")
+@patch("ddpui.core.trial.tasks.TaskProgress")
+@patch("ddpui.core.trial.tasks.clone_template_org")
+def test_clone_task_survives_a_failing_biz_dev_notification(
+    mock_clone, mock_taskprogress_cls, mock_orgplans, mock_awsses
+):
+    """The clone is already done — a mail problem must not turn it into a failed task."""
+    from ddpui.core.trial.tasks import clone_trial_org_task
+
+    mock_progress = MagicMock()
+    mock_taskprogress_cls.return_value = mock_progress
+    mock_clone.return_value = _run_with_org()
+    mock_orgplans.objects.filter.side_effect = RuntimeError("db gone")
+
+    clone_trial_org_task("task-mailfail", 5, "a@b.org", "Acme", "monitoring_evaluation")
+
+    # still reported as completed, and nothing raised
+    assert any(c.args[0].get("status") == "completed" for c in mock_progress.add.call_args_list)
+    mock_awsses.send_biz_dev_notification.assert_not_called()
+
+
+@patch("ddpui.core.trial.tasks.awsses")
+@patch("ddpui.core.trial.tasks.TaskProgress")
+@patch("ddpui.core.trial.tasks.clone_template_org")
+def test_clone_task_does_not_notify_biz_dev_on_failure(
+    mock_clone, mock_taskprogress_cls, mock_awsses
+):
+    """A failed clone is torn down — there is no org to announce."""
+    from ddpui.core.trial.tasks import clone_trial_org_task
+
+    mock_taskprogress_cls.return_value = MagicMock()
+    mock_clone.side_effect = RuntimeError("boom")
+
+    clone_trial_org_task("task-nomail", 5, "a@b.org", "Acme", "monitoring_evaluation")
+
+    mock_awsses.send_biz_dev_notification.assert_not_called()

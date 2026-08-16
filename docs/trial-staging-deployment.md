@@ -65,7 +65,7 @@ deployer following the template alone will not know to set them. They are marked
 | `AIRBYTE_OAUTH_REDIRECT_URL` | must match the staging backend's public URL |
 | `AIRBYTE_GOOGLE_OAUTH_CLIENT_ID` | |
 | `AIRBYTE_GOOGLE_OAUTH_CLIENT_SECRET` | |
-| `BIZ_DEV_EMAILS` | recipients for subscription requests; blank makes the endpoint error |
+| `BIZ_DEV_EMAILS` | recipients for subscription requests and new-org notifications; blank makes the upgrade endpoint error, and silently skips the new-org mail |
 
 **Check:**
 

@@ -1020,3 +1020,45 @@ def build_subscription_request_email(org, orguser, org_plan, requested_at) -> tu
     )
 
     return subject, body
+
+
+def build_new_org_signup_email(org, orguser, org_plan, created_at) -> tuple:
+    """Render the internal "a new org has been created" notification.
+
+    Same audience and same plain-text shape as `build_subscription_request_email` — the
+    biz-dev team (BIZ_DEV_EMAILS) reads both in the same inbox, so they are kept visually
+    consistent on purpose. Sent once, when the org actually exists (the trial clone finished
+    all its steps), not when the signup form is submitted: a signup whose clone failed is torn
+    down and has no org to talk about.
+
+    `orguser.work_domain` is the "Function" the user picked on the signup form — metadata, not
+    a permission — and `orguser.new_role` is the RBAC role the clone assigned. Both are shown,
+    as in the subscription email, because they answer different questions.
+
+    Returns:
+        (subject, plain_text_body) tuple
+    """
+    subject = f"New org created: {org.name}"
+
+    user = orguser.user if orguser else None
+    full_name = user.get_full_name().strip() if user else ""
+    work_domain = orguser.work_domain if orguser else None
+    role = orguser.new_role if orguser else None
+
+    body = (
+        "A new org has been created.\n"
+        "\n"
+        "Org\n"
+        f"  Name:         {org.name or _MISSING}\n"
+        f"  Slug:         {org.slug or _MISSING}\n"
+        f"  Type:         {(org_plan.base_plan if org_plan else None) or _MISSING}\n"
+        f"  Created:      {_fmt_datetime_utc(created_at)}\n"
+        "\n"
+        "Signed up by\n"
+        f"  Name:         {full_name or _MISSING}\n"
+        f"  Email:        {user.email if user else _MISSING}\n"
+        f"  Function:     {WORK_DOMAIN_LABELS.get(work_domain, work_domain) or _MISSING}\n"
+        f"  Dalgo role:   {role.name if role else _MISSING}\n"
+    )
+
+    return subject, body
