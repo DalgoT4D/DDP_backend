@@ -45,6 +45,9 @@ pytestmark = pytest.mark.django_db
 def seed_template_org(monkeypatch):
     """Org that stands in for the TEMPLATE_ORG_SLUG-configured template org."""
     monkeypatch.setattr(settings, "TEMPLATE_ORG_SLUG", "trial-template")
+    # pinned so the signup path doesn't fall through to the ambient env: CI never sets
+    # FRONTEND_URL_V2, which would trip the fail-fast guard in trial_signup and 500.
+    monkeypatch.setattr(settings, "FRONTEND_URL_V2", "http://localhost:3000")
     return Org.objects.create(name="Trial Template", slug="trial-template")
 
 
