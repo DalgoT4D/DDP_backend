@@ -10,6 +10,8 @@ import sqlalchemy
 from ninja import Router
 from ninja.errors import HttpError
 import sqlalchemy.exc
+import psycopg2.errors
+from google.cloud.exceptions import NotFound as BigQueryNotFound
 
 from django.http import StreamingHttpResponse
 from ddpui import auth
@@ -159,16 +161,23 @@ def get_table_data(
 @has_permission(["can_view_warehouse_data"])
 def get_table_count(request, schema_name: str, table_name: str):
     """Fetches the total number of rows for a specified table."""
-    try:
-        org_user = request.orguser
-        org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
+    org_user = request.orguser
+    org_warehouse = OrgWarehouse.objects.filter(org=org_user.org).first()
 
+    if not org_warehouse:
+        raise HttpError(404, "Please set up your warehouse first")
+
+    try:
         client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
-    except Exception as e:
-        logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
-        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
+    except psycopg2.errors.UndefinedTable as err:
+        raise HttpError(404, f"Table {schema_name}.{table_name} not found") from err
+    except BigQueryNotFound as err:
+        raise HttpError(404, f"Table {schema_name}.{table_name} not found") from err
+    except Exception as err:
+        logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {err}")
+        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}") from err
 
 
 @warehouse_router.get("/dbt_project/json_columnspec/")
