@@ -16,6 +16,13 @@ import os
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from ddpui.core.ai.tracing import TurnCallbackDispatcher
+
+# One dispatcher on every model: on Python 3.10 LangChain doesn't propagate
+# config callbacks into model calls made inside graph nodes, so tracing rides
+# on the model itself. No-ops outside a traced turn (see tracing.py).
+_TRACING_DISPATCHER = TurnCallbackDispatcher()
+
 
 def resolve_model_name(env_var: str, default_model: str) -> str:
     """The model id a job will use — for building the client and for tracing."""
@@ -27,4 +34,5 @@ def build_model(env_var: str, default_model: str, max_tokens: int) -> BaseChatMo
     return init_chat_model(
         resolve_model_name(env_var, default_model),
         max_tokens=max_tokens,
+        callbacks=[_TRACING_DISPATCHER],
     )

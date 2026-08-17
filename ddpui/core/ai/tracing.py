@@ -11,6 +11,7 @@ Every call here is wrapped so a tracing failure can never break a chat turn.
 """
 
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -22,6 +23,94 @@ logger = CustomLogger("ddpui")
 
 # Cap trace payload sizes — traces are for debugging, not archival
 MAX_IO_CHARS = 4000
+
+# Stage nodes of the TurnGraph → span names (verb-first, stable: these are
+# referenced by Langfuse dashboards and filters, so treat them as an API)
+STAGE_SPANS = {
+    "route_node": "route-question",
+    "casual_reply_node": "reply-casually",
+    "clarify_node": "ask-clarification",
+    "retrieve_context_node": "retrieve-context",
+    "sql_agent": "run-sql-agent",
+    "validate_node": "validate-answer",
+}
+
+# LLM call inside a graph node → generation name; distinguishes the router,
+# agent, and validator calls that would otherwise all look identical
+GENERATION_NAMES = {
+    "route_node": "classify-intent",
+    "casual_reply_node": "generate-reply",
+    "model": "generate-response",
+    "validate_node": "judge-answer",
+}
+# Same mapping keyed by the enclosing stage span — used when the model call
+# arrives without langgraph metadata (see TurnCallbackDispatcher below)
+STAGE_GENERATION_NAMES = {
+    "route-question": "classify-intent",
+    "reply-casually": "generate-reply",
+    "run-sql-agent": "generate-response",
+    "validate-answer": "judge-answer",
+}
+FALLBACK_GENERATION_NAME = "llm-call"
+
+# The turn currently being traced in this async context. Set by run_turn before
+# streaming the graph; plain ContextVar reads propagate into every child task
+# the graph creates, which works on Python 3.10.
+_current_turn_handler: ContextVar[Any] = ContextVar("langfuse_turn_handler", default=None)
+
+
+def set_current_turn_handler(handler) -> Any:
+    """Bind a turn's handler to this async context. Returns the reset token."""
+    return _current_turn_handler.set(handler)
+
+
+def reset_current_turn_handler(token) -> None:
+    try:
+        _current_turn_handler.reset(token)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+class TurnCallbackDispatcher(BaseCallbackHandler):
+    """Model-attached bridge for Python 3.10.
+
+    LangChain only auto-propagates config callbacks into `model.ainvoke()` on
+    Python 3.11+; on 3.10 every model call inside a graph node is invisible to
+    the handler passed via config (langchain's own agent factory calls
+    `model_.ainvoke(messages)` with no config). Chain and tool callbacks are
+    unaffected — LangGraph invokes those with explicit config.
+
+    So the model carries this dispatcher from construction (see base.build_model),
+    and it forwards LLM events to whichever turn handler is bound to the current
+    async context. Outside a traced turn (REPL, evals, one-shot calls) it no-ops.
+    """
+
+    raise_error = False
+    run_inline = True  # preserve the caller's contextvar context
+
+    def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, **kwargs):
+        handler = _current_turn_handler.get()
+        if handler is not None:
+            handler.on_chat_model_start(
+                serialized, messages, run_id=run_id, parent_run_id=parent_run_id, **kwargs
+            )
+
+    def on_llm_end(self, response, *, run_id, **kwargs):
+        handler = _current_turn_handler.get()
+        if handler is not None:
+            handler.on_llm_end(response, run_id=run_id, **kwargs)
+
+    def on_llm_error(self, error, *, run_id, **kwargs):
+        handler = _current_turn_handler.get()
+        if handler is not None:
+            handler.on_llm_error(error, run_id=run_id, **kwargs)
+
+
+def _mask_tool_results() -> bool:
+    """When set, tool outputs (which can contain warehouse rows, i.e. real
+    beneficiary data) are replaced with a length stub in traces. Recommended
+    in production; SQL text and tool inputs are still recorded."""
+    return os.getenv("LANGFUSE_MASK_TOOL_RESULTS", "").lower() in ("1", "true", "yes")
 
 _client = None
 _client_initialized = False
@@ -46,6 +135,8 @@ def get_langfuse():
             public_key=public_key,
             secret_key=secret_key,
             host=os.getenv("LANGFUSE_HOST", "http://localhost:3000"),
+            # ties traces to a deploy (git sha / image tag) for regression hunting
+            release=os.getenv("LANGFUSE_RELEASE") or None,
         )
         logger.info("chat_with_data: langfuse tracing enabled")
     except Exception:  # pylint: disable=broad-except
@@ -64,9 +155,12 @@ def _clip(value: Any) -> str:
 class LangfuseTurnHandler(BaseCallbackHandler):
     """Maps LangChain callbacks for ONE turn onto a Langfuse trace.
 
-    Flat structure: the trace is the turn; each model call is a generation,
-    each tool call a span. The langfuse client batches sends on a background
-    thread, so nothing here blocks the event loop.
+    Structure mirrors the TurnGraph: the trace is the turn; each graph stage
+    (route / agent / validate) is a span; model calls are generations and tool
+    calls are spans nested under their stage. Non-stage chain runs (LangGraph
+    internals) get no observation — they'd be noise — but their run ids still
+    link children to the right stage. The langfuse client batches sends on a
+    background thread, so nothing here blocks the event loop.
     """
 
     raise_error = False  # never let tracing errors propagate into the turn
@@ -75,15 +169,86 @@ class LangfuseTurnHandler(BaseCallbackHandler):
         self._trace = trace
         self._model_name = model_name
         self._observations: dict[str, Any] = {}  # run_id -> generation/span
+        self._parents: dict[str, str] = {}  # run_id -> parent run_id
+        # currently-open stage spans, innermost last — the nesting fallback for
+        # model runs that arrive with no parent linkage (see TurnCallbackDispatcher)
+        self._stage_stack: list[tuple[str, Any]] = []  # (stage span name, span)
+
+    def _parent_of(self, run_id, parent_run_id):
+        """Nearest ancestor run that has an observation; else the innermost open
+        stage span (the graph's stages are sequential, so at most one is open);
+        else the trace root."""
+        self._parents[str(run_id)] = str(parent_run_id) if parent_run_id else ""
+        ancestor = str(parent_run_id) if parent_run_id else ""
+        while ancestor:
+            if ancestor in self._observations:
+                return self._observations[ancestor]
+            ancestor = self._parents.get(ancestor, "")
+        if self._stage_stack:
+            return self._stage_stack[-1][1]
+        return self._trace
+
+    def _current_stage_name(self) -> str | None:
+        return self._stage_stack[-1][0] if self._stage_stack else None
+
+    # ── graph stages ────────────────────────────────────────────────────────
+
+    def on_chain_start(self, serialized, inputs, *, run_id, parent_run_id=None, **kwargs):
+        try:
+            parent = self._parent_of(run_id, parent_run_id)
+            node = (kwargs.get("metadata") or {}).get("langgraph_node")
+            run_name = (serialized or {}).get("name") or kwargs.get("name")
+            # one span per stage node run; inner runs of the same node carry the
+            # same langgraph_node metadata but a different run name — skip them
+            if node in STAGE_SPANS and run_name == node:
+                span = parent.span(name=STAGE_SPANS[node])
+                self._observations[str(run_id)] = span
+                self._stage_stack.append((STAGE_SPANS[node], span))
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("langfuse on_chain_start failed")
+
+    def _end_stage(self, run_id, **end_kwargs):
+        span = self._observations.pop(str(run_id), None)
+        if span is not None:
+            span.end(**end_kwargs)
+            self._stage_stack = [(name, s) for name, s in self._stage_stack if s is not span]
+
+    def on_chain_end(self, outputs, *, run_id, **kwargs):
+        try:
+            self._end_stage(run_id)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("langfuse on_chain_end failed")
+
+    def on_chain_error(self, error, *, run_id, **kwargs):
+        try:
+            self._end_stage(run_id, level="ERROR", status_message=str(error)[:500])
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("langfuse on_chain_error failed")
 
     # ── model calls ─────────────────────────────────────────────────────────
 
-    def on_chat_model_start(self, serialized, messages, *, run_id, **kwargs):
+    def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, **kwargs):
         try:
+            if str(run_id) in self._observations:
+                return  # already seen via the other delivery path (config vs dispatcher)
+            parent = self._parent_of(run_id, parent_run_id)
+            # name from langgraph metadata when config propagated; from the
+            # enclosing stage span when the call arrived via the dispatcher
+            node = (kwargs.get("metadata") or {}).get("langgraph_node")
+            name = (
+                GENERATION_NAMES.get(node)
+                or STAGE_GENERATION_NAMES.get(self._current_stage_name())
+                or FALLBACK_GENERATION_NAME
+            )
+            # each stage may use its own model (router/validator run cheaper
+            # ones) — read it from the call, not the agent default, so
+            # Langfuse's per-model cost accounting stays correct
+            params = kwargs.get("invocation_params") or {}
+            model = params.get("model") or params.get("model_name") or self._model_name
             last = messages[0][-1] if messages and messages[0] else None
-            self._observations[str(run_id)] = self._trace.generation(
-                name="model_call",
-                model=self._model_name,
+            self._observations[str(run_id)] = parent.generation(
+                name=name,
+                model=model,
                 input=_clip(last.content) if last is not None else None,
                 metadata={"message_count": len(messages[0]) if messages else 0},
             )
@@ -122,9 +287,10 @@ class LangfuseTurnHandler(BaseCallbackHandler):
 
     # ── tool calls ──────────────────────────────────────────────────────────
 
-    def on_tool_start(self, serialized, input_str, *, run_id, **kwargs):
+    def on_tool_start(self, serialized, input_str, *, run_id, parent_run_id=None, **kwargs):
         try:
-            self._observations[str(run_id)] = self._trace.span(
+            parent = self._parent_of(run_id, parent_run_id)
+            self._observations[str(run_id)] = parent.span(
                 name=(serialized or {}).get("name", "tool"),
                 input=_clip(input_str),
             )
@@ -135,7 +301,11 @@ class LangfuseTurnHandler(BaseCallbackHandler):
         try:
             span = self._observations.pop(str(run_id), None)
             if span is not None:
-                span.end(output=_clip(output))
+                if _mask_tool_results():
+                    text = _clip(output)
+                    span.end(output=f"[masked: {len(text)} chars]")
+                else:
+                    span.end(output=_clip(output))
         except Exception:  # pylint: disable=broad-except
             logger.exception("langfuse on_tool_end failed")
 
@@ -177,7 +347,9 @@ def start_turn_trace(
             # deterministic id: the feedback endpoint and the eval runner
             # address the trace by request_uuid without storing a second id
             id=str(request_uuid),
-            name="chat_with_data_turn",
+            # verb-first per Langfuse naming guidance; stable — dashboards,
+            # filters, and evaluators key on this name
+            name="answer-data-question",
             session_id=str(session.id),
             user_id=str(orguser.id),
             # scope tag separates dashboard-drawer chats from org-wide chats

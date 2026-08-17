@@ -38,7 +38,11 @@ from ddpui.core.ai.messages.artifacts import (
     tool_artifact,
 )
 from ddpui.core.ai.messages.content import extract_text
-from ddpui.core.ai.tracing import start_turn_trace
+from ddpui.core.ai.tracing import (
+    reset_current_turn_handler,
+    set_current_turn_handler,
+    start_turn_trace,
+)
 from ddpui.models.chat_with_data import ChatWithDataSession, ChatWithDataTurnAudit
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.custom_logger import CustomLogger
@@ -104,8 +108,13 @@ async def run_turn(
         "configurable": {"thread_id": str(session.thread_id)},
         "recursion_limit": RECURSION_LIMIT,
     }
+    trace_ctx_token = None
     if trace_handler is not None:
         config["callbacks"] = [trace_handler]
+        # model calls don't see config callbacks on Python 3.10 — bind the
+        # handler to this async context so the model-attached dispatcher
+        # (base.build_model) can reach it from inside any graph node
+        trace_ctx_token = set_current_turn_handler(trace_handler)
 
     final_message = ""
     route_dict: dict | None = None
@@ -223,6 +232,8 @@ async def run_turn(
         latency_ms = int((time.monotonic() - started) * 1000)
         if trace_handler is not None:
             trace_handler.finish(output=final_message, status=status)
+        if trace_ctx_token is not None:
+            reset_current_turn_handler(trace_ctx_token)
         try:
             await sync_to_async(ChatWithDataTurnAudit.objects.create)(
                 org=orguser.org,
