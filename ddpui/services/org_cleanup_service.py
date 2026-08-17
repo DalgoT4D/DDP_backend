@@ -370,19 +370,31 @@ class OrgCleanupService:
         deletes all org users; first removes UserPreferences rows that FK to
         each OrgUser (they don't CASCADE) so the OrgUser delete doesn't
         violate the FK constraint.
+        After removing the OrgUser, deletes the underlying User if they have
+        no remaining org memberships (UserAttributes cascades automatically).
         """
         for orguser in OrgUser.objects.filter(org=self.org):
-            logger.info("will delete orguser %s", orguser.user.email)
+            user = orguser.user
+            logger.info("will delete orguser %s", user.email)
             if not self.dry_run:
                 n_prefs = UserPreferences.objects.filter(orguser=orguser).count()
                 if n_prefs:
                     logger.info(
                         "deleting %s UserPreferences row(s) attached to orguser %s",
                         n_prefs,
-                        orguser.user.email,
+                        user.email,
                     )
                     UserPreferences.objects.filter(orguser=orguser).delete()
                 orguser.delete()
+
+                remaining = OrgUser.objects.filter(user=user).exclude(org=self.org).count()
+                if remaining == 0:
+                    logger.info("deleting user %s (no remaining org memberships)", user.email)
+                    user.delete()
+                else:
+                    logger.info(
+                        "keeping user %s (%d other org membership(s))", user.email, remaining
+                    )
 
     def delete_elementary_setup(self):
         """Clean up everything Elementary-related for this org:
@@ -451,6 +463,8 @@ class OrgCleanupService:
                 logger.error(f"failed to bulk delete S3 reports for {self.org.slug}: {err}")
 
     def delete_org(self):
+        org_pk = self.org.pk  # save pk now; cascades below may set self.org.pk = None
+
         # delete all orchestrate pipelines
         self.delete_orchestrate_pipelines()
 
@@ -520,5 +534,13 @@ class OrgCleanupService:
         # delete org object itself
         logger.info(f"will delete org {self.org.name} from DB")
         if not self.dry_run:
-            self.org.delete()
-            logger.info(f"deleted org {self.org.name} from DB")
+            if org_pk is None:
+                logger.warning("org pk is None — org may have already been deleted, skipping")
+            else:
+                deleted, _ = Org.objects.filter(pk=org_pk).delete()
+                if deleted:
+                    logger.info(f"deleted org {self.org.name} from DB")
+                else:
+                    logger.warning(
+                        f"org {self.org.name} was not found in DB, may have already been deleted"
+                    )
