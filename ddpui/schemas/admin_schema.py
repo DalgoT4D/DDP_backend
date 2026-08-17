@@ -16,6 +16,7 @@ from pydantic import HttpUrl
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_user import Invitation, OrgUser
+from ddpui.schemas.org_schema import CreateOrgSchema
 
 
 # ── Session ──────────────────────────────────────────────────────────────────
@@ -28,12 +29,6 @@ class AdminCurrentUserSchema(Schema):
 
     email: str
     is_platform_admin: bool
-
-
-class AdminPingSchema(Schema):
-    """stub health-check response proving the platform-admin gate works"""
-
-    detail: str
 
 
 class AdminSuccessSchema(Schema):
@@ -78,15 +73,13 @@ class AdminOrgSchema(Schema):
         )
 
 
-class AdminCreateOrgSchema(Schema):
-    """payload to create an org from the admin portal (slug is derived from name)"""
+class AdminCreateOrgSchema(CreateOrgSchema):
+    """CreateOrgSchema with admin-friendly defaults, so the portal form only requires name"""
 
-    name: str
-    viz_url: Optional[HttpUrl] = None
     base_plan: str = OrgPlanType.FREE_TRIAL.value
-    superset_included: bool = False
     can_upgrade_plan: bool = True
     subscription_duration: str = "Monthly"
+    superset_included: bool = False
 
 
 class AdminUpdateOrgSchema(Schema):

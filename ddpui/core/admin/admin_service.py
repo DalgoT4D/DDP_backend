@@ -1,13 +1,6 @@
 """
-Admin Portal service layer — the ORM/business logic behind the cross-org admin
-endpoints (ddpui/api/admin_api.py).
-
-The admin_api handlers stay thin (parse -> call service -> convert to response
-schema -> return); everything that touches the ORM or mutates state lives here,
-mirroring how the invite / role-change / remove paths already delegate to
-orguserfunctions. This module deliberately knows nothing about HTTP or the
-admin_api response schemas — it returns models / primitive values, and the API
-layer builds the response and maps errors to status codes.
+Admin Portal service layer: the ORM/business logic behind ddpui/api/admin_api.py.
+Handlers stay thin (parse -> call service -> respond); this module owns the ORM.
 """
 
 from typing import List, Optional, Tuple
@@ -24,9 +17,9 @@ from ddpui.models.org_plans import OrgPlans
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.schemas.admin_schema import AdminCreateOrgSchema, AdminUpdateOrgSchema
 from ddpui.core import orgfunctions, orguserfunctions
+from ddpui.ddpairbyte import airbyte_service
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.admin")
@@ -38,12 +31,8 @@ logger = CustomLogger("ddpui.core.admin")
 
 
 def get_platform_stats() -> Tuple[int, int]:
-    """
-    (total_orgs, total_users) across the whole platform.
-
-    total_users counts distinct users who belong to at least one org (via OrgUser),
-    consistent with total_orgs being real orgs — not every User row.
-    """
+    """(total_orgs, total_users) across the whole platform. total_users counts distinct
+    users who belong to at least one org."""
     total_orgs = Org.objects.count()
     total_users = OrgUser.objects.values("user").distinct().count()
     return total_orgs, total_users
@@ -70,40 +59,26 @@ def org_user_count(org: Org) -> int:
 
 
 def create_org(payload: AdminCreateOrgSchema) -> Org:
-    """
-    Create an org and its plan. Takes the AdminCreateOrgSchema the API validated — the
-    widening to the full CreateOrgSchema that orgfunctions expects happens HERE, not in
-    the handler, so the API layer stays parse -> call service -> respond. The admin
-    payload deliberately omits slug / airbyte_workspace_id / is_demo etc.; those keep
-    CreateOrgSchema's own defaults (slug is derived downstream from name).
-
-    Reuses orgfunctions.create_organization (which provisions an Airbyte workspace and
-    rolls the Org back if Airbyte fails) plus create_org_plan. No OrgUser is attached
-    here — the first admin is invited on the Users tab (M4). Returns the Org on success;
-    raises AdminOrgCreateError on failure so the API maps the exception TYPE to 400.
-
-    Rollback differs by failure point: on Airbyte failure create_organization has
-    already deleted the Org itself, so nothing persists. On PLAN failure the Org row
-    DOES persist here — this function just raises — and it is the caller's
-    @transaction.atomic (post_admin_org) that rolls the Org back. See the M16 test.
-    """
-    create_payload = CreateOrgSchema(
-        name=payload.name,
-        viz_url=payload.viz_url,
-        base_plan=payload.base_plan,
-        can_upgrade_plan=payload.can_upgrade_plan,
-        subscription_duration=payload.subscription_duration,
-        superset_included=payload.superset_included,
-    )
-
-    org, error = orgfunctions.create_organization(create_payload)
+    """Create an org + its plan (AdminCreateOrgSchema IS-A CreateOrgSchema). Raises
+    AdminOrgCreateError on failure, for the API to map to 400."""
+    org, error = orgfunctions.create_organization(payload)
     if error:
         # create_organization already deleted the org on Airbyte failure; nothing persists.
         raise AdminOrgCreateError(error)
 
-    _, plan_error = orgfunctions.create_org_plan(create_payload, org)
+    _, plan_error = orgfunctions.create_org_plan(payload, org)
     if plan_error:
-        # the Org persists at this point — the caller's @transaction.atomic rolls it back.
+        # the Org DB row persists at this point but the Airbyte workspace it already
+        # provisioned is not transactional — delete both explicitly rather than leaving
+        # an orphaned workspace behind when the caller's @transaction.atomic rolls the
+        # Org row back.
+        try:
+            airbyte_service.delete_workspace(org.airbyte_workspace_id)
+        except Exception:
+            logger.error(
+                f"failed to delete orphaned airbyte workspace {org.airbyte_workspace_id} "
+                f"for org {org.slug} after plan creation failure"
+            )
         raise AdminOrgCreateError(plan_error)
 
     logger.info(f"admin created new org {org.name}")
@@ -111,13 +86,8 @@ def create_org(payload: AdminCreateOrgSchema) -> Org:
 
 
 def update_org(org: Org, payload: AdminUpdateOrgSchema) -> Org:
-    """
-    Partial-update an org's name / viz_url / base_plan from the AdminUpdateOrgSchema
-    payload (not loose kwargs), per the service-signature convention. slug is never
-    touched — it is locked post-create because it is used in URLs and the Airbyte
-    workspace. Only fields passed as non-None are changed. base_plan lives on OrgPlans,
-    not Org. viz_url is a pydantic HttpUrl on the schema, coerced to str for the model.
-    """
+    """Partial-update name/viz_url/base_plan. slug is locked post-create (used in URLs
+    and the Airbyte workspace); only non-None fields are changed."""
     if payload.name is not None:
         org.name = payload.name
     if payload.viz_url is not None:
@@ -141,25 +111,16 @@ def update_org(org: Org, payload: AdminUpdateOrgSchema) -> Org:
 def invite_user(
     org: Org, inviter: OrgUser, payload: NewInvitationSchema
 ) -> Tuple[Optional[object], Optional[str]]:
-    """
-    Invite a user into the target org on behalf of a platform admin. Thin delegation to
-    orguserfunctions.invite_user_to_org with is_platform_admin=True, so the inviter-level
-    role cap is skipped — a platform admin acting cross-org has no role in the target org
-    to compare against. Returns orguserfunctions' (result, error) tuple; the API maps the
-    error to a status code.
-    """
+    """Invite a user into the target org as a platform admin (skips the inviter-level
+    role cap, since the admin has no role in the target org)."""
     return orguserfunctions.invite_user_to_org(org, inviter, payload, is_platform_admin=True)
 
 
 def change_orguser_role(
     org: Org, requestor: OrgUser, orguser: OrgUser, role_uuid
 ) -> Tuple[Optional[dict], Optional[str]]:
-    """
-    Change a user's role within the target org on behalf of a platform admin. Thin
-    delegation to orguserfunctions.change_orguser_role_in_org with is_platform_admin=True,
-    which skips the "can't assign a role higher than your own" cap. Returns the
-    (result, error) tuple.
-    """
+    """Change a user's role in the target org as a platform admin (skips the "can't
+    assign higher than your own role" cap)."""
     return orguserfunctions.change_orguser_role_in_org(
         org, requestor, orguser.user.email, role_uuid, is_platform_admin=True
     )
@@ -168,12 +129,8 @@ def change_orguser_role(
 def remove_orguser(
     org: Org, requestor: OrgUser, orguser: OrgUser
 ) -> Tuple[Optional[object], Optional[str]]:
-    """
-    Remove a user from the target org on behalf of a platform admin. Thin delegation to
-    orguserfunctions.delete_orguser_from_org with is_platform_admin=True (role-level cap
-    skipped). The user's created content is ORPHANED, not deleted — Dashboard / Chart /
-    ReportSnapshot.created_by are SET_NULL. Returns the (result, error) tuple.
-    """
+    """Remove a user from the target org as a platform admin. Their created content is
+    orphaned (created_by SET_NULL), not deleted."""
     return orguserfunctions.delete_orguser_from_org(
         org,
         requestor,
@@ -193,19 +150,14 @@ def list_org_users(org: Org) -> List[OrgUser]:
 
 
 def list_org_invitations(org: Org) -> List[Invitation]:
-    """
-    The org's pending invitations, scoped by the explicit target org — so an invite a
-    platform admin created into this org shows even though invited_by is in another org.
-    """
+    """The org's pending invitations, scoped by the explicit target org (not invited_by,
+    which may be a different org for an admin-created invite)."""
     return list(Invitation.objects.filter(invited_in_org=org).select_related("invited_new_role"))
 
 
 def get_pending_invitation(org: Org, invited_email: str) -> Optional[Invitation]:
-    """
-    The pending Invitation row for an email in this org, if any. Returns None when the
-    invitee already had a platform account (they were added directly as an OrgUser, so
-    no Invitation row exists).
-    """
+    """The pending Invitation for an email in this org, or None if the invitee already
+    had an account and was added directly (no Invitation row)."""
     return (
         Invitation.objects.filter(
             invited_email__iexact=invited_email.lower().strip(),
@@ -217,10 +169,8 @@ def get_pending_invitation(org: Org, invited_email: str) -> Optional[Invitation]
 
 
 def get_invitation_in_org(org: Org, invitation_id: int) -> Optional[Invitation]:
-    """
-    Resolve a pending invitation by id, scoped to the target org (None if it belongs
-    elsewhere) — so a wrong-org id yields 404 rather than touching another org's invite.
-    """
+    """Resolve a pending invitation by id, scoped to the target org (None if it belongs
+    to a different org)."""
     return Invitation.objects.filter(id=invitation_id, invited_in_org=org).first()
 
 
@@ -230,10 +180,8 @@ def delete_invitation(invitation: Invitation) -> None:
 
 
 def removal_impact(orguser: OrgUser) -> Tuple[int, int, int]:
-    """
-    (dashboards, charts, reports) that removing this user would orphan — its created_by
-    set to NULL (the content is kept, not deleted). Exact ORM counts on the created_by FK.
-    """
+    """(dashboards, charts, reports) that removing this user would orphan (created_by
+    set to NULL; content is kept, not deleted)."""
     return (
         Dashboard.objects.filter(created_by=orguser).count(),
         Chart.objects.filter(created_by=orguser).count(),

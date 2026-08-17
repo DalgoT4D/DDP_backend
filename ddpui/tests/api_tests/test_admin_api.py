@@ -2,7 +2,7 @@
 Tests for the Admin Portal API and its platform-admin gate.
 
 Milestone 1 acceptance (features/admin-portal/v1/plan.md §6, §7):
-  - non-platform-admin -> 403 on the guarded /admin/ping route
+  - non-platform-admin -> 403 on a guarded admin route
   - platform admin      -> 200 on the same route
   - /currentuserv2 surfaces is_platform_admin
 """
@@ -24,7 +24,6 @@ from django.conf import settings
 from django.contrib.auth.models import User
 
 from ddpui.api.admin_api import (
-    get_admin_ping,
     get_admin_stats,
     get_admin_orgs,
     post_admin_org,
@@ -106,34 +105,34 @@ def orguser(authuser, org, seed_db):
     orguser.delete()
 
 
-# ---- the guard: /admin/ping 403 vs 200 ----------------------------------------
+# ---- the guard: /admin/currentuser 403 vs 200 ---------------------------------
 
 
-def test_admin_ping_forbidden_for_non_platform_admin(orguser):
+def test_admin_currentuser_forbidden_for_non_platform_admin(orguser):
     """a user without is_platform_admin is refused with 403"""
     request = mock_request(orguser)
     # no UserAttributes row at all -> not a platform admin
     with pytest.raises(HttpError) as excinfo:
-        get_admin_ping(request)
+        get_admin_currentuser(request)
     assert excinfo.value.status_code == 403
     assert str(excinfo.value) == "platform admin access required"
 
 
-def test_admin_ping_forbidden_when_flag_false(orguser):
+def test_admin_currentuser_forbidden_when_flag_false(orguser):
     """a user whose is_platform_admin is explicitly False is refused with 403"""
     UserAttributes.objects.create(user=orguser.user, is_platform_admin=False)
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
-        get_admin_ping(request)
+        get_admin_currentuser(request)
     assert excinfo.value.status_code == 403
 
 
-def test_admin_ping_ok_for_platform_admin(orguser):
-    """a platform admin gets 200 (the stub payload)"""
+def test_admin_currentuser_ok_for_platform_admin(orguser):
+    """a platform admin gets 200"""
     UserAttributes.objects.create(user=orguser.user, is_platform_admin=True)
     request = mock_request(orguser)
-    response = get_admin_ping(request)
-    assert response == {"detail": "pong"}
+    response = get_admin_currentuser(request)
+    assert response == {"email": orguser.user.email, "is_platform_admin": True}
 
 
 # ---- /currentuserv2 surfaces is_platform_admin --------------------------------
@@ -247,17 +246,22 @@ def test_admin_create_org_rolls_back_on_airbyte_failure(mock_setup_airbyte, plat
     assert OrgPlans.objects.filter(org__name="Bhumi").count() == 0
 
 
+@patch("ddpui.core.admin.admin_service.airbyte_service.delete_workspace")
 @patch("ddpui.core.orgfunctions.create_org_plan")
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_admin_create_org_rolls_back_when_plan_creation_fails(
-    mock_setup_airbyte, mock_connectors, mock_create_plan, platform_admin_request
+    mock_setup_airbyte,
+    mock_connectors,
+    mock_create_plan,
+    mock_delete_workspace,
+    platform_admin_request,
 ):
     """
-    The Airbyte-failure rollback is covered by its sibling test; this covers the OTHER
-    failure point. If the org is created but its plan fails, the endpoint's
-    @transaction.atomic must undo the Org too — a half-created org with no plan would
-    show up in the portal's org list as a broken row.
+    If the org is created but its plan fails, the Org DB row must roll back (else a
+    half-created org with no plan shows up in the portal) AND the Airbyte workspace
+    already provisioned for it must be explicitly deleted, since the DB rollback can't
+    reach that external side effect.
     """
     mock_setup_airbyte.return_value = Mock(workspaceId="ws-abc")
     mock_create_plan.return_value = (None, "could not create plan")
@@ -268,6 +272,7 @@ def test_admin_create_org_rolls_back_when_plan_creation_fails(
     assert excinfo.value.status_code == 400
     assert Org.objects.filter(name="Halfway").count() == 0  # rolled back, no orphan
     assert OrgPlans.objects.filter(org__name="Halfway").count() == 0
+    mock_delete_workspace.assert_called_once()  # orphaned Airbyte workspace cleaned up
 
 
 def test_admin_org_detail_404(platform_admin_request):

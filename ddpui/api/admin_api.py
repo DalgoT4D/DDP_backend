@@ -1,9 +1,6 @@
 """
-Admin Portal API — cross-org endpoints for the Dalgo ops team.
-
-Every route here is gated by @platform_admin_required (the global
-UserAttributes.is_platform_admin flag), not by per-org permission slugs. See
-features/admin-portal/v1/plan.md §3 for why cross-org needs its own layer.
+Admin Portal API — cross-org endpoints for the Dalgo ops team, gated by
+@platform_admin_required rather than per-org permission slugs.
 """
 
 from typing import List
@@ -21,7 +18,6 @@ from ddpui.models.org_user import (
 )
 from ddpui.schemas.admin_schema import (
     AdminCurrentUserSchema,
-    AdminPingSchema,
     AdminSuccessSchema,
     AdminStatsSchema,
     AdminOrgSchema,
@@ -39,26 +35,16 @@ from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
 
-# Router-level auth is the API-wide CustomJwtAuthMiddleware (the normal access_token
-# cookie), same as every other router. There is no separate admin session: the admin app
-# signs in through POST /api/v2/login/ and authority comes from @platform_admin_required
-# on each route.
+# No separate admin session: signs in through the normal POST /api/v2/login/, and
+# authority comes from @platform_admin_required on each route.
 admin_router = Router()
 
 
 @admin_router.get("/currentuser", response=AdminCurrentUserSchema)
 @platform_admin_required
 def get_admin_currentuser(request):
-    """
-    Identity for the admin portal — read by the frontend AdminGuard.
-
-    Authenticated by the shared session cookie, then gated by
-    @platform_admin_required, so a signed-in non-admin gets 403 and a signed-out
-    visitor gets 401. AdminGuard treats both the same: send them to the admin sign-in.
-    Kept as a dedicated route (rather than reusing /api/currentuserv2) because
-    currentuserv2 returns a LIST of OrgUsers and is gated on the per-org
-    can_view_orgusers permission, which a platform admin need not hold.
-    """
+    """Identity for the admin portal — read by the frontend AdminGuard. A dedicated
+    route rather than /api/currentuserv2, which is gated on a per-org permission."""
     user = request.orguser.user
     return {"email": user.email, "is_platform_admin": True}
 
@@ -77,25 +63,10 @@ def _admin_org_response(org: Org) -> AdminOrgSchema:
     return AdminOrgSchema.from_model(org, admin_service.org_user_count(org))
 
 
-@admin_router.get("/ping", response=AdminPingSchema)
-@platform_admin_required
-def get_admin_ping(request):
-    """
-    Stub health check for the admin portal — proves the platform-admin gate works.
-    Returns 200 for platform admins; @platform_admin_required 403s everyone else.
-    """
-    return {"detail": "pong"}
-
-
 @admin_router.get("/stats", response=AdminStatsSchema)
 @platform_admin_required
 def get_admin_stats(request):
-    """
-    Dashboard counts: total orgs and total users across the whole platform.
-
-    total_users counts distinct users who belong to at least one org (via OrgUser),
-    consistent with total_orgs being real orgs — not every User row.
-    """
+    """Dashboard counts: total orgs and total users across the whole platform."""
     total_orgs, total_users = admin_service.get_platform_stats()
     return AdminStatsSchema(total_orgs=total_orgs, total_users=total_users)
 
@@ -111,17 +82,13 @@ def get_admin_orgs(request):
 @platform_admin_required
 @transaction.atomic
 def post_admin_org(request, payload: AdminCreateOrgSchema):
-    """
-    Create an org. Reuses create_organization (which provisions an Airbyte workspace
-    and rolls the Org back if Airbyte fails) + create_org_plan. No OrgUser is attached
-    here — the first admin is invited on the Users tab (M4).
-    """
+    """Create an org + plan. No OrgUser is attached — the first admin is invited on the
+    Users tab."""
     try:
         org = admin_service.create_org(payload)
     except AdminOrgCreateError as err:
-        # On Airbyte failure create_org already deleted the Org. On plan failure the Org
-        # persists until this @transaction.atomic view unwinds — raising here triggers that
-        # rollback, so either way nothing is left behind.
+        # @transaction.atomic rolls back the Org row; create_org already cleaned up any
+        # Airbyte workspace on the failure path that provisioned one.
         raise HttpError(400, err.message) from err
 
     return _admin_org_response(org)
@@ -145,12 +112,9 @@ def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
 
 
 # ======================= Users tab (M4) ======================================
-# Cross-org user management inside a target org. Every endpoint takes the target
-# org in the URL and goes through admin_service (invite_user / change_orguser_role /
-# remove_orguser), which delegates to the org-parameterized core functions in
-# orguserfunctions with is_platform_admin=True — so the invite-cap and role-cap rules
-# that only make sense for an in-org inviter are skipped for a platform admin acting
-# cross-org. See plan.md §4.4.
+# Cross-org user management: every endpoint takes the target org in the URL and goes
+# through admin_service with is_platform_admin=True, skipping the inviter/role caps
+# that only make sense for an in-org actor.
 
 
 def _get_orguser_or_404(org: Org, orguser_id: int) -> OrgUser:
@@ -164,7 +128,7 @@ def _get_orguser_or_404(org: Org, orguser_id: int) -> OrgUser:
 @admin_router.get("/orgs/{org_id}/users", response=AdminOrgUsersResponse)
 @platform_admin_required
 def get_admin_org_users(request, org_id: int):
-    """List an org's users (with per-org Status) plus its pending invitations."""
+    """List an org's users plus its pending invitations."""
     org = _get_org_or_404(org_id)
 
     users = [AdminOrgUserSchema.from_model(ou) for ou in admin_service.list_org_users(org)]
@@ -181,12 +145,8 @@ def get_admin_org_users(request, org_id: int):
 @admin_router.post("/orgs/{org_id}/users/invite", response=AdminInvitationSchema)
 @platform_admin_required
 def post_admin_org_user_invite(request, org_id: int, payload: NewInvitationSchema):
-    """
-    Invite a user into the org. A platform admin may invite at ANY role — the
-    inviter-level cap is skipped (is_platform_admin=True). The invitation records
-    invited_in_org=this org, so accept/cancel resolve the right org even though the
-    admin is not a member of it.
-    """
+    """Invite a user into the org at any role — the inviter-level cap is skipped for a
+    platform admin."""
     org = _get_org_or_404(org_id)
 
     _, error = admin_service.invite_user(org, request.orguser, payload)
@@ -217,11 +177,8 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
 
     _, error = admin_service.change_orguser_role(org, request.orguser, orguser, payload.role_uuid)
     if error:
-        # is_platform_admin=True skips the role-level cap inside change_orguser_role_in_org
-        # — both of its "Insufficient permissions" returns are guarded by `not
-        # is_platform_admin` — so a 403 is structurally unreachable on this path. Every
-        # error it can still return here ("Invalid role", "User does not exist") is a bad
-        # request, so we map to 400 without matching on the (fragile) error string.
+        # 403 is unreachable here (role-cap is skipped for is_platform_admin=True); any
+        # remaining error is a bad request.
         raise HttpError(400, error)
 
     orguser.refresh_from_db()
@@ -231,11 +188,8 @@ def put_admin_org_user_role(request, org_id: int, orguser_id: int, payload: Admi
 @admin_router.get("/orgs/{org_id}/users/{orguser_id}/removal-impact", response=RemovalImpactSchema)
 @platform_admin_required
 def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
-    """
-    Count the content that removing this user would orphan (its created_by set to NULL —
-    the content is kept, not deleted), so the confirm dialog can warn before the action.
-    Counts are exact ORM counts on the created_by FK. See plan.md §4.6 / research §5.
-    """
+    """Count the content removing this user would orphan, so the confirm dialog can
+    warn before the action."""
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
     dashboards_orphaned, charts_orphaned, reports_orphaned = admin_service.removal_impact(orguser)
@@ -249,13 +203,8 @@ def get_admin_org_user_removal_impact(request, org_id: int, orguser_id: int):
 @admin_router.delete("/orgs/{org_id}/users/{orguser_id}", response=AdminSuccessSchema)
 @platform_admin_required
 def delete_admin_org_user(request, org_id: int, orguser_id: int):
-    """
-    Remove a user from the org. This deletes the OrgUser row but ORPHANS the content
-    they created rather than deleting it: Dashboard / Chart / ReportSnapshot.created_by
-    are SET_NULL, so the content is kept and only the creator link is cleared. The
-    role-level cap is skipped for the platform admin. Callers should have shown the
-    removal-impact warning first.
-    """
+    """Remove a user from the org. Their created content is orphaned (created_by
+    SET_NULL), not deleted. Callers should show the removal-impact warning first."""
     org = _get_org_or_404(org_id)
     orguser = _get_orguser_or_404(org, orguser_id)
 
@@ -270,12 +219,7 @@ def delete_admin_org_user(request, org_id: int, orguser_id: int):
 @admin_router.delete("/orgs/{org_id}/invitations/{invitation_id}", response=AdminSuccessSchema)
 @platform_admin_required
 def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
-    """
-    Cancel a pending invitation, scoped to the target org. Unlike the regular
-    DELETE /users/invitations/delete/{id} (which deletes by id with no org check —
-    research §8), this refuses to touch an invitation belonging to another org: the
-    filter requires invited_in_org == this org, so a wrong-org id yields 404.
-    """
+    """Cancel a pending invitation, scoped to the target org (404 on a wrong-org id)."""
     org = _get_org_or_404(org_id)
     invitation = admin_service.get_invitation_in_org(org, invitation_id)
     if invitation is None:

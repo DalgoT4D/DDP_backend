@@ -19,20 +19,14 @@ def _get_ses_client():
 
 
 def _ses_available() -> bool:
-    """True when real SES credentials are configured (the same pair AWSClient needs)."""
+    """True when SES credentials are configured."""
     return bool(os.getenv("SES_ACCESS_KEY_ID") and os.getenv("SES_SECRET_ACCESS_KEY"))
 
 
 def send_text_message(to_email, subject, message):
-    """
-    send a plain-text email using ses.
-
-    Local-dev fallback: when settings.DEBUG is True AND no SES credentials are
-    configured, log the email instead of sending it, so flows that email (invite /
-    signup / password-reset) complete without a real SES setup. This can only engage
-    when DEBUG is True — which is off in staging/prod — so a real SES misconfiguration
-    there is never masked; it raises loudly as before.
-    """
+    """Send a plain-text email using SES. In local dev (DEBUG=True) with no SES
+    credentials configured, logs the email instead of sending it, so email-dependent
+    flows (invite/signup/password-reset) work without a real SES setup."""
     if settings.DEBUG and not _ses_available():
         logger.info(
             "[DEV] SES not configured — not sending email. to=%s subject=%s\n%s",

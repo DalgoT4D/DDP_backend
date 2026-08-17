@@ -160,11 +160,8 @@ class Invitation(models.Model):
         null=True,
         related_name="invitations",
         help_text=(
-            "the org this invite grants membership of. Explicit because a "
-            "platform admin inviting cross-org is not a member of the target "
-            "org, so invited_by.org is NOT the target org. Nullable for "
-            "backfill; old rows fall back to invited_by.org. See "
-            "features/admin-portal/v1/plan.md §4.4."
+            "the org this invite grants membership of, when it differs from "
+            "invited_by.org (e.g. a platform admin inviting cross-org)."
         ),
     )
     invited_on = models.DateTimeField()
