@@ -1822,3 +1822,110 @@ def test_get_one_connection_includes_post_sync_transform(
     DataflowOrgTask.objects.filter(orgtask=sync_orgtask).delete()
     dataflow.delete()
     sync_orgtask.delete()
+
+
+# ================================================================================
+# update_destination SSL credential isolation tests
+
+
+@patch("ddpui.ddpairbyte.airbyte_service.update_destination", mock_update_destination=Mock())
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+    mock_retrieve_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.update_warehouse_credentials",
+    mock_update_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
+)
+def test_update_destination_drops_old_ssl_keys_when_ssl_disabled(
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
+    mock_update_warehouse_credentials: Mock,
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_update_destination: Mock,
+):
+    """Old ssl_mode / sslrootcert in curr_credentials must not bleed into the
+    updated warehouse credentials or the dbt profile secret block when the new
+    payload omits ssl_mode (i.e. SSL is disabled)."""
+    org = Org.objects.create(name="org-ssl-disable", slug="org-ssl-disable")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
+
+    mock_update_destination.return_value = {"destinationId": "DEST_ID"}
+    mock_retrieve_warehouse_credentials.return_value = {
+        "host": "db-host",
+        "port": "5432",
+        "password": "real-password",
+        "ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"},
+        "sslrootcert": "/home/ddp/global-bundle.pem",
+    }
+    mock_update_warehouse_credentials.return_value = None
+    mock_create_or_update_dbt_profile_secret_blk.return_value = Mock()
+
+    # New payload has no ssl_mode — user switched SSL off
+    payload = AirbyteDestinationUpdate(
+        name="wh",
+        destinationDefId="def-id",
+        config={"host": "db-host", "port": "5432", "password": "*****"},
+    )
+    update_destination(org, "dest-id", payload)
+
+    saved_creds = mock_update_warehouse_credentials.call_args[0][1]
+    assert "ssl_mode" not in saved_creds
+    assert "sslrootcert" not in saved_creds
+    assert saved_creds["password"] == "real-password"
+
+    passed_to_secret_blk = mock_create_or_update_dbt_profile_secret_blk.call_args[0][2]
+    assert "ssl_mode" not in passed_to_secret_blk
+    assert "sslrootcert" not in passed_to_secret_blk
+
+
+@patch("ddpui.ddpairbyte.airbyte_service.update_destination", mock_update_destination=Mock())
+@patch(
+    "ddpui.utils.secretsmanager.retrieve_warehouse_credentials",
+    mock_retrieve_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.utils.secretsmanager.update_warehouse_credentials",
+    mock_update_warehouse_credentials=Mock(),
+)
+@patch(
+    "ddpui.ddpairbyte.airbytehelpers.create_or_update_dbt_profile_secret_blk",
+    mock_create_or_update_dbt_profile_secret_blk=Mock(),
+)
+def test_update_destination_starred_ca_cert_resolved_from_curr_credentials(
+    mock_create_or_update_dbt_profile_secret_blk: Mock,
+    mock_update_warehouse_credentials: Mock,
+    mock_retrieve_warehouse_credentials: Mock,
+    mock_update_destination: Mock,
+):
+    """When ca_certificate is starred in the payload, it must be resolved from
+    curr_credentials — not dropped."""
+    org = Org.objects.create(name="org-ssl-cert", slug="org-ssl-cert")
+    warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", name="wh")
+
+    mock_update_destination.return_value = {"destinationId": "DEST_ID"}
+    mock_retrieve_warehouse_credentials.return_value = {
+        "host": "db-host",
+        "password": "real-password",
+        "ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"},
+    }
+    mock_update_warehouse_credentials.return_value = None
+    mock_create_or_update_dbt_profile_secret_blk.return_value = Mock()
+
+    payload = AirbyteDestinationUpdate(
+        name="wh",
+        destinationDefId="def-id",
+        config={
+            "host": "db-host",
+            "password": "*****",
+            "ssl_mode": {"mode": "verify-ca", "ca_certificate": "*****"},
+        },
+    )
+    update_destination(org, "dest-id", payload)
+
+    saved_creds = mock_update_warehouse_credentials.call_args[0][1]
+    assert saved_creds["ssl_mode"]["ca_certificate"] == "real-cert"
+    assert saved_creds["password"] == "real-password"
