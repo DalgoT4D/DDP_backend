@@ -541,4 +541,6 @@ class OrgCleanupService:
                 if deleted:
                     logger.info(f"deleted org {self.org.name} from DB")
                 else:
-                    logger.warning(f"org {self.org.name} was not found in DB, may have already been deleted")
+                    logger.warning(
+                        f"org {self.org.name} was not found in DB, may have already been deleted"
+                    )

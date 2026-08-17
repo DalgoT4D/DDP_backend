@@ -38,7 +38,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         role = Role.objects.filter(slug=options["role"]).first()
         if role is None:
-            print(f"Role '{options['role']}' not found — run: python manage.py loaddata seed/*.json")
+            print(
+                f"Role '{options['role']}' not found — run: python manage.py loaddata seed/*.json"
+            )
             sys.exit(1)
 
         plan_map = {
