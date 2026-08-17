@@ -207,9 +207,9 @@ def test_admin_orgs_forbidden_for_non_platform_admin(orguser):
 
 
 def test_admin_list_orgs(platform_admin_request):
-    """lists every org, including ones marked inactive at the model level"""
+    """lists every org"""
     Org.objects.create(name="Alpha Org", slug="alpha-org")
-    Org.objects.create(name="Beta Org", slug="beta-org", is_active=False)
+    Org.objects.create(name="Beta Org", slug="beta-org")
     response = get_admin_orgs(platform_admin_request)
     by_name = {o.name: o for o in response}
     assert "Alpha Org" in by_name
@@ -279,7 +279,7 @@ def test_admin_org_detail_404(platform_admin_request):
 
 def test_admin_edit_org_locks_slug(platform_admin_request):
     """edit updates name + viz_url but never the slug (locked post-create)"""
-    org = Org.objects.create(name="Old Name", slug="old-name", is_active=True)
+    org = Org.objects.create(name="Old Name", slug="old-name")
     payload = AdminUpdateOrgSchema(name="New Name", viz_url="https://viz.example.com")
 
     response = put_admin_org(platform_admin_request, org.id, payload)

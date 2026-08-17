@@ -72,15 +72,6 @@ class OrgUser(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)
     new_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True)
-    is_active = models.BooleanField(
-        default=True,
-        help_text=(
-            "per-(user, org) active flag; distinct from User.is_active. "
-            "False deactivates this user in THIS org only (blocked at "
-            "permission-load); their membership of other orgs is unaffected. "
-            "See features/admin-portal/v1/plan.md §4.1."
-        ),
-    )
     email_verified = models.BooleanField(default=False)
     llm_optin = models.BooleanField(default=False)  # deprecated
     has_seen_rbac_notice = models.BooleanField(

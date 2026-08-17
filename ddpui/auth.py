@@ -169,24 +169,6 @@ class CustomJwtAuthMiddleware(HttpBearer):
                 if orguser.org is None:
                     raise HttpError(400, "register an organization first")
 
-                # A deactivated org blocks all of its users at permission-load, so every
-                # gated endpoint 403s. Enforced here (not via empty permissions) because
-                # @has_permission's bare-except turns an empty-permissions 403 into a 404 —
-                # this raises a real 403. Reactivating the org restores access. See
-                # features/admin-portal/v1/plan.md §4.2.
-                if not orguser.org.is_active:
-                    raise HttpError(403, "your organization has been deactivated")
-
-                # A per-org-deactivated user is blocked in THIS org only. `orguser` is
-                # the specific (user, org) row resolved from the x-dalgo-org header, so
-                # this never touches the user's membership of any OTHER org (a different
-                # OrgUser row). Same 403 rationale as the org check above; reactivating
-                # the user in this org restores access. See plan.md §4.2. The field is
-                # non-null (default True, backfilled from User.is_active), so an active
-                # user is never blocked here.
-                if not orguser.is_active:
-                    raise HttpError(403, "your access to this organization has been deactivated")
-
                 redis_client = RedisClient.get_instance()
                 orguser_role_id = None
                 permissions_json = None
