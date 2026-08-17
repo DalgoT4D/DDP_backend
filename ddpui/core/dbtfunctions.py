@@ -30,7 +30,11 @@ def map_airbyte_destination_spec_to_dbtcli_profile(conn_info: dict):
         conn_info["user"] = conn_info["username"]
 
     # handle dbt ssl params
-    if "ssl_mode" in conn_info:
+    # ssl: false is the authoritative "no SSL" signal — takes precedence over ssl_mode
+    # because Airbyte can send both fields simultaneously
+    if "ssl" in conn_info and conn_info["ssl"] is False:
+        conn_info["sslmode"] = "disable"
+    elif "ssl_mode" in conn_info:
         ssl_data = conn_info["ssl_mode"]
         mode = ssl_data["mode"] if "mode" in ssl_data else None
         ca_certificate = ssl_data["ca_certificate"] if "ca_certificate" in ssl_data else None
