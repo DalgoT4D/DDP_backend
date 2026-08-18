@@ -1612,9 +1612,7 @@ def test_L25_group_grant_notifies_every_current_member(
         assert no_access_member.id in recipients
 
 
-def test_L26_view_to_edit_upgrade_fires_upgrade_notification(
-    org, dashboard, owner_analyst, member
-):
+def test_L26_view_to_edit_upgrade_fires_upgrade_notification(org, dashboard, owner_analyst, member):
     """Pre-existing direct View → re-share at Edit → 'upgraded' notification."""
     _grant(org, dashboard, member, AccessLevel.VIEW)
     with _patch_notification() as mock_notify:
@@ -1694,18 +1692,14 @@ def test_L29_invitation_grants_do_not_fire_share_notification(
             "dashboard",
             str(dashboard.id),
             _add_grants_payload(
-                pending_grants=[
-                    PendingGrantPayload(email="invitee@t.com", access_level="view")
-                ],
+                pending_grants=[PendingGrantPayload(email="invitee@t.com", access_level="view")],
                 invite_role_uuid=str(member_role.uuid),
             ),
         )
         assert not mock_notify.called
 
 
-def test_L30_dedup_when_user_is_direct_and_group_grantee(
-    org, dashboard, owner_analyst, member
-):
+def test_L30_dedup_when_user_is_direct_and_group_grantee(org, dashboard, owner_analyst, member):
     """User granted directly + present in a granted group at the same level → one notification, once."""
     from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
 
@@ -1738,9 +1732,7 @@ def test_L30_dedup_when_user_is_direct_and_group_grantee(
         assert payload.recipients.count(member.id) == 1
 
 
-def test_L31_sender_not_own_share_notification_recipient(
-    org, dashboard, owner_analyst, member
-):
+def test_L31_sender_not_own_share_notification_recipient(org, dashboard, owner_analyst, member):
     """Sender is a member of a granted group → filtered out of the recipient list."""
     from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
 
