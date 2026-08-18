@@ -40,7 +40,7 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.core.trial.viz_clone")
 
 
-def _preserve_ordering_timestamps(instance, template_row) -> None:
+def _preserve_ordering_timestamps(instance, template_row, skip: tuple = ()) -> None:
     """Copy the template row's created_at/updated_at onto the freshly-created clone.
 
     The trial's list pages sort by `-updated_at` (charts, dashboards, metrics, kpis, alerts) or
@@ -49,11 +49,14 @@ def _preserve_ordering_timestamps(instance, template_row) -> None:
     tiebreak and the template's on-screen arrangement is lost. Writing the template's real
     timestamps via a queryset `.update()` (which bypasses auto_now/auto_now_add, unlike save())
     makes the trial list order match the template exactly. Fields absent on a model are skipped.
+
+    `skip` drops named fields from that copy, for models where a backdated timestamp is not
+    inert — see `_clone_alerts` and `scheduling.is_due`.
     """
     fields = {
         name: getattr(template_row, name)
         for name in ("created_at", "updated_at")
-        if hasattr(template_row, name)
+        if hasattr(template_row, name) and name not in skip
     }
     if fields:
         type(instance).objects.filter(pk=instance.pk).update(**fields)
@@ -333,7 +336,22 @@ def _clone_alerts(  # pylint: disable=unused-argument
         if new_a.is_active != a.is_active:
             Alert.objects.filter(pk=new_a.pk).update(is_active=a.is_active)
             new_a.is_active = a.is_active
-        _preserve_ordering_timestamps(new_a, a)
+
+        # Claim the tick that has already passed today. `scheduling.is_due` treats an alert as
+        # due when its most recent cron tick is later than `last_evaluated_at or created_at` —
+        # a clone starts with last_evaluated_at NULL, so without this stamp the trial's alerts
+        # all fire on the dispatcher's next 60s pass (a "0 9 * * *" alert cloned at 2pm emails
+        # the user immediately). Stamping now means the first email lands at the alert's next
+        # real scheduled tick.
+        claimed_at = timezone.now()
+        Alert.objects.filter(pk=new_a.pk).update(last_evaluated_at=claimed_at)
+        new_a.last_evaluated_at = claimed_at
+
+        # created_at is excluded: for every other model a backdated created_at only affects list
+        # ordering, but on Alert it is the is_due() floor that keeps a fresh alert from firing —
+        # copying the template's (months old) created_at would defeat the stamp above the moment
+        # last_evaluated_at is cleared or an evaluation resets it.
+        _preserve_ordering_timestamps(new_a, a, skip=("created_at",))
         count += 1
     return count
 

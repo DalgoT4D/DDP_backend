@@ -1,6 +1,10 @@
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth.models import User
 
+from ddpui.core.alerts import scheduling
 from ddpui.core.trial import viz_clone
 from ddpui.models.alert import Alert
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -427,7 +431,12 @@ def test_clone_alerts_remaps_metric_kpi_and_resets_delivery_state():
     assert new_alert.recipients == [{"type": "orguser", "orguser_id": trial_user.id}]
     assert new_alert.delivery_channels == ["email"]
     assert new_alert.slack_webhook_url is None
-    assert new_alert.last_evaluated_at is None
+    # the template's evaluation history is dropped, but the clone claims the current tick so it
+    # doesn't fire on the dispatcher's next pass — see
+    # test_clone_alerts_does_not_fire_before_next_scheduled_tick
+    assert new_alert.last_evaluated_at is not None
+    a.refresh_from_db()
+    assert new_alert.last_evaluated_at > a.last_evaluated_at
 
 
 def test_clone_alerts_preserves_inactive_template_alert():
@@ -469,6 +478,64 @@ def test_clone_alerts_preserves_inactive_template_alert():
 
     new_alert = Alert.objects.get(org=trial_org, name="InactiveAlert")
     assert new_alert.is_active is False
+
+
+def test_clone_alerts_does_not_fire_before_next_scheduled_tick():
+    """A cloned alert must wait for its next real cron tick.
+
+    `scheduling.is_due` floors "has this alert's last tick been consumed" at
+    `last_evaluated_at or created_at`. The clone copies the template row's timestamps for
+    list ordering, so the created_at floor is useless — without an explicit
+    `last_evaluated_at` stamp the trial's alerts all fire within 60s of signup.
+    """
+    template_org = _make_org("tmpl-alert-due")
+    trial_org = _make_org("trial-alert-due")
+    template_user = _make_orguser(template_org, "tmpl-alert-due@x.org")
+    trial_user = _make_orguser(trial_org, "trial-alert-due@x.org")
+
+    m = Metric.objects.create(
+        name="Metric1",
+        schema_name="analytics",
+        table_name="t",
+        column="id",
+        aggregation="count",
+        org=template_org,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+    a = Alert.objects.create(
+        org=template_org,
+        name="DailyNine",
+        alert_type="metric_threshold",
+        metric=m,
+        condition={"operator": "lt", "value": 10},
+        schedule_cron="0 9 * * *",
+        delivery_channels=["email"],
+        message_template="{{value}}",
+        recipients=[{"type": "external", "email": "tmpl-owner@x.org"}],
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+    # template alert is old — this is what the clone copies onto created_at
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    Alert.objects.filter(pk=a.pk).update(created_at=old, updated_at=old)
+    a.refresh_from_db()
+
+    metric_map = viz_clone._clone_metrics(template_org, trial_org, trial_user)
+
+    # clone at 14:00 UTC — today's 09:00 tick is already in the past
+    cloned_at = datetime(2026, 8, 18, 14, 0, tzinfo=timezone.utc)
+    with patch("ddpui.core.trial.viz_clone.timezone.now", return_value=cloned_at):
+        viz_clone._clone_alerts(template_org, trial_org, trial_user, metric_map, {})
+
+    new_alert = Alert.objects.get(org=trial_org, name="DailyNine")
+
+    # the dispatcher's very next 60s tick must not pick it up
+    assert scheduling.is_due(new_alert, cloned_at + timedelta(seconds=60)) is False
+    # nor at any point before tomorrow's 09:00
+    assert scheduling.is_due(new_alert, datetime(2026, 8, 19, 8, 59, tzinfo=timezone.utc)) is False
+    # but it does fire at its real scheduled time
+    assert scheduling.is_due(new_alert, datetime(2026, 8, 19, 9, 1, tzinfo=timezone.utc)) is True
 
 
 # ---------------------------------------------------------------------------
