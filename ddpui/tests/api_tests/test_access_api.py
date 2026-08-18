@@ -1130,11 +1130,35 @@ def test_L01_no_access_user_can_request_view(dashboard, no_access_member):
     assert result.status == AccessRequestStatus.PENDING
 
 
-def test_L03_user_with_access_cannot_request(dashboard, other_analyst):
-    """Analyst has Edit via floor → cannot submit a request (409)."""
+def test_L03_view_holder_can_request_edit_upgrade(dashboard, member):
+    """View-holder (floor=view) can request an Edit upgrade → 201."""
+    result = create_access_request(
+        mock_request(member),
+        "dashboard",
+        str(dashboard.id),
+        RequestAccessPayload(requested_level="edit"),
+    )
+    assert result.requested_level == "edit"
+    assert result.status == AccessRequestStatus.PENDING
+
+
+def test_L03b_edit_holder_cannot_request_lower_or_equal(dashboard, other_analyst):
+    """Edit-holder requesting view (downgrade) or edit (same) → 409."""
     with pytest.raises(HttpError) as exc:
         create_access_request(
             mock_request(other_analyst),
+            "dashboard",
+            str(dashboard.id),
+            RequestAccessPayload(requested_level="view"),
+        )
+    assert exc.value.status_code == 409
+
+
+def test_L03c_view_holder_requesting_view_rejected(dashboard, member):
+    """View-holder requesting View (same level) → 409."""
+    with pytest.raises(HttpError) as exc:
+        create_access_request(
+            mock_request(member),
             "dashboard",
             str(dashboard.id),
             RequestAccessPayload(requested_level="view"),
@@ -1330,6 +1354,88 @@ def test_L16_respond_to_already_decided_request(dashboard, owner_analyst, no_acc
     assert exc.value.status_code == 409
 
 
+def test_L22_approve_upgrade_merges_into_existing_direct_share(
+    org, dashboard, owner_analyst, no_access_member
+):
+    """View-holder with an existing direct share → approve Edit upgrade →
+    the same row is bumped to Edit; no duplicate row is created."""
+    existing = _grant(org, dashboard, no_access_member, AccessLevel.VIEW)
+    req = create_access_request(
+        mock_request(no_access_member),
+        "dashboard",
+        str(dashboard.id),
+        RequestAccessPayload(requested_level="edit"),
+    )
+    respond_to_access_request(
+        mock_request(owner_analyst),
+        "dashboard",
+        str(dashboard.id),
+        req.id,
+        RespondToRequestPayload(decision="approved"),
+    )
+
+    direct_rows = ResourceShare.objects.filter(
+        org=org,
+        resource_type=ResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.USER,
+        principal_id=no_access_member.id,
+        parent__isnull=True,
+    )
+    assert direct_rows.count() == 1
+    updated = direct_rows.first()
+    assert updated.id == existing.id
+    assert updated.access_level == AccessLevel.EDIT
+
+
+def test_L23_approve_upgrade_via_group_creates_new_direct_row(
+    org, dashboard, owner_analyst, no_access_member
+):
+    """View came from a group grant only (no direct row) → approve Edit →
+    new direct Edit row for the user; group grant is untouched."""
+    from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
+
+    group = OrgUserGroup.objects.create(org=org, name="Group", created_by=owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=no_access_member)
+    group_share = ResourceShare.objects.create(
+        org=org,
+        resource_type=ResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.GROUP,
+        principal_id=group.id,
+        access_level=AccessLevel.VIEW,
+    )
+
+    req = create_access_request(
+        mock_request(no_access_member),
+        "dashboard",
+        str(dashboard.id),
+        RequestAccessPayload(requested_level="edit"),
+    )
+    respond_to_access_request(
+        mock_request(owner_analyst),
+        "dashboard",
+        str(dashboard.id),
+        req.id,
+        RespondToRequestPayload(decision="approved"),
+    )
+
+    # New direct Edit row for the user
+    direct_row = ResourceShare.objects.get(
+        org=org,
+        resource_type=ResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.USER,
+        principal_id=no_access_member.id,
+        parent__isnull=True,
+    )
+    assert direct_row.access_level == AccessLevel.EDIT
+
+    # Group grant untouched
+    group_share.refresh_from_db()
+    assert group_share.access_level == AccessLevel.VIEW
+
+
 # ---- Notifications (L17-L21) -----------------------------------------------
 
 
@@ -1434,6 +1540,233 @@ def test_L21_notification_failure_does_not_fail_api_call(
     assert AccessRequest.objects.filter(
         resource_id=str(dashboard.id), requester=no_access_member
     ).exists()
+
+
+# ---------------------------------------------------------------------------
+# Share notifications on direct grants (L24-L31)
+# spec test-spec.md §"Story 9 · notifications on Share" — see access_api._notify_share_recipients
+# ---------------------------------------------------------------------------
+
+
+def _add_grants_payload(principals=None, pending_grants=None, invite_role_uuid=None):
+    return AddGrantsPayload(
+        principals=principals or [],
+        pending_grants=pending_grants or [],
+        invite_role_uuid=invite_role_uuid,
+    )
+
+
+def test_L24_direct_user_grant_fires_share_notification(dashboard, owner_analyst, member):
+    """Adding a new user chip at View → notification to that user."""
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="user",
+                        principal_id=member.id,
+                        access_level="view",
+                    )
+                ],
+            ),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        assert list(payload.recipients) == [member.id]
+        assert "shared" in payload.message.lower()
+        assert "view" in payload.message.lower()
+
+
+def test_L25_group_grant_notifies_every_current_member(
+    org, dashboard, owner_analyst, member, no_access_member
+):
+    """Group grant expands to every current OrgUserGroupMember with an orguser."""
+    from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
+
+    group = OrgUserGroup.objects.create(org=org, name="Team", created_by=owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=member)
+    OrgUserGroupMember.objects.create(group=group, orguser=no_access_member)
+
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="group",
+                        principal_id=group.id,
+                        access_level="view",
+                    )
+                ],
+            ),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        recipients = set(payload.recipients)
+        assert member.id in recipients
+        assert no_access_member.id in recipients
+
+
+def test_L26_view_to_edit_upgrade_fires_upgrade_notification(
+    org, dashboard, owner_analyst, member
+):
+    """Pre-existing direct View → re-share at Edit → 'upgraded' notification."""
+    _grant(org, dashboard, member, AccessLevel.VIEW)
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="user",
+                        principal_id=member.id,
+                        access_level="edit",
+                    )
+                ],
+            ),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        assert list(payload.recipients) == [member.id]
+        assert "upgraded" in payload.message.lower()
+
+
+def test_L27_noop_re_save_does_not_notify(org, dashboard, owner_analyst, member):
+    """Same-level re-save fires no notification."""
+    _grant(org, dashboard, member, AccessLevel.VIEW)
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="user",
+                        principal_id=member.id,
+                        access_level="view",
+                    )
+                ],
+            ),
+        )
+        assert not mock_notify.called
+
+
+def test_L28_downgrade_does_not_notify(org, dashboard, owner_analyst, member):
+    """Edit → View downgrade fires no notification."""
+    _grant(org, dashboard, member, AccessLevel.EDIT)
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="user",
+                        principal_id=member.id,
+                        access_level="view",
+                    )
+                ],
+            ),
+        )
+        assert not mock_notify.called
+
+
+def test_L29_invitation_grants_do_not_fire_share_notification(
+    org, dashboard, owner_analyst, seed_db
+):
+    """Pending-email invitation rows go through the platform invite-email flow,
+    not the share-notification path."""
+    from ddpui.schemas.access.resource_share_schema import PendingGrantPayload
+
+    member_role = Role.objects.filter(slug=MEMBER_ROLE).first()
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                pending_grants=[
+                    PendingGrantPayload(email="invitee@t.com", access_level="view")
+                ],
+                invite_role_uuid=str(member_role.uuid),
+            ),
+        )
+        assert not mock_notify.called
+
+
+def test_L30_dedup_when_user_is_direct_and_group_grantee(
+    org, dashboard, owner_analyst, member
+):
+    """User granted directly + present in a granted group at the same level → one notification, once."""
+    from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
+
+    group = OrgUserGroup.objects.create(org=org, name="Team", created_by=owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=member)
+
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="user",
+                        principal_id=member.id,
+                        access_level="view",
+                    ),
+                    PrincipalGrantPayload(
+                        principal_type="group",
+                        principal_id=group.id,
+                        access_level="view",
+                    ),
+                ],
+            ),
+        )
+        # Same (class, level) bucket → one create_notification call, recipient once.
+        assert mock_notify.call_count == 1
+        payload = mock_notify.call_args[0][0]
+        assert payload.recipients.count(member.id) == 1
+
+
+def test_L31_sender_not_own_share_notification_recipient(
+    org, dashboard, owner_analyst, member
+):
+    """Sender is a member of a granted group → filtered out of the recipient list."""
+    from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
+
+    group = OrgUserGroup.objects.create(org=org, name="Team", created_by=owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=member)
+    OrgUserGroupMember.objects.create(group=group, orguser=owner_analyst)
+
+    with _patch_notification() as mock_notify:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="group",
+                        principal_id=group.id,
+                        access_level="view",
+                    )
+                ],
+            ),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        assert owner_analyst.id not in payload.recipients
+        assert member.id in payload.recipients
 
 
 # ---------------------------------------------------------------------------

@@ -269,12 +269,17 @@ def add_grants(
     for grant in principals:
         _check_principal_exists(org, grant.principal_type, grant.principal_id)
 
+        # Restrict to direct rows. Cascade child rows share the same principal
+        # coordinates but are derived from a parent share (parent set); mutating
+        # one directly would break the cascade invariant and get reverted on
+        # the next sync_dashboard_cascade.
         existing = ResourceShare.objects.filter(
             org=org,
             resource_type=rtype,
             resource_id=resource_id_str,
             principal_type=grant.principal_type,
             principal_id=grant.principal_id,
+            parent__isnull=True,
         ).first()
 
         if existing is not None:
