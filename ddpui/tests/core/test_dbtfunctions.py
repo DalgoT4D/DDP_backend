@@ -116,6 +116,46 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_mode_only(tmpdir):
     assert "sslrootcert_content" not in res
 
 
+def test_map_airbyte_ssl_false_sets_sslmode_disable():
+    """ssl: false must map to sslmode: disable regardless of ssl_mode presence."""
+    conn_info = {"host": "h", "ssl": False}
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "disable"
+
+
+def test_map_airbyte_ssl_false_overrides_ssl_mode():
+    """ssl: false takes precedence — ssl_mode cert config must be ignored."""
+    conn_info = {
+        "host": "h",
+        "ssl": False,
+        "ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"},
+    }
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "disable"
+    assert "sslrootcert_content" not in res
+    assert "sslrootcert" not in res
+
+
+def test_map_airbyte_ssl_true_falls_through_to_ssl_mode():
+    """ssl: true alone doesn't set sslmode — ssl_mode dict is the source of truth."""
+    conn_info = {
+        "host": "h",
+        "ssl": True,
+        "ssl_mode": {"mode": "require"},
+    }
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "require"
+
+
+def test_map_airbyte_ssl_false_with_no_ssl_mode():
+    """ssl: false with no ssl_mode still produces sslmode: disable."""
+    conn_info = {"host": "h", "ssl": False}
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "disable"
+    assert "sslrootcert_content" not in res
+    assert "sslrootcert" not in res
+
+
 # ============================================================================
 # preprocess_airbyte_creds_for_dbt
 # ============================================================================

@@ -2,8 +2,11 @@ import uuid
 import os
 import time
 import django
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.core.management import call_command
+
+# `from ddpui.utils import timezone` below shadows the name, so django's is aliased
+from django.utils import timezone as django_timezone
 
 from unittest.mock import Mock, patch, MagicMock
 import pytest
@@ -39,6 +42,7 @@ from ddpui.api.user_org_api import (
     post_organization_v1,
 )
 from ddpui.models.org import Org, OrgWarehouse
+from ddpui.models.org_plans import OrgPlans, OrgPlanType
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.metric import Metric, KPI
@@ -218,6 +222,53 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
         assert response[0].new_role_slug == orguser2.new_role.slug
         assert response[1].has_seen_rbac_notice is False
         assert response[0].has_seen_rbac_notice is True
+
+
+def test_get_current_userv2_returns_the_plan_window(authuser, org_with_workspace):
+    """the org plan's start/end dates ride along on currentuserv2
+
+    This is what the frontend's trial countdown and lifecycle nudges count days from, so the
+    two dates must reach it verbatim — NOT be re-derived from `org.created_at`, which is a
+    different thing entirely (see `Org.plan_window`).
+    """
+    start = django_timezone.now()
+    end = start + timedelta(days=14)
+    OrgPlans.objects.create(
+        org=org_with_workspace,
+        base_plan=OrgPlanType.FREE_TRIAL.value,
+        start_date=start,
+        end_date=end,
+    )
+    orguser = OrgUser.objects.create(
+        user=authuser,
+        org=org_with_workspace,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+
+    response = get_current_user_v2(mock_request(orguser))
+
+    assert len(response) == 1
+    assert response[0].subscription_plan == OrgPlanType.FREE_TRIAL.value
+    assert response[0].plan_start_date == start
+    assert response[0].plan_end_date == end
+
+
+def test_get_current_userv2_plan_window_is_null_without_a_plan(authuser, org_with_workspace):
+    """an org with no OrgPlans row reports no window rather than raising
+
+    Legitimate state for older orgs. The frontend treats null dates as "not a trial" and shows
+    nothing, so this must be null and not a guess.
+    """
+    orguser = OrgUser.objects.create(
+        user=authuser,
+        org=org_with_workspace,
+        new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+    )
+
+    response = get_current_user_v2(mock_request(orguser))
+
+    assert response[0].plan_start_date is None
+    assert response[0].plan_end_date is None
 
 
 # ================================================================================

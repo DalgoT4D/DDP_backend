@@ -20,8 +20,9 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
-from ddpui.core.oauth import google_oauth_service
+from ddpui.core.oauth import google_oauth_service, google_service_account
 from ddpui.core.oauth.google_oauth_provider import (
+    GSHEETS_SOURCE_NAME,
     get_connector,
     oauth_client_id,
     oauth_client_secret,
@@ -66,6 +67,7 @@ from ddpui.utils.constants import (
 from ddpui.utils.helpers import (
     generate_hash_id,
     update_dict_but_not_stars,
+    resolve_stars,
     from_timestamp,
     nice_bytes,
     get_integer_env_var,
@@ -102,6 +104,35 @@ def _build_oauth_source_config(
         oauth_client_id(), oauth_client_secret(), refresh_token
     )
     return {**config, "credentials": credentials}
+
+
+def inject_managed_gsheets_credentials(source_def_name: str, config: dict) -> dict:
+    """MANAGED-SA bridge — fill in Dalgo's own Google service-account key for a Google Sheets
+    source that arrived without one. See `core/oauth/google_service_account.py` to remove it.
+
+    `source_def_name` is off the request payload, so this trusts the caller about the connector
+    type. Fine for an internal API; revisit if that changes."""
+    if source_def_name != GSHEETS_SOURCE_NAME:
+        return config
+
+    key = google_service_account.managed_service_account_json()
+    if key is None:
+        return config
+
+    # A pasted key is the bring-your-own-key option — only fill an empty slot. No Client
+    # (OAuth) guard needed: sign-in is unreleased, so no saved source carries one.
+    credentials = config.get(google_service_account.CREDENTIALS_KEY) or {}
+    if credentials.get(google_service_account.SERVICE_INFO_KEY):
+        return config
+
+    logger.info("using the dalgo-managed google service account for this google sheets source")
+    return {
+        **config,
+        google_service_account.CREDENTIALS_KEY: {
+            google_service_account.AUTH_TYPE_KEY: google_service_account.SERVICE_AUTH_TYPE,
+            google_service_account.SERVICE_INFO_KEY: key,
+        },
+    }
 
 
 def create_oauth_source(orguser: OrgUser, payload: SourceGoogleOAuthCreate) -> dict:
@@ -854,9 +885,13 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         warehouse.name = payload.name
         warehouse.save()
 
+    curr_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
+
+    # payload is the authoritative source of truth; only replace starred values
+    # from curr_credentials — never carry over keys absent from the new payload
     airbyte_creds = {}
     if warehouse.wtype == "postgres":
-        airbyte_creds = update_dict_but_not_stars(payload.config)
+        airbyte_creds = resolve_stars(payload.config, curr_credentials)
         # i've forgotten why we have this here, airbyte sends "database" - RC
         if "dbname" in airbyte_creds:
             airbyte_creds["database"] = airbyte_creds["dbname"]
@@ -874,13 +909,6 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
 
     else:
         raise ValueError("unknown warehouse type " + warehouse.wtype)
-
-    curr_credentials = secretsmanager.retrieve_warehouse_credentials(warehouse)
-
-    # copy over the value of keys that are missing from in airbyte_creds (these are probably that have all '*****')
-    for key, value in curr_credentials.items():
-        if key not in airbyte_creds:
-            airbyte_creds[key] = value
 
     secretsmanager.update_warehouse_credentials(warehouse, airbyte_creds)
 

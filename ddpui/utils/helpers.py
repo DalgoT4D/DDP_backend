@@ -103,6 +103,28 @@ def update_dict_but_not_stars(input_config: dict):
     return output_config
 
 
+def resolve_stars(payload_config: dict, curr_credentials: dict) -> dict:
+    """
+    Returns a copy of payload_config with starred string values replaced by the
+    corresponding value from curr_credentials. payload_config is the authoritative
+    source — keys absent from it are NOT carried over from curr_credentials.
+    Starred values that cannot be resolved (key absent from curr_credentials) are
+    dropped, matching the behaviour of update_dict_but_not_stars.
+    Handles nested dicts recursively.
+    """
+    result = {}
+    for key, val in payload_config.items():
+        if isinstance(val, str) and re.match(r"^\*+$", val.strip()):
+            if key in curr_credentials:
+                result[key] = curr_credentials[key]
+            # else: unresolvable star — drop the key
+        elif isinstance(val, dict):
+            result[key] = resolve_stars(val, curr_credentials.get(key, {}))
+        else:
+            result[key] = val
+    return result
+
+
 def hash_dict(payload: dict) -> str:
     """hash a dictionary"""
     hasher = hashlib.sha256()

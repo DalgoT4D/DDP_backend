@@ -4,6 +4,8 @@ import os
 import shutil
 from ninja.errors import HttpError
 
+from django.db import connection
+
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.models.org_user import OrgUser
 from ddpui.models.tasks import DataflowOrgTask, OrgDataFlowv1, OrgTask
@@ -11,6 +13,7 @@ from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.llm import LlmSession
+from ddpui.models.metric import KPI, Metric
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import prefect_service
@@ -367,19 +370,31 @@ class OrgCleanupService:
         deletes all org users; first removes UserPreferences rows that FK to
         each OrgUser (they don't CASCADE) so the OrgUser delete doesn't
         violate the FK constraint.
+        After removing the OrgUser, deletes the underlying User if they have
+        no remaining org memberships (UserAttributes cascades automatically).
         """
         for orguser in OrgUser.objects.filter(org=self.org):
-            logger.info("will delete orguser %s", orguser.user.email)
+            user = orguser.user
+            logger.info("will delete orguser %s", user.email)
             if not self.dry_run:
                 n_prefs = UserPreferences.objects.filter(orguser=orguser).count()
                 if n_prefs:
                     logger.info(
                         "deleting %s UserPreferences row(s) attached to orguser %s",
                         n_prefs,
-                        orguser.user.email,
+                        user.email,
                     )
                     UserPreferences.objects.filter(orguser=orguser).delete()
                 orguser.delete()
+
+                remaining = OrgUser.objects.filter(user=user).exclude(org=self.org).count()
+                if remaining == 0:
+                    logger.info("deleting user %s (no remaining org memberships)", user.email)
+                    user.delete()
+                else:
+                    logger.info(
+                        "keeping user %s (%d other org membership(s))", user.email, remaining
+                    )
 
     def delete_elementary_setup(self):
         """Clean up everything Elementary-related for this org:
@@ -448,6 +463,8 @@ class OrgCleanupService:
                 logger.error(f"failed to bulk delete S3 reports for {self.org.slug}: {err}")
 
     def delete_org(self):
+        org_pk = self.org.pk  # save pk now; cascades below may set self.org.pk = None
+
         # delete all orchestrate pipelines
         self.delete_orchestrate_pipelines()
 
@@ -503,8 +520,27 @@ class OrgCleanupService:
                     model_cls.objects.filter(org=self.org).delete()
                     logger.info(f"deleted {n} {label} row(s) for org")
 
+        # KPI.metric is on_delete=PROTECT, so KPIs block Metric deletion which blocks Org deletion.
+        # Delete KPIs first, then Metrics explicitly before org.delete() cascades.
+        kpi_n = KPI.objects.filter(org=self.org).count()
+        metric_n = Metric.objects.filter(org=self.org).count()
+        if kpi_n or metric_n:
+            logger.info(f"will delete {kpi_n} KPI(s) and {metric_n} Metric(s) for org")
+            if not self.dry_run:
+                KPI.objects.filter(org=self.org).delete()
+                Metric.objects.filter(org=self.org).delete()
+                logger.info(f"deleted {kpi_n} KPI(s) and {metric_n} Metric(s) for org")
+
         # delete org object itself
         logger.info(f"will delete org {self.org.name} from DB")
         if not self.dry_run:
-            self.org.delete()
-            logger.info(f"deleted org {self.org.name} from DB")
+            if org_pk is None:
+                logger.warning("org pk is None — org may have already been deleted, skipping")
+            else:
+                deleted, _ = Org.objects.filter(pk=org_pk).delete()
+                if deleted:
+                    logger.info(f"deleted org {self.org.name} from DB")
+                else:
+                    logger.warning(
+                        f"org {self.org.name} was not found in DB, may have already been deleted"
+                    )

@@ -238,6 +238,21 @@ class Org(models.Model):
         """returns the base plan of the organization"""
         return self.org_plans.base_plan if hasattr(self, "org_plans") else None
 
+    def plan_window(self):
+        """Returns the plan's validity window as `(start_date, end_date)`, either of which may
+        be None.
+
+        This is the ONE definition of a trial's window. `Org.created_at` is NOT it: for a
+        clone-created trial the two happen to coincide, but an org put on a trial plan later (or
+        one whose window an admin adjusted via `createorgplan`) has a window that has nothing to
+        do with when the org row was made. Everything that counts trial days — the lifecycle
+        email sweep, the expired-trial deleter, and the frontend countdown/nudges — must read
+        these two dates so they cannot drift apart.
+        """
+        if not hasattr(self, "org_plans"):
+            return None, None
+        return self.org_plans.start_date, self.org_plans.end_date
+
 
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""

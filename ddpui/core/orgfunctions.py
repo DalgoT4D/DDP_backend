@@ -7,13 +7,13 @@ from urllib.parse import urlparse
 from django.utils.text import slugify
 
 from ddpui.ddpairbyte import airbytehelpers
+from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui import settings
 from ddpui.models.org import Org
 from ddpui.schemas.org_schema import CreateOrgSchema
 from ddpui.utils.constants import DALGO_WITH_SUPERSET, DALGO, FREE_TRIAL
 from ddpui.models.org_plans import OrgPlans, OrgPlanType
-from ddpui.celeryworkers.tasks import add_custom_connectors_to_workspace
 from ddpui.utils.http import dalgo_get, dalgo_head
 from ddpui.utils.s3_utils import upload_file, delete_file
 from ddpui.core.org_logo.exceptions import (
