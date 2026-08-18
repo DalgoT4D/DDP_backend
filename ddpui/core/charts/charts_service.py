@@ -5,12 +5,12 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from collections import defaultdict
 
-from sqlalchemy import column, func, and_, or_, text, literal_column
+from sqlalchemy import column, func, and_, or_, text, literal_column, cast, String
 
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.metric import Metric
 from ddpui.models.visualization import Chart
-from ddpui.core.datainsights.query_builder import AggQueryBuilder
+from ddpui.core.datainsights.query_builder import AggQueryBuilder, build_aggregate_expression
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.custom_logger import CustomLogger
@@ -571,11 +571,28 @@ def build_chart_query(
                 # Aggregated query: use multi-metric query builder
                 query_builder = build_multi_metric_query(payload, query_builder, org_warehouse)
 
-            # Apply filters and sorting before returning
+            # Apply filters, search and sorting before returning
             if payload.dashboard_filters:
                 query_builder = apply_dashboard_filters(query_builder, payload.dashboard_filters)
             if payload.extra_config and payload.extra_config.get("filters"):
                 query_builder = apply_chart_filters(query_builder, payload.extra_config["filters"])
+            if payload.extra_config and payload.extra_config.get("search"):
+                # A time-grain-transformed dimension is grouped by a derived expression,
+                # not its raw column — referencing the raw column in HAVING (the metrics
+                # path below) would then fail with "must appear in GROUP BY". Only matters
+                # when metrics are present; the raw-row WHERE path is unaffected.
+                time_grain = payload.extra_config.get("time_grain")
+                search_dimensions = (
+                    [d for d in dimensions if d != payload.dimension_col]
+                    if payload.metrics and time_grain
+                    else dimensions
+                )
+                query_builder = apply_table_search(
+                    query_builder,
+                    payload.extra_config["search"],
+                    search_dimensions,
+                    payload.metrics,
+                )
             if payload.extra_config and payload.extra_config.get("sort"):
                 query_builder = apply_chart_sorting(
                     query_builder, payload.extra_config["sort"], payload
@@ -922,6 +939,62 @@ def apply_chart_filters(
             query_builder.where_clause(column(column_name).is_(None))
         elif operator == "is_not_null":
             query_builder.where_clause(column(column_name).isnot(None))
+
+    return query_builder
+
+
+def apply_table_search(
+    query_builder: AggQueryBuilder,
+    search_term: str,
+    columns: List[str],
+    metrics: Optional[List[Any]] = None,
+) -> AggQueryBuilder:
+    """Filter table-chart rows to those where any column or metric contains the search term.
+
+    Case-insensitive substring match, OR'd across columns (matches if ANY column
+    contains the term) — unlike apply_chart_filters, which ANDs distinct filter
+    conditions together and can't express "match in any of these columns".
+
+    Everything is cast to text first: dimensions/metrics aren't always strings
+    (e.g. a boolean column or a COUNT), and lower()/like() only accept text —
+    Postgres errors with "function lower(boolean) does not exist" otherwise.
+
+    Without metrics, this is a plain WHERE (filters raw rows, cheaper). With
+    metrics, dimensions are grouped (GROUP BY), so a metric's value only exists
+    post-aggregation — WHERE can't see it. The whole condition (dimensions +
+    metrics) moves to HAVING instead, referencing the grouped dimension columns
+    directly (valid — they're GROUP BY keys, not output aliases) alongside the
+    same aggregate expressions used to build the SELECT list.
+
+    Args:
+        query_builder: The AggQueryBuilder instance to modify
+        search_term: Raw search text from the table's search box
+        columns: Column names to search across (a table chart's dimensions)
+        metrics: The chart's metrics (ChartMetric-like objects), if any
+
+    Returns:
+        Modified query builder with the search condition applied
+    """
+    if not search_term or (not columns and not metrics):
+        return query_builder
+
+    pattern = f"%{search_term.strip().lower()}%"
+    conditions = [func.lower(cast(column(col), String)).like(pattern) for col in columns]
+
+    if not metrics:
+        query_builder.where_clause(or_(*conditions))
+        return query_builder
+
+    for metric in metrics:
+        if metric.column_expression:
+            expr = literal_column(metric.column_expression)
+        else:
+            if not metric.aggregation:
+                continue
+            expr = build_aggregate_expression(metric.column, metric.aggregation)
+        conditions.append(func.lower(cast(expr, String)).like(pattern))
+
+    query_builder.having_clause(or_(*conditions))
 
     return query_builder
 
