@@ -380,3 +380,102 @@ def render_alert_email(alert, rendered_body: str) -> tuple:
         body_html,
         "You received this email because you are a recipient on this Dalgo alert.",
     )
+
+
+# ── In-app notification email ────────────────────────────────────────────
+
+
+_URL_RE = re.compile(r"(https?://[^\s<>\"']+)")
+
+
+def _split_trailing_url(message: str) -> tuple:
+    """Extract the last URL if it sits on its own trailing line.
+
+    Callers of ``create_notification`` frequently emit messages shaped like
+    "{text}\\n{resource_url}". Pulling that trailing URL out lets the email
+    template render it as a CTA button instead of inline text.
+
+    Returns ``(body_without_url, cta_url_or_none)``.
+    """
+    stripped = message.rstrip()
+    urls = _URL_RE.findall(stripped)
+    if not urls:
+        return message, None
+    last = urls[-1]
+    if stripped.endswith(last):
+        head = stripped[: -len(last)].rstrip()
+        return head, last
+    return message, None
+
+
+def _escape_and_link_inline(user_body: str) -> str:
+    """HTML-escape, wrap URLs in <a>, convert newlines to <br>."""
+    escaped = html.escape(user_body)
+    linked = _URL_RE.sub(
+        r'<a href="\1" style="color:#00897B; text-decoration:underline;">\1</a>',
+        escaped,
+    )
+    return linked.replace("\n", "<br>\n")
+
+
+def render_notification_email(subject: str, message: str) -> tuple:
+    """Wrap an in-app notification in the same visual shell as the report share email.
+
+    Callers of ``create_notification`` produce plain-text ``message`` bodies,
+    often with a resource URL on the last line (see e.g. the access-request
+    notifications in ``access_api``). This renderer:
+
+    - Uses ``email_subject`` as the headline.
+    - If the message ends on a URL, pulls it out and renders it as the CTA
+      button ("View"). Otherwise auto-links URLs inline.
+
+    Mirrors the ``render_share_report_email`` chrome for a consistent look
+    across Dalgo transactional emails. Returns ``(plain_text, html_body)``.
+    """
+    safe_subject = html.escape(subject) if subject else "Dalgo notification"
+    body_text, cta_url = _split_trailing_url(message)
+    body_fragment = _escape_and_link_inline(body_text) if body_text else ""
+
+    plain_text = (
+        f"{message}\n"
+        f"\n"
+        f"---\n"
+        f"You received this email because you have Dalgo email notifications enabled.\n"
+    )
+
+    cta_block = ""
+    if cta_url:
+        safe_cta_url = html.escape(cta_url)
+        cta_block = f"""
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <a href="{safe_cta_url}"
+                       style="display:inline-block; background-color:#00897B; color:#ffffff; padding:10px 24px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:600; letter-spacing:0.3px;">
+                      View
+                    </a>
+                  </td>
+                </tr>
+              </table>"""
+
+    body_paragraph = ""
+    if body_fragment:
+        body_paragraph = f"""
+
+              <!-- Message body -->
+              <p style="margin:0 0 24px; font-size:14px; color:#374151; line-height:1.6;">
+                {body_fragment}
+              </p>"""
+
+    body_html = f"""\
+              <!-- Headline -->
+              <p style="margin:0 0 8px; font-size:17px; color:#111827; font-weight:600; line-height:1.4;">
+                {safe_subject}
+              </p>{body_paragraph}{cta_block}"""
+
+    return plain_text, _render_email_shell(
+        body_html,
+        "You received this email because you have Dalgo email notifications enabled.",
+    )

@@ -131,6 +131,7 @@ class AlertResponse(Schema):
     recipients: List[RecipientOut]
     created_at: datetime
     updated_at: datetime
+    created_by_email: Optional[str] = None
 
 
 class KpiRagContext(Schema):
@@ -165,6 +166,7 @@ class AlertListItem(Schema):
     is_active: bool
     last_fire_at: Optional[datetime] = None
     fire_streak: int = 0
+    created_by_email: Optional[str] = None
 
 
 class AlertListResponse(Schema):
@@ -172,7 +174,20 @@ class AlertListResponse(Schema):
     total: int
     page: int
     page_size: int
-    total_pages: int
+
+
+class AlertTransferCandidate(Schema):
+    orguser_id: int
+    email: str
+    role_name: Optional[str] = None
+
+
+class AlertTransferCandidatesResponse(Schema):
+    candidates: List[AlertTransferCandidate]
+
+
+class AlertTransferOwnershipPayload(Schema):
+    to_orguser_id: int
 
 
 # ── Test (dry-run) endpoint ────────────────────────────────────────────────

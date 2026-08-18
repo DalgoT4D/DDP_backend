@@ -5,6 +5,7 @@ import pytest
 from django.utils import timezone
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.models.notifications import Notification, NotificationRecipient
+from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Permission, Role, RolePermission
@@ -174,6 +175,41 @@ def test_get_recipients_invalid_user_email():
 def test_handle_recipient_success(orguser, unsent_notification):
     error = handle_recipient(orguser.id, None, unsent_notification)
     assert error is None
+
+
+def test_handle_recipient_email_uses_html_template(orguser):
+    """When email notifications are enabled, the email pipeline sends
+    templated HTML (not raw plaintext) and pulls a trailing URL out as a CTA.
+    """
+    from unittest.mock import patch
+
+    UserPreferences.objects.get_or_create(
+        orguser=orguser, defaults={"enable_email_notifications": True}
+    )
+    UserPreferences.objects.filter(orguser=orguser).update(enable_email_notifications=True)
+
+    notification = Notification.objects.create(
+        author="sharer@example.com",
+        message="Priya shared 'Sales' with you.\nhttps://app.dalgo.org/dashboards/7",
+        email_subject="Access request for Sales",
+        urgent=False,
+    )
+    try:
+        with patch(
+            "ddpui.core.notifications.notifications_functions.send_html_message"
+        ) as mock_send:
+            error = handle_recipient(orguser.id, None, notification)
+            assert error is None
+            assert mock_send.call_count == 1
+            _, subject, plain_body, html_body = mock_send.call_args.args
+            assert subject == "Access request for Sales"
+            assert "Priya shared" in plain_body
+            # Templated HTML — shell wrapper + CTA button for the trailing URL
+            assert "<!DOCTYPE html>" in html_body
+            assert 'href="https://app.dalgo.org/dashboards/7"' in html_body
+            assert "View\n                    </a>" in html_body
+    finally:
+        notification.delete()
 
 
 def test_handle_recipient_with_scheduled_time(orguser, scheduled_notification):

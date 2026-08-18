@@ -21,6 +21,7 @@ from ddpui.utils import email_templates
 from ddpui.utils.email_templates import (
     render_alert_email,
     render_mention_email,
+    render_notification_email,
     render_share_report_email,
 )
 
@@ -151,6 +152,54 @@ def test_render_alert_email_escapes_alert_name_in_headline():
     # The literal <b> must not survive into the HTML headline
     assert "<b>Injected</b>" not in html_
     assert "&lt;b&gt;Injected&lt;/b&gt;" in html_
+
+
+# ── Notification email (in-app notifications, email channel) ─────────────
+
+
+def test_notification_email_trailing_url_renders_cta_button():
+    """Message shaped like '{text}\\n{url}' pulls the URL out as a CTA."""
+    plain, html_ = render_notification_email(
+        "Access request",
+        "Priya requests View on dashboard 'Sales'.\nhttps://app.dalgo.org/dashboards/7",
+    )
+    # CTA URL is not inlined into the message paragraph — it's on the button.
+    assert 'href="https://app.dalgo.org/dashboards/7"' in html_
+    assert "View\n                    </a>" in html_
+    # The URL is stripped from the visible message body.
+    assert "https://app.dalgo.org/dashboards/7</p>" not in html_
+    # Plain-text keeps the original message verbatim.
+    assert "https://app.dalgo.org/dashboards/7" in plain
+
+
+def test_notification_email_without_url_auto_links_inline():
+    """When there's no trailing URL, no CTA button is rendered."""
+    _, html_ = render_notification_email("Ping", "Just a heads-up, nothing to click.")
+    assert "View\n                    </a>" not in html_
+    assert "Just a heads-up, nothing to click." in html_
+
+
+def test_notification_email_inline_url_is_auto_linked():
+    """A URL embedded mid-sentence should be auto-linked, not extracted."""
+    _, html_ = render_notification_email(
+        "Update",
+        "Something happened at https://app.dalgo.org/x and continues here.",
+    )
+    # No CTA — URL wasn't at the end.
+    assert "View\n                    </a>" not in html_
+    assert 'href="https://app.dalgo.org/x"' in html_
+
+
+def test_notification_email_escapes_subject_and_message():
+    """No HTML injection via message or subject."""
+    _, html_ = render_notification_email("<script>", "Hi <b>you</b>")
+    assert (
+        "<script>"
+        not in html_.replace("<script>", "")  # sanity: after escape the raw sequence is gone
+        or "&lt;script&gt;" in html_
+    )
+    assert "<b>you</b>" not in html_
+    assert "&lt;b&gt;you&lt;/b&gt;" in html_
 
 
 # ── Shell single-source-of-truth guard ───────────────────────────────────

@@ -28,6 +28,8 @@ from ddpui.schemas.alert_schema import (
     AlertTestRequest,
     AlertTestResponse,
     AlertToggle,
+    AlertTransferCandidatesResponse,
+    AlertTransferOwnershipPayload,
     AlertUpdate,
     KpiRagContext,
     LogDeliveryOut,
@@ -121,6 +123,7 @@ def _build_alert_response(alert: Alert) -> AlertResponse:
         recipients=_build_recipient_out(alert.recipients or [], alert.org_id),
         created_at=alert.created_at,
         updated_at=alert.updated_at,
+        created_by_email=(alert.created_by.user.email if alert.created_by else None),
     )
 
 
@@ -180,6 +183,7 @@ def _build_list_item(alert: Alert) -> AlertListItem:
         is_active=alert.is_active,
         last_fire_at=last_fire_at,
         fire_streak=AlertService.compute_fire_streak(alert),
+        created_by_email=(alert.created_by.user.email if alert.created_by else None),
     )
 
 
@@ -394,6 +398,54 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         resource_id=str(alert.id),
         action=AuditLogAction.UPDATE,
         resource_fields={"name": alert.name, "is_active": payload.is_active},
+    )
+
+    return _build_alert_response(alert)
+
+
+@alert_router.get(
+    "/{alert_id}/transfer-candidates/",
+    response=AlertTransferCandidatesResponse,
+)
+@has_permission(["can_edit_alerts"])
+def list_alert_transfer_candidates(request, alert_id: int):
+    """Org members eligible to receive ownership of this alert. Owner-or-admin gated."""
+    orguser: OrgUser = request.orguser
+    try:
+        candidates = AlertService.list_transfer_candidates(alert_id, orguser.org, orguser)
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
+    return AlertTransferCandidatesResponse(candidates=candidates)
+
+
+@alert_router.post("/{alert_id}/transfer-ownership/", response=AlertResponse)
+@has_permission(["can_edit_alerts"])
+def transfer_alert_ownership(request, alert_id: int, payload: AlertTransferOwnershipPayload):
+    """Transfer alert.created_by to another org member. Owner-or-admin gated."""
+    orguser: OrgUser = request.orguser
+    try:
+        alert = AlertService.transfer_ownership(
+            alert_id, orguser.org, orguser, payload.to_orguser_id
+        )
+    except AlertNotFoundError:
+        raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
+    except AlertValidationError as e:
+        raise HttpError(400, e.message) from None
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.ALERT,
+        resource_id=str(alert_id),
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "name": alert.name,
+            "transferred_to": (alert.created_by.user.email if alert.created_by else None),
+        },
     )
 
     return _build_alert_response(alert)

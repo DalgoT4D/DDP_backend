@@ -18,13 +18,15 @@ from ddpui.api.alert_api import (
     delete_alert,
     get_alert,
     get_alert_logs,
+    list_alert_transfer_candidates,
     list_alerts,
     toggle_alert,
+    transfer_alert_ownership,
     update_alert,
 )
 from ddpui.api.alert_api import test_alert as run_dry_run
 from ddpui.api.alert_api import test_slack_webhook as run_slack_webhook_test
-from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
+from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE, MEMBER_ROLE
 from ddpui.models.alert import Alert
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.metric import KPI, Metric
@@ -35,6 +37,7 @@ from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertTestRequest,
     AlertToggle,
+    AlertTransferOwnershipPayload,
     AlertUpdate,
     RecipientIn,
     SlackTestRequest,
@@ -92,6 +95,22 @@ def analyst_orguser(org):
         user=user,
         org=org,
         new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+    )
+    yield orguser
+    orguser.delete()
+    user.delete()
+
+
+@pytest.fixture
+def member_orguser(org):
+    """A same-org user whose role lacks ``can_edit_alerts``."""
+    user = User.objects.create(
+        username="alertapimember", email="alertapimember@test.com", password="testpassword"
+    )
+    orguser = OrgUser.objects.create(
+        user=user,
+        org=org,
+        new_role=Role.objects.filter(slug=MEMBER_ROLE).first(),
     )
     yield orguser
     orguser.delete()
@@ -801,3 +820,128 @@ def test_dry_run_kpi_rag_uses_rag_status_for_evaluation(seed_db, orguser, sample
     out = run_dry_run(request, payload)
     assert out.would_fire is True
     assert "red" in out.message
+
+
+# ── Transfer ownership ─────────────────────────────────────────────────────
+
+
+def test_transfer_candidates_lists_edit_alert_roles_only(
+    seed_db, orguser, analyst_orguser, member_orguser, sample_metric
+):
+    """Members (no can_edit_alerts) are excluded; the owner is excluded too."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    resp = list_alert_transfer_candidates(request, created.id)
+
+    emails = {c.email for c in resp.candidates}
+    assert analyst_orguser.user.email in emails
+    assert orguser.user.email not in emails  # owner excluded
+    assert member_orguser.user.email not in emails  # role lacks can_edit_alerts
+
+
+def test_transfer_candidates_non_owner_analyst_forbidden(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    """A non-owner non-admin cannot see the transfer list."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+    with pytest.raises(HttpError) as exc:
+        list_alert_transfer_candidates(mock_request(analyst_orguser), created.id)
+    assert exc.value.status_code == 403
+
+
+def test_transfer_ownership_owner_can_transfer_to_analyst(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    updated = transfer_alert_ownership(
+        request, created.id, AlertTransferOwnershipPayload(to_orguser_id=analyst_orguser.id)
+    )
+
+    assert updated.created_by_email == analyst_orguser.user.email
+    Alert.objects.get(id=created.id).created_by_id == analyst_orguser.id
+
+
+def test_transfer_ownership_admin_can_transfer_others_alert(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    """Admin (non-owner) can transfer an alert created by someone else."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    updated = transfer_alert_ownership(
+        mock_request(orguser),
+        created.id,
+        AlertTransferOwnershipPayload(to_orguser_id=orguser.id),
+    )
+
+    assert updated.created_by_email == orguser.user.email
+
+
+def test_transfer_ownership_non_owner_analyst_forbidden(
+    seed_db, orguser, analyst_orguser, sample_metric
+):
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            mock_request(analyst_orguser),
+            created.id,
+            AlertTransferOwnershipPayload(to_orguser_id=analyst_orguser.id),
+        )
+    assert exc.value.status_code == 403
+
+
+def test_transfer_ownership_recipient_without_edit_alerts_rejected(
+    seed_db, orguser, member_orguser, sample_metric
+):
+    """Members lack can_edit_alerts → 400."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            request,
+            created.id,
+            AlertTransferOwnershipPayload(to_orguser_id=member_orguser.id),
+        )
+    assert exc.value.status_code == 400
+    assert "Edit Alerts" in str(exc.value)
+
+
+def test_transfer_ownership_unknown_recipient_rejected(seed_db, orguser, sample_metric):
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            request, created.id, AlertTransferOwnershipPayload(to_orguser_id=999_999)
+        )
+    assert exc.value.status_code == 400
+
+
+def test_transfer_ownership_self_noop(seed_db, orguser, sample_metric):
+    """Transferring to the current owner is a no-op — no error, created_by unchanged."""
+    request = mock_request(orguser)
+    created = create_alert(request, _base_payload(orguser, metric_id=sample_metric.id))
+
+    updated = transfer_alert_ownership(
+        request, created.id, AlertTransferOwnershipPayload(to_orguser_id=orguser.id)
+    )
+
+    assert updated.created_by_email == orguser.user.email
+
+
+def test_transfer_ownership_not_found(seed_db, orguser):
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as exc:
+        transfer_alert_ownership(
+            request, 99999, AlertTransferOwnershipPayload(to_orguser_id=orguser.id)
+        )
+    assert exc.value.status_code == 404

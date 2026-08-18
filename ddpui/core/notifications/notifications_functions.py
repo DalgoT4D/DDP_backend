@@ -15,7 +15,8 @@ from ddpui.auth import ADMIN_ROLE
 from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.discord import send_discord_notification
-from ddpui.utils.awsses import send_text_message
+from ddpui.utils.awsses import send_html_message
+from ddpui.utils.email_templates import render_notification_email
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.moretasks import schedule_notification_task
 
@@ -96,10 +97,14 @@ def handle_recipient(
 
         if user_preference.enable_email_notifications:
             try:
-                send_text_message(
+                plain_body, html_body = render_notification_email(
+                    notification.email_subject, notification.message
+                )
+                send_html_message(
                     user_preference.orguser.user.email,
                     notification.email_subject,
-                    notification.message,
+                    plain_body,
+                    html_body,
                 )
             except Exception as e:
                 return {
