@@ -199,11 +199,17 @@ We use two separate Celery workers for better task isolation:
 - For windows run:<br>
 `celery -A ddpui worker -Q canvas_dbt -n canvas_dbt --concurrency=2 -P solo`
 
+#### Trial Clone Worker (for trial account creation)
+- In another terminal with the same virtual environment:<br>
+ `celery -A ddpui worker -Q trial_clone -n trial_clone --autoscale=4,1`
+- For windows run:<br>
+`celery -A ddpui worker -Q trial_clone -n trial_clone --autoscale=4,1 -P solo`
+
 #### Celery Beat (for periodic tasks)
 - To start celery beat run:<br>
 `celery -A ddpui beat`
 
-**Note**: The Canvas DBT worker handles resource-intensive DBT operations from the canvas, while the default worker handles other background tasks like notifications and maintenance.
+**Note**: The Canvas DBT worker handles resource-intensive DBT operations from the canvas, the Trial Clone worker handles trial account creation (autoscales 1-4 processes with load), while the default worker handles other background tasks like notifications and maintenance.
 
 ## Using Docker
 Follow the steps below:

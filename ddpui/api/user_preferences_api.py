@@ -5,6 +5,8 @@ from ddpui.models.userpreferences import UserPreferences
 from ddpui.schemas.userpreferences_schema import (
     CreateUserPreferencesSchema,
     UpdateUserPreferencesSchema,
+    UpdateTrialWalkthroughSchema,
+    TrialWalkthroughFlowState,
 )
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org_user import OrgUser
@@ -65,8 +67,41 @@ def get_user_preferences(request):
         "last_visited_transform_tab": user_preferences.last_visited_transform_tab,
         "is_llm_active": org_preferences.llm_optin,
         "enable_llm_requested": org_preferences.enable_llm_request,
+        "trial_walkthrough": user_preferences.trial_walkthrough,
     }
     return {"success": True, "res": res}
+
+
+@userpreference_router.put("/trial-walkthrough")
+def update_trial_walkthrough(request, payload: UpdateTrialWalkthroughSchema):
+    """Marks one trial-walkthrough flow (product_tour/insights/automate_pipeline) skipped
+    or completed. Merges into the existing dict so updating one flow never clobbers the
+    other two, and enforces skipped/completed as mutually exclusive."""
+    orguser: OrgUser = request.orguser
+
+    # Rejects an all-falsy payload, not just an all-None one. `{"completed": false}` passes a
+    # `is None` check but matches neither branch below, so it used to return 200 having written
+    # nothing — a silent no-op the caller reads as success. There is no "un-complete" or
+    # "un-skip" operation: a flow only ever moves forward, so the only meaningful request sets
+    # one of these to true.
+    if not payload.completed and not payload.skipped:
+        raise HttpError(400, "Set either skipped or completed to true")
+
+    user_preferences, created = UserPreferences.objects.get_or_create(orguser=orguser)
+
+    # Each write replaces the WHOLE flow object rather than patching one key, which is what
+    # keeps skipped/completed mutually exclusive: completing a flow skipped earlier clears the
+    # stale `skipped` in the same write. `completed` is checked first so a caller sending both
+    # resolves to completed rather than storing a contradiction.
+    walkthrough = dict(user_preferences.trial_walkthrough or {})
+    walkthrough[payload.flow] = TrialWalkthroughFlowState(
+        skipped=not payload.completed, completed=bool(payload.completed)
+    ).model_dump()
+
+    user_preferences.trial_walkthrough = walkthrough
+    user_preferences.save()
+
+    return {"success": True, "res": walkthrough}
 
 
 @userpreference_router.post("/llm_analysis/request")

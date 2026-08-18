@@ -23,6 +23,7 @@ from ddpui.api.charts_api import charts_router
 from ddpui.api.dashboard_native_api import dashboard_native_router
 from ddpui.api.filter_api import filter_router
 from ddpui.api.public_api import public_router
+from ddpui.api.trial_api import trial_router
 from ddpui.api.report_api import report_router
 from ddpui.api.metric_api import metric_router
 from ddpui.api.kpi_api import kpi_router
@@ -127,3 +128,4 @@ public_api = NinjaAPI(
     docs_url="/api/v1/public/docs",
 )
 public_api.add_router("/api/v1/public/", public_router)
+public_api.add_router("/api/v1/public/trial/", trial_router)
