@@ -114,25 +114,28 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
     # Lock all dbt tasks that will be run
     task_locks: list[TaskLock] = []
 
+    taskprogress = TaskProgress(
+        task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}"
+    )
+
     try:
         orgtasks = OrgTask.objects.filter(
             dbt__id=orgdbt_id, task__slug__in=[TASK_DBTCLEAN, TASK_DBTDEPS, TASK_DBTRUN]
         )
         for orgtask in orgtasks:
             task_lock, task_lock_created = TaskLock.objects.get_or_create(
-                orgtask=orgtask, locked_by=system_user, celery_task_id=task_id
+                orgtask=orgtask,
+                defaults={"locked_by": system_user, "celery_task_id": task_id},
             )
             if not task_lock_created:
+                task_lock.celery_task_id = task_id
+                task_lock.locked_by = system_user
                 task_lock.locked_at = datetime.now()
                 task_lock.save()
 
             task_locks.append(task_lock)
 
         logger.info("found org %s", org.name)
-
-        taskprogress = TaskProgress(
-            task_id, f"{TaskProgressHashPrefix.RUNDBTCMDS.value}-{org.slug}"
-        )
 
         taskprogress.add(
             {
