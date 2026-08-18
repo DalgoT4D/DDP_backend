@@ -32,7 +32,6 @@ def execute_sql(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict]:
             dialect=ctx.dialect,
             allowed_schemas=ctx.allowed_schemas,
             max_rows=ctx.max_result_rows,
-            allowed_tables=ctx.allowed_tables,
         )
     except sql_guard.GuardError as err:
         return f"SQL rejected: {err}", {"sql": sql, "status": "rejected", "error": str(err)}

@@ -34,17 +34,7 @@ def list_table_names(ctx: RunContext, schema: str) -> dict[str, int | None]:
             "ORDER BY 1"
         )
     rows = ctx.warehouse.execute(sql)
-    tables = {row["table_name"]: row.get("approx_rows") for row in rows}
-    if ctx.allowed_tables is not None:
-        # scoped session: discovery shows only the scope's tables, so the model
-        # never plans SQL the guard would then reject. check_table() inherits
-        # this filter, which also keeps get_table_details/profile_column sample
-        # queries inside the scope.
-        allowed = {ref.lower() for ref in ctx.allowed_tables}
-        tables = {
-            name: approx for name, approx in tables.items() if f"{schema}.{name}".lower() in allowed
-        }
-    return tables
+    return {row["table_name"]: row.get("approx_rows") for row in rows}
 
 
 def check_table(ctx: RunContext, schema: str, table: str) -> None:

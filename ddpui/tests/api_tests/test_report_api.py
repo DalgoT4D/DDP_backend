@@ -40,7 +40,6 @@ from ddpui.api.report_api import (
     toggle_report_sharing,
     get_report_sharing_status,
     list_dashboard_datetime_columns,
-    generate_snapshot_summary,
 )
 from ddpui.schemas.report_schema import SnapshotCreate, SnapshotUpdate, DateColumnSchema
 from ddpui.schemas.dashboard_schema import ShareToggle
@@ -787,42 +786,3 @@ class TestListDashboardDatetimeColumns:
             with pytest.raises(HttpError) as exc_info:
                 list_dashboard_datetime_columns(request, sample_dashboard.id)
             assert exc_info.value.status_code == 502
-
-
-# ================================================================================
-# Generate summary (AI draft)
-# ================================================================================
-
-
-class TestGenerateSummary:
-    """POST /{snapshot_id}/generate-summary/ — AI-drafted executive summary."""
-
-    @patch("ddpui.api.report_api.generate_report_summary")
-    def test_returns_draft_without_saving_it(
-        self, mock_generate, orguser, org, sample_snapshot, seed_db
-    ):
-        from ddpui.models.org_preferences import OrgPreferences
-
-        OrgPreferences.objects.create(org=org, llm_optin=True)
-        mock_generate.return_value = "**A strong quarter.**"
-
-        response = generate_snapshot_summary(mock_request(orguser), sample_snapshot.id)
-
-        assert response["data"]["summary"] == "**A strong quarter.**"
-        sample_snapshot.refresh_from_db()
-        assert sample_snapshot.summary != "**A strong quarter.**"  # draft only
-
-    def test_requires_llm_consent(self, orguser, sample_snapshot, seed_db):
-        # reports don't otherwise touch LLMs — this endpoint must honor the org's
-        # AI consent flag just like chat does
-        with pytest.raises(HttpError) as exc_info:
-            generate_snapshot_summary(mock_request(orguser), sample_snapshot.id)
-        assert exc_info.value.status_code == 403
-
-    def test_missing_snapshot_404s(self, orguser, org, seed_db):
-        from ddpui.models.org_preferences import OrgPreferences
-
-        OrgPreferences.objects.create(org=org, llm_optin=True)
-        with pytest.raises(HttpError) as exc_info:
-            generate_snapshot_summary(mock_request(orguser), 999999)
-        assert exc_info.value.status_code == 404

@@ -52,74 +52,30 @@ def test_stale_dbt_schema_falls_back_to_raw():
     assert derive_allowed_schemas(warehouse, "postgres", dbt_default_schema="prod") == ["raw_kobo"]
 
 
-# ── Scope wiring (DB) ───────────────────────────────────────────────────────
+# ── Context building (DB) ───────────────────────────────────────────────────
 
 
 @pytest.fixture
-def scoped_setup(monkeypatch):
-    """Org + warehouse + dashboard(1 chart) + one scoped and one org session."""
+def org_setup(monkeypatch):
+    """Org + warehouse + one orguser, with a fake two-schema warehouse."""
     org = Org.objects.create(name="Ctx Test Org", slug="ctx-test")
     OrgWarehouse.objects.create(org=org, wtype="postgres")
     user = User.objects.create(username="ctxuser", email="ctxuser@test.com", password="x")
     orguser = OrgUser.objects.create(user=user, org=org)
-    chart = Chart.objects.create(
-        title="Surveys by district",
-        chart_type="bar",
-        computation_type="aggregated",
-        schema_name="prod",
-        table_name="surveys",
-        org=org,
-        created_by=orguser,
-    )
-    dashboard = Dashboard.objects.create(
-        title="Field Performance",
-        org=org,
-        created_by=orguser,
-        tabs=[
-            {
-                "id": "t1",
-                "title": "Main",
-                "layout_config": {},
-                "components": {"c1": {"type": "chart", "config": {"chartId": chart.id}}},
-            }
-        ],
-    )
     monkeypatch.setattr(
         context_module.WarehouseFactory,
         "get_warehouse_client",
         staticmethod(lambda org_warehouse: SchemaWarehouse(["prod", "raw_kobo"])),
     )
-    yield orguser, dashboard
-    dashboard.delete()
-    chart.delete()
+    yield orguser
     orguser.delete()
     user.delete()
     org.delete()
 
 
 @pytest.mark.django_db
-def test_dashboard_scoped_session_narrows_the_context(scoped_setup):
-    orguser, dashboard = scoped_setup
-    session = ChatWithDataSession.objects.create(
-        org=orguser.org, orguser=orguser, scope_type="dashboard", scope_id=dashboard.id
-    )
-
-    ctx = build_run_context(orguser, session=session)
-
-    assert ctx.scope_type == "dashboard"
-    assert ctx.allowed_tables == ["prod.surveys"]
-    # schemas narrowed to the scoped tables' schemas — no schemata discovery
-    assert ctx.allowed_schemas == ["prod"]
-    assert '"Field Performance"' in ctx.scope_context
-
-
-@pytest.mark.django_db
-def test_org_session_and_no_session_keep_full_context(scoped_setup):
-    orguser, _ = scoped_setup
-    org_session = ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
-
-    for ctx in (build_run_context(orguser), build_run_context(orguser, session=org_session)):
-        assert ctx.scope_type == "org"
-        assert ctx.allowed_tables is None
-        assert ctx.scope_context == ""
-        assert ctx.allowed_schemas == ["prod", "raw_kobo"]
+def test_context_carries_all_non_system_schemas(org_setup):
+    orguser = org_setup
+    ctx = build_run_context(orguser)
+    assert ctx.allowed_schemas == ["prod", "raw_kobo"]
+    assert ctx.org_slug == "ctx-test"

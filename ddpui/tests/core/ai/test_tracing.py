@@ -252,7 +252,7 @@ def test_trace_id_is_the_request_uuid(monkeypatch):
 
     request_uuid = uuid.uuid4()
     handler = observability.start_turn_trace(
-        session=SimpleNamespace(id=7, scope_type="dashboard", scope_id=42),
+        session=SimpleNamespace(id=7),
         orguser=SimpleNamespace(id=3),
         context=SimpleNamespace(org_slug="ngo", dialect="postgres"),
         question="how many surveys?",
@@ -262,10 +262,8 @@ def test_trace_id_is_the_request_uuid(monkeypatch):
 
     assert handler is not None
     assert captured["id"] == str(request_uuid)
-    # dashboard-scoped chats must be separable from org-wide chats in Langfuse
-    assert "scope:dashboard" in captured["tags"]
-    assert captured["metadata"]["scope_type"] == "dashboard"
-    assert captured["metadata"]["scope_id"] == 42
+    assert captured["tags"] == ["ngo", "postgres"]
+    assert captured["metadata"]["request_uuid"] == str(request_uuid)
 
 
 def test_record_generation_maps_one_shot_call_to_trace(monkeypatch):

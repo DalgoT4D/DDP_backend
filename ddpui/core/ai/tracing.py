@@ -352,15 +352,9 @@ def start_turn_trace(
             name="answer-data-question",
             session_id=str(session.id),
             user_id=str(orguser.id),
-            # scope tag separates dashboard-drawer chats from org-wide chats
-            # in Langfuse dashboards and eval slices
-            tags=[context.org_slug, context.dialect, f"scope:{session.scope_type}"],
+            tags=[context.org_slug, context.dialect],
             input=_clip(question),
-            metadata={
-                "request_uuid": str(request_uuid),
-                "scope_type": session.scope_type,
-                "scope_id": session.scope_id,
-            },
+            metadata={"request_uuid": str(request_uuid)},
         )
         return LangfuseTurnHandler(trace, model_name=model_name)
     except Exception:  # pylint: disable=broad-except

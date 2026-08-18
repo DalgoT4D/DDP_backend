@@ -62,18 +62,8 @@ def validate(
     dialect: str,
     allowed_schemas: list[str],
     max_rows: int,
-    allowed_tables: list[str] | None = None,
 ) -> GuardedSQL:
     """Parse `sql` in the warehouse dialect and enforce the guard rules.
-
-    `allowed_tables` (list of 'schema.table') restricts queries to those exact
-    tables — used by dashboard-scoped chat. None means schema-level rules only;
-    an empty list blocks every table (fail-closed). Comparison is
-    case-insensitive: Postgres folds unquoted identifiers to lowercase, and our
-    refs come from Chart rows written by the same case conventions. BigQuery
-    dataset/table names are case-sensitive server-side, so a case-mismatched
-    ref could pass the guard and then fail at the warehouse — an acceptable
-    failure direction (never grants access it shouldn't).
 
     Returns a GuardedSQL with LIMIT injected/clamped, or raises GuardError.
     """
@@ -96,8 +86,6 @@ def validate(
 
     tables = _referenced_tables(tree)
     _check_schemas(tables, allowed_schemas)
-    if allowed_tables is not None:
-        _check_tables(tables, allowed_tables)
 
     _apply_limit(tree, max_rows)
 
@@ -133,20 +121,6 @@ def _check_schemas(tables: set[str], allowed_schemas: list[str]) -> None:
         if schema not in allowed:
             raise GuardError(
                 f"Schema '{schema}' is not allowed. Allowed schemas: {sorted(allowed)}"
-            )
-
-
-def _check_tables(tables: set[str], allowed_tables: list[str]) -> None:
-    """Every physical table must be in the scope's allowlist. The message is
-    written for the LLM to relay to the user, so it explains the scope."""
-    allowed = {ref.lower() for ref in allowed_tables}
-    for ref in tables:
-        if ref.lower() not in allowed:
-            raise GuardError(
-                f"Table '{ref}' is not available in this chat — this conversation "
-                f"is scoped to one dashboard. Available tables: {sorted(allowed_tables)}. "
-                "If the user's question needs other data, tell them to open the full "
-                "Chat with Data page instead of retrying."
             )
 
 

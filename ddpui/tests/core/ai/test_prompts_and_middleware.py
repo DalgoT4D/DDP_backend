@@ -62,20 +62,3 @@ def test_system_prompt_allows_exactly_the_markdown_subset_the_ui_renders():
     assert "no code blocks, no links, no markdown tables" in prompt
 
 
-def test_scoped_prompt_restricts_to_dashboard_tables():
-    ctx = make_ctx(
-        scope_type="dashboard",
-        allowed_tables=["prod.field_visits", "prod.surveys"],
-        scope_context='This chat is about the dashboard "Field Performance".',
-    )
-    prompt = build_system_prompt(ctx)
-    assert "scoped to one dashboard" in prompt
-    assert "prod.surveys" in prompt and "prod.field_visits" in prompt
-    assert '"Field Performance"' in prompt
-    # off-scope questions: point at the full chat page, never try other tables
-    assert "full Chat with Data" in prompt
-
-
-def test_org_prompt_has_no_scope_section():
-    prompt = build_system_prompt(make_ctx())
-    assert "scoped to one dashboard" not in prompt

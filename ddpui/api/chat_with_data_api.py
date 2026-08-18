@@ -10,9 +10,9 @@ from ninja.errors import HttpError
 from ddpui.auth import has_permission
 from ddpui.core.ai.chat import sessions as service
 from ddpui.core.ai.chat import history
-from ddpui.core.ai.chat.sessions import InvalidScope, SessionNotFound
+from ddpui.core.ai.chat.sessions import SessionNotFound
 from ddpui.models.org_user import OrgUser
-from ddpui.schemas.chat_with_data_schemas import SessionCreate, SessionOut, SessionRename
+from ddpui.schemas.chat_with_data_schemas import SessionOut, SessionRename
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.response_wrapper import api_response
 
@@ -31,24 +31,19 @@ def get_status(request):
 
 @chat_with_data_router.post("/sessions/")
 @has_permission(["can_use_chat_with_data"])
-def create_session(request, payload: SessionCreate = None):
-    """Start a new chat session. No payload (legacy clients) = org-wide chat;
-    scope_type="dashboard" + scope_id = chat restricted to that dashboard."""
+def create_session(request):
+    """Start a new chat session."""
     orguser: OrgUser = request.orguser
-    try:
-        session = service.create_session(orguser, payload)
-    except InvalidScope as err:
-        raise HttpError(400, str(err)) from err
+    session = service.create_session(orguser)
     return api_response(success=True, data=SessionOut.from_model(session))
 
 
 @chat_with_data_router.get("/sessions/")
 @has_permission(["can_use_chat_with_data"])
-def list_sessions(request, scope_type: str = None):
-    """The requesting user's sessions, most recent first. scope_type filters
-    (the main chat page passes "org" to hide dashboard-drawer sessions)."""
+def list_sessions(request):
+    """The requesting user's sessions, most recent first."""
     orguser: OrgUser = request.orguser
-    sessions = service.list_sessions(orguser, scope_type=scope_type)
+    sessions = service.list_sessions(orguser)
     return api_response(
         success=True,
         data=[SessionOut.from_model(session).model_dump() for session in sessions],

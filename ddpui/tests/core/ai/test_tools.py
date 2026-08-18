@@ -44,7 +44,7 @@ class FakeWarehouse:
         return column_name in {col["name"] for col in self.columns}
 
 
-def make_runtime(warehouse=None, dialect="postgres", allowed_tables=None):
+def make_runtime(warehouse=None, dialect="postgres"):
     ctx = RunContext(
         org_id=1,
         org_slug="ngo",
@@ -53,7 +53,6 @@ def make_runtime(warehouse=None, dialect="postgres", allowed_tables=None):
         max_result_rows=100,
         query_timeout_s=30,
         warehouse=warehouse or FakeWarehouse(),
-        allowed_tables=allowed_tables,
     )
     return SimpleNamespace(context=ctx)
 
@@ -97,49 +96,6 @@ def test_execute_sql_returns_warehouse_error_as_feedback():
     assert artifact["status"] == "error"
 
 
-def test_execute_sql_enforces_table_scope_without_touching_warehouse():
-    # dashboard-scoped session: donations is off-dashboard, must never execute
-    warehouse = FakeWarehouse()
-    content, artifact = execute_sql.func(
-        sql="SELECT SUM(amount) FROM prod.donations",
-        runtime=make_runtime(warehouse, allowed_tables=["prod.surveys"]),
-    )
-    assert content.startswith("SQL rejected:")
-    assert "scoped to one dashboard" in content
-    assert artifact["status"] == "rejected"
-    assert warehouse.executed == []
-
-
-def test_scoped_list_tables_hides_off_scope_tables():
-    # advertising tables the guard would reject wastes the model's 3 SQL attempts
-    warehouse = FakeWarehouse()
-    warehouse.catalog_rows = [
-        {"table_name": "surveys", "approx_rows": 1284},
-        {"table_name": "donations", "approx_rows": 500},
-    ]
-    result = list_tables.func(
-        schema_name="prod",
-        runtime=make_runtime(warehouse, allowed_tables=["prod.surveys"]),
-    )
-    assert "surveys" in result
-    assert "donations" not in result
-
-
-def test_scoped_get_table_details_refuses_off_scope_table():
-    # get_table_details runs a sample SELECT — scope must cover it, not just execute_sql
-    warehouse = FakeWarehouse()
-    warehouse.catalog_rows = [
-        {"table_name": "surveys", "approx_rows": 1284},
-        {"table_name": "donations", "approx_rows": 500},
-    ]
-    result = get_table_details.func(
-        schema_name="prod",
-        table_name="donations",
-        runtime=make_runtime(warehouse, allowed_tables=["prod.surveys"]),
-    )
-    assert "not found" in result
-    # the sample SELECT must never have run
-    assert not any("donations" in sql for sql in warehouse.executed)
 
 
 def test_list_schemas_returns_allowlist():
