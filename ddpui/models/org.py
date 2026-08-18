@@ -68,13 +68,13 @@ def get_default_queue_config():
         },
         "transform_task_queue": {
             "name": MANUL_DBT_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
         "edr_queue": {
             "name": EDR_WORK_QUEUE,
-            "workpool": default_workpool,
-            "is_workpool_eks": False,
+            "workpool": eks_workpool if eks_workpool else default_workpool,
+            "is_workpool_eks": True if eks_workpool else False,
         },
     }
 
@@ -105,6 +105,16 @@ class OrgDbt(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         related_name="dbtcloud_creds_block",
+    )
+    # Prefect Secret block encoding the dbt profile creds (mapped from warehouse
+    # airbyte creds). JSON-encoded value: {"creds": {...}, "extras": {...}}.
+    # Read by the runner flow at flow-run start.
+    dbt_profile_secret_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
     )
 
     # Managed Git Repository fields
@@ -157,12 +167,12 @@ class Org(models.Model):
 
         def get_queue_details(key: str) -> QueueDetailsSchema:
             if key not in stored:
-                # Use default from function
+                # Use default from function (includes is_workpool_eks derived from env vars)
                 default_data = default_config[key]
                 return QueueDetailsSchema(
                     name=default_data["name"],
                     workpool=default_data["workpool"],
-                    is_workpool_eks=False,  # Default to EC2
+                    is_workpool_eks=default_data.get("is_workpool_eks", False),
                 )
 
             queue_data = stored[key]
@@ -228,6 +238,21 @@ class Org(models.Model):
         """returns the base plan of the organization"""
         return self.org_plans.base_plan if hasattr(self, "org_plans") else None
 
+    def plan_window(self):
+        """Returns the plan's validity window as `(start_date, end_date)`, either of which may
+        be None.
+
+        This is the ONE definition of a trial's window. `Org.created_at` is NOT it: for a
+        clone-created trial the two happen to coincide, but an org put on a trial plan later (or
+        one whose window an admin adjusted via `createorgplan`) has a window that has nothing to
+        do with when the org row was made. Everything that counts trial days — the lifecycle
+        email sweep, the expired-trial deleter, and the frontend countdown/nudges — must read
+        these two dates so they cannot drift apart.
+        """
+        if not hasattr(self, "org_plans"):
+            return None, None
+        return self.org_plans.start_date, self.org_plans.end_date
+
 
 class OrgWarehouse(models.Model):
     """A data warehouse for an org. Typically we expect exactly one"""
@@ -235,7 +260,7 @@ class OrgWarehouse(models.Model):
     wtype = models.CharField(max_length=25)  # postgres, bigquery, snowflake
     name = models.CharField(max_length=256, default="", blank=True)
     credentials = models.CharField(max_length=1000)
-    org = models.ForeignKey(Org, on_delete=models.CASCADE)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, unique=True)
     airbyte_destination_id = models.TextField(  # skipcq: PTC-W0901, PTC-W0906
         max_length=36, null=True
     )
@@ -246,6 +271,13 @@ class OrgWarehouse(models.Model):
         max_length=10, null=True
     )
     bq_location = models.CharField(max_length=100, null=True)
+    dbt_profile_secret_block = models.ForeignKey(
+        "ddpui.OrgPrefectBlockv1",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="warehouse_dbt_profile_secret_block",
+    )
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

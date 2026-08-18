@@ -2,6 +2,7 @@
 
 import os
 import shutil
+from uuid import uuid4
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import sleep
@@ -11,9 +12,7 @@ import pytz
 from django.core.management import call_command
 from django.utils.text import slugify
 
-import yaml
 from celery.schedules import crontab
-from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.celery import app, Celery
 from ddpui.celeryworkers.alert_tasks import dispatch_due_alerts
 from ddpui.settings import PRODUCTION
@@ -27,16 +26,18 @@ from ddpui.core.webhooks.webhook_functions import (
 from ddpui.core.notifications.delivery import notify_org_managers
 
 from ddpui.ddpdbt import elementary_service
+from ddpui.ddpdbt.elementary_service import (
+    create_elementary_profile,
+    ensure_edr_sendreport_dataflow,
+)
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.awsses import send_text_message
-from ddpui.models.org_plans import OrgPlans, OrgPlanType
-from ddpui.ddpdbt.dbthelpers import create_or_update_org_cli_block
+from ddpui.core.trial.lifecycle_emails import run_trial_lifecycle_sweep
 from ddpui.models.org import (
     Org,
     OrgDbt,
     OrgSchemaChange,
     OrgWarehouse,
-    OrgPrefectBlockv1,
     OrgDataFlowv1,
     TransformType,
 )
@@ -75,19 +76,17 @@ from ddpui.utils.constants import (
 )
 from ddpui.core.orgdbt_manager import DbtProjectManager, DbtCommandError
 from ddpui.core.git_manager import GitManager, GitManagerError
+from ddpui.ddpdbt.dbthelpers import write_dbt_profiles_yml
 from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpairbyte import airbyte_service, airbytehelpers
 from ddpui.ddpprefect.prefect_service import (
     get_flow_run_graphs,
-    update_dbt_core_block_schema,
-    get_dbt_cli_profile_block,
     prefect_get,
     recurse_flow_run_logs,
     get_long_running_flow_runs,
     get_flow_run_poll,
 )
 from ddpui.ddpprefect import (
-    DBTCLIPROFILE,
     TASK_RUN_KIND,
     FLOW_RUN_KIND,
     FLOW_RUN_CRASHED_STATE_NAME,
@@ -153,28 +152,23 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
             logger.error("need to set up a dbt workspace first for org %s", org.name)
             raise Exception("need to set up a dbt workspace first for org %s" % org.name)
 
-        dbt_cli_profile: OrgPrefectBlockv1 = orgdbt.cli_profile_block
-        if dbt_cli_profile is None:
-            taskprogress.add(
-                {
-                    "message": "need to set up a dbt cli profile first",
-                    "status": "failed",
-                }
-            )
-            logger.error("need to set up a dbt cli profile first for org %s", org.name)
-            raise Exception("need to set up a dbt cli profile first for org %s" % org.name)
-
         dbt_project_params: DbtProjectParams = DbtProjectManager.gather_dbt_project_params(
             org, orgdbt
         )
 
-        profile = get_dbt_cli_profile_block(dbt_cli_profile.block_name)["profile"]
-        profile_dirname = Path(dbt_project_params.project_dir) / "profiles"
-        os.makedirs(profile_dirname, exist_ok=True)
-        profile_filename = profile_dirname / "profiles.yml"
-        logger.info("writing dbt profile to " + str(profile_filename))
-        with open(profile_filename, "w", encoding="utf-8") as f:
-            yaml.safe_dump(profile, f)
+        # Build profiles.yml from warehouse creds (same source-of-truth as the
+        # runner-flow dbt-profile Secret block).
+        try:
+            write_dbt_profiles_yml(org)
+        except Exception as err:
+            taskprogress.add(
+                {
+                    "message": f"failed to write dbt profiles.yml: {err}",
+                    "status": "failed",
+                }
+            )
+            logger.error("failed to write dbt profiles.yml for org %s: %s", org.name, err)
+            raise
 
         # dbt clean
         taskprogress.add({"message": "starting dbt clean", "status": "running"})
@@ -300,17 +294,87 @@ def run_dbt_commands(self, org_id: int, orgdbt_id: int, task_id: str, dbt_run_pa
 
         # done
         taskprogress.add({"message": "dbt run completed", "status": "completed"})
-    except Exception as e:
+    except Exception:
         taskprogress.add(
             {
                 "message": "Job finished with a failure",
                 "status": "failed",
             }
         )
+        # Re-raise so the celery task ends in FAILURE state. Callers using
+        # .apply().maybe_throw() (e.g. install_elementary step 1) rely on this
+        # to detect sub-task failure — without it, an EagerResult in SUCCESS
+        # state hides the error and the caller proceeds as if it worked.
+        # .delay() callers are unaffected (they poll TaskProgress in Redis).
+        raise
 
     finally:
         for task_lock in task_locks:
             task_lock.delete()
+
+
+@app.task(bind=True)
+def install_elementary(self, org_id: int, task_id: str, hashkey: str):
+    """Consolidated Elementary setup — runs the three sub-steps as one task so
+    the frontend can render a single progress list.
+
+    Sub-steps (each emits {"stepIndex", "step", "status": running|completed}):
+      0. Create dbt profile              → create_elementary_profile(org)
+      1. Install elementary package      → run_dbt_commands (clean + deps + run --select elementary)
+      2. Schedule reports                → ensure_edr_sendreport_dataflow(org, org_task, cron)
+
+    On failure: emits {"stepIndex", "step", "status": "failed", "message"} for
+    the sub-step that blew up, then re-raises so Celery marks the task failed.
+    """
+    org: Org = Org.objects.get(id=org_id)
+    taskprogress = TaskProgress(task_id, hashkey)
+
+    steps = [
+        (0, "Creating dbt profile"),
+        (1, "Installing elementary package"),
+        (2, "Scheduling reports"),
+    ]
+    current = steps[0]
+
+    def _emit(step, status, message=None):
+        payload = {"stepIndex": step[0], "step": step[1], "status": status}
+        if message:
+            payload["message"] = message
+        taskprogress.add(payload)
+
+    try:
+        current = steps[0]
+        _emit(current, "running")
+        result = create_elementary_profile(org)
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(result["error"])
+        _emit(current, "completed")
+
+        current = steps[1]
+        _emit(current, "running")
+        # run_dbt_commands is a bound celery task; .apply() executes it
+        # synchronously in-process (returns an EagerResult). Use a separate
+        # inner task_id so its verbose dbt-output progress doesn't pollute
+        # the install stream — the frontend only polls the outer install
+        # task_id + hashkey. Use .maybe_throw() instead of .get() to re-raise
+        # inner-task exceptions without tripping celery's "no sync subtasks"
+        # guard (which fires for any .get() call inside a running task).
+        inner_task_id = str(uuid4())
+        run_dbt_commands.apply(
+            args=[org.id, org.dbt.id, inner_task_id, {"options": {"select": "elementary"}}]
+        ).maybe_throw()
+        _emit(current, "completed")
+
+        current = steps[2]
+        _emit(current, "running")
+        result = ensure_edr_sendreport_dataflow(org, "0 0 * * *")
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(result["error"])
+        _emit(current, "completed")
+
+    except Exception as err:
+        _emit(current, "failed", message=str(err))
+        raise
 
 
 def detect_schema_changes_for_org(org: Org, delay=0):
@@ -481,13 +545,6 @@ def get_schema_catalog_task(task_key, workspace_id, source_id):
                 "result": str(err),
             }
         )
-
-
-@app.task(bind=False)
-def update_dbt_core_block_schema_task(block_name, default_schema):
-    """single http PUT request to the prefect-proxy"""
-    logger.info("updating default_schema of %s to %s", block_name, default_schema)
-    update_dbt_core_block_schema(block_name, default_schema)
 
 
 @app.task()
@@ -1069,34 +1126,6 @@ def handle_prefect_webhook(self, flow_run_id: str, state: str):  # skipcq: PYL-W
     do_handle_prefect_webhook(flow_run_id, state)
 
 
-@app.task()
-def check_org_plan_expiry_notify_people():
-    """sends an email to the org's account manager to notify them that their plan will expire in a week"""
-    roles_to_notify = [ACCOUNT_MANAGER_ROLE]
-    first_reminder = 7
-    second_reminder = 2
-
-    for org in Org.objects.all():
-        org_plan = OrgPlans.objects.filter(org=org).first()
-        if not org_plan or not org_plan.end_date:
-            continue
-        if org_plan.base_plan != OrgPlanType.FREE_TRIAL:
-            continue
-        # send a notification 7 days before the plan expires
-        if (org_plan.end_date - datetime.now(pytz.utc)).days in [first_reminder, second_reminder]:
-            try:
-                org_users = OrgUser.objects.filter(
-                    org=org,
-                    new_role__slug__in=roles_to_notify,
-                )
-                message = f"""Your Dalgo plan for {org.name} will expire on {org_plan.end_date.strftime("%b %d, %Y")}. Please reach out to the Dalgo team at support@dalgo.org and renew your subscription to continue using the platform's services."""
-                subject = "Dalgo plan expiry"
-                for orguser in org_users:
-                    send_text_message(orguser.user.email, subject, message)
-            except Exception as err:
-                logger.error(err)
-
-
 @app.task(bind=False)
 def check_for_long_running_flow_runs():
     """checks for long-running flow runs in prefect"""
@@ -1249,6 +1278,38 @@ def clear_stuck_locks():
     return processed_count
 
 
+@app.task(name="maintenance.purge_old_audit_logs")
+def purge_old_audit_logs() -> int:
+    """Purge audit log entries older than AUDIT_LOG_RETENTION_DAYS.
+
+    Calls the management command to do the actual work. Returns the number
+    of deleted entries.
+    """
+    call_command("purge_old_audit_logs")
+    return 0  # The command logs the count; we don't have easy access to it here
+
+
+@app.task()
+def delete_expired_trial_orgs():
+    """delete free-trial orgs whose 14-day window has ended; runs hourly on the hour (UTC)
+
+    Thin wrapper — selection and teardown live in the `cleanup_trial_clone` management command,
+    the same one run by hand with --email, so the scheduled delete and the manual cleanup cannot
+    drift apart. That command also holds the mutex that keeps two hourly ticks from overlapping.
+    """
+    return call_command("cleanup_trial_clone", expired=True)
+
+
+@app.task()
+def send_trial_lifecycle_emails():
+    """send any due free-trial lifecycle emails; runs hourly
+
+    Thin wrapper — the decision ladder and all the sending live in
+    ddpui/core/trial/lifecycle_emails.py.
+    """
+    return run_trial_lifecycle_sweep()
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender: Celery, **kwargs):
     """periodic celery tasks"""
@@ -1289,11 +1350,23 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
             name="check for long-running flow-runs",
         )
 
-    # check org plan expiry & notify users; daily at midnight
+    # free-trial lifecycle emails (day-3 nudges, completion, midpoint, pre-end).
+    # crontab, not a 3600.0 interval — an interval re-anchors to beat's start time on every
+    # restart, so :00 would silently drift to :37.
     sender.add_periodic_task(
-        crontab(minute=0, hour=0),
-        check_org_plan_expiry_notify_people.s(),
-        name="check org plan expiry and notify the right people",
+        crontab(minute=0),
+        send_trial_lifecycle_emails.s(),
+        name="trial lifecycle emails",
+    )
+
+    # delete expired free trials. Hourly, not nightly: end_date is clone-time + 14 days and the
+    # command selects `end_date <= now()`, so a trial started 16:45 dies at 17:00 on day 14 —
+    # never early. Nightly gave it another seven hours.
+    # No mutex — see the note above TRIAL_DELETE_STAGGER_SECONDS in core/trial/constants.py.
+    sender.add_periodic_task(
+        crontab(minute=0),
+        delete_expired_trial_orgs.s(),
+        name="delete expired free-trial orgs",
     )
 
     # sync airbyte job stats for connections; every 24 hours
@@ -1301,4 +1374,11 @@ def setup_periodic_tasks(sender: Celery, **kwargs):
         crontab(minute=0, hour=0),
         sync_airbyte_job_stats_for_all_connections.s(last_n_days=2),
         name="sync airbyte job stats for all connections",
+    )
+
+    # purge old audit logs; monthly on the 1st at 2am
+    sender.add_periodic_task(
+        crontab(minute=0, hour=2, day_of_month=1),
+        purge_old_audit_logs.s(),
+        name="purge old audit logs",
     )
