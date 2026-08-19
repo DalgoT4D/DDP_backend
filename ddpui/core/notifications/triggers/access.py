@@ -108,6 +108,7 @@ def notify_owner_of_new_request(req: AccessRequest, resource, rtype: str) -> Non
                 email_subject=f"Access request for {title}",
                 urgent=False,
                 recipients=list(recipients),
+                cta_label="Share",
             )
         )
     except Exception as err:  # notification failure never blocks the API call

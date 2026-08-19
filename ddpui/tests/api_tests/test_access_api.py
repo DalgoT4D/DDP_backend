@@ -1810,6 +1810,86 @@ def test_sender_not_own_share_notification_recipient(org, dashboard, owner_analy
         assert member.id in payload.recipients
 
 
+def test_row_update_view_to_edit_fires_upgrade_notification(org, dashboard, owner_analyst, member):
+    """PATCH /grants/{share_id} that raises the level → 'upgraded' notification."""
+    row = _grant(org, dashboard, member, AccessLevel.VIEW)
+    with _patch_notification() as mock_notify:
+        update_resource_grant(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            row.id,
+            UpdateGrantPayload(access_level="edit"),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        assert member.id in payload.recipients
+        assert "upgraded" in payload.message.lower()
+        assert "edit" in payload.message.lower()
+
+
+def test_row_update_edit_to_view_fires_downgrade_notification(
+    org, dashboard, owner_analyst, member
+):
+    """Row-level downgrade also notifies (deliberate divergence from bulk-add)."""
+    row = _grant(org, dashboard, member, AccessLevel.EDIT)
+    with _patch_notification() as mock_notify:
+        update_resource_grant(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            row.id,
+            UpdateGrantPayload(access_level="view"),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        assert member.id in payload.recipients
+        assert "downgraded" in payload.message.lower()
+        assert "view" in payload.message.lower()
+
+
+def test_row_update_same_level_is_silent(org, dashboard, owner_analyst, member):
+    """No-op saves (level unchanged) don't notify."""
+    row = _grant(org, dashboard, member, AccessLevel.VIEW)
+    with _patch_notification() as mock_notify:
+        update_resource_grant(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            row.id,
+            UpdateGrantPayload(access_level="view"),
+        )
+        assert not mock_notify.called
+
+
+def test_row_update_group_upgrade_fans_out_to_members(org, dashboard, owner_analyst, member):
+    """Group-share upgrade via PATCH → every current group member gets notified."""
+    from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
+    from ddpui.models.resource_share import ResourceSharePrincipalType
+
+    group = OrgUserGroup.objects.create(org=org, name="Team-Upgrade", created_by=owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=member)
+    row = ResourceShare.objects.create(
+        org=org,
+        resource_type="dashboard",
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.GROUP,
+        principal_id=group.id,
+        access_level=AccessLevel.VIEW,
+    )
+    with _patch_notification() as mock_notify:
+        update_resource_grant(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            row.id,
+            UpdateGrantPayload(access_level="edit"),
+        )
+        assert mock_notify.called
+        payload = mock_notify.call_args[0][0]
+        assert member.id in payload.recipients
+
+
 # ---------------------------------------------------------------------------
 # Story 6: Private toggle — enforcement
 # spec test-spec.md §"Story 6" + spec.md §"Private toggle" (floor bypass)

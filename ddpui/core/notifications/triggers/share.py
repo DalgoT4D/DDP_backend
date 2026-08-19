@@ -1,19 +1,24 @@
 """Direct-share notification triggers.
 
-Fires from ``api/access_api.py::add_resource_grants``. The snapshot →
-classify → notify sequence writes an in-app row (via ``create_notification``,
-so org-level Discord fires too) for every recipient whose access changed
-in their favor: new user/group grants, and view→edit upgrades. Downgrades
-and no-op re-saves are silently skipped. Group principals fan out to
-current OrgUserGroupMember orguser ids.
+Fires from ``api/access_api.py``. Two shapes:
 
-Notification failures are logged and swallowed — the API call is not blocked
-by mail or Discord hiccups.
+- ``notify_share_recipients`` — bulk add (POST /grants): new grants and
+  view→edit upgrades notify their recipients. Downgrades and no-ops are silent.
+- ``notify_row_level_change`` — single-row update (PATCH /grants/{id}): the
+  targeted principal is notified on BOTH upgrade and downgrade (no-op silent).
+  This is a deliberate flow-difference: the row dropdown is a targeted action,
+  so the recipient should learn either direction; a bulk-re-share often includes
+  incidental downgrades that don't warrant notification traffic.
+
+All routes go through ``create_notification`` so the in-app row + email + org
+Discord all fire. Group principals fan out to current OrgUserGroupMember
+orguser ids. Notification failures are logged and swallowed — the API call is
+not blocked by mail or Discord hiccups.
 """
 
 from ddpui.core.notifications.notifications_functions import create_notification
 from ddpui.core.notifications.triggers.access import resource_title, resource_url
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, OrgUserGroupMember
 from ddpui.models.resource_share import LEVEL_RANK, ResourceShare
 from ddpui.schemas.notifications_api_schemas import NotificationDataSchema
 from ddpui.utils.custom_logger import CustomLogger
@@ -141,3 +146,64 @@ def notify_share_recipients(sender: OrgUser, rtype: str, resource, classified: d
             )
         except Exception as err:
             logger.error(f"share notification (upgrade@{level}) failed: {err}")
+
+
+def notify_row_level_change(
+    sender: OrgUser,
+    rtype: str,
+    resource,
+    row: ResourceShare,
+    before_level: str,
+) -> None:
+    """Notify the principal on a targeted single-row level change (PATCH /grants).
+
+    Fires on both upgrade (view → edit) and downgrade (edit → view). Cascade
+    rows and invitation-only rows are silent (backend rejects cascade edits;
+    invitation-only rows have no orguser to notify yet). Same-level saves and
+    the sender-is-recipient case are silent."""
+    if row.parent_id is not None or row.invitation_id is not None:
+        return
+    if row.principal_type is None or row.principal_id is None:
+        return
+
+    new_rank = LEVEL_RANK.get(row.access_level)
+    old_rank = LEVEL_RANK.get(before_level)
+    if new_rank is None or old_rank is None or new_rank == old_rank:
+        return
+
+    if row.principal_type == "user":
+        recipient_ids = {row.principal_id}
+    elif row.principal_type == "group":
+        recipient_ids = set(
+            OrgUserGroupMember.objects.filter(
+                group_id=row.principal_id, orguser__isnull=False
+            ).values_list("orguser_id", flat=True)
+        )
+    else:
+        return
+
+    recipient_ids.discard(sender.id)
+    if not recipient_ids:
+        return
+
+    title = resource_title(resource)
+    url = resource_url(rtype, resource.pk)
+    sender_email = sender.user.email
+    is_upgrade = new_rank > old_rank
+    verb = "upgraded" if is_upgrade else "downgraded"
+    message = (
+        f"{sender_email} {verb} your access on {rtype} '{title}' " f"to {row.access_level}.\n{url}"
+    )
+    subject = f"Access {verb}: {title}"
+    try:
+        create_notification(
+            NotificationDataSchema(
+                author=sender_email,
+                message=message,
+                email_subject=subject,
+                urgent=False,
+                recipients=list(recipient_ids),
+            )
+        )
+    except Exception as err:
+        logger.error(f"row-level share notification failed: {err}")

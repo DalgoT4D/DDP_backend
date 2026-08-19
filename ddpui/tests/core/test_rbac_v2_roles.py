@@ -91,5 +91,8 @@ def test_member_is_view_only_content(seed_db):
     allowed_non_view = {"can_request_llm_analysis_feature", "public"}
     non_view = {s for s in member if not s.startswith("can_view_")}
     assert non_view <= allowed_non_view
-    # no infra visibility
-    assert not (INFRA_VIEW & member)
+    # Members can view warehouses + warehouse data (needed for the chart-builder
+    # dataset selector to work when a Member has resource-EDIT on a chart). Dbt
+    # workspace + sources remain hidden.
+    member_infra_block = INFRA_VIEW - {"can_view_warehouses"}
+    assert not (member_infra_block & member)

@@ -24,6 +24,7 @@ from ddpui.core.notifications.triggers.access import (
 )
 from ddpui.core.notifications.triggers.share import (
     classify_share_recipients,
+    notify_row_level_change,
     notify_share_recipients,
     snapshot_direct_levels,
 )
@@ -35,6 +36,7 @@ from ddpui.models.resource_share import (
     AccessRequest,
     AccessRequestStatus,
     LEVEL_RANK,
+    ResourceShare,
 )
 from ddpui.schemas.access.resource_share_schema import (
     AccessRequestSchema,
@@ -171,13 +173,32 @@ def add_resource_grants(request, rtype: str, resource_id: str, payload: AddGrant
 def update_resource_grant(
     request, rtype: str, resource_id: str, share_id: int, payload: UpdateGrantPayload
 ):
-    """Change the access level on one existing row."""
+    """Change the access level on one existing row.
+
+    The targeted principal is notified on BOTH upgrade (view → edit) and
+    downgrade (edit → view). This is deliberately more informative than the
+    bulk-add flow — the row dropdown is a targeted action, so either direction
+    warrants a notification. Same-level saves are silent.
+    """
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
     _require_edit_or_admin(orguser, rtype, resource, "modify sharing")
+
+    # Snapshot the pre-mutation level so notify_row_level_change can decide
+    # upgrade vs downgrade vs no-op.
+    existing = ResourceShare.objects.filter(id=share_id, org=orguser.org).first()
+    before_level = existing.access_level if existing else None
+
     try:
-        resource_share.update_grant(orguser, share_id, payload.access_level)
+        updated = resource_share.update_grant(orguser, share_id, payload.access_level)
     except resource_share.GrantError as err:
         raise HttpError(400, str(err)) from err
+
+    if before_level is not None:
+        try:
+            notify_row_level_change(orguser, rtype, resource, updated, before_level)
+        except Exception as err:  # notification failure never blocks the API call
+            logger.error(f"row-level share notification failed: {err}")
+
     return resource_share.list_grants(orguser.org, rtype, resource_id)
 
 

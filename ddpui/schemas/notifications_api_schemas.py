@@ -56,3 +56,6 @@ class NotificationDataSchema(Schema):
     recipients: List[int]  # list of orguser ids
     # In-app row only; callers that send a specialized email themselves set this to avoid duplicate delivery.
     skip_email: Optional[bool] = False
+    # Overrides the default "View" label on the CTA button when the message
+    # ends on a URL. e.g. "Share", "Accept Invitation".
+    cta_label: Optional[str] = None
