@@ -1,7 +1,7 @@
 """
 Tests for the Admin Portal API and its platform-admin gate.
 
-Milestone 1 acceptance (features/admin-portal/v1/plan.md §6, §7):
+Milestone 1 acceptance (features/admin-portal/plan.md §6, §7):
   - non-platform-admin -> 403 on a guarded admin route
   - platform admin      -> 200 on the same route
   - /currentuserv2 surfaces is_platform_admin

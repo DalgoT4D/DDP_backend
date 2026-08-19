@@ -191,7 +191,7 @@ def delete_orguser_from_org(
     requestor_orguser.org, so the admin portal can remove a user from an org the
     requestor does not belong to. When is_platform_admin is True the role-level cap is
     skipped — a platform admin acting cross-org has no role in target_org to compare
-    against. See features/admin-portal/v1/plan.md §4.4.
+    against. See features/admin-portal/plan.md §4.4.
 
     NOTE: deleting the OrgUser ORPHANS the content it created rather than deleting it —
     Dashboard / Chart / ReportSnapshot.created_by are SET_NULL, so the content is kept
