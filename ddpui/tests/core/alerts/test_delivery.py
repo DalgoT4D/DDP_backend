@@ -10,13 +10,14 @@ django.setup()
 import pytest
 
 from ddpui.core.alerts import delivery
+from ddpui.core.notifications.triggers import alert as alert_trigger
 
 
-# ── deliver_email ──────────────────────────────────────────────────────────
+# ── _deliver_email (moved to triggers/alert.py) ────────────────────────────
 
 
 def test_deliver_email_success_calls_send_html_message(monkeypatch):
-    """deliver_email must go through the HTML sender so alerts get the shared
+    """_deliver_email must go through the HTML sender so alerts get the shared
     Dalgo shell (v1.1). Plain-text and HTML bodies are passed through separately.
     """
     called: dict = {}
@@ -28,9 +29,9 @@ def test_deliver_email_success_calls_send_html_message(monkeypatch):
         called["html"] = html_
         return {"MessageId": "abc"}
 
-    monkeypatch.setattr(delivery.awsses, "send_html_message", fake_send)
+    monkeypatch.setattr(alert_trigger.awsses, "send_html_message", fake_send)
 
-    out = delivery.deliver_email(
+    out = alert_trigger._deliver_email(
         to_email="priya@example.com",
         subject="Alert",
         plain_body="hello",
@@ -50,9 +51,9 @@ def test_deliver_email_failure_returns_failed_dict(monkeypatch):
     def fake_send(to, subject, plain, html_):  # noqa: ANN001
         raise RuntimeError("SES denied")
 
-    monkeypatch.setattr(delivery.awsses, "send_html_message", fake_send)
+    monkeypatch.setattr(alert_trigger.awsses, "send_html_message", fake_send)
 
-    out = delivery.deliver_email(
+    out = alert_trigger._deliver_email(
         to_email="x@y.com", subject="s", plain_body="b", html_body="<p>b</p>"
     )
     assert out["status"] == "failed"
@@ -133,7 +134,8 @@ def test_deliver_all_wraps_email_body_and_keeps_slack_raw(monkeypatch):
         ses_call["html"] = html_
         return {"MessageId": "ok"}
 
-    monkeypatch.setattr(delivery.awsses, "send_html_message", fake_send_html)
+    # The email fan-out now lives in the notifications trigger. Patch there.
+    monkeypatch.setattr(alert_trigger.awsses, "send_html_message", fake_send_html)
 
     slack_call: dict = {}
 

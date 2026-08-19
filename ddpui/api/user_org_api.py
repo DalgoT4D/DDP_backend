@@ -491,10 +491,14 @@ def _resolve_pending_emails(
     orguser: OrgUser,
     emails: List[str],
     invite_role_uuid: Optional[str],
+    group_name: Optional[str] = None,
 ) -> dict[str, int]:
     """For each email in `emails`, ensure an Invitation exists on the org.
     Returns {email → invitation_id}. Emails that already belong to an active
     orguser are ignored and will be resolved via `orguser_ids` later.
+
+    ``group_name`` is threaded through to ``invite_user_v1`` so the resulting
+    invite / added-to-org email names the group in its copy.
     """
     if not emails:
         return {}
@@ -528,7 +532,7 @@ def _resolve_pending_emails(
                 invited_email=email,
                 invited_role_uuid=invite_role_uuid,
             )
-            _, error = orguserfunctions.invite_user_v1(orguser, payload)
+            _, error = orguserfunctions.invite_user_v1(orguser, payload, group_name=group_name)
             if error:
                 raise HttpError(400, f"failed to invite {email}: {error}")
             invitation = Invitation.objects.filter(invited_by__org=org, invited_email=email).first()
@@ -606,7 +610,7 @@ def create_user_group(request, payload: CreateGroupPayload):
         raise HttpError(400, "a group with this name already exists")
 
     email_to_invitation_id = _resolve_pending_emails(
-        orguser.org, orguser, payload.pending_emails, payload.invite_role_uuid
+        orguser.org, orguser, payload.pending_emails, payload.invite_role_uuid, group_name=name
     )
 
     group = OrgUserGroup.objects.create(org=orguser.org, name=name, created_by=orguser)
@@ -698,7 +702,11 @@ def add_user_group_members(request, group_id: int, payload: AddMembersPayload):
         raise HttpError(404, "group not found")
 
     email_to_invitation_id = _resolve_pending_emails(
-        orguser.org, orguser, payload.pending_emails, payload.invite_role_uuid
+        orguser.org,
+        orguser,
+        payload.pending_emails,
+        payload.invite_role_uuid,
+        group_name=group.name,
     )
     _add_members_to_group(group, payload.orguser_ids, email_to_invitation_id)
     return _serialize_group_detail(group)

@@ -16,7 +16,7 @@ from ddpui.utils import timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.discord import send_discord_notification
 from ddpui.utils.awsses import send_html_message
-from ddpui.utils.email_templates import render_notification_email
+from ddpui.core.notifications.templates import render_notification_email
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.celeryworkers.moretasks import schedule_notification_task
 
@@ -74,7 +74,10 @@ def get_recipients(
 
 # manage recipients for a notification
 def handle_recipient(
-    recipient_id: int, scheduled_time: Optional[datetime], notification: Notification
+    recipient_id: int,
+    scheduled_time: Optional[datetime],
+    notification: Notification,
+    skip_email: bool = False,
 ) -> Optional[Dict[str, str]]:
     """
     Add recipients to the recipients table and
@@ -95,7 +98,7 @@ def handle_recipient(
         notification.sent_time = timezone.as_utc(datetime.now())
         notification.save()
 
-        if user_preference.enable_email_notifications:
+        if not skip_email and user_preference.enable_email_notifications:
             try:
                 plain_body, html_body = render_notification_email(
                     notification.email_subject, notification.message
@@ -130,6 +133,7 @@ def create_notification(
     urgent = notification_data.urgent
     scheduled_time = notification_data.scheduled_time
     recipients = notification_data.recipients
+    skip_email = bool(notification_data.skip_email)
 
     errors = []
     notification = Notification.objects.create(
@@ -148,7 +152,9 @@ def create_notification(
         recipient_orguser = OrgUser.objects.get(id=recipient_id)
         if recipient_orguser.org:
             org_ids.add(recipient_orguser.org.id)
-            error = handle_recipient(recipient_id, scheduled_time, notification)
+            error = handle_recipient(
+                recipient_id, scheduled_time, notification, skip_email=skip_email
+            )
             if error:
                 errors.append(error)
 

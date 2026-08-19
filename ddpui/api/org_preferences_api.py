@@ -24,9 +24,10 @@ from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpprefect import (
     prefect_service,
 )
-from ddpui.utils.awsses import biz_dev_recipients, send_text_message
+from ddpui.core.notifications.templates import build_subscription_request_email
+from ddpui.core.notifications.triggers.biz_dev import biz_dev_recipients
+from ddpui.utils.awsses import send_text_message
 from ddpui.utils.custom_logger import CustomLogger
-from ddpui.utils.email_templates import build_subscription_request_email
 from ddpui.utils.redis_client import RedisClient
 
 orgpreference_router = Router()

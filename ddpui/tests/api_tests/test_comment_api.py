@@ -309,7 +309,7 @@ class TestMarkAsRead:
 class TestListComments:
     """Tests for list_comments endpoint"""
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_list_summary(self, mock_send, orguser, snapshot, org):
         Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
@@ -324,7 +324,7 @@ class TestListComments:
         assert len(response["data"]) == 1
         assert response["data"][0].content == "Summary note"
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_list_chart(self, mock_send, orguser, snapshot, org):
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
@@ -419,7 +419,7 @@ class TestCreateComment:
             create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert exc.value.status_code == 400
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_with_mentions(self, mock_send, orguser, other_orguser, snapshot):
         request = mock_request(orguser)
         payload = CommentCreate(

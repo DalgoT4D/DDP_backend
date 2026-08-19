@@ -116,6 +116,18 @@ def test_update_user_preferences_success(orguser, user_preferences):
     assert updated_preferences.enable_email_notifications is False
 
 
+def test_update_user_preferences_toggles_schema_change_flag(orguser, user_preferences):
+    """PUT accepts enable_schema_change_notifications and persists it (default True)."""
+    assert user_preferences.enable_schema_change_notifications is True
+    request = mock_request(orguser)
+    response = update_user_preferences(
+        request, UpdateUserPreferencesSchema(enable_schema_change_notifications=False)
+    )
+    assert response["success"] is True
+    updated = UserPreferences.objects.get(orguser=orguser)
+    assert updated.enable_schema_change_notifications is False
+
+
 def test_update_user_preferences_create_success_if_not_exist(orguser):
     """
     tests the success of updating user preferences
@@ -139,6 +151,7 @@ def test_get_user_preferences_success(orguser, user_preferences):
     assert response["success"] is True
     assert response["res"] == {
         "enable_email_notifications": user_preferences.enable_email_notifications,
+        "enable_schema_change_notifications": user_preferences.enable_schema_change_notifications,
         "disclaimer_shown": user_preferences.disclaimer_shown,
         "last_visited_transform_tab": user_preferences.last_visited_transform_tab,
         "is_llm_active": False,
@@ -156,7 +169,8 @@ def test_get_user_preferences_success_if_not_exist(orguser):
     response = get_user_preferences(request)
     assert response["success"] is True
     assert response["res"] == {
-        "enable_email_notifications": False,
+        "enable_email_notifications": True,
+        "enable_schema_change_notifications": True,
         "disclaimer_shown": False,
         "last_visited_transform_tab": None,
         "is_llm_active": False,

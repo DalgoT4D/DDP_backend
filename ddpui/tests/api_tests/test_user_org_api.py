@@ -338,7 +338,7 @@ def test_post_organization_user_invalid_email(orguser):
     assert str(excinfo.value) == "that is not a valid email address"
 
 
-@patch.multiple("ddpui.utils.awsses", send_signup_email=Mock(return_value=1))
+@patch.multiple("ddpui.core.notifications.triggers.user", send_signup=Mock(return_value=1))
 def test_post_organization_user_success(orguser):
     """a success test"""
     request = mock_request(orguser)
@@ -363,7 +363,7 @@ def test_post_organization_user_success(orguser):
         the_authuser.delete()
 
 
-@patch.multiple("ddpui.utils.awsses", send_signup_email=Mock(return_value=1))
+@patch.multiple("ddpui.core.notifications.triggers.user", send_signup=Mock(return_value=1))
 def test_post_organization_user_success_lowercase_email(orguser):
     """a success test"""
     request = mock_request(orguser)
@@ -834,7 +834,7 @@ def test_get_organizations_warehouses(orguser):
 # ================================================================================
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_post_organization_user_invite_v1_no_org(orguser):
     """failing test, no org"""
     orguser.org = None
@@ -848,7 +848,7 @@ def test_post_organization_user_invite_v1_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_post_organization_user_invite_v1_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -858,7 +858,7 @@ def test_post_organization_user_invite_v1_nosuchrole(orguser):
     assert str(excinfo.value) == "Invalid role"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_post_organization_user_invite_v1_insufficientrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -871,7 +871,7 @@ def test_post_organization_user_invite_v1_insufficientrole(orguser):
     assert str(excinfo.value) == "Insufficient permissions for this operation"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_organization_user_invite_v1(mock_awsses, orguser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
@@ -899,7 +899,7 @@ def test_post_organization_user_invite_v1(mock_awsses, orguser):
     mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, orguser):
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
@@ -939,7 +939,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
     mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
@@ -969,7 +969,7 @@ def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: 
     mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_youve_been_added_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_added_to_org", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_user_exists(mock_awsses, orguser: OrgUser):
     """success test, inviting an existing user"""
     user = User.objects.create(email="existinguser", username="existinguser")
@@ -1241,7 +1241,7 @@ def test_post_resend_invitation_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_resend_invitation(mock_awsses: Mock, orguser):
     """success test"""
     original_invited_on = timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0))

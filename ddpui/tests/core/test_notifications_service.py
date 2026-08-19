@@ -212,6 +212,58 @@ def test_handle_recipient_email_uses_html_template(orguser):
         notification.delete()
 
 
+def test_handle_recipient_skip_email_writes_in_app_row_only(orguser):
+    """skip_email=True → NotificationRecipient row created, send_html_message NOT called.
+    Used by callers that send a specialized email themselves (alerts / mentions / PDF share).
+    """
+    from unittest.mock import patch
+
+    UserPreferences.objects.filter(orguser=orguser).update(enable_email_notifications=True)
+
+    notification = Notification.objects.create(
+        author="sharer@example.com",
+        message="Alert X fired",
+        email_subject="Alert X",
+        urgent=False,
+    )
+    try:
+        with patch(
+            "ddpui.core.notifications.notifications_functions.send_html_message"
+        ) as mock_send:
+            error = handle_recipient(orguser.id, None, notification, skip_email=True)
+            assert error is None
+            assert mock_send.call_count == 0
+        # In-app row still present.
+        assert NotificationRecipient.objects.filter(
+            notification=notification, recipient=orguser
+        ).exists()
+    finally:
+        notification.delete()
+
+
+def test_create_notification_skip_email_flag_flows_through(orguser):
+    """Passing skip_email=True on NotificationDataSchema suppresses the email side."""
+    from unittest.mock import patch
+
+    UserPreferences.objects.filter(orguser=orguser).update(enable_email_notifications=True)
+
+    with patch("ddpui.core.notifications.notifications_functions.send_html_message") as mock_send:
+        error, result = create_notification(
+            NotificationDataSchema(
+                author="sender@example.com",
+                message="hello",
+                email_subject="hi",
+                urgent=False,
+                scheduled_time=None,
+                recipients=[orguser.id],
+                skip_email=True,
+            )
+        )
+        assert error is None
+        assert result is not None
+        assert mock_send.call_count == 0
+
+
 def test_handle_recipient_with_scheduled_time(orguser, scheduled_notification):
     scheduled_time = timezone.now() + timezone.timedelta(days=1)
     error = handle_recipient(orguser.id, scheduled_time, scheduled_notification)

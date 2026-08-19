@@ -497,7 +497,7 @@ class TestNonGuestCommentAccess:
 # - View-holder cannot toggle → test_access_api.py::test_non_edit_holder_cannot_change_mode
 # - Public link + org allow_public_sharing → test_access_api.py general-access section
 # - Orphaned resource share management → test_access_api.py::test_admin_can_transfer_ownership_even_when_not_owner
-#   and covered by test_access_api.py orphan tests (test_L20, test_N01-N06)
+#   and covered by test_access_api.py orphan tests
 
 
 # ================================================================================

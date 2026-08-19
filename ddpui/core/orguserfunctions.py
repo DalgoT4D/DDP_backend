@@ -31,6 +31,7 @@ from ddpui.models.org_user import (
 from ddpui.models.userpreferences import UserPreferences
 from ddpui.models.orgtnc import OrgTnC
 from ddpui.models.role_based_access import Role
+from ddpui.core.notifications.triggers import user as user_notifications
 from ddpui.utils import helpers, awsses, timezone
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.orguserhelpers import from_invitation, from_orguser
@@ -140,7 +141,7 @@ def signup_orguser(payload: OrgUserCreate):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
-        awsses.send_signup_email(payload.email, reset_url)
+        user_notifications.send_signup(payload.email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -204,8 +205,12 @@ def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload)
     return None, None
 
 
-def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
-    """invite a user to an org"""
+def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: str = None):
+    """Invite a user to an org.
+
+    ``group_name`` — set when the invite originates from a group create / edit
+    flow, so the email copy names the group instead of the plain "invited to
+    Dalgo" / "added to org" wording."""
     frontend_url = os.getenv("FRONTEND_URL")
 
     if orguser.org is None:
@@ -228,7 +233,9 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
     if existing_user:
         logger.info("user exists, creating new OrgUser")
         OrgUser.objects.create(user=existing_user, org=orguser.org, new_role=invited_role)
-        awsses.send_youve_been_added_email(invited_email, orguser.user.email, orguser.org.name)
+        user_notifications.send_added_to_org(
+            invited_email, orguser.user.email, orguser.org.name, group_name=group_name
+        )
         return (
             NewInvitationSchema(
                 invited_email=invited_email,
@@ -244,8 +251,11 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
         invitation.invited_on = timezone.as_utc(datetime.utcnow())
         # if the invitation is already present - trigger the email again
         invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-        awsses.send_invite_user_email(
-            invitation.invited_email, invitation.invited_by.user.email, invite_url
+        user_notifications.send_invite_user(
+            invitation.invited_email,
+            invitation.invited_by.user.email,
+            invite_url,
+            group_name=group_name,
         )
         logger.info(
             f"Resent invitation to {invited_email} to join {orguser.org.name} "
@@ -267,8 +277,11 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema):
 
     # trigger an email to the user
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-    awsses.send_invite_user_email(
-        invitation.invited_email, invitation.invited_by.user.email, invite_url
+    user_notifications.send_invite_user(
+        invitation.invited_email,
+        invitation.invited_by.user.email,
+        invite_url,
+        group_name=group_name,
     )
 
     logger.info(
@@ -416,7 +429,7 @@ def resend_invitation(invitation_id: str):
     # trigger an email to the user
     frontend_url = os.getenv("FRONTEND_URL")
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
-    awsses.send_invite_user_email(
+    user_notifications.send_invite_user(
         invitation.invited_email, invitation.invited_by.user.email, invite_url
     )
 
@@ -447,7 +460,7 @@ def request_reset_password(email: str, is_v2: bool = False):
     reset_url = f"{FRONTEND_URL}/resetpassword?token={token.hex}"
 
     try:
-        awsses.send_password_reset_email(email, reset_url)
+        user_notifications.send_password_reset(email, reset_url)
     except Exception:
         return None, "failed to send email"
 
@@ -500,7 +513,7 @@ def resend_verification_email(orguser: OrgUser, email: str):
     FRONTEND_URL = os.getenv("FRONTEND_URL")
     reset_url = f"{FRONTEND_URL}/verifyemail/?token={token.hex}"
     try:
-        awsses.send_signup_email(email, reset_url)
+        user_notifications.send_signup(email, reset_url)
     except Exception:
         return None, "failed to send email"
 
