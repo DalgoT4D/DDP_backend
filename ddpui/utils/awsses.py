@@ -5,12 +5,7 @@ import email.mime.multipart
 import email.mime.text
 import email.mime.application
 
-from django.conf import settings
-
 from ddpui.utils.aws_client import AWSClient
-from ddpui.utils.custom_logger import CustomLogger
-
-logger = CustomLogger("ddpui")
 
 
 def _get_ses_client():
@@ -18,24 +13,8 @@ def _get_ses_client():
     return AWSClient.get_instance("ses")
 
 
-def _ses_available() -> bool:
-    """True when SES credentials are configured."""
-    return bool(os.getenv("SES_ACCESS_KEY_ID") and os.getenv("SES_SECRET_ACCESS_KEY"))
-
-
 def send_text_message(to_email, subject, message):
-    """Send a plain-text email using SES. In local dev (DEBUG=True) with no SES
-    credentials configured, logs the email instead of sending it, so email-dependent
-    flows (invite/signup/password-reset) work without a real SES setup."""
-    if settings.DEBUG and not _ses_available():
-        logger.info(
-            "[DEV] SES not configured — not sending email. to=%s subject=%s\n%s",
-            to_email,
-            subject,
-            message,
-        )
-        return None
-
+    """Send a plain-text email using SES."""
     ses = _get_ses_client()
     response = ses.send_email(
         Destination={"ToAddresses": [to_email]},

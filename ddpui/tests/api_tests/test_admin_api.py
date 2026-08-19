@@ -20,7 +20,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ddpui.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from django.conf import settings
 from django.contrib.auth.models import User
 
 from ddpui.api.admin_api import (
@@ -598,10 +597,10 @@ def test_admin_org_users_lists_members_and_pending(platform_admin_request, aksha
 # create org, invite, accept, change role, cancel invite, remove-with-orphaning — as ONE
 # narrative against real rows, so it proves
 # the milestones COMPOSE, not just that each works in isolation. External deps only are
-# mocked: Airbyte (org create), Redis (unavailable in tests), and SES creds forced
-# absent so the invite exercises the real Part-1 dev fallback rather than a mocked email.
+# mocked: Airbyte (org create), Redis (unavailable in tests), and SES (email sending).
 
 
+@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
 @patch("ddpui.core.orgfunctions.add_custom_connectors_to_workspace")
 @patch("ddpui.core.orgfunctions.airbytehelpers.setup_airbyte_workspace_v1")
 def test_week1_full_admin_lifecycle_flow(
@@ -611,7 +610,7 @@ def test_week1_full_admin_lifecycle_flow(
     The whole Week-1 super-admin story end to end, on real DB state:
 
       1. admin creates an org via the portal (ZERO members)
-      2. admin invites a user by email + role — succeeds with NO real SES (Part 1)
+      2. admin invites a user by email + role (email sending mocked)
       3. the user accepts — becomes an OrgUser of the target org at the right role
       4. admin changes the user's role
       5. admin invites a 2nd user then cancels it; a DIFFERENT org's invite can't be
@@ -628,20 +627,15 @@ def test_week1_full_admin_lifecycle_flow(
     org1 = Org.objects.get(id=created.id)
     assert OrgUser.objects.filter(org=org1).count() == 0
 
-    # -- Step 2: invite a user — succeeds WITHOUT real SES (proves Part 1) ----------
-    # DEBUG=True + no SES creds routes send_invite_user_email through the dev fallback,
-    # so the invite completes and the Invitation row is created without any email mock.
-    with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
-        "ddpui.utils.awsses._ses_available", return_value=False
-    ):
-        post_admin_org_user_invite(
-            admin_request,
-            org1.id,
-            NewInvitationSchema(
-                invited_email="priya@akshara.org",
-                invited_role_uuid=_role(ANALYST_ROLE).uuid,
-            ),
-        )
+    # -- Step 2: invite a user (email sending mocked at the decorator level) --------
+    post_admin_org_user_invite(
+        admin_request,
+        org1.id,
+        NewInvitationSchema(
+            invited_email="priya@akshara.org",
+            invited_role_uuid=_role(ANALYST_ROLE).uuid,
+        ),
+    )
     invite = Invitation.objects.get(invited_email="priya@akshara.org")
     assert invite.invited_in_org_id == org1.id  # the TARGET org, not the admin's org
     assert invite.invited_by.org_id != org1.id  # admin is not a member of Akshara
@@ -672,32 +666,26 @@ def test_week1_full_admin_lifecycle_flow(
     priya_ou2 = OrgUser.objects.create(user=priya_user, org=org2, new_role=_role(GUEST_ROLE))
 
     # -- Step 5: invite a second user, then cancel; cross-org cancel is 404 --------
-    with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
-        "ddpui.utils.awsses._ses_available", return_value=False
-    ):
-        post_admin_org_user_invite(
-            admin_request,
-            org1.id,
-            NewInvitationSchema(
-                invited_email="raj@akshara.org", invited_role_uuid=_role(GUEST_ROLE).uuid
-            ),
-        )
+    post_admin_org_user_invite(
+        admin_request,
+        org1.id,
+        NewInvitationSchema(
+            invited_email="raj@akshara.org", invited_role_uuid=_role(GUEST_ROLE).uuid
+        ),
+    )
     raj_invite = Invitation.objects.get(invited_email="raj@akshara.org")
     delete_admin_org_invitation(admin_request, org1.id, raj_invite.id)
     assert not Invitation.objects.filter(id=raj_invite.id).exists()  # cancelled
 
     # a pending invite that belongs to org2 must NOT be cancellable via org1's path
-    with patch("ddpui.utils.awsses.settings.DEBUG", True), patch(
-        "ddpui.utils.awsses._ses_available", return_value=False
-    ):
-        post_admin_org_user_invite(
-            admin_request,
-            org2.id,
-            NewInvitationSchema(
-                invited_email="pending@bhumi.org",
-                invited_role_uuid=_role(GUEST_ROLE).uuid,
-            ),
-        )
+    post_admin_org_user_invite(
+        admin_request,
+        org2.id,
+        NewInvitationSchema(
+            invited_email="pending@bhumi.org",
+            invited_role_uuid=_role(GUEST_ROLE).uuid,
+        ),
+    )
     bhumi_invite = Invitation.objects.get(invited_email="pending@bhumi.org")
     with pytest.raises(HttpError) as excinfo:
         delete_admin_org_invitation(admin_request, org1.id, bhumi_invite.id)

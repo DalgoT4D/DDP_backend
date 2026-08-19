@@ -17,7 +17,7 @@ def backfill_invited_in_org(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ddpui", "0170_orguser_is_active"),
+        ("ddpui", "0168_alter_alert_created_by_alter_chart_created_by_and_more"),
     ]
 
     operations = [
