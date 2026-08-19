@@ -371,7 +371,7 @@ class MapDataOverlayPayload(Schema):
     schema_name: str
     table_name: str
     geographic_column: str
-    value_column: str
+    value_column: Optional[str] = None  # Legacy simple-metric field; absent for calculated metrics
     metrics: List[ChartMetric]
     filters: Dict[str, Any] = Field(default_factory=dict)  # Drill-down filters (key-value pairs)
     dashboard_filters: Optional[dict[str, Any]] = Field(
@@ -402,20 +402,23 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         schema_name = payload.schema_name
         table_name = payload.table_name
         geographic_column = payload.geographic_column
-        value_column = payload.value_column
         # Use first metric for map overlay
         filters = payload.filters
 
         # Validate required fields
-        if not all([schema_name, table_name, geographic_column, value_column]):
+        if not all([schema_name, table_name, geographic_column]):
             raise HttpError(
                 400,
-                "Missing required fields: schema_name, table_name, geographic_column, value_column",
+                "Missing required fields: schema_name, table_name, geographic_column",
             )
 
         # Validate metrics exist and are non-empty
         if not payload.metrics:
             raise HttpError(400, "Missing metrics - at least one metric is required")
+
+        # value_column is a legacy simple-metric field, not populated for calculated metrics
+        if not payload.value_column and not payload.metrics[0].column_expression:
+            raise HttpError(400, "Missing required field: value_column")
 
         # Build payload for standard chart query (same as other charts)
         # Make a deep copy to avoid mutating the original payload
@@ -482,7 +485,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             # Get the dimension value (geographic region name)
             region_name = row.get(geographic_column)
             # Get the aggregated value using the metric alias
-            metric_alias = metrics[0].alias or f"{metrics[0].aggregation}_{metrics[0].column}"
+            metric_alias = charts_service.metric_sql_alias(metrics[0])
             value = row.get(metric_alias)
 
             if region_name and value is not None:
