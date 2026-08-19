@@ -6,6 +6,13 @@ from django.db import migrations, models
 import django.db.models.deletion
 
 
+# Invitation is a pre-existing, live table (since migration 0001) — real pending
+# invites already exist independent of this branch, and without this backfill
+# they'd all get invited_in_org=NULL. accept_invitation_v1 has a fallback for that
+# (invited_in_org or invited_by.org), but this sets the real value permanently
+# instead of relying on the fallback indefinitely. invited_by.org is provably
+# correct for every existing row: the cross-org case this field exists for is only
+# reachable through the new admin-portal invite path this branch introduces.
 def backfill_invited_in_org(apps, schema_editor):
     """copy invited_by.org onto invited_in_org for existing invitations"""
     Invitation = apps.get_model("ddpui", "Invitation")
