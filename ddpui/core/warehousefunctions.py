@@ -1,6 +1,7 @@
 import json
 from ninja.errors import HttpError
 from sqlalchemy import column
+from sqlalchemy.exc import NoSuchTableError
 
 from ddpui.core import dbtautomation_service
 from ddpui.core.charts.charts_service import execute_query
@@ -43,9 +44,11 @@ def get_warehouse_data(request, data_type: str, **kwargs):
                 order_by=kwargs["order_by"],
                 order=kwargs["order"],
             )
+    except NoSuchTableError as error:
+        raise HttpError(404, "Table not found") from error
     except Exception as error:
         logger.exception(f"Exception occurred in get_{data_type}: {error}")
-        raise HttpError(500, f"Failed to get {data_type}")
+        raise HttpError(500, f"Failed to get {data_type}") from error
 
     return convert_to_standard_types(data)
 

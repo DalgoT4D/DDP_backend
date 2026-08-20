@@ -25,6 +25,7 @@ from ddpui.api.warehouse_api import (
     post_warehouse_prompt,
     post_save_warehouse_prompt_session,
 )
+from ddpui.core.warehousefunctions import get_warehouse_data
 from ddpui.schemas.warehouse_api_schemas import (
     RequestorColumnSchema,
     AskWarehouseRequest,
@@ -92,6 +93,42 @@ def test_get_table_columns_success(orguser):
 
     assert response is not None
     assert response == ["column1", "column2"]
+
+
+def test_get_table_columns_table_not_found(orguser):
+    """get_table_columns returns 404 when the table does not exist"""
+    request = mock_request(orguser)
+    with patch(
+        "ddpui.api.warehouse_api.get_warehouse_data",
+        side_effect=HttpError(404, "Table not found"),
+    ):
+        with pytest.raises(HttpError) as exc:
+            get_table_columns(request, "test_schema", "nonexistent_table")
+        assert exc.value.status_code == 404
+        assert str(exc.value) == "Table not found"
+
+
+def test_get_warehouse_data_table_columns_no_such_table(orguser):
+    """get_warehouse_data raises 404 when the warehouse client raises NoSuchTableError"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+    request = mock_request(orguser)
+
+    mock_client = Mock()
+    mock_client.get_table_columns.side_effect = sqlalchemy.exc.NoSuchTableError("nonexistent_table")
+
+    with patch(
+        "ddpui.core.warehousefunctions.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        with pytest.raises(HttpError) as exc:
+            get_warehouse_data(
+                request,
+                "table_columns",
+                schema_name="test_schema",
+                table_name="nonexistent_table",
+            )
+        assert exc.value.status_code == 404
+        assert str(exc.value) == "Table not found"
 
 
 @patch.multiple(
