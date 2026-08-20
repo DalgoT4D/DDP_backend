@@ -50,9 +50,6 @@ class PublicDashboardResponse(DashboardResponse):
     """Extended dashboard response for public access with additional public fields"""
 
     org_name: str
-    # Stable org identifier (never renamed, unlike org_name). Public views are
-    # anonymous, so this is the only way analytics can attribute a public view
-    # to an org — it must match the slug used everywhere else.
     org_slug: str
     org_logo_url: Optional[str] = None
     is_valid: bool = True
@@ -1194,9 +1191,6 @@ def get_public_report(request, token: str):
         return {
             **view_data,
             "org_name": snapshot.org.name,
-            # Stable org identifier (never renamed, unlike org_name). A public view is
-            # anonymous, so this is the only way analytics can attribute the read to an
-            # org — same reasoning and same key as PublicDashboardResponse.org_slug.
             "org_slug": snapshot.org.slug,
             "org_logo_url": snapshot.org.logo_url,
             "is_valid": True,
