@@ -829,11 +829,19 @@ def apply_chart_filters(
     grouped_filters = defaultdict(list)
     single_filters = []
 
+    VALUE_NOT_REQUIRED_OPERATORS = {"is_null", "is_not_null"}
+
     for filter_config in filters:
         column_name = filter_config["column"]
         operator = filter_config["operator"]
 
         if not column_name or operator is None:
+            continue
+
+        value = filter_config.get("value")
+        if operator not in VALUE_NOT_REQUIRED_OPERATORS and (
+            value is None or value == ""
+        ):
             continue
 
         # Timestamp date filters need day-range logic — keep full config

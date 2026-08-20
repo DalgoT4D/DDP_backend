@@ -110,3 +110,52 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    def test_empty_string_value_skipped_for_date_column(self):
+        """empty string value on a date column must not produce a WHERE clause"""
+        sql = get_where_sql([make_filter("meeting_date", "equals", "", "date")])
+        assert len(sql) == 0
+
+    def test_none_value_skipped(self):
+        """None value must not produce a WHERE clause"""
+        sql = get_where_sql([make_filter("meeting_date", "equals", None, "date")])
+        assert len(sql) == 0
+
+    def test_empty_string_value_skipped_for_all_value_operators(self):
+        """empty string value is skipped for all operators that require a value"""
+        for op in [
+            "equals",
+            "not_equals",
+            "greater_than",
+            "less_than",
+            "greater_than_equal",
+            "less_than_equal",
+            "like",
+            "like_case_insensitive",
+            "contains",
+            "not_contains",
+            "in",
+            "not_in",
+        ]:
+            sql = get_where_sql([make_filter("col", op, "", "date")])
+            assert len(sql) == 0, f"operator '{op}' should skip empty value"
+
+    def test_is_null_with_empty_value_still_applied(self):
+        """is_null must still work even with empty string value"""
+        sql = get_where_sql([make_filter("meeting_date", "is_null", "", "date")])
+        assert len(sql) == 1
+
+    def test_is_not_null_with_none_value_still_applied(self):
+        """is_not_null must still work even with None value"""
+        sql = get_where_sql([make_filter("meeting_date", "is_not_null", None, "date")])
+        assert len(sql) == 1
+
+    def test_valid_filter_alongside_empty_filter(self):
+        """valid filters still apply when mixed with empty-value filters"""
+        filters = [
+            make_filter("meeting_date", "equals", "", "date"),
+            make_filter("status", "equals", "active"),
+        ]
+        sql = get_where_sql(filters)
+        assert len(sql) == 1
+        assert "active" in sql[0]
