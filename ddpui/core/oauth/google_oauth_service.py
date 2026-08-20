@@ -160,7 +160,7 @@ def _store_refresh_token_ref(orguser_id: int, source_name: str, tokens: GoogleTo
     return refresh_token_ref
 
 
-def _read_refresh_token_ref(
+def redeem_refresh_token_ref(
     orguser: OrgUser, refresh_token_ref: str, source_name: str
 ) -> OAuthRefData:
     """Read the payload behind a refresh_token_ref and prove the caller owns it. Rejects a
@@ -181,11 +181,6 @@ def _read_refresh_token_ref(
     return stored
 
 
-def redeem_refresh_token_ref(orguser: OrgUser, refresh_token_ref: str, source_name: str) -> str:
-    """Redeem a refresh_token_ref at create-source time; return the stashed refresh_token."""
-    return _read_refresh_token_ref(orguser, refresh_token_ref, source_name).refresh_token
-
-
 def get_picker_config(
     orguser: OrgUser, refresh_token_ref: str, source_name: str
 ) -> GooglePickerConfig:
@@ -197,7 +192,7 @@ def get_picker_config(
     caps it at an hour) and read-only against the files the user selects.
 
     The refresh_token stays server-side, always."""
-    stored = _read_refresh_token_ref(orguser, refresh_token_ref, source_name)
+    stored = redeem_refresh_token_ref(orguser, refresh_token_ref, source_name)
     if not stored.access_token:
         # a ref minted by the pre-Picker release (see OAuthRefData). Re-consenting mints a
         # complete one, which is exactly what the frontend does on this error.

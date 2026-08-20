@@ -98,7 +98,7 @@ def _build_oauth_source_config(
     the same workspace catalog it got `sourceDefId` from — it is the OAuth registry key."""
     refresh_token = google_oauth_service.redeem_refresh_token_ref(
         orguser, refresh_token_ref, source_name
-    )
+    ).refresh_token
     connector = get_connector(source_name)
     credentials = connector.credentials_builder(
         oauth_client_id(), oauth_client_secret(), refresh_token
