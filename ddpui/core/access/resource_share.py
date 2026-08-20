@@ -305,17 +305,45 @@ def add_grants(
         if dashboard:
             sync_dashboard_cascade(dashboard)
 
-    # 2) Pending emails — create/reuse Invitation, store share pointing at it.
+    # 2) Pending emails — either an Invitation (fresh email) or a direct user
+    # grant (existing Dalgo user just added to this org). See _resolve_pending_email.
     for pending in pending_grants:
-        invitation_id = _resolve_pending_email_to_invitation_id(
-            org, orguser, pending.email, invite_role_uuid
-        )
+        kind, resolved_id = _resolve_pending_email(org, orguser, pending.email, invite_role_uuid)
 
+        if kind == "user":
+            # Existing Dalgo user — create a direct-user share.
+            existing = ResourceShare.objects.filter(
+                org=org,
+                resource_type=rtype,
+                resource_id=resource_id_str,
+                principal_type=ResourceSharePrincipalType.USER,
+                principal_id=resolved_id,
+            ).first()
+            if existing is not None:
+                if existing.access_level != pending.access_level:
+                    existing.access_level = pending.access_level
+                    existing.save(update_fields=["access_level"])
+                written.append(existing)
+            else:
+                written.append(
+                    ResourceShare.objects.create(
+                        org=org,
+                        resource_type=rtype,
+                        resource_id=resource_id_str,
+                        principal_type=ResourceSharePrincipalType.USER,
+                        principal_id=resolved_id,
+                        access_level=pending.access_level,
+                        created_by=orguser,
+                    )
+                )
+            continue
+
+        # kind == "invitation" — invitation-linked share
         existing = ResourceShare.objects.filter(
             org=org,
             resource_type=rtype,
             resource_id=resource_id_str,
-            invitation_id=invitation_id,
+            invitation_id=resolved_id,
         ).first()
 
         if existing is not None:
@@ -329,7 +357,7 @@ def add_grants(
                     org=org,
                     resource_type=rtype,
                     resource_id=resource_id_str,
-                    invitation_id=invitation_id,
+                    invitation_id=resolved_id,
                     access_level=pending.access_level,
                     created_by=orguser,
                 )
@@ -373,25 +401,32 @@ def remove_grant(orguser: OrgUser, share_id: int) -> None:
 # Internal
 
 
-def _resolve_pending_email_to_invitation_id(
+def _resolve_pending_email(
     org: Org, orguser: OrgUser, email: str, invite_role_uuid: Optional[str]
-) -> int:
-    """Ensure an ``Invitation`` exists for ``email`` on this org; return its id.
+) -> tuple:
+    """Resolve a pending-share email to either an OrgUser or an Invitation.
 
-    Reuses an existing pending invitation when present; otherwise creates
-    one via ``invite_user_v1`` using ``invite_role_uuid`` (required for new
-    invitations). Raises ``GrantError`` on validation failures.
+    Three cases:
+    - Email already belongs to an active OrgUser in this org → invalid; the
+      caller should have grouped this into ``principals`` (direct grant).
+    - Email belongs to an existing Dalgo User but not this org → ``invite_user_v1``
+      creates the OrgUser directly (no invitation needed); returns
+      ``('user', orguser_id)`` so the caller can write a direct-user share.
+    - Email is brand-new to Dalgo → an ``Invitation`` is created (or reused);
+      returns ``('invitation', invitation_id)``.
+
+    Raises ``GrantError`` on validation failures.
     """
     normalized = email.strip().lower()
 
     if OrgUser.objects.filter(org=org, user__email__iexact=normalized).exists():
         raise GrantError(f"{normalized} is already an active user; grant them directly")
 
-    existing = Invitation.objects.filter(
+    existing_invitation = Invitation.objects.filter(
         invited_by__org=org, invited_email__iexact=normalized
     ).first()
-    if existing is not None:
-        return existing.id
+    if existing_invitation is not None:
+        return ("invitation", existing_invitation.id)
 
     if not invite_role_uuid:
         raise GrantError("invite_role_uuid is required to invite new emails")
@@ -405,12 +440,20 @@ def _resolve_pending_email_to_invitation_id(
     if error:
         raise GrantError(f"failed to invite {normalized}: {error}")
 
+    # invite_user_v1 takes one of two paths internally:
+    # - Existing Dalgo User → creates an OrgUser directly (no Invitation row).
+    # - Brand-new email → creates an Invitation row.
+    # Detect which happened by looking up the OrgUser first.
+    new_orguser = OrgUser.objects.filter(org=org, user__email__iexact=normalized).first()
+    if new_orguser is not None:
+        return ("user", new_orguser.id)
+
     invitation = Invitation.objects.filter(
         invited_by__org=org, invited_email__iexact=normalized
     ).first()
     if invitation is None:
         raise GrantError(f"could not resolve invitation for {normalized}")
-    return invitation.id
+    return ("invitation", invitation.id)
 
 
 def _check_principal_exists(org: Org, principal_type: str, principal_id: int) -> None:

@@ -1748,6 +1748,58 @@ def test_invitation_grants_do_not_fire_share_notification(org, dashboard, owner_
         assert not mock_notify.called
 
 
+def test_pending_email_belonging_to_existing_dalgo_user_creates_direct_share(
+    org, dashboard, owner_analyst, seed_db
+):
+    """Regression: when the pending email is an existing Dalgo user (with a
+    User row) but not in THIS org, invite_user_v1 creates an OrgUser directly
+    instead of an Invitation. The share must land as a direct-user grant, not
+    an invitation-pending row — and the endpoint must NOT raise 'could not
+    resolve invitation'."""
+    from ddpui.schemas.access.resource_share_schema import PendingGrantPayload
+    from ddpui.models.resource_share import ResourceShare, ResourceSharePrincipalType
+    from django.contrib.auth.models import User
+
+    # An existing Dalgo user in a DIFFERENT org (has a User row, no OrgUser here).
+    other_org = Org.objects.create(slug="other-org")
+    User.objects.create(username="existing@dalgo.test", email="existing@dalgo.test", password="pw")
+    member_role = Role.objects.filter(slug=MEMBER_ROLE).first()
+
+    try:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            _add_grants_payload(
+                pending_grants=[
+                    PendingGrantPayload(email="existing@dalgo.test", access_level="view")
+                ],
+                invite_role_uuid=str(member_role.uuid),
+            ),
+        )
+    finally:
+        other_org.delete()
+
+    # A direct-user share must exist for the newly-created OrgUser.
+    orguser = OrgUser.objects.get(org=org, user__email="existing@dalgo.test")
+    share = ResourceShare.objects.filter(
+        org=org,
+        resource_type="dashboard",
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.USER,
+        principal_id=orguser.id,
+    ).first()
+    assert share is not None
+    assert share.access_level == AccessLevel.VIEW
+    # And NOT an invitation-linked row for that email.
+    assert not ResourceShare.objects.filter(
+        org=org,
+        resource_type="dashboard",
+        resource_id=str(dashboard.id),
+        invitation__invited_email__iexact="existing@dalgo.test",
+    ).exists()
+
+
 def test_dedup_when_user_is_direct_and_group_grantee(org, dashboard, owner_analyst, member):
     """User granted directly + present in a granted group at the same level → one notification, once."""
     from ddpui.models.org_user import OrgUserGroup, OrgUserGroupMember
