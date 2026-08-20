@@ -1871,5 +1871,20 @@
         "model": "ddpui.RolePermission",
         "pk": 242,
         "fields": { "role": 5, "permission": 6 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 243,
+        "fields": { "role": 5, "permission": 69 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 244,
+        "fields": { "role": 5, "permission": 66 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 245,
+        "fields": { "role": 5, "permission": 79 }
     }
 ]
