@@ -36,11 +36,7 @@ OAUTH_STATE_REDIS_PREFIX = "airbyte_oauth_state"
 OAUTH_STATE_TTL_SECONDS = 120  # 2 minutes
 # refresh_token_ref: opaque handle to a stashed refresh_token (callback -> create-source window)
 OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX = "airbyte_oauth_refresh_token_ref"
-# The user browses their whole Drive in the Google Picker inside this window (consent ->
-# pick a spreadsheet -> save the source), so it cannot be as tight as the state nonce's.
-# Still shorter than Google's own 1h access_token lifetime, so an abandoned flow expires here
-# first. Bumped from 120s when the Picker step was added — 2 minutes is not enough time to
-# find a file.
+# Wide enough for the user to find a file in the Picker, still under Google's 1h access_token.
 OAUTH_REFRESH_TOKEN_REF_TTL_SECONDS = 600  # 10 minutes
 
 
@@ -56,9 +52,8 @@ class OAuthStateData(Schema):
 
 
 class GoogleTokens(Schema):
-    """What Google's token endpoint hands back on a successful code exchange. The
-    refresh_token is what Airbyte syncs with; the access_token is what the Google Picker needs
-    in the browser to let the user pick the spreadsheet they are granting us."""
+    """Google's code-exchange response: refresh_token for Airbyte syncs, access_token for the
+    browser-side Picker."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -67,25 +62,22 @@ class GoogleTokens(Schema):
 
 
 class GooglePickerConfig(Schema):
-    """What the browser needs to open the Google Picker: a Drive-scoped access token plus the
-    Picker's own API key and app id. camelCase because these map 1:1 onto the Picker builder's
-    `setOAuthToken` / `setDeveloperKey` / `setAppId`."""
+    """What the browser needs to open the Google Picker. camelCase to map 1:1 onto the Picker
+    builder's `setOAuthToken` / `setDeveloperKey` / `setAppId`."""
 
     model_config = ConfigDict(extra="forbid")
 
-    accessToken: str  # pylint: disable=invalid-name
-    apiKey: str  # pylint: disable=invalid-name
-    appId: str  # pylint: disable=invalid-name
+    accessToken: str
+    apiKey: str
+    appId: str
 
 
 class OAuthRefData(Schema):
     """Typed payload stashed in Redis under the `refresh_token_ref` handle (callback ->
-    create-source window): the stashed tokens plus the orguser/source they were minted
-    for. Redeemed at create-source time.
+    create-source window): the stashed tokens plus the orguser/source they were minted for.
 
-    `access_token` is optional so a ref written by the previous release (no Picker step)
-    still validates during a rolling deploy; the picker endpoint rejects a ref without one
-    rather than crashing on it."""
+    `access_token` is optional only so refs from the pre-Picker release still validate during
+    a rolling deploy."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -142,9 +134,8 @@ def _read_oauth_state(state: str) -> OAuthStateData:
 
 
 def _store_refresh_token_ref(orguser_id: int, source_name: str, tokens: GoogleTokens) -> str:
-    """Stash both Google tokens server-side under a fresh opaque handle. The browser only
-    ever receives this `refresh_token_ref`, never a token — the access_token leaves only
-    through the picker-config endpoint, which checks the caller owns the ref."""
+    """Stash both Google tokens under a fresh opaque handle. The browser only ever receives
+    the handle; the access_token leaves solely through the picker-config endpoint."""
     refresh_token_ref = secrets.token_urlsafe(48)
     data = OAuthRefData(
         orguser_id=orguser_id,
@@ -163,10 +154,9 @@ def _store_refresh_token_ref(orguser_id: int, source_name: str, tokens: GoogleTo
 def redeem_refresh_token_ref(
     orguser: OrgUser, refresh_token_ref: str, source_name: str
 ) -> OAuthRefData:
-    """Read the payload behind a refresh_token_ref and prove the caller owns it. Rejects a
-    missing/expired handle, or one minted for a different orguser or a different source
-    connector (compared by source-definition name, the registry key). The ref is NOT
-    consumed — the same one is read once for the Picker and again at create-source time."""
+    """Read the payload behind a refresh_token_ref and prove the caller owns it — rejects a
+    missing/expired handle, or one minted for a different orguser or source connector. Not
+    consumed: read once for the Picker, again at create-source."""
     raw = RedisClient.get_instance().get(
         f"{OAUTH_REFRESH_TOKEN_REF_REDIS_PREFIX}:{refresh_token_ref}"
     )
@@ -184,18 +174,11 @@ def redeem_refresh_token_ref(
 def get_picker_config(
     orguser: OrgUser, refresh_token_ref: str, source_name: str
 ) -> GooglePickerConfig:
-    """Everything the Google Picker needs in the browser, for a ref the caller owns.
-
-    The access_token is the ONLY Google credential that ever reaches the browser, and only
-    here: `drive.file` means the user must hand us each spreadsheet through the Picker, and
-    the Picker runs client-side, so it needs a Drive-scoped token. It is short-lived (Google
-    caps it at an hour) and read-only against the files the user selects.
-
-    The refresh_token stays server-side, always."""
+    """Picker config for a ref the caller owns. The access_token is the only Google credential
+    that ever reaches the browser — the Picker runs client-side. The refresh_token never does."""
     stored = redeem_refresh_token_ref(orguser, refresh_token_ref, source_name)
     if not stored.access_token:
-        # a ref minted by the pre-Picker release (see OAuthRefData). Re-consenting mints a
-        # complete one, which is exactly what the frontend does on this error.
+        # pre-Picker ref (see OAuthRefData); the frontend re-consents on this error
         raise HttpError(400, "invalid or expired oauth session")
     return GooglePickerConfig(
         accessToken=stored.access_token,
@@ -261,8 +244,7 @@ def exchange_google_oauth_code(code: str) -> GoogleTokens:
         logger.error("google token exchange returned no refresh_token: keys=%s", list(tokens))
         raise HttpError(400, "oauth did not return a refresh token")
     if "access_token" not in tokens:
-        # every successful code exchange returns one; without it the Picker cannot run and the
-        # user has no way to name a spreadsheet, so fail here rather than mid-flow
+        # without it the Picker cannot run — fail here rather than mid-flow
         logger.error("google token exchange returned no access_token: keys=%s", list(tokens))
         raise HttpError(400, "oauth did not return an access token")
     return GoogleTokens(refresh_token=tokens["refresh_token"], access_token=tokens["access_token"])

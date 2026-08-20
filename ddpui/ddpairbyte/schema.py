@@ -43,12 +43,8 @@ class SourceGoogleOAuthConsentCreate(Schema):
 
 
 class SourceGoogleOAuthPickerConfigFetch(Schema):
-    """Ask for the Google Picker config belonging to a `refresh_token_ref` the caller owns.
-
-    Between consent and save, the browser has to open the Google Picker so the user can hand
-    us the one spreadsheet the `drive.file` grant will cover. `sourceName` is checked against
-    the ref the same way create/update check it, so a ref minted for one connector cannot
-    fetch another's picker token."""
+    """Ask for the Google Picker config behind a `refresh_token_ref` the caller owns.
+    `sourceName` is checked against the ref, as create/update do."""
 
     sourceName: str
     refresh_token_ref: str
