@@ -170,12 +170,8 @@ def get_source_oauth_callback(request, state: str = None, code: str = None, erro
 @airbyte_router.post("/sources/oauth/picker/", response=GooglePickerConfig)
 @has_permission(["can_view_sources"])
 def post_source_oauth_picker_config(request, payload: SourceGoogleOAuthPickerConfigFetch):
-    """Google Picker config for a `refresh_token_ref` the caller owns.
-
-    The `drive.file` scope only grants the files the user selects in Google's own Picker, so
-    between consent and save the browser opens the Picker to collect the spreadsheet. That
-    needs a Drive-scoped access_token client-side; this is the only place one leaves the
-    backend, and only to the orguser the ref was minted for. The refresh_token never does.
+    """Google Picker config for a `refresh_token_ref` the caller owns. The only place a
+    Drive-scoped access_token leaves the backend; the refresh_token never does.
 
     POST rather than GET because the ref is a credential — keep it out of URLs and logs.
     """

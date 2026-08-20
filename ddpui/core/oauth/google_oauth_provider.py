@@ -61,20 +61,8 @@ def _normalize_source_name(source_name: str) -> str:
 # truth for "which connectors support the Dalgo-driven Google OAuth flow".
 GOOGLE_OAUTH_CONNECTORS: dict[str, GoogleOAuthConnector] = {
     _normalize_source_name(GSHEETS_SOURCE_NAME): GoogleOAuthConnector(
-        # Least privilege, and the scope Google's verification team requires here: `drive.file`
-        # grants access ONLY to the files the user hands us through the Google Picker, not to
-        # every spreadsheet in their Drive (which is what `spreadsheets.readonly` did — a
-        # SENSITIVE scope, needing verification, a demo video and annual re-review).
-        # `drive.file` is non-sensitive: no verification, no unverified-app screen, no user cap.
-        #
-        # The grant Google records is (oauth client, user, file id) and it is DURABLE — so the
-        # refresh_token below keeps reading that spreadsheet on Airbyte's schedule, headless,
-        # long after the browser is gone. That is why scheduled syncs are not a reason to ask
-        # for a broader scope.
-        #
-        # Consequence for callers: a spreadsheet id the user never picked is NOT readable
-        # (Sheets API 403s), so the UI must source `spreadsheet_id` from the Picker — never
-        # from a pasted link. Re-authenticating an existing source re-picks for the same reason.
+        # Non-sensitive scope (no Google verification): grants only the files the user picks in
+        # the Google Picker, so `spreadsheet_id` must come from the Picker, never a pasted link.
         scopes=["https://www.googleapis.com/auth/drive.file"],
         credentials_builder=_gsheets_credentials,
     ),
@@ -108,9 +96,8 @@ def oauth_client_secret() -> str:
 
 
 def picker_api_key() -> str:
-    """Browser API key for the Google Picker, from the same GCP project as the OAuth client.
-    Public by design (it ships to the browser); lock it down with an HTTP-referrer
-    restriction in the Cloud console, not by hiding it."""
+    """Browser API key for the Google Picker. Public by design — restrict it by HTTP referrer
+    in the Cloud console, not by hiding it."""
     api_key = os.getenv("AIRBYTE_GOOGLE_PICKER_API_KEY")
     if not api_key:
         raise HttpError(500, "google picker api key is not configured")
@@ -118,9 +105,8 @@ def picker_api_key() -> str:
 
 
 def picker_app_id() -> str:
-    """The Picker's `appId` — the GCP PROJECT NUMBER of the project owning the OAuth client
-    (not the project id, and not the client id). Drive uses it to attribute the per-file
-    grants the Picker creates to this app."""
+    """The Picker's `appId` — the GCP PROJECT NUMBER owning the OAuth client (not the project
+    id, not the client id)."""
     app_id = os.getenv("AIRBYTE_GOOGLE_PICKER_APP_ID")
     if not app_id:
         raise HttpError(500, "google picker app id is not configured")
