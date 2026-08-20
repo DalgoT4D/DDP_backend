@@ -25,6 +25,7 @@ from ddpui.ddpairbyte.schema import (
     SourceGoogleOAuthConsentCreate,
     SourceGoogleOAuthCreate,
     SourceGoogleOAuthUpdate,
+    SourceGoogleOAuthPickerConfigFetch,
 )
 from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
@@ -36,6 +37,7 @@ from ddpui.models.org import OrgType, ConnectionMeta
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
 from ddpui.core.oauth import google_oauth_service, google_service_account
+from ddpui.core.oauth.google_oauth_service import GooglePickerConfig
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
@@ -167,6 +169,25 @@ def get_source_oauth_callback(request, state: str = None, code: str = None, erro
     """
     return HttpResponseRedirect(
         google_oauth_service.oauth_callback_redirect_url(state, code, error)
+    )
+
+
+@airbyte_router.post("/sources/oauth/picker/", response=GooglePickerConfig)
+@has_permission(["can_view_sources"])
+def post_source_oauth_picker_config(request, payload: SourceGoogleOAuthPickerConfigFetch):
+    """Google Picker config for a `refresh_token_ref` the caller owns.
+
+    The `drive.file` scope only grants the files the user selects in Google's own Picker, so
+    between consent and save the browser opens the Picker to collect the spreadsheet. That
+    needs a Drive-scoped access_token client-side; this is the only place one leaves the
+    backend, and only to the orguser the ref was minted for. The refresh_token never does.
+
+    POST rather than GET because the ref is a credential — keep it out of URLs and logs.
+    """
+    orguser: OrgUser = request.orguser
+
+    return google_oauth_service.get_picker_config(
+        orguser, payload.refresh_token_ref, payload.sourceName
     )
 
 

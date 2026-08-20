@@ -2,9 +2,15 @@
 
 TEMPORARY BRIDGE — meant to be deleted.
 
-Google OAuth verification for the sensitive `spreadsheets.readonly` scope takes 3-4 weeks. A
-service account skips verification entirely (Google exempts apps accessing only their own data),
-at the cost of the user sharing each spreadsheet with the service account's email.
+Built when the OAuth flow asked for the sensitive `spreadsheets.readonly` scope, whose Google
+verification takes 3-4 weeks; a service account skips verification entirely (Google exempts
+apps accessing only their own data), at the cost of the user sharing each spreadsheet with the
+service account's email.
+
+The OAuth flow now asks for `drive.file`, which is non-sensitive and needs no verification at
+all — so this bridge's original reason is gone. It stays only as the fallback for a deployment
+whose Airbyte connector version cannot work per-file (see the scope note in
+`google_oauth_provider.py`).
 
 Switched on by one env var pointing at the key file. Unset, it returns None and every call
 site falls through to the existing OAuth / bring-your-own-key behaviour. A path rather than
