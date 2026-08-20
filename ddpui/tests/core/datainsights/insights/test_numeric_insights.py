@@ -174,6 +174,24 @@ def test_data_stats_query_uniqueness_of_query_id(numeric_payload):
     assert data_stats_insights1.query_id() != data_stats_insights2.query_id()
 
 
+def test_data_stats_query_parse_results_null_other_modes(numeric_payload):
+    """parse_results handles NULL other_modes from DB without raising TypeError"""
+    obj = NumericColInsights(**numeric_payload)
+    data_stats_insights = obj.insights[0]
+
+    mock_results = [
+        {
+            "mean": Decimal(1.2),
+            "median": Decimal(1.5),
+            "mode": Decimal(2),
+            "other_modes": None,
+        }
+    ]
+    output = data_stats_insights.parse_results(mock_results)
+
+    assert output[data_stats_insights.columns[0].name]["other_modes"] == []
+
+
 def test_data_stats_query_generate_sql():
     """TODO"""
     pass
