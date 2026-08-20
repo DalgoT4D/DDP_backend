@@ -22,3 +22,10 @@ class AdminOrgCreateError(AdminServiceError):
 
     def __init__(self, message: str):
         super().__init__(message, "ADMIN_ORG_CREATE_ERROR")
+
+
+class AdminOrgDeleteError(AdminServiceError):
+    """org deletion failed (OrgCleanupService raised) — maps to 400"""
+
+    def __init__(self, message: str):
+        super().__init__(message, "ADMIN_ORG_DELETE_ERROR")

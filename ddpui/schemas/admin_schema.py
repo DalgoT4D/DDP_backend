@@ -159,3 +159,20 @@ class RemovalImpactSchema(Schema):
     dashboards_orphaned: int
     charts_orphaned: int
     reports_orphaned: int
+
+
+class OrgDeletionImpactSchema(Schema):
+    """
+    what deleting an org would destroy. Drives the confirm dialog's warning.
+    Unlike RemovalImpactSchema (SET_NULL, content kept), every count here is a hard
+    CASCADE delete — the org itself, its warehouse/connections/pipelines, all its
+    users, and all its dashboards/charts/report snapshots are gone, not orphaned.
+    """
+
+    user_count: int
+    warehouse_count: int
+    connection_count: int
+    pipeline_count: int
+    dashboard_count: int
+    chart_count: int
+    report_count: int

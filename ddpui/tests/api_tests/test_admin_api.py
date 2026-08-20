@@ -28,6 +28,8 @@ from ddpui.api.admin_api import (
     post_admin_org,
     get_admin_org,
     put_admin_org,
+    get_admin_org_delete_impact,
+    delete_admin_org,
     get_admin_org_users,
     post_admin_org_user_invite,
     put_admin_org_user_role,
@@ -40,6 +42,7 @@ from ddpui.api.admin_api import (
     AdminUpdateOrgSchema,
     AdminChangeRoleSchema,
 )
+from ddpui.services.org_cleanup_service import OrgCleanupServiceError
 from ddpui.routes import drf_authentication_failed_handler
 from rest_framework.exceptions import AuthenticationFailed
 from ddpui.api.user_org_api import (
@@ -306,6 +309,104 @@ def test_admin_edit_org_updates_base_plan(platform_admin_request):
 
     assert OrgPlans.objects.get(org=org).base_plan == "Dalgo"
     assert response.base_plan == "Dalgo"
+
+
+# ---- org lifecycle: delete ------------------------------------------------------
+
+
+def test_admin_org_delete_impact_forbidden_for_non_platform_admin(orguser):
+    """the delete-impact route is gated too — non-admin gets 403"""
+    org = Org.objects.create(name="Impact Org", slug="impact-org")
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_org_delete_impact(request, org.id)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_org_delete_impact_404(platform_admin_request):
+    """delete-impact for a missing org is 404"""
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_org_delete_impact(platform_admin_request, 999999)
+    assert excinfo.value.status_code == 404
+
+
+def test_admin_org_delete_impact_counts(platform_admin_request):
+    """delete-impact reports the real counts of what a delete would destroy"""
+    org = Org.objects.create(name="Impact Org", slug="impact-org")
+    user = User.objects.create(username="impact-user", email="impact-user@example.com")
+    OrgUser.objects.create(
+        user=user, org=org, new_role=Role.objects.filter(slug=GUEST_ROLE).first()
+    )
+    Dashboard.objects.create(org=org, title="D1", created_by=None)
+    Chart.objects.create(
+        org=org,
+        title="C1",
+        chart_type="bar",
+        schema_name="s",
+        table_name="t",
+        created_by=None,
+    )
+
+    response = get_admin_org_delete_impact(platform_admin_request, org.id)
+
+    assert response.user_count == 1
+    assert response.warehouse_count == 0
+    assert response.connection_count == 0
+    assert response.pipeline_count == 0
+    assert response.dashboard_count == 1
+    assert response.chart_count == 1
+    assert response.report_count == 0
+
+
+def test_admin_delete_org_forbidden_for_non_platform_admin(orguser):
+    """the delete route is gated too — non-admin gets 403"""
+    org = Org.objects.create(name="Delete-Guard Org", slug="delete-guard-org")
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        delete_admin_org(request, org.id)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_delete_org_404(platform_admin_request):
+    """deleting a missing org is 404"""
+    with pytest.raises(HttpError) as excinfo:
+        delete_admin_org(platform_admin_request, 999999)
+    assert excinfo.value.status_code == 404
+
+
+@patch("ddpui.core.admin.admin_service.OrgCleanupService")
+def test_admin_delete_org_happy_path(mock_cleanup_service_cls, platform_admin_request):
+    """delete runs OrgCleanupService for real (dry_run=False) and removes the Org row"""
+    org = Org.objects.create(name="Delete Me", slug="delete-me")
+    org_id = org.id
+
+    response = delete_admin_org(platform_admin_request, org_id)
+
+    mock_cleanup_service_cls.assert_called_once_with(org, dry_run=False)
+    mock_cleanup_service_cls.return_value.delete_org.assert_called_once()
+    assert response == {"success": 1}
+    # the real org.delete() only happens inside OrgCleanupService.delete_org, which is
+    # mocked here — so this confirms the wiring, not the cascade (that's
+    # test_org_cleanup_service.py's job)
+    assert Org.objects.filter(id=org_id).exists()
+
+
+@patch("ddpui.core.admin.admin_service.OrgCleanupService")
+def test_admin_delete_org_propagates_cleanup_error_as_400(
+    mock_cleanup_service_cls, platform_admin_request
+):
+    """an OrgCleanupServiceError (e.g. a transform task still used by a pipeline) is
+    surfaced as a 400, not a 500"""
+    org = Org.objects.create(name="Stuck Org", slug="stuck-org")
+    mock_cleanup_service_cls.return_value.delete_org.side_effect = OrgCleanupServiceError(
+        "org_task is being used in a deployment"
+    )
+
+    with pytest.raises(HttpError) as excinfo:
+        delete_admin_org(platform_admin_request, org.id)
+
+    assert excinfo.value.status_code == 400
+    assert Org.objects.filter(id=org.id).exists()  # nothing deleted on failure
 
 
 # ============================================================================

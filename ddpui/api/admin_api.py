@@ -28,9 +28,10 @@ from ddpui.schemas.admin_schema import (
     AdminOrgUsersResponse,
     AdminChangeRoleSchema,
     RemovalImpactSchema,
+    OrgDeletionImpactSchema,
 )
 from ddpui.core.admin import admin_service
-from ddpui.core.admin.exceptions import AdminOrgCreateError
+from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui")
@@ -109,6 +110,50 @@ def put_admin_org(request, org_id: int, payload: AdminUpdateOrgSchema):
     org = _get_org_or_404(org_id)
     org = admin_service.update_org(org, payload)
     return _admin_org_response(org)
+
+
+@admin_router.get("/orgs/{org_id}/delete-impact", response=OrgDeletionImpactSchema)
+@platform_admin_required
+def get_admin_org_delete_impact(request, org_id: int):
+    """Count everything deleting this org would destroy, so the confirm dialog can
+    warn before the action."""
+    org = _get_org_or_404(org_id)
+    (
+        user_count,
+        warehouse_count,
+        connection_count,
+        pipeline_count,
+        dashboard_count,
+        chart_count,
+        report_count,
+    ) = admin_service.delete_org_impact(org)
+    return OrgDeletionImpactSchema(
+        user_count=user_count,
+        warehouse_count=warehouse_count,
+        connection_count=connection_count,
+        pipeline_count=pipeline_count,
+        dashboard_count=dashboard_count,
+        chart_count=chart_count,
+        report_count=report_count,
+    )
+
+
+@admin_router.delete("/orgs/{org_id}", response=AdminSuccessSchema)
+@platform_admin_required
+def delete_admin_org(request, org_id: int):
+    """Hard-delete an org: Airbyte workspace, Prefect deployments/blocks, warehouse
+    credentials, dbt/git setup, org users, and (via CASCADE) its dashboards/charts/
+    report snapshots. Callers should show the delete-impact warning first."""
+    org = _get_org_or_404(org_id)
+    org_name = org.name  # captured before delete_org — the row won't exist afterward
+
+    try:
+        admin_service.delete_org(org)
+    except AdminOrgDeleteError as err:
+        raise HttpError(400, err.message) from err
+
+    logger.info(f"admin deleted org {org_name}")
+    return {"success": 1}
 
 
 # ======================= Users tab (M4) ======================================

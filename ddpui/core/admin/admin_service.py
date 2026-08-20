@@ -5,8 +5,8 @@ Handlers stay thin (parse -> call service -> respond); this module owns the ORM.
 
 from typing import List, Optional, Tuple
 
-from ddpui.core.admin.exceptions import AdminOrgCreateError
-from ddpui.models.org import Org
+from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import (
     OrgUser,
     Invitation,
@@ -14,12 +14,14 @@ from ddpui.models.org_user import (
     DeleteOrgUserPayload,
 )
 from ddpui.models.org_plans import OrgPlans
+from ddpui.models.tasks import OrgTask, OrgDataFlowv1
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.schemas.admin_schema import AdminCreateOrgSchema, AdminUpdateOrgSchema
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.ddpairbyte import airbyte_service
+from ddpui.services.org_cleanup_service import OrgCleanupService, OrgCleanupServiceError
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.core.admin")
@@ -101,6 +103,32 @@ def update_org(org: Org, payload: AdminUpdateOrgSchema) -> Org:
             org_plans.save()
 
     return org
+
+
+def delete_org_impact(org: Org) -> Tuple[int, int, int, int, int, int, int]:
+    """(users, warehouses, connections, pipelines, dashboards, charts, reports) that
+    deleting this org would destroy. Unlike removal_impact (SET_NULL, content kept),
+    every one of these is a hard CASCADE delete."""
+    return (
+        org_user_count(org),
+        OrgWarehouse.objects.filter(org=org).count(),
+        OrgTask.objects.filter(org=org, task__type="airbyte").count(),
+        OrgDataFlowv1.objects.filter(org=org, dataflow_type="orchestrate").count(),
+        Dashboard.objects.filter(org=org).count(),
+        Chart.objects.filter(org=org).count(),
+        ReportSnapshot.objects.filter(org=org).count(),
+    )
+
+
+def delete_org(org: Org) -> None:
+    """Hard-delete an org and everything it owns: Airbyte workspace, Prefect
+    deployments/blocks, warehouse credentials, dbt/git setup, and org users — the same
+    OrgCleanupService the `deleteorg` management command uses, run for real
+    (dry_run=False)."""
+    try:
+        OrgCleanupService(org, dry_run=False).delete_org()
+    except OrgCleanupServiceError as err:
+        raise AdminOrgDeleteError(str(err)) from err
 
 
 # --------------------------------------------------------------------------- #
