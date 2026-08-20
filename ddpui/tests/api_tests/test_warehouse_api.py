@@ -3,6 +3,8 @@ from unittest.mock import Mock, patch
 from ninja.errors import HttpError
 import sqlalchemy
 from unittest.mock import _Call
+import psycopg2
+from google.cloud.exceptions import NotFound as BigQueryNotFound
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -19,6 +21,7 @@ from ddpui.api.warehouse_api import (
     get_table,
     get_table_columns,
     get_table_data,
+    get_table_count,
     post_data_insights,
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
@@ -106,6 +109,81 @@ def test_get_table_data_success(orguser):
 
     assert response is not None
     assert response == [{"column_1": "value_1"}, {"column2": "value2}"}]
+
+
+def test_get_table_count_success(orguser):
+    """Success case for fetching total row count"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient"
+    ) as mock_get_wclient:
+        mock_client = Mock()
+        mock_client.get_total_rows.return_value = 42
+        mock_get_wclient.return_value = mock_client
+
+        request = mock_request(orguser)
+        response = get_table_count(request, "staging", "my_table")
+
+        assert response == {"total_rows": 42}
+        mock_client.get_total_rows.assert_called_once_with("staging", "my_table")
+
+
+def test_get_table_count_postgres_table_not_found(orguser):
+    """Returns 404 when Postgres table does not exist (UndefinedTable / pgcode 42P01)"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient"
+    ) as mock_get_wclient:
+        mock_client = Mock()
+        mock_client.get_total_rows.side_effect = psycopg2.errors.UndefinedTable(
+            "relation \"staging\".\"April_2026\" does not exist"
+        )
+        mock_get_wclient.return_value = mock_client
+
+        with pytest.raises(HttpError) as exc:
+            request = mock_request(orguser)
+            get_table_count(request, "staging", "April_2026")
+        assert exc.value.status_code == 404
+        assert "does not exist" in str(exc.value)
+
+
+def test_get_table_count_bigquery_table_not_found(orguser):
+    """Returns 404 when BigQuery table does not exist (NotFound)"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient"
+    ) as mock_get_wclient:
+        mock_client = Mock()
+        mock_client.get_total_rows.side_effect = BigQueryNotFound(
+            "Not found: Table project.staging.April_2026"
+        )
+        mock_get_wclient.return_value = mock_client
+
+        with pytest.raises(HttpError) as exc:
+            request = mock_request(orguser)
+            get_table_count(request, "staging", "April_2026")
+        assert exc.value.status_code == 404
+        assert "does not exist" in str(exc.value)
+
+
+def test_get_table_count_generic_error(orguser):
+    """Returns 500 for unexpected database errors"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient"
+    ) as mock_get_wclient:
+        mock_client = Mock()
+        mock_client.get_total_rows.side_effect = Exception("connection refused")
+        mock_get_wclient.return_value = mock_client
+
+        with pytest.raises(HttpError) as exc:
+            request = mock_request(orguser)
+            get_table_count(request, "staging", "my_table")
+        assert exc.value.status_code == 500
 
 
 def test_data_insights_without_warehouse(orguser, data_insights_payload):
