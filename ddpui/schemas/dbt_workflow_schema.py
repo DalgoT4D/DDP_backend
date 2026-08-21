@@ -1,5 +1,6 @@
 from ninja import Field, Schema
 from typing import Union, Any, Literal, Optional
+from uuid import UUID
 from pydantic import ConfigDict
 
 from ddpui.models.dbt_workflow import OrgDbtModel
@@ -69,6 +70,26 @@ class LockCanvasResponseSchema(Schema):
     lock_token: str
     expires_at: str
     locked_by: str
+
+
+class CanvasPositionSchema(Schema):
+    """Top-left node coordinate in React Flow space."""
+
+    x: float
+    y: float
+
+
+class CanvasNodePositionUpdateSchema(Schema):
+    """Position update for one persisted canvas node."""
+
+    uuid: UUID
+    position: CanvasPositionSchema
+
+
+class UpdateCanvasLayoutPayload(Schema):
+    """Atomic batch of canvas node position updates."""
+
+    nodes: list[CanvasNodePositionUpdateSchema]
 
 
 # ==============================================================================
