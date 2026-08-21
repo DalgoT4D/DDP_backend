@@ -9,7 +9,9 @@ from dataclasses import dataclass
 
 from django.db.models import Q
 
-from ddpui.core.ownership import can_delete_resource
+from ddpui.core.access.access_control import accessible_filter
+from ddpui.core.access.ownership import is_creator_or_admin
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
@@ -87,6 +89,7 @@ class ChartService:
     @staticmethod
     def list_charts(
         org: Org,
+        orguser: OrgUser,
         page: int = 1,
         page_size: int = 10,
         search: Optional[str] = None,
@@ -94,17 +97,9 @@ class ChartService:
     ) -> Tuple[List[Chart], int]:
         """List charts for an organization with pagination and filtering.
 
-        Args:
-            org: The organization
-            page: Page number (1-indexed)
-            page_size: Number of items per page
-            search: Optional search term (searches title, description, schema_name, table_name)
-            chart_type: Optional filter by chart type
-
-        Returns:
-            Tuple of (charts list, total count)
+        Returns only charts the orguser is allowed to see (accessible_filter).
         """
-        query = Q(org=org)
+        query = Q(org=org) & accessible_filter(orguser, ResourceType.CHART)
 
         if search:
             query &= (
@@ -122,7 +117,6 @@ class ChartService:
         )
         total = queryset.count()
 
-        # Apply pagination
         offset = (page - 1) * page_size
         charts = list(queryset[offset : offset + page_size])
 
@@ -242,7 +236,7 @@ class ChartService:
         chart = ChartService.get_chart(chart_id, org)
 
         # Only allow deletion if the user is the owner or an admin
-        if not can_delete_resource(orguser, chart):
+        if not is_creator_or_admin(orguser, chart):
             raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
@@ -283,7 +277,7 @@ class ChartService:
             logger.warning(f"Charts not found or not accessible: {missing_ids}")
 
         # Same owner-or-admin rule as single delete: skip charts the user may not delete
-        deletable = [chart for chart in charts if can_delete_resource(orguser, chart)]
+        deletable = [chart for chart in charts if is_creator_or_admin(orguser, chart)]
         forbidden_ids = sorted(set(found_ids) - {chart.id for chart in deletable})
         if forbidden_ids:
             logger.warning(
