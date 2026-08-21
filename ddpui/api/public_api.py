@@ -50,6 +50,7 @@ class PublicDashboardResponse(DashboardResponse):
     """Extended dashboard response for public access with additional public fields"""
 
     org_name: str
+    org_slug: str
     org_logo_url: Optional[str] = None
     is_valid: bool = True
 
@@ -114,6 +115,7 @@ def get_public_dashboard(request, token: str):
         public_response_data = {
             **dashboard_data,
             "org_name": dashboard.org.name,
+            "org_slug": dashboard.org.slug,
             "org_logo_url": dashboard.org.logo_url,
             "is_valid": True,
             # Remove sensitive fields for public access
@@ -1189,6 +1191,7 @@ def get_public_report(request, token: str):
         return {
             **view_data,
             "org_name": snapshot.org.name,
+            "org_slug": snapshot.org.slug,
             "org_logo_url": snapshot.org.logo_url,
             "is_valid": True,
         }
