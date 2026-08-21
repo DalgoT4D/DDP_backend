@@ -315,7 +315,10 @@ class DashboardService:
 
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
+            DashboardPermissionError: If orguser doesn't belong to org
         """
+        if orguser.org_id != org.id:
+            raise DashboardPermissionError("User does not belong to this organization.")
         DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
         FavoriteService.add_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
 
@@ -330,7 +333,10 @@ class DashboardService:
 
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
+            DashboardPermissionError: If orguser doesn't belong to org
         """
+        if orguser.org_id != org.id:
+            raise DashboardPermissionError("User does not belong to this organization.")
         DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
         FavoriteService.remove_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
 

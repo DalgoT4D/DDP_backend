@@ -762,6 +762,8 @@ def favorite_dashboard(request, dashboard_id: int):
         DashboardService.favorite_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
+    except DashboardPermissionError as err:
+        raise HttpError(403, err.message) from err
 
     return {"is_favorite": True}
 
@@ -776,5 +778,7 @@ def unfavorite_dashboard(request, dashboard_id: int):
         DashboardService.unfavorite_dashboard(dashboard_id, orguser.org, orguser)
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
+    except DashboardPermissionError as err:
+        raise HttpError(403, err.message) from err
 
     return {"is_favorite": False}
