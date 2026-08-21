@@ -1114,6 +1114,10 @@ def switch_git_repository_v1(
     # Get paths
     dbt_project_dir = Path(DbtProjectManager.get_dbt_project_dir(orgdbt))
     org_dir = Path(DbtProjectManager.get_org_dir(org))
+    # The clone destination is always under the current org's directory.
+    # dbt_project_dir (from orgdbt.project_dir) may reference a stale path
+    # under a different org's directory after a previous switch.
+    clone_destination = org_dir / "dbtrepo"
 
     # Scenario 1: Dalgo managed -> External repo
     needs_clone = False
@@ -1148,10 +1152,11 @@ def switch_git_repository_v1(
     # Common cloning logic for scenarios that require it
     if needs_clone:
         try:
-            # Clean existing directory
-            if dbt_project_dir.exists():
-                shutil.rmtree(dbt_project_dir)
-                logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+            # Clean the actual clone destination (org_dir / "dbtrepo"),
+            # not dbt_project_dir which may point to a different org's directory
+            if clone_destination.exists():
+                shutil.rmtree(clone_destination)
+                logger.info(f"Removed existing dbt directory: {clone_destination}")
 
             # Clone the new repository
             GitManager.clone(
@@ -1160,7 +1165,7 @@ def switch_git_repository_v1(
                 relative_path="dbtrepo",
                 pat=actual_pat,
             )
-            logger.info(f"Successfully cloned repository to {dbt_project_dir}")
+            logger.info(f"Successfully cloned repository to {clone_destination}")
         except Exception as e:
             logger.error(f"Failed to clone repository: {str(e)}")
             raise Exception(f"Failed to clone repository: {str(e)}") from e
@@ -1173,6 +1178,8 @@ def switch_git_repository_v1(
     orgdbt.gitrepo_url = payload.gitrepoUrl
     orgdbt.transform_type = TransformType.GIT
     orgdbt.is_repo_managed_by_system = False  # New repo is NOT Dalgo-managed
+    if needs_clone:
+        orgdbt.project_dir = DbtProjectManager.get_dbt_repo_relative_path(clone_destination)
     orgdbt.save()
 
     # Handle PAT token storage (only if not masked)
@@ -1186,7 +1193,8 @@ def switch_git_repository_v1(
 
     # Sync .gitignore contents
     try:
-        sync_gitignore_contents(dbt_project_dir)
+        project_path = clone_destination if needs_clone else dbt_project_dir
+        sync_gitignore_contents(project_path)
     except Exception as err:
         logger.error(f"Failed to sync .gitignore contents: {err}")
         logger.warning("Continuing despite gitignore sync failure")
