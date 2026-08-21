@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pg_restore --version)",
+      "Bash(aws --version)"
+    ]
+  }
+}
