@@ -1146,12 +1146,18 @@ def switch_git_repository_v1(
         needs_clone = True
 
     # Common cloning logic for scenarios that require it
+    clone_target = org_dir / "dbtrepo"
     if needs_clone:
         try:
-            # Clean existing directory
-            if dbt_project_dir.exists():
+            # Remove the actual clone target directory
+            if clone_target.exists():
+                shutil.rmtree(clone_target)
+                logger.info(f"Removed clone target directory: {clone_target}")
+
+            # Also remove stale dbt_project_dir if it differs from clone_target
+            if dbt_project_dir != clone_target and dbt_project_dir.exists():
                 shutil.rmtree(dbt_project_dir)
-                logger.info(f"Removed existing dbt directory: {dbt_project_dir}")
+                logger.info(f"Removed stale dbt directory: {dbt_project_dir}")
 
             # Clone the new repository
             GitManager.clone(
@@ -1160,7 +1166,7 @@ def switch_git_repository_v1(
                 relative_path="dbtrepo",
                 pat=actual_pat,
             )
-            logger.info(f"Successfully cloned repository to {dbt_project_dir}")
+            logger.info(f"Successfully cloned repository to {clone_target}")
         except Exception as e:
             logger.error(f"Failed to clone repository: {str(e)}")
             raise Exception(f"Failed to clone repository: {str(e)}") from e
@@ -1173,6 +1179,10 @@ def switch_git_repository_v1(
     orgdbt.gitrepo_url = payload.gitrepoUrl
     orgdbt.transform_type = TransformType.GIT
     orgdbt.is_repo_managed_by_system = False  # New repo is NOT Dalgo-managed
+    # Keep project_dir in sync with current org slug
+    new_relative_path = str(Path(org.slug) / "dbtrepo")
+    if orgdbt.project_dir != new_relative_path:
+        orgdbt.project_dir = new_relative_path
     orgdbt.save()
 
     # Handle PAT token storage (only if not masked)
@@ -1186,7 +1196,7 @@ def switch_git_repository_v1(
 
     # Sync .gitignore contents
     try:
-        sync_gitignore_contents(dbt_project_dir)
+        sync_gitignore_contents(clone_target)
     except Exception as err:
         logger.error(f"Failed to sync .gitignore contents: {err}")
         logger.warning("Continuing despite gitignore sync failure")
