@@ -7,12 +7,14 @@ gets a module like this one under agent/ — the loop infrastructure it shares
 lives in middleware.py / run_context.py / checkpointer.py.
 """
 
+import os
+
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from ddpui.core.ai.agent.base import build_model
+from ddpui.core.ai.agent.base import build_model_by_id, resolve_model_name
 from ddpui.core.ai.agent.middleware import (
     MAX_SQL_ATTEMPTS,
     clear_old_tool_results,
@@ -38,12 +40,47 @@ MODEL_MAX_TOKENS = 4096
 MODEL_ENV_VAR = "CHAT_WITH_DATA_MODEL"
 DEFAULT_MODEL = "claude-sonnet-5"
 
+# Models a user may pick in the chat UI. Only entries whose provider key is
+# present in the environment are offered (credentials move to org settings
+# later). The id doubles as the init_chat_model spec — provider inferred.
+MODEL_OPTIONS = [
+    {"id": "claude-sonnet-5", "label": "Claude Sonnet", "key_env": "ANTHROPIC_API_KEY"},
+    {"id": "gpt-5.5", "label": "OpenAI GPT", "key_env": "OPENAI_API_KEY"},
+]
+
 _DIALECT_LABELS = {"postgres": "PostgreSQL", "bigquery": "BigQuery"}
 
 
-def get_chat_model() -> BaseChatModel:
-    """The production chat model."""
-    return build_model(MODEL_ENV_VAR, DEFAULT_MODEL, MODEL_MAX_TOKENS)
+def available_models() -> list[dict]:
+    """User-selectable models whose provider credentials exist, as {id, label}."""
+    return [
+        {"id": option["id"], "label": option["label"]}
+        for option in MODEL_OPTIONS
+        if os.getenv(option["key_env"])
+    ]
+
+
+def default_model_id() -> str:
+    """The model used when the user picks nothing: the env override if it is
+    offerable, else the first available option, else the hard default."""
+    configured = resolve_model_name(MODEL_ENV_VAR, DEFAULT_MODEL)
+    offered = [m["id"] for m in available_models()]
+    if configured in offered or not offered:
+        return configured
+    return offered[0]
+
+
+def resolve_selected_model(model_id: str | None) -> str:
+    """Validate a user-supplied model id against the allowlist; None or an
+    unknown/unavailable id falls back to the default. Never trusts the client."""
+    if model_id and any(m["id"] == model_id for m in available_models()):
+        return model_id
+    return default_model_id()
+
+
+def get_chat_model(model_id: str | None = None) -> BaseChatModel:
+    """The production chat model, optionally the user's selected one."""
+    return build_model_by_id(resolve_selected_model(model_id), MODEL_MAX_TOKENS)
 
 
 def build_system_prompt(ctx: RunContext) -> str:

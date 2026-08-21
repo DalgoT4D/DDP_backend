@@ -78,6 +78,7 @@ async def run_turn(
     orguser: OrgUser,
     question: str,
     context: RunContext,
+    model_name: str | None = None,
 ) -> AsyncIterator[dict]:
     """Stream one turn of the TurnGraph. Always ends with message_complete or
     error, and always writes the audit row.
@@ -102,7 +103,7 @@ async def run_turn(
         context=context,
         question=question,
         request_uuid=request_uuid,
-        model_name=resolve_model_name(MODEL_ENV_VAR, DEFAULT_MODEL),
+        model_name=model_name or resolve_model_name(MODEL_ENV_VAR, DEFAULT_MODEL),
     )
     config = {
         "configurable": {"thread_id": str(session.thread_id)},

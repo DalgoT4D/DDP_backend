@@ -29,10 +29,15 @@ def resolve_model_name(env_var: str, default_model: str) -> str:
     return os.getenv(env_var, default_model)
 
 
-def build_model(env_var: str, default_model: str, max_tokens: int) -> BaseChatModel:
-    """A chat-model client for one AI job, provider inferred from the model id."""
+def build_model_by_id(model_id: str, max_tokens: int) -> BaseChatModel:
+    """A chat-model client for an explicit model id (user-selected models)."""
     return init_chat_model(
-        resolve_model_name(env_var, default_model),
+        model_id,
         max_tokens=max_tokens,
         callbacks=[_TRACING_DISPATCHER],
     )
+
+
+def build_model(env_var: str, default_model: str, max_tokens: int) -> BaseChatModel:
+    """A chat-model client for one AI job, provider inferred from the model id."""
+    return build_model_by_id(resolve_model_name(env_var, default_model), max_tokens)

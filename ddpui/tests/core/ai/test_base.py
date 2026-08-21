@@ -49,3 +49,40 @@ def test_resolve_model_name_prefers_env(monkeypatch):
     assert resolve_model_name("TEST_SUMMARY_MODEL", "claude-sonnet-5") == "gpt-5.5"
     monkeypatch.delenv("TEST_SUMMARY_MODEL")
     assert resolve_model_name("TEST_SUMMARY_MODEL", "claude-sonnet-5") == "claude-sonnet-5"
+
+
+# ── user-selectable models (UI model picker) ────────────────────────────────
+
+
+def test_available_models_filters_by_provider_key(monkeypatch):
+    from ddpui.core.ai.agent import chat_data_agent as cda
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    offered = [m["id"] for m in cda.available_models()]
+    assert "claude-sonnet-5" in offered
+    assert "gpt-5.5" not in offered
+
+
+def test_resolve_selected_model_rejects_unknown_ids(monkeypatch):
+    """Client-supplied ids are never trusted — unknown or unavailable ids fall
+    back to the default instead of reaching init_chat_model."""
+    from ddpui.core.ai.agent import chat_data_agent as cda
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CHAT_WITH_DATA_MODEL", raising=False)
+
+    assert cda.resolve_selected_model("claude-sonnet-5") == "claude-sonnet-5"
+    assert cda.resolve_selected_model("gpt-5.5") == "claude-sonnet-5"  # key absent
+    assert cda.resolve_selected_model("evil:model") == "claude-sonnet-5"
+    assert cda.resolve_selected_model(None) == "claude-sonnet-5"
+
+
+def test_default_model_prefers_env_when_offerable(monkeypatch):
+    from ddpui.core.ai.agent import chat_data_agent as cda
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("CHAT_WITH_DATA_MODEL", "gpt-5.5")
+    assert cda.default_model_id() == "gpt-5.5"

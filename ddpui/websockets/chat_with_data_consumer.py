@@ -20,7 +20,11 @@ from django.contrib.auth.models import User
 from rest_framework_simplejwt.tokens import AccessToken
 
 from ddpui.core.ai.chat import sessions as service
-from ddpui.core.ai.agent.chat_data_agent import build_agent
+from ddpui.core.ai.agent.chat_data_agent import (
+    build_agent,
+    get_chat_model,
+    resolve_selected_model,
+)
 from ddpui.core.ai.agent.checkpointer import get_checkpointer
 from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
 from ddpui.core.ai.chat.turn_runner import run_turn
@@ -92,6 +96,9 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             return
 
         question = str(payload["message"]).strip()
+        # user's model pick for this turn; anything not on the allowlist
+        # (or absent) silently falls back to the default — never trust the client
+        model_id = resolve_selected_model(payload.get("model"))
 
         if not self._check_rate_limit():
             await self._send_event(
@@ -109,11 +116,11 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             return
 
         try:
-            await self._run_turn(question)
+            await self._run_turn(question, model_id)
         finally:
             self._release_turn_lock()
 
-    async def _run_turn(self, question: str):
+    async def _run_turn(self, question: str, model_id: str):
         try:
             context = await database_sync_to_async(build_run_context)(self.orguser)
         except ChatWithDataNotReady as err:
@@ -121,7 +128,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             return
 
         checkpointer = await get_checkpointer()
-        agent = build_agent(checkpointer=checkpointer)
+        agent = build_agent(checkpointer=checkpointer, model=get_chat_model(model_id))
 
         final_answer = ""
         async for event in run_turn(
@@ -130,6 +137,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             orguser=self.orguser,
             question=question,
             context=context,
+            model_name=model_id,
         ):
             if event["type"] == "message_complete":
                 final_answer = event.get("message", "")

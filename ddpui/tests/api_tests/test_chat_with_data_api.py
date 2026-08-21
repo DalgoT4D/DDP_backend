@@ -84,7 +84,12 @@ def test_status_requires_llm_consent_then_warehouse_then_ok(orguser, org, seed_d
 
     OrgWarehouse.objects.create(org=org, wtype="postgres")
     response = get_status(mock_request(orguser))
-    assert response["data"] == {"enabled": True, "reason": "ok"}
+    assert response["data"]["enabled"] is True
+    assert response["data"]["reason"] == "ok"
+    # model selector data rides on the status payload
+    assert response["data"]["default_model"]
+    offered = [m["id"] for m in response["data"]["models"]]
+    assert all(isinstance(m, str) for m in offered)
 
 
 # ── Sessions ────────────────────────────────────────────────────────────────

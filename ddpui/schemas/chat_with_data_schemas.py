@@ -6,12 +6,23 @@ from typing import Optional
 from ninja import Schema
 
 
+class ModelOption(Schema):
+    """A model the user may pick in the chat UI."""
+
+    id: str
+    label: str
+
+
 class StatusResponse(Schema):
     """Whether the chat surface is usable for this org, and why not if not."""
 
     enabled: bool
     # feature_disabled | llm_consent_required | no_warehouse | ok
     reason: str
+    # models the user may choose from (empty when disabled); the default is
+    # what runs when they never touch the selector
+    models: list[ModelOption] = []
+    default_model: str | None = None
 
 
 class SessionOut(Schema):

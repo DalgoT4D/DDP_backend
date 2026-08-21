@@ -1,5 +1,6 @@
 """Service layer for Chat with Data sessions and status."""
 
+from ddpui.core.ai.agent.chat_data_agent import available_models, default_model_id
 from ddpui.models.chat_with_data import ChatWithDataSession
 from ddpui.models.org_preferences import OrgPreferences
 from ddpui.models.org import OrgWarehouse
@@ -28,7 +29,12 @@ def get_status(orguser: OrgUser) -> StatusResponse:
     if not OrgWarehouse.objects.filter(org=org).exists():
         return StatusResponse(enabled=False, reason="no_warehouse")
 
-    return StatusResponse(enabled=True, reason="ok")
+    return StatusResponse(
+        enabled=True,
+        reason="ok",
+        models=available_models(),
+        default_model=default_model_id(),
+    )
 
 
 def create_session(orguser: OrgUser) -> ChatWithDataSession:
