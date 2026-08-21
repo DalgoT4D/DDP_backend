@@ -125,6 +125,8 @@ def test_copy_dbt_dag_copies_canvas():
         name="stg_customers",
         output_cols=["id"],
         dbtmodel=src_model,
+        position_x=-120.5,
+        position_y=80.25,
     )
     op_node = CanvasNode.objects.create(
         orgdbt=template_dbt,
@@ -158,6 +160,8 @@ def test_copy_dbt_dag_copies_canvas():
     assert new_op_node.dbtmodel_id is None
     assert new_op_node.operation_config == {"operation_type": "rename"}
     assert new_src_node.uuid != src_node.uuid
+    assert new_src_node.position_x == -120.5
+    assert new_src_node.position_y == 80.25
 
     trial_edges = list(CanvasEdge.objects.filter(from_node__orgdbt=trial_dbt).order_by("seq"))
     assert len(trial_edges) == 2
