@@ -12,10 +12,11 @@ from ddpui.models.canvaslock import CanvasLock
 from ddpui.models.org import OrgDbt, TransformType
 from ddpui.schemas.dbt_workflow_schema import UpdateCanvasLayoutPayload
 from ddpui.tests.api_tests.test_user_org_api import (
-    authuser,
+    # Imported so pytest registers dependencies of the shared orguser fixtures.
+    authuser,  # skipcq: PY-W2000
     mock_request,
     nonadminorguser,
-    org_without_workspace,
+    org_without_workspace,  # skipcq: PY-W2000
     orguser,
     seed_db,
 )

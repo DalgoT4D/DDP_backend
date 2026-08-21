@@ -4,6 +4,8 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    """Store persistent top-left coordinates for UI4T canvas nodes."""
+
     dependencies = [
         ("ddpui", "0176_trialsignup"),
     ]

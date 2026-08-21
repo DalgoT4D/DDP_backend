@@ -63,6 +63,7 @@ CANVAS_LOCK_DURATION = timedelta(minutes=2)
 
 
 def _canvas_lock_response(lock: CanvasLock) -> LockCanvasResponseSchema:
+    """Serialize the backend lock record for the canvas lock API."""
     return LockCanvasResponseSchema(
         lock_token=lock.lock_token,
         expires_at=lock.expires_at.isoformat(),
