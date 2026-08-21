@@ -27,12 +27,13 @@ from ddpui.schemas.dbt_workflow_schema import (
     EditOperationNodePayload,
     TerminateChainAndCreateModelPayload,
 )
-from ddpui.tests.api_tests.test_user_org_api import (
-    # Imported so pytest registers dependencies of the shared orguser fixtures.
-    authuser,  # skipcq: PY-W2000
+
+# authuser and org_without_workspace register dependencies of the shared fixtures.
+from ddpui.tests.api_tests.test_user_org_api import (  # skipcq: PY-W2000
+    authuser,
     mock_request,
     nonadminorguser,
-    org_without_workspace,  # skipcq: PY-W2000
+    org_without_workspace,
     orguser,
     seed_db,
 )
