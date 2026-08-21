@@ -8,11 +8,20 @@ from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 
 class WarehouseFactory:
     @classmethod
-    def connect(cls, creds: dict, wtype: str) -> Warehouse:
+    def connect(cls, creds: dict, wtype: str, org_warehouse_id: int | None = None) -> Warehouse:
+        """
+        Build a warehouse client. Cheap to call per request: the underlying
+        engine and its connection pool are shared per credentials by the engine
+        registry, so only the thin client wrapper is new.
+
+        org_warehouse_id is optional metadata -- it is not part of the engine
+        cache key -- used to attribute pools to an org in logs and to invalidate
+        them when a warehouse is changed or deleted.
+        """
         if wtype == WarehouseType.POSTGRES:
-            return PostgresClient(creds)
+            return PostgresClient(creds, org_warehouse_id=org_warehouse_id)
         elif wtype == WarehouseType.BIGQUERY:
-            return BigqueryClient(creds)
+            return BigqueryClient(creds, org_warehouse_id=org_warehouse_id)
         else:
             raise ValueError("Column type not supported for insights generation")
 
@@ -25,4 +34,4 @@ class WarehouseFactory:
         if not creds:
             raise ValueError("Warehouse credentials not found")
 
-        return cls.connect(creds, org_warehouse.wtype)
+        return cls.connect(creds, org_warehouse.wtype, org_warehouse_id=org_warehouse.id)

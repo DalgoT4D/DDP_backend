@@ -7,6 +7,7 @@ from sqlalchemy_bigquery._types import _type_map
 from sqlalchemy.exc import NoSuchTableError
 
 from ddpui.core.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
+from ddpui.utils.warehouse.client import engine_registry
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 
@@ -15,15 +16,27 @@ _type_map["JSON"] = types.JSON
 
 
 class BigqueryClient(Warehouse):
-    def __init__(self, creds: dict):
+    def __init__(self, creds: dict, org_warehouse_id: int | None = None):
         """
-        Establish connection to the postgres database using sqlalchemy engine
+        Establish connection to the bigquery warehouse using sqlalchemy engine
         Creds come from the secrets manager
+
+        The engine is shared per set of credentials via the engine registry, for
+        the same reason as postgres: one engine per client meant one abandoned
+        pool per request.
         """
+        cache_key = engine_registry.fingerprint(WarehouseType.BIGQUERY, creds)
         connection_string = "bigquery://{project_id}".format(**creds)
 
-        self.engine = create_engine(
-            connection_string, credentials_info=creds, pool_size=5, pool_timeout=30
+        self.engine = engine_registry.get_or_create_engine(
+            cache_key,
+            lambda: create_engine(
+                connection_string,
+                credentials_info=creds,
+                **engine_registry.pool_kwargs(WarehouseType.BIGQUERY),
+            ),
+            wtype=WarehouseType.BIGQUERY,
+            org_warehouse_id=org_warehouse_id,
         )
         self.inspect_obj: Inspector = inspect(
             self.engine
