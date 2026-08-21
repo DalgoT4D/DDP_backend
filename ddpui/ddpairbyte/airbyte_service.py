@@ -363,6 +363,9 @@ def update_source(source_id: str, name: str, config: dict, sourcedef_id: str) ->
             "connectionConfiguration": config,
             "sourceDefinitionId": sourcedef_id,
         },
+        # airbyte re-validates the config against the connector before saving — same 60s the
+        # check_connection calls use, not abreq's 30s default
+        timeout=60,
     )
     if "sourceId" not in res:
         error_message = "Failed to update source: " + res.get("message", json.dumps(res))

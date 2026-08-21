@@ -20,7 +20,7 @@ from django.forms.models import model_to_dict
 
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.ddpairbyte.schema import AirbyteWorkspace
-from ddpui.core.oauth import google_oauth_service, google_service_account
+from ddpui.core.oauth import google_oauth_service
 from ddpui.core.oauth.google_oauth_provider import (
     GSHEETS_SOURCE_NAME,
     get_connector,
@@ -98,41 +98,12 @@ def _build_oauth_source_config(
     the same workspace catalog it got `sourceDefId` from — it is the OAuth registry key."""
     refresh_token = google_oauth_service.redeem_refresh_token_ref(
         orguser, refresh_token_ref, source_name
-    )
+    ).refresh_token
     connector = get_connector(source_name)
     credentials = connector.credentials_builder(
         oauth_client_id(), oauth_client_secret(), refresh_token
     )
     return {**config, "credentials": credentials}
-
-
-def inject_managed_gsheets_credentials(source_def_name: str, config: dict) -> dict:
-    """MANAGED-SA bridge — fill in Dalgo's own Google service-account key for a Google Sheets
-    source that arrived without one. See `core/oauth/google_service_account.py` to remove it.
-
-    `source_def_name` is off the request payload, so this trusts the caller about the connector
-    type. Fine for an internal API; revisit if that changes."""
-    if source_def_name != GSHEETS_SOURCE_NAME:
-        return config
-
-    key = google_service_account.managed_service_account_json()
-    if key is None:
-        return config
-
-    # A pasted key is the bring-your-own-key option — only fill an empty slot. No Client
-    # (OAuth) guard needed: sign-in is unreleased, so no saved source carries one.
-    credentials = config.get(google_service_account.CREDENTIALS_KEY) or {}
-    if credentials.get(google_service_account.SERVICE_INFO_KEY):
-        return config
-
-    logger.info("using the dalgo-managed google service account for this google sheets source")
-    return {
-        **config,
-        google_service_account.CREDENTIALS_KEY: {
-            google_service_account.AUTH_TYPE_KEY: google_service_account.SERVICE_AUTH_TYPE,
-            google_service_account.SERVICE_INFO_KEY: key,
-        },
-    }
 
 
 def create_oauth_source(orguser: OrgUser, payload: SourceGoogleOAuthCreate) -> dict:
