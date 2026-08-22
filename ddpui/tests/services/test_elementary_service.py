@@ -697,6 +697,20 @@ def test_get_edr_version_success(mock_check_output, mock_gather_dbt_project_para
     assert response == "1"
 
 
+def test_get_dbt_version_no_dbt():
+    """get_dbt_version returns None without calling gather_dbt_project_params when org.dbt is None"""
+    org_without_dbt = Mock(dbt=None)
+    response = get_dbt_version(org_without_dbt)
+    assert response is None
+
+
+def test_get_edr_version_no_dbt():
+    """get_edr_version returns None without calling gather_dbt_project_params when org.dbt is None"""
+    org_without_dbt = Mock(dbt=None)
+    response = get_edr_version(org_without_dbt)
+    assert response is None
+
+
 @patch("ddpui.ddpdbt.elementary_service.DbtProjectManager.gather_dbt_project_params")
 @patch("ddpui.ddpdbt.elementary_service.setup_edr_send_report_task_config")
 @patch("ddpui.ddpdbt.elementary_service.generate_hash_id")
