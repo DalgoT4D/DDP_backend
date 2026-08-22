@@ -36,11 +36,18 @@ from ddpui.api.admin_api import (
     get_admin_org_user_removal_impact,
     delete_admin_org_user,
     delete_admin_org_invitation,
+    get_admin_flags_catalog,
+    get_admin_org_flags,
+    put_admin_org_flag,
+    delete_admin_org_flag,
+    put_admin_bulk_flag,
     admin_router,
     get_admin_currentuser,
     AdminCreateOrgSchema,
     AdminUpdateOrgSchema,
     AdminChangeRoleSchema,
+    AdminSetOrgFlagSchema,
+    AdminBulkSetFlagSchema,
 )
 from ddpui.services.org_cleanup_service import OrgCleanupServiceError
 from ddpui.routes import drf_authentication_failed_handler
@@ -962,3 +969,122 @@ def test_v2_login_bad_credentials_maps_to_401_not_500():
     # the handler registered in routes.py turns that exception into a 401 response
     response = drf_authentication_failed_handler(mock_request(), excinfo.value)
     assert response.status_code == 401
+
+
+# ======================= Feature flags tab (M3) ===============================
+
+
+def test_admin_flags_catalog_forbidden_for_non_platform_admin(orguser):
+    """the catalog route is gated too — non-admin gets 403"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_flags_catalog(request)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_flags_catalog_lists_the_registry(platform_admin_request):
+    """the catalog is the FEATURE_FLAGS registry, one entry per flag"""
+    response = get_admin_flags_catalog(platform_admin_request)
+    flag_names = {item.flag_name for item in response}
+    assert "REPORTS" in flag_names
+    assert "DATA_QUALITY" in flag_names
+    reports_item = next(item for item in response if item.flag_name == "REPORTS")
+    assert reports_item.description  # non-empty description carried through
+
+
+def test_admin_get_org_flags_forbidden_for_non_platform_admin(orguser, org):
+    """reading an org's flags is gated too"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_org_flags(request, org.id)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_get_org_flags_defaults_all_off(platform_admin_request, org):
+    """with no rows at all, every registry flag reads as off"""
+    response = get_admin_org_flags(platform_admin_request, org.id)
+    assert response["REPORTS"] is False
+
+
+def test_admin_put_org_flag_turns_it_on(platform_admin_request, org):
+    """PUT enabled=True turns a flag on for this org only"""
+    response = put_admin_org_flag(
+        platform_admin_request, org.id, "REPORTS", AdminSetOrgFlagSchema(enabled=True)
+    )
+    assert response["REPORTS"] is True
+
+    other_org = Org.objects.create(name="flags-other-org", slug="flags-other-org")
+    unaffected = get_admin_org_flags(platform_admin_request, other_org.id)
+    assert unaffected["REPORTS"] is False
+    other_org.delete()
+
+
+def test_admin_put_org_flag_unknown_name_is_400(platform_admin_request, org):
+    """an unknown flag_name is rejected before anything is written"""
+    with pytest.raises(HttpError) as excinfo:
+        put_admin_org_flag(
+            platform_admin_request, org.id, "NOT_A_REAL_FLAG", AdminSetOrgFlagSchema(enabled=True)
+        )
+    assert excinfo.value.status_code == 400
+
+
+def test_admin_delete_org_flag_clears_the_override(platform_admin_request, org):
+    """DELETE clears the org's override, falling back to the (off) global default"""
+    put_admin_org_flag(
+        platform_admin_request, org.id, "REPORTS", AdminSetOrgFlagSchema(enabled=True)
+    )
+    response = delete_admin_org_flag(platform_admin_request, org.id, "REPORTS")
+    assert response["REPORTS"] is False
+
+
+def test_admin_bulk_flag_unknown_name_is_400(platform_admin_request, org):
+    """flag_name is validated once for the whole bulk request, before any org is touched"""
+    with pytest.raises(HttpError) as excinfo:
+        put_admin_bulk_flag(
+            platform_admin_request,
+            "NOT_A_REAL_FLAG",
+            AdminBulkSetFlagSchema(org_ids=[org.id], enabled=True),
+        )
+    assert excinfo.value.status_code == 400
+
+
+def test_admin_bulk_flag_mixed_success_and_failure(platform_admin_request, org):
+    """a nonexistent org_id in the batch fails on its own; valid orgs still succeed —
+    the whole point of best-effort over all-or-nothing (plan.md §2, §4.3)"""
+    other_org = Org.objects.create(name="flags-bulk-org", slug="flags-bulk-org")
+    nonexistent_id = 9999999
+
+    response = put_admin_bulk_flag(
+        platform_admin_request,
+        "REPORTS",
+        AdminBulkSetFlagSchema(org_ids=[org.id, other_org.id, nonexistent_id], enabled=True),
+    )
+
+    results_by_org = {item.org_id: item.success for item in response}
+    assert results_by_org == {org.id: True, other_org.id: True, nonexistent_id: False}
+    assert get_admin_org_flags(platform_admin_request, org.id)["REPORTS"] is True
+    assert get_admin_org_flags(platform_admin_request, other_org.id)["REPORTS"] is True
+    other_org.delete()
+
+
+def test_admin_bulk_flag_result_has_no_message_field(platform_admin_request):
+    """the failure shape is generic — {org_id, success} only, so a bulk request can
+    never be used to tell a nonexistent org apart from any other failure (plan.md §5)"""
+    response = put_admin_bulk_flag(
+        platform_admin_request,
+        "REPORTS",
+        AdminBulkSetFlagSchema(org_ids=[9999999], enabled=True),
+    )
+    assert len(response) == 1
+    assert response[0].success is False
+    assert set(response[0].dict().keys()) == {"org_id", "success"}
+
+
+def test_admin_bulk_flag_forbidden_for_non_platform_admin(orguser, org):
+    """the bulk route is gated too — non-admin gets 403"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        put_admin_bulk_flag(
+            request, "REPORTS", AdminBulkSetFlagSchema(org_ids=[org.id], enabled=True)
+        )
+    assert excinfo.value.status_code == 403

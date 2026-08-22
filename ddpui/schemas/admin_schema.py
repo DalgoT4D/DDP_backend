@@ -161,6 +161,41 @@ class RemovalImpactSchema(Schema):
     reports_orphaned: int
 
 
+# ── Feature flags tab (M3) ───────────────────────────────────────────────────
+
+
+class AdminFeatureFlagCatalogItem(Schema):
+    """one entry in the fixed FEATURE_FLAGS registry"""
+
+    flag_name: str
+    description: str
+
+
+class AdminSetOrgFlagSchema(Schema):
+    """payload to turn one flag on/off for a single org"""
+
+    enabled: bool
+
+
+class AdminBulkSetFlagSchema(Schema):
+    """payload to turn one flag on/off for several orgs at once"""
+
+    org_ids: List[int]
+    enabled: bool
+
+
+class AdminBulkFlagResultItem(Schema):
+    """
+    one org's outcome from a bulk flag set. Deliberately success-only -- no message
+    field -- so a failed org_id can never be told apart from a different failure
+    cause (e.g. "doesn't exist" vs "write failed") by whoever reads the response
+    (plan.md §5: the bulk endpoint must not become an org-existence oracle).
+    """
+
+    org_id: int
+    success: bool
+
+
 class OrgDeletionImpactSchema(Schema):
     """
     what deleting an org would destroy. Drives the confirm dialog's warning.

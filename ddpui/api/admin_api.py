@@ -3,7 +3,7 @@ Admin Portal API — cross-org endpoints for the Dalgo ops team, gated by
 @platform_admin_required rather than per-org permission slugs.
 """
 
-from typing import List
+from typing import Dict, List
 
 from ninja import Router
 from ninja.errors import HttpError
@@ -29,6 +29,10 @@ from ddpui.schemas.admin_schema import (
     AdminChangeRoleSchema,
     RemovalImpactSchema,
     OrgDeletionImpactSchema,
+    AdminFeatureFlagCatalogItem,
+    AdminSetOrgFlagSchema,
+    AdminBulkSetFlagSchema,
+    AdminBulkFlagResultItem,
 )
 from ddpui.core.admin import admin_service
 from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
@@ -272,3 +276,59 @@ def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
     admin_service.delete_invitation(invitation)
     logger.info(f"admin cancelled invitation {invitation_id} in org {org.slug}")
     return {"success": 1}
+
+
+# ======================= Feature flags tab (M3) ==============================
+# Per-org and multi-org on/off. OrgFeatureFlag is reused as-is (no new model); the
+# new work here is these admin-facing HTTP routes on top of the existing
+# enable/disable_feature_flag primitives (utils/feature_flags.py).
+
+
+@admin_router.get("/flags/catalog", response=List[AdminFeatureFlagCatalogItem])
+@platform_admin_required
+def get_admin_flags_catalog(request):
+    """The fixed FEATURE_FLAGS registry, so the frontend renders from one source of
+    truth instead of a hand-maintained TS enum."""
+    return admin_service.get_flag_catalog()
+
+
+@admin_router.get("/orgs/{org_id}/flags", response=Dict[str, bool])
+@platform_admin_required
+def get_admin_org_flags(request, org_id: int):
+    """All flags for this org: global default merged with any org-specific override."""
+    org = _get_org_or_404(org_id)
+    return admin_service.get_org_flags(org)
+
+
+@admin_router.put("/orgs/{org_id}/flags/{flag_name}", response=Dict[str, bool])
+@platform_admin_required
+def put_admin_org_flag(request, org_id: int, flag_name: str, payload: AdminSetOrgFlagSchema):
+    """Turn one flag on/off for a single org."""
+    org = _get_org_or_404(org_id)
+    result = admin_service.set_org_flag(org, flag_name, payload.enabled)
+    if result is None:
+        raise HttpError(400, f"unknown flag_name: {flag_name}")
+    return admin_service.get_org_flags(org)
+
+
+@admin_router.delete("/orgs/{org_id}/flags/{flag_name}", response=Dict[str, bool])
+@platform_admin_required
+def delete_admin_org_flag(request, org_id: int, flag_name: str):
+    """Clear this org's override for a flag, falling back to the global default."""
+    org = _get_org_or_404(org_id)
+    result = admin_service.clear_org_flag(org, flag_name)
+    if result is None:
+        raise HttpError(400, f"unknown flag_name: {flag_name}")
+    return admin_service.get_org_flags(org)
+
+
+@admin_router.put("/flags/{flag_name}/orgs", response=List[AdminBulkFlagResultItem])
+@platform_admin_required
+def put_admin_bulk_flag(request, flag_name: str, payload: AdminBulkSetFlagSchema):
+    """Turn one flag on/off for several selected orgs at once. flag_name is validated
+    once, up front, for the whole request; each org_id then succeeds or fails on its
+    own (best-effort, not all-or-nothing) -- see admin_service.bulk_set_org_flags."""
+    results = admin_service.bulk_set_org_flags(flag_name, payload.org_ids, payload.enabled)
+    if results is None:
+        raise HttpError(400, f"unknown flag_name: {flag_name}")
+    return [AdminBulkFlagResultItem(**result) for result in results]

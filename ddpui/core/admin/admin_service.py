@@ -18,11 +18,23 @@ from ddpui.models.tasks import OrgTask, OrgDataFlowv1
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
-from ddpui.schemas.admin_schema import AdminCreateOrgSchema, AdminUpdateOrgSchema
+from ddpui.schemas.admin_schema import (
+    AdminCreateOrgSchema,
+    AdminUpdateOrgSchema,
+    AdminFeatureFlagCatalogItem,
+)
 from ddpui.core import orgfunctions, orguserfunctions
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.services.org_cleanup_service import OrgCleanupService, OrgCleanupServiceError
 from ddpui.utils.custom_logger import CustomLogger
+from ddpui.utils.feature_flags import (
+    FEATURE_FLAGS,
+    enable_feature_flag,
+    disable_feature_flag,
+    clear_org_flag as _clear_org_flag_row,
+    get_all_feature_flags_for_org,
+    bulk_set_feature_flag,
+)
 
 logger = CustomLogger("ddpui.core.admin")
 
@@ -215,3 +227,43 @@ def removal_impact(orguser: OrgUser) -> Tuple[int, int, int]:
         Chart.objects.filter(created_by=orguser).count(),
         ReportSnapshot.objects.filter(created_by=orguser).count(),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Feature flags tab (M3) -- per-org and multi-org on/off
+# --------------------------------------------------------------------------- #
+
+
+def get_flag_catalog() -> List[AdminFeatureFlagCatalogItem]:
+    """The fixed FEATURE_FLAGS registry, served as the catalog the frontend renders
+    instead of a hand-maintained TS enum."""
+    return [
+        AdminFeatureFlagCatalogItem(flag_name=name, description=description)
+        for name, description in FEATURE_FLAGS.items()
+    ]
+
+
+def get_org_flags(org: Org) -> dict:
+    """All flags for this org: global default merged with any org-specific override."""
+    return get_all_feature_flags_for_org(org)
+
+
+def set_org_flag(org: Org, flag_name: str, enabled: bool) -> Optional[bool]:
+    """Turn one flag on/off for a single org. None if flag_name is not in the registry."""
+    if enabled:
+        return enable_feature_flag(flag_name, org)
+    return disable_feature_flag(flag_name, org)
+
+
+def clear_org_flag(org: Org, flag_name: str) -> Optional[bool]:
+    """Clear this org's override for a flag, falling back to the global default. None
+    if flag_name is not in the registry."""
+    return _clear_org_flag_row(flag_name, org)
+
+
+def bulk_set_org_flags(flag_name: str, org_ids: List[int], enabled: bool) -> Optional[List[dict]]:
+    """Turn one flag on/off for several orgs at once. None if flag_name is not in the
+    registry -- validated once, up front, never a per-org concern."""
+    if flag_name not in FEATURE_FLAGS:
+        return None
+    return bulk_set_feature_flag(flag_name, org_ids, enabled)
