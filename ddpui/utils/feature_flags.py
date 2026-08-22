@@ -1,3 +1,4 @@
+from typing import List
 from django.db.models import Q
 from ddpui.models.org import OrgFeatureFlag, Org
 
@@ -101,6 +102,56 @@ def get_all_feature_flags_for_org(org: Org = None) -> dict:
             org_flags[flag.flag_name] = flag.flag_value
 
     return {**global_flags, **org_flags}
+
+
+def clear_org_flag(flag_name: str, org: Org = None) -> bool:
+    """
+    Delete the org's (or global) row for this flag, removing the override entirely
+    rather than writing it False. After this, get_all_feature_flags_for_org falls
+    back to the global default (or False if no global row exists either).
+
+    Returns:
+        True if the flag_name is valid (whether or not a row existed to delete)
+        None if the flag_name is not in the allowed feature list
+    """
+    if flag_name not in FEATURE_FLAGS.keys():
+        return None
+
+    OrgFeatureFlag.objects.filter(org=org, flag_name=flag_name).delete()
+    return True
+
+
+def bulk_set_feature_flag(flag_name: str, org_ids: List[int], enabled: bool) -> List[dict]:
+    """
+    Apply the same on/off change to many orgs in one call. Best-effort, not
+    @transaction.atomic: one org's failure does not roll back or block the others
+    (mirrors the per-recipient loop in notifications_functions.create_notification,
+    the only other bulk-write-across-many-entities precedent in this codebase).
+
+    Every result is exactly {"org_id": ..., "success": bool} -- deliberately no
+    message field, so a failed org_id can never be told apart from a different
+    failure cause (e.g. "doesn't exist" vs "write raised") by whoever reads the
+    response (plan.md §5: the bulk endpoint must not become an org-existence oracle).
+
+    Assumes flag_name has already been validated by the caller -- this loops orgs,
+    not flags, and a bad flag_name is a single 400 for the whole request, not a
+    per-org concern.
+    """
+    results = []
+    for org_id in org_ids:
+        try:
+            org = Org.objects.get(id=org_id)
+            ok = (
+                enable_feature_flag(flag_name, org)
+                if enabled
+                else disable_feature_flag(flag_name, org)
+            )
+            results.append({"org_id": org_id, "success": bool(ok)})
+        except Exception:  # pylint: disable=broad-except
+            # deliberately broad + deliberately swallowed: Org.DoesNotExist and any other
+            # per-org failure collapse to the same generic {success: False} (see docstring)
+            results.append({"org_id": org_id, "success": False})
+    return results
 
 
 def enable_all_global_feature_flags() -> dict:

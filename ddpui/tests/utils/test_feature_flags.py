@@ -7,6 +7,8 @@ from ddpui.utils.feature_flags import (
     disable_feature_flag,
     is_feature_flag_enabled,
     get_all_feature_flags_for_org,
+    clear_org_flag,
+    bulk_set_feature_flag,
 )
 
 pytestmark = pytest.mark.django_db
@@ -124,3 +126,46 @@ class TestFeatureFlags(TestCase):
 
         # Clean up
         org2.delete()
+
+    def test_clear_org_flag_removes_the_override(self):
+        """clear_org_flag deletes the org's row entirely, leaving no override at all"""
+        enable_feature_flag("DATA_QUALITY", org=self.org)
+        self.assertTrue(
+            OrgFeatureFlag.objects.filter(org=self.org, flag_name="DATA_QUALITY").exists()
+        )
+
+        result = clear_org_flag("DATA_QUALITY", org=self.org)
+
+        self.assertTrue(result)
+        self.assertFalse(
+            OrgFeatureFlag.objects.filter(org=self.org, flag_name="DATA_QUALITY").exists()
+        )
+
+    def test_clear_org_flag_invalid_name_returns_none(self):
+        """an unknown flag_name is rejected, same as enable/disable, and touches no rows"""
+        result = clear_org_flag("NOT_A_REAL_FLAG", org=self.org)
+        self.assertIsNone(result)
+
+    def test_bulk_set_feature_flag_mixed_success_and_failure(self):
+        """valid orgs succeed independently of a nonexistent org_id in the same request —
+        best-effort, not all-or-nothing (plan.md §4.3)"""
+        org2 = Org.objects.create(name="Test Org 2", slug="test-org-2")
+        nonexistent_id = 999999
+
+        results = bulk_set_feature_flag(
+            "DATA_QUALITY", [self.org.id, org2.id, nonexistent_id], True
+        )
+
+        results_by_org = {r["org_id"]: r["success"] for r in results}
+        self.assertEqual(results_by_org, {self.org.id: True, org2.id: True, nonexistent_id: False})
+        self.assertTrue(is_feature_flag_enabled("DATA_QUALITY", org=self.org))
+        self.assertTrue(is_feature_flag_enabled("DATA_QUALITY", org=org2))
+
+        org2.delete()
+
+    def test_bulk_set_feature_flag_failure_shape_is_generic(self):
+        """every result is exactly {org_id, success} -- no message field, so a failed
+        org_id can never be told apart from a different failure cause (plan.md §5)"""
+        results = bulk_set_feature_flag("DATA_QUALITY", [999999], True)
+        self.assertEqual(results, [{"org_id": 999999, "success": False}])
+        self.assertEqual(set(results[0].keys()), {"org_id", "success"})
