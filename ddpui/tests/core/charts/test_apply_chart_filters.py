@@ -110,3 +110,49 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    def test_empty_string_value_skipped(self):
+        """Filters with empty string values are silently skipped"""
+        for operator in [
+            "greater_than",
+            "less_than",
+            "greater_than_equal",
+            "less_than_equal",
+            "equals",
+            "not_equals",
+            "like",
+            "like_case_insensitive",
+            "contains",
+            "not_contains",
+        ]:
+            sql = get_where_sql([make_filter("date_col", operator, "", "date")])
+            assert len(sql) == 0, f"operator={operator} should skip empty value"
+
+    def test_whitespace_only_value_skipped(self):
+        """Filters with whitespace-only values are silently skipped"""
+        sql = get_where_sql([make_filter("date_col", "greater_than", "   ", "date")])
+        assert len(sql) == 0
+
+    def test_none_value_skipped(self):
+        """Filters with None values are silently skipped"""
+        sql = get_where_sql([make_filter("date_col", "greater_than", None, "date")])
+        assert len(sql) == 0
+
+    def test_empty_value_skipped_with_valid_filters_kept(self):
+        """Empty-value filters are skipped but valid filters still apply"""
+        filters = [
+            make_filter("date_col", "greater_than", "", "date"),
+            make_filter("status", "equals", "active"),
+        ]
+        sql = get_where_sql(filters)
+        assert len(sql) == 1
+        assert "active" in sql[0]
+
+    def test_null_operators_still_work_with_empty_value(self):
+        """is_null and is_not_null must not be skipped even with empty/None values"""
+        for value in ["", None, "   "]:
+            for operator in ["is_null", "is_not_null"]:
+                sql = get_where_sql([make_filter("date_col", operator, value, "date")])
+                assert len(sql) == 1, (
+                    f"operator={operator} with value={value!r} should NOT be skipped"
+                )

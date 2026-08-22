@@ -836,6 +836,12 @@ def apply_chart_filters(
         if not column_name or operator is None:
             continue
 
+        # Skip filters with empty/blank values (except is_null/is_not_null which don't use values)
+        if operator not in ("is_null", "is_not_null"):
+            value = filter_config.get("value")
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                continue
+
         # Timestamp date filters need day-range logic — keep full config
         if operator in ("equals", "not_equals") and _is_timestamp_date(filter_config):
             single_filters.append(filter_config)
