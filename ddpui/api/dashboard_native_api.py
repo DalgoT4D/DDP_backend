@@ -74,7 +74,18 @@ def list_dashboards(
         is_published=is_published,
     )
 
-    return [DashboardResponse(**DashboardService.get_dashboard_response(d)) for d in dashboards]
+    favorited_dashboard_ids = DashboardService.get_favorited_dashboard_ids(
+        [d.id for d in dashboards], orguser
+    )
+
+    return [
+        DashboardResponse(
+            **DashboardService.get_dashboard_response(
+                d, is_favorite=d.id in favorited_dashboard_ids
+            )
+        )
+        for d in dashboards
+    ]
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)
@@ -739,3 +750,35 @@ def resolve_user_landing_page(request):
 
     # 3. No landing page set
     return {"dashboard_id": None, "dashboard_title": None, "dashboard_type": None, "source": "none"}
+
+
+@dashboard_native_router.post("/{dashboard_id}/favorite/", response=dict)
+@has_permission(["can_view_dashboards"])
+def favorite_dashboard(request, dashboard_id: int):
+    """Mark a dashboard as favorited by the current user"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        DashboardService.favorite_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    except DashboardPermissionError as err:
+        raise HttpError(403, err.message) from err
+
+    return {"is_favorite": True}
+
+
+@dashboard_native_router.delete("/{dashboard_id}/favorite/", response=dict)
+@has_permission(["can_view_dashboards"])
+def unfavorite_dashboard(request, dashboard_id: int):
+    """Remove the current user's favorite on a dashboard"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        DashboardService.unfavorite_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+    except DashboardPermissionError as err:
+        raise HttpError(403, err.message) from err
+
+    return {"is_favorite": False}

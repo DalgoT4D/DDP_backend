@@ -40,6 +40,8 @@ from ddpui.api.dashboard_native_api import (
     delete_filter,
     toggle_dashboard_sharing,
     get_dashboard_sharing_status,
+    favorite_dashboard,
+    unfavorite_dashboard,
     set_personal_landing_dashboard,
     set_org_default_dashboard,
 )
@@ -272,6 +274,90 @@ class TestGetDashboard:
         other_orguser.delete()
         other_user.delete()
         other_org.delete()
+
+
+def _dashboard_is_favorite(request, dashboard_id):
+    """is_favorite is only computed on list_dashboards (the only consumer); look it up there."""
+    response = list_dashboards(request)
+    return next(d for d in response if d.id == dashboard_id).is_favorite
+
+
+class TestFavoriteDashboard:
+    """Tests for favorite_dashboard / unfavorite_dashboard endpoints"""
+
+    def test_favorite_dashboard_success(self, orguser, sample_dashboard, seed_db):
+        """Favoriting a dashboard returns is_favorite=True and is reflected on list_dashboards"""
+        request = mock_request(orguser)
+
+        response = favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": True}
+        assert _dashboard_is_favorite(request, sample_dashboard.id) is True
+
+    def test_favorite_dashboard_idempotent(self, orguser, sample_dashboard, seed_db):
+        """Favoriting an already-favorited dashboard doesn't error or duplicate"""
+        request = mock_request(orguser)
+
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+        response = favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": True}
+
+    def test_unfavorite_dashboard_success(self, orguser, sample_dashboard, seed_db):
+        """Unfavoriting a dashboard returns is_favorite=False and is reflected on list_dashboards"""
+        request = mock_request(orguser)
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        response = unfavorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": False}
+        assert _dashboard_is_favorite(request, sample_dashboard.id) is False
+
+    def test_unfavorite_dashboard_not_favorited(self, orguser, sample_dashboard, seed_db):
+        """Unfavoriting a dashboard that was never favorited is a no-op, not an error"""
+        request = mock_request(orguser)
+
+        response = unfavorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert response == {"is_favorite": False}
+
+    def test_favorite_dashboard_not_found(self, orguser, seed_db):
+        """Favoriting a non-existent dashboard returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            favorite_dashboard(request, dashboard_id=99999)
+
+        assert excinfo.value.status_code == 404
+
+    def test_favorite_is_per_user(self, orguser, sample_dashboard, org, seed_db):
+        """One user's favorite has no effect on another user's view of the same dashboard"""
+        other_user = User.objects.create(username="otherfavuser", email="otherfav@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+
+        favorite_dashboard(mock_request(orguser), dashboard_id=sample_dashboard.id)
+
+        assert _dashboard_is_favorite(mock_request(orguser), sample_dashboard.id) is True
+        assert _dashboard_is_favorite(mock_request(other_orguser), sample_dashboard.id) is False
+
+        # Cleanup
+        other_orguser.delete()
+        other_user.delete()
+
+    def test_list_dashboards_reflects_favorite(self, orguser, sample_dashboard, seed_db):
+        """list_dashboards marks only the favorited dashboard as is_favorite"""
+        request = mock_request(orguser)
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        response = list_dashboards(request)
+
+        favorited = [d for d in response if d.id == sample_dashboard.id]
+        assert len(favorited) == 1
+        assert favorited[0].is_favorite is True
 
 
 # ================================================================================

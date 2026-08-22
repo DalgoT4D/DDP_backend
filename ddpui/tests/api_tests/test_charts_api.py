@@ -37,6 +37,8 @@ from ddpui.api.charts_api import (
     bulk_delete_charts,
     get_chart_dashboards,
     get_chart_data,
+    favorite_chart,
+    unfavorite_chart,
     download_chart_data_csv,
     BulkDeleteRequest,
 )
@@ -634,6 +636,90 @@ class TestGetChartDashboards:
             get_chart_dashboards(request, chart_id=99999)
 
         assert excinfo.value.status_code == 404
+
+
+def _chart_is_favorite(request, chart_id):
+    """is_favorite is only computed on list_charts (the only consumer); look it up there."""
+    response = list_charts(request)
+    return next(c for c in response.data if c.id == chart_id).is_favorite
+
+
+class TestFavoriteChart:
+    """Tests for favorite_chart / unfavorite_chart endpoints"""
+
+    def test_favorite_chart_success(self, orguser, sample_chart, seed_db):
+        """Favoriting a chart returns is_favorite=True and is reflected on list_charts"""
+        request = mock_request(orguser)
+
+        response = favorite_chart(request, chart_id=sample_chart.id)
+
+        assert response == {"is_favorite": True}
+        assert _chart_is_favorite(request, sample_chart.id) is True
+
+    def test_favorite_chart_idempotent(self, orguser, sample_chart, seed_db):
+        """Favoriting an already-favorited chart doesn't error or duplicate"""
+        request = mock_request(orguser)
+
+        favorite_chart(request, chart_id=sample_chart.id)
+        response = favorite_chart(request, chart_id=sample_chart.id)
+
+        assert response == {"is_favorite": True}
+
+    def test_unfavorite_chart_success(self, orguser, sample_chart, seed_db):
+        """Unfavoriting a chart returns is_favorite=False and is reflected on list_charts"""
+        request = mock_request(orguser)
+        favorite_chart(request, chart_id=sample_chart.id)
+
+        response = unfavorite_chart(request, chart_id=sample_chart.id)
+
+        assert response == {"is_favorite": False}
+        assert _chart_is_favorite(request, sample_chart.id) is False
+
+    def test_unfavorite_chart_not_favorited(self, orguser, sample_chart, seed_db):
+        """Unfavoriting a chart that was never favorited is a no-op, not an error"""
+        request = mock_request(orguser)
+
+        response = unfavorite_chart(request, chart_id=sample_chart.id)
+
+        assert response == {"is_favorite": False}
+
+    def test_favorite_chart_not_found(self, orguser, seed_db):
+        """Favoriting a non-existent chart returns 404"""
+        request = mock_request(orguser)
+
+        with pytest.raises(HttpError) as excinfo:
+            favorite_chart(request, chart_id=99999)
+
+        assert excinfo.value.status_code == 404
+
+    def test_favorite_is_per_user(self, orguser, sample_chart, org, seed_db):
+        """One user's favorite has no effect on another user's view of the same chart"""
+        other_user = User.objects.create(username="otherfavuser", email="otherfav@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+
+        favorite_chart(mock_request(orguser), chart_id=sample_chart.id)
+
+        assert _chart_is_favorite(mock_request(orguser), sample_chart.id) is True
+        assert _chart_is_favorite(mock_request(other_orguser), sample_chart.id) is False
+
+        # Cleanup
+        other_orguser.delete()
+        other_user.delete()
+
+    def test_list_charts_reflects_favorite(self, orguser, sample_chart, seed_db):
+        """list_charts marks only the favorited chart as is_favorite"""
+        request = mock_request(orguser)
+        favorite_chart(request, chart_id=sample_chart.id)
+
+        response = list_charts(request)
+
+        favorited = [c for c in response.data if c.id == sample_chart.id]
+        assert len(favorited) == 1
+        assert favorited[0].is_favorite is True
 
 
 # ================================================================================

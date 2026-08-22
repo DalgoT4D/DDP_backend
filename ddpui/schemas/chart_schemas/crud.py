@@ -71,6 +71,7 @@ class ChartResponse(Schema):
     extra_config: dict
     created_at: datetime
     updated_at: datetime
+    is_favorite: bool = False
 
 
 class ChartConfig(Schema):

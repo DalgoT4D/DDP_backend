@@ -4,16 +4,18 @@ This module encapsulates all chart-related business logic,
 separating it from the API layer for better testability and maintainability.
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass
 
 from django.db.models import Q
 
 from ddpui.core.ownership import can_delete_resource
 from ddpui.models.visualization import Chart
+from ddpui.models.favorite import FavoriteResourceType
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
+from ddpui.services.favorite_service import FavoriteService
 from ddpui.utils.custom_logger import CustomLogger
 
 logger = CustomLogger("ddpui.chart_service")
@@ -342,3 +344,46 @@ class ChartService:
                     break
 
         return dashboards_with_chart
+
+    @staticmethod
+    def favorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
+        """Mark a chart as favorited by this user.
+
+        Args:
+            chart_id: The chart ID
+            org: The organization
+            orguser: The user favoriting the chart
+
+        Raises:
+            ChartNotFoundError: If chart doesn't exist or doesn't belong to org
+        """
+        ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
+        FavoriteService.add_favorite(FavoriteResourceType.CHART, chart_id, orguser)
+
+    @staticmethod
+    def unfavorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
+        """Remove this user's favorite on a chart, if any.
+
+        Args:
+            chart_id: The chart ID
+            org: The organization
+            orguser: The user unfavoriting the chart
+
+        Raises:
+            ChartNotFoundError: If chart doesn't exist or doesn't belong to org
+        """
+        ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
+        FavoriteService.remove_favorite(FavoriteResourceType.CHART, chart_id, orguser)
+
+    @staticmethod
+    def get_favorited_chart_ids(chart_ids: List[int], orguser: OrgUser) -> Set[int]:
+        """Return the subset of chart_ids this user has favorited.
+
+        Args:
+            chart_ids: Chart IDs to check
+            orguser: The user whose favorites to look up
+
+        Returns:
+            Set of chart IDs favorited by this user
+        """
+        return FavoriteService.get_favorited_ids(FavoriteResourceType.CHART, chart_ids, orguser)
