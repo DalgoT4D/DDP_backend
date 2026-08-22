@@ -887,6 +887,8 @@ def get_flow_runs_logsummary_v1(
     """
     Use llms to summarize logs
     """
+    if job_id <= 0:
+        raise HttpError(400, "Invalid job ID")
     try:
         orguser: OrgUser = request.orguser
 
@@ -922,6 +924,8 @@ def get_job_logs(
     attempt_number: int,
 ):
     """get the log info from airbyte for a job attempt"""
+    if job_id <= 0:
+        raise HttpError(400, "Invalid job ID")
     try:
         log_lines = airbyte_service.get_logs_for_job(job_id, attempt_number)
     except Exception as error:
