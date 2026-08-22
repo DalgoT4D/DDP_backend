@@ -666,13 +666,21 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         if "metrics" not in payload and chart.extra_config.get("metrics"):
             # Transform metrics to use 'value' alias (same as private API)
             original_metrics = chart.extra_config["metrics"]
-            payload["metrics"] = [
-                {
-                    "column": original_metrics[0]["column"],
-                    "aggregation": original_metrics[0]["aggregation"],
-                    "alias": "value",  # Force alias to 'value' like private API
-                }
-            ]
+            if original_metrics[0].get("column_expression"):
+                payload["metrics"] = [
+                    {
+                        "column_expression": original_metrics[0]["column_expression"],
+                        "alias": "value",  # Force alias to 'value' like private API
+                    }
+                ]
+            else:
+                payload["metrics"] = [
+                    {
+                        "column": original_metrics[0]["column"],
+                        "aggregation": original_metrics[0]["aggregation"],
+                        "alias": "value",  # Force alias to 'value' like private API
+                    }
+                ]
         elif "metrics" not in payload:
             # Fallback: create a metric from value_column and aggregate_function
             payload["metrics"] = [
@@ -692,13 +700,16 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
                 map_payload.schema_name,
                 map_payload.table_name,
                 map_payload.geographic_column,
-                map_payload.value_column,
             ]
         ):
             raise Exception("Missing required fields for map data")
 
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
+
+        # value_column is a legacy simple-metric field, not populated for calculated metrics
+        if not map_payload.value_column and not map_payload.metrics[0].column_expression:
+            raise Exception("Missing required field: value_column")
 
         # Use same logic as authenticated API
         extra_config = copy.deepcopy(map_payload.extra_config or {})
@@ -1403,13 +1414,16 @@ def get_public_report_map_data(request, token: str):
                 map_payload.schema_name,
                 map_payload.table_name,
                 map_payload.geographic_column,
-                map_payload.value_column,
             ]
         ):
             raise Exception("Missing required fields for map data")
 
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
+
+        # value_column is a legacy simple-metric field, not populated for calculated metrics
+        if not map_payload.value_column and not map_payload.metrics[0].column_expression:
+            raise Exception("Missing required field: value_column")
 
         extra_config = copy.deepcopy(map_payload.extra_config or {})
 
