@@ -29,7 +29,7 @@ class TestNormalizeDimensions:
         assert dims == ["dim1", "dim-2", "dim 3"]
 
     def test_normalize_dimensions_table_chart_no_dimensions(self):
-        """Test that table charts without dimensions array return empty list"""
+        """Test that table charts without dimensions array fall back to dimension_col + extra_dimension"""
         payload = ChartDataPayload(
             chart_type="table",
             schema_name="test_schema",
@@ -38,7 +38,7 @@ class TestNormalizeDimensions:
             extra_dimension="dim 2",
         )
         dims = normalize_dimensions(payload)
-        assert dims == []
+        assert dims == ["dim-1", "dim 2"]
 
     def test_normalize_dimensions_bar_chart(self):
         """Test normalize_dimensions for bar chart"""
@@ -80,6 +80,41 @@ class TestNormalizeDimensions:
         assert len(dims) == 5
         assert "Total Registrations" in dims
         assert "my-column" in dims
+
+    def test_normalize_dimensions_table_chart_dimension_col_only(self):
+        """Test that table charts with only dimension_col fall back correctly"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimension_col="dim-1",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["dim-1"]
+
+    def test_normalize_dimensions_table_chart_extra_dimension_only(self):
+        """Test that table charts with only extra_dimension fall back correctly"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            extra_dimension="dim-2",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["dim-2"]
+
+    def test_normalize_dimensions_table_chart_dimensions_preferred_over_legacy(self):
+        """Test that dimensions list is preferred over dimension_col for table charts"""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="test_schema",
+            table_name="test_table",
+            dimensions=["new_dim1", "new_dim2"],
+            dimension_col="legacy_dim",
+            extra_dimension="legacy_extra",
+        )
+        dims = normalize_dimensions(payload)
+        assert dims == ["new_dim1", "new_dim2"]
 
     def test_normalize_dimensions_no_dimensions(self):
         """Test normalize_dimensions when no dimensions are provided"""
