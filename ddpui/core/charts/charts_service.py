@@ -931,6 +931,10 @@ def apply_chart_sorting(
 ) -> AggQueryBuilder:
     """Apply chart-level sorting to the query builder
 
+    Only allows sorting on columns that are part of the query's GROUP BY
+    (dimensions) or SELECT as aggregates (metrics). This prevents PostgreSQL
+    GroupingError when ORDER BY references a column not in GROUP BY.
+
     Args:
         query_builder: The AggQueryBuilder instance to modify
         sort_config: List of sort dictionaries with format:
@@ -945,6 +949,15 @@ def apply_chart_sorting(
     """
     if not sort_config:
         return query_builder
+
+    # Build the set of columns that are valid for ORDER BY:
+    # dimensions (in GROUP BY) and metric SQL aliases (aggregated in SELECT).
+    valid_columns: set[str] = set()
+    if payload:
+        valid_columns.update(normalize_dimensions(payload))
+        if payload.metrics:
+            for metric in payload.metrics:
+                valid_columns.add(metric_sql_alias(metric))
 
     # Prepare sort columns as list of tuples for order_cols_by method
     sort_cols = []
@@ -964,22 +977,16 @@ def apply_chart_sorting(
                     break
 
         if matching_metric:
-            # It's a metric - generate the actual SQL alias that matches SELECT clause
-            if (
-                matching_metric.aggregation
-                and matching_metric.aggregation.lower() == "count"
-                and matching_metric.column is None
-            ):
-                sort_column = (
-                    f"count_all_{matching_metric.alias}" if matching_metric.alias else "count_all"
-                )
-            else:
-                sort_column = (
-                    matching_metric.alias
-                    or f"{matching_metric.aggregation}_{matching_metric.column}"
-                )
+            # It's a metric - use the canonical SQL alias
+            sort_column = metric_sql_alias(matching_metric)
         else:
-            # It's a dimension column - use as-is
+            # Validate that the column is a known dimension or metric SQL alias
+            if valid_columns and column_name not in valid_columns:
+                logger.warning(
+                    f"Sort column '{column_name}' is not a valid dimension or metric, skipping. "
+                    f"Valid columns: {valid_columns}"
+                )
+                continue
             sort_column = column_name
 
         sort_cols.append((sort_column, direction))
