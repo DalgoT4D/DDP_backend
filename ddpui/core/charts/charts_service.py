@@ -374,10 +374,15 @@ def build_multi_metric_query(
 
     # Add all metrics as aggregate columns (if present)
     if payload.metrics:
+        seen_aliases = set()
         for metric in payload.metrics:
             # Expression path: inline raw SQL expression
             if metric.column_expression:
                 alias = metric.alias or "expression_metric"
+                if alias in seen_aliases:
+                    logger.warning(f"Skipping duplicate metric alias: {alias}")
+                    continue
+                seen_aliases.add(alias)
                 query_builder.add_column(literal_column(metric.column_expression).label(alias))
                 continue
 
@@ -390,6 +395,10 @@ def build_multi_metric_query(
             # keys in the result set, not validated as SQL identifiers, so human-readable
             # display names with spaces/special chars (e.g. "Total Count") are fine.
             alias = metric_sql_alias(metric)
+            if alias in seen_aliases:
+                logger.warning(f"Skipping duplicate metric alias: {alias}")
+                continue
+            seen_aliases.add(alias)
 
             query_builder.add_aggregate_column(
                 metric.column,
@@ -464,8 +473,13 @@ def build_pivot_table_query(
 
     # Add metrics to SELECT — calculated metrics are raw aggregate expressions, the
     # rest are column + aggregation (same split the non-pivot query path uses).
+    seen_aliases = set()
     for metric in payload.metrics:
         alias = metric_sql_alias(metric)
+        if alias in seen_aliases:
+            logger.warning(f"Skipping duplicate metric alias: {alias}")
+            continue
+        seen_aliases.add(alias)
         if metric.column_expression:
             query_builder.add_column(literal_column(metric.column_expression).label(alias))
         else:
