@@ -41,6 +41,9 @@ from ddpui.api.admin_api import (
     put_admin_org_flag,
     delete_admin_org_flag,
     put_admin_bulk_flag,
+    post_admin_notification_preview,
+    post_admin_notification,
+    get_admin_notifications,
     admin_router,
     get_admin_currentuser,
     AdminCreateOrgSchema,
@@ -48,7 +51,10 @@ from ddpui.api.admin_api import (
     AdminChangeRoleSchema,
     AdminSetOrgFlagSchema,
     AdminBulkSetFlagSchema,
+    AdminNotificationAudienceSchema,
+    AdminCreateNotificationSchema,
 )
+from ddpui.models.notifications import Notification
 from ddpui.services.org_cleanup_service import OrgCleanupServiceError
 from ddpui.routes import drf_authentication_failed_handler
 from rest_framework.exceptions import AuthenticationFailed
@@ -1088,3 +1094,113 @@ def test_admin_bulk_flag_forbidden_for_non_platform_admin(orguser, org):
             request, "REPORTS", AdminBulkSetFlagSchema(org_ids=[org.id], enabled=True)
         )
     assert excinfo.value.status_code == 403
+
+
+# ---- notifications tab (M2) ---------------------------------------------------
+
+
+def test_admin_notification_preview_forbidden_for_non_platform_admin(orguser):
+    """the preview route is gated too — non-admin gets 403"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_notification_preview(request, AdminNotificationAudienceSchema())
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_notification_preview_whole_platform(platform_admin_request, org):
+    """org_ids omitted previews the whole-platform audience"""
+    response = post_admin_notification_preview(
+        platform_admin_request, AdminNotificationAudienceSchema()
+    )
+    assert response.recipient_count >= 1  # at least the platform admin's own OrgUser
+
+
+def test_admin_notification_preview_merges_multiple_orgs(platform_admin_request, org, akshara):
+    """org_ids with several orgs merges into one combined count, never a per-org
+    breakdown (plan.md §4.3)"""
+    _make_member(akshara, "akshara-preview@x.org", ACCOUNT_MANAGER_ROLE)
+
+    response = post_admin_notification_preview(
+        platform_admin_request, AdminNotificationAudienceSchema(org_ids=[org.id, akshara.id])
+    )
+    assert response.recipient_count == 2
+
+
+def test_admin_notification_create_forbidden_for_non_platform_admin(orguser):
+    """the create route is gated too — non-admin gets 403"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_notification(
+            request,
+            AdminCreateNotificationSchema(message="hi", email_subject="subject"),
+        )
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_notification_create_derives_author_from_the_signed_in_admin(
+    platform_admin_request, org
+):
+    """author is server-derived from the signed-in platform admin, never taken
+    from the client — the schema doesn't even carry an author field"""
+    response = post_admin_notification(
+        platform_admin_request,
+        AdminCreateNotificationSchema(message="hi", email_subject="subject", org_ids=[org.id]),
+    )
+    notification = Notification.objects.get(id=response.id)
+    assert notification.author == platform_admin_request.orguser.user.email
+
+
+def test_admin_notification_create_persists_channel_choice(platform_admin_request, org):
+    """the admin's channel choice (send_in_app/send_email) persists on the created
+    notification (plan.md §4.1)"""
+    response = post_admin_notification(
+        platform_admin_request,
+        AdminCreateNotificationSchema(
+            message="email only",
+            email_subject="subject",
+            org_ids=[org.id],
+            send_in_app=False,
+            send_email=True,
+        ),
+    )
+    assert response.send_in_app is False
+    assert response.send_email is True
+
+
+def test_admin_notification_create_blocks_zero_recipient_audience(platform_admin_request):
+    """a bogus-only org_ids selection has zero recipients — blocked, nothing created"""
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_notification(
+            platform_admin_request,
+            AdminCreateNotificationSchema(message="hi", email_subject="subject", org_ids=[9999999]),
+        )
+    assert excinfo.value.status_code == 400
+
+
+def test_admin_notification_history_forbidden_for_non_platform_admin(orguser):
+    """the history route is gated too — non-admin gets 403"""
+    request = mock_request(orguser)
+    with pytest.raises(HttpError) as excinfo:
+        get_admin_notifications(request)
+    assert excinfo.value.status_code == 403
+
+
+def test_admin_notification_history_shows_audience_channels_and_recipient_count(
+    platform_admin_request, org
+):
+    """history resolves target_org_ids to org names and reports audience,
+    channels, time, and recipient count only (plan.md §3.3, §4.3)"""
+    created = post_admin_notification(
+        platform_admin_request,
+        AdminCreateNotificationSchema(
+            message="hist", email_subject="subject", org_ids=[org.id], send_email=False
+        ),
+    )
+
+    history = get_admin_notifications(platform_admin_request)
+    entry = next(item for item in history if item.id == created.id)
+
+    assert entry.target_org_names == [org.name]
+    assert entry.send_email is False
+    assert entry.recipient_count == 1
+    assert entry.sent_time is not None

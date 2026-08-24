@@ -16,6 +16,7 @@ from pydantic import HttpUrl
 from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlanType
 from ddpui.models.org_user import Invitation, OrgUser
+from ddpui.models.notifications import Notification
 from ddpui.schemas.org_schema import CreateOrgSchema
 
 
@@ -194,6 +195,76 @@ class AdminBulkFlagResultItem(Schema):
 
     org_id: int
     success: bool
+
+
+# ── Notifications tab (M2) ───────────────────────────────────────────────────
+# Broadcast notifications: whole platform, one org, or several orgs at once, with
+# admin-chosen channels. Reuses Notification/NotificationRecipient as-is (§4.1) --
+# the new work here is these admin-facing HTTP routes plus the additive
+# target_org_ids/send_in_app/send_email fields on the existing model.
+
+
+class AdminNotificationAudienceSchema(Schema):
+    """shared audience shape for preview and create -- null/empty org_ids is the
+    whole platform; one or several org_ids is a merged multi-org audience, never a
+    per-org breakdown (plan.md §4.3, §5)"""
+
+    org_ids: Optional[List[int]] = None
+
+
+class AdminNotificationPreviewResponseSchema(Schema):
+    """one combined recipient count across the whole chosen audience -- never the
+    recipient list itself (would leak a cross-org email roster) and never a
+    per-org count"""
+
+    recipient_count: int
+
+
+class AdminCreateNotificationSchema(AdminNotificationAudienceSchema):
+    """payload to send a broadcast immediately. author is deliberately absent --
+    it is derived server-side from the signed-in platform admin, never taken from
+    the client (plan.md §4.3, §5)."""
+
+    message: str
+    email_subject: str
+    urgent: bool = False
+    send_in_app: bool = True
+    send_email: bool = True
+
+
+class AdminNotificationSchema(Schema):
+    """one broadcast in admin history: audience (resolved to org names), channels,
+    time, and recipient count only -- no read status, no recipient list, no audit
+    field beyond what the model already carries (plan.md §3.3, §4.3)."""
+
+    id: int
+    message: str
+    urgent: bool
+    timestamp: datetime
+    sent_time: Optional[datetime]
+    target_org_names: Optional[List[str]]
+    send_in_app: bool
+    send_email: bool
+    recipient_count: int
+
+    @classmethod
+    def from_model(
+        cls, notification: Notification, target_org_names: Optional[List[str]], recipient_count: int
+    ) -> "AdminNotificationSchema":
+        """Build the response from a Notification plus its (API-supplied)
+        resolved org names and recipient count -- both need a service call, so
+        aren't the schema's to compute."""
+        return cls(
+            id=notification.id,
+            message=notification.message,
+            urgent=notification.urgent,
+            timestamp=notification.timestamp,
+            sent_time=notification.sent_time,
+            target_org_names=target_org_names,
+            send_in_app=notification.send_in_app,
+            send_email=notification.send_email,
+            recipient_count=recipient_count,
+        )
 
 
 class OrgDeletionImpactSchema(Schema):

@@ -54,3 +54,8 @@ class NotificationDataSchema(Schema):
     urgent: Optional[bool] = False
     scheduled_time: Optional[datetime] = None
     recipients: List[int]  # list of orguser ids
+    # additive, for the admin broadcast path -- defaults preserve today's behavior
+    # for every existing caller (management command, the broken HTTP route)
+    target_org_ids: Optional[List[int]] = None
+    send_in_app: Optional[bool] = True
+    send_email: Optional[bool] = True

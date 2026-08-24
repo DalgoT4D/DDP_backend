@@ -33,6 +33,10 @@ from ddpui.schemas.admin_schema import (
     AdminSetOrgFlagSchema,
     AdminBulkSetFlagSchema,
     AdminBulkFlagResultItem,
+    AdminNotificationAudienceSchema,
+    AdminNotificationPreviewResponseSchema,
+    AdminCreateNotificationSchema,
+    AdminNotificationSchema,
 )
 from ddpui.core.admin import admin_service
 from ddpui.core.admin.exceptions import AdminOrgCreateError, AdminOrgDeleteError
@@ -332,3 +336,41 @@ def put_admin_bulk_flag(request, flag_name: str, payload: AdminBulkSetFlagSchema
     if results is None:
         raise HttpError(400, f"unknown flag_name: {flag_name}")
     return [AdminBulkFlagResultItem(**result) for result in results]
+
+
+# ======================= Notifications tab (M2) ===============================
+# Broadcast notifications: whole platform, one org, or several orgs at once, with
+# admin-chosen channels. Built on the existing get_recipients/create_notification
+# service functions (do NOT extend the broken/ungated /api/notifications/ HTTP
+# path -- research.md §3.3). Immediate send only: no scheduling, no cancel.
+
+
+@admin_router.post("/notifications/preview", response=AdminNotificationPreviewResponseSchema)
+@platform_admin_required
+def post_admin_notification_preview(request, payload: AdminNotificationAudienceSchema):
+    """One combined recipient count across the whole chosen audience -- never the
+    recipient list itself, and never a per-org breakdown."""
+    recipient_count = admin_service.preview_notification_recipients(payload.org_ids)
+    return AdminNotificationPreviewResponseSchema(recipient_count=recipient_count)
+
+
+@admin_router.post("/notifications", response=AdminNotificationSchema)
+@platform_admin_required
+def post_admin_notification(request, payload: AdminCreateNotificationSchema):
+    """Send a broadcast immediately. author is derived server-side from the
+    signed-in platform admin -- never taken from the client. A 0-recipient
+    audience is blocked before anything is created."""
+    error, notification = admin_service.create_admin_notification(
+        request.orguser.user.email, payload
+    )
+    if error:
+        raise HttpError(400, error)
+    return admin_service.notification_response(notification)
+
+
+@admin_router.get("/notifications", response=List[AdminNotificationSchema])
+@platform_admin_required
+def get_admin_notifications(request):
+    """Review sent broadcasts: audience (resolved to org names), channels, time,
+    and recipient count only -- no read status, no recipient list."""
+    return admin_service.get_admin_notification_history()

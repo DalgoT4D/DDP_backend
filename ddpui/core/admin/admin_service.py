@@ -18,12 +18,17 @@ from ddpui.models.tasks import OrgTask, OrgDataFlowv1
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
+from ddpui.models.notifications import Notification
 from ddpui.schemas.admin_schema import (
     AdminCreateOrgSchema,
     AdminUpdateOrgSchema,
     AdminFeatureFlagCatalogItem,
+    AdminCreateNotificationSchema,
+    AdminNotificationSchema,
 )
+from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.core import orgfunctions, orguserfunctions
+from ddpui.core.notifications.notifications_functions import get_recipients, create_notification
 from ddpui.ddpairbyte import airbyte_service
 from ddpui.services.org_cleanup_service import OrgCleanupService, OrgCleanupServiceError
 from ddpui.utils.custom_logger import CustomLogger
@@ -267,3 +272,80 @@ def bulk_set_org_flags(flag_name: str, org_ids: List[int], enabled: bool) -> Opt
     if flag_name not in FEATURE_FLAGS:
         return None
     return bulk_set_feature_flag(flag_name, org_ids, enabled)
+
+
+# --------------------------------------------------------------------------- #
+# Notifications tab (M2) -- broadcast: whole platform, one org, or several orgs
+# at once, admin-chosen channels. Notification/NotificationRecipient are reused
+# as-is; the new work is these admin-facing wrappers around get_recipients /
+# create_notification (plan.md §4.3).
+# --------------------------------------------------------------------------- #
+
+
+def _resolve_recipient_ids(org_ids: Optional[List[int]]) -> List[int]:
+    """Merge recipients across a whole-platform or multi-org audience into one
+    list -- never a per-org breakdown. A bogus org_id resolves to no slug and
+    contributes nothing, rather than erroring (plan.md §4.3, §5)."""
+    if org_ids:
+        org_slugs = list(Org.objects.filter(id__in=org_ids).values_list("slug", flat=True))
+        if not org_slugs:
+            return []
+        error, recipient_ids = get_recipients(
+            SentToEnum.ALL_ORG_USERS, None, None, False, org_slugs=org_slugs
+        )
+    else:
+        error, recipient_ids = get_recipients(SentToEnum.ALL_USERS, None, None, False)
+
+    if error:
+        return []
+    return recipient_ids
+
+
+def preview_notification_recipients(org_ids: Optional[List[int]]) -> int:
+    """One combined recipient count across the whole chosen audience."""
+    return len(_resolve_recipient_ids(org_ids))
+
+
+def create_admin_notification(
+    author_email: str, payload: AdminCreateNotificationSchema
+) -> Tuple[Optional[str], Optional[Notification]]:
+    """Send a broadcast immediately. Blocks a 0-recipient audience before creating
+    anything; author is server-derived, never taken from the client."""
+    recipient_ids = _resolve_recipient_ids(payload.org_ids)
+    if not recipient_ids:
+        return "No recipients found for the given audience", None
+
+    notification_data = NotificationDataSchema(
+        author=author_email,
+        message=payload.message,
+        email_subject=payload.email_subject,
+        urgent=payload.urgent,
+        scheduled_time=None,
+        recipients=recipient_ids,
+        target_org_ids=payload.org_ids,
+        send_in_app=payload.send_in_app,
+        send_email=payload.send_email,
+    )
+    error, result = create_notification(notification_data)
+    if error:
+        return error.get("message", "Failed to send notification"), None
+
+    return None, Notification.objects.get(id=result["res"]["notification_id"])
+
+
+def notification_response(notification: Notification) -> AdminNotificationSchema:
+    """Build the response schema for one notification -- shared by the create
+    route and the history list, mirroring _admin_org_response's role for orgs."""
+    target_org_names = None
+    if notification.target_org_ids:
+        target_org_names = list(
+            Org.objects.filter(id__in=notification.target_org_ids).values_list("name", flat=True)
+        )
+    recipient_count = notification.notifications_received.count()
+    return AdminNotificationSchema.from_model(notification, target_org_names, recipient_count)
+
+
+def get_admin_notification_history() -> List[AdminNotificationSchema]:
+    """Review sent broadcasts: audience, channels, time, recipient count only."""
+    notifications = Notification.objects.filter(sent_time__isnull=False).order_by("-timestamp")
+    return [notification_response(n) for n in notifications]
