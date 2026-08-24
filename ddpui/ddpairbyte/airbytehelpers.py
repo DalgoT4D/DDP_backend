@@ -73,7 +73,6 @@ from ddpui.utils.helpers import (
     get_integer_env_var,
 )
 from ddpui.utils import secretsmanager
-from ddpui.utils.warehouse.client import engine_registry
 from ddpui.core.pipelinefunctions import (
     setup_airbyte_sync_task_config,
     setup_airbyte_update_schema_task_config,
@@ -912,13 +911,6 @@ def update_destination(org: Org, destination_id: str, payload: AirbyteDestinatio
         raise ValueError("unknown warehouse type " + warehouse.wtype)
 
     secretsmanager.update_warehouse_credentials(warehouse, airbyte_creds)
-
-    # Retire this warehouse's pooled connections, which were opened with the
-    # credentials we just replaced. The engine cache is keyed on a hash of the
-    # credentials, so the new creds would get a fresh engine regardless -- this
-    # just hands the superseded pool back now instead of leaving it to the idle
-    # timeout. Only affects this process; other workers retire theirs on idle.
-    engine_registry.invalidate_for_warehouse(warehouse.id)
 
     create_or_update_dbt_profile_secret_blk(org, warehouse, airbyte_creds)
 
