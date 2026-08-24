@@ -26,7 +26,6 @@ from ddpui.utils.constants import TASK_AIRBYTESYNC, TASK_AIRBYTERESET
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils import secretsmanager
 from ddpui.utils.s3_utils import bulk_delete_files, list_objects
-from ddpui.utils.warehouse.client import engine_registry
 
 logger = CustomLogger("ddpui")
 
@@ -287,11 +286,6 @@ class OrgCleanupService:
             if not self.dry_run:
                 secretsmanager.delete_warehouse_credentials(warehouse)
                 logger.info("deleted warehouse credentials from secrets manager")
-
-                # close any pooled connections still open to the warehouse we
-                # are tearing down, rather than holding them until the idle
-                # timeout expires
-                engine_registry.invalidate_for_warehouse(warehouse.id)
 
                 # Delete the dbt-profile Secret block (runner-flow artifact).
                 # FK now lives on OrgWarehouse; read it from there.

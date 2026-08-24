@@ -161,7 +161,7 @@ def test_pool_kwargs_bound_the_connection_ceiling():
 
     assert kwargs["pool_size"] == engine_registry.POOL_SIZE
     assert kwargs["max_overflow"] == engine_registry.POOL_MAX_OVERFLOW
-    assert kwargs["pool_recycle"] == engine_registry.POOL_RECYCLE_SECONDS
+    assert kwargs["pool_timeout"] == engine_registry.POOL_TIMEOUT
 
 
 def test_pre_ping_is_enabled_for_postgres_only():
@@ -266,51 +266,16 @@ def add_engine(name, checkedout=0, org_warehouse_id=None):
     return key, engine
 
 
-def test_lru_cap_evicts_the_coldest_engine(monkeypatch):
-    """An instance with hundreds of orgs must not blow up one process."""
-    monkeypatch.setattr(engine_registry, "MAX_CACHED_ENGINES", 2)
+def test_nothing_caps_how_many_warehouses_are_cached():
+    """Cache growth is bounded by the idle TTL alone -- no LRU eviction."""
+    for name in ("a", "b", "c", "d", "e"):
+        add_engine(name)
 
-    key_a, engine_a = add_engine("a")
-    _, engine_b = add_engine("b")
-
-    engine_registry.get_or_create_engine(key_a, make("a"), wtype="postgres")  # touch a
-    _, engine_c = add_engine("c")  # should evict b, the coldest
-
-    assert engine_b.disposed is True
-    assert engine_a.disposed is False
-    assert engine_c.disposed is False
-    assert len(engine_registry._engines) == 2
+    assert len(engine_registry._engines) == 5
+    assert all(not entry.engine.disposed for entry in engine_registry._engines.values())
 
 
-def test_cap_is_exceeded_rather_than_stealing_a_pool_mid_query(monkeypatch):
-    """Better briefly over the cap than disposing a pool serving a live query."""
-    monkeypatch.setattr(engine_registry, "MAX_CACHED_ENGINES", 1)
-
-    _, busy = add_engine("busy", checkedout=1)
-    _, newcomer = add_engine("newcomer")
-
-    assert busy.disposed is False
-    assert newcomer is not None
-    assert len(engine_registry._engines) == 2
-
-
-def test_invalidate_for_warehouse_drops_only_that_warehouse(monkeypatch):
-    monkeypatch.setattr(engine_registry, "MAX_CACHED_ENGINES", 10)
-
-    _, mine = add_engine("mine", org_warehouse_id=7)
-    _, also_mine = add_engine("also_mine", org_warehouse_id=7)
-    _, someone_else = add_engine("theirs", org_warehouse_id=8)
-
-    assert engine_registry.invalidate_for_warehouse(7) == 2
-    assert mine.disposed is True
-    assert also_mine.disposed is True
-    assert someone_else.disposed is False
-    assert len(engine_registry._engines) == 1
-
-
-def test_invalidate_all_disposes_everything(monkeypatch):
-    monkeypatch.setattr(engine_registry, "MAX_CACHED_ENGINES", 10)
-
+def test_invalidate_all_disposes_everything():
     _, one = add_engine("one")
     _, two = add_engine("two")
 
@@ -320,8 +285,7 @@ def test_invalidate_all_disposes_everything(monkeypatch):
     assert engine_registry._engines == {}
 
 
-def test_registry_stats_reports_the_connection_ceiling(monkeypatch):
-    monkeypatch.setattr(engine_registry, "MAX_CACHED_ENGINES", 10)
+def test_registry_stats_reports_the_connection_ceiling():
     add_engine("stats_org", checkedout=2, org_warehouse_id=42)
 
     stats = engine_registry.registry_stats()
