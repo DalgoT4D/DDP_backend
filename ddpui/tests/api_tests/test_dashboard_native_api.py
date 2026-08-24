@@ -27,6 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
 from ddpui.models.visualization import Chart
+from ddpui.models.favorite import Favorite
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.api.dashboard_native_api import (
     list_dashboards,
@@ -358,6 +359,28 @@ class TestFavoriteDashboard:
         favorited = [d for d in response if d.id == sample_dashboard.id]
         assert len(favorited) == 1
         assert favorited[0].is_favorite is True
+
+    def test_delete_dashboard_removes_favorite_rows(self, orguser, sample_dashboard, seed_db):
+        """Deleting a dashboard cleans up its Favorite rows instead of orphaning them"""
+        # Create another dashboard so we're not deleting the last one in the org
+        Dashboard.objects.create(
+            title="Another Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            created_by=orguser,
+            org=orguser.org,
+        )
+
+        dashboard_id = sample_dashboard.id
+        request = mock_request(orguser)
+        favorite_dashboard(request, dashboard_id=dashboard_id)
+        assert Favorite.objects.filter(resource_type="dashboard", resource_id=dashboard_id).exists()
+
+        delete_dashboard(request, dashboard_id=dashboard_id)
+
+        assert not Favorite.objects.filter(
+            resource_type="dashboard", resource_id=dashboard_id
+        ).exists()
 
 
 # ================================================================================

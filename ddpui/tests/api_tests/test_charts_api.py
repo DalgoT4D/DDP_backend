@@ -27,6 +27,7 @@ from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.visualization import Chart
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
+from ddpui.models.favorite import Favorite
 from ddpui.auth import ACCOUNT_MANAGER_ROLE
 from ddpui.api.charts_api import (
     list_charts,
@@ -720,6 +721,48 @@ class TestFavoriteChart:
         favorited = [c for c in response.data if c.id == sample_chart.id]
         assert len(favorited) == 1
         assert favorited[0].is_favorite is True
+
+    def test_delete_chart_removes_favorite_rows(self, orguser, sample_chart, seed_db):
+        """Deleting a chart cleans up its Favorite rows instead of orphaning them"""
+        chart_id = sample_chart.id
+        favorite_chart(mock_request(orguser), chart_id=chart_id)
+        assert Favorite.objects.filter(resource_type="chart", resource_id=chart_id).exists()
+
+        delete_chart(mock_request(orguser), chart_id=chart_id)
+
+        assert not Favorite.objects.filter(resource_type="chart", resource_id=chart_id).exists()
+
+    def test_bulk_delete_charts_removes_favorite_rows(self, orguser, org, seed_db):
+        """Bulk-deleting charts cleans up their Favorite rows too"""
+        chart_a = Chart.objects.create(
+            title="Bulk Fav Chart A",
+            chart_type="bar",
+            schema_name="public",
+            table_name="test",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        chart_b = Chart.objects.create(
+            title="Bulk Fav Chart B",
+            chart_type="bar",
+            schema_name="public",
+            table_name="test",
+            extra_config={},
+            created_by=orguser,
+            last_modified_by=orguser,
+            org=org,
+        )
+        request = mock_request(orguser)
+        favorite_chart(request, chart_id=chart_a.id)
+        favorite_chart(request, chart_id=chart_b.id)
+
+        bulk_delete_charts(request, BulkDeleteRequest(chart_ids=[chart_a.id, chart_b.id]))
+
+        assert not Favorite.objects.filter(
+            resource_type="chart", resource_id__in=[chart_a.id, chart_b.id]
+        ).exists()
 
 
 # ================================================================================

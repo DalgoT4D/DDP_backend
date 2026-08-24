@@ -46,3 +46,24 @@ class FavoriteService:
                 resource_id__in=resource_ids,
             ).values_list("resource_id", flat=True)
         )
+
+    @staticmethod
+    def remove_favorites_for_resource(
+        resource_type: FavoriteResourceType, resource_id: int
+    ) -> None:
+        """Delete every user's favorite on a resource. resource_id isn't a real
+        ForeignKey (it's generic across resource types), so there's no DB-level
+        cascade when the chart/dashboard itself is deleted — callers must call
+        this explicitly at the point of deletion to avoid orphaned rows."""
+        Favorite.objects.filter(resource_type=resource_type.value, resource_id=resource_id).delete()
+
+    @staticmethod
+    def remove_favorites_for_resources(
+        resource_type: FavoriteResourceType, resource_ids: List[int]
+    ) -> None:
+        """Bulk variant of remove_favorites_for_resource, for bulk-delete flows."""
+        if not resource_ids:
+            return
+        Favorite.objects.filter(
+            resource_type=resource_type.value, resource_id__in=resource_ids
+        ).delete()

@@ -249,6 +249,7 @@ class ChartService:
 
         chart_title = chart.title
         chart.delete()
+        FavoriteService.remove_favorites_for_resource(FavoriteResourceType.CHART, chart_id)
 
         logger.info(f"Deleted chart '{chart_title}' (id={chart_id}) by {orguser.user.email}")
         return chart_title
@@ -292,8 +293,10 @@ class ChartService:
                 f"Charts not deletable by {orguser.user.email} (not owner or admin): {forbidden_ids}"
             )
 
+        deletable_ids = [chart.id for chart in deletable]
         deleted_titles = [chart.title for chart in deletable]
-        deleted_count = Chart.objects.filter(id__in=[chart.id for chart in deletable]).delete()[0]
+        deleted_count = Chart.objects.filter(id__in=deletable_ids).delete()[0]
+        FavoriteService.remove_favorites_for_resources(FavoriteResourceType.CHART, deletable_ids)
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
 

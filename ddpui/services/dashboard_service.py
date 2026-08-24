@@ -1167,6 +1167,7 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
     # Delete the dashboard
     dashboard_title = dashboard.title
     dashboard.delete()
+    FavoriteService.remove_favorites_for_resource(FavoriteResourceType.DASHBOARD, dashboard_id)
 
     logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
     return True, ""
