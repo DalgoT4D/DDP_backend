@@ -16,7 +16,7 @@ _type_map["JSON"] = types.JSON
 
 
 class BigqueryClient(Warehouse):
-    def __init__(self, creds: dict, org_warehouse_id: int | None = None):
+    def __init__(self, creds: dict):
         """
         Establish connection to the bigquery warehouse using sqlalchemy engine
         Creds come from the secrets manager
@@ -36,7 +36,6 @@ class BigqueryClient(Warehouse):
                 **engine_registry.pool_kwargs(WarehouseType.BIGQUERY),
             ),
             wtype=WarehouseType.BIGQUERY,
-            org_warehouse_id=org_warehouse_id,
         )
         self.inspect_obj: Inspector = inspect(
             self.engine

@@ -50,7 +50,6 @@ class EngineEntry:
     engine: Engine
     wtype: str
     last_used_at: float
-    org_warehouse_id: int | None = None
 
     def in_use(self) -> bool:
         """
@@ -117,10 +116,7 @@ def _dispose(entries: list[EngineEntry]) -> None:
             entry.engine.dispose()
         except Exception:  # skipcq: PYL-W0703
             # Discarding a pool that fails to close must not fail a request.
-            logger.warning(
-                "failed to dispose warehouse engine",
-                extra={"wtype": entry.wtype, "org_warehouse_id": entry.org_warehouse_id},
-            )
+            logger.warning("failed to dispose warehouse engine", extra={"wtype": entry.wtype})
 
 
 def _sweep() -> int:
@@ -209,12 +205,7 @@ def _reset_after_fork() -> None:
 os.register_at_fork(after_in_child=_reset_after_fork)
 
 
-def get_or_create_engine(
-    cache_key: str,
-    create,
-    wtype: str,
-    org_warehouse_id: int | None = None,
-) -> Engine:
+def get_or_create_engine(cache_key: str, create, wtype: str) -> Engine:
     """
     Return the cached engine for `cache_key`, building it via `create` on a miss.
     Retiring idle pools is left to the sweeper. `create` runs under the lock, which is
@@ -231,19 +222,10 @@ def get_or_create_engine(
             return entry.engine
 
         engine = create()
-        _engines[cache_key] = EngineEntry(
-            engine=engine,
-            wtype=wtype,
-            last_used_at=now,
-            org_warehouse_id=org_warehouse_id,
-        )
+        _engines[cache_key] = EngineEntry(engine=engine, wtype=wtype, last_used_at=now)
         logger.info(
             "created warehouse engine",
-            extra={
-                "wtype": wtype,
-                "org_warehouse_id": org_warehouse_id,
-                "cached_engines": len(_engines),
-            },
+            extra={"wtype": wtype, "cached_engines": len(_engines)},
         )
 
     return engine
@@ -270,7 +252,6 @@ def registry_stats() -> dict:
         entries = [
             {
                 "wtype": entry.wtype,
-                "org_warehouse_id": entry.org_warehouse_id,
                 "idle_seconds": round(now - entry.last_used_at, 1),
                 "checkedout": entry.engine.pool.checkedout(),
                 "checkedin": entry.engine.pool.checkedin(),
