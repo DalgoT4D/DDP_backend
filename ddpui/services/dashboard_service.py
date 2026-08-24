@@ -12,6 +12,7 @@ import time
 import uuid
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from sqlalchemy import text, distinct, column
@@ -315,10 +316,7 @@ class DashboardService:
 
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
-            DashboardPermissionError: If orguser doesn't belong to org
         """
-        if orguser.org_id != org.id:
-            raise DashboardPermissionError("User does not belong to this organization.")
         DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
         FavoriteService.add_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
 
@@ -333,10 +331,7 @@ class DashboardService:
 
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
-            DashboardPermissionError: If orguser doesn't belong to org
         """
-        if orguser.org_id != org.id:
-            raise DashboardPermissionError("User does not belong to this organization.")
         DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
         FavoriteService.remove_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
 
@@ -1166,8 +1161,9 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
 
     # Delete the dashboard
     dashboard_title = dashboard.title
-    dashboard.delete()
-    FavoriteService.remove_favorites_for_resource(FavoriteResourceType.DASHBOARD, dashboard_id)
+    with transaction.atomic():
+        dashboard.delete()
+        FavoriteService.remove_favorites_for_resource(FavoriteResourceType.DASHBOARD, dashboard_id)
 
     logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
     return True, ""

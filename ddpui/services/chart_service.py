@@ -7,6 +7,7 @@ separating it from the API layer for better testability and maintainability.
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.db.models import Q
 
 from ddpui.core.ownership import can_delete_resource
@@ -248,8 +249,9 @@ class ChartService:
             raise ChartPermissionError("Only the owner or an admin can delete this chart.")
 
         chart_title = chart.title
-        chart.delete()
-        FavoriteService.remove_favorites_for_resource(FavoriteResourceType.CHART, chart_id)
+        with transaction.atomic():
+            chart.delete()
+            FavoriteService.remove_favorites_for_resource(FavoriteResourceType.CHART, chart_id)
 
         logger.info(f"Deleted chart '{chart_title}' (id={chart_id}) by {orguser.user.email}")
         return chart_title
@@ -295,8 +297,11 @@ class ChartService:
 
         deletable_ids = [chart.id for chart in deletable]
         deleted_titles = [chart.title for chart in deletable]
-        deleted_count = Chart.objects.filter(id__in=deletable_ids).delete()[0]
-        FavoriteService.remove_favorites_for_resources(FavoriteResourceType.CHART, deletable_ids)
+        with transaction.atomic():
+            deleted_count = Chart.objects.filter(id__in=deletable_ids).delete()[0]
+            FavoriteService.remove_favorites_for_resources(
+                FavoriteResourceType.CHART, deletable_ids
+            )
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
 
