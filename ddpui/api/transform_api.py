@@ -1090,8 +1090,8 @@ def delete_canvas_node(request, node_uuid: str):
         )
         return {"success": 1}
     except CanvasNode.DoesNotExist:
-        logger.error(f"Canvas node {node_uuid} not found")
-        raise HttpError(404, "canvas node not found")
+        logger.info(f"Canvas node {node_uuid} already deleted, returning success")
+        return {"success": 1}
     except HttpError:
         # let domain errors propagate (422/404 from validation helpers)
         raise

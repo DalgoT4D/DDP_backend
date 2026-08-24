@@ -48,6 +48,7 @@ from ddpui.api.transform_api import (
     post_add_operation_node,
     put_operation_node,
     post_terminate_operation_node,
+    delete_canvas_node,
 )
 from ddpui.schemas.dbt_workflow_schema import (
     LockCanvasResponseSchema,
@@ -3593,3 +3594,35 @@ def test_post_terminate_operation_node_verify_transaction_atomicity(
 
     # Verify no database changes were persisted due to transaction rollback on early failure
     assert not OrgDbtModel.objects.filter(orgdbt=orgdbt, name="test_model").exists()
+
+
+def test_delete_canvas_node_already_deleted(seed_db, orguser: OrgUser):
+    """Deleting a node that no longer exists returns success (idempotent)."""
+    org = orguser.org
+    orgdbt = OrgDbt.objects.create(
+        org=org,
+        gitrepo_url="https://github.com/test/test",
+        project_dir="/tmp/test",
+        dbt_venv="/tmp/venv",
+        target_type="postgres",
+        default_schema="public",
+    )
+    org.dbt = orgdbt
+    org.save()
+
+    node = CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        node_type=CanvasNodeType.SOURCE,
+        name="already_gone",
+        output_cols=["id"],
+    )
+    node_uuid = str(node.uuid)
+
+    # Delete the node directly so it's gone before the API call
+    node.delete()
+    assert not CanvasNode.objects.filter(uuid=node_uuid).exists()
+
+    request = mock_request(orguser)
+    response = delete_canvas_node(request, node_uuid)
+
+    assert response["success"] == 1
