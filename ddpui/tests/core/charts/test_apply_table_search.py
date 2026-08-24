@@ -177,3 +177,60 @@ class TestSearchAndSortCombined:
         order_idx = sql.upper().index("ORDER BY")
         limit_idx = sql.upper().index("LIMIT") if "LIMIT" in sql.upper() else sql.upper().index("OFFSET")
         assert where_idx < order_idx < limit_idx
+
+
+class TestSearchWithTimeGrainDimension:
+    """Regression coverage for the primary time-grain dimension's search behavior.
+
+    When metrics + time_grain + a warehouse are all present, the primary dimension is
+    grouped by a derived date_trunc(...) expression (see build_multi_metric_query's
+    is_time_grain_applicable), not its raw column — so search must reuse that exact
+    same expression instead of the raw column name, or Postgres rejects it with
+    "must appear in GROUP BY". Without a warehouse, GROUP BY still uses the raw
+    column, so the raw primary dimension must remain searchable as-is.
+    """
+
+    def _payload(self):
+        return ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=["created_at", "region"],
+            dimension_col="created_at",
+            metrics=[ChartMetric(aggregation="sum", column="amount", alias="Total Amount")],
+            extra_config={
+                "search": "march",
+                "time_grain": "month",
+            },
+        )
+
+    def test_with_warehouse_searches_time_grain_expression_not_raw_column(self):
+        """org_warehouse present: the primary dimension is searched via the same
+        date_trunc(...) expression used in GROUP BY, not the raw column name."""
+        mock_warehouse = MagicMock(spec=OrgWarehouse)
+        mock_warehouse.wtype = "postgres"
+
+        query_builder = build_chart_query(self._payload(), mock_warehouse)
+        sql = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
+
+        assert "HAVING" in sql.upper()
+        assert "%march%" in sql
+        # The search condition reuses the derived GROUP BY expression...
+        assert "date_trunc" in sql.lower()
+        assert "lower(CAST(date_trunc('month', created_at) AS VARCHAR))" in sql
+        # ...and does NOT reference the raw column directly in a search condition
+        # (region — the other dimension — is still searched via its raw column).
+        assert "lower(CAST(region AS VARCHAR))" in sql
+
+    def test_without_warehouse_searches_raw_primary_column(self):
+        """org_warehouse absent: GROUP BY uses the raw column (no time-grain transform
+        is actually applied), so the raw primary dimension stays in the search columns
+        instead of being needlessly excluded."""
+        query_builder = build_chart_query(self._payload(), org_warehouse=None)
+        sql = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
+
+        assert "HAVING" in sql.upper()
+        assert "%march%" in sql
+        assert "date_trunc" not in sql.lower()
+        assert "lower(CAST(created_at AS VARCHAR))" in sql
+        assert "lower(CAST(region AS VARCHAR))" in sql
