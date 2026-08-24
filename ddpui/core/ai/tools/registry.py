@@ -19,6 +19,7 @@ _TOOL_MODULES = (
     "ddpui.core.ai.tools.sql_tools",
     "ddpui.core.ai.tools.chart_tools",
     "ddpui.core.ai.tools.dashboard_tools",
+    "ddpui.core.ai.tools.clarify_tools",
 )
 
 

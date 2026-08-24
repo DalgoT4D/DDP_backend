@@ -5,9 +5,18 @@ yield on the event loop (the sync consumers block a worker thread per message,
 which cannot stream). Auth mirrors BaseConsumer's cookie-JWT flow, with ORM
 touches wrapped for async.
 
-Per-message protocol (in):  {"action": "send_message", "message": "<question>"}
+Per-message protocol (in):
+    {"action": "send_message", "message": "<question>", "model": str?}
+        — starts a turn; if the agent is waiting on an ask_user question,
+          the message is that question's answer and resumes the paused turn
+    {"action": "resume_approval", "approve": true|false}
+        — answers a pending approval card (approve/cancel all pending calls)
 Events (out): see ddpui/core/ai/chat/turn_runner.py, plus
               {"type": "title_updated", "title": str}.
+
+A paused turn (input_required) is durable: the graph state lives in the
+Postgres checkpointer and the pending card in Redis, so a reconnecting client
+gets the card re-sent and can resume even after a page reload or a restart.
 """
 
 import json
@@ -25,6 +34,7 @@ from ddpui.core.ai.agent.chat_data_agent import (
     get_chat_model,
     resolve_selected_model,
 )
+from ddpui.core.ai.agent.hitl import build_resume_payload
 from ddpui.core.ai.agent.checkpointer import get_checkpointer
 from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
 from ddpui.core.ai.chat.turn_runner import run_turn
@@ -46,6 +56,11 @@ RATE_LIMIT_WINDOW_S = 60
 
 # A crashed consumer's turn lock must not wedge the session forever
 TURN_LOCK_TTL_S = 180
+
+# How long a paused turn's approval/question card stays answerable. The graph
+# checkpoint itself never expires — if this record lapses, the next message
+# simply re-triggers the same interrupt and a fresh card.
+PENDING_INPUT_TTL_S = 24 * 60 * 60
 
 DEFAULT_SESSION_TITLE = "New chat"
 
@@ -84,6 +99,12 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             await self.close(code=WebsocketCloseCodes.FORBIDDEN)
             return
 
+        # a turn paused mid-question survives reloads — re-send its card so the
+        # user can still approve/answer it on this fresh connection
+        pending = self._get_pending_input()
+        if pending:
+            await self._send_event(pending["event"])
+
     async def receive(self, text_data=None, bytes_data=None):
         try:
             payload = json.loads(text_data or "{}")
@@ -91,14 +112,49 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             await self._send_event({"type": "error", "message": "Invalid message format"})
             return
 
-        if payload.get("action") != "send_message" or not str(payload.get("message", "")).strip():
+        action = payload.get("action")
+        pending = self._get_pending_input()
+        resume_payload: dict | None = None
+
+        if action == "send_message":
+            question = str(payload.get("message", "")).strip()
+            if not question:
+                await self._send_event({"type": "error", "message": "Unsupported action"})
+                return
+            if pending and pending.get("kind") == "approval":
+                await self._send_event(
+                    {
+                        "type": "error",
+                        "message": "Please approve or cancel the pending action first.",
+                    }
+                )
+                return
+            if pending:
+                # the agent asked a question (ask_user) — this message answers it
+                # and resumes the paused turn on the model that started it
+                model_id = resolve_selected_model(pending.get("model"))
+                resume_payload = build_resume_payload(
+                    pending["event"].get("requests", []), approve=True, answer=question
+                )
+            else:
+                # user's model pick for this turn; anything not on the allowlist
+                # (or absent) silently falls back to the default — never trust the client
+                model_id = resolve_selected_model(payload.get("model"))
+        elif action == "resume_approval":
+            if not pending or pending.get("kind") != "approval":
+                await self._send_event(
+                    {"type": "error", "message": "There is nothing waiting for your approval."}
+                )
+                return
+            approve = bool(payload.get("approve"))
+            question = "[user approved the action]" if approve else "[user cancelled the action]"
+            model_id = resolve_selected_model(pending.get("model"))
+            resume_payload = build_resume_payload(
+                pending["event"].get("requests", []), approve=approve
+            )
+        else:
             await self._send_event({"type": "error", "message": "Unsupported action"})
             return
-
-        question = str(payload["message"]).strip()
-        # user's model pick for this turn; anything not on the allowlist
-        # (or absent) silently falls back to the default — never trust the client
-        model_id = resolve_selected_model(payload.get("model"))
 
         if not self._check_rate_limit():
             await self._send_event(
@@ -115,12 +171,17 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             )
             return
 
+        # resuming consumes the card; if the resume fails, the graph is still
+        # paused and the next message re-triggers the same interrupt
+        if resume_payload is not None:
+            self._clear_pending_input()
+
         try:
-            await self._run_turn(question, model_id)
+            await self._run_turn(question, model_id, resume_payload=resume_payload)
         finally:
             self._release_turn_lock()
 
-    async def _run_turn(self, question: str, model_id: str):
+    async def _run_turn(self, question: str, model_id: str, resume_payload: dict | None = None):
         try:
             context = await database_sync_to_async(build_run_context)(self.orguser)
         except ChatWithDataNotReady as err:
@@ -138,9 +199,14 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             question=question,
             context=context,
             model_name=model_id,
+            resume_payload=resume_payload,
         ):
             if event["type"] == "message_complete":
                 final_answer = event.get("message", "")
+            elif event["type"] == "input_required":
+                # the turn paused for the user — remember the card so a
+                # reconnecting client gets it back and resumes can validate
+                self._store_pending_input(event, model_id)
             await self._send_event(event)
 
         if final_answer and self.session.title == DEFAULT_SESSION_TITLE:
@@ -211,6 +277,29 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
 
     def _lock_key(self) -> str:
         return f"chat_with_data:turn_lock:{self.session.id}"
+
+    def _pending_key(self) -> str:
+        return f"chat_with_data:pending_input:{self.session.id}"
+
+    def _get_pending_input(self) -> dict | None:
+        """The session's unanswered approval/question card, if any."""
+        raw = RedisClient.get_instance().get(self._pending_key())
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _store_pending_input(self, event: dict, model_id: str):
+        RedisClient.get_instance().set(
+            self._pending_key(),
+            json.dumps({"kind": event.get("kind"), "model": model_id, "event": event}),
+            ex=PENDING_INPUT_TTL_S,
+        )
+
+    def _clear_pending_input(self):
+        RedisClient.get_instance().delete(self._pending_key())
 
     def _check_rate_limit(self) -> bool:
         redis = RedisClient.get_instance()

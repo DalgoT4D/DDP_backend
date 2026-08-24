@@ -65,10 +65,15 @@ def sql_call(sql: str, call_id: str) -> AIMessage:
 
 def test_realistic_discovery_turn_fits_in_the_recursion_limit():
     """Regression: a normal 7-tool-call discovery turn must complete under the
-    PRODUCTION recursion limit. Every middleware hook is its own graph node
-    (each PIIMiddleware adds two), so adding middleware silently shrinks how
-    many tool calls fit — this broke real turns at 3 tool calls when the PII
-    middleware landed while RECURSION_LIMIT was still 25."""
+    PRODUCTION recursion limit, with the PRODUCTION middleware stack — including
+    human-in-the-loop, whose approval pauses are auto-approved here the way the
+    consumer resumes them. Every middleware hook is its own graph node (each
+    PIIMiddleware adds two), so adding middleware silently shrinks how many tool
+    calls fit — this broke real turns at 3 tool calls when the PII middleware
+    landed while RECURSION_LIMIT was still 25."""
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
+
     from ddpui.core.ai.agent.chat_data_agent import RECURSION_LIMIT
 
     def tool_call(name, args, call_id):
@@ -90,13 +95,24 @@ def test_realistic_discovery_turn_fits_in_the_recursion_limit():
             AIMessage(content="Here is your answer."),
         ]
     )
-    agent = build_agent(model=model)
+    agent = build_agent(model=model, checkpointer=InMemorySaver())
+    context = make_context(FakeWarehouse(rows=[{"n": 5}]))
+    config = {"configurable": {"thread_id": "t1"}, "recursion_limit": RECURSION_LIMIT}
     result = agent.invoke(
         {"messages": [HumanMessage("tell me about the work order data")]},
-        context=make_context(FakeWarehouse(rows=[{"n": 5}])),
-        config={"recursion_limit": RECURSION_LIMIT},
+        context=context,
+        config=config,
     )
+    resumes = 0
+    while "__interrupt__" in result:
+        requests = result["__interrupt__"][0].value["action_requests"]
+        decisions = [{"type": "approve"} for _ in requests]
+        result = agent.invoke(
+            Command(resume={"decisions": decisions}), context=context, config=config
+        )
+        resumes += 1
     assert result["messages"][-1].content == "Here is your answer."
+    assert resumes == 2  # both execute_sql calls paused for approval
 
 
 def test_sql_error_recovery_second_attempt_succeeds():
@@ -114,7 +130,7 @@ def test_sql_error_recovery_second_attempt_succeeds():
             AIMessage(content="Most surveys were in Pune."),
         ]
     )
-    agent = build_agent(model=model)
+    agent = build_agent(model=model, human_in_the_loop=False)
     result = agent.invoke(
         {"messages": [HumanMessage("surveys by district?")]},
         context=make_context(warehouse),
@@ -132,7 +148,7 @@ def test_retry_exhaustion_ends_with_deterministic_apology():
 
     # model never gives up by itself — the limiter middleware must stop it
     model = ScriptedChatModel(script=[sql_call("SELECT x FROM prod.ghost", "c")])
-    agent = build_agent(model=model)
+    agent = build_agent(model=model, human_in_the_loop=False)
     result = agent.invoke(
         {"messages": [HumanMessage("anything?")]},
         context=make_context(AlwaysFailingWarehouse()),
@@ -151,7 +167,7 @@ def test_happy_path_runs_guarded_sql_and_answers():
             AIMessage(content="You ran 1,284 surveys in June."),
         ]
     )
-    agent = build_agent(model=model)
+    agent = build_agent(model=model, human_in_the_loop=False)
 
     result = agent.invoke(
         {"messages": [HumanMessage("how many surveys in June?")]},

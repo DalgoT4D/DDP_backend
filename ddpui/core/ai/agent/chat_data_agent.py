@@ -15,6 +15,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ddpui.core.ai.agent.base import build_model_by_id, resolve_model_name
+from ddpui.core.ai.agent.hitl import build_hitl_middleware
 from ddpui.core.ai.agent.middleware import (
     MAX_SQL_ATTEMPTS,
     clear_old_tool_results,
@@ -108,6 +109,13 @@ aggregation (GROUP BY, COUNT, SUM) rather than fetching raw rows whenever possib
 4. If a query fails, read the error, fix your SQL (re-check table details if needed), \
 and retry. After {MAX_SQL_ATTEMPTS} failed attempts, stop and explain simply what you \
 tried and what the user could ask instead.
+5. If you cannot find tables or columns matching what the user asked, or their \
+question could mean two different things in a way that changes the answer (which \
+table, which time period, which program), use ask_user to ask ONE short clarifying \
+question instead of guessing or giving up. Their reply comes back as the tool result.
+6. Running a query and creating charts or dashboards each wait for the user's \
+approval in the chat. If the user cancels one, do not retry the same action — adjust \
+your approach or ask what they would prefer.
 
 ## Creating charts
 - When the user asks to chart, plot, graph, or visualize something, use \
@@ -157,18 +165,26 @@ def org_system_prompt(request) -> str:
 def build_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     model: BaseChatModel | None = None,
+    human_in_the_loop: bool = True,
 ):
-    """Compile the agent graph. `model` is overridable for tests and the REPL."""
+    """Compile the agent graph. `model` is overridable for tests and the REPL.
+
+    `human_in_the_loop=False` disables the approval/clarification interrupts for
+    contexts with no human to answer them (evals, REPL) — there ask_user falls
+    back to its tool body and gated tools run without approval."""
+    middleware = [
+        sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
+        *build_pii_middleware(),  # mask PII before anything downstream sees it
+        org_system_prompt,
+        trim_history,
+        clear_old_tool_results(),
+    ]
+    if human_in_the_loop:
+        middleware.append(build_hitl_middleware())
     return create_agent(
         model=model or get_chat_model(),
         tools=get_tools(),
-        middleware=[
-            sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
-            *build_pii_middleware(),  # mask PII before anything downstream sees it
-            org_system_prompt,
-            trim_history,
-            clear_old_tool_results(),
-        ],
+        middleware=middleware,
         context_schema=RunContext,
         checkpointer=checkpointer,
     )

@@ -163,6 +163,9 @@ class FakeRedis:
     def expire(self, key, ttl):
         return True
 
+    def get(self, key):
+        return self.store.get(key)
+
     def set(self, key, value, nx=False, ex=None):
         if nx and key in self.store:
             return None
@@ -189,14 +192,19 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
     session = ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
     saver = InMemorySaver()
 
-    def fake_build_agent(checkpointer=None, model=None):
-        scripted = ScriptedChatModel(
-            script=[
-                sql_call("SELECT COUNT(*) AS n FROM prod.surveys", "c1"),
-                AIMessage(content="1,284 surveys."),
-            ]
+    # one scripted model across build_agent calls: a resumed turn must NOT
+    # restart the script (the checkpoint replays the history, not the model)
+    scripted = ScriptedChatModel(
+        script=[
+            sql_call("SELECT COUNT(*) AS n FROM prod.surveys", "c1"),
+            AIMessage(content="1,284 surveys."),
+        ]
+    )
+
+    def fake_build_agent(checkpointer=None, model=None, human_in_the_loop=True):
+        return real_build_agent(
+            checkpointer=saver, model=scripted, human_in_the_loop=human_in_the_loop
         )
-        return real_build_agent(checkpointer=saver, model=scripted)
 
     async def fake_get_checkpointer():
         return saver
@@ -255,6 +263,20 @@ def test_full_turn_streams_events_and_updates_title(orguser, scripted_turn):
             event = await communicator.receive_json_from(timeout=10)
             events.append(event)
             # error also ends the loop so a failed turn fails fast, not by timeout
+            if event["type"] in ("title_updated", "error", "input_required"):
+                break
+
+        # the turn pauses at execute_sql for the user's approval (HITL)
+        pause = events[-1]
+        assert pause["type"] == "input_required"
+        assert pause["kind"] == "approval"
+        assert pause["requests"][0]["tool"] == "execute_sql"
+        assert "SELECT COUNT(*)" in pause["requests"][0]["sql"]
+
+        await communicator.send_json_to({"action": "resume_approval", "approve": True})
+        while True:
+            event = await communicator.receive_json_from(timeout=10)
+            events.append(event)
             if event["type"] in ("title_updated", "error"):
                 break
 

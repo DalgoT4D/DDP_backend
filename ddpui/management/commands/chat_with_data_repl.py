@@ -58,7 +58,8 @@ class Command(BaseCommand):
         asyncio.run(self._chat_loop(context, model))
 
     async def _chat_loop(self, context, model):
-        agent = build_agent(checkpointer=InMemorySaver(), model=model)
+        # the REPL has no approval UI — run without human-in-the-loop pauses
+        agent = build_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=False)
         config = {
             "configurable": {"thread_id": str(uuid.uuid4())},
             "recursion_limit": RECURSION_LIMIT,

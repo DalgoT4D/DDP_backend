@@ -33,7 +33,8 @@ class RecordingScriptedModel(ScriptedChatModel):
 
 
 def run_agent(model, question, warehouse=None):
-    agent = build_agent(model=model)
+    # PII masking is what's under test — approvals would pause the scripted run
+    agent = build_agent(model=model, human_in_the_loop=False)
     return agent.invoke(
         {"messages": [("user", question)]},
         context=make_context(warehouse=warehouse),

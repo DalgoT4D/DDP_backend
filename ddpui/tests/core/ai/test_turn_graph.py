@@ -177,7 +177,7 @@ def test_validate_node_writes_validation_into_state():
             AIMessage(content="1,284 surveys."),
         ]
     )
-    agent = build_agent(model=model)
+    agent = build_agent(model=model, human_in_the_loop=False)
 
     captured = {}
 

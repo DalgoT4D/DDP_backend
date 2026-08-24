@@ -12,6 +12,9 @@ forwards these events verbatim. Event shapes are the WS protocol from plan §4.4
      "charts": list, "usage": {"input_tokens": int, "output_tokens": int}}
     {"type": "validation", "verdict": "ok"|"warn", "assumptions": list,
      "caveat": str|None}   — post-execution audit, arrives after message_complete
+    {"type": "input_required", "kind": "approval"|"question", "requests": list,
+     "question": str?}     — the turn paused for the user (agent/hitl.py); the
+                             consumer resumes it with run_turn(resume_payload=...)
     {"type": "error", "message": str}
 
 After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
@@ -23,8 +26,10 @@ from typing import AsyncIterator
 
 from asgiref.sync import sync_to_async
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langgraph.types import Command
 
 from ddpui.core.ai.agent.base import resolve_model_name
+from ddpui.core.ai.agent.hitl import input_required_event
 from ddpui.core.ai.agent.chat_data_agent import DEFAULT_MODEL, MODEL_ENV_VAR, RECURSION_LIMIT
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.llm_calls.router import casual_reply, route_question
@@ -60,6 +65,7 @@ TOOL_LABELS = {
     "list_dashboards": "Checking your dashboards…",
     "create_dashboard": "Creating dashboard…",
     "add_charts_to_dashboard": "Adding to dashboard…",
+    "ask_user": "Asking you a question…",
 }
 GENERIC_TOOL_LABEL = "Working…"
 
@@ -79,9 +85,17 @@ async def run_turn(
     question: str,
     context: RunContext,
     model_name: str | None = None,
+    resume_payload: dict | None = None,
 ) -> AsyncIterator[dict]:
-    """Stream one turn of the TurnGraph. Always ends with message_complete or
-    error, and always writes the audit row.
+    """Stream one turn of the TurnGraph. Always ends with message_complete,
+    input_required (the turn paused for the user), or error, and always writes
+    the audit row.
+
+    `resume_payload` continues a paused turn instead of starting a new one:
+    the graph resumes from its checkpoint on this thread with
+    Command(resume=payload) — see agent/hitl.py for the payload shape. The
+    `question` is then only a label for the trace/audit (the user's answer or
+    an approval summary), not a new graph input.
 
     The brains are passed as this module's globals (route_question, casual_reply,
     audit_turn) at call time, so tests can patch them per turn. The parent
@@ -137,14 +151,31 @@ async def run_turn(
             "usage": usage,
         }
 
+    # a resumed turn continues from the checkpoint — no new graph input
+    stream_input = (
+        Command(resume=resume_payload)
+        if resume_payload is not None
+        else {"messages": [("user", question)], "question": question}
+    )
+
     try:
         async for namespace, mode, chunk in graph.astream(
-            {"messages": [("user", question)], "question": question},
+            stream_input,
             config=config,
             context=context,
             stream_mode=["messages", "updates"],
             subgraphs=True,
         ):
+            # a human-in-the-loop pause (approval or ask_user question) — the
+            # checkpoint holds the paused turn; the consumer resumes it later
+            if mode == "updates" and "__interrupt__" in (chunk or {}):
+                interrupts = chunk["__interrupt__"]
+                if interrupts:
+                    status = "paused"
+                    yield input_required_event(interrupts[0].value)
+                    break
+                continue
+
             if mode == "messages":
                 message_chunk, meta = chunk
                 # Only the agent's model node streams to the user — the router/
@@ -173,7 +204,13 @@ async def run_turn(
                                 }
                         elif isinstance(message, ToolMessage):
                             artifact = tool_artifact(message)
-                            tool_status = "success"
+                            # a rejected/errored tool call carries status="error"
+                            # (e.g. the user cancelled it at the approval card)
+                            tool_status = (
+                                "error"
+                                if getattr(message, "status", None) == "error"
+                                else "success"
+                            )
                             if artifact is not None and is_creation_artifact(artifact):
                                 # created-artifact chip (saved chart or dashboard), or a rejection
                                 chip = creation_chip(artifact)

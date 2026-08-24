@@ -68,7 +68,7 @@ def session(orguser):
     return ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
 
 
-def collect_events(agent, session, orguser, question, context):
+def collect_events(agent, session, orguser, question, context, resume_payload=None):
     """Drive the async runner from sync tests (pytest-asyncio is inert on this
     pytest version — it needs pytest>=8)."""
 
@@ -76,7 +76,12 @@ def collect_events(agent, session, orguser, question, context):
         return [
             event
             async for event in run_turn(
-                agent=agent, session=session, orguser=orguser, question=question, context=context
+                agent=agent,
+                session=session,
+                orguser=orguser,
+                question=question,
+                context=context,
+                resume_payload=resume_payload,
             )
         ]
 
@@ -106,7 +111,7 @@ def test_run_turn_streams_events_and_writes_audit(orguser, session):
             AIMessage(content="You ran 1,284 surveys."),
         ]
     )
-    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+    agent = build_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=False)
 
     events = collect_events(agent, session, orguser, "how many surveys?", make_context(warehouse))
 
@@ -217,7 +222,7 @@ def test_validation_event_follows_message_complete(orguser, session, monkeypatch
             AIMessage(content="1,284 surveys."),
         ]
     )
-    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+    agent = build_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=False)
     events = collect_events(agent, session, orguser, "how many farmers?", make_context(warehouse))
 
     types = [e["type"] for e in events]
@@ -335,7 +340,7 @@ def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):
             AIMessage(content="Done — the chart is in your Charts page."),
         ]
     )
-    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+    agent = build_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=False)
 
     events = collect_events(agent, session, orguser, "chart surveys by district", context)
 
@@ -363,7 +368,7 @@ def test_run_turn_extracts_text_from_content_blocks(orguser, session):
             ),
         ]
     )
-    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+    agent = build_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=False)
 
     events = collect_events(agent, session, orguser, "how many surveys?", make_context())
 
@@ -376,3 +381,42 @@ def test_run_turn_extracts_text_from_content_blocks(orguser, session):
         if event["type"] == "token":
             assert "signature" not in event["text"]
             assert not event["text"].startswith("[")  # no stringified block lists
+
+
+def test_turn_pauses_for_approval_and_resume_completes_it(orguser, session):
+    """A gated tool pauses the turn: input_required is the final event, the
+    audit row records paused, and a resume run on the same session thread
+    executes the approved query and finishes with message_complete."""
+    from ddpui.core.ai.agent.hitl import build_resume_payload
+
+    warehouse = FakeWarehouse(rows=[{"n": 1284}])
+    model = ScriptedChatModel(
+        script=[
+            sql_call("SELECT COUNT(*) AS n FROM prod.surveys", "c1"),
+            AIMessage(content="1,284 surveys."),
+        ]
+    )
+    agent = build_agent(checkpointer=InMemorySaver(), model=model)
+    context = make_context(warehouse)
+
+    events = collect_events(agent, session, orguser, "how many surveys?", context)
+    pause = events[-1]
+    assert pause["type"] == "input_required"
+    assert pause["kind"] == "approval"
+    assert pause["requests"][0]["tool"] == "execute_sql"
+    assert warehouse.executed == []  # nothing ran before approval
+    assert ChatWithDataTurnAudit.objects.get(session=session).status == "paused"
+
+    resume = build_resume_payload(pause["requests"], approve=True)
+    events = collect_events(
+        agent,
+        session,
+        orguser,
+        "[user approved the action]",
+        context,
+        resume_payload=resume,
+    )
+    types = [e["type"] for e in events]
+    assert "message_complete" in types
+    assert events[types.index("message_complete")]["message"] == "1,284 surveys."
+    assert len(warehouse.executed) == 1

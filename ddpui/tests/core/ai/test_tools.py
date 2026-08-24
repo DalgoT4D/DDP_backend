@@ -190,4 +190,5 @@ def test_registry_exposes_the_v1_tools():
         "list_dashboards",
         "create_dashboard",
         "add_charts_to_dashboard",
+        "ask_user",
     }
