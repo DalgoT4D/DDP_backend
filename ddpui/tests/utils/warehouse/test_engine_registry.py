@@ -254,15 +254,10 @@ def test_caching_an_engine_starts_the_sweeper_thread():
     )
 
 
-def add_engine(name, checkedout=0, org_warehouse_id=None):
+def add_engine(name, checkedout=0):
     """Cache one engine under a distinct warehouse and return (key, engine)."""
     key = engine_registry.fingerprint("postgres", dict(PG_CREDS, database=name))
-    engine = engine_registry.get_or_create_engine(
-        key,
-        make(name, checkedout),
-        wtype="postgres",
-        org_warehouse_id=org_warehouse_id,
-    )
+    engine = engine_registry.get_or_create_engine(key, make(name, checkedout), wtype="postgres")
     return key, engine
 
 
@@ -286,7 +281,7 @@ def test_invalidate_all_disposes_everything():
 
 
 def test_registry_stats_reports_the_connection_ceiling():
-    add_engine("stats_org", checkedout=2, org_warehouse_id=42)
+    add_engine("stats_org", checkedout=2)
 
     stats = engine_registry.registry_stats()
 
@@ -294,7 +289,7 @@ def test_registry_stats_reports_the_connection_ceiling():
     assert stats["per_warehouse_ceiling"] == (
         engine_registry.POOL_SIZE + engine_registry.POOL_MAX_OVERFLOW
     )
-    assert stats["engines"][0]["org_warehouse_id"] == 42
+    assert stats["engines"][0]["wtype"] == "postgres"
     assert stats["engines"][0]["checkedout"] == 2
 
 

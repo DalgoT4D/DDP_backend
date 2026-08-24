@@ -60,14 +60,14 @@ def build_connection_args(creds: dict) -> dict:
 
 
 class PostgresClient(Warehouse):
-    def __init__(self, creds: dict, org_warehouse_id: int | None = None):
+    def __init__(self, creds: dict):
         """
         Establish connection to the postgres database using sqlalchemy engine
         Creds come from the secrets manager
 
-        The engine (and therefore its connection pool) is shared per set of
-        credentials via the engine registry. Building one per client -- and so
-        per request -- left a pool of open connections behind on every call.
+        The engine (and therefore its connection pool) is shared per set of credentials
+        via the engine registry. Building one per client -- and so per request -- left a
+        pool of open connections behind on every call.
         """
         cache_key = engine_registry.fingerprint(WarehouseType.POSTGRES, creds)
 
@@ -79,7 +79,6 @@ class PostgresClient(Warehouse):
                 **engine_registry.pool_kwargs(WarehouseType.POSTGRES),
             ),
             wtype=WarehouseType.POSTGRES,
-            org_warehouse_id=org_warehouse_id,
         )
         self.inspect_obj: Inspector = inspect(
             self.engine
