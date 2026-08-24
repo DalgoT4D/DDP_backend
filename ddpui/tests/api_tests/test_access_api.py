@@ -227,12 +227,10 @@ def test_transfer_to_nonexistent_user_fails(dashboard, owner_analyst):
 # ---------------------------------------------------------------------------
 
 
-def test_previous_owner_direct_shares_unchanged_after_transfer(
+def test_previous_owner_existing_share_upgraded_to_edit_after_transfer(
     org, dashboard, owner_analyst, other_analyst
 ):
-    """Spec line 273: 'The previous owner's direct shares are not changed.'"""
-    # Give the current owner a direct View share (redundant with ownership,
-    # but present) — after transfer, that row must still exist unchanged.
+    """Previous owner with an existing direct share has it upgraded to Edit."""
     prev_owner_share = _grant(org, dashboard, owner_analyst, AccessLevel.VIEW)
     request = mock_request(owner_analyst)
     transfer_resource_ownership(
@@ -242,8 +240,31 @@ def test_previous_owner_direct_shares_unchanged_after_transfer(
         TransferOwnershipPayload(to_orguser_id=other_analyst.id),
     )
     prev_owner_share.refresh_from_db()
-    assert prev_owner_share.access_level == AccessLevel.VIEW
+    assert prev_owner_share.access_level == AccessLevel.EDIT
     assert prev_owner_share.principal_id == owner_analyst.id
+
+
+def test_previous_owner_gets_new_edit_share_when_no_direct_share_exists(
+    org, dashboard, owner_analyst, other_analyst
+):
+    """Previous owner with no direct share gets a new Edit share after transfer."""
+    request = mock_request(owner_analyst)
+    transfer_resource_ownership(
+        request,
+        "dashboard",
+        str(dashboard.id),
+        TransferOwnershipPayload(to_orguser_id=other_analyst.id),
+    )
+    share = ResourceShare.objects.filter(
+        org=org,
+        resource_type=ResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.USER,
+        principal_id=owner_analyst.id,
+        parent=None,
+    ).first()
+    assert share is not None
+    assert share.access_level == AccessLevel.EDIT
 
 
 def test_transfer_updates_created_by(dashboard, owner_analyst, other_analyst):
@@ -2451,6 +2472,60 @@ def test_owner_adds_grant_for_group(org, owner_analyst, dashboard):
         principal_type=ResourceSharePrincipalType.GROUP,
         principal_id=group.id,
     ).exists()
+
+
+def test_direct_share_for_owner_raises_400(org, owner_analyst, dashboard):
+    """Sharing a resource directly with its owner must be rejected with 400."""
+    with pytest.raises(HttpError) as exc:
+        add_resource_grants(
+            mock_request(owner_analyst),
+            "dashboard",
+            str(dashboard.id),
+            AddGrantsPayload(
+                principals=[
+                    PrincipalGrantPayload(
+                        principal_type="user",
+                        principal_id=owner_analyst.id,
+                        access_level="view",
+                    )
+                ]
+            ),
+        )
+    assert exc.value.status_code == 400
+    assert "owner" in str(exc.value.message).lower()
+
+
+def test_group_share_with_owner_as_member_succeeds_with_warning(
+    org, owner_analyst, dashboard, member
+):
+    """Sharing via a group that includes the owner succeeds; response carries a warning."""
+    group = _group(org, owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=owner_analyst)
+    OrgUserGroupMember.objects.create(group=group, orguser=member)
+
+    result = add_resource_grants(
+        mock_request(owner_analyst),
+        "dashboard",
+        str(dashboard.id),
+        AddGrantsPayload(
+            principals=[
+                PrincipalGrantPayload(
+                    principal_type="group", principal_id=group.id, access_level="edit"
+                )
+            ]
+        ),
+    )
+    # Share row is created.
+    assert ResourceShare.objects.filter(
+        org=org,
+        resource_type=ResourceType.DASHBOARD,
+        resource_id=str(dashboard.id),
+        principal_type=ResourceSharePrincipalType.GROUP,
+        principal_id=group.id,
+    ).exists()
+    # Response carries at least one advisory warning mentioning the owner.
+    assert len(result.warnings) > 0
+    assert any("owner" in w.lower() for w in result.warnings)
 
 
 # ---- Group management authz --------------------------------

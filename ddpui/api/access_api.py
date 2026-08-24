@@ -41,6 +41,7 @@ from ddpui.models.resource_share import (
 from ddpui.schemas.access.resource_share_schema import (
     AccessRequestSchema,
     AddGrantsPayload,
+    AddGrantsResponse,
     GeneralAccessPayload,
     GeneralAccessState,
     GrantsListResponse,
@@ -139,14 +140,14 @@ def list_resource_grants(request, rtype: str, resource_id: str):
     )
 
 
-@access_router.post("/{rtype}/{resource_id}/grants", response=list[ShareRowSchema])
+@access_router.post("/{rtype}/{resource_id}/grants", response=AddGrantsResponse)
 def add_resource_grants(request, rtype: str, resource_id: str, payload: AddGrantsPayload):
     """Apply staged chips from the share modal — bulk add/update."""
     orguser, resource = _fetch_resource_or_404(request, rtype, resource_id)
     _require_edit_or_admin(orguser, rtype, resource, "modify sharing")
     before = snapshot_direct_levels(orguser.org, rtype, resource_id)
     try:
-        written = resource_share.add_grants(
+        written, warnings = resource_share.add_grants(
             orguser,
             rtype,
             resource_id,
@@ -163,7 +164,8 @@ def add_resource_grants(request, rtype: str, resource_id: str, payload: AddGrant
     except Exception as err:  # notification failure never blocks the API call
         logger.error(f"share notification failed: {err}")
 
-    return resource_share.list_grants(orguser.org, rtype, resource_id)
+    shares = resource_share.list_grants(orguser.org, rtype, resource_id)
+    return AddGrantsResponse(shares=shares, warnings=warnings)
 
 
 @access_router.patch(
@@ -477,7 +479,7 @@ def respond_to_access_request(
                 ],
                 pending_grants=[],
                 invite_role_uuid=None,
-            )
+            )  # warnings ignored — access-request approval is always a direct user grant
         except resource_share.GrantError as err:
             raise HttpError(400, str(err)) from err
         req.status = AccessRequestStatus.APPROVED

@@ -9,9 +9,16 @@ Payload/response shapes live in ``ddpui/schemas/access/resource_share_schema``.
 from typing import Optional
 
 from ddpui.core import orguserfunctions
+from ddpui.core.access import shareable_types
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org
-from ddpui.models.org_user import Invitation, NewInvitationSchema, OrgUser, OrgUserGroup
+from ddpui.models.org_user import (
+    Invitation,
+    NewInvitationSchema,
+    OrgUser,
+    OrgUserGroup,
+    OrgUserGroupMember,
+)
 from ddpui.models.resource_share import (
     LEVEL_RANK,
     ResourceShare,
@@ -250,24 +257,51 @@ def add_grants(
     principals: list[PrincipalGrantPayload],
     pending_grants: list[PendingGrantPayload],
     invite_role_uuid: Optional[str],
-) -> list[ResourceShare]:
+) -> tuple[list[ResourceShare], list[str]]:
     """Idempotent multi-add.
 
     Existing rows for the same (org, rtype, resource_id, principal_type,
     principal_id) get their ``access_level`` updated in-place — the modal
     treats staged chips as "make this the level"; it does not create
     duplicate rows.
+
+    Returns ``(written_shares, warnings)`` where ``warnings`` is a list of
+    user-facing advisory messages (e.g. the owner is a member of a shared group).
     """
     if orguser.org is None:
         raise GrantError("no associated org")
     org = orguser.org
     resource_id_str = str(resource_id)
 
+    # Resolve the owner so we can block/warn about sharing with them.
+    resource = shareable_types.get_resource(org, rtype, resource_id)
+    owner_orguser_id = getattr(resource, "created_by_id", None) if resource else None
+
     written: list[ResourceShare] = []
+    warnings: list[str] = []
 
     # 1) Concrete principals — user or group.
     for grant in principals:
         _check_principal_exists(org, grant.principal_type, grant.principal_id)
+
+        if (
+            grant.principal_type == ResourceSharePrincipalType.USER
+            and owner_orguser_id is not None
+            and grant.principal_id == owner_orguser_id
+        ):
+            raise GrantError("cannot add a direct share for the resource owner")
+
+        if (
+            grant.principal_type == ResourceSharePrincipalType.GROUP
+            and owner_orguser_id is not None
+            and OrgUserGroupMember.objects.filter(
+                group_id=grant.principal_id, orguser_id=owner_orguser_id
+            ).exists()
+        ):
+            warnings.append(
+                "The resource owner is a member of this group. "
+                "Their access will not be affected by this share."
+            )
 
         # Restrict to direct rows. Cascade child rows share the same principal
         # coordinates but are derived from a parent share (parent set); mutating
@@ -363,7 +397,7 @@ def add_grants(
                 )
             )
 
-    return written
+    return written, warnings
 
 
 def update_grant(orguser: OrgUser, share_id: int, access_level: AccessLevel) -> ResourceShare:

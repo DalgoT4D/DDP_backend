@@ -1,5 +1,5 @@
 from ddpui.models.org_user import OrgUser
-from ddpui.models.resource_share import AccessLevel
+from ddpui.models.resource_share import AccessLevel, ResourceShare, ResourceSharePrincipalType
 from ddpui.models.role_based_access import RoleSlug
 
 
@@ -33,9 +33,9 @@ def transfer_ownership(caller: OrgUser, rtype: str, resource, to_orguser_id: int
     Rules:
     - Caller must be the current owner or Admin.
     - Recipient must be in the same org.
-    - Recipient must already have effective Edit access (floor or direct grant),
-      so that the transfer is meaningful. Importing here to avoid circular imports
-      (access_control imports auth which imports ownership).
+    - Recipient must already have effective Edit access (floor or direct grant).
+    - Previous owner is guaranteed Edit access after transfer: their existing
+      direct share is updated to Edit, or a new Edit share is created if none exists.
     """
     from ddpui.core.access.access_control import get_user_access  # late import — avoid cycle
 
@@ -59,5 +59,22 @@ def transfer_ownership(caller: OrgUser, rtype: str, resource, to_orguser_id: int
             "share it with them first or ensure their role floor is Edit"
         )
 
+    previous_owner_id = resource.created_by_id
+
     resource.created_by = to_orguser
     resource.save(update_fields=["created_by"])
+
+    # Ensure the previous owner retains Edit access.
+    if previous_owner_id is not None:
+        share, created = ResourceShare.objects.get_or_create(
+            org=caller.org,
+            resource_type=rtype,
+            resource_id=str(resource.pk),
+            principal_type=ResourceSharePrincipalType.USER,
+            principal_id=previous_owner_id,
+            parent=None,
+            defaults={"access_level": AccessLevel.EDIT, "created_by": caller},
+        )
+        if not created and share.access_level != AccessLevel.EDIT:
+            share.access_level = AccessLevel.EDIT
+            share.save(update_fields=["access_level"])

@@ -120,6 +120,18 @@ class AddGrantsPayload(Schema):
     invite_role_uuid: Optional[str] = None  # required when pending_grants is non-empty
 
 
+class AddGrantsResponse(Schema):
+    """Response body for ``POST /api/access/{rtype}/{id}/grants``.
+
+    ``warnings`` carries advisory messages for the frontend (e.g. the resource
+    owner is a member of a shared group — the share is still created but owner
+    access is unaffected).
+    """
+
+    shares: list[ShareRowSchema]
+    warnings: list[str] = []
+
+
 class UpdateGrantPayload(Schema):
     """Body for ``PATCH /api/access/{rtype}/{id}/grants/{share_id}`` — the
     per-row access-level dropdown change.
