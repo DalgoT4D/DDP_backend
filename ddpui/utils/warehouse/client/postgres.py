@@ -76,7 +76,7 @@ class PostgresClient(Warehouse):
             lambda: create_engine(
                 "postgresql+psycopg2://",
                 connect_args=build_connection_args(creds),
-                **engine_registry.pool_kwargs(WarehouseType.POSTGRES),
+                **engine_registry.pool_kwargs(),
             ),
             wtype=WarehouseType.POSTGRES,
         )

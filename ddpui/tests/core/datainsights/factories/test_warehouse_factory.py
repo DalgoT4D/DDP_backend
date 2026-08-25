@@ -115,7 +115,7 @@ def test_postgres_client_builds_its_engine_with_the_registry_pool_settings():
     mock_create_engine.assert_called_once_with(
         "postgresql+psycopg2://",
         connect_args={**EXPECTED_BASE_ARGS, "sslmode": "require"},
-        **engine_registry.pool_kwargs("postgres"),
+        **engine_registry.pool_kwargs(),
     )
 
     engine_registry.invalidate_all()

@@ -131,21 +131,20 @@ def test_fingerprint_does_not_leak_the_password():
 
 def test_pool_kwargs_bound_the_connection_ceiling():
     """max_overflow especially: SQLAlchemy defaults it to 10, we want it small."""
-    kwargs = engine_registry.pool_kwargs("postgres")
+    kwargs = engine_registry.pool_kwargs()
 
     assert kwargs["pool_size"] == engine_registry.POOL_SIZE
     assert kwargs["max_overflow"] == engine_registry.POOL_MAX_OVERFLOW
     assert kwargs["pool_timeout"] == engine_registry.POOL_TIMEOUT
 
 
-def test_pre_ping_is_enabled_for_postgres_only():
+def test_pre_ping_is_enabled():
     """
-    sqlalchemy-bigquery inherits DefaultDialect.do_ping, so pre-ping there runs
-    `SELECT 1` as a real BigQuery job -- a job slot, API quota and hundreds of ms
-    on every checkout, to test a session that does not exist.
+    A pooled connection outlives the server's willingness to keep it: without
+    pre-ping, a backend killed by an RDS failover or an idle timeout surfaces as a
+    failed request on the next checkout instead of a transparent reconnect.
     """
-    assert engine_registry.pool_kwargs("postgres")["pool_pre_ping"] is True
-    assert "pool_pre_ping" not in engine_registry.pool_kwargs("bigquery")
+    assert engine_registry.pool_kwargs()["pool_pre_ping"] is True
 
 
 def age_entry(key, seconds):
