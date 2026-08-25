@@ -32,7 +32,12 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schemas import (
+    ChartConfig,
+    ChartDataResponse,
+    ChartDataPayload,
+    ChartSort,
+)
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -1287,12 +1292,34 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
 
 
+def _apply_live_sort_search_override(
+    chart_payload: ChartDataPayload, sort: Optional[str], search: Optional[str]
+) -> None:
+    """Apply live sort/search on top of the frozen payload — everything else stays frozen."""
+    if not sort and not search:
+        return
+    if chart_payload.extra_config is None:
+        chart_payload.extra_config = {}
+    if sort:
+        chart_payload.extra_config["sort"] = [
+            ChartSort(**item).model_dump() for item in json.loads(sort)
+        ]
+    if search:
+        chart_payload.extra_config["search"] = search
+
+
 @public_router.get(
     "/reports/{token}/charts/{chart_id}/data-preview/",
     response={200: dict, 404: PublicErrorResponse},
 )
 def get_public_report_table_data(
-    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+    request,
+    token: str,
+    chart_id: int,
+    page: int = 0,
+    limit: int = 100,
+    sort: Optional[str] = None,
+    search: Optional[str] = None,
 ):
     """Get table chart data for a public report"""
     try:
@@ -1308,6 +1335,7 @@ def get_public_report_table_data(
             extra_config=chart_config.get("extra_config"),
         )
         chart_payload = charts_service.build_chart_data_payload(config)
+        _apply_live_sort_search_override(chart_payload, sort, search)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1336,8 +1364,13 @@ def get_public_report_table_data(
     "/reports/{token}/charts/{chart_id}/total-rows/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_total_rows(request, token: str, chart_id: int):
-    """Get total row count for table chart in a public report"""
+def get_public_report_table_total_rows(
+    request, token: str, chart_id: int, search: Optional[str] = None
+):
+    """Get total row count for table chart in a public report.
+
+    Sort isn't accepted here — it can't change a row count, only search can.
+    """
     try:
         snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
             token, chart_id, request
@@ -1351,6 +1384,7 @@ def get_public_report_table_total_rows(request, token: str, chart_id: int):
             extra_config=chart_config.get("extra_config"),
         )
         chart_payload = charts_service.build_chart_data_payload(config)
+        _apply_live_sort_search_override(chart_payload, sort=None, search=search)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 
