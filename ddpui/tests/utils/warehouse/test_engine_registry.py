@@ -129,32 +129,6 @@ def test_fingerprint_does_not_leak_the_password():
     assert "dalgo" not in key
 
 
-def test_fork_gives_the_child_an_empty_registry():
-    """
-    gunicorn and celery fork their workers, so a child inherits this module's
-    state. It must not inherit the parent's pools (two processes on one socket)
-    nor a flag claiming a sweeper is running when that thread did not survive.
-    """
-    closed_with = []
-
-    class ForkAwareEngine(FakeEngine):
-        def dispose(self, close=True):
-            closed_with.append(close)
-
-    key = engine_registry.fingerprint("postgres", PG_CREDS)
-    engine_registry.get_or_create_engine(key, ForkAwareEngine, wtype="postgres")
-    assert engine_registry._sweeper_started.is_set()
-
-    lock_before = engine_registry._lock
-    engine_registry._reset_after_fork()
-
-    assert engine_registry._engines == {}
-    assert not engine_registry._sweeper_started.is_set()
-    assert engine_registry._lock is not lock_before
-    # abandoned, not closed -- the child's sockets are dups of the parent's
-    assert closed_with == [False]
-
-
 def test_pool_kwargs_bound_the_connection_ceiling():
     """max_overflow especially: SQLAlchemy defaults it to 10, we want it small."""
     kwargs = engine_registry.pool_kwargs("postgres")

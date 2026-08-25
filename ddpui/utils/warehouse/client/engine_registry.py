@@ -178,33 +178,6 @@ def _ensure_sweeper() -> None:
         )
 
 
-def _reset_after_fork() -> None:
-    """
-    Give a freshly forked child its own empty registry: it inherits the parent's
-    _engines and a _sweeper_started flag claiming a thread that did not survive the
-    fork. Insurance today, but the alternative is two processes on one socket.
-
-    dispose(close=False) abandons inherited pools rather than closing them -- the
-    child's sockets are dups, so closing kills sessions the parent is still using.
-    """
-    global _lock  # pylint: disable=global-statement # skipcq: PYL-W0603
-    # A lock held at fork time stays locked forever in the child, where its owning
-    # thread does not exist. The child is single-threaded here, so a fresh one is safe.
-    _lock = threading.RLock()
-
-    for entry in _engines.values():
-        try:
-            entry.engine.dispose(close=False)
-        except Exception:  # skipcq: PYL-W0703
-            pass
-    _engines.clear()
-    # the parent's sweeper thread did not come with us; let the child start one
-    _sweeper_started.clear()
-
-
-os.register_at_fork(after_in_child=_reset_after_fork)
-
-
 def get_or_create_engine(cache_key: str, create, wtype: str) -> Engine:
     """
     Return the cached engine for `cache_key`, building it via `create` on a miss.
