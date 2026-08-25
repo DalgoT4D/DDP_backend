@@ -10,6 +10,11 @@ quiet. POOL_SIZE + POOL_MAX_OVERFLOW cap one warehouse in one process, and
 ENGINE_IDLE_TTL_SECONDS retires a whole idle pool; a dropped socket is caught by
 pool_pre_ping, not by age.
 
+Postgres only. BigQuery deliberately does not register: its connections are REST
+clients, not sockets, so there is no connection limit to protect and nothing to
+retire -- and pooling one would only cache an authed client, which is not what this
+module is for.
+
 Nothing caps how many distinct warehouses one process caches -- the idle TTL is the
 only bound. TODO: add an LRU cap if cached engines ever approach the process fd limit.
 
@@ -70,22 +75,20 @@ _lock = threading.RLock()
 _sweeper_started = threading.Event()
 
 
-def pool_kwargs(wtype: str) -> dict:
+def pool_kwargs() -> dict:
     """
     Pool settings a warehouse engine must be built with.
 
-    pool_pre_ping is postgres-only. Both dialects ping with `SELECT 1`; only the cost
-    differs -- ~1ms down an open socket on postgres, versus a whole REST job on
-    BigQuery, on every checkout, to test a session BigQuery does not even have.
+    pool_pre_ping is unconditional because only postgres registers engines here: it
+    costs ~1ms down an already-open socket, and it is what turns a server-side
+    disconnect into a retry rather than a failed request.
     """
-    kwargs = {
+    return {
         "pool_size": POOL_SIZE,
         "max_overflow": POOL_MAX_OVERFLOW,
         "pool_timeout": POOL_TIMEOUT,
+        "pool_pre_ping": True,
     }
-    if wtype == "postgres":
-        kwargs["pool_pre_ping"] = True
-    return kwargs
 
 
 def fingerprint(wtype: str, creds: dict) -> str:
