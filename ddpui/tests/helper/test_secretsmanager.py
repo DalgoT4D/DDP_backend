@@ -113,6 +113,11 @@ def test_retrieve_warehouse_credentials(
     get_secret_value.assert_called_once_with(SecretId="credentialskey")
 
 
+def test_retrieve_warehouse_credentials_none_warehouse():
+    result = retrieve_warehouse_credentials(None)
+    assert result is None
+
+
 @patch("ddpui.utils.secretsmanager.get_client")
 def test_delete_warehouse_credentials(
     mock_getclient: Mock,

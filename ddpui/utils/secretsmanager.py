@@ -183,6 +183,8 @@ def update_warehouse_credentials(warehouse: OrgWarehouse, credentials: dict):
 
 def retrieve_warehouse_credentials(warehouse: OrgWarehouse) -> dict | None:
     """decodes and returns the saved warehouse credentials for an org"""
+    if warehouse is None:
+        return None
     aws_sm = get_client()
     response = aws_sm.get_secret_value(SecretId=warehouse.credentials)
     return json.loads(response["SecretString"]) if response and "SecretString" in response else None
