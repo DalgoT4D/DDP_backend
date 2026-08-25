@@ -584,7 +584,11 @@ def build_chart_query(
                 time_grain = payload.extra_config.get("time_grain")
                 warehouse_type = org_warehouse.wtype.lower() if org_warehouse else None
                 primary_dim_is_time_grained = bool(
-                    payload.metrics and time_grain and warehouse_type and payload.dimension_col
+                    payload.metrics
+                    and time_grain
+                    and warehouse_type
+                    and payload.dimension_col
+                    and payload.dimension_col in dimensions
                 )
                 extra_search_expressions = None
                 if primary_dim_is_time_grained:

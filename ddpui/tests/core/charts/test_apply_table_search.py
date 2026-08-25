@@ -220,8 +220,12 @@ class TestSearchWithTimeGrainDimension:
         # The search condition reuses the derived GROUP BY expression...
         assert "date_trunc" in sql.lower()
         assert "lower(CAST(date_trunc('month', created_at) AS VARCHAR))" in sql
-        # ...and does NOT reference the raw column directly in a search condition
-        # (region — the other dimension — is still searched via its raw column).
+        # ...and does NOT also search the raw column directly — that would be a
+        # dangling reference outside GROUP BY (created_at is only grouped via
+        # DATE_TRUNC here, never raw too), catching a regression that forgets to
+        # exclude the primary dimension from search_dimensions.
+        assert "lower(CAST(created_at AS VARCHAR))" not in sql
+        # region — the other dimension — is still searched via its raw column.
         assert "lower(CAST(region AS VARCHAR))" in sql
 
     def test_without_warehouse_searches_raw_primary_column(self):
@@ -235,4 +239,34 @@ class TestSearchWithTimeGrainDimension:
         assert "%march%" in sql
         assert "date_trunc" not in sql.lower()
         assert "lower(CAST(created_at AS VARCHAR))" in sql
+        assert "lower(CAST(region AS VARCHAR))" in sql
+
+    def test_dimension_col_absent_from_dimensions_is_never_treated_as_time_grained(self):
+        """Regression: dimension_col must actually be a member of dimensions to be
+        treated as the time-grained primary dimension. If it isn't (a stale/mismatched
+        payload), build_multi_metric_query's own GROUP BY loop never matches it either
+        — nothing gets time-grain-transformed — so search must stay on raw columns too,
+        not build a HAVING expression referencing a column that was never grouped."""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="test_table",
+            dimensions=["region"],
+            dimension_col="created_at",  # not in dimensions
+            metrics=[ChartMetric(aggregation="sum", column="amount", alias="Total Amount")],
+            extra_config={
+                "search": "march",
+                "time_grain": "month",
+            },
+        )
+        mock_warehouse = MagicMock(spec=OrgWarehouse)
+        mock_warehouse.wtype = "postgres"
+
+        query_builder = build_chart_query(payload, mock_warehouse)
+        sql = str(query_builder.build().compile(compile_kwargs={"literal_binds": True}))
+
+        assert "HAVING" in sql.upper()
+        assert "%march%" in sql
+        assert "date_trunc" not in sql.lower()
+        assert "created_at" not in sql
         assert "lower(CAST(region AS VARCHAR))" in sql

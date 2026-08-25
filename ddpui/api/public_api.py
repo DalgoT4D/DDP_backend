@@ -7,6 +7,7 @@ import copy
 from datetime import datetime
 
 from ninja import Router, Schema
+from pydantic import ValidationError
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import F
@@ -1310,7 +1311,7 @@ def _apply_live_sort_search_override(
 
 @public_router.get(
     "/reports/{token}/charts/{chart_id}/data-preview/",
-    response={200: dict, 404: PublicErrorResponse},
+    response={200: dict, 400: PublicErrorResponse, 404: PublicErrorResponse},
 )
 def get_public_report_table_data(
     request,
@@ -1355,6 +1356,9 @@ def get_public_report_table_data(
         return 404, PublicErrorResponse(
             error="Report not found or no longer public", is_valid=False
         )
+    except (json.JSONDecodeError, TypeError, ValidationError) as e:
+        logger.warning(f"Public report table data - invalid sort parameter: {str(e)}")
+        return 400, PublicErrorResponse(error="Invalid sort parameter", is_valid=False)
     except Exception as e:
         logger.error(f"Public report table data error: {str(e)}")
         return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
