@@ -3,7 +3,8 @@
 from typing import Optional, List
 from datetime import timedelta
 
-from ninja import Router
+from ninja import Router, File
+from ninja.files import UploadedFile
 from ninja.errors import HttpError
 from django.utils import timezone
 from django.db import transaction
@@ -29,7 +30,12 @@ from ddpui.services.dashboard_service import (
     DashboardServiceError,
     FilterNotFoundError,
     FilterValidationError,
+    WidgetImagePermissionError,
+    WidgetImageStorageError,
+    WidgetImageValidationError,
     delete_dashboard_safely,
+    delete_widget_image,
+    upload_widget_image,
 )
 from ddpui.schemas.dashboard_schema import (
     DashboardCreate,
@@ -46,6 +52,8 @@ from ddpui.schemas.dashboard_schema import (
     DashboardShareStatus,
     LandingPageResponse,
     LandingPageResolveResponse,
+    WidgetImageDeleteRequest,
+    WidgetImageUploadResponse,
 )
 from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
@@ -75,6 +83,58 @@ def list_dashboards(
     )
 
     return [DashboardResponse(**DashboardService.get_dashboard_response(d)) for d in dashboards]
+
+
+# =============================================================================
+# Widget Image Endpoints (dashboard text/image widgets)
+# =============================================================================
+# NOTE: these must be registered before any "/{dashboard_id}/"-pattern route
+# below. Django tries URL patterns in registration order and dashboard_id has
+# no int-only constraint at the URL level, so "/images/" would otherwise get
+# matched as dashboard_id="images" by whichever "/{dashboard_id}/" route came
+# first, sending the request to the wrong view entirely.
+
+
+@dashboard_native_router.put("/images/", response=WidgetImageUploadResponse)
+@has_permission(["can_edit_dashboards"])
+def upload_dashboard_widget_image(request, file: UploadedFile = File(...)):
+    """Upload an image for a dashboard text/image widget.
+
+    Unlike the org logo, this isn't saved to any model — the caller stores
+    the returned image_url inline in the widget's own config, persisted via
+    the normal dashboard save flow.
+    """
+    orguser: OrgUser = request.orguser
+
+    try:
+        image_url, image_key = upload_widget_image(
+            file_bytes=file.read(),
+            content_type=file.content_type or "",
+            org=orguser.org,
+        )
+    except WidgetImageValidationError as err:
+        raise HttpError(400, err.message) from err
+    except WidgetImageStorageError as err:
+        raise HttpError(502, err.message) from err
+
+    return WidgetImageUploadResponse(image_url=image_url, image_key=image_key)
+
+
+@dashboard_native_router.delete("/images/")
+@has_permission(["can_edit_dashboards"])
+def delete_dashboard_widget_image(request, payload: WidgetImageDeleteRequest):
+    """Delete a dashboard widget image from S3 (on explicit remove, or when
+    replacing an image with a new upload)."""
+    orguser: OrgUser = request.orguser
+
+    try:
+        delete_widget_image(payload.image_key, orguser.org)
+    except WidgetImagePermissionError as err:
+        raise HttpError(403, err.message) from err
+    except WidgetImageStorageError as err:
+        raise HttpError(502, err.message) from err
+
+    return {"success": True}
 
 
 @dashboard_native_router.get("/{dashboard_id}/", response=DashboardResponse)

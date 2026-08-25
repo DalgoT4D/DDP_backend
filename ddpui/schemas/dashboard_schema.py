@@ -198,3 +198,27 @@ class LandingPageResolveResponse(Schema):
     dashboard_title: Optional[str] = None
     dashboard_type: Optional[str] = None
     source: str  # "personal", "org_default", or "none"
+
+
+# =============================================================================
+# Widget Image Schemas
+# =============================================================================
+
+
+class WidgetImageUploadResponse(Schema):
+    """Response schema for a dashboard widget image upload.
+
+    Unlike the org logo, this isn't persisted to any model field — a
+    dashboard can hold many widget images, each embedded inline in that
+    dashboard's own JSON config. image_key is returned so the frontend can
+    pass it back later to delete the file when the image is removed/replaced.
+    """
+
+    image_url: str
+    image_key: str
+
+
+class WidgetImageDeleteRequest(Schema):
+    """Request schema for deleting a dashboard widget image from S3"""
+
+    image_key: str = Field(..., min_length=1)
