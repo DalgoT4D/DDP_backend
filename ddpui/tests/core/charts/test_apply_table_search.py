@@ -175,7 +175,9 @@ class TestSearchAndSortCombined:
         # LIMIT/OFFSET must be the outermost/last clause — after WHERE and ORDER BY.
         where_idx = sql.upper().index("WHERE")
         order_idx = sql.upper().index("ORDER BY")
-        limit_idx = sql.upper().index("LIMIT") if "LIMIT" in sql.upper() else sql.upper().index("OFFSET")
+        limit_idx = (
+            sql.upper().index("LIMIT") if "LIMIT" in sql.upper() else sql.upper().index("OFFSET")
+        )
         assert where_idx < order_idx < limit_idx
 
 

@@ -422,9 +422,7 @@ class TestGetPublicReportTableData:
             )
 
             called_payload = mock_preview_fn.call_args[0][1]
-            assert called_payload.extra_config["sort"] == [
-                {"column": "name", "direction": "desc"}
-            ]
+            assert called_payload.extra_config["sort"] == [{"column": "name", "direction": "desc"}]
 
     def test_search_query_param_reaches_extra_config(self, public_snapshot, seed_db):
         """A live `search` query param is written into extra_config the same way
@@ -516,9 +514,7 @@ class TestGetPublicReportTableData:
             mock_preview_fn.return_value = mock_preview
 
             request = _make_public_request()
-            get_public_report_table_data(
-                request, public_snapshot.public_share_token, chart_id=1
-            )
+            get_public_report_table_data(request, public_snapshot.public_share_token, chart_id=1)
 
             called_payload = mock_preview_fn.call_args[0][1]
             assert "search" not in (called_payload.extra_config or {})
