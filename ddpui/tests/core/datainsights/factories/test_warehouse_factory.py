@@ -15,7 +15,7 @@ from ddpui.utils.warehouse.client.warehouse_factory import (
     WarehouseFactory,
     WarehouseType,
 )
-from ddpui.utils.warehouse.client import engine_registry
+from ddpui.utils.warehouse.client import postgres_engine_registry
 from ddpui.utils.warehouse.client.bigquery import BigqueryClient
 from ddpui.utils.warehouse.client.postgres import PostgresClient
 
@@ -124,7 +124,7 @@ def test_postgres_client_builds_its_engine_with_the_registry_pool_settings():
     max_overflow especially, which defaults to 10 and set the old per-warehouse
     ceiling at 15 connections.
     """
-    engine_registry.invalidate_all()
+    postgres_engine_registry.invalidate_all()
 
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):
         with patch("ddpui.utils.warehouse.client.postgres.create_engine") as mock_create_engine:
@@ -133,10 +133,10 @@ def test_postgres_client_builds_its_engine_with_the_registry_pool_settings():
     mock_create_engine.assert_called_once_with(
         "postgresql+psycopg2://",
         connect_args={**EXPECTED_BASE_ARGS, "sslmode": "require"},
-        **engine_registry.pool_kwargs(),
+        **postgres_engine_registry.pool_kwargs(),
     )
 
-    engine_registry.invalidate_all()
+    postgres_engine_registry.invalidate_all()
 
 
 def test_repeated_clients_for_one_warehouse_share_a_single_engine():
@@ -145,7 +145,7 @@ def test_repeated_clients_for_one_warehouse_share_a_single_engine():
     is what the chart, dashboard, KPI and filter endpoints all do -- must not
     build a new pool per request.
     """
-    engine_registry.invalidate_all()
+    postgres_engine_registry.invalidate_all()
 
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):
         with patch("ddpui.utils.warehouse.client.postgres.create_engine") as mock_create_engine:
@@ -155,7 +155,7 @@ def test_repeated_clients_for_one_warehouse_share_a_single_engine():
     assert mock_create_engine.call_count == 1
     assert first.engine is second.engine
 
-    engine_registry.invalidate_all()
+    postgres_engine_registry.invalidate_all()
 
 
 def test_connect_args_are_built_only_on_a_cache_miss():
@@ -165,7 +165,7 @@ def test_connect_args_are_built_only_on_a_cache_miss():
     warehouses configured with one -- once per engine here, once per request if this
     ever slips back out of the callback.
     """
-    engine_registry.invalidate_all()
+    postgres_engine_registry.invalidate_all()
 
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):
         with patch("ddpui.utils.warehouse.client.postgres.create_engine"):
@@ -178,4 +178,4 @@ def test_connect_args_are_built_only_on_a_cache_miss():
 
     assert mock_build.call_count == 1
 
-    engine_registry.invalidate_all()
+    postgres_engine_registry.invalidate_all()
