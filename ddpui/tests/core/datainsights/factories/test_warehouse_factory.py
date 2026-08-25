@@ -17,7 +17,7 @@ from ddpui.utils.warehouse.client.warehouse_factory import (
 )
 from ddpui.utils.warehouse.client import engine_registry
 from ddpui.utils.warehouse.client.bigquery import BigqueryClient
-from ddpui.utils.warehouse.client.postgres import PostgresClient, build_connection_args
+from ddpui.utils.warehouse.client.postgres import PostgresClient
 
 
 class MockClass:
@@ -67,23 +67,41 @@ EXPECTED_BASE_ARGS = {
 
 def test_connect_args_1():
     """sslmode given as a string is passed through verbatim"""
-    args = build_connection_args({**BASE_PG_CREDS, "sslmode": "require"})
+    args = PostgresClient.build_connection_args({**BASE_PG_CREDS, "sslmode": "require"})
 
     assert args == {**EXPECTED_BASE_ARGS, "sslmode": "require"}
 
 
 def test_connect_args_2():
     """sslmode given as boolean True means 'require'"""
-    args = build_connection_args({**BASE_PG_CREDS, "sslmode": True})
+    args = PostgresClient.build_connection_args({**BASE_PG_CREDS, "sslmode": True})
 
     assert args == {**EXPECTED_BASE_ARGS, "sslmode": "require"}
 
 
 def test_connect_args_3():
     """sslmode given as boolean False means 'disable'"""
-    args = build_connection_args({**BASE_PG_CREDS, "sslmode": False})
+    args = PostgresClient.build_connection_args({**BASE_PG_CREDS, "sslmode": False})
 
     assert args == {**EXPECTED_BASE_ARGS, "sslmode": "disable"}
+
+
+def test_connect_args_writes_a_ca_certificate_to_disk():
+    """
+    psycopg2 wants sslrootcert as a path, but the credentials carry the certificate
+    inline, so it gets written to a temp file. The file outlives the call (delete=False)
+    because psycopg2 reads it at connect time, not here.
+    """
+    creds = {**BASE_PG_CREDS, "sslmode": {"ca_certificate": "---CERT BODY---"}}
+    del creds["sslrootcert"]
+
+    args = PostgresClient.build_connection_args(creds)
+
+    assert os.path.isfile(args["sslrootcert"])
+    with open(args["sslrootcert"], encoding="utf-8") as fp:
+        assert fp.read() == "---CERT BODY---"
+
+    os.unlink(args["sslrootcert"])
 
 
 def test_connect_args_does_not_mutate_the_caller_creds():
@@ -94,7 +112,7 @@ def test_connect_args_does_not_mutate_the_caller_creds():
     """
     creds = {**BASE_PG_CREDS, "ssl_mode": "require"}
 
-    args = build_connection_args(creds)
+    args = PostgresClient.build_connection_args(creds)
 
     assert args["sslmode"] == "require"
     assert "sslmode" not in creds
@@ -136,5 +154,28 @@ def test_repeated_clients_for_one_warehouse_share_a_single_engine():
 
     assert mock_create_engine.call_count == 1
     assert first.engine is second.engine
+
+    engine_registry.invalidate_all()
+
+
+def test_connect_args_are_built_only_on_a_cache_miss():
+    """
+    build_connection_args runs inside the callback the registry invokes on a miss,
+    never on the per-request path. It writes a CA certificate to a temp file for
+    warehouses configured with one -- once per engine here, once per request if this
+    ever slips back out of the callback.
+    """
+    engine_registry.invalidate_all()
+
+    with patch("ddpui.utils.warehouse.client.postgres.inspect"):
+        with patch("ddpui.utils.warehouse.client.postgres.create_engine"):
+            with patch.object(
+                PostgresClient, "build_connection_args", return_value={}
+            ) as mock_build:
+                PostgresClient(dict(BASE_PG_CREDS))
+                PostgresClient(dict(BASE_PG_CREDS))
+                PostgresClient(dict(BASE_PG_CREDS))
+
+    assert mock_build.call_count == 1
 
     engine_registry.invalidate_all()

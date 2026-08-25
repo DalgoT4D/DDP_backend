@@ -12,53 +12,6 @@ from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 
 
-def build_connection_args(creds: dict) -> dict:
-    """
-    Translate warehouse credentials into psycopg2 connect_args.
-
-    Works on a copy: this normalises the credentials (sslmode aliasing) and the
-    caller's dict should not come back mutated. Only ever called on an engine
-    cache miss, which also means the CA certificate below is written to disk once
-    per warehouse instead of once per request.
-    """
-    creds = dict(creds)
-
-    connection_args = {
-        "host": creds["host"],
-        "port": creds["port"],
-        "dbname": creds["database"],
-        "user": creds["username"],
-        "password": creds["password"],
-    }
-
-    if "ssl_mode" in creds:
-        creds["sslmode"] = creds["ssl_mode"]
-
-    if "sslrootcert" in creds:
-        connection_args["sslrootcert"] = creds["sslrootcert"]
-
-    if "sslmode" in creds and isinstance(creds["sslmode"], str):
-        connection_args["sslmode"] = creds["sslmode"]
-
-    if "sslmode" in creds and isinstance(creds["sslmode"], bool):
-        connection_args["sslmode"] = "require" if creds["sslmode"] else "disable"
-
-    if (
-        "sslmode" in creds
-        and isinstance(creds["sslmode"], dict)
-        and "ca_certificate" in creds["sslmode"]
-    ):
-        # connect_params['sslcert'] needs a file path but
-        # creds['sslmode']['ca_certificate']
-        # is a string (i.e. the actual certificate). so we write
-        # it to disk and pass the file path
-        with tempfile.NamedTemporaryFile(delete=False) as fp:
-            fp.write(creds["sslmode"]["ca_certificate"].encode())
-            connection_args["sslrootcert"] = fp.name
-
-    return connection_args
-
-
 class PostgresClient(Warehouse):
     def __init__(self, creds: dict):
         """
@@ -73,9 +26,13 @@ class PostgresClient(Warehouse):
 
         self.engine = engine_registry.get_or_create_engine(
             cache_key,
+            # Class-qualified, not `self.`: the lambda then captures only `creds`, and
+            # never the half-built client. It runs before __init__ returns, on a cache
+            # miss only -- which is what keeps the args build (and its temp cert file)
+            # off the per-request path.
             lambda: create_engine(
                 "postgresql+psycopg2://",
-                connect_args=build_connection_args(creds),
+                connect_args=PostgresClient.build_connection_args(creds),
                 **engine_registry.pool_kwargs(),
             ),
             wtype=WarehouseType.POSTGRES,
@@ -83,6 +40,53 @@ class PostgresClient(Warehouse):
         self.inspect_obj: Inspector = inspect(
             self.engine
         )  # this will be used to fetch metadata of the database
+
+    @staticmethod
+    def build_connection_args(creds: dict) -> dict:
+        """
+        Translate warehouse credentials into psycopg2 connect_args.
+
+        Works on a copy: this normalises the credentials (sslmode aliasing) and the
+        caller's dict should not come back mutated. Only ever called on an engine
+        cache miss, which also means the CA certificate below is written to disk once
+        per warehouse instead of once per request.
+        """
+        creds = dict(creds)
+
+        connection_args = {
+            "host": creds["host"],
+            "port": creds["port"],
+            "dbname": creds["database"],
+            "user": creds["username"],
+            "password": creds["password"],
+        }
+
+        if "ssl_mode" in creds:
+            creds["sslmode"] = creds["ssl_mode"]
+
+        if "sslrootcert" in creds:
+            connection_args["sslrootcert"] = creds["sslrootcert"]
+
+        if "sslmode" in creds and isinstance(creds["sslmode"], str):
+            connection_args["sslmode"] = creds["sslmode"]
+
+        if "sslmode" in creds and isinstance(creds["sslmode"], bool):
+            connection_args["sslmode"] = "require" if creds["sslmode"] else "disable"
+
+        if (
+            "sslmode" in creds
+            and isinstance(creds["sslmode"], dict)
+            and "ca_certificate" in creds["sslmode"]
+        ):
+            # connect_params['sslcert'] needs a file path but
+            # creds['sslmode']['ca_certificate']
+            # is a string (i.e. the actual certificate). so we write
+            # it to disk and pass the file path
+            with tempfile.NamedTemporaryFile(delete=False) as fp:
+                fp.write(creds["sslmode"]["ca_certificate"].encode())
+                connection_args["sslrootcert"] = fp.name
+
+        return connection_args
 
     def execute(self, sql) -> list[dict]:
         """
