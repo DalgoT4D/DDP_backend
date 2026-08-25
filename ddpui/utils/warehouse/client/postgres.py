@@ -7,7 +7,7 @@ from sqlalchemy.types import NullType
 from sqlalchemy.exc import NoSuchTableError
 
 from ddpui.core.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
-from ddpui.utils.warehouse.client import engine_registry
+from ddpui.utils.warehouse.client import postgres_engine_registry
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 
@@ -22,9 +22,9 @@ class PostgresClient(Warehouse):
         via the engine registry. Building one per client -- and so per request -- left a
         pool of open connections behind on every call.
         """
-        cache_key = engine_registry.fingerprint(WarehouseType.POSTGRES, creds)
+        cache_key = postgres_engine_registry.fingerprint(WarehouseType.POSTGRES, creds)
 
-        self.engine = engine_registry.get_or_create_engine(
+        self.engine = postgres_engine_registry.get_or_create_engine(
             cache_key,
             # Class-qualified, not `self.`: the lambda then captures only `creds`, and
             # never the half-built client. It runs before __init__ returns, on a cache
@@ -33,7 +33,7 @@ class PostgresClient(Warehouse):
             lambda: create_engine(
                 "postgresql+psycopg2://",
                 connect_args=PostgresClient.build_connection_args(creds),
-                **engine_registry.pool_kwargs(),
+                **postgres_engine_registry.pool_kwargs(),
             ),
             wtype=WarehouseType.POSTGRES,
         )
