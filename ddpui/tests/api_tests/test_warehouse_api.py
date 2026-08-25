@@ -1,8 +1,10 @@
 import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
+import psycopg2.errors
 import sqlalchemy
 from unittest.mock import _Call
+from google.cloud.exceptions import NotFound as BigQueryNotFound
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -19,6 +21,7 @@ from ddpui.api.warehouse_api import (
     get_table,
     get_table_columns,
     get_table_data,
+    get_table_count,
     post_data_insights,
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
@@ -417,3 +420,75 @@ def test_llm_data_analysis_save_and_overwrite_session(orguser):
         ).count()
         == 1
     )
+
+
+def test_get_table_count_success(orguser, seed_db):
+    """Success case for fetching table row count"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.return_value = 42
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        response = get_table_count(request, "test_schema", "test_table")
+        assert response == {"total_rows": 42}
+        mock_client.get_total_rows.assert_called_once_with("test_schema", "test_table")
+
+
+def test_get_table_count_postgres_table_not_found(orguser, seed_db):
+    """Returns 404 when Postgres raises UndefinedTable for a missing relation"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = psycopg2.errors.UndefinedTable(
+        'relation "test_schema"."test_table" does not exist'
+    )
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "test_schema", "test_table")
+        assert exc.value.status_code == 404
+        assert "not found" in str(exc.value)
+
+
+def test_get_table_count_bigquery_table_not_found(orguser, seed_db):
+    """Returns 404 when BigQuery raises NotFound for a missing table"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = BigQueryNotFound("Table not found")
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "test_schema", "test_table")
+        assert exc.value.status_code == 404
+        assert "not found" in str(exc.value)
+
+
+def test_get_table_count_other_error(orguser, seed_db):
+    """Returns 500 for unexpected errors"""
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = Exception("connection refused")
+
+    with patch(
+        "ddpui.api.warehouse_api.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "test_schema", "test_table")
+        assert exc.value.status_code == 500
