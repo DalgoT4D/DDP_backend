@@ -9,7 +9,6 @@ from ddpui.utils.secretsmanager import retrieve_warehouse_credentials
 class WarehouseFactory:
     @classmethod
     def connect(cls, creds: dict, wtype: str) -> Warehouse:
-        """Build a warehouse client. Cheap per request -- the engine pool is shared."""
         if wtype == WarehouseType.POSTGRES:
             return PostgresClient(creds)
         elif wtype == WarehouseType.BIGQUERY:
