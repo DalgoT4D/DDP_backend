@@ -6,10 +6,12 @@ from io import StringIO
 import sqlparse
 from sqlparse.tokens import Keyword, Number, Token
 import uuid
+import psycopg2.errors
 import sqlalchemy
 from ninja import Router
 from ninja.errors import HttpError
 import sqlalchemy.exc
+from google.cloud.exceptions import NotFound as BigQueryNotFound
 
 from django.http import StreamingHttpResponse
 from ddpui import auth
@@ -166,9 +168,15 @@ def get_table_count(request, schema_name: str, table_name: str):
         client = dbtautomation_service._get_wclient(org_warehouse)
         total_rows = client.get_total_rows(schema_name, table_name)
         return {"total_rows": total_rows}
+    except psycopg2.errors.UndefinedTable as err:
+        logger.error(f"Table not found {schema_name}.{table_name}: {err}")
+        raise HttpError(404, "Table not found") from err
+    except BigQueryNotFound as err:
+        logger.error(f"Table not found {schema_name}.{table_name}: {err}")
+        raise HttpError(404, "Table not found") from err
     except Exception as e:
         logger.error(f"Failed to fetch total rows for {schema_name}.{table_name}: {e}")
-        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}")
+        raise HttpError(500, f"Failed to fetch total rows for {schema_name}.{table_name}") from e
 
 
 @warehouse_router.get("/dbt_project/json_columnspec/")

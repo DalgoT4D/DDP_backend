@@ -1,8 +1,10 @@
 import pytest
 from unittest.mock import Mock, patch
 from ninja.errors import HttpError
+import psycopg2.errors
 import sqlalchemy
 from unittest.mock import _Call
+from google.cloud.exceptions import NotFound as BigQueryNotFound
 
 from ddpui.models.org import OrgWarehouse, Org
 from ddpui.models.role_based_access import Role, RolePermission, Permission
@@ -19,6 +21,7 @@ from ddpui.api.warehouse_api import (
     get_table,
     get_table_columns,
     get_table_data,
+    get_table_count,
     post_data_insights,
     get_download_warehouse_data,
     get_warehouse_table_columns_spec,
@@ -417,3 +420,78 @@ def test_llm_data_analysis_save_and_overwrite_session(orguser):
         ).count()
         == 1
     )
+
+
+def test_get_table_count_postgres_undefined_table(seed_db, orguser):
+    """When the Postgres table does not exist, get_table_count should return 404"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = psycopg2.errors.UndefinedTable(
+        "relation \"intermediate.class_upd_25_26\" does not exist"
+    )
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "intermediate", "class_upd_25_26")
+        assert exc.value.status_code == 404
+        assert str(exc.value) == "Table not found"
+
+
+def test_get_table_count_bigquery_not_found(seed_db, orguser):
+    """When the BigQuery table does not exist, get_table_count should return 404"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = BigQueryNotFound("Table not found")
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "intermediate", "class_upd_25_26")
+        assert exc.value.status_code == 404
+        assert str(exc.value) == "Table not found"
+
+
+def test_get_table_count_success(seed_db, orguser):
+    """When the table exists, get_table_count should return the row count"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.return_value = 42
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        response = get_table_count(request, "intermediate", "some_table")
+        assert response == {"total_rows": 42}
+
+
+def test_get_table_count_generic_error(seed_db, orguser):
+    """Other exceptions should still return 500"""
+
+    OrgWarehouse.objects.create(org=orguser.org, name="fake-warehouse-name")
+
+    mock_client = Mock()
+    mock_client.get_total_rows.side_effect = Exception("connection refused")
+
+    with patch(
+        "ddpui.core.dbtautomation_service._get_wclient",
+        return_value=mock_client,
+    ):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc:
+            get_table_count(request, "intermediate", "some_table")
+        assert exc.value.status_code == 500
