@@ -339,6 +339,8 @@ def update_alert(request, alert_id: int, payload: AlertUpdate):
         alert = AlertService.update_alert(alert_id, orguser.org, orguser, payload)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
     except AlertValidationError as e:
         raise HttpError(400, e.message) from None
 
@@ -390,6 +392,8 @@ def toggle_alert(request, alert_id: int, payload: AlertToggle):
         alert = AlertService.toggle_alert(alert_id, orguser.org, orguser, payload.is_active)
     except AlertNotFoundError:
         raise HttpError(404, "Alert not found") from None
+    except AlertPermissionError as e:
+        raise HttpError(403, e.message) from None
 
     create_audit_log(
         org=orguser.org,

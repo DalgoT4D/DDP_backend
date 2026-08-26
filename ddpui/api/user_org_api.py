@@ -343,6 +343,33 @@ class PeopleRow(Schema):
 
 
 @user_org_router.get(
+    "/v1/organizations/active-members",
+    response=List[PeopleRow],
+)
+@has_permission(["can_view_orgusers"])
+def get_organization_active_members(request):
+    """Active orgusers only — accessible to all roles including member."""
+    orguser: OrgUser = request.orguser
+    if orguser.org is None:
+        raise HttpError(400, "no associated org")
+    org: Org = orguser.org
+
+    return [
+        PeopleRow(
+            email=curr_orguser.user.email,
+            role_slug=curr_orguser.new_role.slug,
+            role_name=curr_orguser.new_role.name,
+            status="active",
+            created_by_email=None,
+            orguser_id=curr_orguser.id,
+            invitation_id=None,
+            created_at=curr_orguser.user.date_joined,
+        )
+        for curr_orguser in OrgUser.objects.filter(org=org).select_related("user", "new_role")
+    ]
+
+
+@user_org_router.get(
     "/v1/organizations/people",
     response=List[PeopleRow],
 )

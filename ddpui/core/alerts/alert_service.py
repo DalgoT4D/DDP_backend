@@ -280,6 +280,9 @@ class AlertService:
     def update_alert(alert_id: int, org: Org, orguser: OrgUser, payload: AlertUpdate) -> Alert:
         alert = AlertService.get_alert(alert_id, org)
 
+        if not is_creator_or_admin(orguser, alert):
+            raise AlertPermissionError("Only the owner or an admin can edit this alert.")
+
         if payload.name is not None:
             if Alert.objects.filter(org=org, name=payload.name).exclude(id=alert_id).exists():
                 raise AlertValidationError(f"An alert named '{payload.name}' already exists")
@@ -359,6 +362,8 @@ class AlertService:
     @staticmethod
     def toggle_alert(alert_id: int, org: Org, orguser: OrgUser, is_active: bool) -> Alert:
         alert = AlertService.get_alert(alert_id, org)
+        if not is_creator_or_admin(orguser, alert):
+            raise AlertPermissionError("Only the owner or an admin can toggle this alert.")
         alert.is_active = is_active
         alert.last_modified_by = orguser
         alert.save(update_fields=["is_active", "last_modified_by", "updated_at"])

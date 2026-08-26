@@ -498,6 +498,53 @@ def test_delete_alert_admin_can_delete_others(seed_db, orguser, analyst_orguser,
     assert not Alert.objects.filter(id=created.id).exists()
 
 
+def test_update_alert_non_owner_analyst_gets_403(seed_db, orguser, analyst_orguser, sample_metric):
+    """An analyst who did not create the alert cannot update it."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        update_alert(mock_request(analyst_orguser), created.id, AlertUpdate(name="hacked"))
+
+    assert exc_info.value.status_code == 403
+
+
+def test_update_alert_admin_can_update_others(seed_db, orguser, analyst_orguser, sample_metric):
+    """An admin can update an alert created by another user."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    updated = update_alert(mock_request(orguser), created.id, AlertUpdate(name="Admin renamed"))
+
+    assert updated.name == "Admin renamed"
+
+
+def test_toggle_alert_non_owner_analyst_gets_403(seed_db, orguser, analyst_orguser, sample_metric):
+    """An analyst who did not create the alert cannot toggle it."""
+    created = create_alert(
+        mock_request(orguser), _base_payload(orguser, metric_id=sample_metric.id)
+    )
+
+    with pytest.raises(HttpError) as exc_info:
+        toggle_alert(mock_request(analyst_orguser), created.id, AlertToggle(is_active=False))
+
+    assert exc_info.value.status_code == 403
+    assert Alert.objects.get(id=created.id).is_active is True
+
+
+def test_toggle_alert_admin_can_toggle_others(seed_db, orguser, analyst_orguser, sample_metric):
+    """An admin can toggle an alert created by another user."""
+    created = create_alert(
+        mock_request(analyst_orguser), _base_payload(analyst_orguser, metric_id=sample_metric.id)
+    )
+
+    toggled = toggle_alert(mock_request(orguser), created.id, AlertToggle(is_active=False))
+
+    assert toggled.is_active is False
+
+
 def test_metric_delete_cascades_to_alert(seed_db, orguser, sample_metric):
     """Deleting a Metric silently deletes its Alert (on_delete=CASCADE)."""
     request = mock_request(orguser)
