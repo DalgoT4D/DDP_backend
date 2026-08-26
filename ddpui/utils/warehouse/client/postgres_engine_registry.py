@@ -27,7 +27,7 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddpui.warehouse.engine_registry")
 
 # Ceiling on sockets kept per warehouse per process; a pool only grows to peak concurrency.
-POOL_SIZE = int(os.getenv("WAREHOUSE_POOL_SIZE", "8"))
+POOL_SIZE = int(os.getenv("WAREHOUSE_POOL_SIZE", "5"))
 # Burst allowance above POOL_SIZE; these close on return, so they cost nothing when idle.
 POOL_MAX_OVERFLOW = 7
 # Wait for a free slot before TimeoutError -- under the ~60s gateway timeout, over a normal burst.
