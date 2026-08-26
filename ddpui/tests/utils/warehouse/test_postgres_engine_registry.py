@@ -63,8 +63,8 @@ def test_same_credentials_reuse_one_engine():
     """The whole point: repeated requests for one warehouse share a single pool."""
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
 
-    first = postgres_engine_registry.get_or_create_engine(key, make("first"), wtype="postgres")
-    second = postgres_engine_registry.get_or_create_engine(key, make("second"), wtype="postgres")
+    first = postgres_engine_registry.get_or_create_engine(key, make("first"))
+    second = postgres_engine_registry.get_or_create_engine(key, make("second"))
 
     assert first is second
     assert first.label == "first"  # the second create-fn was never called
@@ -81,10 +81,10 @@ def test_warehouses_differing_only_by_database_get_separate_engines():
     org_b = dict(PG_CREDS, database="trial_xyz")
 
     engine_a = postgres_engine_registry.get_or_create_engine(
-        postgres_engine_registry.fingerprint("postgres", org_a), make("a"), wtype="postgres"
+        postgres_engine_registry.fingerprint("postgres", org_a), make("a")
     )
     engine_b = postgres_engine_registry.get_or_create_engine(
-        postgres_engine_registry.fingerprint("postgres", org_b), make("b"), wtype="postgres"
+        postgres_engine_registry.fingerprint("postgres", org_b), make("b")
     )
 
     assert engine_a is not engine_b
@@ -97,10 +97,10 @@ def test_rotated_password_gets_a_fresh_engine():
     new = dict(PG_CREDS, password="new-password")
 
     engine_old = postgres_engine_registry.get_or_create_engine(
-        postgres_engine_registry.fingerprint("postgres", old), make("old"), wtype="postgres"
+        postgres_engine_registry.fingerprint("postgres", old), make("old")
     )
     engine_new = postgres_engine_registry.get_or_create_engine(
-        postgres_engine_registry.fingerprint("postgres", new), make("new"), wtype="postgres"
+        postgres_engine_registry.fingerprint("postgres", new), make("new")
     )
 
     assert engine_old is not engine_new
@@ -157,7 +157,7 @@ def age_entry(key, seconds):
 def test_idle_engine_is_retired_and_its_connections_closed():
     """10 minutes of inactivity retires the pool -- the whole ask."""
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
-    engine = postgres_engine_registry.get_or_create_engine(key, make(), wtype="postgres")
+    engine = postgres_engine_registry.get_or_create_engine(key, make())
 
     age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS + 1)
     retired = postgres_engine_registry._sweep()
@@ -169,7 +169,7 @@ def test_idle_engine_is_retired_and_its_connections_closed():
 
 def test_engine_within_the_ttl_is_left_alone():
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
-    engine = postgres_engine_registry.get_or_create_engine(key, make(), wtype="postgres")
+    engine = postgres_engine_registry.get_or_create_engine(key, make())
 
     age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS - 5)
 
@@ -180,12 +180,12 @@ def test_engine_within_the_ttl_is_left_alone():
 def test_next_request_after_retirement_rebuilds_the_pool():
     """'Next time user comes again, pool comes back.'"""
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
-    first = postgres_engine_registry.get_or_create_engine(key, make("first"), wtype="postgres")
+    first = postgres_engine_registry.get_or_create_engine(key, make("first"))
 
     age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS + 1)
     postgres_engine_registry._sweep()
 
-    second = postgres_engine_registry.get_or_create_engine(key, make("second"), wtype="postgres")
+    second = postgres_engine_registry.get_or_create_engine(key, make("second"))
 
     assert first.disposed is True
     assert second is not first
@@ -198,9 +198,7 @@ def test_idle_engine_running_a_query_is_not_retired():
     looks abandoned. A checked-out connection means the pool is still in service.
     """
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
-    engine = postgres_engine_registry.get_or_create_engine(
-        key, make("busy", checkedout=1), wtype="postgres"
-    )
+    engine = postgres_engine_registry.get_or_create_engine(key, make("busy", checkedout=1))
 
     age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS + 1)
 
@@ -222,7 +220,7 @@ def test_caching_an_engine_starts_the_sweeper_thread():
     without it running. Started lazily, after gunicorn/celery have forked.
     """
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
-    postgres_engine_registry.get_or_create_engine(key, make(), wtype="postgres")
+    postgres_engine_registry.get_or_create_engine(key, make())
 
     assert postgres_engine_registry._sweeper_started.is_set()
     assert any(
@@ -234,9 +232,7 @@ def test_caching_an_engine_starts_the_sweeper_thread():
 def add_engine(name, checkedout=0):
     """Cache one engine under a distinct warehouse and return (key, engine)."""
     key = postgres_engine_registry.fingerprint("postgres", dict(PG_CREDS, database=name))
-    engine = postgres_engine_registry.get_or_create_engine(
-        key, make(name, checkedout), wtype="postgres"
-    )
+    engine = postgres_engine_registry.get_or_create_engine(key, make(name, checkedout))
     return key, engine
 
 
@@ -249,16 +245,6 @@ def test_nothing_caps_how_many_warehouses_are_cached():
     assert all(not entry.engine.disposed for entry in postgres_engine_registry._engines.values())
 
 
-def test_invalidate_all_disposes_everything():
-    _, one = add_engine("one")
-    _, two = add_engine("two")
-
-    assert postgres_engine_registry.invalidate_all() == 2
-    assert one.disposed is True
-    assert two.disposed is True
-    assert postgres_engine_registry._engines == {}
-
-
 def test_registry_stats_reports_the_connection_ceiling():
     add_engine("stats_org", checkedout=2)
 
@@ -268,7 +254,6 @@ def test_registry_stats_reports_the_connection_ceiling():
     assert stats["per_warehouse_ceiling"] == (
         postgres_engine_registry.POOL_SIZE + postgres_engine_registry.POOL_MAX_OVERFLOW
     )
-    assert stats["engines"][0]["wtype"] == "postgres"
     assert stats["engines"][0]["checkedout"] == 2
 
 
@@ -280,7 +265,7 @@ def test_dispose_failure_does_not_break_the_sweep():
             raise RuntimeError("socket already gone")
 
     key = postgres_engine_registry.fingerprint("postgres", PG_CREDS)
-    postgres_engine_registry.get_or_create_engine(key, lambda: ExplodingEngine(), wtype="postgres")
+    postgres_engine_registry.get_or_create_engine(key, lambda: ExplodingEngine())
     age_entry(key, postgres_engine_registry.ENGINE_IDLE_TTL_SECONDS + 1)
 
     assert postgres_engine_registry._sweep() == 1
