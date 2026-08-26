@@ -1296,7 +1296,12 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
     response={200: dict, 404: PublicErrorResponse},
 )
 def get_public_report_table_data(
-    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+    request,
+    token: str,
+    chart_id: int,
+    page: int = 0,
+    limit: int = 100,
+    dashboard_filters: Optional[str] = None,
 ):
     """Get table chart data for a public report"""
     try:
@@ -1311,7 +1316,27 @@ def get_public_report_table_data(
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
-        chart_payload = charts_service.build_chart_data_payload(config)
+
+        # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
+        resolved_filters = None
+        if dashboard_filters:
+            try:
+                filter_values = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                filter_values = None
+
+            if filter_values:
+                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    frozen_filters,
+                    chart_config["schema_name"],
+                    chart_config["table_name"],
+                    warehouse_client,
+                )
+
+        chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         preview_data = charts_service.get_chart_data_table_preview(
             org_warehouse, chart_payload, page, limit
@@ -1340,7 +1365,9 @@ def get_public_report_table_data(
     "/reports/{token}/charts/{chart_id}/total-rows/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_total_rows(request, token: str, chart_id: int):
+def get_public_report_table_total_rows(
+    request, token: str, chart_id: int, dashboard_filters: Optional[str] = None
+):
     """Get total row count for table chart in a public report"""
     try:
         snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
@@ -1354,7 +1381,27 @@ def get_public_report_table_total_rows(request, token: str, chart_id: int):
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
-        chart_payload = charts_service.build_chart_data_payload(config)
+
+        # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
+        resolved_filters = None
+        if dashboard_filters:
+            try:
+                filter_values = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                filter_values = None
+
+            if filter_values:
+                frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+                warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+                resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                    filter_values,
+                    frozen_filters,
+                    chart_config["schema_name"],
+                    chart_config["table_name"],
+                    warehouse_client,
+                )
+
+        chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
 
