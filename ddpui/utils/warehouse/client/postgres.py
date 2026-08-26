@@ -1,5 +1,4 @@
 import tempfile
-from urllib.parse import quote
 
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
@@ -8,6 +7,7 @@ from sqlalchemy.types import NullType
 from sqlalchemy.exc import NoSuchTableError
 
 from ddpui.core.datainsights.insights.insight_interface import MAP_TRANSLATE_TYPES
+from ddpui.utils.warehouse.client import postgres_engine_registry
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 
@@ -15,11 +15,32 @@ from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 class PostgresClient(Warehouse):
     def __init__(self, creds: dict):
         """
-        Establish connection to the postgres database using sqlalchemy engine
-        Creds come from the secrets manager
+        Postgres client over a pooled engine shared per credentials by the registry.
+        Creds come from the secrets manager.
         """
-        creds["encoded_username"] = quote(creds["username"].strip())
-        creds["encoded_password"] = quote(creds["password"].strip())
+        cache_key = postgres_engine_registry.fingerprint(WarehouseType.POSTGRES, creds)
+
+        def build_engine():
+            """Runs on a registry cache miss only. Class-qualified so the closure
+            captures `creds`, not the half-built client."""
+            return create_engine(
+                "postgresql+psycopg2://",
+                connect_args=PostgresClient.build_connection_args(creds),
+                **postgres_engine_registry.pool_kwargs(),
+            )
+
+        self.engine = postgres_engine_registry.get_or_create_engine(cache_key, build_engine)
+        self.inspect_obj: Inspector = inspect(
+            self.engine
+        )  # this will be used to fetch metadata of the database
+
+    @staticmethod
+    def build_connection_args(creds: dict) -> dict:
+        """
+        Translate warehouse credentials into psycopg2 connect_args. Works on a copy:
+        normalising sslmode must not mutate the caller's dict.
+        """
+        creds = dict(creds)
 
         connection_args = {
             "host": creds["host"],
@@ -28,8 +49,6 @@ class PostgresClient(Warehouse):
             "user": creds["username"],
             "password": creds["password"],
         }
-
-        connection_string = "postgresql+psycopg2://"
 
         if "ssl_mode" in creds:
             creds["sslmode"] = creds["ssl_mode"]
@@ -56,12 +75,7 @@ class PostgresClient(Warehouse):
                 fp.write(creds["sslmode"]["ca_certificate"].encode())
                 connection_args["sslrootcert"] = fp.name
 
-        self.engine = create_engine(
-            connection_string, connect_args=connection_args, pool_size=5, pool_timeout=30
-        )
-        self.inspect_obj: Inspector = inspect(
-            self.engine
-        )  # this will be used to fetch metadata of the database
+        return connection_args
 
     def execute(self, sql) -> list[dict]:
         """
