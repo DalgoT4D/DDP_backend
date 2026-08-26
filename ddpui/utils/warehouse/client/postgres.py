@@ -15,27 +15,22 @@ from ddpui.utils.warehouse.client.warehouse_interface import WarehouseType
 class PostgresClient(Warehouse):
     def __init__(self, creds: dict):
         """
-        Establish connection to the postgres database using sqlalchemy engine
-        Creds come from the secrets manager
-
-        The engine (and therefore its connection pool) is shared per set of credentials
-        via the engine registry. Building one per client -- and so per request -- left a
-        pool of open connections behind on every call.
+        Postgres client over a pooled engine shared per credentials by the registry.
+        Creds come from the secrets manager.
         """
         cache_key = postgres_engine_registry.fingerprint(WarehouseType.POSTGRES, creds)
 
-        self.engine = postgres_engine_registry.get_or_create_engine(
-            cache_key,
-            # Class-qualified, not `self.`: the lambda then captures only `creds`, and
-            # never the half-built client. It runs before __init__ returns, on a cache
-            # miss only -- which is what keeps the args build (and its temp cert file)
-            # off the per-request path.
-            lambda: create_engine(
+        def build_engine():
+            """Runs on a registry cache miss only. Class-qualified so the closure
+            captures `creds`, not the half-built client."""
+            return create_engine(
                 "postgresql+psycopg2://",
                 connect_args=PostgresClient.build_connection_args(creds),
                 **postgres_engine_registry.pool_kwargs(),
-            ),
-            wtype=WarehouseType.POSTGRES,
+            )
+
+        self.engine = postgres_engine_registry.get_or_create_engine(
+            cache_key, build_engine, wtype=WarehouseType.POSTGRES
         )
         self.inspect_obj: Inspector = inspect(
             self.engine
@@ -44,12 +39,8 @@ class PostgresClient(Warehouse):
     @staticmethod
     def build_connection_args(creds: dict) -> dict:
         """
-        Translate warehouse credentials into psycopg2 connect_args.
-
-        Works on a copy: this normalises the credentials (sslmode aliasing) and the
-        caller's dict should not come back mutated. Only ever called on an engine
-        cache miss, which also means the CA certificate below is written to disk once
-        per warehouse instead of once per request.
+        Translate warehouse credentials into psycopg2 connect_args. Works on a copy:
+        normalising sslmode must not mutate the caller's dict.
         """
         creds = dict(creds)
 
