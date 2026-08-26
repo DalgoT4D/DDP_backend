@@ -14,7 +14,7 @@ EffectiveAccessLevel = Literal["no_access", "view", "edit"]
 PrincipalType = Literal["user", "group"]
 ShareRowKind = Literal["user", "group", "invitation"]
 ShareRowStatus = Literal["active", "pending"]
-GeneralAccessMode = Literal["everyone", "private", "public"]
+GeneralAccessMode = Literal["internal", "private", "public"]
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ class GeneralAccessState(Schema):
     (charts, KPIs) — the frontend hides the Public option accordingly.
     """
 
-    mode: GeneralAccessMode  # "everyone" | "private" | "public"
+    mode: GeneralAccessMode  # "internal" | "private" | "public"
     supports_public: bool
     allow_public_sharing: bool  # org-level; when False the Public option is disabled
     public_url: Optional[str] = None
@@ -144,7 +144,7 @@ class GeneralAccessPayload(Schema):
     """Body for ``PATCH /api/access/{rtype}/{id}/general-access``.
 
     Maps 1:1 to the "General access" dropdown in the share modal:
-    - ``everyone`` — org-wide role-floor access, no public link
+    - ``internal`` — org-wide role-floor access, no public link
     - ``private`` — only explicitly-shared users
     - ``public`` — org-wide access plus anyone with the link
     """

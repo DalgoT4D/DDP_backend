@@ -91,7 +91,7 @@ def _general_access_state(orguser: OrgUser, rtype: str, resource) -> GeneralAcce
     supports_public = hasattr(resource, "is_public")
     is_private = bool(getattr(resource, "is_private", False))
     is_public = bool(getattr(resource, "is_public", False))
-    mode = "private" if is_private else ("public" if is_public else "everyone")
+    mode = "private" if is_private else ("public" if is_public else "internal")
 
     prefs = OrgPreferences.objects.filter(org=orguser.org).first() or OrgPreferences()
     allow_public_sharing = bool(prefs.allow_public_sharing)
@@ -240,7 +240,7 @@ def _public_share_url(rtype: str, token: str) -> str:
 def update_general_access(request, rtype: str, resource_id: str, payload: GeneralAccessPayload):
     """Set the org-wide access mode for a resource.
 
-    - ``everyone`` — floor-based org access, no public link
+    - ``internal`` — floor-based org access, no public link
     - ``private`` — only explicitly-shared users
     - ``public`` — floor-based org access + anyone with the link (dashboards/reports only)
     """
@@ -283,7 +283,7 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
             if prev_public and hasattr(resource, "public_disabled_at"):
                 resource.public_disabled_at = timezone.now()
                 update_fields.append("public_disabled_at")
-            # Wipe the token only when going fully private — turning "public → everyone"
+            # Wipe the token only when going fully private — turning "public → internal"
             # keeps the token dormant for audit / re-enable, matching the existing
             # dashboard/report toggle semantics.
             if is_private and hasattr(resource, "public_share_token"):

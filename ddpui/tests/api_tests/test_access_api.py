@@ -347,7 +347,7 @@ def _set_mode(caller, rtype, resource_id, mode):
     )
 
 
-def test_everyone_to_private_sets_is_private(dashboard, owner_analyst):
+def test_internal_to_private_sets_is_private(dashboard, owner_analyst):
     """Mode=private → is_private flips on."""
     _set_mode(owner_analyst, "dashboard", dashboard.id, "private")
     dashboard.refresh_from_db()
@@ -355,7 +355,7 @@ def test_everyone_to_private_sets_is_private(dashboard, owner_analyst):
     assert dashboard.is_public is False
 
 
-def test_everyone_to_public_generates_token_and_timestamps(dashboard, owner_analyst):
+def test_internal_to_public_generates_token_and_timestamps(dashboard, owner_analyst):
     """Mode=public → is_public on, token generated, public_shared_at set."""
     _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
     dashboard.refresh_from_db()
@@ -380,26 +380,26 @@ def test_public_to_private_clears_token_spec_line_263(dashboard, owner_analyst):
     assert dashboard.public_share_token is None
 
 
-def test_public_to_everyone_keeps_token_dormant(dashboard, owner_analyst):
+def test_public_to_internal_keeps_token_dormant(dashboard, owner_analyst):
     """Turning public off (to everyone) preserves the token as dormant so
     the owner can re-enable later without a new URL. public_disabled_at set."""
     _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
     dashboard.refresh_from_db()
     original_token = dashboard.public_share_token
 
-    _set_mode(owner_analyst, "dashboard", dashboard.id, "everyone")
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "internal")
     dashboard.refresh_from_db()
     assert dashboard.is_public is False
     assert dashboard.public_share_token == original_token  # dormant, not cleared
     assert dashboard.public_disabled_at is not None
 
 
-def test_private_to_everyone_does_not_reenable_public_spec_line_263(dashboard, owner_analyst):
+def test_private_to_internal_does_not_reenable_public_spec_line_263(dashboard, owner_analyst):
     """Spec line 263: 'turning [Private] off does not restore the public
     link — the owner must re-enable it manually.'"""
     _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
     _set_mode(owner_analyst, "dashboard", dashboard.id, "private")  # clears token
-    _set_mode(owner_analyst, "dashboard", dashboard.id, "everyone")
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "internal")
     dashboard.refresh_from_db()
     assert dashboard.is_public is False  # still off, not silently re-enabled
     assert dashboard.public_share_token is None  # still cleared
@@ -500,7 +500,7 @@ def test_grants_includes_general_access_state(dashboard, owner_analyst):
     """List response embeds general_access — populates the share-modal section."""
     request = mock_request(owner_analyst)
     result = list_resource_grants(request, "dashboard", str(dashboard.id))
-    assert result.general_access.mode == "everyone"  # newly-created default
+    assert result.general_access.mode == "internal"  # newly-created default
     assert result.general_access.supports_public is True  # dashboards support public
 
 
