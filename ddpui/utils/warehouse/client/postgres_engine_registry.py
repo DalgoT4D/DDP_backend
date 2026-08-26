@@ -1,26 +1,16 @@
 """
-Process-local registry of pooled SQLAlchemy engines for client warehouses.
+Process-local registry of pooled SQLAlchemy engines, one per set of postgres
+credentials. Endpoints used to build an Engine per request, each with its own pool
+that nothing disposed -- hence idle connections climbing, then draining in a lump.
 
-Chart / dashboard / KPI / filter endpoints used to build an Engine per request,
-each with its own pool that nothing disposed. Reference cycles meant only a gen-2
-GC reclaimed them -- hence idle connections climbing, then draining in a lump.
+Process-local because a socket belongs to one process; peak connections to a
+warehouse are `n_processes * (POOL_SIZE + POOL_MAX_OVERFLOW)`.
 
-So: one engine per distinct set of credentials, retired once that warehouse goes
-quiet. POOL_SIZE + POOL_MAX_OVERFLOW cap one warehouse in one process, and
-ENGINE_IDLE_TTL_SECONDS retires a whole idle pool; a dropped socket is caught by
-pool_pre_ping, not by age.
+Postgres only: BigQuery connections are REST clients, so there is no connection
+limit to protect and nothing to retire.
 
-Postgres only. BigQuery deliberately does not register: its connections are REST
-clients, not sockets, so there is no connection limit to protect and nothing to
-retire -- and pooling one would only cache an authed client, which is not what this
-module is for.
-
-Nothing caps how many distinct warehouses one process caches -- the idle TTL is the
-only bound. TODO: add an LRU cap if cached engines ever approach the process fd limit.
-
-Peak connections to a warehouse are `n_processes * (POOL_SIZE + POOL_MAX_OVERFLOW)`.
-The cache must be process-local: a socket belongs to one process, and cannot be
-shared with the others.
+TODO: add an LRU cap if cached engines ever approach the process fd limit; the idle
+TTL is currently the only bound on how many warehouses one process caches.
 """
 
 import hashlib
@@ -58,9 +48,8 @@ class EngineEntry:
 
     def in_use(self) -> bool:
         """
-        Whether a connection from this pool is currently checked out. last_used_at is
-        stamped at hand-out, so without this a query running longer than the idle TTL
-        would look abandoned and have its pool retired underneath it.
+        Whether a connection is checked out. last_used_at is stamped at hand-out, so
+        without this a query outliving the idle TTL would have its pool retired.
         """
         try:
             return self.engine.pool.checkedout() > 0
@@ -77,11 +66,8 @@ _sweeper_started = threading.Event()
 
 def pool_kwargs() -> dict:
     """
-    Pool settings a warehouse engine must be built with.
-
-    pool_pre_ping is unconditional because only postgres registers engines here: it
-    costs ~1ms down an already-open socket, and it is what turns a server-side
-    disconnect into a retry rather than a failed request.
+    Pool settings a warehouse engine must be built with. pool_pre_ping costs ~1ms and
+    turns a server-side disconnect into a retry rather than a failed request.
     """
     return {
         "pool_size": POOL_SIZE,
@@ -94,12 +80,9 @@ def pool_kwargs() -> dict:
 def fingerprint(wtype: str, creds: dict) -> str:
     """
     Cache key for a set of warehouse credentials. Hashes the full creds, not a subset:
-    trial warehouses share one RDS host and differ only by `database`, so a narrower
-    key would hand one org an engine pointed at another's database.
-
-    Keying on creds rather than org id also covers callers holding raw creds with no
-    OrgWarehouse in scope, and puts rotated credentials on a new key. Call before the
-    creds reach a client, which normalises the dict (sslmode aliasing).
+    trial warehouses differ only by `database`, so a narrower key would hand one org
+    an engine pointed at another's. Keying on creds also puts rotated ones on a new
+    key. Call before the creds reach a client, which normalises sslmode.
     """
     digest = hashlib.sha256(
         json.dumps(creds, sort_keys=True, default=str).encode("utf-8")
@@ -109,10 +92,9 @@ def fingerprint(wtype: str, creds: dict) -> str:
 
 def _dispose(entries: list[EngineEntry]) -> None:
     """
-    Close the pools of engines already removed from the registry. Always called with
-    the lock released: dispose() closes sockets, and holding the lock through that
-    would stall every thread waiting for an engine. Checked-out connections are
-    unaffected and close when returned.
+    Close the pools of engines already removed from the registry. Called with the lock
+    released: dispose() closes sockets, and holding the lock would stall every thread
+    waiting for an engine. Checked-out connections close when returned.
     """
     for entry in entries:
         try:
@@ -154,16 +136,16 @@ def _sweep_loop() -> None:
         try:
             _sweep()
         except Exception:  # skipcq: PYL-W0703
-            # The sweeper must outlive any single failure, or the process silently
-            # stops retiring pools for the rest of its life.
+            # The sweeper must outlive any single failure, or this process stops
+            # retiring pools for the rest of its life.
             logger.exception("warehouse engine sweep failed")
 
 
 def _ensure_sweeper() -> None:
     """
-    Start this process's sweeper thread, once. Lazy rather than at import because
-    gunicorn and celery fork their workers, and a thread created before the fork does
-    not survive into the child -- first use guarantees it belongs to the right process.
+    Start this process's sweeper thread, once. Lazy rather than at import: gunicorn
+    and celery fork their workers, and a thread created before the fork does not
+    survive into the child.
     """
     if _sweeper_started.is_set():
         return
@@ -184,8 +166,7 @@ def _ensure_sweeper() -> None:
 def get_or_create_engine(cache_key: str, create, wtype: str) -> Engine:
     """
     Return the cached engine for `cache_key`, building it via `create` on a miss.
-    Retiring idle pools is left to the sweeper. `create` runs under the lock, which is
-    fine: create_engine() is lazy and opens no connection, so the section stays short.
+    `create` runs under the lock: create_engine() opens no connection, so it is short.
     """
     _ensure_sweeper()
 
@@ -220,8 +201,7 @@ def invalidate_all() -> int:
 def registry_stats() -> dict:
     """
     Snapshot of the registry, logged on each sweep that retires something. checkedout /
-    checkedin come straight off each pool -- the cheapest way to see how many warehouse
-    sockets a process is actually holding.
+    checkedin come straight off each pool.
     """
     now = time.time()
     with _lock:
