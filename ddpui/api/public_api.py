@@ -245,16 +245,15 @@ def get_public_chart_data(request, token: str, chart_id: int):
         extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
         # Parse and resolve dashboard filters if provided
+        # Uses schema/table match (no warehouse_client) to check filter applicability
         resolved_dashboard_filters = None
         if filters:
-            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
             filter_defs = DashboardFilter.objects.filter(id__in=filters.keys(), dashboard=dashboard)
             resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
                 filters,
                 [f.to_json() for f in filter_defs],
                 chart.schema_name,
                 chart.table_name,
-                warehouse_client,
             )
 
         config = ChartConfig(
