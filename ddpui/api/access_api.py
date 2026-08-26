@@ -122,7 +122,7 @@ def _owner_info(resource) -> Optional[OwnerInfo]:
     if not email:
         return None
     role_name = getattr(getattr(owner, "new_role", None), "name", None)
-    return OwnerInfo(email=email, role_name=role_name)
+    return OwnerInfo(orguser_id=owner.id, email=email, role_name=role_name)
 
 
 @access_router.get("/{rtype}/{resource_id}/grants", response=GrantsListResponse)

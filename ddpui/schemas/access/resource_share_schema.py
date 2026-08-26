@@ -53,6 +53,7 @@ class OwnerInfo(Schema):
     since the owner has implicit Edit access — no ``ResourceShare`` row exists
     for them. Null on orphan resources (creator was deleted from the org)."""
 
+    orguser_id: int
     email: str
     role_name: Optional[str] = None
 

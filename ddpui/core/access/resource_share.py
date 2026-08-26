@@ -127,13 +127,31 @@ def list_grants(org: Org, rtype: str, resource_id) -> list[ShareRowSchema]:
     - access_level = max across all their rows
     - share_id = the direct row's id (None if cascade-only)
     - cascade_sources = list of source dashboards (for the frontend block message)
+
+    The resource owner is excluded — they are surfaced separately via ``OwnerInfo``
+    and must not appear as a duplicate entry in the shares list.
     """
     resource_id_str = str(resource_id)
+    resource = shareable_types.get_resource(org, rtype, resource_id)
+    owner_orguser_id = getattr(resource, "created_by_id", None) if resource else None
+
     rows = list(
         ResourceShare.objects.filter(org=org, resource_type=rtype, resource_id=resource_id_str)
         .select_related("invitation__invited_new_role")
         .order_by("created_at")
     )
+
+    # Strip any USER-type rows for the current owner — they are shown in the
+    # dedicated Owner section and must not appear again in the shares list.
+    if owner_orguser_id is not None:
+        rows = [
+            r
+            for r in rows
+            if not (
+                r.principal_type == ResourceSharePrincipalType.USER
+                and r.principal_id == owner_orguser_id
+            )
+        ]
 
     # Resolve principals in bulk.
     user_ids = [r.principal_id for r in rows if r.principal_type == ResourceSharePrincipalType.USER]
