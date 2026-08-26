@@ -22,7 +22,7 @@ from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgWarehouse
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, OrgUserGroup
 from ddpui.models.role_based_access import RolePermission
 from ddpui.schemas.alert_schema import (
     AlertCreate,
@@ -37,7 +37,7 @@ logger = CustomLogger("ddpui.alert_service")
 
 
 VALID_CHANNELS = {"email", "slack"}
-VALID_RECIPIENT_TYPES = {"orguser", "external"}
+VALID_RECIPIENT_TYPES = {"orguser", "external", "user_group"}
 
 
 # ── Validation helpers ─────────────────────────────────────────────────────
@@ -52,7 +52,9 @@ def _validate_recipients(recipients: list, org: Org) -> None:
         email = r.get("email") if isinstance(r, dict) else r.email
 
         if rtype not in VALID_RECIPIENT_TYPES:
-            raise AlertValidationError(f"Recipient[{idx}]: type must be 'orguser' or 'external'")
+            raise AlertValidationError(
+                f"Recipient[{idx}]: type must be 'orguser', 'external', or 'user_group'"
+            )
         if rtype == "orguser":
             if not orguser_id:
                 raise AlertValidationError(
@@ -61,6 +63,16 @@ def _validate_recipients(recipients: list, org: Org) -> None:
             if not OrgUser.objects.filter(id=orguser_id, org=org).exists():
                 raise AlertValidationError(
                     f"Recipient[{idx}]: OrgUser {orguser_id} not in this org"
+                )
+        elif rtype == "user_group":
+            user_group_id = r.get("user_group_id") if isinstance(r, dict) else r.user_group_id
+            if not user_group_id:
+                raise AlertValidationError(
+                    f"Recipient[{idx}]: user_group_id is required for type='user_group'"
+                )
+            if not OrgUserGroup.objects.filter(id=user_group_id, org=org).exists():
+                raise AlertValidationError(
+                    f"Recipient[{idx}]: UserGroup {user_group_id} not in this org"
                 )
         else:  # external
             if not email:

@@ -16,7 +16,7 @@ from typing import Optional
 
 from ddpui.core.notifications.templates import render_alert_email
 from ddpui.models.alert import Alert
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, OrgUserGroupMember
 from ddpui.utils import awsses
 from ddpui.utils.custom_logger import CustomLogger
 
@@ -47,6 +47,8 @@ def _describe_missing_recipient(r: dict) -> str:
         return r.get("email") or "external:unknown"
     if r.get("type") == "orguser":
         return f"orguser:{r.get('orguser_id')}"
+    if r.get("type") == "user_group":
+        return f"user_group:{r.get('user_group_id')}"
     return "unknown"
 
 
@@ -77,15 +79,19 @@ def _deliver_email(*, to_email: str, subject: str, plain_body: str, html_body: s
 def notify_alert_recipients(alert: Alert, *, subject: str, body: str) -> list:
     """Dispatch the email leg of an alert to its recipient list.
 
-    Returns a list of email-delivery dicts, one per recipient, in stored
-    order. Callers append this to any other channel dicts (e.g. Slack) they
-    generate separately.
+    Handles three recipient types — orguser, external, user_group — and
+    deduplicates by email so no address ever receives more than one email per
+    firing, regardless of how many paths lead to it (e.g. direct orguser +
+    group member).
+
+    Returns a list of email-delivery dicts. Callers append this to any other
+    channel dicts (e.g. Slack) they generate separately.
     """
     deliveries: list = []
-
     plain_body, html_body = render_alert_email(alert, body)
-
     recipients = alert.recipients or []
+
+    # ── Bulk-resolve orguser IDs → emails ──────────────────────────────────
     orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
     orguser_email_by_id: dict = {}
     if orguser_ids:
@@ -94,7 +100,29 @@ def notify_alert_recipients(alert: Alert, *, subject: str, body: str) -> list:
         ):
             orguser_email_by_id[ou.id] = ou.user.email
 
+    # ── Bulk-expand user_group IDs → active member emails ──────────────────
+    group_ids = [r["user_group_id"] for r in recipients if r.get("type") == "user_group"]
+    group_member_emails: set[str] = set()
+    if group_ids:
+        memberships = OrgUserGroupMember.objects.filter(
+            group_id__in=group_ids, orguser__isnull=False
+        ).select_related("orguser__user")
+        group_member_emails = {m.orguser.user.email for m in memberships}
+        if not group_member_emails:
+            logger.warning(
+                f"alert {alert.id}: user_group recipients {group_ids} resolved to 0 active members"
+            )
+
+    # ── Walk individual recipients (orguser + external) in stored order ─────
+    # Deduplication set tracks every email we have already queued, so a user
+    # who appears both as a named orguser recipient AND inside a group only
+    # ever gets one email.
+    seen: set[str] = set()
+
     for r in recipients:
+        rtype = r.get("type")
+        if rtype == "user_group":
+            continue  # expanded in bulk below
         email = _resolve_recipient_email(r, orguser_email_by_id)
         if not email:
             deliveries.append(
@@ -108,12 +136,23 @@ def notify_alert_recipients(alert: Alert, *, subject: str, body: str) -> list:
                 }
             )
             continue
+        if email in seen:
+            continue
+        seen.add(email)
         deliveries.append(
             _deliver_email(
-                to_email=email,
-                subject=subject,
-                plain_body=plain_body,
-                html_body=html_body,
+                to_email=email, subject=subject, plain_body=plain_body, html_body=html_body
+            )
+        )
+
+    # ── Deliver to group-expanded emails not already sent ──────────────────
+    for email in group_member_emails:
+        if email in seen:
+            continue
+        seen.add(email)
+        deliveries.append(
+            _deliver_email(
+                to_email=email, subject=subject, plain_body=plain_body, html_body=html_body
             )
         )
 

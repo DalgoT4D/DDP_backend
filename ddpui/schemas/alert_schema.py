@@ -10,9 +10,10 @@ from ninja import Schema
 
 
 class RecipientIn(Schema):
-    type: Literal["orguser", "external"]
+    type: Literal["orguser", "external", "user_group"]
     orguser_id: Optional[int] = None
     email: Optional[str] = None
+    user_group_id: Optional[int] = None
 
 
 class RecipientOut(Schema):
@@ -20,6 +21,8 @@ class RecipientOut(Schema):
     orguser_id: Optional[int] = None
     orguser_name: Optional[str] = None
     email: Optional[str] = None
+    user_group_id: Optional[int] = None
+    user_group_name: Optional[str] = None
 
 
 # ── Standalone source ──────────────────────────────────────────────────────

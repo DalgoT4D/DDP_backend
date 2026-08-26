@@ -18,7 +18,7 @@ from ddpui.core.audit_log_service import create_audit_log
 from ddpui.models.alert import Alert, AlertLog, AlertType
 from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.metric import KPI, Metric
-from ddpui.models.org_user import OrgUser
+from ddpui.models.org_user import OrgUser, OrgUserGroup
 from ddpui.schemas.alert_schema import (
     AlertCreate,
     AlertListItem,
@@ -52,8 +52,9 @@ alert_router = Router()
 
 
 def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
-    """Render stored JSON recipients with OrgUser names resolved."""
+    """Render stored JSON recipients with OrgUser and group names resolved."""
     out: list[RecipientOut] = []
+
     orguser_ids = [r["orguser_id"] for r in recipients if r.get("type") == "orguser"]
     name_by_id: dict[int, str] = {}
     if orguser_ids:
@@ -61,13 +62,29 @@ def _build_recipient_out(recipients: list, org_id: int) -> list[RecipientOut]:
             full = (ou.user.first_name + " " + ou.user.last_name).strip()
             name_by_id[ou.id] = full or ou.user.email
 
+    group_ids = [r["user_group_id"] for r in recipients if r.get("type") == "user_group"]
+    group_name_by_id: dict[int, str] = {}
+    if group_ids:
+        for g in OrgUserGroup.objects.filter(id__in=group_ids, org_id=org_id):
+            group_name_by_id[g.id] = g.name
+
     for r in recipients:
-        if r.get("type") == "orguser":
+        rtype = r.get("type")
+        if rtype == "orguser":
             out.append(
                 RecipientOut(
                     type="orguser",
                     orguser_id=r.get("orguser_id"),
                     orguser_name=name_by_id.get(r.get("orguser_id")),
+                )
+            )
+        elif rtype == "user_group":
+            gid = r.get("user_group_id")
+            out.append(
+                RecipientOut(
+                    type="user_group",
+                    user_group_id=gid,
+                    user_group_name=group_name_by_id.get(gid),
                 )
             )
         else:
