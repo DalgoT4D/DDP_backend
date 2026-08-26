@@ -39,7 +39,7 @@ from ddpui.core.charts.charts_service import (
 from ddpui.schemas.dashboard_schema import DashboardTabSchema
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.redis_client import RedisClient
-from ddpui.utils.s3_utils import upload_file, delete_file
+from ddpui.utils.s3_utils import upload_file, delete_file, copy_file, bulk_delete_files
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.schemas.dashboard_schema import DashboardUpdate, FilterUpdate
 
@@ -1132,6 +1132,19 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
     # Clear any user landing page preferences pointing to this dashboard
     OrgUser.objects.filter(landing_dashboard=dashboard).update(landing_dashboard=None)
 
+    # Best-effort: delete any S3-hosted widget images before the dashboard itself is
+    # gone, so they don't sit orphaned in the bucket forever. A failure here must not
+    # block the actual dashboard deletion the user asked for.
+    image_keys = collect_widget_image_keys(dashboard.tabs or [])
+    if image_keys:
+        try:
+            bulk_delete_files(_get_widget_image_bucket(), image_keys)
+        except Exception as err:
+            logger.error(
+                f"Failed to delete {len(image_keys)} widget image(s) for dashboard "
+                f"{dashboard_id}: {err}"
+            )
+
     # Delete the dashboard
     dashboard_title = dashboard.title
     dashboard.delete()
@@ -1207,3 +1220,64 @@ def delete_widget_image(image_key: str, org: Org) -> None:
         logger.error(f"S3 delete failed for widget image {image_key}: {err}")
         raise WidgetImageStorageError("Failed to delete image from S3") from err
     logger.info(f"Deleted dashboard widget image s3://{bucket}/{image_key}")
+
+
+def copy_widget_image(image_key: str, dest_org: Org) -> Tuple[str, str]:
+    """Copy an existing widget image to a new key scoped to dest_org.
+
+    Used when a dashboard's tabs are duplicated onto a new Dashboard row (same-org
+    duplicate, or trial-org cloning). A naive deep-copy of tabs would leave the copy
+    pointing at the ORIGINAL image_key, so removing/replacing the image on either
+    dashboard would silently delete it out from under the other.
+    """
+    ext = image_key.rsplit(".", 1)[-1] if "." in image_key else "png"
+    new_image_key = f"orgs/{dest_org.slug}/dashboards/images/{uuid.uuid4()}.{ext}"
+    bucket = _get_widget_image_bucket()
+    try:
+        new_image_url = copy_file(bucket, image_key, new_image_key)
+    except Exception as err:
+        logger.error(f"S3 copy failed for widget image {image_key} -> {new_image_key}: {err}")
+        raise WidgetImageStorageError("Failed to copy image to S3") from err
+    return new_image_url, new_image_key
+
+
+def remap_widget_images(tabs: list, dest_org: Org) -> list:
+    """Deep-copy `tabs` and give every text/image widget's S3-hosted image its own
+    independent copy, scoped to dest_org, rewriting imageUrl/imageKey in place.
+
+    If a single image fails to copy (e.g. a transient S3 error), that one widget is
+    left pointing at the original image rather than failing the whole duplicate/clone —
+    the pre-existing shared-key behavior, not a new failure mode.
+    """
+    import copy as _copy
+
+    new_tabs = _copy.deepcopy(tabs) or []
+    for tab in new_tabs:
+        for component in (tab.get("components") or {}).values():
+            cfg = component.get("config") or {}
+            image_key = cfg.get("imageKey")
+            if not image_key:
+                continue
+            try:
+                new_url, new_key = copy_widget_image(image_key, dest_org)
+            except WidgetImageStorageError as err:
+                logger.warning(f"Skipping widget image copy for {image_key}: {err.message}")
+                continue
+            cfg["imageUrl"] = new_url
+            cfg["imageKey"] = new_key
+    return new_tabs
+
+
+def collect_widget_image_keys(tabs: list) -> List[str]:
+    """Return every non-empty imageKey referenced by a text/image widget across all tabs.
+
+    Used when a dashboard (or a whole org) is deleted, so its S3-hosted images can be
+    cleaned up alongside it instead of being left orphaned in the bucket forever.
+    """
+    keys = []
+    for tab in tabs or []:
+        for component in (tab.get("components") or {}).values():
+            image_key = (component.get("config") or {}).get("imageKey")
+            if image_key:
+                keys.append(image_key)
+    return keys

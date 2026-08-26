@@ -35,6 +35,7 @@ from ddpui.services.dashboard_service import (
     WidgetImageValidationError,
     delete_dashboard_safely,
     delete_widget_image,
+    remap_widget_images,
     upload_widget_image,
 )
 from ddpui.schemas.dashboard_schema import (
@@ -336,9 +337,10 @@ def duplicate_dashboard(request, dashboard_id: int):
             )
             filter_id_mapping[str(original_filter.id)] = str(new_filter.id)
 
-        new_dashboard.tabs = DashboardService.copy_tabs_with_filter_remapping(
+        remapped_tabs = DashboardService.copy_tabs_with_filter_remapping(
             original_dashboard.tabs or [], filter_id_mapping
         )
+        new_dashboard.tabs = remap_widget_images(remapped_tabs, org)
         new_dashboard.save()
 
         logger.info(f"Duplicated dashboard {dashboard_id} as {new_dashboard.id} for org {org.id}")

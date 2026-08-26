@@ -296,6 +296,59 @@ def test_clone_dashboards_remaps_ids_preserves_public_state_with_fresh_token_and
     assert d.is_org_default is True
 
 
+def test_clone_dashboards_gives_widget_image_its_own_s3_copy(monkeypatch):
+    """A text widget's S3-hosted image must get an independent copy scoped to the
+    trial org — otherwise every trial signup cloned from the same template would
+    share one S3 key, and removing/replacing it on any single trial org would
+    delete it out from under the template AND every other trial org."""
+    monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+    template_org = _make_org("tmpl-img")
+    trial_org = _make_org("trial-img")
+    template_user = _make_orguser(template_org, "tmpl-img@x.org")
+    trial_user = _make_orguser(trial_org, "trial-img@x.org")
+
+    original_image_key = f"orgs/{template_org.slug}/dashboards/images/old.png"
+    d = Dashboard.objects.create(
+        title="Dash1",
+        tabs=[
+            {
+                "id": "tab1",
+                "components": {
+                    "text-1": {
+                        "type": "text",
+                        "config": {
+                            "imageUrl": f"https://test-bucket.s3.amazonaws.com/{original_image_key}",
+                            "imageKey": original_image_key,
+                        },
+                    }
+                },
+            }
+        ],
+        org=template_org,
+        created_by=template_user,
+        last_modified_by=template_user,
+    )
+
+    with patch(
+        "ddpui.services.dashboard_service.copy_file",
+        return_value="https://test-bucket.s3.amazonaws.com/orgs/trial-img/dashboards/images/new.png",
+    ) as mock_copy:
+        dash_map = viz_clone._clone_dashboards(template_org, trial_org, trial_user, {}, {})
+
+    new_config = dash_map[d.id].tabs[0]["components"]["text-1"]["config"]
+    assert new_config["imageKey"] != original_image_key
+    assert new_config["imageKey"].startswith(f"orgs/{trial_org.slug}/dashboards/images/")
+    assert (
+        new_config["imageUrl"]
+        == "https://test-bucket.s3.amazonaws.com/orgs/trial-img/dashboards/images/new.png"
+    )
+    mock_copy.assert_called_once()
+
+    # template dashboard untouched
+    d.refresh_from_db()
+    assert d.tabs[0]["components"]["text-1"]["config"]["imageKey"] == original_image_key
+
+
 # ---------------------------------------------------------------------------
 # DashboardFilter
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
+from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.tasks import OrgTask, Task, OrgDataFlowv1, DataflowOrgTask
 from ddpui.services.org_cleanup_service import OrgCleanupService, OrgCleanupServiceError
@@ -235,3 +236,89 @@ def test_delete_orchestrate_pipelines_none(mock_prefect_service):
     # No orchestrate pipelines, nothing should be deleted
     assert OrgDataFlowv1.objects.filter(org=org, dataflow_type="orchestrate").count() == 0
     mock_prefect_service.delete_deployment_by_id.assert_not_called()
+
+
+@patch.dict("os.environ", {"S3_IMAGES_BUCKET": "test-bucket"})
+@patch("ddpui.services.org_cleanup_service.bulk_delete_files")
+def test_delete_dashboard_images_deletes_every_dashboards_widget_images(mock_bulk_delete):
+    """Test that deleting an org also deletes S3 images across ALL of its dashboards —
+    org deletion cascades dashboards away without ever calling the single-dashboard
+    delete path, so without this the images would be orphaned in S3 forever."""
+    org = Org.objects.create(
+        name="TestOrgDashImages", airbyte_workspace_id="workspace-img", slug="test-slug-img"
+    )
+    Dashboard.objects.create(
+        title="Dash1",
+        dashboard_type="native",
+        tabs=[
+            {
+                "id": "tab-1",
+                "components": {
+                    "text-1": {
+                        "type": "text",
+                        "config": {"imageKey": "orgs/test-slug-img/dashboards/images/a.png"},
+                    }
+                },
+            }
+        ],
+        org=org,
+    )
+    Dashboard.objects.create(
+        title="Dash2",
+        dashboard_type="native",
+        tabs=[
+            {
+                "id": "tab-1",
+                "components": {
+                    "text-2": {
+                        "type": "text",
+                        "config": {"imageKey": "orgs/test-slug-img/dashboards/images/b.png"},
+                    },
+                    "chart-1": {"type": "chart", "config": {"chartId": 1}},
+                },
+            }
+        ],
+        org=org,
+    )
+
+    service = OrgCleanupService(org, dry_run=False)
+    service.delete_dashboard_images()
+
+    mock_bulk_delete.assert_called_once()
+    called_bucket, called_keys = mock_bulk_delete.call_args[0]
+    assert called_bucket == "test-bucket"
+    assert set(called_keys) == {
+        "orgs/test-slug-img/dashboards/images/a.png",
+        "orgs/test-slug-img/dashboards/images/b.png",
+    }
+
+
+@patch.dict("os.environ", {"S3_IMAGES_BUCKET": "test-bucket"})
+@patch("ddpui.services.org_cleanup_service.bulk_delete_files")
+def test_delete_dashboard_images_dry_run_does_not_delete(mock_bulk_delete):
+    """Test that dry_run=True never actually calls S3, matching every other
+    cleanup step's dry_run contract."""
+    org = Org.objects.create(
+        name="TestOrgDashImagesDry", airbyte_workspace_id="workspace-img-dry", slug="test-slug-dry"
+    )
+    Dashboard.objects.create(
+        title="Dash1",
+        dashboard_type="native",
+        tabs=[
+            {
+                "id": "tab-1",
+                "components": {
+                    "text-1": {
+                        "type": "text",
+                        "config": {"imageKey": "orgs/test-slug-dry/dashboards/images/a.png"},
+                    }
+                },
+            }
+        ],
+        org=org,
+    )
+
+    service = OrgCleanupService(org, dry_run=True)
+    service.delete_dashboard_images()
+
+    mock_bulk_delete.assert_not_called()

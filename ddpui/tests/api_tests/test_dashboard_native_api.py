@@ -443,6 +443,42 @@ class TestDeleteDashboard:
         assert response.get("success") is True
         assert not Dashboard.objects.filter(id=dashboard_id).exists()
 
+    def test_delete_dashboard_removes_widget_images_from_s3(
+        self, orguser, sample_dashboard, seed_db
+    ):
+        """Test that deleting a dashboard also deletes its text widgets' S3 images,
+        instead of leaving them orphaned in the bucket forever."""
+        Dashboard.objects.create(
+            title="Another Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            created_by=orguser,
+            org=orguser.org,
+        )
+        image_key = f"orgs/{orguser.org.slug}/dashboards/images/old.png"
+        sample_dashboard.tabs = [
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [],
+                "components": {
+                    "text-1": {"type": "text", "config": {"imageKey": image_key}},
+                    "chart-1": {"type": "chart", "config": {"chartId": 1}},
+                },
+            }
+        ]
+        sample_dashboard.save()
+        dashboard_id = sample_dashboard.id
+
+        request = mock_request(orguser)
+        with patch("ddpui.services.dashboard_service.bulk_delete_files") as mock_bulk_delete:
+            response = delete_dashboard(request, dashboard_id=dashboard_id)
+
+        assert response.get("success") is True
+        mock_bulk_delete.assert_called_once()
+        called_bucket, called_keys = mock_bulk_delete.call_args[0]
+        assert called_keys == [image_key]
+
     def test_delete_dashboard_not_found(self, orguser, seed_db):
         """Test deleting non-existent dashboard returns 404"""
         request = mock_request(orguser)
@@ -698,6 +734,48 @@ class TestDuplicateDashboardTabs:
 
         # Cleanup
         original_filter.delete()
+
+    def test_duplicate_dashboard_gives_widget_image_its_own_s3_copy(
+        self, orguser, sample_dashboard, seed_db, monkeypatch
+    ):
+        """Test that a text widget's S3-hosted image is copied to a NEW key on
+        duplicate, not left pointing at the original — otherwise removing/replacing
+        the image on either dashboard would delete it out from under the other."""
+        monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
+        original_image_key = f"orgs/{orguser.org.slug}/dashboards/images/old.png"
+        sample_dashboard.tabs = [
+            {
+                "id": "tab-1",
+                "title": "Tab 1",
+                "layout_config": [{"i": "text-1", "x": 0, "y": 0, "w": 4, "h": 3}],
+                "components": {
+                    "text-1": {
+                        "type": "text",
+                        "config": {
+                            "imageUrl": f"https://test-bucket.s3.amazonaws.com/{original_image_key}",
+                            "imageKey": original_image_key,
+                        },
+                    }
+                },
+            }
+        ]
+        sample_dashboard.save()
+
+        request = mock_request(orguser)
+        with patch(
+            "ddpui.services.dashboard_service.copy_file",
+            return_value="https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png",
+        ) as mock_copy:
+            response = duplicate_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        new_config = response.tabs[0].components["text-1"]["config"]
+        assert new_config["imageKey"] != original_image_key
+        assert new_config["imageKey"].startswith(f"orgs/{orguser.org.slug}/dashboards/images/")
+        assert (
+            new_config["imageUrl"]
+            == "https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png"
+        )
+        mock_copy.assert_called_once()
 
 
 # ================================================================================
