@@ -1322,6 +1322,8 @@ def get_public_report_table_data(
         if dashboard_filters:
             try:
                 filter_values = json.loads(dashboard_filters)
+                if not isinstance(filter_values, dict):
+                    filter_values = None
             except json.JSONDecodeError:
                 filter_values = None
 
@@ -1387,6 +1389,8 @@ def get_public_report_table_total_rows(
         if dashboard_filters:
             try:
                 filter_values = json.loads(dashboard_filters)
+                if not isinstance(filter_values, dict):
+                    filter_values = None
             except json.JSONDecodeError:
                 filter_values = None
 
