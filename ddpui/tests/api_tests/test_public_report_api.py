@@ -245,6 +245,19 @@ class TestGetPublicReport:
         assert "report_metadata" in response
         assert response["report_metadata"]["title"] == "Public Report"
 
+    @patch("ddpui.core.reports.report_service.ReportService._inject_period_into_chart_configs")
+    def test_returns_org_slug(self, mock_inject, public_snapshot, seed_db):
+        """The response carries the org's stable slug, not just its display name.
+
+        A public view is anonymous — no user, no org group — so the payload is the only
+        way analytics can attribute the read to an org. org_name can be renamed and is
+        not a stable key; the slug is. Matches PublicDashboardResponse.
+        """
+        request = _make_public_request()
+        response = get_public_report(request, public_snapshot.public_share_token)
+
+        assert response["org_slug"] == "pub-rpt-test-org"
+
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
         request = _make_public_request()
