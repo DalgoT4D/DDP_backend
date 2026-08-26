@@ -43,7 +43,6 @@ class EngineEntry:
     """A cached engine plus what is needed to retire and observe it."""
 
     engine: Engine
-    wtype: str
     last_used_at: float
 
     def in_use(self) -> bool:
@@ -101,7 +100,7 @@ def _dispose(entries: list[EngineEntry]) -> None:
             entry.engine.dispose()
         except Exception:  # skipcq: PYL-W0703
             # Discarding a pool that fails to close must not fail a request.
-            logger.warning("failed to dispose warehouse engine", extra={"wtype": entry.wtype})
+            logger.warning("failed to dispose warehouse engine")
 
 
 def _sweep() -> int:
@@ -149,7 +148,7 @@ def _ensure_sweeper() -> None:
     """
     if _sweeper_started.is_set():
         return
-    with _lock:
+    with _lock:  # thread lock
         if _sweeper_started.is_set():
             return
         threading.Thread(target=_sweep_loop, name="warehouse-engine-sweeper", daemon=True).start()
@@ -163,7 +162,7 @@ def _ensure_sweeper() -> None:
         )
 
 
-def get_or_create_engine(cache_key: str, create, wtype: str) -> Engine:
+def get_or_create_engine(cache_key: str, create) -> Engine:
     """
     Return the cached engine for `cache_key`, building it via `create` on a miss.
     `create` runs under the lock: create_engine() opens no connection, so it is short.
@@ -179,23 +178,10 @@ def get_or_create_engine(cache_key: str, create, wtype: str) -> Engine:
             return entry.engine
 
         engine = create()
-        _engines[cache_key] = EngineEntry(engine=engine, wtype=wtype, last_used_at=now)
-        logger.info(
-            "created warehouse engine",
-            extra={"wtype": wtype, "cached_engines": len(_engines)},
-        )
+        _engines[cache_key] = EngineEntry(engine=engine, last_used_at=now)
+        logger.info("created warehouse engine", extra={"cached_engines": len(_engines)})
 
     return engine
-
-
-def invalidate_all() -> int:
-    """Drop every cached engine, closing its pool. Returns how many."""
-    with _lock:
-        detached = list(_engines.values())
-        _engines.clear()
-
-    _dispose(detached)
-    return len(detached)
 
 
 def registry_stats() -> dict:
@@ -207,7 +193,6 @@ def registry_stats() -> dict:
     with _lock:
         entries = [
             {
-                "wtype": entry.wtype,
                 "idle_seconds": round(now - entry.last_used_at, 1),
                 "checkedout": entry.engine.pool.checkedout(),
                 "checkedin": entry.engine.pool.checkedin(),

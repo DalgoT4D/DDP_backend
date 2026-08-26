@@ -124,7 +124,7 @@ def test_postgres_client_builds_its_engine_with_the_registry_pool_settings():
     max_overflow especially, which defaults to 10 and set the old per-warehouse
     ceiling at 15 connections.
     """
-    postgres_engine_registry.invalidate_all()
+    postgres_engine_registry._engines.clear()
 
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):
         with patch("ddpui.utils.warehouse.client.postgres.create_engine") as mock_create_engine:
@@ -136,7 +136,7 @@ def test_postgres_client_builds_its_engine_with_the_registry_pool_settings():
         **postgres_engine_registry.pool_kwargs(),
     )
 
-    postgres_engine_registry.invalidate_all()
+    postgres_engine_registry._engines.clear()
 
 
 def test_repeated_clients_for_one_warehouse_share_a_single_engine():
@@ -145,7 +145,7 @@ def test_repeated_clients_for_one_warehouse_share_a_single_engine():
     is what the chart, dashboard, KPI and filter endpoints all do -- must not
     build a new pool per request.
     """
-    postgres_engine_registry.invalidate_all()
+    postgres_engine_registry._engines.clear()
 
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):
         with patch("ddpui.utils.warehouse.client.postgres.create_engine") as mock_create_engine:
@@ -155,7 +155,7 @@ def test_repeated_clients_for_one_warehouse_share_a_single_engine():
     assert mock_create_engine.call_count == 1
     assert first.engine is second.engine
 
-    postgres_engine_registry.invalidate_all()
+    postgres_engine_registry._engines.clear()
 
 
 def test_connect_args_are_built_only_on_a_cache_miss():
@@ -165,7 +165,7 @@ def test_connect_args_are_built_only_on_a_cache_miss():
     warehouses configured with one -- once per engine here, once per request if this
     ever slips back out of the callback.
     """
-    postgres_engine_registry.invalidate_all()
+    postgres_engine_registry._engines.clear()
 
     with patch("ddpui.utils.warehouse.client.postgres.inspect"):
         with patch("ddpui.utils.warehouse.client.postgres.create_engine"):
@@ -178,4 +178,4 @@ def test_connect_args_are_built_only_on_a_cache_miss():
 
     assert mock_build.call_count == 1
 
-    postgres_engine_registry.invalidate_all()
+    postgres_engine_registry._engines.clear()

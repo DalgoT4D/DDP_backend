@@ -29,9 +29,7 @@ class PostgresClient(Warehouse):
                 **postgres_engine_registry.pool_kwargs(),
             )
 
-        self.engine = postgres_engine_registry.get_or_create_engine(
-            cache_key, build_engine, wtype=WarehouseType.POSTGRES
-        )
+        self.engine = postgres_engine_registry.get_or_create_engine(cache_key, build_engine)
         self.inspect_obj: Inspector = inspect(
             self.engine
         )  # this will be used to fetch metadata of the database
