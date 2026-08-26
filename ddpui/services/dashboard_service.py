@@ -1192,7 +1192,11 @@ def upload_widget_image(file_bytes: bytes, content_type: str, org: Org) -> Tuple
 
     bucket = _get_widget_image_bucket()
     ext = WIDGET_IMAGE_CONTENT_TYPE_TO_EXT[content_type]
-    image_key = f"orgs/{org.slug}/dashboards/images/{uuid.uuid4()}.{ext}"
+    # Keyed by org.pk, not org.slug — slug is nullable and not unique-enforced
+    # (plain slugify(org.name) with no collision check), so two orgs could share
+    # a slug and pass each other's ownership check in delete_widget_image below.
+    # pk is the DB-guaranteed-unique, immutable identifier this needs.
+    image_key = f"orgs/{org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
     try:
         image_url = upload_file(bucket, image_key, file_bytes, content_type)
     except Exception as err:
@@ -1207,9 +1211,10 @@ def delete_widget_image(image_key: str, org: Org) -> None:
     """Delete a dashboard widget image from S3.
 
     Only deletes keys under this org's own prefix, so one org can't delete
-    another org's S3 objects by passing an arbitrary key.
+    another org's S3 objects by passing an arbitrary key. Keyed by org.pk (see
+    upload_widget_image) rather than slug, which isn't guaranteed unique.
     """
-    expected_prefix = f"orgs/{org.slug}/dashboards/images/"
+    expected_prefix = f"orgs/{org.pk}/dashboards/images/"
     if not image_key.startswith(expected_prefix):
         raise WidgetImagePermissionError()
 
@@ -1231,7 +1236,7 @@ def copy_widget_image(image_key: str, dest_org: Org) -> Tuple[str, str]:
     dashboard would silently delete it out from under the other.
     """
     ext = image_key.rsplit(".", 1)[-1] if "." in image_key else "png"
-    new_image_key = f"orgs/{dest_org.slug}/dashboards/images/{uuid.uuid4()}.{ext}"
+    new_image_key = f"orgs/{dest_org.pk}/dashboards/images/{uuid.uuid4()}.{ext}"
     bucket = _get_widget_image_bucket()
     try:
         new_image_url = copy_file(bucket, image_key, new_image_key)

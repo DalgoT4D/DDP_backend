@@ -307,7 +307,7 @@ def test_clone_dashboards_gives_widget_image_its_own_s3_copy(monkeypatch):
     template_user = _make_orguser(template_org, "tmpl-img@x.org")
     trial_user = _make_orguser(trial_org, "trial-img@x.org")
 
-    original_image_key = f"orgs/{template_org.slug}/dashboards/images/old.png"
+    original_image_key = f"orgs/{template_org.pk}/dashboards/images/old.png"
     d = Dashboard.objects.create(
         title="Dash1",
         tabs=[
@@ -337,7 +337,7 @@ def test_clone_dashboards_gives_widget_image_its_own_s3_copy(monkeypatch):
 
     new_config = dash_map[d.id].tabs[0]["components"]["text-1"]["config"]
     assert new_config["imageKey"] != original_image_key
-    assert new_config["imageKey"].startswith(f"orgs/{trial_org.slug}/dashboards/images/")
+    assert new_config["imageKey"].startswith(f"orgs/{trial_org.pk}/dashboards/images/")
     assert (
         new_config["imageUrl"]
         == "https://test-bucket.s3.amazonaws.com/orgs/trial-img/dashboards/images/new.png"

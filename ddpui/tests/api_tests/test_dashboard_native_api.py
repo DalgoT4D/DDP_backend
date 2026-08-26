@@ -455,7 +455,7 @@ class TestDeleteDashboard:
             created_by=orguser,
             org=orguser.org,
         )
-        image_key = f"orgs/{orguser.org.slug}/dashboards/images/old.png"
+        image_key = f"orgs/{orguser.org.pk}/dashboards/images/old.png"
         sample_dashboard.tabs = [
             {
                 "id": "tab-1",
@@ -742,7 +742,7 @@ class TestDuplicateDashboardTabs:
         duplicate, not left pointing at the original — otherwise removing/replacing
         the image on either dashboard would delete it out from under the other."""
         monkeypatch.setenv("S3_IMAGES_BUCKET", "test-bucket")
-        original_image_key = f"orgs/{orguser.org.slug}/dashboards/images/old.png"
+        original_image_key = f"orgs/{orguser.org.pk}/dashboards/images/old.png"
         sample_dashboard.tabs = [
             {
                 "id": "tab-1",
@@ -770,7 +770,7 @@ class TestDuplicateDashboardTabs:
 
         new_config = response.tabs[0].components["text-1"]["config"]
         assert new_config["imageKey"] != original_image_key
-        assert new_config["imageKey"].startswith(f"orgs/{orguser.org.slug}/dashboards/images/")
+        assert new_config["imageKey"].startswith(f"orgs/{orguser.org.pk}/dashboards/images/")
         assert (
             new_config["imageUrl"]
             == "https://test-bucket.s3.amazonaws.com/orgs/dash-api-test-org/dashboards/images/new.png"
@@ -1191,7 +1191,7 @@ class TestDeleteDashboardWidgetImage:
         """Test a successful delete forwards the image key and org to the service"""
         request = mock_request(orguser)
         payload = WidgetImageDeleteRequest(
-            image_key=f"orgs/{orguser.org.slug}/dashboards/images/file.png"
+            image_key=f"orgs/{orguser.org.pk}/dashboards/images/file.png"
         )
 
         with patch("ddpui.api.dashboard_native_api.delete_widget_image") as mock_delete:
