@@ -144,6 +144,12 @@ def create_dashboard(request, payload: DashboardCreate):
         },
     )
 
+    # Materialise the owner's access as a self-share row so it survives
+    # future org-floor changes. The dashboard has no tabs yet, so no cascade
+    # children are created — sync_dashboard_cascade only writes the top-level
+    # self-share here. Subsequent tab updates add children.
+    sync_dashboard_cascade(dashboard)
+
     return DashboardResponse(
         **DashboardService.get_dashboard_response(dashboard), access_level=AccessLevel.EDIT
     )

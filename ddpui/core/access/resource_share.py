@@ -20,6 +20,7 @@ from ddpui.models.org_user import (
     OrgUserGroupMember,
 )
 from ddpui.models.resource_share import (
+    AccessLevel,
     LEVEL_RANK,
     ResourceShare,
     ResourceSharePrincipalType,
@@ -27,7 +28,6 @@ from ddpui.models.resource_share import (
 )
 from ddpui.models.role_based_access import Role
 from ddpui.schemas.access.resource_share_schema import (
-    AccessLevel,
     CascadeSourceSchema,
     PendingGrantPayload,
     PrincipalGrantPayload,
@@ -65,10 +65,32 @@ def sync_dashboard_cascade(dashboard: Dashboard) -> None:
     tabs — correct level, correct set of charts/KPIs, stale rows removed.
     Call after any share change (add/update) or any tabs change.
     Invitation-backed shares are skipped — promoted on acceptance.
+
+    Owner protection: the dashboard's ``created_by`` gets an auto self-share
+    at EDIT so their access is materialised in the DB and survives org-floor
+    changes. That self-share cascades to inner charts/KPIs at VIEW (not EDIT)
+    so the owner never gains modification rights on charts they don't
+    personally own via dashboard ownership alone.
     """
     inner = _parse_inner_ids(dashboard.tabs)
     current_chart_ids = [str(cid) for cid in inner["chart_ids"]]
     current_kpi_ids = [str(kid) for kid in inner["kpi_ids"]]
+
+    # Ensure the owner has a top-level self-share on the dashboard — the loop
+    # below will populate inner-chart/KPI children for them at VIEW. Idempotent.
+    if dashboard.created_by_id:
+        ResourceShare.objects.get_or_create(
+            org=dashboard.org,
+            resource_type=ResourceType.DASHBOARD,
+            resource_id=str(dashboard.id),
+            principal_type=ResourceSharePrincipalType.USER,
+            principal_id=dashboard.created_by_id,
+            parent=None,
+            defaults={
+                "access_level": AccessLevel.EDIT,
+                "created_by_id": dashboard.created_by_id,
+            },
+        )
 
     dashboard_shares = list(
         ResourceShare.objects.filter(
@@ -83,7 +105,16 @@ def sync_dashboard_cascade(dashboard: Dashboard) -> None:
         return
 
     for share in dashboard_shares:
-        ResourceShare.objects.filter(parent=share).update(access_level=share.access_level)
+        # Owner's auto self-share cascades at VIEW; everyone else at their own
+        # level. Keeps the owner protected against floor changes without
+        # granting them modification rights on inner charts they don't own.
+        is_owner_self_share = (
+            share.principal_type == ResourceSharePrincipalType.USER
+            and share.principal_id == dashboard.created_by_id
+        )
+        cascade_level = AccessLevel.VIEW if is_owner_self_share else share.access_level
+
+        ResourceShare.objects.filter(parent=share).update(access_level=cascade_level)
 
         for chart_id in current_chart_ids:
             ResourceShare.objects.get_or_create(
@@ -93,7 +124,7 @@ def sync_dashboard_cascade(dashboard: Dashboard) -> None:
                 principal_type=share.principal_type,
                 principal_id=share.principal_id,
                 parent=share,
-                defaults={"access_level": share.access_level, "created_by": share.created_by},
+                defaults={"access_level": cascade_level, "created_by": share.created_by},
             )
         for kpi_id in current_kpi_ids:
             ResourceShare.objects.get_or_create(
@@ -103,7 +134,7 @@ def sync_dashboard_cascade(dashboard: Dashboard) -> None:
                 principal_type=share.principal_type,
                 principal_id=share.principal_id,
                 parent=share,
-                defaults={"access_level": share.access_level, "created_by": share.created_by},
+                defaults={"access_level": cascade_level, "created_by": share.created_by},
             )
 
         ResourceShare.objects.filter(parent=share, resource_type=ResourceType.CHART).exclude(

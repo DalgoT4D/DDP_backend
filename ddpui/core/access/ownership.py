@@ -1,5 +1,10 @@
 from ddpui.models.org_user import OrgUser
-from ddpui.models.resource_share import AccessLevel, ResourceShare, ResourceSharePrincipalType
+from ddpui.models.resource_share import (
+    AccessLevel,
+    ResourceShare,
+    ResourceSharePrincipalType,
+    ResourceType,
+)
 from ddpui.models.role_based_access import RoleSlug
 
 
@@ -78,3 +83,14 @@ def transfer_ownership(caller: OrgUser, rtype: str, resource, to_orguser_id: int
         if not created and share.access_level != AccessLevel.EDIT:
             share.access_level = AccessLevel.EDIT
             share.save(update_fields=["access_level"])
+
+    # Re-sync the dashboard cascade so:
+    #  - the previous owner's cascade rows flip from VIEW → EDIT (they're now a
+    #    regular Edit-share holder, not the owner self-share).
+    #  - the new owner gets their own auto self-share + VIEW cascade rows on
+    #    every inner chart/KPI, materialising their access against future
+    #    org-floor changes.
+    if rtype == ResourceType.DASHBOARD:
+        from ddpui.core.access.resource_share import sync_dashboard_cascade
+
+        sync_dashboard_cascade(resource)
