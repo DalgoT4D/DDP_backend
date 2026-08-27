@@ -1916,5 +1916,10 @@
         "model": "ddpui.RolePermission",
         "pk": 251,
         "fields": { "role": 5, "permission": 81 }
+    },
+    {
+        "model": "ddpui.RolePermission",
+        "pk": 252,
+        "fields": { "role": 5, "permission": 72 }
     }
 ]

@@ -95,11 +95,11 @@ def notify_owner_of_new_request(req: AccessRequest, resource, rtype: str) -> Non
         else req.requester.user.email
     )
     url = resource_url(rtype, resource.pk, open_share=True)
+    note_clause = f' with note "{req.note}"' if req.note else ""
     body = (
-        f"{requester_label} requested {req.requested_level} access to " f"{rtype} '{title}'.\n{url}"
+        f"{requester_label} has requested to {req.requested_level} your {rtype}, "
+        f"'{title}'{note_clause}. Visit {url} to review"
     )
-    if req.note:
-        body += f'\nNote: "{req.note}"'
     try:
         create_notification(
             NotificationDataSchema(
