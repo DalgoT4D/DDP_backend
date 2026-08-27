@@ -86,6 +86,7 @@ async def run_turn(
     context: RunContext,
     model_name: str | None = None,
     resume_payload: dict | None = None,
+    resume_trace_id: str | None = None,
 ) -> AsyncIterator[dict]:
     """Stream one turn of the TurnGraph. Always ends with message_complete,
     input_required (the turn paused for the user), or error, and always writes
@@ -94,14 +95,19 @@ async def run_turn(
     `resume_payload` continues a paused turn instead of starting a new one:
     the graph resumes from its checkpoint on this thread with
     Command(resume=payload) — see agent/hitl.py for the payload shape. The
-    `question` is then only a label for the trace/audit (the user's answer or
-    an approval summary), not a new graph input.
+    `question` is then only a label for the audit (the user's answer or an
+    approval summary), not a new graph input. `resume_trace_id` keeps the
+    whole question ONE Langfuse trace: it is the original run's trace id,
+    carried through the consumer's pending record via the `trace_id` field
+    on the input_required event.
 
     The brains are passed as this module's globals (route_question, casual_reply,
     audit_turn) at call time, so tests can patch them per turn. The parent
     graph reuses the agent's checkpointer — one saver, one thread namespace."""
     request_uuid = uuid.uuid4()
     started = time.monotonic()
+    # the id that ties every run of one question to one Langfuse trace
+    trace_id = resume_trace_id or str(request_uuid)
 
     graph = build_turn_graph(
         agent,
@@ -118,6 +124,8 @@ async def run_turn(
         question=question,
         request_uuid=request_uuid,
         model_name=model_name or resolve_model_name(MODEL_ENV_VAR, DEFAULT_MODEL),
+        trace_id=trace_id,
+        is_resume=resume_payload is not None,
     )
     config = {
         "configurable": {"thread_id": str(session.thread_id)},
@@ -172,7 +180,18 @@ async def run_turn(
                 interrupts = chunk["__interrupt__"]
                 if interrupts:
                     status = "paused"
-                    yield input_required_event(interrupts[0].value)
+                    event = input_required_event(interrupts[0].value)
+                    # trace continuity: the consumer stores this and passes it
+                    # back as resume_trace_id, keeping the question one trace
+                    event["trace_id"] = trace_id
+                    # human-readable trace output instead of raw message blocks
+                    pending_tools = ", ".join(r["tool"] for r in event.get("requests", []))
+                    final_message = (
+                        "paused: asked the user a question"
+                        if event["kind"] == "question"
+                        else f"paused: awaiting approval of {pending_tools}"
+                    )
+                    yield event
                     break
                 continue
 

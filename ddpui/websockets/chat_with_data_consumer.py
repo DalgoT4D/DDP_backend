@@ -115,6 +115,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
         action = payload.get("action")
         pending = self._get_pending_input()
         resume_payload: dict | None = None
+        resume_trace_id: str | None = None
 
         if action == "send_message":
             question = str(payload.get("message", "")).strip()
@@ -136,6 +137,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
                 resume_payload = build_resume_payload(
                     pending["event"].get("requests", []), approve=True, answer=question
                 )
+                resume_trace_id = pending.get("trace_id")
             else:
                 # user's model pick for this turn; anything not on the allowlist
                 # (or absent) silently falls back to the default — never trust the client
@@ -152,6 +154,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             resume_payload = build_resume_payload(
                 pending["event"].get("requests", []), approve=approve
             )
+            resume_trace_id = pending.get("trace_id")
         else:
             await self._send_event({"type": "error", "message": "Unsupported action"})
             return
@@ -177,11 +180,19 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             self._clear_pending_input()
 
         try:
-            await self._run_turn(question, model_id, resume_payload=resume_payload)
+            await self._run_turn(
+                question, model_id, resume_payload=resume_payload, resume_trace_id=resume_trace_id
+            )
         finally:
             self._release_turn_lock()
 
-    async def _run_turn(self, question: str, model_id: str, resume_payload: dict | None = None):
+    async def _run_turn(
+        self,
+        question: str,
+        model_id: str,
+        resume_payload: dict | None = None,
+        resume_trace_id: str | None = None,
+    ):
         try:
             context = await database_sync_to_async(build_run_context)(self.orguser)
         except ChatWithDataNotReady as err:
@@ -200,6 +211,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             context=context,
             model_name=model_id,
             resume_payload=resume_payload,
+            resume_trace_id=resume_trace_id,
         ):
             if event["type"] == "message_complete":
                 final_answer = event.get("message", "")
@@ -294,7 +306,15 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
     def _store_pending_input(self, event: dict, model_id: str):
         RedisClient.get_instance().set(
             self._pending_key(),
-            json.dumps({"kind": event.get("kind"), "model": model_id, "event": event}),
+            json.dumps(
+                {
+                    "kind": event.get("kind"),
+                    "model": model_id,
+                    # keeps every run of one question on one Langfuse trace
+                    "trace_id": event.get("trace_id"),
+                    "event": event,
+                }
+            ),
             ex=PENDING_INPUT_TTL_S,
         )
 

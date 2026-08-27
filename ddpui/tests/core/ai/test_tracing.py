@@ -110,12 +110,16 @@ def test_handler_nests_observations_under_stage_spans():
     # route stage: a chain run for the node, an LLM call inside it
     route_run, route_llm = uuid.uuid4(), uuid.uuid4()
     handler.on_chain_start(
-        {"name": "route_node"}, {}, run_id=route_run,
+        {"name": "route_node"},
+        {},
+        run_id=route_run,
         metadata={"langgraph_node": "route_node"},
     )
     handler.on_chat_model_start(
-        {}, [[HumanMessage("how many surveys?")]],
-        run_id=route_llm, parent_run_id=route_run,
+        {},
+        [[HumanMessage("how many surveys?")]],
+        run_id=route_llm,
+        parent_run_id=route_run,
         metadata={"langgraph_node": "route_node"},
         invocation_params={"model": "claude-haiku-4-5"},
     )
@@ -124,24 +128,38 @@ def test_handler_nests_observations_under_stage_spans():
     # agent stage: LLM + tool nested below the sql_agent span, one level apart
     agent_run, inner_run, agent_llm, tool_run = (uuid.uuid4() for _ in range(4))
     handler.on_chain_start(
-        {"name": "sql_agent"}, {}, run_id=agent_run,
+        {"name": "sql_agent"},
+        {},
+        run_id=agent_run,
         metadata={"langgraph_node": "sql_agent"},
     )
     # LangGraph internal wrapper run: same node metadata, different name — no span,
     # but children must still resolve through it to the stage span
     handler.on_chain_start(
-        {"name": "LangGraph"}, {}, run_id=inner_run, parent_run_id=agent_run,
+        {"name": "LangGraph"},
+        {},
+        run_id=inner_run,
+        parent_run_id=agent_run,
         metadata={"langgraph_node": "sql_agent"},
     )
     handler.on_chat_model_start(
-        {}, [[HumanMessage("q")]], run_id=agent_llm, parent_run_id=inner_run,
+        {},
+        [[HumanMessage("q")]],
+        run_id=agent_llm,
+        parent_run_id=inner_run,
         metadata={"langgraph_node": "model"},
         invocation_params={"model": "claude-sonnet-5"},
     )
-    handler.on_tool_start({"name": "execute_sql"}, "SELECT 1", run_id=tool_run, parent_run_id=inner_run)
+    handler.on_tool_start(
+        {"name": "execute_sql"}, "SELECT 1", run_id=tool_run, parent_run_id=inner_run
+    )
 
     route_span, route_gen, agent_span, agent_gen, tool_span = trace.observations
-    assert (route_span.kind, route_span.kwargs["name"], route_span.parent) == ("span", "route-question", None)
+    assert (route_span.kind, route_span.kwargs["name"], route_span.parent) == (
+        "span",
+        "route-question",
+        None,
+    )
     assert route_span.ended_with == {}  # ended by on_chain_end
     assert route_gen.kwargs["name"] == "classify-intent"
     assert route_gen.kwargs["model"] == "claude-haiku-4-5"  # not the agent default
@@ -173,12 +191,16 @@ def test_dispatcher_routes_model_events_to_context_bound_handler():
         # model call arrives via the dispatcher: no parent link, no metadata
         llm_run = uuid.uuid4()
         dispatcher.on_chat_model_start(
-            {}, [[HumanMessage("q")]], run_id=llm_run,
+            {},
+            [[HumanMessage("q")]],
+            run_id=llm_run,
             invocation_params={"model": "claude-sonnet-5"},
         )
         message = AIMessage(content="answer")
         message.usage_metadata = {"input_tokens": 10, "output_tokens": 5}
-        dispatcher.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=llm_run)
+        dispatcher.on_llm_end(
+            LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=llm_run
+        )
     finally:
         observability.reset_current_turn_handler(token)
 
@@ -218,7 +240,9 @@ def test_tool_output_masked_when_env_set(monkeypatch):
     handler = LangfuseTurnHandler(trace, model_name="m")
 
     tool_run = uuid.uuid4()
-    handler.on_tool_start({"name": "execute_sql"}, "SELECT name FROM beneficiaries", run_id=tool_run)
+    handler.on_tool_start(
+        {"name": "execute_sql"}, "SELECT name FROM beneficiaries", run_id=tool_run
+    )
     handler.on_tool_end("Anjali,9876543210\nPriya,9123456789", run_id=tool_run)
 
     (span,) = trace.observations
@@ -250,11 +274,12 @@ def test_trace_id_is_the_request_uuid(monkeypatch):
     monkeypatch.setattr(observability, "_client", StubClient())
     monkeypatch.setattr(observability, "_client_initialized", True)
 
+    monkeypatch.setenv("LANGFUSE_ENVIRONMENT", "prod")
     request_uuid = uuid.uuid4()
     handler = observability.start_turn_trace(
-        session=SimpleNamespace(id=7),
+        session=SimpleNamespace(id=7, title="Survey counts"),
         orguser=SimpleNamespace(id=3),
-        context=SimpleNamespace(org_slug="ngo", dialect="postgres"),
+        context=SimpleNamespace(org_slug="ngo", dialect="postgres", org_id=12),
         question="how many surveys?",
         request_uuid=request_uuid,
         model_name="claude-sonnet-5",
@@ -262,8 +287,13 @@ def test_trace_id_is_the_request_uuid(monkeypatch):
 
     assert handler is not None
     assert captured["id"] == str(request_uuid)
-    assert captured["tags"] == ["ngo", "postgres"]
+    # org-scoped identity: Users/Sessions pages group by org, still no PII
+    assert captured["user_id"] == "ngo/3"
+    assert captured["session_id"] == "ngo/s7"
+    assert captured["tags"] == ["ngo", "postgres", "env:prod", "model:claude-sonnet-5"]
     assert captured["metadata"]["request_uuid"] == str(request_uuid)
+    assert captured["metadata"]["org_id"] == 12
+    assert captured["metadata"]["session_title"] == "Survey counts"
 
 
 def test_record_generation_maps_one_shot_call_to_trace(monkeypatch):
@@ -332,3 +362,66 @@ def test_record_generation_marks_failures_as_errors(monkeypatch):
     (generation,) = captured["_trace"].observations
     assert generation.ended_with["level"] == "ERROR"
     assert generation.ended_with["status_message"] == "model overloaded"
+
+
+def test_graph_interrupt_ends_stage_span_without_error_level():
+    """A HITL pause is healthy control flow — the stage span must NOT be ERROR,
+    or every approval would light up error dashboards and alerts."""
+    from langgraph.errors import GraphInterrupt
+
+    trace = StubTrace()
+    handler = LangfuseTurnHandler(trace, model_name="m")
+    run = uuid.uuid4()
+    handler.on_chain_start(
+        {"name": "sql_agent"}, {}, run_id=run, metadata={"langgraph_node": "sql_agent"}
+    )
+    handler.on_chain_error(GraphInterrupt(()), run_id=run)
+
+    (span,) = trace.observations
+    assert "level" not in span.ended_with
+    assert "paused" in span.ended_with["status_message"]
+
+
+def test_real_chain_error_still_marks_the_span_error():
+    trace = StubTrace()
+    handler = LangfuseTurnHandler(trace, model_name="m")
+    run = uuid.uuid4()
+    handler.on_chain_start(
+        {"name": "sql_agent"}, {}, run_id=run, metadata={"langgraph_node": "sql_agent"}
+    )
+    handler.on_chain_error(RuntimeError("warehouse exploded"), run_id=run)
+
+    (span,) = trace.observations
+    assert span.ended_with["level"] == "ERROR"
+    assert "warehouse exploded" in span.ended_with["status_message"]
+
+
+def test_resume_attaches_to_original_trace_without_overwriting(monkeypatch):
+    """A resumed run passes is_resume + the original trace id: the client must
+    be called with ONLY the id, so the original name/input/tags survive the
+    server-side upsert (merge behavior verified against a live v4 server)."""
+    from types import SimpleNamespace
+
+    calls = []
+
+    class StubClient:
+        def trace(self, **kwargs):
+            calls.append(kwargs)
+            return StubTrace()
+
+    monkeypatch.setattr(observability, "_client", StubClient())
+    monkeypatch.setattr(observability, "_client_initialized", True)
+
+    handler = observability.start_turn_trace(
+        session=SimpleNamespace(id=7, title="Survey counts"),
+        orguser=SimpleNamespace(id=3),
+        context=SimpleNamespace(org_slug="ngo", dialect="postgres", org_id=12),
+        question="[user approved the action]",
+        request_uuid=uuid.uuid4(),
+        model_name="claude-sonnet-5",
+        trace_id="original-trace-id",
+        is_resume=True,
+    )
+
+    assert handler is not None
+    assert calls == [{"id": "original-trace-id"}]

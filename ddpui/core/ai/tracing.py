@@ -112,6 +112,7 @@ def _mask_tool_results() -> bool:
     in production; SQL text and tool inputs are still recorded."""
     return os.getenv("LANGFUSE_MASK_TOOL_RESULTS", "").lower() in ("1", "true", "yes")
 
+
 _client = None
 _client_initialized = False
 
@@ -221,7 +222,13 @@ class LangfuseTurnHandler(BaseCallbackHandler):
 
     def on_chain_error(self, error, *, run_id, **kwargs):
         try:
-            self._end_stage(run_id, level="ERROR", status_message=str(error)[:500])
+            # a human-in-the-loop pause surfaces as a GraphInterrupt "error" in
+            # chain callbacks — it is healthy control flow, not a failure, and
+            # must not pollute error-rate dashboards and alerts
+            if error.__class__.__name__ in ("GraphInterrupt", "NodeInterrupt", "Interrupt"):
+                self._end_stage(run_id, status_message="paused: waiting for the user")
+            else:
+                self._end_stage(run_id, level="ERROR", status_message=str(error)[:500])
         except Exception:  # pylint: disable=broad-except
             logger.exception("langfuse on_chain_error failed")
 
@@ -335,27 +342,57 @@ class LangfuseTurnHandler(BaseCallbackHandler):
 
 
 def start_turn_trace(
-    *, session, orguser, context, question: str, request_uuid, model_name: str
+    *,
+    session,
+    orguser,
+    context,
+    question: str,
+    request_uuid,
+    model_name: str,
+    trace_id: str | None = None,
+    is_resume: bool = False,
 ) -> LangfuseTurnHandler | None:
-    """One trace per turn, or None when tracing is off. IDs are opaque internal
-    ids — never emails or names (same rule as our analytics)."""
+    """One trace per QUESTION, or None when tracing is off.
+
+    A paused-then-resumed question stays ONE trace: the resume run passes the
+    original run's trace_id and is_resume=True, and the v2 client's upsert
+    semantics attach the new spans to the existing trace — without touching
+    its name/input (which still show the user's original question).
+
+    IDs are opaque internal ids — never emails or names (same rule as our
+    analytics). user_id/session_id carry an org_slug/ prefix so Langfuse's
+    Users and Sessions pages group by org at a glance."""
     client = get_langfuse()
     if client is None:
         return None
     try:
-        trace = client.trace(
-            # deterministic id: the feedback endpoint and the eval runner
-            # address the trace by request_uuid without storing a second id
-            id=str(request_uuid),
-            # verb-first per Langfuse naming guidance; stable — dashboards,
-            # filters, and evaluators key on this name
-            name="answer-data-question",
-            session_id=str(session.id),
-            user_id=str(orguser.id),
-            tags=[context.org_slug, context.dialect],
-            input=_clip(question),
-            metadata={"request_uuid": str(request_uuid)},
-        )
+        if is_resume and trace_id:
+            # attach to the original question's trace; set no fields that
+            # would overwrite the original name/input/tags
+            trace = client.trace(id=trace_id)
+        else:
+            trace = client.trace(
+                # deterministic id: the feedback endpoint and the eval runner
+                # address the trace by request_uuid without storing a second id
+                id=trace_id or str(request_uuid),
+                # verb-first per Langfuse naming guidance; stable — dashboards,
+                # filters, and evaluators key on this name
+                name="answer-data-question",
+                session_id=f"{context.org_slug}/s{session.id}",
+                user_id=f"{context.org_slug}/{orguser.id}",
+                tags=[
+                    context.org_slug,
+                    context.dialect,
+                    f"env:{os.getenv('LANGFUSE_ENVIRONMENT', 'dev')}",
+                    f"model:{model_name}",
+                ],
+                input=_clip(question),
+                metadata={
+                    "request_uuid": str(request_uuid),
+                    "org_id": context.org_id,
+                    "session_title": session.title,
+                },
+            )
         return LangfuseTurnHandler(trace, model_name=model_name)
     except Exception:  # pylint: disable=broad-except
         logger.exception("langfuse trace start failed")
