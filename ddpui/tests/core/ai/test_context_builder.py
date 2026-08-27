@@ -10,9 +10,11 @@ django.setup()
 
 from django.contrib.auth.models import User
 
+from django.core.exceptions import ValidationError
+
 from ddpui.core.ai.agent import context_builder as context_module
 from ddpui.core.ai.agent.context_builder import build_run_context, derive_allowed_schemas
-from ddpui.models.chat_with_data import ChatWithDataSession
+from ddpui.models.chat_with_data import ChatWithDataOrgConfig, ChatWithDataSession
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
@@ -79,3 +81,41 @@ def test_context_carries_all_non_system_schemas(org_setup):
     ctx = build_run_context(orguser)
     assert ctx.allowed_schemas == ["prod", "raw_kobo"]
     assert ctx.org_slug == "ctx-test"
+
+
+@pytest.mark.django_db
+def test_context_uses_defaults_when_org_has_no_config_row(org_setup):
+    ctx = build_run_context(org_setup)
+    assert ctx.max_result_rows == 100
+    assert ctx.query_timeout_s == 30
+    assert ctx.pii_rules == []
+
+
+@pytest.mark.django_db
+def test_org_config_row_overrides_schemas_limits_and_pii_rules(org_setup):
+    orguser = org_setup
+    rule = {"pii_type": "case_id", "detector": r"CASE-\d{6}", "strategy": "redact"}
+    ChatWithDataOrgConfig.objects.create(
+        org=orguser.org,
+        allowed_schemas=["prod"],
+        max_result_rows=50,
+        query_timeout_s=10,
+        pii_rules=[rule],
+    )
+
+    ctx = build_run_context(orguser)
+
+    assert ctx.allowed_schemas == ["prod"]  # admin's list wins over derivation
+    assert ctx.max_result_rows == 50
+    assert ctx.query_timeout_s == 10
+    assert ctx.pii_rules == [rule]
+
+
+@pytest.mark.django_db
+def test_org_config_rejects_invalid_pii_rules_at_save_time(org_setup):
+    config = ChatWithDataOrgConfig(
+        org=org_setup.org,
+        pii_rules=[{"pii_type": "email", "detector": "x"}],  # collides with a default
+    )
+    with pytest.raises(ValidationError, match="built-in"):
+        config.full_clean()

@@ -27,6 +27,9 @@ class RunContext:
     # Resolved from RolePermission at context-build time; tools never query RBAC
     can_create_charts: bool = False
     can_create_dashboards: bool = False
+    # Org-specific PII detector rules (ChatWithDataOrgConfig.pii_rules) — the
+    # transport passes these into build_agent's PII middleware
+    pii_rules: list[dict] = field(default_factory=list)
     # Set per turn by the runner (router output) — reflection gate + tool context
     question: str = ""
     complexity: str = "simple"

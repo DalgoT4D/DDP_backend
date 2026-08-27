@@ -200,7 +200,11 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             return
 
         checkpointer = await get_checkpointer()
-        agent = build_agent(checkpointer=checkpointer, model=get_chat_model(model_id))
+        agent = build_agent(
+            checkpointer=checkpointer,
+            model=get_chat_model(model_id),
+            pii_rules=context.pii_rules,
+        )
 
         final_answer = ""
         async for event in run_turn(

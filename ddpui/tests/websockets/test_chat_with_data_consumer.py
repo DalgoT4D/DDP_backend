@@ -201,9 +201,9 @@ def scripted_turn(monkeypatch, orguser, enabled_org):
         ]
     )
 
-    def fake_build_agent(checkpointer=None, model=None, human_in_the_loop=True):
+    def fake_build_agent(checkpointer=None, model=None, human_in_the_loop=True, **kwargs):
         return real_build_agent(
-            checkpointer=saver, model=scripted, human_in_the_loop=human_in_the_loop
+            checkpointer=saver, model=scripted, human_in_the_loop=human_in_the_loop, **kwargs
         )
 
     async def fake_get_checkpointer():

@@ -28,8 +28,9 @@ from ddpui.core.ai.tools.registry import get_tools
 
 # Upper bound on GRAPH STEPS per turn — backstop against runaway loops.
 # Every middleware hook is its own graph node, so one model⇄tool cycle costs
-# ~10 steps with the current stack (5 before_model hooks + model + 3 after_model
-# + tools). 120 ≈ headroom for ~11 tool calls; a legitimate heavy turn uses ~9
+# ~12 steps with the current stack (7 before_model hooks incl. 5 PII rules +
+# model + 3 after_model + tools) — plus one more per org-defined PII rule.
+# 120 ≈ headroom for ~10 tool calls; a legitimate heavy turn uses ~9
 # (schemas → tables → details ×2 → profile ×2 → sql ×2 → chart). The real
 # runaway guard is sql_retry_limiter (3 failed queries), not this ceiling.
 # If you add middleware, re-check test_realistic_discovery_turn_fits_in_the_recursion_limit.
@@ -166,15 +167,19 @@ def build_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     model: BaseChatModel | None = None,
     human_in_the_loop: bool = True,
+    pii_rules: list[dict] | None = None,
 ):
     """Compile the agent graph. `model` is overridable for tests and the REPL.
 
     `human_in_the_loop=False` disables the approval/clarification interrupts for
     contexts with no human to answer them (evals, REPL) — there ask_user falls
-    back to its tool body and gated tools run without approval."""
+    back to its tool body and gated tools run without approval.
+
+    `pii_rules` are the org's extra PII detectors (RunContext.pii_rules),
+    layered on top of the immovable defaults — see agent/pii.py."""
     middleware = [
         sql_retry_limiter,  # must precede other before_model hooks: it can jump to end
-        *build_pii_middleware(),  # mask PII before anything downstream sees it
+        *build_pii_middleware(pii_rules),  # mask PII before anything downstream sees it
         org_system_prompt,
         trim_history,
         clear_old_tool_results(),

@@ -8,6 +8,7 @@ tools never touch the database or trust an LLM-supplied org identifier.
 
 from ddpui.auth import granted_permission_slugs
 from ddpui.core.ai.agent.run_context import RunContext
+from ddpui.models.chat_with_data import ChatWithDataOrgConfig
 from ddpui.models.org import OrgDbt, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
@@ -54,9 +55,15 @@ def build_run_context(orguser: OrgUser) -> RunContext:
     warehouse = WarehouseFactory.get_warehouse_client(org_warehouse)
     dialect = org_warehouse.wtype
 
-    org_dbt: OrgDbt | None = org.dbt
-    dbt_schema = org_dbt.default_schema if org_dbt else None
-    allowed_schemas = derive_allowed_schemas(warehouse, dialect, dbt_schema)
+    # per-org knobs; every org works with no config row (all defaults)
+    config = ChatWithDataOrgConfig.objects.filter(org=org).first()
+
+    if config and config.allowed_schemas:
+        allowed_schemas = config.allowed_schemas
+    else:
+        org_dbt: OrgDbt | None = org.dbt
+        dbt_schema = org_dbt.default_schema if org_dbt else None
+        allowed_schemas = derive_allowed_schemas(warehouse, dialect, dbt_schema)
 
     granted = granted_permission_slugs(orguser, ["can_create_charts", "can_create_dashboards"])
 
@@ -65,10 +72,11 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         org_slug=org.slug,
         dialect=dialect,
         allowed_schemas=allowed_schemas,
-        max_result_rows=DEFAULT_MAX_RESULT_ROWS,
-        query_timeout_s=DEFAULT_QUERY_TIMEOUT_S,
+        max_result_rows=config.max_result_rows if config else DEFAULT_MAX_RESULT_ROWS,
+        query_timeout_s=config.query_timeout_s if config else DEFAULT_QUERY_TIMEOUT_S,
         warehouse=warehouse,
         orguser_id=orguser.id,
         can_create_charts="can_create_charts" in granted,
         can_create_dashboards="can_create_dashboards" in granted,
+        pii_rules=(config.pii_rules if config else []) or [],
     )

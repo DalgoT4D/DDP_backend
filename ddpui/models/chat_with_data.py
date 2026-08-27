@@ -68,6 +68,21 @@ class ChatWithDataOrgConfig(models.Model):
     allowed_schemas = models.JSONField(null=True, blank=True)
     max_result_rows = models.IntegerField(default=100)
     query_timeout_s = models.IntegerField(default=30)
+    # Org-specific PII detectors, additive over the deployment-wide defaults:
+    # [{pii_type, detector (regex string), strategy}] — see core/ai/agent/pii.py
+    pii_rules = models.JSONField(default=list, blank=True)
+
+    def clean(self):
+        super().clean()
+        # imported here: the validator lives with the agent, not the models
+        from ddpui.core.ai.agent.pii import validate_org_pii_rules
+
+        try:
+            validate_org_pii_rules(self.pii_rules)
+        except ValueError as err:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError({"pii_rules": str(err)}) from err
 
 
 class ChatWithDataTableCard(models.Model):
