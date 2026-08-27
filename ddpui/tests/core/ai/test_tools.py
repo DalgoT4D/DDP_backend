@@ -113,15 +113,16 @@ def test_list_tables_rejects_unknown_schema_with_guidance():
     assert "not available" in result and "prod" in result
 
 
-def test_get_table_details_renders_columns_and_samples():
+def test_get_table_details_renders_columns_without_row_data():
     warehouse = FakeWarehouse(rows=[{"district": "Pune", "surveyed_at": "2026-06-01"}])
     result = get_table_details.func(
         schema_name="prod", table_name="surveys", runtime=make_runtime(warehouse)
     )
     assert "district: text" in result
-    assert "Pune" in result
-    # sample query used properly quoted identifiers
-    assert any('"prod"."surveys"' in sql for sql in warehouse.executed)
+    # metadata only: no sample rows means no warehouse values reach the model here
+    assert "Pune" not in result
+    # only the catalog's pg_catalog lookup ran — no query touched the table's rows
+    assert not any("prod\".\"surveys" in sql or "SELECT *" in sql for sql in warehouse.executed)
 
 
 def test_get_table_details_rejects_unknown_table():

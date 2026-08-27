@@ -1,13 +1,14 @@
-"""Schema-discovery tools: what data exists and what shape it has."""
+"""Schema-discovery tools: what data exists and what shape it has.
+
+These tools return METADATA only (schema/table/column names and types) —
+never row data. Actual values reach the model solely through profile_column
+and execute_sql, so PII controls only have those two surfaces to cover."""
 
 from langchain.tools import ToolRuntime, tool
 
 from ddpui.core.ai.agent.run_context import RunContext
-from ddpui.core.ai.tools import catalog, rendering
+from ddpui.core.ai.tools import catalog
 from ddpui.core.ai.tools.registry import register_tool
-
-# Sample rows shown per table in get_table_details — enough to convey shape, not data
-SAMPLE_ROW_COUNT = 3
 
 
 @register_tool
@@ -42,8 +43,9 @@ def list_tables(schema_name: str, runtime: ToolRuntime[RunContext]) -> str:
 @register_tool
 @tool
 def get_table_details(schema_name: str, table_name: str, runtime: ToolRuntime[RunContext]) -> str:
-    """Get a table's columns with types, plus a few sample rows. Use this before
-    writing SQL against the table — column names must match exactly."""
+    """Get a table's columns with types. Use this before writing SQL against
+    the table — column names must match exactly. To learn what values a text
+    column holds before filtering on it, use profile_column."""
     ctx = runtime.context
     try:
         catalog.check_table(ctx, schema_name, table_name)
@@ -53,15 +55,4 @@ def get_table_details(schema_name: str, table_name: str, runtime: ToolRuntime[Ru
     columns = ctx.warehouse.get_table_columns(schema_name, table_name)
     col_lines = [f"{col['name']}: {col['data_type']}" for col in columns]
 
-    qualified = catalog.qualified(ctx.dialect, schema_name, table_name)
-    try:
-        sample_rows = ctx.warehouse.execute(f"SELECT * FROM {qualified} LIMIT {SAMPLE_ROW_COUNT}")
-        sample = rendering.render_rows(sample_rows, SAMPLE_ROW_COUNT)
-    except Exception:  # pylint: disable=broad-except
-        sample = "(samples unavailable)"
-
-    return (
-        f"Table {schema_name}.{table_name}\n\nColumns:\n"
-        + "\n".join(col_lines)
-        + f"\n\nSample rows:\n{sample}"
-    )
+    return f"Table {schema_name}.{table_name}\n\nColumns:\n" + "\n".join(col_lines)
