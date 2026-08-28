@@ -1,0 +1,15 @@
+{"question": "How many individual beneficiaries have enrolled in at least one program?", "expected_intent": "data_question", "gold_sql": "SELECT COUNT(DISTINCT beneficiary_id) AS n FROM test_ngo.enrollments", "tags": ["counting", "grain-trap", "canary"]}
+{"question": "How many beneficiaries in the West region are in the Education Support program?", "expected_intent": "data_question", "gold_sql": "SELECT COUNT(*) AS n FROM test_ngo.beneficiaries WHERE region = 'West' AND program = 'Education Support'", "tags": ["filtered-count"]}
+{"question": "How many enrollments are currently active?", "expected_intent": "data_question", "gold_sql": "SELECT COUNT(*) AS n FROM test_ngo.enrollments WHERE status = 'Active'", "tags": ["false-zero-bait", "canary"]}
+{"question": "What is the total donation amount we have received?", "expected_intent": "data_question", "gold_sql": "SELECT SUM(amount) AS total FROM test_ngo.donations", "tags": ["sum", "canary"]}
+{"question": "Which are our top 3 programs by number of beneficiaries?", "expected_intent": "data_question", "gold_sql": "SELECT program, COUNT(*) AS n FROM test_ngo.beneficiaries GROUP BY 1 ORDER BY 2 DESC LIMIT 3", "tags": ["top-n"]}
+{"question": "How many beneficiaries do we have in each region?", "expected_intent": "data_question", "gold_sql": "SELECT region, COUNT(*) AS n FROM test_ngo.beneficiaries GROUP BY 1", "tags": ["breakdown"]}
+{"question": "How old is our oldest beneficiary?", "expected_intent": "data_question", "gold_sql": "SELECT MAX(age) AS oldest FROM test_ngo.beneficiaries", "tags": ["single-value"]}
+{"question": "How do donations compare across fiscal years?", "expected_intent": "data_question", "gold_sql": "SELECT fiscal_year, SUM(amount) AS total FROM test_ngo.donations GROUP BY 1", "tags": ["trend"]}
+{"question": "Create a bar chart of beneficiaries by region", "expected_intent": "platform_help", "tags": ["chart"]}
+{"question": "hello!", "expected_intent": "small_talk", "tags": ["small-talk", "canary"]}
+{"question": "thank you, that was helpful", "expected_intent": "small_talk", "tags": ["small-talk"]}
+{"question": "compare them", "expected_intent": "needs_clarification", "tags": ["ambiguous", "canary"]}
+{"question": "How do I create a KPI?", "expected_intent": "platform_help", "tags": ["how-to", "canary"]}
+{"question": "Create a metric for total donations", "expected_intent": "platform_help", "tags": ["create-metric"]}
+{"question": "How do I share a report with my team?", "expected_intent": "platform_help", "tags": ["how-to"]}

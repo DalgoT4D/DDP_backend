@@ -678,5 +678,13 @@
             "name": "Can Delete Alerts",
             "slug": "can_delete_alerts"
         }
+    },
+    {
+        "model": "ddpui.Permission",
+        "pk": 86,
+        "fields": {
+            "name": "Can Use Chat With Data",
+            "slug": "can_use_chat_with_data"
+        }
     }
 ]

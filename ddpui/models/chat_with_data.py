@@ -1,0 +1,106 @@
+"""Models for Chat with Data sessions, audit, and per-org configuration.
+
+Message content is NOT stored here — the LangGraph Postgres checkpointer is the
+single source of truth for conversation content, keyed by thread_id.
+"""
+
+import uuid
+
+from django.db import models
+from django.utils import timezone
+
+from ddpui.models.org import Org
+from ddpui.models.org_user import OrgUser
+
+
+class ChatWithDataSession(models.Model):
+    """One chat conversation, owned by one user in one org."""
+
+    id = models.BigAutoField(primary_key=True)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="chat_sessions")
+    orguser = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="chat_sessions")
+    title = models.CharField(max_length=255, default="New chat")
+    thread_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    def soft_delete(self):
+        self.deleted_at = timezone.now()
+        self.save(update_fields=["deleted_at"])
+
+
+class ChatWithDataTurnAudit(models.Model):
+    """One row per user question: what was asked, what SQL ran, what it cost."""
+
+    id = models.BigAutoField(primary_key=True)
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="chat_turn_audits")
+    orguser = models.ForeignKey(OrgUser, null=True, on_delete=models.SET_NULL)
+    session = models.ForeignKey(
+        ChatWithDataSession, on_delete=models.CASCADE, related_name="turn_audits"
+    )
+    request_uuid = models.UUIDField(default=uuid.uuid4, editable=False)
+    user_message = models.TextField()
+    # [{sql, status, row_count, duration_ms, error}] — one entry per execute_sql call
+    sql_queries = models.JSONField(default=list)
+    tools_called = models.JSONField(default=list)
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    latency_ms = models.IntegerField(null=True)
+    status = models.CharField(
+        max_length=20, default="completed"
+    )  # completed|failed|aborted|paused (paused = waiting on human input)
+    # router output: {intent, complexity, entities, clarification}
+    intent = models.JSONField(null=True, blank=True)
+    # post-execution validator output: {verdict, assumptions, caveat}
+    validation = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ChatWithDataOrgConfig(models.Model):
+    """Per-org knobs, admin-managed (Django admin only in v1).
+
+    allowed_schemas=NULL means "derive": the org's dbt output schema, falling
+    back to all raw (non-system) schemas.
+    """
+
+    org = models.OneToOneField(Org, on_delete=models.CASCADE, related_name="chat_with_data_config")
+    allowed_schemas = models.JSONField(null=True, blank=True)
+    max_result_rows = models.IntegerField(default=100)
+    query_timeout_s = models.IntegerField(default=30)
+    # Org-specific PII detectors, additive over the deployment-wide defaults:
+    # [{pii_type, detector (regex string), strategy}] — see core/ai/agent/pii.py
+    pii_rules = models.JSONField(default=list, blank=True)
+
+    def clean(self):
+        super().clean()
+        # imported here: the validator lives with the agent, not the models
+        from ddpui.core.ai.agent.pii import validate_org_pii_rules
+
+        try:
+            validate_org_pii_rules(self.pii_rules)
+        except ValueError as err:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError({"pii_rules": str(err)}) from err
+
+
+class ChatWithDataTableCard(models.Model):
+    """LLM-enriched metadata for ONE warehouse table (v2 plan §4).
+
+    Built offline by the enrichment job; injected into the agent's system
+    prompt for the tables most relevant to a question (BM25). The fingerprint
+    hashes the live column structure so schema drift invalidates stale cards
+    instead of silently poisoning answers.
+    """
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="chat_table_cards")
+    schema_name = models.CharField(max_length=255)
+    table_name = models.CharField(max_length=255)
+    # {description, grain, time_column, dimensions, metrics, value_notes}
+    card = models.JSONField(default=dict)
+    source_fingerprint = models.CharField(max_length=64)
+    built_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("org", "schema_name", "table_name")
