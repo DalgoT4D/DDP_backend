@@ -320,6 +320,17 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
         org.slug = slugify(org.name)
         org.save()
 
+    # Check if the project directory already exists (prior setup completed)
+    project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
+    dbtrepo_dir: Path = project_dir / project_name
+    if dbtrepo_dir.exists():
+        logger.info(
+            "Project directory %s already exists for org %s, skipping setup",
+            project_name,
+            org.name,
+        )
+        return
+
     # Get environment for repository naming
     environment = os.getenv("ENVIRONMENT", "development")
 
@@ -335,10 +346,6 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
         # 2. Get org admin PAT and set up storage (both AWS + Prefect)
         repo_pat = GitManager.get_org_admin_pat()
         pat_secret_key = update_github_pat_storage(org, repo_url, repo_pat)
-
-        # 4. Set up local paths (same as original function)
-        project_dir: Path = Path(DbtProjectManager.get_org_dir(org))
-        dbtrepo_dir: Path = project_dir / project_name
 
         # 5. Create or update OrgDbt record
         orgdbt = org.dbt
@@ -369,10 +376,6 @@ def setup_managed_git_workspace(org: Org, project_name: str, default_schema: str
             orgdbt.gitrepo_access_token_secret = pat_secret_key
             orgdbt.is_repo_managed_by_system = True
             orgdbt.save()
-
-        # 6. Check if project already exists
-        if dbtrepo_dir.exists():
-            raise Exception(f"Project {project_name} already exists")
 
         if not project_dir.exists():
             project_dir.mkdir(parents=True, exist_ok=True)

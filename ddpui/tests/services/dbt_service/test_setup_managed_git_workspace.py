@@ -20,13 +20,16 @@ def test_setup_managed_git_workspace_warehouse_not_created():
 
 
 @pytest.mark.django_db
-def test_setup_managed_git_workspace_environment_vars_missing():
+def test_setup_managed_git_workspace_environment_vars_missing(tmp_path):
     """a failure test; creating managed git workspace without required environment variables"""
     org = Org.objects.create(name="temp", slug="temp")
     OrgWarehouse.objects.create(org=org, wtype="postgres")
 
     # Test with missing DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT
-    with patch("os.getenv", return_value=None):
+    with patch("os.getenv", return_value=None), patch(
+        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir",
+        return_value=str(tmp_path),
+    ):
         with pytest.raises(
             Exception,
             match="Failed to set up managed Git workspace.*DALGO_GITHUB_ORG and DALGO_ORG_ADMIN_PAT must be set",
@@ -100,43 +103,30 @@ def test_setup_managed_git_workspace_success(tmp_path):
 
 @pytest.mark.django_db
 def test_setup_managed_git_workspace_project_already_exists(tmp_path):
-    """Test that setup fails when project directory already exists"""
+    """Test that setup returns early when project directory already exists"""
     project_name = "dbtrepo"
     default_schema = "default"
 
     org = Org.objects.create(name="test-org", slug="test-org")
     warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres")
 
+    # Create the dbtrepo directory so the idempotency guard triggers
+    dbtrepo_dir = tmp_path / project_name
+    dbtrepo_dir.mkdir()
+
     with patch(
-        "ddpui.ddpdbt.dbt_service.GitManager.create_managed_repository"
-    ) as mock_create_repo, patch(
-        "ddpui.ddpdbt.dbt_service.GitManager.get_org_admin_pat"
-    ) as mock_get_pat, patch(
-        "ddpui.ddpdbt.dbt_service.update_github_pat_storage"
-    ) as mock_update_pat, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_org_dir"
     ) as mock_get_org_dir, patch(
-        "ddpui.ddpdbt.dbt_service.DbtProjectManager.get_dbt_repo_relative_path"
-    ) as mock_get_relative_path, patch(
-        "ddpui.ddpdbt.dbt_service.Path"
-    ) as mock_path:
-        # Mock successful repository creation with simple dict
-        mock_create_repo.return_value = {
-            "clone_url": "https://github.com/dalgo/test-org.git",
-            "full_name": "dalgo/test-org",
-        }
-        mock_get_pat.return_value = "test-pat-token"
-        mock_update_pat.return_value = "test-secret-key"
+        "ddpui.ddpdbt.dbt_service.GitManager.create_managed_repository"
+    ) as mock_create_repo:
         mock_get_org_dir.return_value = str(tmp_path)
-        mock_get_relative_path.return_value = f"test-org/{project_name}"
 
-        # Mock that project directory already exists
-        mock_path.return_value.exists.return_value = True
+        # Should return early without raising or calling create_managed_repository
+        setup_managed_git_workspace(
+            org, project_name=project_name, default_schema=default_schema
+        )
 
-        with pytest.raises(Exception, match=f"Project {project_name} already exists"):
-            setup_managed_git_workspace(
-                org, project_name=project_name, default_schema=default_schema
-            )
+        mock_create_repo.assert_not_called()
 
 
 @pytest.mark.django_db
