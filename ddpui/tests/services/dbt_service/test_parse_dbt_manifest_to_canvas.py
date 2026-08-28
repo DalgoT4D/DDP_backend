@@ -230,6 +230,8 @@ def test_parse_dbt_manifest_to_canvas_update_existing(org_with_dbt_workspace: Or
         node_type=CanvasNodeType.SOURCE,
         output_cols=["old_col1", "old_col2"],
         dbtmodel=existing_orgdbt_model,
+        position_x=-75.5,
+        position_y=125.25,
     )
 
     mock_warehouse = Mock()
@@ -260,6 +262,7 @@ def test_parse_dbt_manifest_to_canvas_update_existing(org_with_dbt_workspace: Or
         assert updated_node.id == existing_node.id  # Same node
         assert "id" in updated_node.output_cols  # New columns added
         assert "name" in updated_node.output_cols
+        assert (updated_node.position_x, updated_node.position_y) == (-75.5, 125.25)
 
 
 @pytest.mark.django_db
