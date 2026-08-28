@@ -23,7 +23,7 @@ logger = CustomLogger("ddpui")
 DEFAULT_ROUTER_MODEL = "claude-haiku-4-5"
 ROUTER_MAX_TOKENS = 300
 
-INTENTS = {"data_question", "small_talk", "needs_clarification"}
+INTENTS = {"data_question", "platform_help", "small_talk", "needs_clarification"}
 COMPLEXITIES = {"simple", "complex"}
 
 _PROMPT = """Classify one message sent to a data-analysis chat for an NGO.
@@ -31,23 +31,29 @@ _PROMPT = """Classify one message sent to a data-analysis chat for an NGO.
 Message: {question}
 
 Return ONLY JSON:
-{{"intent": "data_question" | "small_talk" | "needs_clarification",
+{{"intent": "data_question" | "platform_help" | "small_talk" | "needs_clarification",
  "complexity": "simple" | "complex",
  "entities": [strings — metrics, filter values, time ranges mentioned],
  "clarification": string or null}}
 
 Rules:
-- data_question: anything that could be answered from data, even vaguely.
-  When unsure, choose data_question.
-- small_talk: greetings, thanks, chit-chat with no data request at all.
+- data_question: asks for numbers, facts, or analysis FROM the org's data
+  ("how many surveys in MH?", "top districts by enrollment"). When unsure
+  between data_question and platform_help, choose data_question.
+- platform_help: asks to CREATE or set up a platform object — chart,
+  dashboard, KPI, metric, report — or asks HOW to use a Dalgo feature.
+  Examples: "make me a chart of surveys by state", "create a KPI for
+  survey completion", "how do I share a report?", "what is a metric?".
+- small_talk: greetings, thanks, chit-chat with no request at all.
 - needs_clarification: ONLY when the question is so ambiguous no reasonable
   query exists (e.g. "compare them" with no referent). Set "clarification"
   to one short, friendly question to ask back.
 - IMPORTANT: if the message refers to the recent conversation ("this",
-  "that", "the above", "chart it", a short answer to the assistant's last
-  question), it is a data_question — the analyst agent holds the full
-  history and will resolve the reference. Never ask to re-state context
-  that already appears in the conversation.
+  "that", "the above", a short answer to the assistant's last question),
+  keep it with the SAME intent as that conversation: a follow-up in a
+  creation/how-to exchange is platform_help; a follow-up in a data
+  exchange is data_question. Never ask to re-state context that already
+  appears in the conversation.
 - complexity "complex": needs multiple tables, comparisons across groups or
   time periods, or "top N by X" ranking. Otherwise "simple"."""
 

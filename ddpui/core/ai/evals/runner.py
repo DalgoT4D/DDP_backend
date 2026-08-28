@@ -141,9 +141,12 @@ async def run_item(item: dict, *, context, model=None, judge=True) -> ItemResult
     """One golden item through a fresh TurnGraph (in-memory checkpointer)."""
     result = ItemResult(question=item["question"])
     saver = InMemorySaver()
+    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
+
     graph = build_turn_graph(
         # no human answers evals — ask_user falls back, gated tools auto-run
         build_agent(checkpointer=saver, model=model, human_in_the_loop=False),
+        build_guide_agent(checkpointer=saver, model=model, human_in_the_loop=False),
         route_fn=route_question,
         casual_reply_fn=casual_reply,
         validate_fn=None,  # the runner scores; the product validator stays out

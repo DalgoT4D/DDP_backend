@@ -35,6 +35,7 @@ from ddpui.core.ai.agent.chat_data_agent import (
     resolve_selected_model,
 )
 from ddpui.core.ai.agent.hitl import build_resume_payload
+from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
 from ddpui.core.ai.agent.checkpointer import get_checkpointer
 from ddpui.core.ai.agent.context_builder import ChatWithDataNotReady, build_run_context
 from ddpui.core.ai.chat.turn_runner import run_turn
@@ -205,6 +206,11 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             model=get_chat_model(model_id),
             pii_rules=context.pii_rules,
         )
+        guide_agent = build_guide_agent(
+            checkpointer=checkpointer,
+            model=get_chat_model(model_id),
+            pii_rules=context.pii_rules,
+        )
 
         final_answer = ""
         async for event in run_turn(
@@ -216,6 +222,7 @@ class ChatWithDataConsumer(AsyncWebsocketConsumer):
             model_name=model_id,
             resume_payload=resume_payload,
             resume_trace_id=resume_trace_id,
+            guide_agent=guide_agent,
         ):
             if event["type"] == "message_complete":
                 final_answer = event.get("message", "")

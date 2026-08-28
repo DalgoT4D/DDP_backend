@@ -66,6 +66,14 @@ TOOL_LABELS = {
     "create_dashboard": "Creating dashboard…",
     "add_charts_to_dashboard": "Adding to dashboard…",
     "ask_user": "Asking you a question…",
+    "get_dalgo_help": "Reading the Dalgo guide…",
+    "list_metrics": "Checking your metrics…",
+    "list_kpis": "Checking your KPIs…",
+    "list_charts": "Checking your charts…",
+    "list_reports": "Checking your reports…",
+    "create_metric": "Creating metric…",
+    "create_kpi": "Creating KPI…",
+    "create_report": "Creating report…",
 }
 GENERIC_TOOL_LABEL = "Working…"
 
@@ -87,6 +95,7 @@ async def run_turn(
     model_name: str | None = None,
     resume_payload: dict | None = None,
     resume_trace_id: str | None = None,
+    guide_agent=None,
 ) -> AsyncIterator[dict]:
     """Stream one turn of the TurnGraph. Always ends with message_complete,
     input_required (the turn paused for the user), or error, and always writes
@@ -111,6 +120,7 @@ async def run_turn(
 
     graph = build_turn_graph(
         agent,
+        guide_agent,
         route_fn=route_question,
         casual_reply_fn=casual_reply,
         validate_fn=audit_turn,
@@ -267,9 +277,10 @@ async def run_turn(
                     if reply_messages:
                         final_message = extract_text(reply_messages[-1].content)
                     yield _message_complete()
-                elif node == "sql_agent":
-                    # the subgraph finished — the answer is complete; validation
-                    # (which never blocks the answer) streams as its own event
+                elif node in ("sql_agent", "guide_agent"):
+                    # an agent subgraph finished — the answer is complete; the
+                    # SQL agent's validation (which never blocks the answer)
+                    # streams as its own event; the guide path has none
                     yield _message_complete()
                 elif node == "validate_node":
                     validation = (update or {}).get("validation")

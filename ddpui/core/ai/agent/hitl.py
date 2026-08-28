@@ -56,10 +56,15 @@ class _SyncHumanInTheLoopMiddleware(HumanInTheLoopMiddleware):
                 var_child_runnable_config.reset(token)
 
 
-def build_hitl_middleware() -> HumanInTheLoopMiddleware:
-    """One middleware gating the approval tools and the ask_user tool."""
+def build_hitl_middleware(
+    approval_tools: tuple[str, ...] = APPROVAL_TOOLS,
+) -> HumanInTheLoopMiddleware:
+    """One middleware gating the approval tools and the ask_user tool.
+
+    Each agent passes its own `approval_tools` set (the SQL agent gates
+    execute_sql; the platform guide agent gates its creation tools)."""
     interrupt_on: dict = {
-        name: {"allowed_decisions": ["approve", "reject"]} for name in APPROVAL_TOOLS
+        name: {"allowed_decisions": ["approve", "reject"]} for name in approval_tools
     }
     interrupt_on[QUESTION_TOOL] = {"allowed_decisions": ["respond"]}
     return _SyncHumanInTheLoopMiddleware(

@@ -94,3 +94,9 @@ def test_history_reaches_the_router_prompt():
     prompt = model.prompts[0]
     assert "list of top donors" in prompt
     assert "Recent conversation" in prompt
+
+
+def test_routes_platform_help():
+    model = FakeModel(json.dumps({"intent": "platform_help", "complexity": "simple"}))
+    route = run(route_question("how do I create a KPI?", model))
+    assert route.intent == "platform_help"

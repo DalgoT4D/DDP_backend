@@ -65,7 +65,16 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         dbt_schema = org_dbt.default_schema if org_dbt else None
         allowed_schemas = derive_allowed_schemas(warehouse, dialect, dbt_schema)
 
-    granted = granted_permission_slugs(orguser, ["can_create_charts", "can_create_dashboards"])
+    granted = granted_permission_slugs(
+        orguser,
+        [
+            "can_create_charts",
+            "can_create_dashboards",
+            "can_edit_dashboards",
+            "can_create_metrics",
+            "can_create_kpis",
+        ],
+    )
 
     return RunContext(
         org_id=org.id,
@@ -78,5 +87,8 @@ def build_run_context(orguser: OrgUser) -> RunContext:
         orguser_id=orguser.id,
         can_create_charts="can_create_charts" in granted,
         can_create_dashboards="can_create_dashboards" in granted,
+        can_edit_dashboards="can_edit_dashboards" in granted,
+        can_create_metrics="can_create_metrics" in granted,
+        can_create_kpis="can_create_kpis" in granted,
         pii_rules=(config.pii_rules if config else []) or [],
     )

@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from ddpui.core.ai.messages.content import extract_text
 
 # Artifacts that represent a created Dalgo object (vs an execute_sql result)
-CREATION_ARTIFACT_TYPES = ("chart", "dashboard")
+CREATION_ARTIFACT_TYPES = ("chart", "dashboard", "metric", "kpi", "report")
 
 
 def tool_artifact(message: ToolMessage) -> dict | None:
@@ -58,10 +58,13 @@ def sql_result_table(artifact: dict) -> dict | None:
 def creation_chip(artifact: dict) -> dict | None:
     """The created-artifact chip the UI renders, or None for a rejected creation.
 
-    Dashboards reuse the chart chip shape — "chart_id" is the wire-protocol key
-    the frontend already renders (it picks the icon from url_path), so the key
-    name stays even though the id may be a dashboard's."""
-    artifact_id = artifact.get("chart_id") or artifact.get("dashboard_id")
+    Dashboards (and metric/kpi/report artifacts) reuse the chart chip shape —
+    "chart_id" is the wire-protocol key the frontend already renders (it picks
+    the icon from url_path), so the key name stays even though the id may
+    belong to another object type."""
+    artifact_id = (
+        artifact.get("chart_id") or artifact.get("dashboard_id") or artifact.get("object_id")
+    )
     if not artifact_id:
         return None
     return {

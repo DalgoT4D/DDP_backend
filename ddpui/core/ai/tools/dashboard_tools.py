@@ -33,6 +33,14 @@ class DashboardNotFound(Exception):
     """Dashboard missing or not in this org."""
 
 
+class DashboardLocked(Exception):
+    """Dashboard is being edited by someone else (active DashboardLock)."""
+
+    def __init__(self, locked_by_email: str):
+        super().__init__(locked_by_email)
+        self.locked_by_email = locked_by_email
+
+
 def place_charts(existing_layout: list[dict], chart_ids: list[int]) -> tuple[list[dict], dict]:
     """Grid positions + component configs for chart_ids, appended BELOW any
     existing items so nothing overlaps."""
@@ -96,10 +104,17 @@ def _create_dashboard(ctx: RunContext, title: str, description: str | None, char
 
 def _add_charts(ctx: RunContext, dashboard_id: int, chart_ids: list[int]):
     from ddpui.models.dashboard import Dashboard
+    from ddpui.models.org_user import OrgUser
 
     dashboard = Dashboard.objects.filter(org_id=ctx.org_id, id=dashboard_id).first()
     if dashboard is None:
         raise DashboardNotFound()
+    # same lock rule as DashboardService.update_dashboard: an unexpired lock
+    # held by ANOTHER user blocks the edit
+    orguser = OrgUser.objects.get(id=ctx.orguser_id)
+    lock = getattr(dashboard, "lock", None)
+    if lock and not lock.is_expired() and lock.locked_by != orguser:
+        raise DashboardLocked(lock.locked_by.user.email)
     tabs = dashboard.tabs or []
     if not tabs:
         tabs = [{"id": "tab-1", "title": "Untitled Tab 1", "layout_config": [], "components": {}}]
@@ -110,7 +125,8 @@ def _add_charts(ctx: RunContext, dashboard_id: int, chart_ids: list[int]):
     tab["layout_config"] = tab.get("layout_config", []) + layout
     tab["components"] = {**tab.get("components", {}), **components}
     dashboard.tabs = [tab] + tabs[1:]
-    dashboard.save(update_fields=["tabs"])
+    dashboard.last_modified_by = orguser
+    dashboard.save(update_fields=["tabs", "last_modified_by", "updated_at"])
     return dashboard
 
 
@@ -188,7 +204,7 @@ def add_charts_to_dashboard(
     """Add charts to an EXISTING dashboard (first tab). Get the dashboard_id
     from list_dashboards and confirm the choice with the user first."""
     ctx = runtime.context
-    if not ctx.can_create_dashboards:
+    if not ctx.can_edit_dashboards:
         return _rejected("you do not have permission to edit dashboards in this organization")
     if not chart_ids:
         return _rejected("provide at least one chart_id to add")
@@ -202,6 +218,10 @@ def add_charts_to_dashboard(
         dashboard = _add_charts(ctx, dashboard_id, chart_ids)
     except DashboardNotFound:
         return _rejected(f"dashboard {dashboard_id} not found — use list_dashboards for valid ids")
+    except DashboardLocked as err:
+        return _rejected(
+            f"this dashboard is currently being edited by {err.locked_by_email} — try again later"
+        )
     except Exception as err:  # pylint: disable=broad-except
         return _rejected(f"saving failed ({str(err).splitlines()[0][:300]})")
     return _dashboard_artifact(dashboard)

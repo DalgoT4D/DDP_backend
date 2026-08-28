@@ -60,5 +60,3 @@ def test_system_prompt_allows_exactly_the_markdown_subset_the_ui_renders():
     for allowed in ["**bold**", '"- " bullets', '"1." numbered lists', '"### "', '"> "']:
         assert allowed in prompt
     assert "no code blocks, no links, no markdown tables" in prompt
-
-

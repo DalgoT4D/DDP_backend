@@ -96,8 +96,6 @@ def test_execute_sql_returns_warehouse_error_as_feedback():
     assert artifact["status"] == "error"
 
 
-
-
 def test_list_schemas_returns_allowlist():
     result = list_schemas.func(runtime=make_runtime())
     assert "prod" in result
@@ -122,7 +120,7 @@ def test_get_table_details_renders_columns_without_row_data():
     # metadata only: no sample rows means no warehouse values reach the model here
     assert "Pune" not in result
     # only the catalog's pg_catalog lookup ran — no query touched the table's rows
-    assert not any("prod\".\"surveys" in sql or "SELECT *" in sql for sql in warehouse.executed)
+    assert not any('prod"."surveys' in sql or "SELECT *" in sql for sql in warehouse.executed)
 
 
 def test_get_table_details_rejects_unknown_table():
@@ -179,7 +177,7 @@ def test_execute_sql_sets_postgres_statement_timeout_on_same_connection():
     assert "LIMIT 100" in executed[1]
 
 
-def test_registry_exposes_the_v1_tools():
+def test_registry_exposes_all_tools():
     names = {t.name for t in get_tools()}
     assert names == {
         "list_schemas",
@@ -192,4 +190,21 @@ def test_registry_exposes_the_v1_tools():
         "create_dashboard",
         "add_charts_to_dashboard",
         "ask_user",
+        "get_dalgo_help",
+        "list_metrics",
+        "list_kpis",
+        "list_charts",
+        "list_reports",
+        "create_metric",
+        "create_kpi",
+        "create_report",
     }
+
+
+def test_registry_names_filter_selects_a_subset_and_rejects_typos():
+    import pytest as _pytest
+
+    subset = get_tools(names=("execute_sql", "ask_user"))
+    assert [t.name for t in subset] == ["execute_sql", "ask_user"]
+    with _pytest.raises(KeyError, match="no_such_tool"):
+        get_tools(names=("no_such_tool",))

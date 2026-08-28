@@ -20,6 +20,7 @@ def make_dash_context(**overrides):
     ctx = make_context()
     ctx.orguser_id = 7
     ctx.can_create_dashboards = True
+    ctx.can_edit_dashboards = True
     for key, value in overrides.items():
         setattr(ctx, key, value)
     return ctx

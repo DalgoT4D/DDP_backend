@@ -20,6 +20,10 @@ _TOOL_MODULES = (
     "ddpui.core.ai.tools.chart_tools",
     "ddpui.core.ai.tools.dashboard_tools",
     "ddpui.core.ai.tools.clarify_tools",
+    "ddpui.core.ai.tools.docs_tools",
+    "ddpui.core.ai.tools.guide_tools",
+    "ddpui.core.ai.tools.metric_tools",
+    "ddpui.core.ai.tools.report_tools",
 )
 
 
@@ -29,8 +33,17 @@ def register_tool(tool_obj: BaseTool) -> BaseTool:
     return tool_obj
 
 
-def get_tools() -> list[BaseTool]:
-    """All registered tools, importing the tool modules on first call."""
+def get_tools(names: tuple[str, ...] | list[str] | None = None) -> list[BaseTool]:
+    """Registered tools, importing the tool modules on first call.
+
+    `names` selects a per-agent subset (each agent module declares its own
+    tool-name tuple); None returns everything. Unknown names raise so a typo
+    in an agent's tool list fails at build, not silently at runtime."""
     for module_name in _TOOL_MODULES:
         importlib.import_module(module_name)
-    return list(_REGISTRY.values())
+    if names is None:
+        return list(_REGISTRY.values())
+    missing = [name for name in names if name not in _REGISTRY]
+    if missing:
+        raise KeyError(f"unknown tool name(s): {missing}")
+    return [_REGISTRY[name] for name in names]

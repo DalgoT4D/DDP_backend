@@ -32,6 +32,7 @@ STAGE_SPANS = {
     "clarify_node": "ask-clarification",
     "retrieve_context_node": "retrieve-context",
     "sql_agent": "run-sql-agent",
+    "guide_agent": "run-guide-agent",
     "validate_node": "validate-answer",
 }
 
@@ -49,6 +50,7 @@ STAGE_GENERATION_NAMES = {
     "route-question": "classify-intent",
     "reply-casually": "generate-reply",
     "run-sql-agent": "generate-response",
+    "run-guide-agent": "generate-response",
     "validate-answer": "judge-answer",
 }
 FALLBACK_GENERATION_NAME = "llm-call"

@@ -52,6 +52,21 @@ MODEL_OPTIONS = [
 
 _DIALECT_LABELS = {"postgres": "PostgreSQL", "bigquery": "BigQuery"}
 
+# The SQL agent's toolbox: data Q&A only. Creation (charts, dashboards, KPIs,
+# metrics, reports) belongs to the platform guide agent — the router sends
+# those requests there (intent platform_help).
+SQL_AGENT_TOOLS = (
+    "list_schemas",
+    "list_tables",
+    "get_table_details",
+    "profile_column",
+    "execute_sql",
+    "ask_user",
+)
+
+# Only warehouse reads pause for approval on this agent
+SQL_APPROVAL_TOOLS = ("execute_sql",)
+
 
 def available_models() -> list[dict]:
     """User-selectable models whose provider credentials exist, as {id, label}."""
@@ -114,26 +129,13 @@ tried and what the user could ask instead.
 question could mean two different things in a way that changes the answer (which \
 table, which time period, which program), use ask_user to ask ONE short clarifying \
 question instead of guessing or giving up. Their reply comes back as the tool result.
-6. Running a query and creating charts or dashboards each wait for the user's \
-approval in the chat. If the user cancels one, do not retry the same action — adjust \
-your approach or ask what they would prefer.
-
-## Creating charts
-- When the user asks to chart, plot, graph, or visualize something, use \
-create_chart to save a real chart in their chart library (types: bar, line, \
-pie, number). Do not just describe what a chart would look like.
-- Bar and line charts can plot several metrics at once (e.g. target vs \
-achieved per state) — pass multiple entries in `metrics` instead of making \
-separate charts for values that belong together.
-- Verify the exact column names with get_table_details first, same as for a query.
-- After creating it, tell the user the chart's name and that it is on their \
-Charts page and can be added to a dashboard. If create_chart reports a \
-permission problem, say so plainly and answer with a small table of numbers instead.
-
-## Dashboards
-- When the user wants a chart on a dashboard, FIRST call list_dashboards, then ASK: add it to one of their existing dashboards (name them) or create a new one? Do not pick for them. Act only after they choose.
-- If they have no dashboards yet, say so and offer to create one.
-- Create the chart(s) first (create_chart returns the chart id), then use create_dashboard or add_charts_to_dashboard with those ids.
+6. Running a query waits for the user's approval in the chat. If the user \
+cancels it, do not retry the same query — adjust your approach or ask what \
+they would prefer.
+7. You do NOT create charts, dashboards, KPIs, metrics, or reports — the \
+platform guide handles those and the router sends creation requests to it. \
+If the user asks you mid-conversation, tell them to ask for it directly \
+(e.g. "create a chart of this") so the guide can take over.
 
 ## How to answer
 - Lead with the headline: the direct answer in one or two sentences, with the key \
@@ -185,10 +187,10 @@ def build_agent(
         clear_old_tool_results(),
     ]
     if human_in_the_loop:
-        middleware.append(build_hitl_middleware())
+        middleware.append(build_hitl_middleware(approval_tools=SQL_APPROVAL_TOOLS))
     return create_agent(
         model=model or get_chat_model(),
-        tools=get_tools(),
+        tools=get_tools(names=SQL_AGENT_TOOLS),
         middleware=middleware,
         context_schema=RunContext,
         checkpointer=checkpointer,

@@ -226,3 +226,57 @@ def test_graph_shape_matches_the_approach_2_diagram():
     assert ("validate_node", "__end__") in edges
     assert ("casual_reply_node", "__end__") in edges
     assert ("clarify_node", "__end__") in edges
+
+
+def test_platform_help_routes_to_guide_agent_and_skips_validation():
+    """platform_help runs the guide agent and ends the turn — the SQL agent
+    and the text-to-SQL validator must never fire."""
+    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
+
+    saver = InMemorySaver()
+    sql_agent = build_agent(checkpointer=saver, model=MustNotRun(script=[]))
+    guide_agent = build_guide_agent(
+        checkpointer=saver,
+        model=ScriptedChatModel(script=[AIMessage(content="Here's how KPIs work.")]),
+        human_in_the_loop=False,
+    )
+
+    async def help_route(question, model=None, history=None):
+        return RouteResult(intent="platform_help")
+
+    validations = []
+
+    async def must_not_validate(**kwargs):
+        validations.append(kwargs)
+        return {"verdict": "ok"}
+
+    graph = build_turn_graph(
+        sql_agent,
+        guide_agent,
+        route_fn=help_route,
+        casual_reply_fn=_canned_reply,
+        validate_fn=must_not_validate,
+        checkpointer=saver,
+    )
+    result = run_graph(graph, "how do I create a KPI?")
+
+    assert result["messages"][-1].content == "Here's how KPIs work."
+    assert validations == []  # guide path ends at END, not validate_node
+
+
+def test_platform_help_without_guide_agent_falls_through_to_sql_agent():
+    """Older callers (and focused tests) that pass no guide agent keep the v1
+    behavior: platform_help degrades to the data path instead of crashing."""
+    agent = build_agent(
+        checkpointer=InMemorySaver(),
+        model=ScriptedChatModel(script=[AIMessage(content="I can look at your data.")]),
+        human_in_the_loop=False,
+    )
+
+    async def help_route(question, model=None, history=None):
+        return RouteResult(intent="platform_help")
+
+    graph = build_turn_graph(agent, route_fn=help_route, casual_reply_fn=_canned_reply)
+    result = run_graph(graph, "how do I create a KPI?")
+
+    assert result["messages"][-1].content == "I can look at your data."

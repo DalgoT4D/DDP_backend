@@ -68,7 +68,9 @@ def session(orguser):
     return ChatWithDataSession.objects.create(org=orguser.org, orguser=orguser)
 
 
-def collect_events(agent, session, orguser, question, context, resume_payload=None):
+def collect_events(
+    agent, session, orguser, question, context, resume_payload=None, guide_agent=None
+):
     """Drive the async runner from sync tests (pytest-asyncio is inert on this
     pytest version — it needs pytest>=8)."""
 
@@ -82,6 +84,7 @@ def collect_events(agent, session, orguser, question, context, resume_payload=No
                 question=question,
                 context=context,
                 resume_payload=resume_payload,
+                guide_agent=guide_agent,
             )
         ]
 
@@ -305,8 +308,13 @@ def test_clarification_still_short_circuits_the_first_turn(orguser, session, mon
     assert "Compare what to what?" in events[0]["message"]
 
 
-def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):
-    """A create_chart tool call surfaces the chart link on message_complete."""
+def test_run_turn_attaches_created_charts_via_guide_agent(orguser, session, monkeypatch):
+    """Creation lives on the guide agent now: a platform_help route runs the
+    guide subgraph, and its create_chart call surfaces the chart chip on
+    message_complete — same wire shape as before the split."""
+    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
+    from ddpui.core.ai.chat import turn_runner as runner_module
+    from ddpui.core.ai.llm_calls.router import RouteResult
     from ddpui.core.ai.tools import chart_tools
 
     class FakeChart:
@@ -314,6 +322,11 @@ def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):
         title = "Surveys by district"
 
     monkeypatch.setattr(chart_tools, "_save_chart", lambda ctx, data: FakeChart())
+
+    async def platform_route(question, model=None, history=None):
+        return RouteResult(intent="platform_help")
+
+    monkeypatch.setattr(runner_module, "route_question", platform_route)
 
     context = make_context()
     context.orguser_id = orguser.id
@@ -340,15 +353,24 @@ def test_run_turn_attaches_created_charts(orguser, session, monkeypatch):
             AIMessage(content="Done — the chart is in your Charts page."),
         ]
     )
-    agent = build_agent(checkpointer=InMemorySaver(), model=model, human_in_the_loop=False)
+    saver = InMemorySaver()
+    # the SQL agent is required but must never run on this route
+    sql_agent = build_agent(
+        checkpointer=saver, model=ScriptedChatModel(script=[]), human_in_the_loop=False
+    )
+    guide_agent = build_guide_agent(checkpointer=saver, model=model, human_in_the_loop=False)
 
-    events = collect_events(agent, session, orguser, "chart surveys by district", context)
+    events = collect_events(
+        sql_agent, session, orguser, "chart surveys by district", context, guide_agent=guide_agent
+    )
 
     complete = events[-1]
     assert complete["type"] == "message_complete"
     assert complete["charts"] == [
         {"chart_id": 42, "title": "Surveys by district", "url_path": "/charts/42"}
     ]
+    # the guide path never emits a validation event (validator is a SQL audit)
+    assert not any(e["type"] == "validation" for e in events)
 
     audit = ChatWithDataTurnAudit.objects.get(session=session)
     assert audit.tools_called == ["create_chart"]

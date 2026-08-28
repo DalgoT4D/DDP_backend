@@ -5,11 +5,16 @@ edges, so they show up in traces, checkpoints, and get_graph() diagrams:
 
     START → route_node ──┬─ small talk        → casual_reply_node → END
                          ├─ needs clarify*    → clarify_node      → END
+                         ├─ platform help     → guide_agent       → END
                          └─ data question     → retrieve_context_node
                                                 (*first turn only)   ↓
                                                 sql_agent (subgraph node)
                                                                      ↓
                                                 validate_node → END
+
+The guide_agent path skips validate_node on purpose: the validator is a
+text-to-SQL audit (grain, filters, false zeros) and has nothing to say about
+a guidance/creation answer.
 
 The stage brains stay in llm_calls/ — nodes are thin adapters. They are
 INJECTED (route_fn, casual_reply_fn) rather than imported so the runner can
@@ -44,16 +49,19 @@ class TurnState(TypedDict):
 
 def build_turn_graph(
     agent: Any,
+    guide_agent: Any = None,
     *,
     route_fn,
     casual_reply_fn,
     validate_fn=None,
     checkpointer: BaseCheckpointSaver | None = None,
 ):
-    """Assemble and compile the TurnGraph around a compiled agent.
+    """Assemble and compile the TurnGraph around the compiled agents.
 
-    `agent` is the create_agent graph, mounted as a subgraph node — only the
-    parent is compiled with a checkpointer (the subgraph inherits it)."""
+    `agent` is the SQL agent's create_agent graph, mounted as a subgraph node —
+    only the parent is compiled with a checkpointer (subgraphs inherit it).
+    `guide_agent` is the platform guide agent; when None (older callers,
+    focused tests), platform_help routes fall through to the SQL agent."""
 
     async def route_node(state: TurnState, runtime: Runtime[RunContext]) -> dict:
         question = state["question"]
@@ -98,6 +106,8 @@ def build_turn_graph(
         # agent (which holds the full conversation) handles ambiguity itself
         if route["intent"] == "needs_clarification" and not state["has_history"]:
             return "clarify_node" if route.get("clarification") else "casual_reply_node"
+        if route["intent"] == "platform_help" and guide_agent is not None:
+            return "guide_agent"
         return "retrieve_context_node"
 
     graph = StateGraph(TurnState, context_schema=RunContext)
@@ -108,12 +118,14 @@ def build_turn_graph(
     graph.add_node("sql_agent", agent)
     graph.add_node("validate_node", validate_node)
 
+    destinations = ["casual_reply_node", "clarify_node", "retrieve_context_node"]
+    if guide_agent is not None:
+        graph.add_node("guide_agent", guide_agent)
+        graph.add_edge("guide_agent", END)
+        destinations.append("guide_agent")
+
     graph.add_edge(START, "route_node")
-    graph.add_conditional_edges(
-        "route_node",
-        route_decision,
-        ["casual_reply_node", "clarify_node", "retrieve_context_node"],
-    )
+    graph.add_conditional_edges("route_node", route_decision, destinations)
     graph.add_edge("retrieve_context_node", "sql_agent")
     graph.add_edge("casual_reply_node", END)
     graph.add_edge("clarify_node", END)
