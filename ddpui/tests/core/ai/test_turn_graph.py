@@ -280,3 +280,55 @@ def test_platform_help_without_guide_agent_falls_through_to_sql_agent():
     result = run_graph(graph, "how do I create a KPI?")
 
     assert result["messages"][-1].content == "I can look at your data."
+
+
+def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
+    """The 'go ahead' scenario: a creation confirmation lands on the SQL agent
+    (router stickiness), it calls handoff_to_platform_guide, and the SAME turn
+    continues in the guide agent — the user never re-asks."""
+    from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
+
+    saver = InMemorySaver()
+    sql_agent = build_agent(
+        checkpointer=saver,
+        model=ScriptedChatModel(
+            script=[
+                AIMessage(
+                    "",
+                    tool_calls=[
+                        {
+                            "name": "handoff_to_platform_guide",
+                            "args": {"request_summary": "create the 6 KPIs we discussed"},
+                            "id": "h1",
+                        }
+                    ],
+                ),
+                AIMessage(content="Handing you to the platform guide."),
+            ]
+        ),
+        human_in_the_loop=False,
+    )
+    guide_agent = build_guide_agent(
+        checkpointer=saver,
+        model=ScriptedChatModel(script=[AIMessage(content="Creating the KPIs now.")]),
+        human_in_the_loop=False,
+    )
+
+    validations = []
+
+    async def must_not_validate(**kwargs):
+        validations.append(kwargs)
+        return {"verdict": "ok"}
+
+    graph = build_turn_graph(
+        sql_agent,
+        guide_agent,
+        route_fn=_data_route,  # router says data_question — the miss we recover from
+        casual_reply_fn=_canned_reply,
+        validate_fn=must_not_validate,
+        checkpointer=saver,
+    )
+    result = run_graph(graph, "go ahead")
+
+    assert result["messages"][-1].content == "Creating the KPIs now."
+    assert validations == []  # handed-off turns skip the text-to-SQL validator

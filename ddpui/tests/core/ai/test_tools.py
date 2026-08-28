@@ -190,6 +190,7 @@ def test_registry_exposes_all_tools():
         "create_dashboard",
         "add_charts_to_dashboard",
         "ask_user",
+        "handoff_to_platform_guide",
         "get_dalgo_help",
         "list_metrics",
         "list_kpis",

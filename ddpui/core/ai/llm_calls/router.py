@@ -54,6 +54,10 @@ Rules:
   KPI, dashboard, metric, report") is ALWAYS platform_help — even in the
   middle of a data conversation. The guide sees the full conversation, so
   "create a chart of this" works.
+- IMPORTANT: if the assistant's latest message OFFERED to create charts,
+  KPIs, metrics, dashboards, or reports, and the user's message agrees
+  ("yes", "go ahead", "all of them", "do it"), that is platform_help — the
+  user is accepting a creation offer, not asking a data question.
 - IMPORTANT: for OTHER follow-ups that refer to the recent conversation
   ("this", "that", "the above", a short answer to the assistant's last
   question), keep the SAME intent as that conversation: a follow-up in a

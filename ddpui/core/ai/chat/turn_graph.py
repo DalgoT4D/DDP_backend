@@ -9,12 +9,16 @@ edges, so they show up in traces, checkpoints, and get_graph() diagrams:
                          └─ data question     → retrieve_context_node
                                                 (*first turn only)   ↓
                                                 sql_agent (subgraph node)
-                                                                     ↓
+                                                          ↓
+                                          handed off? ── yes → guide_agent → END
+                                                          ↓ no
                                                 validate_node → END
 
 The guide_agent path skips validate_node on purpose: the validator is a
 text-to-SQL audit (grain, filters, false zeros) and has nothing to say about
-a guidance/creation answer.
+a guidance/creation answer. The handed-off edge fires when the SQL agent
+called handoff_to_platform_guide — a creation request that reached it anyway
+continues in the guide agent instead of dead-ending in an apology.
 
 The stage brains stay in llm_calls/ — nodes are thin adapters. They are
 INJECTED (route_fn, casual_reply_fn) rather than imported so the runner can
@@ -25,7 +29,7 @@ circular import with turn_runner.py.
 import dataclasses
 from typing import Annotated, Any, Optional, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -34,6 +38,16 @@ from langgraph.runtime import Runtime
 from ddpui.core.ai.agent.run_context import RunContext
 from ddpui.core.ai.messages.artifacts import extract_turn_results
 from ddpui.core.ai.messages.conversation import history_lines, turn_segment
+from ddpui.core.ai.tools.clarify_tools import HANDOFF_TOOL
+
+
+def turn_handed_off(messages: list[AnyMessage]) -> bool:
+    """True when the CURRENT turn contains a handoff_to_platform_guide call —
+    the SQL agent yielded the turn to the guide agent."""
+    return any(
+        isinstance(message, ToolMessage) and message.name == HANDOFF_TOOL
+        for message in turn_segment(messages)
+    )
 
 
 class TurnState(TypedDict):
@@ -129,7 +143,17 @@ def build_turn_graph(
     graph.add_edge("retrieve_context_node", "sql_agent")
     graph.add_edge("casual_reply_node", END)
     graph.add_edge("clarify_node", END)
-    graph.add_edge("sql_agent", "validate_node")
+
+    if guide_agent is not None:
+        # mid-turn handoff: a creation request that landed on the SQL agent
+        # anyway (e.g. a "go ahead" confirming a creation offer) continues in
+        # the guide agent instead of dead-ending in an "I can't do that" reply
+        def after_sql_agent(state: TurnState) -> str:
+            return "guide_agent" if turn_handed_off(state["messages"]) else "validate_node"
+
+        graph.add_conditional_edges("sql_agent", after_sql_agent, ["guide_agent", "validate_node"])
+    else:
+        graph.add_edge("sql_agent", "validate_node")
     graph.add_edge("validate_node", END)
 
     return graph.compile(checkpointer=checkpointer)

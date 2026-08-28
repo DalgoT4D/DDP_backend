@@ -74,6 +74,7 @@ TOOL_LABELS = {
     "create_metric": "Creating metric…",
     "create_kpi": "Creating KPI…",
     "create_report": "Creating report…",
+    "handoff_to_platform_guide": "Bringing in the platform guide…",
 }
 GENERIC_TOOL_LABEL = "Working…"
 
@@ -155,6 +156,7 @@ async def run_turn(
     usage = {"input_tokens": 0, "output_tokens": 0}
     sql_queries: list[dict] = []
     tools_called: list[str] = []
+    handed_off = False  # sql_agent yielded the turn to the guide agent
     last_result_table: dict | None = None
     # created charts AND dashboards — "charts" is the wire-protocol key
     created_artifacts: list[dict] = []
@@ -232,6 +234,8 @@ async def run_turn(
                                     "sql": tool_call["args"].get("sql"),
                                 }
                         elif isinstance(message, ToolMessage):
+                            if message.name == "handoff_to_platform_guide":
+                                handed_off = True
                             artifact = tool_artifact(message)
                             # a rejected/errored tool call carries status="error"
                             # (e.g. the user cancelled it at the approval card)
@@ -277,6 +281,10 @@ async def run_turn(
                     if reply_messages:
                         final_message = extract_text(reply_messages[-1].content)
                     yield _message_complete()
+                elif node == "sql_agent" and handed_off:
+                    # the turn continues in the guide agent — the real
+                    # message_complete comes when THAT subgraph finishes
+                    continue
                 elif node in ("sql_agent", "guide_agent"):
                     # an agent subgraph finished — the answer is complete; the
                     # SQL agent's validation (which never blocks the answer)

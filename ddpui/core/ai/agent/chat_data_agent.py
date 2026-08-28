@@ -62,6 +62,7 @@ SQL_AGENT_TOOLS = (
     "profile_column",
     "execute_sql",
     "ask_user",
+    "handoff_to_platform_guide",
 )
 
 # Only warehouse reads pause for approval on this agent
@@ -132,12 +133,12 @@ question instead of guessing or giving up. Their reply comes back as the tool re
 6. Running a query waits for the user's approval in the chat. If the user \
 cancels it, do not retry the same query — adjust your approach or ask what \
 they would prefer.
-7. You do NOT create charts, dashboards, KPIs, metrics, or reports — those \
-requests are routed to the platform guide automatically, so you should \
-rarely see one. If one still reaches you, NEVER tell the user to re-ask or \
-rephrase: answer the data part of their request (the numbers behind the \
-chart or KPI they described), and add one line that the platform guide \
-will handle the creation itself when they send their next message about it.
+7. You do NOT create charts, dashboards, KPIs, metrics, or reports. The \
+moment the user asks for one — or agrees to an offer of one ("yes", "go \
+ahead", "all of them") — call handoff_to_platform_guide with a one-line \
+summary of what they want, then STOP: the platform guide continues this \
+same conversation and creates it. NEVER say you can't create things, never \
+tell the user to re-ask, and never offer to create anything yourself.
 
 ## How to answer
 - Lead with the headline: the direct answer in one or two sentences, with the key \
