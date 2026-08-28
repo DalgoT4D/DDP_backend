@@ -532,6 +532,41 @@ class TestKPIData:
         assert result["data"]["rag_status"] == "red"
 
 
+# ── Compute Trend Tests ──────────────────────────────────────────────
+
+
+class TestComputeTrend:
+    """Tests for _compute_trend, exercising the actual value-conversion logic."""
+
+    @patch("ddpui.core.kpi.kpi_service.WarehouseFactory.get_warehouse_client")
+    def test_non_numeric_values_become_none(self, mock_get_wh, orguser, org, sample_kpi, seed_db):
+        """column_expression KPIs returning text like 'On Track' must not crash."""
+        mock_wh = MagicMock()
+        mock_wh.execute.return_value = [
+            {"period": "2026-01-01", "value": "On Track"},
+            {"period": "2026-02-01", "value": "Off Track"},
+            {"period": "2026-03-01", "value": 42},
+            {"period": "2026-04-01", "value": None},
+        ]
+        mock_get_wh.return_value = mock_wh
+
+        sample_kpi.time_dimension_column = "created_at"
+        sample_kpi.save(update_fields=["time_dimension_column"])
+
+        org_warehouse = OrgWarehouse.objects.create(org=org, wtype="postgres", credentials={})
+        kpi_response = KPIService.kpi_to_response(sample_kpi)
+
+        periods = KPIService._compute_trend(kpi_response, org_warehouse)
+
+        assert len(periods) == 4
+        assert periods[0]["value"] is None  # "On Track" → None
+        assert periods[1]["value"] is None  # "Off Track" → None
+        assert periods[2]["value"] == 42.0  # numeric → float
+        assert periods[3]["value"] is None  # None stays None
+
+        OrgWarehouse.objects.filter(org=org).delete()
+
+
 # ── Annotation Tests ──────────────────────────────────────────────────
 
 
