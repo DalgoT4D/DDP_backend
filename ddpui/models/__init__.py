@@ -13,6 +13,7 @@ from ddpui.models.canvas_models import CanvasNode, CanvasEdge
 from ddpui.models.comment import Comment, CommentReadStatus
 from ddpui.models.metric import Metric, KPI
 from ddpui.models.alert import Alert, AlertLog, AlertType
+from ddpui.models.trial_signup import TrialSignup
 
 # Not re-exported for API use — imported so these models are ALWAYS registered
 # with the app registry. Their modules were previously only imported by feature

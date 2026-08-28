@@ -332,39 +332,47 @@ def test_put_dbt_schema_v1_no_warehouse(orguser: OrgUser):
     assert str(excinfo.value) == "No warehouse configuration found for this organization"
 
 
-def test_put_dbt_schema_v1_no_cli_profile(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
-    """test put_dbt_schema_v1 no dbt cli profile"""
+def test_put_dbt_schema_v1_success(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
+    """put_dbt_schema_v1: updates default_schema on OrgDbt AND refreshes the
+    dbt-profile SECRET block so the runner picks up the new schema."""
     orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
-    payload = OrgDbtTarget(target_configs_schema="new-target")
-    request = mock_request(orguser)
-    retval = put_dbt_schema_v1(request, payload)
-    assert retval == {"success": 1}
-    assert orguser.org.dbt.default_schema == payload.target_configs_schema
-
-
-def test_put_dbt_schema_v1_success(
-    orguser: OrgUser, f_orgwarehouse: OrgWarehouse, f_dbtcliprofileblock: OrgPrefectBlockv1
-):
-    """test put_dbt_schema_v1 success flow"""
-    orguser.org.dbt = OrgDbt(
-        gitrepo_url="A",
-        target_type="B",
-        default_schema="C",
-        cli_profile_block=f_dbtcliprofileblock,
-    )
     orguser.org.dbt.save()
     payload = OrgDbtTarget(target_configs_schema="new-target")
     request = mock_request(orguser)
+
     with patch(
-        "ddpui.ddpprefect.prefect_service.update_dbt_cli_profile_block"
-    ) as mock_update_dbt_cli_profile_block:
+        "ddpui.api.dbt_api.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"username": "u", "password": "pw"},
+    ), patch("ddpui.api.dbt_api.create_or_update_dbt_profile_secret_blk") as mock_upsert:
         retval = put_dbt_schema_v1(request, payload)
-        assert retval == {"success": 1}
-        mock_update_dbt_cli_profile_block.assert_called_once_with(
-            block_name=f_dbtcliprofileblock.block_name,
-            target=payload.target_configs_schema,
-            wtype=f_orgwarehouse.wtype,
-        )
+
+    assert retval == {"success": 1}
+    orguser.org.dbt.refresh_from_db()
+    assert orguser.org.dbt.default_schema == "new-target"
+    mock_upsert.assert_called_once()
+    args = mock_upsert.call_args.args
+    assert args[0] == orguser.org
+    assert args[1] == f_orgwarehouse
+    assert args[2] == {"username": "u", "password": "pw"}
+
+
+def test_put_dbt_schema_v1_no_warehouse_creds(orguser: OrgUser, f_orgwarehouse: OrgWarehouse):
+    """put_dbt_schema_v1 returns 500 when warehouse credentials are missing."""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    orguser.org.dbt.save()
+    payload = OrgDbtTarget(target_configs_schema="new-target")
+    request = mock_request(orguser)
+
+    with patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_warehouse_credentials",
+        return_value=None,
+    ), patch("ddpui.api.dbt_api.create_or_update_dbt_profile_secret_blk") as mock_upsert:
+        with pytest.raises(HttpError) as excinfo:
+            put_dbt_schema_v1(request, payload)
+
+    assert excinfo.value.status_code == 500
+    assert str(excinfo.value) == "warehouse credentials not found"
+    mock_upsert.assert_not_called()
 
 
 def test_get_transform_type_none(orguser: OrgUser):
@@ -1059,6 +1067,288 @@ def test_put_switch_git_repo_error_general_exception(seed_db, orguser: OrgUser):
         put_switch_git_repo(request, payload)
 
     assert str(excinfo.value) == "Repository validation failed"
+
+    # Cleanup
+    orgdbt.delete()
+
+
+# ================================================================================
+# Audit Log Tests for M3 (dbt Events)
+# ================================================================================
+from ddpui.models.audit_log import AuditLogResourceType, AuditLogAction
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+@patch.multiple("os.path", exists=Mock(return_value=True))
+def test_post_dbt_git_pull_creates_audit_log(mock_audit_log, seed_db, orguser: OrgUser):
+    """Test that git pull creates an audit log entry"""
+    request = mock_request(orguser)
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo",
+        project_dir="/test/dir",
+        dbt_venv="/test/venv",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir", return_value="project_dir"
+    ), patch("ddpui.api.dbt_api.GitManager") as mock_git_manager:
+        mock_git_manager.return_value.pull_changes.return_value = None
+        post_dbt_git_pull(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    # Git pull is logged as EXECUTE (pulling latest changes is an execution action)
+    assert call_kwargs["action"] == AuditLogAction.EXECUTE
+    assert "resource_fields" not in call_kwargs
+
+    # Cleanup
+    orgdbt.delete()
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_put_dbt_schema_v1_creates_audit_log(
+    mock_audit_log,
+    seed_db,
+    orguser: OrgUser,
+    f_orgwarehouse: OrgWarehouse,
+    f_dbtcliprofileblock: OrgPrefectBlockv1,
+):
+    """Updating the dbt target schema logs the new schema directly from the
+    payload — no prior-state diffing."""
+    orguser.org.dbt = OrgDbt(
+        gitrepo_url="A",
+        target_type="B",
+        default_schema="old-schema",
+        cli_profile_block=f_dbtcliprofileblock,
+    )
+    orguser.org.dbt.save()
+    payload = OrgDbtTarget(target_configs_schema="new-schema")
+    request = mock_request(orguser)
+
+    with patch("ddpui.api.dbt_api.create_or_update_dbt_profile_secret_blk"), patch(
+        "ddpui.api.dbt_api.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "db.example.com"},
+    ):
+        put_dbt_schema_v1(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {"default_schema": "new-schema"}
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_put_switch_git_repo_creates_audit_log(mock_audit_log, seed_db, orguser: OrgUser):
+    """Switching the git repo logs the new repo url and managed-by-system flag
+    read back from the DB after the switch — never the access token."""
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo",
+        transform_type="git",
+        is_repo_managed_by_system=True,
+    )
+    orguser.org.dbt = orgdbt
+    orguser.org.save()
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo",
+        gitrepoAccessToken="super-secret-pat",
+    )
+    request = mock_request(orguser)
+
+    def fake_switch(orguser, payload, actual_pat):
+        orgdbt.gitrepo_url = payload.gitrepoUrl
+        orgdbt.is_repo_managed_by_system = False
+        orgdbt.save()
+        return {"success": 1}
+
+    with patch("ddpui.api.dbt_api.dbt_service.switch_git_repository_v1", side_effect=fake_switch):
+        put_switch_git_repo(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {
+        "gitrepo_url": "https://github.com/new/repo",
+        "is_repo_managed_by_system": False,
+    }
+    assert "super-secret-pat" not in str(call_kwargs["resource_fields"])
+
+    # Cleanup
+    orgdbt.delete()
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+@patch("ddpui.api.dbt_api.OrgCleanupService")
+def test_dbt_delete_creates_audit_log(mock_cleanup, mock_audit_log, seed_db, orguser: OrgUser):
+    """Test that deleting dbt workspace creates an audit log entry"""
+    request = mock_request(orguser)
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/test/repo",
+        project_dir="/test/dir",
+        dbt_venv="/test/venv",
+    )
+    orgdbt_id = orgdbt.id
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    mock_cleanup_instance = Mock()
+    mock_cleanup.return_value = mock_cleanup_instance
+
+    dbt_delete(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.DELETE
+    assert call_kwargs["resource_id"] == str(orgdbt_id)
+    assert "resource_fields" not in call_kwargs
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_put_switch_git_repo_creates_audit_log_with_existing_secret(
+    mock_audit_log, seed_db, orguser: OrgUser
+):
+    """Test that switching git repo (with a pre-existing PAT secret) creates an audit log entry"""
+    request = mock_request(orguser)
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_url="https://github.com/old/repo",
+        project_dir="/test/dir",
+        dbt_venv="/test/venv",
+        gitrepo_access_token_secret="existing-secret",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    payload = OrgDbtConnectGitRemote(
+        gitrepoUrl="https://github.com/new/repo",
+        gitrepoAccessToken="ghp_newtoken123",
+    )
+
+    with patch(
+        "ddpui.api.dbt_api.dbt_service.switch_git_repository_v1",
+        return_value={"success": True},
+    ):
+        put_switch_git_repo(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert "org" not in call_kwargs["resource_fields"]
+    assert set(call_kwargs["resource_fields"].keys()) == {
+        "gitrepo_url",
+        "is_repo_managed_by_system",
+    }
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+@patch("os.path.exists", mock_exists=Mock(side_effect=[True, True]))
+@patch(
+    "ddpui.api.dbt_api.create_single_html",
+    mock_create_single_html=Mock(return_value="html"),
+)
+@patch("builtins.open", mock_open=Mock(write=Mock(), close=Mock()))
+@patch(
+    "ddpui.api.dbt_api.RedisClient",
+    mock_Redis=Mock(return_value=Mock(get_instance=Mock(set=Mock(), expire=Mock()))),
+)
+def test_post_dbt_makedocs_creates_audit_log(
+    mock_Redis: Mock,
+    mock_open: Mock,
+    mock_create_single_html: Mock,
+    mock_exists: Mock,
+    mock_audit_log,
+    seed_db,
+    orguser: OrgUser,
+):
+    """Test that generating dbt docs creates an audit log entry"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    request = mock_request(orguser)
+
+    post_dbt_makedocs(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.EXECUTE
+    assert "resource_fields" not in call_kwargs
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_post_run_dbt_commands_creates_audit_log(
+    mock_audit_log, seed_db, orguser: OrgUser, f_org_tasks
+):
+    """Test that running dbt commands creates an audit log entry"""
+    orguser.org.dbt = OrgDbt(gitrepo_url="A", target_type="B", default_schema="C")
+    request = mock_request(orguser)
+
+    mock_celery_task = Mock()
+    mock_celery_task.id = "celery-task-id"
+
+    with patch("ddpui.api.dbt_api.TaskProgress"), patch(
+        "ddpui.celeryworkers.tasks.run_dbt_commands.delay", return_value=mock_celery_task
+    ):
+        post_run_dbt_commands(request)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.EXECUTE
+    assert "resource_fields" not in call_kwargs
+
+
+@patch("ddpui.api.dbt_api.create_audit_log")
+def test_post_dbt_publish_changes_creates_audit_log(mock_audit_log, seed_db, orguser: OrgUser):
+    """Test that publishing dbt changes creates an audit log entry with commit info"""
+    request = mock_request(orguser)
+    payload = OrgDbtChangesPublish(commit_message="Test commit")
+
+    orgdbt = OrgDbt.objects.create(
+        gitrepo_access_token_secret="pat-secret-key",
+        transform_type="github",
+    )
+    request.orguser.org.dbt = orgdbt
+    request.orguser.org.save()
+
+    with patch(
+        "ddpui.api.dbt_api.DbtProjectManager.get_dbt_project_dir",
+        return_value="/existing/path",
+    ), patch("ddpui.api.dbt_api.Path") as mock_path:
+        mock_path.return_value.exists.return_value = True
+
+        mock_git_manager = Mock()
+        mock_git_manager.commit_changes.return_value = "Committed successfully"
+        mock_git_manager.push_changes.return_value = "Pushed successfully"
+
+        with patch(
+            "ddpui.api.dbt_api.secretsmanager.retrieve_github_pat",
+            return_value="actual-pat",
+        ), patch("ddpui.api.dbt_api.GitManager", return_value=mock_git_manager):
+            post_dbt_publish_changes(request, payload)
+
+    mock_audit_log.assert_called_once()
+    call_kwargs = mock_audit_log.call_args[1]
+    assert call_kwargs["org"] == orguser.org
+    assert call_kwargs["resource_type"] == AuditLogResourceType.DBT
+    assert call_kwargs["action"] == AuditLogAction.UPDATE
+    assert call_kwargs["resource_fields"] == {
+        "commit_message": {"old": None, "new": "Test commit"},
+        "pushed_to_remote": {"old": None, "new": True},
+    }
 
     # Cleanup
     orgdbt.delete()

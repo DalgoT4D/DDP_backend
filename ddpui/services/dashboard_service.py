@@ -394,9 +394,7 @@ class DashboardService:
         return dashboard
 
     @staticmethod
-    def delete_dashboard(
-        dashboard_id: int, org: Org, orguser: OrgUser, force: bool = False
-    ) -> bool:
+    def delete_dashboard(dashboard_id: int, org: Org, orguser: OrgUser, force: bool = False) -> str:
         """Delete a dashboard with safety checks.
 
         Args:
@@ -406,7 +404,8 @@ class DashboardService:
             force: If True, bypass some safety checks
 
         Returns:
-            True if deletion was successful
+            The dashboard's title, so callers (e.g. the API layer's audit
+            log) don't need a separate fetch of their own.
 
         Raises:
             DashboardNotFoundError: If dashboard doesn't exist
@@ -434,11 +433,12 @@ class DashboardService:
             raise DashboardLockedError(dashboard.lock.locked_by.user.email)
 
         # Use safe deletion
+        dashboard_title = dashboard.title
         success, error_message = delete_dashboard_safely(dashboard_id, orguser)
         if not success:
             raise DashboardServiceError(error_message)
 
-        return True
+        return dashboard_title
 
     # =========================================================================
     # Lock Operations

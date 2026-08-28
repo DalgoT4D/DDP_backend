@@ -271,11 +271,12 @@ class TestDeleteComment:
             author=author_orguser,
             org=org,
         )
-        CommentService.delete_comment(
+        deleted_info = CommentService.delete_comment(
             comment_id=my_comment.id,
             org=org,
             orguser=author_orguser,
         )
+        assert deleted_info["content"] == "Delete me"
         my_comment.refresh_from_db()
         assert my_comment.is_deleted is True
         assert my_comment.content == ""

@@ -5,9 +5,10 @@ import yaml
 from ninja.errors import HttpError
 
 from ddpui.ddpdbt.schema import DbtProjectParams
-from ddpui.ddpprefect import DBTCLIPROFILE, SECRET, prefect_service
+from ddpui.ddpprefect import SECRET, prefect_service
 from ddpui.ddpprefect.schema import PrefectSecretBlockEdit
 from ddpui.core.dbtfunctions import build_profile_dict, preprocess_airbyte_creds_for_dbt
+from ddpui.core.git_manager import GitManager
 from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.models.org import Org, OrgWarehouse, OrgPrefectBlockv1
 from ddpui.utils import secretsmanager
@@ -16,133 +17,11 @@ from ddpui.utils.custom_logger import CustomLogger
 logger = CustomLogger("ddphelpers")
 
 
-def create_or_update_org_cli_block(org: Org, warehouse: OrgWarehouse, airbyte_creds: dict):
-    """Create/update the block in db and also in prefect"""
-    profile_name = None
-    target = None
-    dbt_project_params: DbtProjectParams = None
-    try:
-        dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-
-        dbt_project_filename = str(Path(dbt_project_params.project_dir) / "dbt_project.yml")
-        if not os.path.exists(dbt_project_filename):
-            raise HttpError(400, dbt_project_filename + " is missing")
-
-        with open(dbt_project_filename, "r", encoding="utf-8") as dbt_project_file:
-            dbt_project = yaml.safe_load(dbt_project_file)
-            if "profile" not in dbt_project:
-                raise HttpError(400, "could not find 'profile:' in dbt_project.yml")
-
-        profile_name = dbt_project["profile"]
-        target = dbt_project_params.target
-    except Exception as err:
-        logger.error(
-            "Failed to fetch the dbt profile - looks like transformation has not been setup. Using 'default' as profile name and continuing"
-        )
-        logger.error(err)
-
-    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(
-        warehouse, airbyte_creds, dbt_project_params
-    )
-    # CLI-block writer takes location / priority as separate kwargs (Prefect's
-    # block API expects them that way); pull them back out from wh_extras.
-    bqlocation = wh_extras.get("location")
-    priority = wh_extras.get("priority")
-
-    orgdbt = org.dbt
-
-    if not orgdbt:
-        logger.error("Org %s does not have a dbt workspace setup", org.slug)
-        return (None, None), "dbt workspace not setup for the org"
-
-    # set defaults to target and profile
-    # cant create a cli profile without these two
-    # idea is these should be updated when we setup transformation or update the warehouse
-    if not profile_name:
-        profile_name = "default"
-
-    if not target:
-        target = "default"
-
-    logger.info("Found org=%s profile_name=%s target=%s", org.slug, profile_name, target)
-    cli_profile_block: OrgPrefectBlockv1 = orgdbt.cli_profile_block
-    if cli_profile_block:
-        logger.info(
-            f"Updating the cli profile block : {cli_profile_block.block_name} for org={org.slug} with profile={profile_name} target={target}"
-        )
-        try:
-            prefect_service.update_dbt_cli_profile_block(
-                block_name=cli_profile_block.block_name,
-                wtype=warehouse.wtype,
-                credentials=dbt_creds,
-                bqlocation=bqlocation,
-                profilename=profile_name,
-                target=target,
-                priority=priority,
-            )
-        except Exception as error:
-            logger.error(
-                "Failed to update the cli profile block %s , err=%s",
-                cli_profile_block.block_name,
-                str(error),
-            )
-            return (None, None), "Failed to update the cli profile block"
-        logger.info(f"Successfully updated the cli profile block : {cli_profile_block.block_name}")
-    else:
-        logger.info(
-            "Creating a new cli profile block for %s with profile=%s & target=%s ",
-            org.slug,
-            profile_name,
-            target,
-        )
-        new_block_name = f"{org.slug}-{profile_name}"
-
-        try:
-            cli_block_response = prefect_service.create_dbt_cli_profile_block(
-                block_name=new_block_name,
-                profilename=profile_name,
-                target=target,
-                wtype=warehouse.wtype,
-                bqlocation=bqlocation,
-                credentials=dbt_creds,
-                priority=priority,
-            )
-        except Exception as error:
-            logger.error(
-                "Failed to create a new cli profile block %s , err=%s",
-                new_block_name,
-                str(error),
-            )
-            return (None, None), "Failed to create the cli profile block"
-
-        # save the cli profile block in django db
-        cli_profile_block, created = OrgPrefectBlockv1.objects.get_or_create(
-            org=org,
-            block_type=DBTCLIPROFILE,
-            block_id=cli_block_response["block_id"],
-            block_name=cli_block_response["block_name"],
-        )
-
-        if created:
-            logger.info(
-                f"Successfully created the cli profile block : {cli_profile_block.block_name}"
-            )
-            orgdbt.cli_profile_block = cli_profile_block
-            orgdbt.save()
-
-    # Mirror creds to the runner-flow Secret block. Non-fatal on failure so
-    # the CLI-profile-block path (authoritative until cutover) still wins.
-    create_or_update_dbt_profile_secret_blk(org, warehouse, dbt_creds, wh_extras)
-
-    return (cli_profile_block, dbt_project_params), None
-
-
 def create_or_update_dbt_profile_secret_blk(
     org: Org,
     warehouse: OrgWarehouse,
-    dbt_creds: dict,
-    profile_extras: dict,
-):
+    airbyte_creds: dict,
+) -> OrgPrefectBlockv1:
     """Upsert the org's dbt-profile Prefect Secret block — the runner-flow
     artifact read by proxy/prefect_flows_runner.py at flow-run start.
 
@@ -150,53 +29,79 @@ def create_or_update_dbt_profile_secret_blk(
     Value is JSON-encoded:
       {
         "wtype":          warehouse.wtype,
-        "default_schema": org.dbt.default_schema,
+        "default_schema": <derived — see below>,
         "creds":          dbt_creds,
-        "extras":         profile_extras,
+        "extras":         wh_extras,
       }
+    - default_schema:  if `org.dbt` is set, uses `org.dbt.default_schema`.
+                       Otherwise derived from `airbyte_creds` — postgres uses
+                       creds["schema"], bigquery uses creds["dataset_id"].
     - dbt_creds:       airbyte destination fields mapped to dbt-postgres /
                        dbt-bigquery field names (via
                        preprocess_airbyte_creds_for_dbt).
-    - profile_extras:  profile-shaping settings that aren't credentials:
+    - wh_extras:       warehouse-specific settings that aren't credentials:
                        bigquery → {"location": ..., "priority": ...}
                        postgres → {}
 
-    Also upserts an OrgPrefectBlockv1 row and sets
-    `org.dbt.dbt_profile_secret_block`. Requires `org.dbt` to be set; the block
-    is a dbt-lifecycle artifact.
+    Works whether or not `org.dbt` is set. When `org.dbt` is not set, the
+    function logs an info message and still upserts the block (default_schema
+    is derived from airbyte_creds instead).
 
-    Errors are logged and swallowed — the caller's CLI-profile-block path stays
-    authoritative during the transition.
+    Persistence:
+      - Prefect Secret block via prefect_service.upsert_secret_block.
+      - OrgPrefectBlockv1 row (block_type=SECRET) via update_or_create.
+      - `warehouse.dbt_profile_secret_block` — authoritative source of truth
+        going forward (used by post-sync ops + runner flows).
+      - `org.dbt.dbt_profile_secret_block` — mirrored FK, kept only for
+        backwards compatibility. Marked with a FUTURE-TODO to be removed once
+        all consumers read from the warehouse. Only written when `org.dbt` is
+        set (skipped for non-dbt orgs).
 
-    Returns the OrgPrefectBlockv1 row on success, None on failure / no orgdbt.
+    Errors: exceptions from prefect_service.upsert_secret_block or the DB
+    saves are NOT swallowed — they propagate up to the caller.
+
+    Returns the OrgPrefectBlockv1 row on success.
     """
+    default_schema = None
     if not org.dbt:
-        logger.info("Skipping dbt-profile secret block for org=%s — no OrgDbt", org.slug)
-        return None
+        logger.info(
+            "org.dbt is not set for org=%s; still continuing to create/update the dbt-profile secret block",
+            org.slug,
+        )
+        # set default schema from airbyte creds based on the warehouse type
+        if warehouse.wtype == "postgres":
+            if "schema" in airbyte_creds:
+                logger.info(
+                    "Setting default schema from airbyte creds for postgres: %s",
+                    airbyte_creds["schema"],
+                )
+                default_schema = airbyte_creds["schema"]
+        elif warehouse.wtype == "bigquery":
+            if "dataset_id" in airbyte_creds:
+                logger.info(
+                    "Setting default schema from airbyte creds for bigquery: %s",
+                    airbyte_creds["dataset_id"],
+                )
+                default_schema = airbyte_creds["dataset_id"]
+    else:
+        default_schema = org.dbt.default_schema
+
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds)
 
     dbt_profile_secret_block_name = f"dbt-profile-{org.slug}"
     block_value = {
         "wtype": warehouse.wtype,
-        "default_schema": org.dbt.default_schema,
+        "default_schema": default_schema,
         "creds": dbt_creds,
-        "extras": profile_extras,
+        "extras": wh_extras,
     }
-    try:
-        dbt_profile_secret_response = prefect_service.upsert_secret_block(
-            PrefectSecretBlockEdit(
-                block_name=dbt_profile_secret_block_name,
-                secret=json.dumps(block_value),
-            )
-        )
-    except Exception as error:  # pylint: disable=broad-exception-caught
-        logger.error(
-            "Failed to upsert dbt-profile secret block %s for org=%s , err=%s",
-            dbt_profile_secret_block_name,
-            org.slug,
-            str(error),
-        )
-        return None
 
+    dbt_profile_secret_response = prefect_service.upsert_secret_block(
+        PrefectSecretBlockEdit(
+            block_name=dbt_profile_secret_block_name,
+            secret=json.dumps(block_value),
+        )
+    )
     dbt_profile_secret_block_row, _ = OrgPrefectBlockv1.objects.update_or_create(
         block_name=dbt_profile_secret_response["block_name"],
         defaults={
@@ -205,13 +110,21 @@ def create_or_update_dbt_profile_secret_blk(
             "block_id": dbt_profile_secret_response["block_id"],
         },
     )
-    org.dbt.dbt_profile_secret_block = dbt_profile_secret_block_row
-    org.dbt.save(update_fields=["dbt_profile_secret_block"])
+
+    # FUTURE-TODO: remove the org.dbt assignment since we are moving it to warehouse.dbt_profile_secret_block
+    if org.dbt:
+        org.dbt.dbt_profile_secret_block = dbt_profile_secret_block_row
+        org.dbt.save(update_fields=["dbt_profile_secret_block"])
+
+    warehouse.dbt_profile_secret_block = dbt_profile_secret_block_row
+    warehouse.save(update_fields=["dbt_profile_secret_block"])
+
     logger.info(
         "Upserted dbt-profile secret block %s for org=%s",
         dbt_profile_secret_response["block_name"],
         org.slug,
     )
+
     return dbt_profile_secret_block_row
 
 
@@ -238,9 +151,7 @@ def write_dbt_profiles_yml(org: Org) -> Path:
 
     dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
 
-    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(
-        warehouse, airbyte_creds, dbt_project_params
-    )
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds)
 
     dbt_project_filename = Path(dbt_project_params.project_dir) / "dbt_project.yml"
     if not dbt_project_filename.exists():

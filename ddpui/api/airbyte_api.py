@@ -1,5 +1,6 @@
 """Dalgo API for Airbyte"""
 
+import json
 import os
 from typing import List
 from ninja.errors import HttpError
@@ -21,13 +22,20 @@ from ddpui.ddpairbyte.schema import (
     AirbyteSourceUpdateCheckConnection,
     AirbyteDestinationUpdateCheckConnection,
     AirbyteConnectionUpdate,
+    SourceGoogleOAuthConsentCreate,
+    SourceGoogleOAuthCreate,
+    SourceGoogleOAuthUpdate,
 )
+from django.http import HttpResponseRedirect
 from ddpui.auth import has_permission
 
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.models.org_user import OrgUser
-from ddpui.models.org import OrgType
+from ddpui.models.org import OrgType, ConnectionMeta
 from ddpui.models.llm import LogsSummarizationType, LlmSession, LlmSessionStatus
 from ddpui.ddpairbyte import airbytehelpers, deleteconnection
+from ddpui.core.oauth import google_oauth_service, google_service_account
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.celeryworkers.tasks import (
     get_connection_catalog_task,
@@ -107,6 +115,11 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.config = whitelisted_config
         logger.info("whitelisted the source config")
 
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceDefName, payload.config
+    )
+
     source = airbyte_service.create_source(
         orguser.org.airbyte_workspace_id,
         payload.name,
@@ -114,7 +127,102 @@ def post_airbyte_source(request, payload: AirbyteSourceCreate):
         payload.config,
     )
     logger.info("created source having id " + source["sourceId"])
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        action=AuditLogAction.CREATE,
+        # Never log payload.config — it holds connection credentials for
+        # whichever source type this is (host, port, username, password, etc).
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
     return {"sourceId": source["sourceId"]}
+
+
+@airbyte_router.post("/sources/oauth/consent/")
+@has_permission(["can_create_source"])
+def post_source_oauth_consent(request, payload: SourceGoogleOAuthConsentCreate):
+    """Start the Google OAuth flow: build the Google consent URL and mint a state nonce.
+
+    Dalgo builds the URL itself (client_id from env, redirect_uri = Dalgo's own backend
+    callback); Airbyte is not involved. Returns {authUrl}; the state nonce stays server-side.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    return google_oauth_service.get_source_oauth_consent(orguser, payload.sourceName)
+
+
+@airbyte_router.get("/sources/oauth/callback", auth=None)
+def get_source_oauth_callback(request, state: str = None, code: str = None, error: str = None):
+    """Google's redirect target after consent. PUBLIC — no JWT (a browser redirect carries
+    none); the unguessable `state` nonce is the authentication.
+
+    Exchanges the auth code for a refresh_token server-side, stashes it under an opaque
+    `refresh_token_ref`, and 302s the popup back to the frontend callback page carrying only
+    that `refresh_token_ref` (or an `error`). The auth code and refresh_token never reach the
+    browser.
+    """
+    return HttpResponseRedirect(
+        google_oauth_service.oauth_callback_redirect_url(state, code, error)
+    )
+
+
+@airbyte_router.post("/sources/oauth/create/")
+@has_permission(["can_create_source"])
+def post_source_oauth_create(request, payload: SourceGoogleOAuthCreate):
+    """Create a NEW source from a redeemed OAuth `refresh_token_ref`.
+
+    Redeems the `refresh_token_ref` for the stashed refresh_token, builds the connector
+    credentials (client_id/secret from env), merges them into the config, and creates the
+    source. The refresh_token never travels through the browser.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res = airbytehelpers.create_oauth_source(orguser, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=res.get("sourceId", ""),
+        action=AuditLogAction.CREATE,
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
+    return res
+
+
+@airbyte_router.put("/sources/oauth/{source_id}")
+@has_permission(["can_edit_source"])
+def put_source_oauth_update(request, source_id: str, payload: SourceGoogleOAuthUpdate):
+    """Re-authenticate an EXISTING source from a redeemed OAuth `refresh_token_ref`.
+
+    Same as create, but updates the source named in the URL path. The source must belong to
+    the caller's own workspace (enforced in the service layer). The refresh_token never
+    travels through the browser.
+
+    ONLY for the re-authenticate action (frontend calls this after a fresh consent+callback
+    round redeems a ref). Editing a source's config/streams WITHOUT re-authenticating goes
+    through the plain PUT /sources/{source_id} instead — it never needs a refresh_token_ref
+    and never touches stored credentials.
+    """
+    orguser: OrgUser = request.orguser
+    if orguser.org.airbyte_workspace_id is None:
+        raise HttpError(400, "create an airbyte workspace first")
+
+    res = airbytehelpers.update_oauth_source(orguser, source_id, payload)
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=res.get("sourceId", ""),
+        action=AuditLogAction.UPDATE,
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
+    return res
 
 
 @airbyte_router.put("/sources/{source_id}")
@@ -141,10 +249,25 @@ def put_airbyte_source(request, source_id: str, payload: AirbyteSourceUpdate):
         payload.config = whitelisted_config
         logger.info("whitelisted the source config for update")
 
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceDefName, payload.config
+    )
+
     source = airbyte_service.update_source(
         source_id, payload.name, payload.config, payload.sourceDefId
     )
     logger.info("updated source having id " + source["sourceId"])
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source["sourceId"],
+        action=AuditLogAction.UPDATE,
+        # Never log payload.config — may contain connection credentials.
+        resource_fields={"name": payload.name, "sourceDefId": payload.sourceDefId},
+    )
     return {"sourceId": source["sourceId"]}
 
 
@@ -170,6 +293,11 @@ def post_airbyte_check_source(request, payload: AirbyteSourceCreate):
 
         payload.config = whitelisted_config
         logger.info("whitelisted the source config")
+
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceDefName, payload.config
+    )
 
     response = airbyte_service.check_source_connection(orguser.org.airbyte_workspace_id, payload)
     return {
@@ -202,11 +330,26 @@ def post_airbyte_check_source_for_update(
         payload.config = whitelisted_config
         logger.info("whitelisted the source config for update")
 
+    # MANAGED-SA bridge — no-op unless the key env var is set.
+    payload.config = airbytehelpers.inject_managed_gsheets_credentials(
+        payload.sourceDefName, payload.config
+    )
+
     response = airbyte_service.check_source_connection_for_update(source_id, payload)
     return {
         "status": "succeeded" if response["jobInfo"]["succeeded"] else "failed",
         "logs": response["jobInfo"]["logs"]["logLines"],
     }
+
+
+@airbyte_router.get("/sources/google_sheets/managed_service_account/")
+@has_permission(["can_view_sources"])
+def get_managed_google_service_account(request):  # pylint: disable=unused-argument
+    """MANAGED-SA bridge — the address users share their spreadsheet with, or null when the
+    deployment ships no key (which is how the UI knows the option is off). Only the client_email
+    is exposed; the key itself never leaves the backend."""
+    key = google_service_account.managed_service_account_json()
+    return {"email": json.loads(key).get("client_email") if key else None}
 
 
 @airbyte_router.get("/sources")
@@ -299,6 +442,15 @@ def post_airbyte_destination(request, payload: AirbyteDestinationCreate):
         payload.config,
     )
     logger.info("created destination having id " + destination["destinationId"])
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=destination["destinationId"],
+        action=AuditLogAction.CREATE,
+        # Never log payload.config — warehouse connection credentials.
+        resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
+    )
     return {"destinationId": destination["destinationId"]}
 
 
@@ -441,6 +593,19 @@ def post_airbyte_connection_v1(request, payload: AirbyteConnectionCreate):
         raise HttpError(400, error)
 
     logger.debug(res)
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=res.get("connectionId", ""),
+        action=AuditLogAction.CREATE,
+        resource_fields={
+            "name": payload.name,
+            "streams": payload.streams,
+            "destinationSchema": payload.destinationSchema or "",
+            "post_sync_transform": payload.post_sync_transform,
+        },
+    )
     return res
 
 
@@ -496,6 +661,20 @@ def put_airbyte_connection_v1(
     if error:
         raise HttpError(400, error)
 
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        action=AuditLogAction.UPDATE,
+        resource_fields={
+            "name": payload.name,
+            "streams": payload.streams,
+            "destinationSchema": payload.destinationSchema or "",
+            "post_sync_transform": payload.post_sync_transform,
+        },
+    )
+
     return res
 
 
@@ -510,9 +689,22 @@ def delete_airbyte_connection_v1(request, connection_id):
     if org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture connection name before deletion for audit log
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    connection_name = connection_meta.connection_name if connection_meta else connection_id
+
     _, error = deleteconnection.delete_org_connection(org, connection_id)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": connection_name},
+    )
 
     return {"success": 1}
 
@@ -559,9 +751,23 @@ def put_airbyte_destination_v1(request, destination_id: str, payload: AirbyteDes
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
-    destination, error = airbytehelpers.update_destination(orguser.org, destination_id, payload)
-    if error:
-        raise HttpError(400, error)
+    try:
+        destination = airbytehelpers.update_destination(orguser.org, destination_id, payload)
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    except Exception as error:
+        logger.exception(error)
+        raise HttpError(500, "failed to update destination") from error
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.WAREHOUSE,
+        resource_id=destination["destinationId"],
+        action=AuditLogAction.UPDATE,
+        # Never log payload.config — warehouse connection credentials.
+        resource_fields={"name": payload.name, "destinationDefId": payload.destinationDefId},
+    )
 
     return {"destinationId": destination["destinationId"]}
 
@@ -576,9 +782,25 @@ def delete_airbyte_source_v1(request, source_id):
     if orguser.org.airbyte_workspace_id is None:
         raise HttpError(400, "create an airbyte workspace first")
 
+    # Capture source name before deletion for audit log
+    try:
+        source = airbyte_service.get_source(orguser.org.airbyte_workspace_id, source_id)
+        source_name = source.get("name", source_id)
+    except Exception:
+        source_name = source_id
+
     _, error = airbytehelpers.delete_source(orguser.org, source_id)
     if error:
         raise HttpError(400, error)
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.DATA_SOURCE,
+        resource_id=source_id,
+        action=AuditLogAction.DELETE,
+        resource_fields={"name": source_name},
+    )
 
     return {"success": 1}
 
@@ -626,6 +848,18 @@ def schedule_update_connection_schema(
         raise HttpError(400, "create an airbyte workspace first")
 
     airbytehelpers.schedule_update_connection_schema(orguser, connection_id, payload)
+
+    connection_meta = ConnectionMeta.objects.filter(connection_id=connection_id).first()
+    connection_name = connection_meta.connection_name if connection_meta else connection_id
+
+    create_audit_log(
+        org=orguser.org,
+        orguser=orguser,
+        resource_type=AuditLogResourceType.CONNECTION,
+        resource_id=connection_id,
+        action=AuditLogAction.UPDATE,
+        resource_fields={"name": connection_name, "cron": payload.cron},
+    )
 
     return {"success": 1}
 

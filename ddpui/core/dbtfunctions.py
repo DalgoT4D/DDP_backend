@@ -1,16 +1,11 @@
 import os
-from typing import Union
-
-from ddpui.ddpdbt.schema import DbtProjectParams
 
 # Fixed target label used inside profiles.yml. Matches proxy/prefect_flows_runner.py:DBT_TARGET
 # so backend-generated profiles.yml and runner-generated ones use the same key.
 DBT_TARGET = "default"
 
 
-def map_airbyte_destination_spec_to_dbtcli_profile(
-    conn_info: dict, dbt_project_params: Union[DbtProjectParams | None]
-):
+def map_airbyte_destination_spec_to_dbtcli_profile(conn_info: dict):
     """
     Dbt doesn't support tunnel methods
     So the translation to tunnel params is for our proxy service
@@ -35,35 +30,26 @@ def map_airbyte_destination_spec_to_dbtcli_profile(
         conn_info["user"] = conn_info["username"]
 
     # handle dbt ssl params
-    if "ssl_mode" in conn_info:
+    # ssl: false is the authoritative "no SSL" signal — takes precedence over ssl_mode
+    # because Airbyte can send both fields simultaneously
+    if "ssl" in conn_info and conn_info["ssl"] is False:
+        conn_info["sslmode"] = "disable"
+    elif "ssl_mode" in conn_info:
         ssl_data = conn_info["ssl_mode"]
         mode = ssl_data["mode"] if "mode" in ssl_data else None
         ca_certificate = ssl_data["ca_certificate"] if "ca_certificate" in ssl_data else None
-        # client_key_password = (
-        #     ssl_data["client_key_password"] if "client_key_password" in ssl_data else None
-        # )
         if mode:
             conn_info["sslmode"] = mode
 
         if ca_certificate:
-            if not dbt_project_params or not dbt_project_params.org_project_dir:
-                raise Exception(
-                    "org_project_dir is required to save the ca_certificate for dbt ssl connections"
-                )
-
             conn_info["sslrootcert_content"] = ca_certificate
-            conn_info["sslrootcert"] = os.path.join(
-                dbt_project_params.org_project_dir, "sslrootcert.pem"
-            )
+            # we are build this path in proxy
+            conn_info["sslrootcert"] = None
 
     return conn_info
 
 
-def preprocess_airbyte_creds_for_dbt(
-    warehouse,
-    airbyte_creds: dict,
-    dbt_project_params: Union[DbtProjectParams | None],
-) -> tuple[dict, dict]:
+def preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds: dict) -> tuple[dict, dict]:
     """Convert raw airbyte destination-spec creds into the (dbt_creds, wh_extras)
     pair used everywhere downstream (profiles.yml, Secret block value).
 
@@ -81,7 +67,7 @@ def preprocess_airbyte_creds_for_dbt(
         bqlocation = airbyte_creds.pop("dataset_location", None)
         priority = airbyte_creds.pop("transformation_priority", None)
 
-    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds, dbt_project_params)
+    dbt_creds = map_airbyte_destination_spec_to_dbtcli_profile(airbyte_creds)
     dbt_creds.pop("ssl_mode", None)
     dbt_creds.pop("ssl", None)
 

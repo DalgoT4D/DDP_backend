@@ -1,5 +1,6 @@
 """Tests for parse_dbt_manifest_to_canvas function."""
 
+import uuid
 import pytest
 from unittest.mock import patch, Mock
 from ddpui.ddpdbt.dbt_service import parse_dbt_manifest_to_canvas
@@ -116,8 +117,6 @@ def test_parse_dbt_manifest_to_canvas_success(sample_manifest, org_with_dbt_work
     ]
 
     with patch(
-        "ddpui.ddpdbt.dbt_service.prefect_service.get_dbt_cli_profile_block"
-    ) as mock_get_profile, patch(
         "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
     ) as mock_connect, patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
@@ -125,15 +124,6 @@ def test_parse_dbt_manifest_to_canvas_success(sample_manifest, org_with_dbt_work
     ) as mock_creds, patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command"
     ) as mock_run_dbt:
-        # Mock the profile block content
-        mock_get_profile.return_value = {
-            "profile": {
-                "test_profile": {
-                    "outputs": {"public": {"type": "postgres", "host": "localhost", "port": 5432}}
-                }
-            }
-        }
-
         result = parse_dbt_manifest_to_canvas(
             org_with_dbt_workspace, orgdbt, warehouse, sample_manifest, refresh=False
         )
@@ -270,6 +260,60 @@ def test_parse_dbt_manifest_to_canvas_update_existing(org_with_dbt_workspace: Or
         assert updated_node.id == existing_node.id  # Same node
         assert "id" in updated_node.output_cols  # New columns added
         assert "name" in updated_node.output_cols
+
+
+@pytest.mark.django_db
+def test_parse_dbt_manifest_to_canvas_preserves_uuid_on_resync(
+    org_with_dbt_workspace: Org, sample_manifest
+):
+    """Re-syncing the manifest for a model/source that already exists must not
+    rotate its uuid, since the frontend caches the uuid to reference the node
+    (e.g. clicking a model on the canvas). See bug: resync silently minted a
+    new uuid.uuid4() on every call via update_or_create's `defaults`, breaking
+    any uuid a client already holds (most visibly right after an org clone,
+    whose first canvas load triggers an immediate resync)."""
+
+    warehouse = OrgWarehouse.objects.create(org=org_with_dbt_workspace, wtype="postgres")
+    orgdbt = org_with_dbt_workspace.dbt
+
+    existing_source = OrgDbtModel.objects.create(
+        orgdbt=orgdbt,
+        uuid=uuid.uuid4(),
+        name="table1",
+        source_name="source1",
+        type=OrgDbtModelType.SOURCE,
+        display_name="source1.table1",
+        schema="raw",
+        output_cols=["old_col1", "old_col2"],
+        under_construction=False,
+    )
+    CanvasNode.objects.create(
+        orgdbt=orgdbt,
+        name="source1.table1",
+        node_type=CanvasNodeType.SOURCE,
+        output_cols=["old_col1", "old_col2"],
+        dbtmodel=existing_source,
+    )
+    original_uuid = existing_source.uuid
+
+    mock_warehouse = Mock()
+    mock_warehouse.get_table_columns.return_value = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "name", "data_type": "text"},
+    ]
+
+    with patch(
+        "ddpui.ddpdbt.dbt_service.WarehouseFactory.connect", return_value=mock_warehouse
+    ), patch(
+        "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials",
+        return_value={"host": "localhost"},
+    ):
+        parse_dbt_manifest_to_canvas(
+            org_with_dbt_workspace, orgdbt, warehouse, sample_manifest, refresh=False
+        )
+
+    existing_source.refresh_from_db()
+    assert existing_source.uuid == original_uuid
 
 
 @pytest.fixture

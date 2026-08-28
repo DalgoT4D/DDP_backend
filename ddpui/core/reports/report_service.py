@@ -733,7 +733,7 @@ class ReportService:
         return snapshot
 
     @staticmethod
-    def delete_snapshot(snapshot_id: int, org: Org, orguser: OrgUser) -> bool:
+    def delete_snapshot(snapshot_id: int, org: Org, orguser: OrgUser) -> str:
         """Delete a snapshot.
 
         Args:
@@ -742,7 +742,8 @@ class ReportService:
             orguser: The user deleting the snapshot
 
         Returns:
-            True if deletion was successful
+            The snapshot's title, so callers (e.g. the API layer's audit log)
+            don't need a separate fetch of their own.
 
         Raises:
             SnapshotNotFoundError: If snapshot doesn't exist
@@ -753,9 +754,10 @@ class ReportService:
         if not can_delete_resource(orguser, snapshot):
             raise SnapshotPermissionError("Only the owner or an admin can delete this report.")
 
+        snapshot_title = snapshot.title
         snapshot.delete()
         logger.info(f"Deleted snapshot {snapshot_id} by user {orguser.user.email}")
-        return True
+        return snapshot_title
 
     # =========================================================================
     # Datetime Column Discovery

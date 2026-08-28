@@ -131,7 +131,7 @@ def mock_setup_dbt_workspace_ui_transform(orguser: OrgUser, tmp_path):
     ), patch(
         "ddpui.ddpdbt.dbt_service.DbtProjectManager.run_dbt_command", side_effect=run_dbt_init
     ) as mock_dbt_command, patch(
-        "ddpui.ddpdbt.dbt_service.create_or_update_org_cli_block", return_value=((None, None), None)
+        "ddpui.ddpdbt.dbt_service.create_or_update_dbt_profile_secret_blk", return_value=None
     ) as mock_create_cli_block, patch(
         "ddpui.ddpdbt.dbt_service.secretsmanager.retrieve_warehouse_credentials", return_value={}
     ) as mock_retrieve_creds:

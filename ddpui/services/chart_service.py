@@ -223,7 +223,7 @@ class ChartService:
         return chart
 
     @staticmethod
-    def delete_chart(chart_id: int, org: Org, orguser: OrgUser) -> bool:
+    def delete_chart(chart_id: int, org: Org, orguser: OrgUser) -> str:
         """Delete a chart.
 
         Args:
@@ -232,7 +232,8 @@ class ChartService:
             orguser: The user deleting the chart
 
         Returns:
-            True if deletion was successful
+            The chart's title, so callers (e.g. the API layer's audit log)
+            don't need a separate fetch of their own.
 
         Raises:
             ChartNotFoundError: If chart doesn't exist
@@ -248,7 +249,7 @@ class ChartService:
         chart.delete()
 
         logger.info(f"Deleted chart '{chart_title}' (id={chart_id}) by {orguser.user.email}")
-        return True
+        return chart_title
 
     @staticmethod
     def bulk_delete_charts(chart_ids: List[int], org: Org, orguser: OrgUser) -> Dict[str, Any]:
@@ -269,6 +270,7 @@ class ChartService:
                 "requested_count": 0,
                 "missing_ids": [],
                 "forbidden_ids": [],
+                "deleted_titles": [],
             }
 
         # Get charts that belong to this org
@@ -288,6 +290,7 @@ class ChartService:
                 f"Charts not deletable by {orguser.user.email} (not owner or admin): {forbidden_ids}"
             )
 
+        deleted_titles = [chart.title for chart in deletable]
         deleted_count = Chart.objects.filter(id__in=[chart.id for chart in deletable]).delete()[0]
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
@@ -297,6 +300,7 @@ class ChartService:
             "requested_count": len(chart_ids),
             "missing_ids": list(missing_ids),
             "forbidden_ids": forbidden_ids,
+            "deleted_titles": deleted_titles,
         }
 
     @staticmethod

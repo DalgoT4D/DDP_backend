@@ -590,7 +590,7 @@ class TestDeleteSnapshot:
         """Creator can delete their own snapshot"""
         snapshot_id = sample_snapshot.id
         result = ReportService.delete_snapshot(snapshot_id, org, orguser)
-        assert result is True
+        assert result == sample_snapshot.title
         assert not ReportSnapshot.objects.filter(id=snapshot_id).exists()
 
     def test_delete_non_creator_forbidden(self, sample_snapshot, org, other_orguser):
@@ -616,7 +616,7 @@ class TestDeleteSnapshot:
             orguser=other_orguser,
         )
         result = ReportService.delete_snapshot(snapshot.id, org, other_orguser)
-        assert result is True
+        assert result == "Analyst Report"
         assert not ReportSnapshot.objects.filter(id=snapshot.id).exists()
 
     def test_delete_admin_can_delete_others_snapshot(
@@ -636,7 +636,7 @@ class TestDeleteSnapshot:
             orguser=other_orguser,
         )
         result = ReportService.delete_snapshot(snapshot.id, org, orguser)
-        assert result is True
+        assert result == "Analyst Report"
         assert not ReportSnapshot.objects.filter(id=snapshot.id).exists()
 
     def test_delete_not_found(self, org, orguser):

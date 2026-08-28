@@ -18,7 +18,6 @@ class TaskType(str, Enum):
     DBT = "dbt"
     GIT = "git"
     EDR = "edr"
-    DBTCLOUD = "dbtcloud"
     AIRBYTE = "airbyte"
 
 
@@ -96,6 +95,7 @@ class OrgTask(models.Model):
         choices=OrgTaskGeneratedBy.choices(), max_length=50, default="system"
     )
     dbt = models.ForeignKey(OrgDbt, on_delete=models.CASCADE, null=True)
+    post_sync_transform = models.JSONField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_created=True, default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

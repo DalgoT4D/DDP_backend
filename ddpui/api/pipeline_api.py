@@ -7,9 +7,10 @@ from ninja.errors import HttpError
 from ddpui.ddpprefect import prefect_service
 from ddpui.ddpairbyte import airbyte_service
 
-from ddpui.models.org import OrgDataFlowv1, Org
+from ddpui.models.org import OrgDataFlowv1, Org, ConnectionMeta
 from ddpui.models.org_user import OrgUser
 from ddpui.models.llm import LogsSummarizationType
+from ddpui.models.tasks import OrgTask
 from ddpui.ddpprefect.schema import (
     PrefectFlowRunSchema,
     PrefectDataFlowCreateSchema4,
@@ -30,10 +31,37 @@ from ddpui.core.orchestrate.pipeline_service import (
     PipelineConfigurationError,
     PipelineServiceError,
 )
+from ddpui.core.audit_log_service import create_audit_log
+from ddpui.models.audit_log import AuditLogAction, AuditLogResourceType
 from ddpui.auth import has_permission
 
 pipeline_router = Router()
 logger = CustomLogger("ddpui")
+
+
+def _resolve_transform_task_labels(org: Org, transform_tasks_payload: list) -> list:
+    """Human-readable labels for a pipeline's transform tasks, for audit logging."""
+    if not transform_tasks_payload:
+        return []
+    uuids = [t.uuid for t in transform_tasks_payload]
+    org_tasks = OrgTask.objects.filter(org=org, uuid__in=uuids).select_related("task")
+    return sorted(t.task.label for t in org_tasks)
+
+
+def _resolve_connection_names(connection_ids: list) -> list:
+    """Human-readable connection names for a pipeline's Airbyte connections, for audit logging.
+
+    Falls back to the raw connection_id when no ConnectionMeta record exists for it
+    (e.g. connections created before ConnectionMeta name-tracking was added).
+    """
+    if not connection_ids:
+        return []
+    names_by_id = dict(
+        ConnectionMeta.objects.filter(connection_id__in=connection_ids).values_list(
+            "connection_id", "connection_name"
+        )
+    )
+    return sorted(names_by_id.get(cid) or cid for cid in connection_ids)
 
 
 @pipeline_router.post("v1/flows/")
@@ -48,6 +76,19 @@ def post_prefect_dataflow_v1(request, payload: PrefectDataFlowCreateSchema4):
 
     try:
         result = PipelineService.create_pipeline(org, payload)
+        create_audit_log(
+            org=org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=result.get("deploymentId", ""),
+            action=AuditLogAction.CREATE,
+            resource_fields={
+                "name": payload.name,
+                "cron": payload.cron,
+                "connections": _resolve_connection_names([c.id for c in payload.connections]),
+                "transform_tasks": _resolve_transform_task_labels(org, payload.transformTasks),
+            },
+        )
         return result
     except PipelineValidationError as error:
         raise HttpError(400, error.message) from error
@@ -111,6 +152,15 @@ def delete_prefect_dataflow_v1(request, deployment_id):
 
     try:
         result = PipelineService.delete_pipeline(orguser.org, deployment_id)
+        pipeline_name = result.pop("pipeline_name")
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            action=AuditLogAction.DELETE,
+            resource_fields={"name": pipeline_name},
+        )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -132,6 +182,22 @@ def put_prefect_dataflow_v1(request, deployment_id, payload: PrefectDataFlowUpda
 
     try:
         result = PipelineService.update_pipeline(orguser.org, deployment_id, payload)
+
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            action=AuditLogAction.UPDATE,
+            resource_fields={
+                "name": payload.name or "",
+                "cron": payload.cron,
+                "connections": _resolve_connection_names([c.id for c in payload.connections]),
+                "transform_tasks": _resolve_transform_task_labels(
+                    orguser.org, payload.transformTasks
+                ),
+            },
+        )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -155,9 +221,26 @@ def post_deployment_set_schedule(request, deployment_id, status):
     if orguser.org is None:
         raise HttpError(400, "register an organization first")
 
+    # Track schedule status change
+    old_status = "active" if status == "inactive" else "inactive"
+
     try:
         result = PipelineService.set_pipeline_schedule(orguser.org, deployment_id, status)
+        pipeline_name = result.pop("pipeline_name")
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            action=AuditLogAction.UPDATE,
+            resource_fields={
+                "name": pipeline_name,
+                "schedule_active": {"old": old_status, "new": status},
+            },
+        )
         return result
+    except PipelineNotFoundError:
+        raise HttpError(404, "pipeline not found")
     except PipelineValidationError as error:
         raise HttpError(422, error.message) from error
     except PipelineServiceError as error:
@@ -187,6 +270,15 @@ def post_run_prefect_org_deployment_task(request, deployment_id, payload: TaskPa
 
     try:
         result = PipelineService.run_pipeline(orguser.org, orguser, deployment_id, payload)
+        pipeline_name = result.pop("pipeline_name")
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            action=AuditLogAction.EXECUTE,
+            resource_fields={"name": pipeline_name},
+        )
         return result
     except PipelineNotFoundError:
         raise HttpError(404, "pipeline not found")
@@ -211,6 +303,15 @@ def clear_selected_streams_api(request, deployment_id: str, payload: ClearSelect
     try:
         result = PipelineService.post_clear_selected_streams_run(
             orguser.org, orguser, deployment_id, payload
+        )
+        pipeline_name = result.pop("pipeline_name")
+        create_audit_log(
+            org=orguser.org,
+            orguser=orguser,
+            resource_type=AuditLogResourceType.PIPELINE,
+            resource_id=deployment_id,
+            action=AuditLogAction.EXECUTE,
+            resource_fields={"name": pipeline_name},
         )
         return result
     except PipelineNotFoundError:

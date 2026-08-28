@@ -338,6 +338,13 @@ SIMPLE_JWT = {
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 FRONTEND_URL_V2 = os.getenv("FRONTEND_URL_V2")
 
+# SCHEDULE-A-CALL button in the trial lifecycle emails. Keep in sync with BOOK_A_CALL_URL in
+# webapp_v2 constants/trial.ts.
+TRIAL_SCHEDULE_CALL_URL = os.getenv("TRIAL_SCHEDULE_CALL_URL")
+
+# Where failed trial teardowns/cleanups are reported.
+TRIAL_ALERT_EMAIL = os.getenv("TRIAL_ALERT_EMAIL")
+
 # Secret for server-side PDF rendering (Playwright → public endpoints without is_public=True)
 RENDER_SECRET = os.getenv("RENDER_SECRET")
 
@@ -346,5 +353,22 @@ RENDER_SECRET = os.getenv("RENDER_SECRET")
 COOKIE_SECURE = True
 COOKIE_SAMESITE = "Lax" if os.getenv("ENVIRONMENT", "") == "production" else "None"
 COOKIE_HTTPONLY = True
+
+# Trials RDS instance — hosts per-trial databases provisioned for the "Try Now" clone flow
+# (Postgres-only for v1; BigQuery/Snowflake deferred).
+TRIALS_RDS_HOST = os.getenv("TRIALS_RDS_HOST")
+TRIALS_RDS_PORT = int(os.getenv("TRIALS_RDS_PORT", "5432"))
+TRIALS_RDS_ADMIN_USER = os.getenv("TRIALS_RDS_ADMIN_USER")
+TRIALS_RDS_ADMIN_PASSWORD = os.getenv("TRIALS_RDS_ADMIN_PASSWORD")
+
+# slug of the org used as the clone template for the "Try Now" trial flow
+TEMPLATE_ORG_SLUG = os.getenv("TEMPLATE_ORG_SLUG")
+
+# gitignored JSON file, keyed by template source name, holding the real (unmasked) Airbyte
+# source configs used to recreate sources in a trial workspace (Task P3.0a).
+# Defaults to `.template_source_creds.json` at the repo root; override via env if needed.
+TEMPLATE_SOURCE_CREDS_FILE = os.getenv(
+    "TEMPLATE_SOURCE_CREDS_FILE", str(BASE_DIR / ".template_source_creds.json")
+)
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5 MB

@@ -4,10 +4,10 @@ runner-flow env key `dbt-profile-secret-block`.
 
 Per org:
   1. If org.dbt is not set, skip — the block is a dbt-lifecycle artifact.
-  2. Preprocess airbyte creds (map to dbt-postgres/dbt-bigquery fields, strip
-     ssl_mode/ssl) and upsert `dbt-profile-<slug>` Secret block via
-     create_or_update_dbt_profile_secret_blk. Sets
-     OrgDbt.dbt_profile_secret_block FK.
+  2. Upsert the `dbt-profile-<slug>` Secret block via
+     create_or_update_dbt_profile_secret_blk, passing the RAW airbyte creds —
+     that helper does the dbt-postgres/dbt-bigquery field mapping itself. Sets
+     both the OrgWarehouse and OrgDbt dbt_profile_secret_block FKs.
   3. For every OrgDataFlowv1 belonging to that org, fetch the deployment, find
      DBTCORE tasks, populate env with `dbt-profile-secret-block`. Idempotent —
      skips deployments already up to date.
@@ -17,10 +17,7 @@ CLI profile blocks are not touched.
 
 from django.core.management.base import BaseCommand
 
-from ddpui.core.dbtfunctions import preprocess_airbyte_creds_for_dbt
-from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.ddpdbt.dbthelpers import create_or_update_dbt_profile_secret_blk
-from ddpui.ddpdbt.schema import DbtProjectParams
 from ddpui.ddpprefect import DBTCORE
 from ddpui.ddpprefect.prefect_service import get_deployment, update_dataflow_v1
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
@@ -64,20 +61,6 @@ class Command(BaseCommand):
                     skipped += 1
                     continue
 
-                dbt_project_params: DbtProjectParams | None = None
-                try:
-                    dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, org.dbt)
-                except Exception as err:  # pylint: disable=broad-exception-caught
-                    # SSL cert path needs dbt_project_params; non-SSL orgs are fine
-                    print(
-                        f"  [warn] {org.slug}: gather_dbt_project_params failed ({err}); "
-                        "proceeding without it"
-                    )
-
-                dbt_creds, profile_extras = preprocess_airbyte_creds_for_dbt(
-                    warehouse, airbyte_creds, dbt_project_params
-                )
-
                 if options["dry_run"]:
                     print(
                         f"  [dry-run] {org.slug}: would upsert dbt-profile-{org.slug} "
@@ -86,9 +69,9 @@ class Command(BaseCommand):
                     ok += 1
                     continue
 
-                block = create_or_update_dbt_profile_secret_blk(
-                    org, warehouse, dbt_creds, profile_extras
-                )
+                # raw airbyte creds: create_or_update_dbt_profile_secret_blk runs
+                # preprocess_airbyte_creds_for_dbt itself, same as every other caller
+                block = create_or_update_dbt_profile_secret_blk(org, warehouse, airbyte_creds)
                 if block is None:
                     print(
                         f"  [fail] {org.slug}: create_or_update_dbt_profile_secret_blk returned None"
@@ -100,7 +83,7 @@ class Command(BaseCommand):
                 ok += 1
 
                 # Patch deployments so DBTCORE task_configs carry the runner env key.
-                _patch_deployments_for_org(org)
+                _patch_deployments_for_org(org, warehouse)
             except Exception as err:  # pylint: disable=broad-exception-caught
                 print(f"  [fail] {org.slug}: {err}")
                 failed += 1
@@ -108,15 +91,17 @@ class Command(BaseCommand):
         print(f"\nDone. ok={ok} skipped={skipped} failed={failed}")
 
 
-def _patch_deployments_for_org(org: Org):
+def _patch_deployments_for_org(org: Org, warehouse: OrgWarehouse):
     """Ensure every DBTCORE task_config for this org's deployments has
     env["dbt-profile-secret-block"] populated. Skips deployments already
     up-to-date."""
-    if not org.dbt or not org.dbt.dbt_profile_secret_block:
-        print(f"    [warn] {org.slug}: no dbt_profile_secret_block FK — skipping deployment patch")
+    if not warehouse.dbt_profile_secret_block:
+        print(
+            f"    [warn] {org.slug}: no dbt_profile_secret_block on warehouse — skipping deployment patch"
+        )
         return
 
-    block_name = org.dbt.dbt_profile_secret_block.block_name
+    block_name = warehouse.dbt_profile_secret_block.block_name
     desired_env = {"dbt-profile-secret-block": block_name}
 
     for dataflow in OrgDataFlowv1.objects.filter(org=org):

@@ -28,7 +28,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
     )
 
     conn_info = {"some": "random value"}
-    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
     assert res == conn_info
 
     # SSH_KEY_AUTH
@@ -42,7 +42,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
             "tunnel_private_key_password": "tunnel_private_key_password",
         }
     }
-    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
     assert res["ssh_host"] == conn_info["tunnel_method"]["tunnel_host"]
     assert res["ssh_port"] == conn_info["tunnel_method"]["tunnel_port"]
     assert res["ssh_username"] == conn_info["tunnel_method"]["tunnel_user"]
@@ -61,7 +61,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
             "tunnel_user_password": "tunnel_user_password",
         }
     }
-    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
     assert res["ssh_host"] == conn_info["tunnel_method"]["tunnel_host"]
     assert res["ssh_port"] == conn_info["tunnel_method"]["tunnel_port"]
     assert res["ssh_username"] == conn_info["tunnel_method"]["tunnel_user"]
@@ -69,7 +69,7 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_tunnel_params(tm
 
     # make sure the username is mapped to user
     conn_info = {"username": "username"}
-    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
     assert res["user"] == conn_info["username"]
 
 
@@ -88,12 +88,11 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_success_ssl_params(tmpdi
     )
 
     conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}
-    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
     assert res["sslmode"] == "verify-ca"
-    assert res["sslrootcert"] == f"{tmpdir}/sslrootcert.pem"
+    # cert path is built by the proxy at flow-run time; here we just stash the content
+    assert res["sslrootcert"] is None
     assert res["sslrootcert_content"] == "ca_certificate"
-    # cert should NOT be written to disk at setup time
-    assert not os.path.exists(f"{tmpdir}/sslrootcert.pem")
 
 
 def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_mode_only(tmpdir):
@@ -111,20 +110,50 @@ def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_mode_only(tmpdir):
     )
 
     conn_info = {"ssl_mode": {"mode": "require"}}
-    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info, dbt_project_params)
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
     assert res["sslmode"] == "require"
     assert "sslrootcert" not in res
     assert "sslrootcert_content" not in res
 
 
-def test_map_airbyte_destination_spec_to_dbtcli_profile_ssl_no_org_project_dir():
-    """Tests ssl with ca_certificate but no dbt_project_params raises"""
-    conn_info = {"ssl_mode": {"mode": "verify-ca", "ca_certificate": "ca_certificate"}}
-    try:
-        map_airbyte_destination_spec_to_dbtcli_profile(conn_info, None)
-        assert False, "should have raised"
-    except Exception as e:
-        assert "org_project_dir is required" in str(e)
+def test_map_airbyte_ssl_false_sets_sslmode_disable():
+    """ssl: false must map to sslmode: disable regardless of ssl_mode presence."""
+    conn_info = {"host": "h", "ssl": False}
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "disable"
+
+
+def test_map_airbyte_ssl_false_overrides_ssl_mode():
+    """ssl: false takes precedence — ssl_mode cert config must be ignored."""
+    conn_info = {
+        "host": "h",
+        "ssl": False,
+        "ssl_mode": {"mode": "verify-ca", "ca_certificate": "real-cert"},
+    }
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "disable"
+    assert "sslrootcert_content" not in res
+    assert "sslrootcert" not in res
+
+
+def test_map_airbyte_ssl_true_falls_through_to_ssl_mode():
+    """ssl: true alone doesn't set sslmode — ssl_mode dict is the source of truth."""
+    conn_info = {
+        "host": "h",
+        "ssl": True,
+        "ssl_mode": {"mode": "require"},
+    }
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "require"
+
+
+def test_map_airbyte_ssl_false_with_no_ssl_mode():
+    """ssl: false with no ssl_mode still produces sslmode: disable."""
+    conn_info = {"host": "h", "ssl": False}
+    res = map_airbyte_destination_spec_to_dbtcli_profile(conn_info)
+    assert res["sslmode"] == "disable"
+    assert "sslrootcert_content" not in res
+    assert "sslrootcert" not in res
 
 
 # ============================================================================
@@ -143,7 +172,7 @@ def test_preprocess_airbyte_creds_for_dbt_postgres_no_extras():
         "ssl_mode": {"mode": "require"},  # no ca_certificate
         "ssl": True,
     }
-    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds, None)
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds)
     assert wh_extras == {}
     assert "ssl_mode" not in dbt_creds
     assert "ssl" not in dbt_creds
@@ -161,7 +190,7 @@ def test_preprocess_airbyte_creds_for_dbt_bigquery_extracts_location_and_priorit
         "dataset_location": "us-central1",
         "transformation_priority": "batch",
     }
-    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds, None)
+    dbt_creds, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds)
     assert wh_extras == {"location": "us-central1", "priority": "batch"}
     assert "dataset_location" not in dbt_creds
     assert "transformation_priority" not in dbt_creds
@@ -171,7 +200,7 @@ def test_preprocess_airbyte_creds_for_dbt_bigquery_empty_extras_when_absent():
     """bigquery: extras is {} when dataset_location and priority absent."""
     warehouse = SimpleNamespace(wtype="bigquery")
     airbyte_creds = {"type": "service_account", "project_id": "p"}
-    _, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds, None)
+    _, wh_extras = preprocess_airbyte_creds_for_dbt(warehouse, airbyte_creds)
     assert wh_extras == {}
 
 

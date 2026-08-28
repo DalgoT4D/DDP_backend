@@ -23,6 +23,7 @@ from ddpui.core.orgdbt_manager import DbtProjectManager
 from ddpui.core.pipelinefunctions import setup_edr_send_report_task_config
 from ddpui.ddpprefect.prefect_service import update_dataflow_v1
 from ddpui.ddpprefect.schema import PrefectDataFlowUpdateSchema3
+from ddpui.models.org import OrgWarehouse
 from ddpui.models.tasks import DataflowOrgTask, OrgTask
 from ddpui.utils.constants import TASK_GENERATE_EDR
 
@@ -49,12 +50,14 @@ class Command(BaseCommand):
 
         for orgtask in qs:
             org = orgtask.org
-            orgdbt = org.dbt
-            if orgdbt is None or orgdbt.dbt_profile_secret_block is None:
-                self.stdout.write(f"  [skip] {org.slug}: no dbt_profile_secret_block FK")
+            warehouse = OrgWarehouse.objects.filter(org=org).first()
+            warehouse_secret_block = warehouse.dbt_profile_secret_block if warehouse else None
+            if warehouse_secret_block is None:
+                self.stdout.write(f"  [skip] {org.slug}: no dbt_profile_secret_block on warehouse")
                 skipped += 1
                 continue
 
+            orgdbt = org.dbt
             try:
                 dbt_project_params = DbtProjectManager.gather_dbt_project_params(org, orgdbt)
             except Exception as err:  # pylint: disable=broad-exception-caught
@@ -62,7 +65,11 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
 
-            task_config = setup_edr_send_report_task_config(orgtask, dbt_project_params.project_dir)
+            task_config = setup_edr_send_report_task_config(
+                orgtask,
+                dbt_project_params.project_dir,
+                warehouse_secret_block=warehouse_secret_block,
+            )
             new_params = {
                 "config": {
                     "tasks": [task_config.to_json()],
