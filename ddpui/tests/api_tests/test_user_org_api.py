@@ -197,7 +197,7 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
         user=authuser,
         org=org_without_workspace,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-        has_seen_rbac_notice=True,
+        has_seen_resource_sharing_notice=True,
     )
 
     request = mock_request(orguser2)
@@ -213,15 +213,15 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     if response[0].org.slug == org_with_workspace.slug:
         assert response[0].new_role_slug == orguser1.new_role.slug
         assert response[1].new_role_slug == orguser2.new_role.slug
-        # the one-time RBAC notice flag is surfaced per-orguser on login
-        assert response[0].has_seen_rbac_notice is False
-        assert response[1].has_seen_rbac_notice is True
+        # the one-time resource-sharing notice flag is surfaced per-orguser on login
+        assert response[0].has_seen_resource_sharing_notice is False
+        assert response[1].has_seen_resource_sharing_notice is True
 
     elif response[1].org.slug == org_with_workspace.slug:
         assert response[1].new_role_slug == orguser1.new_role.slug
         assert response[0].new_role_slug == orguser2.new_role.slug
-        assert response[1].has_seen_rbac_notice is False
-        assert response[0].has_seen_rbac_notice is True
+        assert response[1].has_seen_resource_sharing_notice is False
+        assert response[0].has_seen_resource_sharing_notice is True
 
 
 def test_get_current_userv2_returns_the_plan_window(authuser, org_with_workspace):
@@ -641,18 +641,18 @@ def test_put_organization_user_self_v1(orguser):
 def test_put_organization_user_self_v1_marks_rbac_notice_seen(orguser):
     """the requestor can flip the one-time RBAC notice flag on their own OrgUser"""
     request = mock_request(orguser)
-    assert orguser.has_seen_rbac_notice is False
+    assert orguser.has_seen_resource_sharing_notice is False
 
     payload = OrgUserUpdatev1(
         toupdate_email="unused-param",
-        has_seen_rbac_notice=True,
+        has_seen_resource_sharing_notice=True,
     )
 
     response = put_organization_user_self_v1(request, payload)
 
-    assert response.has_seen_rbac_notice is True
+    assert response.has_seen_resource_sharing_notice is True
     orguser.refresh_from_db()
-    assert orguser.has_seen_rbac_notice is True
+    assert orguser.has_seen_resource_sharing_notice is True
 
 
 # ================================================================================

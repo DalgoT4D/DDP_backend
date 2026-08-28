@@ -178,7 +178,7 @@ def get_current_user_v2(request, org_slug: str = None):
                 plan_start_date=plan_start,
                 plan_end_date=plan_end,
                 work_domain=curr_orguser.work_domain,
-                has_seen_rbac_notice=curr_orguser.has_seen_rbac_notice,
+                has_seen_resource_sharing_notice=curr_orguser.has_seen_resource_sharing_notice,
             )
         )
 
