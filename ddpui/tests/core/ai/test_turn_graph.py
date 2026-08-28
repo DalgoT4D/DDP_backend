@@ -289,6 +289,10 @@ def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
     from ddpui.core.ai.agent.platform_guide_agent import build_guide_agent
 
     saver = InMemorySaver()
+    # ONE scripted reply: handoff_to_platform_guide is return_direct, so the
+    # SQL agent's loop must exit at the tool result WITHOUT calling the model
+    # again — a trailing assistant message would be rejected as prefill by
+    # Anthropic when the guide agent starts on the same thread.
     sql_agent = build_agent(
         checkpointer=saver,
         model=ScriptedChatModel(
@@ -303,7 +307,6 @@ def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
                         }
                     ],
                 ),
-                AIMessage(content="Handing you to the platform guide."),
             ]
         ),
         human_in_the_loop=False,
@@ -332,3 +335,9 @@ def test_sql_agent_hands_off_creation_to_the_guide_agent_mid_turn():
 
     assert result["messages"][-1].content == "Creating the KPIs now."
     assert validations == []  # handed-off turns skip the text-to-SQL validator
+    # the message BEFORE the guide's answer is the handoff ToolMessage — the
+    # SQL agent produced no assistant text after the tool (return_direct)
+    from langchain_core.messages import ToolMessage
+
+    assert isinstance(result["messages"][-2], ToolMessage)
+    assert result["messages"][-2].name == "handoff_to_platform_guide"

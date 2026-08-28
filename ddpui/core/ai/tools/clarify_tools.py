@@ -36,15 +36,19 @@ def ask_user(question: str) -> str:
     )
 
 
+# return_direct: the agent loop exits right after this tool runs, so the
+# conversation ends on the tool result (a user-role message for the model
+# API) — a trailing assistant message here would be rejected as "prefill"
+# by Anthropic when the guide agent makes its first call on the same thread.
 @register_tool
-@tool
+@tool(return_direct=True)
 def handoff_to_platform_guide(request_summary: str) -> str:
     """Hand the conversation to the platform guide, which creates charts,
     dashboards, KPIs, metrics, and reports. Call this the moment the user
     asks for (or agrees to) creating any of those — do NOT describe what
     you can't do, do NOT ask them to re-send their request. Summarize what
-    they want created in request_summary. After calling this, stop — the
-    guide continues the conversation."""
+    they want created in request_summary. The guide continues the
+    conversation immediately."""
     return (
         f"(Handing off to the platform guide: {request_summary}. "
         "It will continue this conversation and create what was asked.)"
