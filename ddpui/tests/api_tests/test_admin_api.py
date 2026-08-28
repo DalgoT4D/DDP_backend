@@ -40,7 +40,7 @@ from ddpui.api.admin_api import (
     get_admin_org_flags,
     put_admin_org_flag,
     delete_admin_org_flag,
-    put_admin_bulk_flag,
+    get_admin_flag_orgs,
     post_admin_notification_preview,
     post_admin_notification,
     get_admin_notifications,
@@ -50,7 +50,6 @@ from ddpui.api.admin_api import (
     AdminUpdateOrgSchema,
     AdminChangeRoleSchema,
     AdminSetOrgFlagSchema,
-    AdminBulkSetFlagSchema,
     AdminNotificationAudienceSchema,
     AdminCreateNotificationSchema,
 )
@@ -1043,56 +1042,35 @@ def test_admin_delete_org_flag_clears_the_override(platform_admin_request, org):
     assert response["REPORTS"] is False
 
 
-def test_admin_bulk_flag_unknown_name_is_400(platform_admin_request, org):
-    """flag_name is validated once for the whole bulk request, before any org is touched"""
+def test_get_admin_flag_orgs_unknown_name_is_400(platform_admin_request):
+    """flag_name is validated for the read route too -- an unknown name is a 400,
+    not an empty or partial list"""
     with pytest.raises(HttpError) as excinfo:
-        put_admin_bulk_flag(
-            platform_admin_request,
-            "NOT_A_REAL_FLAG",
-            AdminBulkSetFlagSchema(org_ids=[org.id], enabled=True),
-        )
+        get_admin_flag_orgs(platform_admin_request, "NOT_A_REAL_FLAG")
     assert excinfo.value.status_code == 400
 
 
-def test_admin_bulk_flag_mixed_success_and_failure(platform_admin_request, org):
-    """a nonexistent org_id in the batch fails on its own; valid orgs still succeed —
-    the whole point of best-effort over all-or-nothing (plan.md §2, §4.3)"""
-    other_org = Org.objects.create(name="flags-bulk-org", slug="flags-bulk-org")
-    nonexistent_id = 9999999
-
-    response = put_admin_bulk_flag(
-        platform_admin_request,
-        "REPORTS",
-        AdminBulkSetFlagSchema(org_ids=[org.id, other_org.id, nonexistent_id], enabled=True),
+def test_get_admin_flag_orgs_reflects_each_orgs_current_status(platform_admin_request, org):
+    """every org appears with its own resolved status -- overridden or falling back
+    to the (off) global default -- driving the portal-wide Feature Flags table"""
+    other_org = Org.objects.create(name="flags-status-org", slug="flags-status-org")
+    put_admin_org_flag(
+        platform_admin_request, org.id, "REPORTS", AdminSetOrgFlagSchema(enabled=True)
     )
 
-    results_by_org = {item.org_id: item.success for item in response}
-    assert results_by_org == {org.id: True, other_org.id: True, nonexistent_id: False}
-    assert get_admin_org_flags(platform_admin_request, org.id)["REPORTS"] is True
-    assert get_admin_org_flags(platform_admin_request, other_org.id)["REPORTS"] is True
+    response = get_admin_flag_orgs(platform_admin_request, "REPORTS")
+
+    status_by_org = {item.org_id: item.enabled for item in response}
+    assert status_by_org[org.id] is True
+    assert status_by_org[other_org.id] is False
     other_org.delete()
 
 
-def test_admin_bulk_flag_result_has_no_message_field(platform_admin_request):
-    """the failure shape is generic — {org_id, success} only, so a bulk request can
-    never be used to tell a nonexistent org apart from any other failure (plan.md §5)"""
-    response = put_admin_bulk_flag(
-        platform_admin_request,
-        "REPORTS",
-        AdminBulkSetFlagSchema(org_ids=[9999999], enabled=True),
-    )
-    assert len(response) == 1
-    assert response[0].success is False
-    assert set(response[0].dict().keys()) == {"org_id", "success"}
-
-
-def test_admin_bulk_flag_forbidden_for_non_platform_admin(orguser, org):
-    """the bulk route is gated too — non-admin gets 403"""
+def test_get_admin_flag_orgs_forbidden_for_non_platform_admin(orguser):
+    """the read route is gated too -- non-admin gets 403"""
     request = mock_request(orguser)
     with pytest.raises(HttpError) as excinfo:
-        put_admin_bulk_flag(
-            request, "REPORTS", AdminBulkSetFlagSchema(org_ids=[org.id], enabled=True)
-        )
+        get_admin_flag_orgs(request, "REPORTS")
     assert excinfo.value.status_code == 403
 
 

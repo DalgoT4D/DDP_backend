@@ -204,6 +204,37 @@ def test_get_admin_notification_history_resolves_org_names_and_recipient_count()
     assert entry.recipient_count == 1
 
 
+# --------------------------------------------------------------------------- #
+# feature flags -- get_flag_status_for_orgs
+# --------------------------------------------------------------------------- #
+
+
+def test_get_flag_status_for_orgs_unknown_flag_returns_none():
+    """flag_name is validated up front -- an unknown name returns None, same as
+    set_org_flag/clear_org_flag, rather than an empty or partial list"""
+    Org.objects.create(name="Solo Org", slug="flag-status-solo")
+
+    result = admin_service.get_flag_status_for_orgs("NOT_A_REAL_FLAG")
+
+    assert result is None
+
+
+def test_get_flag_status_for_orgs_reflects_each_orgs_override_or_default():
+    """one row per org, ordered by name; an org with no override falls back to the
+    (off) global default, an org with an override reflects it -- reusing
+    get_org_flags' resolution per org rather than a separate implementation"""
+    org_with_override = Org.objects.create(name="B Org", slug="flag-status-b")
+    org_without_override = Org.objects.create(name="A Org", slug="flag-status-a")
+    admin_service.set_org_flag(org_with_override, "REPORTS", True)
+
+    results = admin_service.get_flag_status_for_orgs("REPORTS")
+
+    assert results == [
+        {"org_id": org_without_override.id, "org_name": "A Org", "enabled": False},
+        {"org_id": org_with_override.id, "org_name": "B Org", "enabled": True},
+    ]
+
+
 def test_removal_impact_is_zero_for_a_user_with_no_content():
     """
     A user who created nothing orphans nothing. The confirm dialog reads these counts,

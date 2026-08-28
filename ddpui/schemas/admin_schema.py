@@ -178,23 +178,13 @@ class AdminSetOrgFlagSchema(Schema):
     enabled: bool
 
 
-class AdminBulkSetFlagSchema(Schema):
-    """payload to turn one flag on/off for several orgs at once"""
-
-    org_ids: List[int]
-    enabled: bool
-
-
-class AdminBulkFlagResultItem(Schema):
-    """
-    one org's outcome from a bulk flag set. Deliberately success-only -- no message
-    field -- so a failed org_id can never be told apart from a different failure
-    cause (e.g. "doesn't exist" vs "write failed") by whoever reads the response
-    (plan.md §5: the bulk endpoint must not become an org-existence oracle).
-    """
+class AdminFlagOrgStatusItem(Schema):
+    """one org's current status for a single flag -- drives the portal-wide Feature
+    Flags table (one row per org, each independently toggleable)."""
 
     org_id: int
-    success: bool
+    org_name: str
+    enabled: bool
 
 
 # ── Notifications tab (M2) ───────────────────────────────────────────────────

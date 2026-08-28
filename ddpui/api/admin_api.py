@@ -31,8 +31,7 @@ from ddpui.schemas.admin_schema import (
     OrgDeletionImpactSchema,
     AdminFeatureFlagCatalogItem,
     AdminSetOrgFlagSchema,
-    AdminBulkSetFlagSchema,
-    AdminBulkFlagResultItem,
+    AdminFlagOrgStatusItem,
     AdminNotificationAudienceSchema,
     AdminNotificationPreviewResponseSchema,
     AdminCreateNotificationSchema,
@@ -326,16 +325,16 @@ def delete_admin_org_flag(request, org_id: int, flag_name: str):
     return admin_service.get_org_flags(org)
 
 
-@admin_router.put("/flags/{flag_name}/orgs", response=List[AdminBulkFlagResultItem])
+@admin_router.get("/flags/{flag_name}/orgs", response=List[AdminFlagOrgStatusItem])
 @platform_admin_required
-def put_admin_bulk_flag(request, flag_name: str, payload: AdminBulkSetFlagSchema):
-    """Turn one flag on/off for several selected orgs at once. flag_name is validated
-    once, up front, for the whole request; each org_id then succeeds or fails on its
-    own (best-effort, not all-or-nothing) -- see admin_service.bulk_set_org_flags."""
-    results = admin_service.bulk_set_org_flags(flag_name, payload.org_ids, payload.enabled)
+def get_admin_flag_orgs(request, flag_name: str):
+    """Every org's current status for one flag -- powers the portal-wide Feature Flags
+    table. Read-only: each row's toggle calls the existing single-org
+    PUT /orgs/{org_id}/flags/{flag_name} route, not this one."""
+    results = admin_service.get_flag_status_for_orgs(flag_name)
     if results is None:
         raise HttpError(400, f"unknown flag_name: {flag_name}")
-    return [AdminBulkFlagResultItem(**result) for result in results]
+    return [AdminFlagOrgStatusItem(**result) for result in results]
 
 
 # ======================= Notifications tab (M2) ===============================

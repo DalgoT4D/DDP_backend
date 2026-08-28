@@ -38,7 +38,6 @@ from ddpui.utils.feature_flags import (
     disable_feature_flag,
     clear_org_flag as _clear_org_flag_row,
     get_all_feature_flags_for_org,
-    bulk_set_feature_flag,
 )
 
 logger = CustomLogger("ddpui.core.admin")
@@ -253,6 +252,23 @@ def get_org_flags(org: Org) -> dict:
     return get_all_feature_flags_for_org(org)
 
 
+def get_flag_status_for_orgs(flag_name: str) -> Optional[List[dict]]:
+    """One row per org -- {org_id, org_name, enabled} -- for a single flag. Reuses
+    get_org_flags (global default merged with org override) per org rather than
+    duplicating that resolution logic. None if flag_name is not in the registry --
+    validated once, up front, same as the other flag routes."""
+    if flag_name not in FEATURE_FLAGS:
+        return None
+    return [
+        {
+            "org_id": org.id,
+            "org_name": org.name,
+            "enabled": get_org_flags(org).get(flag_name, False),
+        }
+        for org in Org.objects.all().order_by("name")
+    ]
+
+
 def set_org_flag(org: Org, flag_name: str, enabled: bool) -> Optional[bool]:
     """Turn one flag on/off for a single org. None if flag_name is not in the registry."""
     if enabled:
@@ -264,14 +280,6 @@ def clear_org_flag(org: Org, flag_name: str) -> Optional[bool]:
     """Clear this org's override for a flag, falling back to the global default. None
     if flag_name is not in the registry."""
     return _clear_org_flag_row(flag_name, org)
-
-
-def bulk_set_org_flags(flag_name: str, org_ids: List[int], enabled: bool) -> Optional[List[dict]]:
-    """Turn one flag on/off for several orgs at once. None if flag_name is not in the
-    registry -- validated once, up front, never a per-org concern."""
-    if flag_name not in FEATURE_FLAGS:
-        return None
-    return bulk_set_feature_flag(flag_name, org_ids, enabled)
 
 
 # --------------------------------------------------------------------------- #
