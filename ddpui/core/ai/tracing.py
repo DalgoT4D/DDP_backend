@@ -10,6 +10,7 @@ Tracing is OFF unless LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set.
 Every call here is wrapped so a tracing failure can never break a chat turn.
 """
 
+import asyncio
 import os
 from contextvars import ContextVar
 from typing import Any
@@ -229,6 +230,13 @@ class LangfuseTurnHandler(BaseCallbackHandler):
             # must not pollute error-rate dashboards and alerts
             if error.__class__.__name__ in ("GraphInterrupt", "NodeInterrupt", "Interrupt"):
                 self._end_stage(run_id, status_message="paused: waiting for the user")
+            # the turn's asyncio task was killed mid-run (browser disconnect,
+            # backend restart/deploy) — an abort, not an application error
+            elif isinstance(error, asyncio.CancelledError):
+                self._end_stage(
+                    run_id,
+                    status_message="aborted: turn cancelled (client disconnect or server restart)",
+                )
             else:
                 self._end_stage(run_id, level="ERROR", status_message=str(error)[:500])
         except Exception:  # pylint: disable=broad-except

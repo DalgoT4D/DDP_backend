@@ -44,11 +44,13 @@ def ask_user(question: str) -> str:
 @tool(return_direct=True)
 def handoff_to_platform_guide(request_summary: str) -> str:
     """Hand the conversation to the platform guide, which creates charts,
-    dashboards, KPIs, metrics, and reports. Call this the moment the user
-    asks for (or agrees to) creating any of those — do NOT describe what
-    you can't do, do NOT ask them to re-send their request. Summarize what
-    they want created in request_summary. The guide continues the
-    conversation immediately."""
+    dashboards, KPIs, metrics, and reports. Call this ONLY when the user's
+    current message asks to create one of those (or accepts an offer to) —
+    do NOT describe what you can't do, do NOT ask them to re-send their
+    request. NEVER call this for questions about the data itself (counts,
+    trends, comparisons, top N): the guide cannot run queries — answer
+    those yourself. Summarize what they want created in request_summary.
+    The guide continues the conversation immediately."""
     return (
         f"(Handing off to the platform guide: {request_summary}. "
         "It will continue this conversation and create what was asked.)"

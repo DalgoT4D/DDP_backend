@@ -20,6 +20,7 @@ forwards these events verbatim. Event shapes are the WS protocol from plan §4.4
 After the stream ends a ChatWithDataTurnAudit row is written (spec §7 layer 5).
 """
 
+import asyncio
 import time
 import uuid
 from typing import AsyncIterator
@@ -300,6 +301,12 @@ async def run_turn(
                                 value=1 if validation["verdict"] == "ok" else 0,
                                 comment=validation.get("caveat"),
                             )
+    except asyncio.CancelledError:
+        # the turn's task was killed (browser disconnect, backend restart) —
+        # record the abort honestly, then let the cancellation propagate
+        status = "aborted"
+        final_message = final_message or "aborted: turn cancelled"
+        raise
     except Exception:  # pylint: disable=broad-except
         status = "failed"
         logger.exception(f"chat_with_data turn failed request_uuid={request_uuid}")
