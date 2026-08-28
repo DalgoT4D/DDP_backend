@@ -8,11 +8,17 @@ from datetime import datetime
 from uuid import uuid4
 
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.utils.text import slugify
 from django.utils import timezone as django_timezone
 
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, GUEST_ROLE
+from ddpui.models.alert import Alert
+from ddpui.models.dashboard import Dashboard
+from ddpui.models.metric import KPI, Metric
 from ddpui.models.org import Org, OrgType
+from ddpui.models.report import ReportSnapshot
+from ddpui.models.visualization import Chart
 from ddpui.models.org_user import (
     AcceptInvitationSchema,
     DeleteOrgUserPayload,
@@ -194,13 +200,21 @@ def delete_orguser_v1(requestor_orguser: OrgUser, payload: DeleteOrgUserPayload)
     if orguser_to_delete.new_role.level > requestor_orguser.new_role.level:
         return None, "cannot delete user having higher role"
 
-    # remove the invitations associated with the org user
-    Invitation.objects.filter(
-        invited_by__org=requestor_orguser.org, invited_email=payload.email
-    ).delete()
+    # Reassign resources owned by the removed user to the admin doing the
+    # removal so nothing is left orphaned.
+    org = requestor_orguser.org
 
-    # delete the org user
-    orguser_to_delete.delete()
+    with transaction.atomic():
+        for Model in (Dashboard, Chart, Metric, KPI, ReportSnapshot, Alert):
+            Model.objects.filter(org=org, created_by=orguser_to_delete).update(
+                created_by=requestor_orguser
+            )
+
+        # remove the invitations associated with the org user
+        Invitation.objects.filter(invited_by__org=org, invited_email=payload.email).delete()
+
+        # delete the org user
+        orguser_to_delete.delete()
 
     return None, None
 

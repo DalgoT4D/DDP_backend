@@ -283,12 +283,10 @@ def update_general_access(request, rtype: str, resource_id: str, payload: Genera
             if prev_public and hasattr(resource, "public_disabled_at"):
                 resource.public_disabled_at = timezone.now()
                 update_fields.append("public_disabled_at")
-            # Wipe the token only when going fully private — turning "public → internal"
-            # keeps the token dormant for audit / re-enable, matching the existing
-            # dashboard/report toggle semantics.
-            if is_private and hasattr(resource, "public_share_token"):
-                resource.public_share_token = None
-                update_fields.append("public_share_token")
+            # Token stays dormant across public → internal AND public → private, so
+            # re-enabling public later reuses the same URL. The public endpoint gates
+            # on `is_public`, not token existence, so leaving the token in place while
+            # `is_public=False` doesn't expose anything.
 
     resource.save(update_fields=update_fields)
 

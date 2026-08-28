@@ -674,6 +674,9 @@ def rename_user_group(request, group_id: int, payload: UpdateGroupPayload):
     if group is None:
         raise HttpError(404, "group not found")
 
+    if not is_creator_or_admin(orguser, group):
+        raise HttpError(403, "only the group creator or an admin can rename this group")
+
     name = payload.name.strip()
     if not name:
         raise HttpError(400, "group name is required")
@@ -728,6 +731,9 @@ def add_user_group_members(request, group_id: int, payload: AddMembersPayload):
     if group is None:
         raise HttpError(404, "group not found")
 
+    if not is_creator_or_admin(orguser, group):
+        raise HttpError(403, "only the group creator or an admin can modify this group")
+
     email_to_invitation_id = _resolve_pending_emails(
         orguser.org,
         orguser,
@@ -750,6 +756,9 @@ def remove_user_group_member(request, group_id: int, member_id: int):
     group = OrgUserGroup.objects.filter(id=group_id, org=orguser.org).first()
     if group is None:
         raise HttpError(404, "group not found")
+
+    if not is_creator_or_admin(orguser, group):
+        raise HttpError(403, "only the group creator or an admin can modify this group")
 
     deleted, _ = OrgUserGroupMember.objects.filter(group=group, id=member_id).delete()
     if deleted == 0:

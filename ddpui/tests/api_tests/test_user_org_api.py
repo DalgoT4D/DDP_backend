@@ -477,7 +477,7 @@ def test_delete_organization_users_success_v1(orguser):
 
 
 def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db, orguser):
-    """deleting an orguser must not delete the dashboards and charts they created"""
+    """deleting an orguser reassigns their dashboards and charts to the requesting admin"""
     request = mock_request(orguser)
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
@@ -514,8 +514,10 @@ def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db,
     assert Chart.objects.filter(id=chart.id).exists()
     assert Dashboard.objects.filter(id=others_dashboard.id).exists()
     dashboard.refresh_from_db()
-    assert dashboard.created_by is None
+    chart.refresh_from_db()
+    assert dashboard.created_by == orguser
     assert dashboard.last_modified_by is None
+    assert chart.created_by == orguser
     others_dashboard.refresh_from_db()
     assert others_dashboard.created_by == orguser
     assert others_dashboard.last_modified_by is None
@@ -523,7 +525,7 @@ def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db,
 
 
 def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, orguser):
-    """deleting an orguser must not delete the metrics, kpis and alerts they created"""
+    """deleting an orguser reassigns their metrics, kpis, and alerts to the requesting admin"""
     request = mock_request(orguser)
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
@@ -565,7 +567,7 @@ def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, o
     for obj in [metric, kpi, alert]:
         assert type(obj).objects.filter(id=obj.id).exists()
         obj.refresh_from_db()
-        assert obj.created_by is None
+        assert obj.created_by == orguser
 
     # KPI.metric is PROTECT, so clean up in dependency order for fixture teardown
     alert.delete()
@@ -574,8 +576,8 @@ def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, o
     user.delete()
 
 
-def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1(seed_db, orguser):
-    """after a creator is deleted, their dashboard can be deleted by an admin but not a member"""
+def test_delete_organization_users_reassigns_dashboard_to_requestor_v1(seed_db, orguser):
+    """after a creator is deleted, their dashboard is reassigned to the requesting admin"""
     request = mock_request(orguser)
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
@@ -587,15 +589,15 @@ def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1
     dashboard = Dashboard.objects.create(
         title="orphaned-dashboard", org=orguser.org, created_by=creator
     )
-    # a second dashboard so the orphaned one isn't the org's last (deleting
+    # a second dashboard so the reassigned one isn't the org's last (deleting
     # the last dashboard is blocked by a separate rule)
     Dashboard.objects.create(title="other-dashboard", org=orguser.org, created_by=orguser)
 
     delete_organization_users_v1(request, payload)
     dashboard.refresh_from_db()
-    assert dashboard.created_by is None
+    assert dashboard.created_by == orguser
 
-    # a non-admin member of the org cannot delete the orphaned dashboard
+    # a non-admin member of the org cannot delete the reassigned dashboard
     member_user = User.objects.create(email="member-email", username="member-email")
     member = OrgUser.objects.create(
         org=orguser.org,
@@ -606,7 +608,7 @@ def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1
         DashboardService.delete_dashboard(dashboard.id, orguser.org, member)
     assert Dashboard.objects.filter(id=dashboard.id).exists()
 
-    # an admin can delete it (the requestor orguser fixture holds the admin role)
+    # the requesting admin, who is now the owner, can delete it
     assert (
         DashboardService.delete_dashboard(dashboard.id, orguser.org, orguser)
         == "orphaned-dashboard"

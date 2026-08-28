@@ -366,18 +366,20 @@ def test_internal_to_public_generates_token_and_timestamps(dashboard, owner_anal
     assert dashboard.public_disabled_at is None
 
 
-def test_public_to_private_clears_token_spec_line_263(dashboard, owner_analyst):
-    """Spec line 263: 'Turning Private on immediately disables any active
-    public link on the resource.' Token must be cleared."""
+def test_public_to_private_keeps_token_dormant(dashboard, owner_analyst):
+    """Going private disables the public link (is_public=False) but preserves the
+    token so re-enabling public later reuses the same URL. The public endpoint
+    gates on is_public, not token existence."""
     _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
     dashboard.refresh_from_db()
-    assert dashboard.public_share_token  # sanity
+    original_token = dashboard.public_share_token
+    assert original_token  # sanity
 
     _set_mode(owner_analyst, "dashboard", dashboard.id, "private")
     dashboard.refresh_from_db()
     assert dashboard.is_private is True
     assert dashboard.is_public is False
-    assert dashboard.public_share_token is None
+    assert dashboard.public_share_token == original_token  # dormant, preserved
 
 
 def test_public_to_internal_keeps_token_dormant(dashboard, owner_analyst):
@@ -394,15 +396,33 @@ def test_public_to_internal_keeps_token_dormant(dashboard, owner_analyst):
     assert dashboard.public_disabled_at is not None
 
 
+def test_public_url_survives_private_round_trip(dashboard, owner_analyst):
+    """After public → private → public, the same public_share_token comes back so
+    the previously-shared URL still works."""
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
+    dashboard.refresh_from_db()
+    original_token = dashboard.public_share_token
+    assert original_token
+
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "private")
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
+    dashboard.refresh_from_db()
+    assert dashboard.is_public is True
+    assert dashboard.public_share_token == original_token  # same URL
+
+
 def test_private_to_internal_does_not_reenable_public_spec_line_263(dashboard, owner_analyst):
     """Spec line 263: 'turning [Private] off does not restore the public
-    link — the owner must re-enable it manually.'"""
+    link — the owner must re-enable it manually.' Token stays dormant across
+    the round-trip so a later re-enable reuses the same URL."""
     _set_mode(owner_analyst, "dashboard", dashboard.id, "public")
-    _set_mode(owner_analyst, "dashboard", dashboard.id, "private")  # clears token
+    dashboard.refresh_from_db()
+    original_token = dashboard.public_share_token
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "private")
     _set_mode(owner_analyst, "dashboard", dashboard.id, "internal")
     dashboard.refresh_from_db()
     assert dashboard.is_public is False  # still off, not silently re-enabled
-    assert dashboard.public_share_token is None  # still cleared
+    assert dashboard.public_share_token == original_token  # preserved for later re-enable
 
 
 def test_public_on_chart_fails_400(org, owner_analyst):
@@ -2542,20 +2562,11 @@ def test_member_cannot_create_group(org, member):
     assert exc.value.status_code in (403, 404)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: rename_user_group / add_user_group_members / remove_user_group_member "
-        "lack the ``is_creator_or_admin`` check that delete_user_group has. "
-        "Spec line 206 says 'Only the group's creator and Admins can edit'. "
-        "Fix: add is_creator_or_admin gate to those three endpoints."
-    ),
-    strict=True,
-)
 def test_non_creator_analyst_cannot_rename_another_analysts_group(
     org, owner_analyst, other_analyst
 ):
-    """Spec line 206: only the group's creator or an Admin can edit membership
-    or rename. Other Analysts (with ``can_edit_user_group``) must be blocked."""
+    """Only the group's creator or an Admin can rename. Other Analysts
+    (with ``can_edit_user_group`` on their role) must be blocked."""
     group = _group(org, owner_analyst, "AnalystOwnedGroup")
     with pytest.raises(HttpError) as exc:
         rename_user_group(
