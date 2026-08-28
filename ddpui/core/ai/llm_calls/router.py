@@ -9,6 +9,8 @@ data_question/simple — the v1 behavior. The router may only ever divert
 obviously-non-data turns; it must never block a real question.
 """
 
+import dataclasses
+import re
 from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -48,9 +50,13 @@ Rules:
 - needs_clarification: ONLY when the question is so ambiguous no reasonable
   query exists (e.g. "compare them" with no referent). Set "clarification"
   to one short, friendly question to ask back.
-- IMPORTANT: if the message refers to the recent conversation ("this",
-  "that", "the above", a short answer to the assistant's last question),
-  keep it with the SAME intent as that conversation: a follow-up in a
+- IMPORTANT: an explicit creation request ("create/make/build a chart,
+  KPI, dashboard, metric, report") is ALWAYS platform_help — even in the
+  middle of a data conversation. The guide sees the full conversation, so
+  "create a chart of this" works.
+- IMPORTANT: for OTHER follow-ups that refer to the recent conversation
+  ("this", "that", "the above", a short answer to the assistant's last
+  question), keep the SAME intent as that conversation: a follow-up in a
   creation/how-to exchange is platform_help; a follow-up in a data
   exchange is data_question. Never ask to re-state context that already
   appears in the conversation.
@@ -67,6 +73,30 @@ class RouteResult:
 
 
 FAIL_OPEN = RouteResult()
+
+# Deterministic backstop: an explicit creation request must reach the guide
+# agent even when the model misroutes it (e.g. follow-up stickiness in a data
+# conversation) or the router fails open. Two shapes: a creation verb followed
+# by a platform object ("create a KPI for silt carted"), and "chart/plot this".
+_CREATION_REQUEST = re.compile(
+    r"\b(create|make|build|generate|set\s?up|add)\b"
+    r".{0,60}?\b(chart|graph|dashboard|kpi|metric|report)s?\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_VISUALIZE_REFERENCE = re.compile(
+    r"\b(chart|plot|graph|visuali[sz]e)\b\s+(this|that|it|these|them)\b", re.IGNORECASE
+)
+
+
+def _apply_platform_help_backstop(question: str, route: RouteResult) -> RouteResult:
+    """Force platform_help for unmistakable creation requests. Never touches
+    small_talk (the phrases can't be greetings) — only routes that would
+    otherwise send a creation request into the SQL agent."""
+    if route.intent == "platform_help":
+        return route
+    if _CREATION_REQUEST.search(question) or _VISUALIZE_REFERENCE.search(question):
+        return dataclasses.replace(route, intent="platform_help", clarification=None)
+    return route
 
 
 def get_router_model() -> BaseChatModel:
@@ -117,19 +147,22 @@ async def route_question(
 
         intent = data.get("intent")
         if intent not in INTENTS:
-            return FAIL_OPEN
+            return _apply_platform_help_backstop(question, FAIL_OPEN)
         complexity = data.get("complexity")
         if complexity not in COMPLEXITIES:
             complexity = "simple"
 
         entities = [str(e) for e in data.get("entities") or [] if isinstance(e, (str, int))]
         clarification = data.get("clarification")
-        return RouteResult(
-            intent=intent,
-            complexity=complexity,
-            entities=entities,
-            clarification=str(clarification) if clarification else None,
+        return _apply_platform_help_backstop(
+            question,
+            RouteResult(
+                intent=intent,
+                complexity=complexity,
+                entities=entities,
+                clarification=str(clarification) if clarification else None,
+            ),
         )
     except Exception:  # pylint: disable=broad-except
         logger.exception("chat_with_data: router failed; failing open to data_question")
-        return FAIL_OPEN
+        return _apply_platform_help_backstop(question, FAIL_OPEN)

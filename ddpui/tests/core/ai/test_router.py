@@ -100,3 +100,34 @@ def test_routes_platform_help():
     model = FakeModel(json.dumps({"intent": "platform_help", "complexity": "simple"}))
     route = run(route_question("how do I create a KPI?", model))
     assert route.intent == "platform_help"
+
+
+def test_creation_requests_override_data_routing_mid_conversation():
+    """The user's exact failure: mid-data-conversation, the model routes a
+    creation follow-up as data_question — the deterministic backstop must
+    force platform_help so the guide agent (which shares the thread) builds it."""
+    model = FakeModel(json.dumps({"intent": "data_question", "complexity": "simple"}))
+
+    for question in [
+        "create a KPI for total silt carted vs target",
+        "create a chart of farmers by vulnerability category",
+        "make me a dashboard for the field team",
+        "chart this by district",
+    ]:
+        route = run(route_question(question, model))
+        assert route.intent == "platform_help", question
+
+
+def test_creation_backstop_applies_even_when_the_router_fails():
+    route = run(route_question("create a chart of farmers by district", ExplodingModel()))
+    assert route.intent == "platform_help"
+
+
+def test_backstop_leaves_genuine_data_questions_alone():
+    model = FakeModel(json.dumps({"intent": "data_question", "complexity": "simple"}))
+    for question in [
+        "how many reports did we create last month?",
+        "how many farmers are in each vulnerability category?",
+    ]:
+        route = run(route_question(question, model))
+        assert route.intent == "data_question", question
