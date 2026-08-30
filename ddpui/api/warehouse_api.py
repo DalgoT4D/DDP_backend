@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from typing import List
 import json
@@ -133,7 +134,7 @@ def get_column_values(request, schema_name: str, table_name: str, column_name: s
 
 @warehouse_router.get("/table_data/{schema_name}/{table_name}")
 @has_permission(["can_view_warehouse_data"])
-def get_table_data(
+async def get_table_data(
     request,
     schema_name: str,
     table_name: str,
@@ -143,7 +144,8 @@ def get_table_data(
     order: int = 1,
 ):
     """Fetches data from a specific table in a warehouse"""
-    return get_warehouse_data(
+    return await asyncio.to_thread(
+        get_warehouse_data,
         request,
         "table_data",
         schema_name=schema_name,
