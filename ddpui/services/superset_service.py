@@ -410,6 +410,56 @@ class SupersetService:
             logger.error(f"Failed to create embedded UUID for dashboard {dashboard_id}: {str(e)}")
             return None
 
+    def import_dashboard(
+        self,
+        bundle_zip: bytes,
+        passwords: Optional[Dict[str, str]] = None,
+        overwrite: bool = True,
+    ) -> Dict[str, Any]:
+        """Import a dashboard export bundle (zip of yaml) into the org's Superset.
+
+        Used to provision Dalgo's standard dashboards (dalgo-dashboard-templates)
+        once the dbt_taf_metrics models have been built for the org. The caller
+        must rewrite the bundle's databases/*.yaml sqlalchemy_uri and
+        datasets/*.yaml schema to the org's warehouse before calling; `passwords`
+        maps each database yaml path inside the zip to its connection password,
+        since Superset never exports passwords.
+
+        Args:
+            bundle_zip: The dashboard export bundle as zip bytes
+            passwords: Mapping of database yaml path -> connection password
+            overwrite: Overwrite existing dashboards/charts/datasets with the
+                same UUIDs (makes re-provisioning idempotent)
+
+        Returns:
+            Superset's import response payload
+
+        Raises:
+            HttpError: On API failure
+        """
+        access_token = self.get_access_token()
+        csrf_token, session_cookie = self.get_csrf_token(access_token)
+
+        url = f"{self.org.viz_url.rstrip('/')}/api/v1/dashboard/import/"
+
+        response = self._make_request_with_retry(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "X-CSRFToken": csrf_token,
+                "Referer": f"{self.org.viz_url.rstrip('/')}",
+            },
+            files={"formData": ("dashboard_bundle.zip", bundle_zip, "application/zip")},
+            data={
+                "overwrite": json.dumps(overwrite),
+                "passwords": json.dumps(passwords or {}),
+            },
+            cookies={"session": session_cookie} if session_cookie else {},
+            timeout=120,
+        )
+        return response.json()
+
     def get_dashboard_by_id(self, dashboard_id: str) -> Dict[str, Any]:
         """Get single dashboard details.
 
