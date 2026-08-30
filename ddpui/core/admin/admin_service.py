@@ -25,6 +25,7 @@ from ddpui.schemas.admin_schema import (
     AdminFeatureFlagCatalogItem,
     AdminCreateNotificationSchema,
     AdminNotificationSchema,
+    OrgDeletionImpactSchema,
 )
 from ddpui.schemas.notifications_api_schemas import SentToEnum, NotificationDataSchema
 from ddpui.core import orgfunctions, orguserfunctions
@@ -38,6 +39,7 @@ from ddpui.utils.feature_flags import (
     disable_feature_flag,
     clear_org_flag as _clear_org_flag_row,
     get_all_feature_flags_for_org,
+    get_flag_value_for_orgs,
 )
 
 logger = CustomLogger("ddpui.core.admin")
@@ -121,18 +123,19 @@ def update_org(org: Org, payload: AdminUpdateOrgSchema) -> Org:
     return org
 
 
-def delete_org_impact(org: Org) -> Tuple[int, int, int, int, int, int, int]:
-    """(users, warehouses, connections, pipelines, dashboards, charts, reports) that
-    deleting this org would destroy. Unlike removal_impact (SET_NULL, content kept),
-    every one of these is a hard CASCADE delete."""
-    return (
-        org_user_count(org),
-        OrgWarehouse.objects.filter(org=org).count(),
-        OrgTask.objects.filter(org=org, task__type="airbyte").count(),
-        OrgDataFlowv1.objects.filter(org=org, dataflow_type="orchestrate").count(),
-        Dashboard.objects.filter(org=org).count(),
-        Chart.objects.filter(org=org).count(),
-        ReportSnapshot.objects.filter(org=org).count(),
+def delete_org_impact(org: Org) -> OrgDeletionImpactSchema:
+    """What deleting this org would destroy. Unlike removal_impact (SET_NULL, content
+    kept), every one of these is a hard CASCADE delete. Returns the response schema
+    directly -- named fields, so adding a count can't silently shift the others the way
+    a positional tuple could (same shape as notification_response)."""
+    return OrgDeletionImpactSchema(
+        user_count=org_user_count(org),
+        warehouse_count=OrgWarehouse.objects.filter(org=org).count(),
+        connection_count=OrgTask.objects.filter(org=org, task__type="airbyte").count(),
+        pipeline_count=OrgDataFlowv1.objects.filter(org=org, dataflow_type="orchestrate").count(),
+        dashboard_count=Dashboard.objects.filter(org=org).count(),
+        chart_count=Chart.objects.filter(org=org).count(),
+        report_count=ReportSnapshot.objects.filter(org=org).count(),
     )
 
 
@@ -234,7 +237,7 @@ def removal_impact(orguser: OrgUser) -> Tuple[int, int, int]:
 
 
 # --------------------------------------------------------------------------- #
-# Feature flags tab (M3) -- per-org and multi-org on/off
+# Feature flags tab (M3) -- every write is single-org; the portal-wide view is a read
 # --------------------------------------------------------------------------- #
 
 
@@ -253,20 +256,16 @@ def get_org_flags(org: Org) -> dict:
 
 
 def get_flag_status_for_orgs(flag_name: str) -> Optional[List[dict]]:
-    """One row per org -- {org_id, org_name, enabled} -- for a single flag. Reuses
-    get_org_flags (global default merged with org override) per org rather than
-    duplicating that resolution logic. None if flag_name is not in the registry --
-    validated once, up front, same as the other flag routes."""
-    if flag_name not in FEATURE_FLAGS:
+    """One row per org -- {org_id, org_name, enabled} -- for a single flag. The
+    global-default/org-override resolution is delegated to feature_flags rather than
+    rebuilt here; get_flag_value_for_orgs resolves every org in ONE query, where
+    get_org_flags per org would cost one query per org. None if flag_name is not in
+    the registry -- validated inside that call, same as the other flag routes."""
+    orgs = list(Org.objects.all().order_by("name"))
+    statuses = get_flag_value_for_orgs(flag_name, orgs)
+    if statuses is None:
         return None
-    return [
-        {
-            "org_id": org.id,
-            "org_name": org.name,
-            "enabled": get_org_flags(org).get(flag_name, False),
-        }
-        for org in Org.objects.all().order_by("name")
-    ]
+    return [{"org_id": org.id, "org_name": org.name, "enabled": statuses[org.id]} for org in orgs]
 
 
 def set_org_flag(org: Org, flag_name: str, enabled: bool) -> Optional[bool]:
@@ -317,8 +316,15 @@ def preview_notification_recipients(org_ids: Optional[List[int]]) -> int:
 def create_admin_notification(
     author_email: str, payload: AdminCreateNotificationSchema
 ) -> Tuple[Optional[str], Optional[Notification]]:
-    """Send a broadcast immediately. Blocks a 0-recipient audience before creating
-    anything; author is server-derived, never taken from the client."""
+    """Send a broadcast immediately. Blocks a 0-recipient audience and a
+    no-channel-selected broadcast before creating anything; author is server-derived,
+    never taken from the client."""
+    if not payload.send_in_app and not payload.send_email:
+        # the composer disables Send in this state, but the rule has to hold for any
+        # client: with both channels off the broadcast would reach nobody while still
+        # persisting a Notification + a NotificationRecipient row per recipient.
+        return "Select at least one channel: in-app or email", None
+
     recipient_ids = _resolve_recipient_ids(payload.org_ids)
     if not recipient_ids:
         return "No recipients found for the given audience", None

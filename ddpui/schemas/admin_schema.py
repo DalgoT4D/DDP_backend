@@ -180,7 +180,8 @@ class AdminSetOrgFlagSchema(Schema):
 
 class AdminFlagOrgStatusItem(Schema):
     """one org's current status for a single flag -- drives the portal-wide Feature
-    Flags table (one row per org, each independently toggleable)."""
+    Flags table (one row per org, each toggled independently through the single-org
+    PUT /orgs/{org_id}/flags/{flag_name} route)."""
 
     org_id: int
     org_name: str

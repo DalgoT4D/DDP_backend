@@ -125,24 +125,7 @@ def get_admin_org_delete_impact(request, org_id: int):
     """Count everything deleting this org would destroy, so the confirm dialog can
     warn before the action."""
     org = _get_org_or_404(org_id)
-    (
-        user_count,
-        warehouse_count,
-        connection_count,
-        pipeline_count,
-        dashboard_count,
-        chart_count,
-        report_count,
-    ) = admin_service.delete_org_impact(org)
-    return OrgDeletionImpactSchema(
-        user_count=user_count,
-        warehouse_count=warehouse_count,
-        connection_count=connection_count,
-        pipeline_count=pipeline_count,
-        dashboard_count=dashboard_count,
-        chart_count=chart_count,
-        report_count=report_count,
-    )
+    return admin_service.delete_org_impact(org)
 
 
 @admin_router.delete("/orgs/{org_id}", response=AdminSuccessSchema)
@@ -282,9 +265,11 @@ def delete_admin_org_invitation(request, org_id: int, invitation_id: int):
 
 
 # ======================= Feature flags tab (M3) ==============================
-# Per-org and multi-org on/off. OrgFeatureFlag is reused as-is (no new model); the
-# new work here is these admin-facing HTTP routes on top of the existing
-# enable/disable_feature_flag primitives (utils/feature_flags.py).
+# Every write is single-org: one flag, one org, one call. The portal-wide view is a
+# READ (GET /flags/{flag_name}/orgs) whose rows each toggle through that same
+# single-org route -- there is no bulk/apply-to-many write. OrgFeatureFlag is reused
+# as-is (no new model); the new work here is these admin-facing HTTP routes on top of
+# the existing enable/disable_feature_flag primitives (utils/feature_flags.py).
 
 
 @admin_router.get("/flags/catalog", response=List[AdminFeatureFlagCatalogItem])

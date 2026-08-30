@@ -17,6 +17,8 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from ddpui.core.admin import admin_service
@@ -24,6 +26,7 @@ from ddpui.models.org import Org
 from ddpui.models.org_plans import OrgPlans
 from ddpui.models.org_user import Invitation, OrgUser
 from ddpui.schemas.admin_schema import AdminUpdateOrgSchema, AdminCreateNotificationSchema
+from ddpui.utils.feature_flags import enable_feature_flag
 
 pytestmark = pytest.mark.django_db
 
@@ -210,8 +213,9 @@ def test_get_admin_notification_history_resolves_org_names_and_recipient_count()
 
 
 def test_get_flag_status_for_orgs_unknown_flag_returns_none():
-    """flag_name is validated up front -- an unknown name returns None, same as
-    set_org_flag/clear_org_flag, rather than an empty or partial list"""
+    """an unknown flag_name returns None -- same as set_org_flag/clear_org_flag --
+    rather than an empty or partial list. Validation lives in the feature_flags
+    delegate, so it stays in step with the registry itself."""
     Org.objects.create(name="Solo Org", slug="flag-status-solo")
 
     result = admin_service.get_flag_status_for_orgs("NOT_A_REAL_FLAG")
@@ -221,8 +225,8 @@ def test_get_flag_status_for_orgs_unknown_flag_returns_none():
 
 def test_get_flag_status_for_orgs_reflects_each_orgs_override_or_default():
     """one row per org, ordered by name; an org with no override falls back to the
-    (off) global default, an org with an override reflects it -- reusing
-    get_org_flags' resolution per org rather than a separate implementation"""
+    (off) global default, an org with an override reflects it -- delegating the
+    resolution to feature_flags.get_flag_value_for_orgs rather than reimplementing it"""
     org_with_override = Org.objects.create(name="B Org", slug="flag-status-b")
     org_without_override = Org.objects.create(name="A Org", slug="flag-status-a")
     admin_service.set_org_flag(org_with_override, "REPORTS", True)
@@ -233,6 +237,45 @@ def test_get_flag_status_for_orgs_reflects_each_orgs_override_or_default():
         {"org_id": org_without_override.id, "org_name": "A Org", "enabled": False},
         {"org_id": org_with_override.id, "org_name": "B Org", "enabled": True},
     ]
+
+
+def test_get_flag_status_for_orgs_falls_back_to_the_global_default():
+    """with a global (org=None) row ON, an org carrying no row of its own reads as ON;
+    an explicit org override still wins over it"""
+    org_default = Org.objects.create(name="A Default", slug="flag-global-a")
+    org_opted_out = Org.objects.create(name="B OptedOut", slug="flag-global-b")
+    enable_feature_flag("REPORTS", None)  # global default ON
+    admin_service.set_org_flag(org_opted_out, "REPORTS", False)
+
+    results = admin_service.get_flag_status_for_orgs("REPORTS")
+
+    assert results == [
+        {"org_id": org_default.id, "org_name": "A Default", "enabled": True},
+        {"org_id": org_opted_out.id, "org_name": "B OptedOut", "enabled": False},
+    ]
+
+
+def test_get_flag_status_for_orgs_query_count_does_not_grow_with_org_count():
+    """
+    The portal-wide table resolves every org in a fixed number of queries. Resolving
+    per org (get_org_flags in a loop) cost one query per org, so this table got slower
+    for every org onboarded -- the exact regression this guards.
+    """
+    for i in range(3):
+        Org.objects.create(name=f"Org {i}", slug=f"flag-nplus1-{i}")
+
+    with CaptureQueriesContext(connection) as ctx:
+        admin_service.get_flag_status_for_orgs("REPORTS")
+    three_orgs = len(ctx.captured_queries)
+
+    for i in range(3, 9):
+        Org.objects.create(name=f"Org {i}", slug=f"flag-nplus1-{i}")
+
+    with CaptureQueriesContext(connection) as ctx:
+        admin_service.get_flag_status_for_orgs("REPORTS")
+    nine_orgs = len(ctx.captured_queries)
+
+    assert nine_orgs == three_orgs
 
 
 def test_removal_impact_is_zero_for_a_user_with_no_content():

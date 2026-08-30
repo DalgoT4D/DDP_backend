@@ -876,25 +876,9 @@ def test_admin_router_has_no_separate_session_auth():
     assert opted_out == set()
 
 
-def test_admin_currentuser_refuses_signed_in_non_platform_admin(orguser):
-    """
-    A perfectly valid NORMAL session is not enough to reach the admin API. The session
-    is now shared, so the whole guarantee rests on @platform_admin_required: a signed-in
-    user without the flag gets 403, not admin identity.
-    """
-    request = mock_request(orguser)
-    with pytest.raises(HttpError) as excinfo:
-        get_admin_currentuser(request)
-    assert excinfo.value.status_code == 403
-
-
-def test_admin_currentuser_reports_platform_admin(platform_admin_request):
-    """A platform admin resolves identity — this is what AdminGuard reads."""
-    result = get_admin_currentuser(platform_admin_request)
-    assert result == {
-        "email": platform_admin_request.orguser.user.email,
-        "is_platform_admin": True,
-    }
+# The 403-for-a-signed-in-non-admin and 200-for-a-platform-admin guarantees this
+# section depends on are asserted once, at the top of this file:
+# test_admin_currentuser_forbidden_for_non_platform_admin / _ok_for_platform_admin.
 
 
 # ---- the contract the admin sign-in depends on -------------------------------
@@ -1153,6 +1137,31 @@ def test_admin_notification_create_blocks_zero_recipient_audience(platform_admin
             AdminCreateNotificationSchema(message="hi", email_subject="subject", org_ids=[9999999]),
         )
     assert excinfo.value.status_code == 400
+
+
+def test_admin_notification_create_blocks_both_channels_off(platform_admin_request, org):
+    """
+    Both channels off would persist a Notification plus a recipient row per user and
+    deliver to nobody. The composer disables Send in this state; the server must not
+    rely on that. Blocked with a 400, and nothing is created.
+    """
+    before = Notification.objects.count()
+
+    with pytest.raises(HttpError) as excinfo:
+        post_admin_notification(
+            platform_admin_request,
+            AdminCreateNotificationSchema(
+                message="nowhere",
+                email_subject="subject",
+                org_ids=[org.id],
+                send_in_app=False,
+                send_email=False,
+            ),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "at least one channel" in str(excinfo.value)
+    assert Notification.objects.count() == before
 
 
 def test_admin_notification_history_forbidden_for_non_platform_admin(orguser):
