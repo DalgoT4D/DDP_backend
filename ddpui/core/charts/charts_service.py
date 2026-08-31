@@ -1,5 +1,6 @@
 """Chart service module for handling chart business logic"""
 
+import copy
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -18,6 +19,7 @@ from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartDataPayload,
     ExecuteChartQuery,
+    MapDataOverlayPayload,
     TransformDataForChart,
 )
 
@@ -1764,3 +1766,61 @@ def get_chart_data_total_rows(
     total_rows = count_result[0]["total"] if count_result else 0
 
     return total_rows
+
+
+def execute_map_data_overlay(
+    map_payload: MapDataOverlayPayload,
+    org_warehouse: OrgWarehouse,
+    resolved_dashboard_filters: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Run a map data overlay query and return [{name, value}] rows.
+
+    Shared by the live dashboard map endpoint and the report-scoped (public
+    and private) map endpoints — callers differ only in how they resolve
+    dashboard_filters before calling this.
+    """
+    warehouse_client = get_warehouse_client(org_warehouse)
+
+    extra_config = copy.deepcopy(map_payload.extra_config or {})
+
+    chart_payload = ChartDataPayload(
+        chart_type="map",
+        schema_name=map_payload.schema_name,
+        table_name=map_payload.table_name,
+        dimension_col=map_payload.geographic_column,
+        metrics=map_payload.metrics,
+        extra_config=extra_config,
+        dashboard_filters=resolved_dashboard_filters,
+    )
+
+    query_builder = build_chart_query(chart_payload, org_warehouse)
+
+    if map_payload.filters:
+        for filter_column, filter_value in map_payload.filters.items():
+            query_builder.where_clause(
+                func.upper(column(filter_column)) == str(filter_value).upper()
+            )
+
+    execute_payload = ExecuteChartQuery(
+        chart_type="map",
+        dimension_col=map_payload.geographic_column,
+        metrics=map_payload.metrics,
+    )
+
+    dict_results = execute_chart_query(warehouse_client, query_builder, execute_payload)
+
+    # Alias defaults to 'value' for every current caller (chart builder preview,
+    # dashboards, reports), but falls back to the same default alias
+    # build_multi_metric_query itself would use, in case a caller omits it.
+    first_metric = map_payload.metrics[0]
+    metric_alias = first_metric.alias or f"{first_metric.aggregation}_{first_metric.column}"
+
+    map_data = []
+    for row in dict_results:
+        region_name = row.get(map_payload.geographic_column)
+        value = row.get(metric_alias)
+        if region_name and value is not None:
+            normalized_name = str(region_name).strip().title()
+            map_data.append({"name": normalized_name, "value": float(value)})
+
+    return {"data": map_data, "count": len(map_data)}

@@ -19,7 +19,7 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.chart_schemas import ChartConfig
+from ddpui.schemas.chart_schemas import ChartConfig, ChartDataPayload, MapDataOverlayPayload
 from ddpui.schemas.kpi_schema import KPIResponse, KPIExtraConfig
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (
@@ -30,6 +30,7 @@ from ddpui.schemas.report_schema import (
     FrozenDashboardConfig,
     SnapshotUpdate,
 )
+from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import build_chart_data_payload
 from ddpui.services.dashboard_service import DashboardService
 from ddpui.core.kpi.kpi_service import KPIService, compute_rag_status
@@ -478,6 +479,112 @@ class ReportService:
         return KPIService.compute_kpi_data(
             kpi_response, org, date_filter=date_filter, dashboard_filters=resolved_dashboard_filters
         )
+
+    @staticmethod
+    def get_report_map_data(
+        snapshot_id: int,
+        org: Org,
+        map_payload: MapDataOverlayPayload,
+    ) -> Dict[str, Any]:
+        """Get map data overlay for a report snapshot.
+
+        Resolves dashboard filters from the snapshot's frozen config (same as
+        get_report_chart_data/get_report_kpi_data), so filtering keeps working
+        even if the source dashboard or filter is later deleted.
+        """
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+
+        resolved_dashboard_filters = None
+        if map_payload.dashboard_filters:
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                map_payload.dashboard_filters,
+                frozen_filters,
+                map_payload.schema_name,
+                map_payload.table_name,
+                warehouse_client,
+            )
+
+        return charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, resolved_dashboard_filters
+        )
+
+    @staticmethod
+    def _resolve_table_payload_filters(
+        snapshot: ReportSnapshot,
+        payload: ChartDataPayload,
+        org_warehouse: OrgWarehouse,
+        dashboard_filters: Optional[Dict[str, Any]],
+    ) -> ChartDataPayload:
+        """Return a copy of `payload` with dashboard_filters resolved against
+        the snapshot's frozen filter config, so filtering keeps working even
+        if the source dashboard or filter is later deleted."""
+        resolved_dashboard_filters = None
+        if dashboard_filters:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                dashboard_filters,
+                frozen_filters,
+                payload.schema_name,
+                payload.table_name,
+                warehouse_client,
+            )
+
+        return ChartDataPayload(
+            **{
+                **payload.model_dump(exclude={"dashboard_filters"}),
+                "dashboard_filters": resolved_dashboard_filters,
+            }
+        )
+
+    @staticmethod
+    def get_report_table_data(
+        snapshot_id: int,
+        org: Org,
+        payload: ChartDataPayload,
+        page: int,
+        limit: int,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated table data preview for a table chart in a report snapshot."""
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        modified_payload = ReportService._resolve_table_payload_filters(
+            snapshot, payload, org_warehouse, dashboard_filters
+        )
+        return charts_service.get_chart_data_table_preview(
+            org_warehouse, modified_payload, page, limit
+        )
+
+    @staticmethod
+    def get_report_table_total_rows(
+        snapshot_id: int,
+        org: Org,
+        payload: ChartDataPayload,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Get total row count for a table chart in a report snapshot."""
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        modified_payload = ReportService._resolve_table_payload_filters(
+            snapshot, payload, org_warehouse, dashboard_filters
+        )
+        return charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
 
     # =========================================================================
     # Snapshot CRUD

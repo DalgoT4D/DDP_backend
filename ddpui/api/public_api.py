@@ -20,7 +20,6 @@ from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
-from ddpui.api.charts_api import MapDataOverlayPayload
 from ddpui.core.charts import charts_service
 
 from ddpui.api.dashboard_native_api import (
@@ -32,7 +31,12 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schemas import (
+    ChartConfig,
+    ChartDataResponse,
+    ChartDataPayload,
+    MapDataOverlayPayload,
+)
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
@@ -701,9 +705,6 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
 
-        # Use same logic as authenticated API
-        extra_config = copy.deepcopy(map_payload.extra_config or {})
-
         # Handle dashboard filters (same logic as private API)
         resolved_dashboard_filters = None
         if map_payload.dashboard_filters:
@@ -719,60 +720,13 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
                 warehouse_client,
             )
 
-        # Build chart payload for map data query (same logic as private API)
-        from ddpui.schemas.chart_schemas import ChartDataPayload, ExecuteChartQuery
-
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            dashboard_filters=resolved_dashboard_filters,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, resolved_dashboard_filters
         )
 
-        # Get warehouse client and build query using standard chart service
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
+        logger.info(f"Public map data overlay query returned {result['count']} rows")
 
-        # Add filters if provided (drill-down filters) with case-insensitive matching
-        if map_payload.filters:
-            from sqlalchemy import column, func
-
-            for filter_column, filter_value in map_payload.filters.items():
-                # Use case-insensitive matching for string filters (same as private API)
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        # Execute query using standard chart service
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        logger.info(f"Public map data overlay query returned {len(dict_results)} rows")
-
-        # Transform results for map visualization (same logic as private API)
-        map_data = []
-        for row in dict_results:
-            # Get the dimension value (geographic region name)
-            region_name = row.get(map_payload.geographic_column)
-            # Get the aggregated value using 'value' alias (same as private API)
-            value = row.get("value")
-
-            if region_name and value is not None:
-                # Normalize region name to proper case for frontend compatibility (same as private API)
-                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"data": map_data, "is_valid": True, "count": len(map_data)}
+        return {**result, "is_valid": True}
 
     except Dashboard.DoesNotExist:
         logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
@@ -1463,46 +1417,25 @@ def get_public_report_map_data(request, token: str):
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
 
-        extra_config = copy.deepcopy(map_payload.extra_config or {})
+        # Resolve dashboard filters from the report's frozen config (same pattern
+        # as get_public_report_table_data), so filtering survives the source
+        # dashboard/filter being deleted after the snapshot was created.
+        resolved_dashboard_filters = None
+        if map_payload.dashboard_filters:
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                map_payload.dashboard_filters,
+                frozen_filters,
+                map_payload.schema_name,
+                map_payload.table_name,
+                warehouse_client,
+            )
 
-        from ddpui.schemas.chart_schemas import ExecuteChartQuery
-
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, resolved_dashboard_filters
         )
 
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
-
-        if map_payload.filters:
-            for filter_column, filter_value in map_payload.filters.items():
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        map_data = []
-        for row in dict_results:
-            region_name = row.get(map_payload.geographic_column)
-            value = row.get("value")
-            if region_name and value is not None:
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"data": map_data, "is_valid": True, "count": len(map_data)}
+        return {**result, "is_valid": True}
 
     except ReportSnapshot.DoesNotExist:
         logger.warning(f"Public report map data access failed - token not found: {token}")

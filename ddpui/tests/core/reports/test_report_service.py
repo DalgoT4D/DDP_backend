@@ -23,7 +23,7 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
 from django.contrib.auth.models import User
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -31,6 +31,7 @@ from ddpui.models.visualization import Chart
 from ddpui.models.report import ReportSnapshot
 from ddpui.auth import ACCOUNT_MANAGER_ROLE, ANALYST_ROLE
 from ddpui.core.reports.report_service import ReportService
+from ddpui.schemas.chart_schemas import ChartDataPayload, MapDataOverlayPayload
 from ddpui.schemas.report_schema import SnapshotUpdate
 from ddpui.core.reports.exceptions import (
     SnapshotNotFoundError,
@@ -1794,3 +1795,224 @@ class TestGetReportKpiData:
 
         snapshot.delete()
         dashboard.delete()
+
+
+# ================================================================================
+# get_report_map_data / get_report_table_data / get_report_table_total_rows
+# ================================================================================
+
+
+@pytest.fixture
+def xsrc_org_warehouse(org):
+    warehouse = OrgWarehouse.objects.create(wtype="postgres", credentials="{}", org=org)
+    yield warehouse
+    warehouse.delete()
+
+
+@pytest.fixture
+def xsrc_dashboard(orguser, org):
+    dashboard = Dashboard.objects.create(
+        title="Cross-source Filter Dashboard",
+        dashboard_type="native",
+        grid_columns=12,
+        tabs=[],
+        created_by=orguser,
+        org=org,
+    )
+    yield dashboard
+    try:
+        dashboard.refresh_from_db()
+        dashboard.delete()
+    except Dashboard.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def xsrc_filter(xsrc_dashboard):
+    """Filter defined against 'orders' — report map/table payloads below target
+    a different table ('line_items') that shares this filter's column name."""
+    f = DashboardFilter.objects.create(
+        dashboard=xsrc_dashboard,
+        name="Date Filter",
+        filter_type="datetime",
+        schema_name="public",
+        table_name="orders",
+        column_name="created_at",
+        settings={},
+        order=0,
+    )
+    yield f
+    try:
+        f.refresh_from_db()
+        f.delete()
+    except DashboardFilter.DoesNotExist:
+        pass
+
+
+@pytest.fixture
+def xsrc_snapshot(orguser, xsrc_dashboard, xsrc_filter, xsrc_org_warehouse):
+    snapshot = ReportService.create_snapshot(
+        title="Cross-source Filter Report",
+        dashboard_id=xsrc_dashboard.id,
+        date_column={
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "created_at",
+        },
+        period_start=date(2025, 1, 1),
+        period_end=date(2025, 1, 31),
+        orguser=orguser,
+    )
+    yield snapshot
+    try:
+        snapshot.refresh_from_db()
+        snapshot.delete()
+    except ReportSnapshot.DoesNotExist:
+        pass
+
+
+class TestReportMapAndTableCrossSourceFilters:
+    """Dashboard filters must apply to any report map/table chart whose table
+    has the filtered column, not just the filter's own source table — and
+    must keep working even after the source dashboard/filter is deleted,
+    since these two endpoints resolve against the snapshot's frozen config."""
+
+    def test_map_data_filter_applies_across_tables_and_survives_deletion(
+        self, xsrc_snapshot, xsrc_dashboard, xsrc_filter, xsrc_org_warehouse, org
+    ):
+        filter_id = xsrc_filter.id
+        xsrc_dashboard.delete()  # cascades to xsrc_filter too
+
+        mock_warehouse_client = MagicMock()
+        mock_warehouse_client.column_exists.return_value = True
+
+        map_payload = MapDataOverlayPayload(
+            schema_name="public",
+            table_name="line_items",  # different table than the filter's own "orders"
+            geographic_column="region",
+            value_column="amount",
+            metrics=[{"column": "amount", "aggregation": "sum", "alias": "value"}],
+            dashboard_filters={str(filter_id): "2025-01-15"},
+        )
+
+        with patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client",
+            return_value=mock_warehouse_client,
+        ), patch(
+            "ddpui.core.reports.report_service.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_execute.return_value = {"data": [], "count": 0}
+            result = ReportService.get_report_map_data(xsrc_snapshot.id, org, map_payload)
+
+        assert result == {"data": [], "count": 0}
+        mock_warehouse_client.column_exists.assert_called_once_with(
+            "public", "line_items", "created_at"
+        )
+        _, _, sent_filters = mock_execute.call_args[0]
+        assert sent_filters == [
+            {
+                "filter_id": str(filter_id),
+                "column": "created_at",
+                "type": "datetime",
+                "value": "2025-01-15",
+                "settings": {},
+            }
+        ]
+
+    def test_table_data_filter_applies_across_tables_and_survives_deletion(
+        self, xsrc_snapshot, xsrc_dashboard, xsrc_filter, xsrc_org_warehouse, org
+    ):
+        filter_id = xsrc_filter.id
+        xsrc_dashboard.delete()
+
+        mock_warehouse_client = MagicMock()
+        mock_warehouse_client.column_exists.return_value = True
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="line_items",
+            dimensions=["created_at"],
+        )
+
+        with patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client",
+            return_value=mock_warehouse_client,
+        ), patch(
+            "ddpui.core.reports.report_service.charts_service.get_chart_data_table_preview"
+        ) as mock_preview:
+            mock_preview.return_value = {
+                "columns": ["created_at"],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+            result = ReportService.get_report_table_data(
+                xsrc_snapshot.id,
+                org,
+                payload,
+                page=0,
+                limit=100,
+                dashboard_filters={str(filter_id): "2025-01-15"},
+            )
+
+        assert result["data"] == []
+        mock_warehouse_client.column_exists.assert_called_once_with(
+            "public", "line_items", "created_at"
+        )
+        _, sent_payload, _, _ = mock_preview.call_args[0]
+        assert sent_payload.dashboard_filters == [
+            {
+                "filter_id": str(filter_id),
+                "column": "created_at",
+                "type": "datetime",
+                "value": "2025-01-15",
+                "settings": {},
+            }
+        ]
+
+    def test_table_total_rows_filter_applies_across_tables(
+        self, xsrc_snapshot, xsrc_dashboard, xsrc_filter, xsrc_org_warehouse, org
+    ):
+        filter_id = xsrc_filter.id
+        xsrc_dashboard.delete()
+
+        mock_warehouse_client = MagicMock()
+        mock_warehouse_client.column_exists.return_value = True
+
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="line_items",
+            dimensions=["created_at"],
+        )
+
+        with patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client",
+            return_value=mock_warehouse_client,
+        ), patch(
+            "ddpui.core.reports.report_service.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_total.return_value = 7
+            result = ReportService.get_report_table_total_rows(
+                xsrc_snapshot.id,
+                org,
+                payload,
+                dashboard_filters={str(filter_id): "2025-01-15"},
+            )
+
+        assert result == 7
+        mock_warehouse_client.column_exists.assert_called_once_with(
+            "public", "line_items", "created_at"
+        )
+        _, sent_payload = mock_total.call_args[0]
+        assert sent_payload.dashboard_filters == [
+            {
+                "filter_id": str(filter_id),
+                "column": "created_at",
+                "type": "datetime",
+                "value": "2025-01-15",
+                "settings": {},
+            }
+        ]
