@@ -142,3 +142,59 @@ def test_subquery():
             LIMIT 10 OFFSET 5
         """,
     )
+
+
+def _normalize(sql: str) -> str:
+    """Collapse whitespace for comparison."""
+    return re.sub(r"\s+", " ", sql).strip()
+
+
+def test_add_aggregate_column_boolean_sum_casts_to_integer():
+    """SUM on a boolean column must wrap in CAST(... AS INTEGER)."""
+    qb = AggQueryBuilder()
+    qb.fetch_from("users", "public")
+    qb.add_aggregate_column("is_active", "sum", alias="active_sum", column_type="boolean")
+
+    sql = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+    assert "CAST(is_active AS INTEGER)" in sql
+    assert "sum(cast(is_active as integer))" in _normalize(sql).lower()
+
+
+def test_add_aggregate_column_boolean_avg_casts_to_integer():
+    """AVG on a boolean column must wrap in CAST(... AS INTEGER)."""
+    qb = AggQueryBuilder()
+    qb.fetch_from("users", "public")
+    qb.add_aggregate_column("is_active", "avg", alias="active_avg", column_type="bool")
+
+    sql = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+    assert "CAST(is_active AS INTEGER)" in sql
+
+
+def test_add_aggregate_column_boolean_count_no_cast():
+    """COUNT on a boolean column should NOT cast — COUNT(bool) works fine."""
+    qb = AggQueryBuilder()
+    qb.fetch_from("users", "public")
+    qb.add_aggregate_column("is_active", "count", alias="cnt", column_type="boolean")
+
+    sql = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+    assert "CAST" not in sql
+
+
+def test_add_aggregate_column_numeric_sum_no_cast():
+    """SUM on a numeric column should NOT cast."""
+    qb = AggQueryBuilder()
+    qb.fetch_from("orders", "public")
+    qb.add_aggregate_column("amount", "sum", alias="total", column_type="numeric")
+
+    sql = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+    assert "CAST" not in sql
+
+
+def test_add_aggregate_column_no_column_type_no_cast():
+    """When column_type is not provided (backward compat), no cast is applied."""
+    qb = AggQueryBuilder()
+    qb.fetch_from("orders", "public")
+    qb.add_aggregate_column("amount", "sum", alias="total")
+
+    sql = str(qb.build().compile(compile_kwargs={"literal_binds": True}))
+    assert "CAST" not in sql

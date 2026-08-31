@@ -32,6 +32,7 @@ class ChartMetric(Schema):
     alias: Optional[str] = None
     column_expression: Optional[str] = None
     saved_metric_id: Optional[int] = None
+    column_type: Optional[str] = None
 
     @model_validator(mode="after")
     def check_aggregation_column_pair(self) -> "ChartMetric":

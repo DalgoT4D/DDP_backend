@@ -1,15 +1,20 @@
-from sqlalchemy.sql.functions import Function
-from sqlalchemy import func
+from typing import Optional
+
+from sqlalchemy import Integer, cast, func
 from sqlalchemy.sql.expression import (
-    table,
-    TableClause,
-    select,
-    Select,
     ColumnClause,
-    column,
+    Select,
+    TableClause,
     asc,
+    column,
     desc,
+    select,
+    table,
 )
+from sqlalchemy.sql.functions import Function
+
+BOOLEAN_TYPES = frozenset({"boolean", "bool"})
+NUMERIC_AGGREGATIONS = frozenset({"sum", "avg"})
 
 
 class AggQueryBuilder:
@@ -34,7 +39,13 @@ class AggQueryBuilder:
         self.column_clauses.append(agg_col)
         return self
 
-    def add_aggregate_column(self, column_name: str, agg_func: str, alias: str = None):
+    def add_aggregate_column(
+        self,
+        column_name: str,
+        agg_func: str,
+        alias: str = None,
+        column_type: Optional[str] = None,
+    ):
         """Add an aggregate column with specified function"""
         agg_func_lower = agg_func.lower()
 
@@ -44,6 +55,15 @@ class AggQueryBuilder:
         else:
             # Quote column name to preserve case
             col = column(column_name)
+
+            # PostgreSQL has no sum(boolean) or avg(boolean); cast to integer
+            # so TRUE → 1 and FALSE → 0 before aggregating.
+            if (
+                column_type
+                and column_type.lower() in BOOLEAN_TYPES
+                and agg_func_lower in NUMERIC_AGGREGATIONS
+            ):
+                col = cast(col, Integer)
 
             agg_functions = {
                 "sum": func.sum,
@@ -57,10 +77,7 @@ class AggQueryBuilder:
             if agg_func_lower not in agg_functions:
                 raise ValueError(f"Unsupported aggregate function: {agg_func}")
 
-            if agg_func_lower == "count_distinct":
-                agg_column = agg_functions[agg_func_lower](col)
-            else:
-                agg_column = agg_functions[agg_func_lower](col)
+            agg_column = agg_functions[agg_func_lower](col)
 
         if alias:
             agg_column = agg_column.label(alias)

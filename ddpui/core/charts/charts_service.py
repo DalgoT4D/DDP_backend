@@ -395,6 +395,7 @@ def build_multi_metric_query(
                 metric.column,
                 metric.aggregation,
                 alias,
+                column_type=metric.column_type,
             )
 
     # Add default ordering by time grain column when time grain is applied
@@ -469,7 +470,9 @@ def build_pivot_table_query(
         if metric.column_expression:
             query_builder.add_column(literal_column(metric.column_expression).label(alias))
         else:
-            query_builder.add_aggregate_column(metric.column, metric.aggregation, alias)
+            query_builder.add_aggregate_column(
+                metric.column, metric.aggregation, alias, column_type=metric.column_type
+            )
 
     # Add GROUPING() markers for each row dimension
     for row_dim in payload.row_dimensions:
@@ -610,6 +613,7 @@ def build_chart_query(
                     metric.column,
                     metric.aggregation,
                     alias,
+                    column_type=metric.column_type,
                 )
         elif payload.chart_type == "pie":
             # Pie charts need dimension and one metric
@@ -658,6 +662,7 @@ def build_chart_query(
                     metric.column,
                     metric.aggregation,
                     alias,
+                    column_type=metric.column_type,
                 )
 
             # Group by dimension column and extra dimension if provided
