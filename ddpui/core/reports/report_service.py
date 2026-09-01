@@ -9,9 +9,11 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.core.ownership import can_delete_resource, is_creator_or_admin
+from ddpui.core.access.access_control import accessible_filter
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.metric import KPI
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.report import ReportSnapshot
@@ -596,22 +598,13 @@ class ReportService:
     @staticmethod
     def list_snapshots(
         org: Org,
+        orguser: OrgUser,
         search: Optional[str] = None,
         dashboard_title: Optional[str] = None,
         created_by_email: Optional[str] = None,
     ) -> List[ReportSnapshot]:
-        """List all snapshots for an organization with optional filtering.
-
-        Args:
-            org: The organization to list snapshots for
-            search: Optional search term to filter snapshots by title (case-insensitive)
-            dashboard_title: Optional filter for snapshots from dashboards with matching title
-            created_by_email: Optional filter for snapshots created by user with matching email
-
-        Returns:
-            List[ReportSnapshot]: List of matching snapshots ordered by creation date (newest first)
-        """
-        query = Q(org=org)
+        """List snapshots for an org that the orguser is allowed to see."""
+        query = Q(org=org) & accessible_filter(orguser, ResourceType.REPORT)
         if search:
             query &= Q(title__icontains=search)
         if dashboard_title:
@@ -711,6 +704,7 @@ class ReportService:
             ),
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
             "dashboard_id": snapshot.frozen_dashboard.get("dashboard_id"),
+            "is_private": snapshot.is_private,
         }
 
         return {
@@ -760,7 +754,7 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        if not can_delete_resource(orguser, snapshot):
+        if not is_creator_or_admin(orguser, snapshot):
             raise SnapshotPermissionError("Only the owner or an admin can delete this report.")
 
         snapshot_title = snapshot.title
@@ -880,7 +874,7 @@ class ReportService:
             settings, "FRONTEND_URL", None
         )
         if not frontend_url:
-            frontend_url = "http://localhost:3001"
+            frontend_url = "http://localhost:3000"
         return frontend_url
 
     @staticmethod
@@ -892,50 +886,6 @@ class ReportService:
     def _build_private_url(snapshot_id: int) -> str:
         """Build the authenticated URL for a report snapshot."""
         return f"{ReportService._get_frontend_url()}/reports/{snapshot_id}"
-
-    @staticmethod
-    def toggle_sharing(
-        snapshot_id: int, org: Org, orguser: OrgUser, is_public: bool
-    ) -> ReportSnapshot:
-        """Toggle public sharing for a report snapshot.
-
-        Args:
-            snapshot_id: The snapshot ID
-            org: The organization
-            orguser: The user toggling sharing
-            is_public: Whether to make the snapshot public
-
-        Returns:
-            Updated ReportSnapshot instance
-
-        Raises:
-            SnapshotNotFoundError: If snapshot not found
-            SnapshotPermissionError: If user is not the creator
-        """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        if not is_creator_or_admin(orguser, snapshot):
-            raise SnapshotPermissionError(
-                "Only the report creator or an org admin can modify sharing settings"
-            )
-
-        if is_public:
-            if not snapshot.public_share_token:
-                snapshot.public_share_token = secrets.token_urlsafe(48)
-            snapshot.public_shared_at = timezone.now()
-            snapshot.public_disabled_at = None
-        else:
-            snapshot.public_disabled_at = timezone.now()
-
-        snapshot.is_public = is_public
-        snapshot.save()
-
-        logger.info(
-            f"Report {snapshot_id} sharing {'enabled' if is_public else 'disabled'} "
-            f"by user {orguser.user.email}, token: {snapshot.public_share_token}"
-        )
-
-        return snapshot
 
     @staticmethod
     def ensure_share_token(snapshot: ReportSnapshot) -> str:
@@ -951,63 +901,3 @@ class ReportService:
             snapshot.public_share_token = secrets.token_urlsafe(48)
             snapshot.save(update_fields=["public_share_token"])
         return snapshot.public_share_token
-
-    @staticmethod
-    def build_share_response(snapshot: ReportSnapshot) -> dict:
-        """Build a share response dict from a snapshot.
-
-        Args:
-            snapshot: The snapshot instance
-
-        Returns:
-            Dict compatible with ShareResponse schema
-        """
-        response_data = {
-            "is_public": snapshot.is_public,
-            "message": f'Report {"made public" if snapshot.is_public else "made private"}',
-        }
-
-        if snapshot.is_public and snapshot.public_share_token:
-            response_data["public_url"] = ReportService._build_public_url(
-                snapshot.public_share_token
-            )
-            response_data["public_share_token"] = snapshot.public_share_token
-
-        return response_data
-
-    @staticmethod
-    def get_sharing_status(snapshot_id: int, org: Org, orguser: OrgUser) -> dict:
-        """Get sharing status for a report snapshot.
-
-        Args:
-            snapshot_id: The snapshot ID
-            org: The organization
-            orguser: The user requesting the status
-
-        Returns:
-            Dict compatible with ShareStatus schema
-
-        Raises:
-            SnapshotNotFoundError: If snapshot not found
-            SnapshotPermissionError: If user is not the creator
-        """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        if not is_creator_or_admin(orguser, snapshot):
-            raise SnapshotPermissionError(
-                "Only the report creator or an org admin can view sharing settings"
-            )
-
-        response_data = {
-            "is_public": snapshot.is_public,
-            "public_access_count": snapshot.public_access_count,
-            "last_public_accessed": snapshot.last_public_accessed,
-            "public_shared_at": snapshot.public_shared_at,
-        }
-
-        if snapshot.is_public and snapshot.public_share_token:
-            response_data["public_url"] = ReportService._build_public_url(
-                snapshot.public_share_token
-            )
-
-        return response_data
