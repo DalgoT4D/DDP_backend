@@ -29,6 +29,7 @@ class TestBuildChartDataPayload:
                 "y_axis_column": "revenue",
                 "dimension_column": "region",
                 "customizations": {"color": "blue"},
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
             },
         )
         payload = build_chart_data_payload(config)
@@ -51,7 +52,10 @@ class TestBuildChartDataPayload:
             schema_name="public",
             table_name="orders",
             title="My Chart",
-            extra_config={"customizations": {"subtitle": "2025"}},
+            extra_config={
+                "customizations": {"subtitle": "2025"},
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
+            },
         )
         payload = build_chart_data_payload(config)
 
@@ -64,7 +68,10 @@ class TestBuildChartDataPayload:
             chart_type="pie",
             schema_name="public",
             table_name="orders",
-            extra_config={"customizations": {"color": "red"}},
+            extra_config={
+                "customizations": {"color": "red"},
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
+            },
         )
         payload = build_chart_data_payload(config)
 
@@ -72,9 +79,9 @@ class TestBuildChartDataPayload:
         assert payload.customizations["color"] == "red"
 
     def test_none_extra_config(self):
-        """Handles None extra_config gracefully"""
+        """Handles None extra_config gracefully for table charts"""
         config = ChartConfig(
-            chart_type="number",
+            chart_type="table",
             schema_name="public",
             table_name="orders",
             extra_config=None,
@@ -127,7 +134,10 @@ class TestBuildChartDataPayload:
             chart_type="bar",
             schema_name="public",
             table_name="orders",
-            extra_config={"x_axis_column": "month"},
+            extra_config={
+                "x_axis_column": "month",
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
+            },
         )
         filters = [
             {
@@ -165,6 +175,7 @@ class TestBuildChartDataPayload:
             extra_config={
                 "dimension_column": "region",
                 "extra_dimension_column": "category",
+                "metrics": [{"column": "revenue", "aggregation": "sum"}],
             },
         )
         payload = build_chart_data_payload(config)

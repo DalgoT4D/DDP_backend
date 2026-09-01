@@ -40,7 +40,7 @@ from ddpui.api.charts_api import (
     download_chart_data_csv,
     BulkDeleteRequest,
 )
-from ddpui.schemas.chart_schemas import ChartCreate, ChartUpdate, ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartCreate, ChartMetric, ChartUpdate, ChartDataPayload
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
 from ddpui.tests.common.fixtures.chart_ui_payloads import CHART_UI_PAYLOADS
 
@@ -659,6 +659,7 @@ class TestGetChartData:
             schema_name="public",
             table_name="users",
             dimension_col="category",
+            metrics=[ChartMetric(column="revenue", aggregation="sum")],
         )
 
         response = get_chart_data(request, payload)
@@ -674,6 +675,7 @@ class TestGetChartData:
             chart_type="bar",
             schema_name="public",
             table_name="test",
+            metrics=[ChartMetric(column="revenue", aggregation="sum")],
         )
 
         with pytest.raises(HttpError) as excinfo:

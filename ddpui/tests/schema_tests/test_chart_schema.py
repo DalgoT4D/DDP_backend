@@ -87,7 +87,7 @@ class TestChartDataPayloadSchema:
     def test_payload_default_pagination(self):
         """Test default pagination values"""
         payload = ChartDataPayload(
-            chart_type="bar",
+            chart_type="table",
             schema_name="public",
             table_name="users",
         )
@@ -98,7 +98,7 @@ class TestChartDataPayloadSchema:
     def test_payload_custom_pagination(self):
         """Test custom pagination values"""
         payload = ChartDataPayload(
-            chart_type="bar",
+            chart_type="table",
             schema_name="public",
             table_name="users",
             offset=50,
@@ -143,10 +143,84 @@ class TestChartDataPayloadSchema:
             chart_type="bar",
             schema_name="public",
             table_name="users",
+            metrics=[ChartMetric(column="revenue", aggregation="sum")],
             dashboard_filters=[{"column": "status", "value": "active"}],
         )
 
         assert len(payload.dashboard_filters) == 1
+
+    def test_payload_rejects_bar_without_metrics(self):
+        """Bar charts require at least one metric."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="bar",
+                schema_name="public",
+                table_name="users",
+            )
+
+    def test_payload_rejects_line_without_metrics(self):
+        """Line charts require at least one metric."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="line",
+                schema_name="public",
+                table_name="users",
+            )
+
+    def test_payload_rejects_number_without_metrics(self):
+        """Number charts require at least one metric."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="number",
+                schema_name="public",
+                table_name="users",
+            )
+
+    def test_payload_rejects_pie_without_metrics(self):
+        """Pie charts require at least one metric."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="pie",
+                schema_name="public",
+                table_name="users",
+            )
+
+    def test_payload_rejects_pivot_table_without_metrics(self):
+        """Pivot table charts require at least one metric."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="pivot_table",
+                schema_name="public",
+                table_name="users",
+            )
+
+    def test_payload_rejects_empty_metrics_list(self):
+        """An empty metrics list is also rejected for non-table charts."""
+        with pytest.raises(ValidationError):
+            ChartDataPayload(
+                chart_type="bar",
+                schema_name="public",
+                table_name="users",
+                metrics=[],
+            )
+
+    def test_payload_allows_table_without_metrics(self):
+        """Table charts can work without metrics."""
+        payload = ChartDataPayload(
+            chart_type="table",
+            schema_name="public",
+            table_name="users",
+        )
+        assert payload.metrics is None
+
+    def test_payload_allows_map_without_metrics(self):
+        """Map charts can work without metrics."""
+        payload = ChartDataPayload(
+            chart_type="map",
+            schema_name="public",
+            table_name="users",
+        )
+        assert payload.metrics is None
 
 
 # ================================================================================

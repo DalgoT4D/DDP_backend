@@ -11,7 +11,7 @@ django.setup()
 from ddpui.core.charts.charts_service import (
     normalize_dimensions,
 )
-from ddpui.schemas.chart_schemas import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
 
 
 class TestNormalizeDimensions:
@@ -47,6 +47,7 @@ class TestNormalizeDimensions:
             schema_name="test_schema",
             table_name="test_table",
             dimension_col="valid-dimension",
+            metrics=[ChartMetric(column="amount", aggregation="sum")],
         )
         dims = normalize_dimensions(payload)
         assert dims == ["valid-dimension"]
@@ -87,6 +88,7 @@ class TestNormalizeDimensions:
             chart_type="bar",
             schema_name="test_schema",
             table_name="test_table",
+            metrics=[ChartMetric(column="amount", aggregation="sum")],
         )
         dims = normalize_dimensions(payload)
         assert dims == []

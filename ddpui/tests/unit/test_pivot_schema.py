@@ -1,5 +1,5 @@
 import pytest
-from ddpui.schemas.chart_schemas import ChartDataPayload
+from ddpui.schemas.chart_schemas import ChartDataPayload, ChartMetric
 
 
 class TestPivotTablePayload:
@@ -12,6 +12,7 @@ class TestPivotTablePayload:
             column_dimensions=["enrollment_date", "category"],
             show_row_subtotals=True,
             show_column_grand_total=True,
+            metrics=[ChartMetric(column=None, aggregation="count", alias="Count")],
         )
         assert payload.row_dimensions == ["district", "program"]
         assert payload.column_dimensions == ["enrollment_date", "category"]
@@ -23,6 +24,7 @@ class TestPivotTablePayload:
             chart_type="pivot_table",
             schema_name="public",
             table_name="beneficiaries",
+            metrics=[ChartMetric(column=None, aggregation="count", alias="Count")],
         )
         assert payload.row_dimensions is None
         assert payload.column_dimensions is None
@@ -35,5 +37,6 @@ class TestPivotTablePayload:
             chart_type="bar",
             schema_name="public",
             table_name="beneficiaries",
+            metrics=[ChartMetric(column="amount", aggregation="sum")],
         )
         assert payload.row_dimensions is None

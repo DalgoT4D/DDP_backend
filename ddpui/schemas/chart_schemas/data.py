@@ -3,8 +3,12 @@
 from typing import List, Optional
 
 from ninja import Schema
+from pydantic import model_validator
 
 from ddpui.schemas.chart_schemas.config import ChartMetric
+
+# Chart types that can operate without metrics
+_METRICS_OPTIONAL_CHART_TYPES = {"table", "map"}
 
 
 class ChartDataPayload(Schema):
@@ -47,6 +51,15 @@ class ChartDataPayload(Schema):
 
     offset: int = 0
     limit: int = 100
+
+    @model_validator(mode="after")
+    def validate_metrics_required(self) -> "ChartDataPayload":
+        """Reject early when a chart type that needs aggregation has no metrics."""
+        if self.chart_type not in _METRICS_OPTIONAL_CHART_TYPES and not self.metrics:
+            raise ValueError(
+                f"At least one metric is required for '{self.chart_type}' charts"
+            )
+        return self
 
 
 class ChartDataResponse(Schema):
