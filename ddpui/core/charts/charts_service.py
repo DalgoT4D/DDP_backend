@@ -782,6 +782,31 @@ TIMESTAMP_TYPES = {
     "timestamp without time zone",
 }
 
+_BOOLEAN_TYPES = {"boolean", "bool"}
+
+_NUMERIC_TYPE_PATTERNS = (
+    "integer",
+    "bigint",
+    "numeric",
+    "decimal",
+    "double",
+    "real",
+    "float",
+    "money",
+)
+
+
+def _has_incompatible_empty_value(filter_config: dict) -> bool:
+    """True when value is empty string on a typed column that can't accept it (e.g. boolean, numeric)."""
+    if filter_config.get("value") != "":
+        return False
+    if filter_config.get("operator") in ("is_null", "is_not_null"):
+        return False
+    data_type = (filter_config.get("data_type") or "").lower()
+    if data_type in _BOOLEAN_TYPES:
+        return True
+    return any(p in data_type for p in _NUMERIC_TYPE_PATTERNS)
+
 
 def _is_timestamp_date(filter_config: dict) -> bool:
     """True if filter is on a timestamp column with a date-only yyyy-MM-dd value."""
@@ -834,6 +859,9 @@ def apply_chart_filters(
         operator = filter_config["operator"]
 
         if not column_name or operator is None:
+            continue
+
+        if _has_incompatible_empty_value(filter_config):
             continue
 
         # Timestamp date filters need day-range logic — keep full config

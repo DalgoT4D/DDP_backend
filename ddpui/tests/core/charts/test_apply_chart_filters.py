@@ -110,3 +110,36 @@ class TestApplyChartFilters:
         for operator in ["is_null", "is_not_null"]:
             sql = get_where_sql([make_filter("created_at", operator, "", "timestamp")])
             assert len(sql) == 1
+
+    def test_empty_string_on_boolean_column_skipped(self):
+        """empty string for boolean column is silently dropped to avoid DB type errors"""
+        for dtype in ["boolean", "bool"]:
+            sql = get_where_sql([make_filter("is_active", "equals", "", dtype)])
+            assert len(sql) == 0, f"Expected filter to be skipped for data_type={dtype}"
+
+    def test_empty_string_on_numeric_column_skipped(self):
+        """empty string for numeric columns is silently dropped"""
+        for dtype in ["integer", "bigint", "numeric", "float", "decimal", "double", "real"]:
+            sql = get_where_sql([make_filter("amount", "equals", "", dtype)])
+            assert len(sql) == 0, f"Expected filter to be skipped for data_type={dtype}"
+
+    def test_empty_string_on_varchar_column_kept(self):
+        """empty string is a valid filter value for text/varchar columns"""
+        sql = get_where_sql([make_filter("name", "equals", "", "varchar")])
+        assert len(sql) == 1
+
+    def test_nonempty_value_on_boolean_column_kept(self):
+        """non-empty value on boolean column is applied normally"""
+        sql = get_where_sql([make_filter("is_active", "equals", "true", "boolean")])
+        assert len(sql) == 1
+
+    def test_empty_string_boolean_is_null_not_skipped(self):
+        """is_null/is_not_null operators are never skipped regardless of data type"""
+        for operator in ["is_null", "is_not_null"]:
+            sql = get_where_sql([make_filter("is_active", operator, "", "boolean")])
+            assert len(sql) == 1
+
+    def test_empty_string_boolean_not_equals_skipped(self):
+        """not_equals with empty string on boolean is also skipped"""
+        sql = get_where_sql([make_filter("is_active", "not_equals", "", "boolean")])
+        assert len(sql) == 0
