@@ -4,7 +4,7 @@
 [![Code coverage badge](https://img.shields.io/codecov/c/github/DalgoT4D/DDP_backend/main.svg)](https://codecov.io/gh/dalgot4d/DDP_backend/branch/main)
 [![DeepSource](https://app.deepsource.com/gh/dalgot4d/DDP_backend.svg/?label=active+issues&show_trend=true&token=H-ilF26v7GEjUlQa3hLfMhPy)](https://app.deepsource.com/gh/dalgot4d/DDP_backend/?ref=repository-badge)
 
-Django application for the DDP platform's management backend. Exposes API endpoints for the management frontend to communicate with, for the purposes of
+Django application for the DDP platform's management backend. The Dalgo Data Platform (DDP) is an open-source initiative by Project Tech4Dev designed to empower social sector organizations with robust data management and analytics capabilities. Exposes API endpoints for the management frontend to communicate with, for the purposes of - 
 
 -   Onboarding an NGO client
 -   Adding users from the client-organization
@@ -53,7 +53,7 @@ Django application for the DDP platform's management backend. Exposes API endpoi
 
 ### UV package manager
 
-The project uses `uv` as its package manager. You will need to install it on your machine
+The project uses `uv` as its package manager. `uv` is chosen for its speed and efficiency in managing Python dependencies. You will need to install it on your machine
 
 UV can be installed system-wide using cURL on macOS and Linux:
 
@@ -78,7 +78,7 @@ brew install uv
 ### Step 1: Create a Python Virtual Environment
 
 ```sh
-uv sync
+$ uv sync
 ```
 
 ## Setup pre-commit and run hooks
