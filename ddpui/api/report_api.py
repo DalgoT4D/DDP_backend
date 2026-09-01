@@ -35,6 +35,7 @@ from ddpui.schemas.report_schema import (
     CommentStatesResponse,
     CommentUpdate,
     DatetimeColumnResponse,
+    ExportPdfRequest,
     MarkReadRequest,
     MentionableUserResponse,
     ReportShareViaEmailRequest,
@@ -361,12 +362,16 @@ def delete_snapshot(request, snapshot_id: int):
 
 @report_router.post("/{snapshot_id}/export/pdf/", response={200: None})
 @has_permission(["can_view_dashboards"])
-def export_report_pdf(request, snapshot_id: int):
+def export_report_pdf(request, snapshot_id: int, payload: ExportPdfRequest = None):
     """Generate PDF of report via Playwright and return as download.
 
     Uses an X-Render-Secret header (injected by Playwright route
     interception) so the public report endpoints serve data without
     the snapshot needing is_public=True.  No public state is toggled.
+
+    payload.dashboard_filters carries whatever the viewer currently has
+    applied, so the PDF reflects that instead of always the configured
+    defaults.
     """
     orguser: OrgUser = request.orguser
 
@@ -377,7 +382,10 @@ def export_report_pdf(request, snapshot_id: int):
 
     try:
         share_token = ReportService.ensure_share_token(snapshot)
-        pdf_bytes = PdfExportService.generate_pdf(snapshot_id, share_token)
+        dashboard_filters = payload.dashboard_filters if payload else None
+        pdf_bytes = PdfExportService.generate_pdf(
+            snapshot_id, share_token, dashboard_filters=dashboard_filters
+        )
 
         safe_title = "".join(c for c in snapshot.title if c.isalnum() or c in " -_").strip()
         filename = f"{safe_title or 'report'}.pdf"

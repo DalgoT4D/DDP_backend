@@ -1,8 +1,10 @@
 """PDF export service using Playwright for server-side report rendering"""
 
 import base64
+import json
 import time
-from urllib.parse import urlparse
+from typing import Any, Dict, Optional
+from urllib.parse import quote, urlparse
 
 import requests as http_requests
 from django.conf import settings
@@ -25,7 +27,11 @@ class PdfExportService:
     """Generates PDFs from report snapshots using headless Playwright Chromium"""
 
     @staticmethod
-    def generate_pdf(snapshot_id: int, share_token: str) -> bytes:
+    def generate_pdf(
+        snapshot_id: int,
+        share_token: str,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> bytes:
         """Generate a PDF of a report snapshot.
 
         Launches headless Chromium, navigates to the public report page
@@ -36,6 +42,10 @@ class PdfExportService:
         Args:
             snapshot_id: The snapshot ID
             share_token: The snapshot's public_share_token (used in the URL)
+            dashboard_filters: Optional {filter_id: value} map — whatever the
+                viewer currently has applied, so the PDF reflects that instead
+                of always the configured defaults. None for the scheduled/
+                emailed export path, which has no live viewer/filter state.
 
         Returns:
             PDF contents as bytes
@@ -56,6 +66,8 @@ class PdfExportService:
         if not frontend_url or str(frontend_url).startswith("/"):
             frontend_url = "http://localhost:3001"
         url = f"{frontend_url.rstrip('/')}/share/report/{share_token}?print=true"
+        if dashboard_filters:
+            url += f"&dashboard_filters={quote(json.dumps(dashboard_filters))}"
 
         logger.info(f"Generating PDF for snapshot {snapshot_id} from {url}")
 
