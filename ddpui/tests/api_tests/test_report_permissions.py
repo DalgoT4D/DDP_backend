@@ -25,7 +25,7 @@ Actual permission matrix (from seed data):
 │ datetime_columns (view)     │     ✓     │    ✓    │    ✓     │    ✓    │   ✓   │
 └─────────────────────────────┴───────────┴─────────┴──────────┴─────────┴───────┘
 
-Note: Only Guest lacks create/edit/delete/share permissions for dashboards.
+Note: All roles have create/edit/delete/share permissions for dashboards in the resource-sharing model.
 """
 
 import os
@@ -249,13 +249,15 @@ class TestRolePermissionsLoaded:
         assert "can_delete_dashboards" in request.permissions
         assert "can_share_dashboards" in request.permissions
 
-    def test_guest_has_only_view_dashboard_permission(self, guest_user):
+    def test_member_has_all_dashboard_permissions(self, guest_user):
+        # resource-sharing model: all roles can manage their own dashboards;
+        # access control governs visibility, not creation rights
         request = mock_request(guest_user)
         assert "can_view_dashboards" in request.permissions
-        assert "can_create_dashboards" not in request.permissions
-        assert "can_edit_dashboards" not in request.permissions
-        assert "can_delete_dashboards" not in request.permissions
-        assert "can_share_dashboards" not in request.permissions
+        assert "can_create_dashboards" in request.permissions
+        assert "can_edit_dashboards" in request.permissions
+        assert "can_delete_dashboards" in request.permissions
+        assert "can_share_dashboards" in request.permissions
 
 
 # ================================================================================
@@ -312,25 +314,35 @@ class TestReportViewPermissions:
 
 
 # ================================================================================
-# Test Report Endpoints - Guest Cannot Create/Edit/Delete/Share
-# Guest is the ONLY role lacking these permissions
+# Test Report Endpoints - Member access control (resource-sharing model)
+# All roles have create/edit/delete/share dashboard permissions.
+# @has_access still blocks edits on resources owned by others.
 # ================================================================================
 
 
 class TestGuestReportRestrictions:
-    """Test that Guest cannot create, edit, delete, or share reports."""
+    """Test that Guest (member) cannot edit/delete reports they don't own.
 
-    def test_guest_cannot_create_snapshot(self, guest_user):
+    In the resource-sharing model, member has can_create/edit/delete/share_dashboards,
+    so permission checks pass. Access control (@has_access) still blocks edits on
+    resources owned by others.
+    """
+
+    def test_member_can_reach_create_snapshot_endpoint(self, guest_user):
+        # member now has can_create_dashboards; permission check passes,
+        # 400 (not 403) means the endpoint was reached
         request = mock_request(guest_user)
         payload = SnapshotCreate(
-            title="Guest Report",
+            title="Member Report",
             dashboard_id=1,
             date_column=DateColumnSchema(
                 schema_name="public", table_name="orders", column_name="created_at"
             ),
             period_end=date(2026, 3, 31),
         )
-        assert_permission_denied(create_snapshot, request, payload)
+        with pytest.raises(HttpError) as exc_info:
+            create_snapshot(request, payload)
+        assert exc_info.value.status_code == 400  # dashboard not found, not 403 permission denied
 
     def test_guest_cannot_update_snapshot(self, guest_user, snapshot):
         request = mock_request(guest_user)
@@ -380,17 +392,24 @@ class TestNonGuestReportAccess:
 
 
 # ================================================================================
-# Test Comment Endpoints - Guest Cannot Create/Update/Delete (can_edit_dashboards)
+# Test Comment Endpoints - Member comment restrictions (resource-sharing model)
+# Member has can_edit_dashboards + VIEW floor access to non-private reports,
+# so they can CREATE comments. They cannot UPDATE/DELETE others' comments
+# (service-layer author-only check).
 # ================================================================================
 
 
 class TestGuestCommentRestrictions:
-    """Test that Guest cannot create, update, or delete comments."""
+    """Member can create comments; cannot update/delete comments they don't own."""
 
-    def test_guest_cannot_create_comment(self, guest_user, snapshot):
+    @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
+    def test_member_can_create_comment(self, mock_mentions, guest_user, snapshot):
+        # member has can_edit_dashboards + VIEW floor access → comment creation succeeds
         request = mock_request(guest_user)
-        payload = CommentCreate(target_type="summary", content="Guest comment")
-        assert_permission_denied(create_comment, request, snapshot_id=snapshot.id, payload=payload)
+        payload = CommentCreate(target_type="summary", content="Member comment")
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
+        assert response["success"] is True
+        Comment.objects.filter(id=response["data"]["id"]).delete()
 
     def test_guest_cannot_update_comment(self, guest_user, snapshot, comment):
         request = mock_request(guest_user)
