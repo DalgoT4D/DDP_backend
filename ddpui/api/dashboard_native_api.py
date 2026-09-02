@@ -99,7 +99,12 @@ def get_dashboard(request, dashboard_id: int):
     except DashboardNotFoundError as err:
         raise HttpError(404, "Dashboard not found") from err
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        )
+    )
 
 
 @dashboard_native_router.post("/", response=DashboardResponse)
@@ -212,7 +217,12 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
             resource_fields={**resource_fields, "title": dashboard.title},
         )
 
-    return DashboardResponse(**DashboardService.get_dashboard_response(dashboard))
+    return DashboardResponse(
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        )
+    )
 
 
 @dashboard_native_router.delete("/{dashboard_id}/")

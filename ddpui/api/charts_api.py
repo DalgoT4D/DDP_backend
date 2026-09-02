@@ -1044,6 +1044,7 @@ def get_chart(request, chart_id: int):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 
@@ -1248,6 +1249,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 

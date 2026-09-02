@@ -33,6 +33,16 @@ class FavoriteService:
         ).delete()
 
     @staticmethod
+    def is_favorited(
+        resource_type: FavoriteResourceType, resource_id: int, orguser: OrgUser
+    ) -> bool:
+        """Whether this user has favorited a single resource. Single-resource
+        counterpart to get_favorited_ids, for detail/update responses."""
+        return Favorite.objects.filter(
+            org_user=orguser, resource_type=resource_type.value, resource_id=resource_id
+        ).exists()
+
+    @staticmethod
     def get_favorited_ids(
         resource_type: FavoriteResourceType, resource_ids: List[int], orguser: OrgUser
     ) -> Set[int]:

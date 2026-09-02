@@ -640,7 +640,7 @@ class TestGetChartDashboards:
 
 
 def _chart_is_favorite(request, chart_id):
-    """is_favorite is only computed on list_charts (the only consumer); look it up there."""
+    """Read is_favorite off list_charts, the endpoint the star UI actually renders from."""
     response = list_charts(request)
     return next(c for c in response.data if c.id == chart_id).is_favorite
 
@@ -721,6 +721,34 @@ class TestFavoriteChart:
         favorited = [c for c in response.data if c.id == sample_chart.id]
         assert len(favorited) == 1
         assert favorited[0].is_favorite is True
+
+    def test_get_chart_reflects_favorite(self, orguser, sample_chart, seed_db):
+        """get_chart reports the user's real favorite state, not the schema default"""
+        request = mock_request(orguser)
+
+        assert get_chart(request, chart_id=sample_chart.id).is_favorite is False
+
+        favorite_chart(request, chart_id=sample_chart.id)
+
+        assert get_chart(request, chart_id=sample_chart.id).is_favorite is True
+
+    def test_get_chart_favorite_is_per_user(self, orguser, sample_chart, org, seed_db):
+        """get_chart scopes is_favorite to the requesting user"""
+        other_user = User.objects.create(username="otherdetailuser", email="otherdetail@test.com")
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+
+        favorite_chart(mock_request(orguser), chart_id=sample_chart.id)
+
+        assert get_chart(mock_request(orguser), chart_id=sample_chart.id).is_favorite is True
+        assert get_chart(mock_request(other_orguser), chart_id=sample_chart.id).is_favorite is False
+
+        # Cleanup
+        other_orguser.delete()
+        other_user.delete()
 
     def test_delete_chart_removes_favorite_rows(self, orguser, sample_chart, seed_db):
         """Deleting a chart cleans up its Favorite rows instead of orphaning them"""
