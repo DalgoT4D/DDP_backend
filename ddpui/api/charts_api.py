@@ -1361,6 +1361,9 @@ def get_chart_dashboards(request, chart_id: int):
 
 @charts_router.post("/{chart_id}/favorite/", response=dict)
 @has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def favorite_chart(request, chart_id: int):
     """Mark a chart as favorited by the current user"""
     orguser: OrgUser = request.orguser
@@ -1375,6 +1378,9 @@ def favorite_chart(request, chart_id: int):
 
 @charts_router.delete("/{chart_id}/favorite/", response=dict)
 @has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def unfavorite_chart(request, chart_id: int):
     """Remove the current user's favorite on a chart"""
     orguser: OrgUser = request.orguser

@@ -5,21 +5,9 @@ one shared table keyed by (user, resource_type, resource_id) instead of a
 separate table per resource type.
 """
 
-from enum import Enum
 from django.db import models
 from ddpui.models.org_user import OrgUser
-
-
-class FavoriteResourceType(str, Enum):
-    """Resource types that can be favorited"""
-
-    CHART = "chart"
-    DASHBOARD = "dashboard"
-
-    @classmethod
-    def choices(cls):
-        """django model definition needs an iterable for `choices`"""
-        return [(key.value, key.name) for key in cls]
+from ddpui.models.resource_share import ResourceType
 
 
 class Favorite(models.Model):
@@ -27,7 +15,7 @@ class Favorite(models.Model):
     personal — one user's favorite has no effect on any other user."""
 
     org_user = models.ForeignKey(OrgUser, on_delete=models.CASCADE, related_name="favorites")
-    resource_type = models.CharField(max_length=20, choices=FavoriteResourceType.choices())
+    resource_type = models.CharField(max_length=20, choices=ResourceType.choices)
     resource_id = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
 

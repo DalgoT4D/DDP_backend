@@ -14,7 +14,6 @@ from ddpui.core.access.access_control import accessible_filter
 from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.resource_share import ResourceType
 from ddpui.models.visualization import Chart
-from ddpui.models.favorite import FavoriteResourceType
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
 from ddpui.models.dashboard import Dashboard, DashboardComponentType
@@ -245,7 +244,7 @@ class ChartService:
         chart_title = chart.title
         with transaction.atomic():
             chart.delete()
-            FavoriteService.remove_favorites_for_resource(FavoriteResourceType.CHART, chart_id)
+            FavoriteService.remove_favorites_for_resource(ResourceType.CHART, chart_id)
 
         logger.info(f"Deleted chart '{chart_title}' (id={chart_id}) by {orguser.user.email}")
         return chart_title
@@ -293,9 +292,7 @@ class ChartService:
         deleted_titles = [chart.title for chart in deletable]
         with transaction.atomic():
             deleted_count = Chart.objects.filter(id__in=deletable_ids).delete()[0]
-            FavoriteService.remove_favorites_for_resources(
-                FavoriteResourceType.CHART, deletable_ids
-            )
+            FavoriteService.remove_favorites_for_resources(ResourceType.CHART, deletable_ids)
 
         logger.info(f"Bulk deleted {deleted_count} charts by {orguser.user.email}")
 
@@ -349,56 +346,18 @@ class ChartService:
 
     @staticmethod
     def favorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
-        """Mark a chart as favorited by this user.
-
-        Args:
-            chart_id: The chart ID
-            org: The organization
-            orguser: The user favoriting the chart
-
-        Raises:
-            ChartNotFoundError: If chart doesn't exist or doesn't belong to org
-        """
         ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
-        FavoriteService.add_favorite(FavoriteResourceType.CHART, chart_id, orguser)
+        FavoriteService.add_favorite(ResourceType.CHART, chart_id, orguser)
 
     @staticmethod
     def unfavorite_chart(chart_id: int, org: Org, orguser: OrgUser) -> None:
-        """Remove this user's favorite on a chart, if any.
-
-        Args:
-            chart_id: The chart ID
-            org: The organization
-            orguser: The user unfavoriting the chart
-
-        Raises:
-            ChartNotFoundError: If chart doesn't exist or doesn't belong to org
-        """
         ChartService.get_chart(chart_id, org)  # raises ChartNotFoundError if not in org
-        FavoriteService.remove_favorite(FavoriteResourceType.CHART, chart_id, orguser)
+        FavoriteService.remove_favorite(ResourceType.CHART, chart_id, orguser)
 
     @staticmethod
     def get_favorited_chart_ids(chart_ids: List[int], orguser: OrgUser) -> Set[int]:
-        """Return the subset of chart_ids this user has favorited.
-
-        Args:
-            chart_ids: Chart IDs to check
-            orguser: The user whose favorites to look up
-
-        Returns:
-            Set of chart IDs favorited by this user
-        """
-        return FavoriteService.get_favorited_ids(FavoriteResourceType.CHART, chart_ids, orguser)
+        return FavoriteService.get_favorited_ids(ResourceType.CHART, chart_ids, orguser)
 
     @staticmethod
     def is_chart_favorited(chart_id: int, orguser: OrgUser) -> bool:
-        """Whether this user has favorited a single chart.
-
-        Args:
-            chart_id: The chart ID
-            orguser: The user whose favorites to look up
-
-        Returns:
-            True if this user has favorited the chart
-        """
-        return FavoriteService.is_favorited(FavoriteResourceType.CHART, chart_id, orguser)
+        return FavoriteService.is_favorited(ResourceType.CHART, chart_id, orguser)

@@ -22,7 +22,13 @@ class Migration(migrations.Migration):
                 (
                     "resource_type",
                     models.CharField(
-                        choices=[("chart", "CHART"), ("dashboard", "DASHBOARD")], max_length=20
+                        choices=[
+                            ("dashboard", "Dashboard"),
+                            ("chart", "Chart"),
+                            ("report", "Report"),
+                            ("kpi", "KPI"),
+                        ],
+                        max_length=20,
                     ),
                 ),
                 ("resource_id", models.BigIntegerField()),

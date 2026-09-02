@@ -28,7 +28,6 @@ from ddpui.models.dashboard import (
     DashboardComponentType,
     DashboardFilterType,
 )
-from ddpui.models.favorite import FavoriteResourceType
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
@@ -316,61 +315,21 @@ class DashboardService:
 
     @staticmethod
     def favorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
-        """Mark a dashboard as favorited by this user.
-
-        Args:
-            dashboard_id: The dashboard ID
-            org: The organization
-            orguser: The user favoriting the dashboard
-
-        Raises:
-            DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
-        """
         DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
-        FavoriteService.add_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
+        FavoriteService.add_favorite(ResourceType.DASHBOARD, dashboard_id, orguser)
 
     @staticmethod
     def unfavorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
-        """Remove this user's favorite on a dashboard, if any.
-
-        Args:
-            dashboard_id: The dashboard ID
-            org: The organization
-            orguser: The user unfavoriting the dashboard
-
-        Raises:
-            DashboardNotFoundError: If dashboard doesn't exist or doesn't belong to org
-        """
         DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
-        FavoriteService.remove_favorite(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
+        FavoriteService.remove_favorite(ResourceType.DASHBOARD, dashboard_id, orguser)
 
     @staticmethod
     def get_favorited_dashboard_ids(dashboard_ids: List[int], orguser: OrgUser) -> Set[int]:
-        """Return the subset of dashboard_ids this user has favorited.
-
-        Args:
-            dashboard_ids: Dashboard IDs to check
-            orguser: The user whose favorites to look up
-
-        Returns:
-            Set of dashboard IDs favorited by this user
-        """
-        return FavoriteService.get_favorited_ids(
-            FavoriteResourceType.DASHBOARD, dashboard_ids, orguser
-        )
+        return FavoriteService.get_favorited_ids(ResourceType.DASHBOARD, dashboard_ids, orguser)
 
     @staticmethod
     def is_dashboard_favorited(dashboard_id: int, orguser: OrgUser) -> bool:
-        """Whether this user has favorited a single dashboard.
-
-        Args:
-            dashboard_id: The dashboard ID
-            orguser: The user whose favorites to look up
-
-        Returns:
-            True if this user has favorited the dashboard
-        """
-        return FavoriteService.is_favorited(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
+        return FavoriteService.is_favorited(ResourceType.DASHBOARD, dashboard_id, orguser)
 
     @staticmethod
     def create_dashboard(data: DashboardData, orguser: OrgUser) -> Dashboard:
@@ -1185,7 +1144,7 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
     dashboard_title = dashboard.title
     with transaction.atomic():
         dashboard.delete()
-        FavoriteService.remove_favorites_for_resource(FavoriteResourceType.DASHBOARD, dashboard_id)
+        FavoriteService.remove_favorites_for_resource(ResourceType.DASHBOARD, dashboard_id)
 
     logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
     return True, ""

@@ -742,6 +742,11 @@ def resolve_user_landing_page(request):
 
 @dashboard_native_router.post("/{dashboard_id}/favorite/", response=dict)
 @has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def favorite_dashboard(request, dashboard_id: int):
     """Mark a dashboard as favorited by the current user"""
     orguser: OrgUser = request.orguser
@@ -756,6 +761,11 @@ def favorite_dashboard(request, dashboard_id: int):
 
 @dashboard_native_router.delete("/{dashboard_id}/favorite/", response=dict)
 @has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
 def unfavorite_dashboard(request, dashboard_id: int):
     """Remove the current user's favorite on a dashboard"""
     orguser: OrgUser = request.orguser
