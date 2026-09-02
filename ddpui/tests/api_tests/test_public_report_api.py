@@ -406,6 +406,63 @@ class TestGetPublicReportTableData:
             assert response["columns"] == ["id", "name"]
             assert len(response["data"]) == 1
 
+    def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
+        """A valid {filter_id: value} dashboard_filters query param is parsed
+        and resolved against the frozen dashboard config."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_preview_fn.return_value = {
+                "columns": [],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters='{"5": "2025-01-15"}',
+            )
+
+            mock_resolve.assert_called_once()
+
+    def test_non_dict_json_dashboard_filters_skips_resolution(self, public_snapshot, seed_db):
+        """dashboard_filters='[1,2,3]' is valid JSON but not a dict — treated
+        as no filters, same as the private report endpoints."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = {
+                "columns": [],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters="[1,2,3]",
+            )
+
+            mock_resolve.assert_not_called()
+
 
 # ================================================================================
 # Test get_public_report_table_total_rows
@@ -440,6 +497,47 @@ class TestGetPublicReportTableTotalRows:
 
             assert response["is_valid"] is True
             assert response["total_rows"] == 42
+
+    def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_total.return_value = 3
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters='{"5": "2025-01-15"}',
+            )
+
+            mock_resolve.assert_called_once()
+
+    def test_non_dict_json_dashboard_filters_skips_resolution(self, public_snapshot, seed_db):
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_total.return_value = 0
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters="[1,2,3]",
+            )
+
+            mock_resolve.assert_not_called()
 
 
 # ================================================================================

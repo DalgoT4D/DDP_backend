@@ -18,11 +18,12 @@ import pytest
 from unittest.mock import MagicMock, patch
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.maps_service import transform_data_for_map
-from ddpui.core.charts.charts_service import build_chart_data_payload
+from ddpui.core.charts.charts_service import build_chart_data_payload, execute_map_data_overlay
 from ddpui.schemas.chart_schemas import (
     ChartConfig,
     ChartDataPayload,
     ChartMetric,
+    MapDataOverlayPayload,
     TransformDataForChart,
 )
 from ddpui.models.org import OrgWarehouse
@@ -463,3 +464,51 @@ class TestTransformDataForMap:
         )
         assert out["matched_regions"] == 1
         assert out["available_metrics"][0]["display_name"] == "Total Count"
+
+
+class TestExecuteMapDataOverlay:
+    """execute_map_data_overlay must read query results back using the same
+    alias build_multi_metric_query used to label the SQL column.
+
+    Regression: for a count-with-no-column metric, the SQL column is labeled
+    "count_all_<alias>" (see metric_sql_alias), but the old read-back code
+    computed a plain "<alias>" lookup key — every row's value came back None
+    and got silently dropped, so the map always showed no data.
+    """
+
+    def _map_payload(self, metrics):
+        return MapDataOverlayPayload(
+            schema_name="public",
+            table_name="health_camp_visits",
+            geographic_column="state_name",
+            value_column="state_name",
+            metrics=metrics,
+        )
+
+    def test_count_with_no_column_metric_reads_value_back(self):
+        metric = {"column": None, "aggregation": "count", "alias": "Total Count"}
+        map_payload = self._map_payload([metric])
+        warehouse_client = MagicMock()
+
+        with patch(
+            "ddpui.core.charts.charts_service.execute_chart_query",
+            return_value=[{"state_name": "Karnataka", "count_all_Total Count": 9}],
+        ):
+            result = execute_map_data_overlay(map_payload, MagicMock(), warehouse_client)
+
+        assert result == {"data": [{"name": "Karnataka", "value": 9.0}], "count": 1}
+
+    def test_sum_with_column_metric_still_works(self):
+        """Guard: the normal sum/avg-with-column path (alias used directly,
+        no count_all_ prefix) is unaffected by the alias lookup fix."""
+        metric = {"column": "amount", "aggregation": "sum", "alias": "value"}
+        map_payload = self._map_payload([metric])
+        warehouse_client = MagicMock()
+
+        with patch(
+            "ddpui.core.charts.charts_service.execute_chart_query",
+            return_value=[{"state_name": "Karnataka", "value": 500}],
+        ):
+            result = execute_map_data_overlay(map_payload, MagicMock(), warehouse_client)
+
+        assert result == {"data": [{"name": "Karnataka", "value": 500.0}], "count": 1}
