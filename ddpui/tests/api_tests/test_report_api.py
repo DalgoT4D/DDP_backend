@@ -43,6 +43,7 @@ from ddpui.api.report_api import (
     create_comment,
     update_comment,
     delete_comment,
+    export_report_pdf,
 )
 from ddpui.schemas.report_schema import (
     SnapshotCreate,
@@ -50,6 +51,7 @@ from ddpui.schemas.report_schema import (
     DateColumnSchema,
     CommentCreate,
     CommentUpdate,
+    ExportPdfRequest,
 )
 from ddpui.schemas.dashboard_schema import ShareToggle
 from ddpui.tests.api_tests.test_user_org_api import seed_db, mock_request
@@ -558,6 +560,60 @@ class TestDeleteSnapshot:
         with pytest.raises(HttpError) as exc_info:
             delete_snapshot(request, sample_snapshot.id)
         assert exc_info.value.status_code == 403
+
+
+# ================================================================================
+# Test export_report_pdf endpoint
+# ================================================================================
+
+
+class TestExportReportPdf:
+    """Tests for export_report_pdf endpoint"""
+
+    @patch("ddpui.api.report_api.PdfExportService.generate_pdf")
+    def test_passes_dashboard_filters_through(
+        self, mock_generate_pdf, orguser, sample_snapshot, seed_db
+    ):
+        """Currently-applied filter values in the request are forwarded to PdfExportService,
+        so the exported PDF reflects what the viewer had selected, not just the defaults."""
+        mock_generate_pdf.return_value = b"%PDF-1.4 content"
+        request = mock_request(orguser)
+        payload = ExportPdfRequest(dashboard_filters={"1": "2025-01-15"})
+
+        response = export_report_pdf(request, sample_snapshot.id, payload)
+
+        assert response.status_code == 200
+        assert response.content == b"%PDF-1.4 content"
+        assert response["Content-Type"] == "application/pdf"
+        sample_snapshot.refresh_from_db()  # export_report_pdf generates the share token on first use
+        mock_generate_pdf.assert_called_once_with(
+            sample_snapshot.id,
+            sample_snapshot.public_share_token,
+            dashboard_filters={"1": "2025-01-15"},
+        )
+
+    @patch("ddpui.api.report_api.PdfExportService.generate_pdf")
+    def test_no_payload_sends_no_filters(
+        self, mock_generate_pdf, orguser, sample_snapshot, seed_db
+    ):
+        """Omitting the payload (e.g. an older client) still works, with no filters applied —
+        matches the export's original behavior before dashboard_filters support was added."""
+        mock_generate_pdf.return_value = b"%PDF-1.4 content"
+        request = mock_request(orguser)
+
+        response = export_report_pdf(request, sample_snapshot.id)
+
+        assert response.status_code == 200
+        sample_snapshot.refresh_from_db()  # export_report_pdf generates the share token on first use
+        mock_generate_pdf.assert_called_once_with(
+            sample_snapshot.id, sample_snapshot.public_share_token, dashboard_filters=None
+        )
+
+    def test_snapshot_not_found(self, orguser, seed_db):
+        request = mock_request(orguser)
+        with pytest.raises(HttpError) as exc_info:
+            export_report_pdf(request, 999999)
+        assert exc_info.value.status_code == 404
 
 
 # ================================================================================

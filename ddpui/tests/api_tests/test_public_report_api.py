@@ -454,12 +454,12 @@ class TestGetPublicReportMapData:
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
         request = _make_public_request(body={"schema_name": "public", "table_name": "orders"})
-        status, response = get_public_report_map_data(request, "bad-token")
+        status, response = get_public_report_map_data(request, "bad-token", chart_id=1)
 
         assert status == 404
         assert response.is_valid is False
 
-    def test_no_warehouse(self, public_snapshot, seed_db):
+    def test_no_warehouse(self, public_snapshot, sample_chart, seed_db):
         """No warehouse configured returns 404"""
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow:
             mock_ow.filter.return_value.first.return_value = None
@@ -473,7 +473,7 @@ class TestGetPublicReportMapData:
                 }
             )
             status, response = get_public_report_map_data(
-                request, public_snapshot.public_share_token
+                request, public_snapshot.public_share_token, chart_id=sample_chart.id
             )
 
             assert status == 404

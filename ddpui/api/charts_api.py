@@ -415,7 +415,7 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
             )
 
         result = charts_service.execute_map_data_overlay(
-            payload, org_warehouse, resolved_dashboard_filters
+            payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
         logger.info(f"Map data overlay query returned {result['count']} rows")

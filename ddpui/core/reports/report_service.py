@@ -320,53 +320,71 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    def get_report_chart_data(
-        snapshot_id: int,
-        chart_id: int,
-        org: Org,
-        dashboard_filters: Optional[Dict[str, Any]] = None,
+    def _get_frozen_report_chart(
+        snapshot: ReportSnapshot, chart_id: int, expected_chart_type: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get chart data for a specific chart in a report snapshot.
+        """Look up chart_id's frozen config on the snapshot, validate its chart
+        type, and inject the snapshot's period filter into it.
 
-        Uses the same flow as dashboard chart rendering:
-        1. Look up chart config from frozen configs
-        2. Inject period date filters
-        3. Resolve dashboard filters from frozen config
-        4. Build ChartDataPayload via shared helper
-        5. Generate chart data and config
+        Returns a deep copy so the persisted frozen config is never mutated.
+        Shared by every report data endpoint (chart/map/table), so the chart's
+        definition and the period lock always come from the snapshot, never
+        from the caller's request.
         """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
         frozen_charts = snapshot.frozen_chart_configs or {}
         chart_config = frozen_charts.get(str(chart_id))
         if not chart_config:
-            raise SnapshotValidationError(f"Chart {chart_id} not found in snapshot {snapshot_id}")
+            raise SnapshotValidationError(f"Chart {chart_id} not found in snapshot {snapshot.id}")
+        if expected_chart_type and chart_config.get("chart_type") != expected_chart_type:
+            raise SnapshotValidationError(f"Chart {chart_id} is not a {expected_chart_type} chart")
 
         chart_config = copy.deepcopy(chart_config)
+        ReportService._inject_period_into_chart_configs({str(chart_id): chart_config}, snapshot)
+        return chart_config
 
-        # Inject period date filters into this chart's extra_config
-        temp_configs = {str(chart_id): chart_config}
-        ReportService._inject_period_into_chart_configs(temp_configs, snapshot)
-
-        # Get warehouse
-        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
-        if not org_warehouse:
-            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
-
-        # Resolve dashboard filters from frozen config
-        resolved_filters = None
-        if dashboard_filters:
+    @staticmethod
+    def _resolve_report_dashboard_filters(
+        snapshot: ReportSnapshot,
+        chart_config: Dict[str, Any],
+        org_warehouse: OrgWarehouse,
+        dashboard_filters: Optional[Dict[str, Any]],
+        warehouse_client=None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Resolve live dashboard_filters against the snapshot's frozen filter
+        defs, scoped to chart_config's own table. Shared by every report data
+        endpoint (chart/map/table). Pass warehouse_client if the caller already
+        built one, so this doesn't open a second connection for it."""
+        if not dashboard_filters:
+            return None
+        if warehouse_client is None:
             warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-            resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                dashboard_filters,
-                frozen_filters,
-                chart_config["schema_name"],
-                chart_config["table_name"],
-                warehouse_client,
-            )
+        frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+        return DashboardService.resolve_dashboard_filters_for_chart(
+            dashboard_filters,
+            frozen_filters,
+            chart_config["schema_name"],
+            chart_config["table_name"],
+            warehouse_client,
+        )
 
-        # Build payload using shared helper
+    @staticmethod
+    def _build_report_chart_data_payload(
+        snapshot: ReportSnapshot,
+        chart_id: int,
+        org_warehouse: OrgWarehouse,
+        dashboard_filters: Optional[Dict[str, Any]],
+        expected_chart_type: Optional[str] = None,
+    ) -> ChartDataPayload:
+        """Look up chart_id's frozen config, inject period, resolve dashboard
+        filters, and build the ChartDataPayload. Shared by get_report_chart_data,
+        get_report_table_data and get_report_table_total_rows — map uses
+        MapDataOverlayPayload instead (see get_report_map_data)."""
+        chart_config = ReportService._get_frozen_report_chart(
+            snapshot, chart_id, expected_chart_type
+        )
+        resolved_filters = ReportService._resolve_report_dashboard_filters(
+            snapshot, chart_config, org_warehouse, dashboard_filters
+        )
         config = ChartConfig(
             chart_type=chart_config["chart_type"],
             schema_name=chart_config["schema_name"],
@@ -374,7 +392,25 @@ class ReportService:
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
-        payload = build_chart_data_payload(config, resolved_filters)
+        return build_chart_data_payload(config, resolved_filters)
+
+    @staticmethod
+    def get_report_chart_data(
+        snapshot_id: int,
+        chart_id: int,
+        org: Org,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Get chart data for a specific chart in a report snapshot."""
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        payload = ReportService._build_report_chart_data_payload(
+            snapshot, chart_id, org_warehouse, dashboard_filters
+        )
 
         # Generate chart data using same function as dashboards
         return generate_chart_data_and_config(payload, org_warehouse, chart_id=chart_id)
@@ -483,72 +519,59 @@ class ReportService:
     @staticmethod
     def get_report_map_data(
         snapshot_id: int,
+        chart_id: int,
         org: Org,
-        map_payload: MapDataOverlayPayload,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Get map data overlay for a report snapshot.
+        """Get map data overlay for a map chart in a report snapshot.
 
-        Resolves dashboard filters from the snapshot's frozen config (same as
-        get_report_chart_data/get_report_kpi_data), so filtering keeps working
-        even if the source dashboard or filter is later deleted.
+        Same flow as get_report_chart_data: the chart's definition and the
+        snapshot's period lock come from the frozen config (via chart_id),
+        never from the request.
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
+        chart_config = ReportService._get_frozen_report_chart(snapshot, chart_id, "map")
 
         org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
 
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-
-        resolved_dashboard_filters = None
-        if map_payload.dashboard_filters:
-            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                map_payload.dashboard_filters,
-                frozen_filters,
-                map_payload.schema_name,
-                map_payload.table_name,
-                warehouse_client,
-            )
-
-        return charts_service.execute_map_data_overlay(
-            map_payload, org_warehouse, resolved_dashboard_filters
+        resolved_dashboard_filters = ReportService._resolve_report_dashboard_filters(
+            snapshot, chart_config, org_warehouse, dashboard_filters, warehouse_client
         )
 
-    @staticmethod
-    def _resolve_table_payload_filters(
-        snapshot: ReportSnapshot,
-        payload: ChartDataPayload,
-        org_warehouse: OrgWarehouse,
-        dashboard_filters: Optional[Dict[str, Any]],
-    ) -> ChartDataPayload:
-        """Return a copy of `payload` with dashboard_filters resolved against
-        the snapshot's frozen filter config, so filtering keeps working even
-        if the source dashboard or filter is later deleted."""
-        resolved_dashboard_filters = None
-        if dashboard_filters:
-            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                dashboard_filters,
-                frozen_filters,
-                payload.schema_name,
-                payload.table_name,
-                warehouse_client,
-            )
-
-        return ChartDataPayload(
-            **{
-                **payload.model_dump(exclude={"dashboard_filters"}),
-                "dashboard_filters": resolved_dashboard_filters,
+        ec = chart_config.get("extra_config") or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise SnapshotValidationError(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
             }
+        ]
+        map_payload = MapDataOverlayPayload(
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            geographic_column=geographic_column,
+            # value_column is required on this schema but None for count-only charts.
+            value_column=value_column or geographic_column,
+            metrics=metrics,
+            extra_config=ec,
+        )
+
+        return charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
     @staticmethod
     def get_report_table_data(
         snapshot_id: int,
+        chart_id: int,
         org: Org,
-        payload: ChartDataPayload,
         page: int,
         limit: int,
         dashboard_filters: Optional[Dict[str, Any]] = None,
@@ -560,18 +583,16 @@ class ReportService:
         if not org_warehouse:
             raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
 
-        modified_payload = ReportService._resolve_table_payload_filters(
-            snapshot, payload, org_warehouse, dashboard_filters
+        payload = ReportService._build_report_chart_data_payload(
+            snapshot, chart_id, org_warehouse, dashboard_filters, "table"
         )
-        return charts_service.get_chart_data_table_preview(
-            org_warehouse, modified_payload, page, limit
-        )
+        return charts_service.get_chart_data_table_preview(org_warehouse, payload, page, limit)
 
     @staticmethod
     def get_report_table_total_rows(
         snapshot_id: int,
+        chart_id: int,
         org: Org,
-        payload: ChartDataPayload,
         dashboard_filters: Optional[Dict[str, Any]] = None,
     ) -> int:
         """Get total row count for a table chart in a report snapshot."""
@@ -581,10 +602,10 @@ class ReportService:
         if not org_warehouse:
             raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
 
-        modified_payload = ReportService._resolve_table_payload_filters(
-            snapshot, payload, org_warehouse, dashboard_filters
+        payload = ReportService._build_report_chart_data_payload(
+            snapshot, chart_id, org_warehouse, dashboard_filters, "table"
         )
-        return charts_service.get_chart_data_total_rows(org_warehouse, modified_payload)
+        return charts_service.get_chart_data_total_rows(org_warehouse, payload)
 
     # =========================================================================
     # Snapshot CRUD

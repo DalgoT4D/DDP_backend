@@ -657,6 +657,8 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise Exception("Chart not found in dashboard's organization")
+        if chart.chart_type != "map":
+            raise Exception(f"Chart {chart_id} is not a map chart")
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
@@ -665,6 +667,11 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
         payload = json.loads(request.body) if request.body else {}
+
+        # schema_name/table_name are overwritten with the chart's own values
+        # below, but MapDataOverlayPayload requires them to construct.
+        payload["schema_name"] = chart.schema_name
+        payload["table_name"] = chart.table_name
 
         # Add metrics from chart configuration if not provided
         # IMPORTANT: Always use 'value' as alias to match private API behavior
@@ -721,7 +728,7 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
             )
 
         result = charts_service.execute_map_data_overlay(
-            map_payload, org_warehouse, resolved_dashboard_filters
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
         logger.info(f"Public map data overlay query returned {result['count']} rows")
@@ -1376,17 +1383,23 @@ def get_public_report_table_total_rows(
 
 
 @public_router.post(
-    "/reports/{token}/map-data/",
+    "/reports/{token}/charts/{chart_id}/map-data/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_map_data(request, token: str):
-    """Get map data overlay for a public report"""
-    try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+def get_public_report_map_data(request, token: str, chart_id: int):
+    """Get map data overlay for a public report.
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
+    chart_id identifies the frozen chart config this request must match —
+    schema_name/table_name are taken from that frozen config, not from the
+    request body, so a caller can't point the query at an arbitrary table
+    outside this report just by editing the POST body.
+    """
+    try:
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
+        if chart_config.get("chart_type") != "map":
+            raise Exception(f"Chart {chart_id} is not a map chart")
 
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
@@ -1401,6 +1414,11 @@ def get_public_report_map_data(request, token: str):
                     "alias": "value",
                 }
             ]
+
+        # schema_name/table_name are overwritten with the frozen config's own
+        # values below, but MapDataOverlayPayload requires them to construct.
+        payload["schema_name"] = chart_config["schema_name"]
+        payload["table_name"] = chart_config["table_name"]
 
         map_payload = MapDataOverlayPayload(**payload)
 
@@ -1432,7 +1450,7 @@ def get_public_report_map_data(request, token: str):
             )
 
         result = charts_service.execute_map_data_overlay(
-            map_payload, org_warehouse, resolved_dashboard_filters
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
         return {**result, "is_valid": True}

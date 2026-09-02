@@ -1771,16 +1771,17 @@ def get_chart_data_total_rows(
 def execute_map_data_overlay(
     map_payload: MapDataOverlayPayload,
     org_warehouse: OrgWarehouse,
+    warehouse_client: Warehouse,
     resolved_dashboard_filters: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Run a map data overlay query and return [{name, value}] rows.
 
     Shared by the live dashboard map endpoint and the report-scoped (public
     and private) map endpoints — callers differ only in how they resolve
-    dashboard_filters before calling this.
+    dashboard_filters before calling this. warehouse_client is required
+    because every current caller already builds one to resolve dashboard
+    filters, and reuses it here instead of opening a second connection.
     """
-    warehouse_client = get_warehouse_client(org_warehouse)
-
     extra_config = copy.deepcopy(map_payload.extra_config or {})
 
     chart_payload = ChartDataPayload(
@@ -1809,11 +1810,10 @@ def execute_map_data_overlay(
 
     dict_results = execute_chart_query(warehouse_client, query_builder, execute_payload)
 
-    # Alias defaults to 'value' for every current caller (chart builder preview,
-    # dashboards, reports), but falls back to the same default alias
-    # build_multi_metric_query itself would use, in case a caller omits it.
+    # Must match the alias build_multi_metric_query actually used for this
+    # metric's SQL column (e.g. count-with-no-column gets a "count_all_" prefix).
     first_metric = map_payload.metrics[0]
-    metric_alias = first_metric.alias or f"{first_metric.aggregation}_{first_metric.column}"
+    metric_alias = metric_sql_alias(first_metric)
 
     map_data = []
     for row in dict_results:

@@ -22,10 +22,8 @@ from ddpui.core.reports.pdf_export_service import PdfExportService
 from ddpui.core.reports.report_service import ReportService
 from ddpui.models.org_user import OrgUser
 from ddpui.schemas.chart_schemas import (
-    ChartDataPayload,
     ChartDataResponse,
     DataPreviewResponse,
-    MapDataOverlayPayload,
 )
 from ddpui.schemas.dashboard_schema import ShareResponse, ShareStatus, ShareToggle
 from ddpui.celeryworkers.report_tasks import send_report_email_task
@@ -203,13 +201,24 @@ def get_report_kpi_data(
         raise HttpError(500, "Failed to get chart data") from e
 
 
-@report_router.post("/{snapshot_id}/map-data/", response=dict)
+@report_router.post("/{snapshot_id}/charts/{chart_id}/map-data/", response=dict)
 @has_permission(["can_view_dashboards"])
-def get_report_map_data(request, snapshot_id: int, payload: MapDataOverlayPayload):
+def get_report_map_data(
+    request, snapshot_id: int, chart_id: int, dashboard_filters: Optional[str] = None
+):
     """Get map data overlay for a map chart in a report snapshot."""
     orguser: OrgUser = request.orguser
     try:
-        result = ReportService.get_report_map_data(snapshot_id, orguser.org, payload)
+        parsed_filters = None
+        if dashboard_filters:
+            try:
+                parsed_filters = json.loads(dashboard_filters)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+
+        result = ReportService.get_report_map_data(
+            snapshot_id, chart_id, orguser.org, parsed_filters
+        )
         return {**result, "is_valid": True}
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
@@ -222,12 +231,12 @@ def get_report_map_data(request, snapshot_id: int, payload: MapDataOverlayPayloa
         raise HttpError(500, "Failed to get map data") from e
 
 
-@report_router.post("/{snapshot_id}/table-data/", response=DataPreviewResponse)
+@report_router.post("/{snapshot_id}/charts/{chart_id}/table-data/", response=DataPreviewResponse)
 @has_permission(["can_view_dashboards"])
 def get_report_table_data(
     request,
     snapshot_id: int,
-    payload: ChartDataPayload,
+    chart_id: int,
     page: int = 0,
     limit: int = 100,
     dashboard_filters: Optional[str] = None,
@@ -243,7 +252,7 @@ def get_report_table_data(
                 logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
 
         result = ReportService.get_report_table_data(
-            snapshot_id, orguser.org, payload, page, limit, parsed_filters
+            snapshot_id, chart_id, orguser.org, page, limit, parsed_filters
         )
         return DataPreviewResponse(
             columns=result.get("columns", []),
@@ -265,12 +274,15 @@ def get_report_table_data(
         raise HttpError(500, "Failed to get table data") from e
 
 
-@report_router.post("/{snapshot_id}/table-data/total-rows/", response=int)
+@report_router.post(
+    "/{snapshot_id}/charts/{chart_id}/table-data/total-rows/",
+    response=int,
+)
 @has_permission(["can_view_dashboards"])
 def get_report_table_total_rows(
     request,
     snapshot_id: int,
-    payload: ChartDataPayload,
+    chart_id: int,
     dashboard_filters: Optional[str] = None,
 ):
     """Get total row count for a table chart in a report snapshot."""
@@ -284,7 +296,7 @@ def get_report_table_total_rows(
                 logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
 
         return ReportService.get_report_table_total_rows(
-            snapshot_id, orguser.org, payload, parsed_filters
+            snapshot_id, chart_id, orguser.org, parsed_filters
         )
     except SnapshotNotFoundError as err:
         raise HttpError(404, str(err)) from err
