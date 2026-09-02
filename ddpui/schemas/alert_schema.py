@@ -10,9 +10,10 @@ from ninja import Schema
 
 
 class RecipientIn(Schema):
-    type: Literal["orguser", "external"]
+    type: Literal["orguser", "external", "user_group"]
     orguser_id: Optional[int] = None
     email: Optional[str] = None
+    user_group_id: Optional[int] = None
 
 
 class RecipientOut(Schema):
@@ -20,6 +21,8 @@ class RecipientOut(Schema):
     orguser_id: Optional[int] = None
     orguser_name: Optional[str] = None
     email: Optional[str] = None
+    user_group_id: Optional[int] = None
+    user_group_name: Optional[str] = None
 
 
 # ── Standalone source ──────────────────────────────────────────────────────
@@ -131,6 +134,7 @@ class AlertResponse(Schema):
     recipients: List[RecipientOut]
     created_at: datetime
     updated_at: datetime
+    created_by_email: Optional[str] = None
 
 
 class KpiRagContext(Schema):
@@ -165,6 +169,7 @@ class AlertListItem(Schema):
     is_active: bool
     last_fire_at: Optional[datetime] = None
     fire_streak: int = 0
+    created_by_email: Optional[str] = None
 
 
 class AlertListResponse(Schema):
@@ -172,7 +177,20 @@ class AlertListResponse(Schema):
     total: int
     page: int
     page_size: int
-    total_pages: int
+
+
+class AlertTransferCandidate(Schema):
+    orguser_id: int
+    email: str
+    role_name: Optional[str] = None
+
+
+class AlertTransferCandidatesResponse(Schema):
+    candidates: List[AlertTransferCandidate]
+
+
+class AlertTransferOwnershipPayload(Schema):
+    to_orguser_id: int
 
 
 # ── Test (dry-run) endpoint ────────────────────────────────────────────────

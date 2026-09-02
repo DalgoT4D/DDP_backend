@@ -117,6 +117,8 @@ class KPI(models.Model):
     # Display order on KPI page
     display_order = models.IntegerField(default=0)
 
+    is_private = models.BooleanField(default=False)
+
     # Org scoping + ownership
     org = models.ForeignKey(Org, on_delete=models.CASCADE)
     created_by = models.ForeignKey(
