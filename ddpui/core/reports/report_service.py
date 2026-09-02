@@ -319,6 +319,26 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
+    def resolve_snapshot_filters_for_chart(
+        snapshot: ReportSnapshot,
+        chart_config: Dict[str, Any],
+        filter_values: Optional[Dict[str, Any]],
+        org_warehouse: OrgWarehouse,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Resolve filter values against a snapshot's frozen filter defs, not the live dashboard."""
+        if not filter_values:
+            return None
+
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+        return DashboardService.resolve_dashboard_filters_for_chart(
+            filter_values,
+            snapshot.frozen_dashboard.get("filters", []),
+            chart_config["schema_name"],
+            chart_config["table_name"],
+            warehouse_client,
+        )
+
+    @staticmethod
     def get_report_chart_data(
         snapshot_id: int,
         chart_id: int,
@@ -353,17 +373,9 @@ class ReportService:
             raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
 
         # Resolve dashboard filters from frozen config
-        resolved_filters = None
-        if dashboard_filters:
-            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
-            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
-            resolved_filters = DashboardService.resolve_dashboard_filters_for_chart(
-                dashboard_filters,
-                frozen_filters,
-                chart_config["schema_name"],
-                chart_config["table_name"],
-                warehouse_client,
-            )
+        resolved_filters = ReportService.resolve_snapshot_filters_for_chart(
+            snapshot, chart_config, dashboard_filters, org_warehouse
+        )
 
         # Build payload using shared helper
         config = ChartConfig(

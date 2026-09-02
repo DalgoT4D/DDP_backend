@@ -46,7 +46,7 @@ pytestmark = pytest.mark.django_db
 rf = RequestFactory()
 
 
-def _make_public_request(body=None):
+def _make_public_request(body=None, query_params=None):
     """Create a simple mock request for public endpoints (no auth needed)"""
     if body:
         request = rf.post(
@@ -55,7 +55,7 @@ def _make_public_request(body=None):
             content_type="application/json",
         )
     else:
-        request = rf.get("/api/v1/public/reports/")
+        request = rf.get("/api/v1/public/reports/", data=query_params or {})
     request.META["REMOTE_ADDR"] = "127.0.0.1"
     request.META["HTTP_USER_AGENT"] = "TestAgent"
     return request
@@ -407,6 +407,43 @@ class TestGetPublicReportTableData:
             assert response["columns"] == ["id", "name"]
             assert len(response["data"]) == 1
 
+    def test_dashboard_filters_are_applied(self, public_snapshot, seed_db):
+        """dashboard_filters from the query string reach the table preview payload"""
+        mock_preview = {
+            "columns": ["id"],
+            "column_types": ["int"],
+            "data": [],
+            "page": 0,
+            "limit": 100,
+        }
+        resolved = [{"column": "created_at", "operator": "between", "value": ["2025-01-01", None]}]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = mock_preview
+            mock_resolve.return_value = resolved
+
+            filter_id = public_snapshot.frozen_dashboard["filters"][0]["id"]
+            request = _make_public_request(
+                query_params={"dashboard_filters": json.dumps({str(filter_id): "2025-01-15"})}
+            )
+            response = get_public_report_table_data(
+                request, public_snapshot.public_share_token, chart_id=1
+            )
+
+            assert response["is_valid"] is True
+            assert mock_resolve.called
+            payload = mock_preview_fn.call_args[0][1]
+            assert payload.dashboard_filters == resolved
+
 
 # ================================================================================
 # Test get_public_report_table_total_rows
@@ -441,6 +478,34 @@ class TestGetPublicReportTableTotalRows:
 
             assert response["is_valid"] is True
             assert response["total_rows"] == 42
+
+    def test_dashboard_filters_are_applied(self, public_snapshot, seed_db):
+        """dashboard_filters from the query string reach the total-rows payload"""
+        resolved = [{"column": "created_at", "operator": "between", "value": ["2025-01-01", None]}]
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total, patch("ddpui.api.public_api.WarehouseFactory.get_warehouse_client"), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.core.reports.report_service.WarehouseFactory.get_warehouse_client"
+        ):
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_total.return_value = 7
+            mock_resolve.return_value = resolved
+
+            filter_id = public_snapshot.frozen_dashboard["filters"][0]["id"]
+            request = _make_public_request(
+                query_params={"dashboard_filters": json.dumps({str(filter_id): "2025-01-15"})}
+            )
+            response = get_public_report_table_total_rows(
+                request, public_snapshot.public_share_token, chart_id=1
+            )
+
+            assert response["total_rows"] == 7
+            assert mock_resolve.called
+            payload = mock_total.call_args[0][1]
+            assert payload.dashboard_filters == resolved
 
 
 # ================================================================================
