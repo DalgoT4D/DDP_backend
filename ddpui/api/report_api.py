@@ -250,6 +250,8 @@ def get_report_table_data(
                 parsed_filters = json.loads(dashboard_filters)
             except json.JSONDecodeError:
                 logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            if not isinstance(parsed_filters, dict):
+                parsed_filters = None
 
         result = ReportService.get_report_table_data(
             snapshot_id, chart_id, orguser.org, page, limit, parsed_filters
@@ -294,6 +296,8 @@ def get_report_table_total_rows(
                 parsed_filters = json.loads(dashboard_filters)
             except json.JSONDecodeError:
                 logger.error(f"Invalid dashboard_filters JSON: {dashboard_filters}")
+            if not isinstance(parsed_filters, dict):
+                parsed_filters = None
 
         return ReportService.get_report_table_total_rows(
             snapshot_id, chart_id, orguser.org, parsed_filters
