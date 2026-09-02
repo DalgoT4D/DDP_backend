@@ -275,7 +275,7 @@ class TestGetDashboard:
 
 
 def _dashboard_is_favorite(request, dashboard_id):
-    """is_favorite is only computed on list_dashboards (the only consumer); look it up there."""
+    """Read is_favorite off list_dashboards, the endpoint the star UI actually renders from."""
     response = list_dashboards(request)
     return next(d for d in response if d.id == dashboard_id).is_favorite
 
@@ -356,6 +356,42 @@ class TestFavoriteDashboard:
         favorited = [d for d in response if d.id == sample_dashboard.id]
         assert len(favorited) == 1
         assert favorited[0].is_favorite is True
+
+    def test_get_dashboard_reflects_favorite(self, orguser, sample_dashboard, seed_db):
+        """get_dashboard reports the user's real favorite state, not the schema default"""
+        request = mock_request(orguser)
+
+        assert get_dashboard(request, dashboard_id=sample_dashboard.id).is_favorite is False
+
+        favorite_dashboard(request, dashboard_id=sample_dashboard.id)
+
+        assert get_dashboard(request, dashboard_id=sample_dashboard.id).is_favorite is True
+
+    def test_get_dashboard_favorite_is_per_user(self, orguser, sample_dashboard, org, seed_db):
+        """get_dashboard scopes is_favorite to the requesting user"""
+        other_user = User.objects.create(
+            username="otherdashdetailuser", email="otherdashdetail@test.com"
+        )
+        other_orguser = OrgUser.objects.create(
+            user=other_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
+        )
+
+        favorite_dashboard(mock_request(orguser), dashboard_id=sample_dashboard.id)
+
+        assert (
+            get_dashboard(mock_request(orguser), dashboard_id=sample_dashboard.id).is_favorite
+            is True
+        )
+        assert (
+            get_dashboard(mock_request(other_orguser), dashboard_id=sample_dashboard.id).is_favorite
+            is False
+        )
+
+        # Cleanup
+        other_orguser.delete()
+        other_user.delete()
 
     def test_delete_dashboard_removes_favorite_rows(self, orguser, sample_dashboard, seed_db):
         """Deleting a dashboard cleans up its Favorite rows instead of orphaning them"""

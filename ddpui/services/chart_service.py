@@ -389,3 +389,16 @@ class ChartService:
             Set of chart IDs favorited by this user
         """
         return FavoriteService.get_favorited_ids(FavoriteResourceType.CHART, chart_ids, orguser)
+
+    @staticmethod
+    def is_chart_favorited(chart_id: int, orguser: OrgUser) -> bool:
+        """Whether this user has favorited a single chart.
+
+        Args:
+            chart_id: The chart ID
+            orguser: The user whose favorites to look up
+
+        Returns:
+            True if this user has favorited the chart
+        """
+        return FavoriteService.is_favorited(FavoriteResourceType.CHART, chart_id, orguser)

@@ -108,7 +108,11 @@ def get_dashboard(request, dashboard_id: int):
         raise HttpError(404, "Dashboard not found") from err
 
     return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard), access_level=request.access_level
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        ),
+        access_level=request.access_level,
     )
 
 
@@ -239,7 +243,11 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
         )
 
     return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard), access_level=request.access_level
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        ),
+        access_level=request.access_level,
     )
 
 

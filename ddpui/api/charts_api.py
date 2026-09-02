@@ -1055,6 +1055,7 @@ def get_chart(request, chart_id: int):
         updated_at=chart.updated_at,
         access_level=request.access_level,
         is_private=chart.is_private,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 
@@ -1266,6 +1267,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         updated_at=chart.updated_at,
         access_level=request.access_level,
         is_private=chart.is_private,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 

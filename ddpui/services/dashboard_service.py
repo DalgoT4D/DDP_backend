@@ -360,6 +360,19 @@ class DashboardService:
         )
 
     @staticmethod
+    def is_dashboard_favorited(dashboard_id: int, orguser: OrgUser) -> bool:
+        """Whether this user has favorited a single dashboard.
+
+        Args:
+            dashboard_id: The dashboard ID
+            orguser: The user whose favorites to look up
+
+        Returns:
+            True if this user has favorited the dashboard
+        """
+        return FavoriteService.is_favorited(FavoriteResourceType.DASHBOARD, dashboard_id, orguser)
+
+    @staticmethod
     def create_dashboard(data: DashboardData, orguser: OrgUser) -> Dashboard:
         """Create a new dashboard.
 
