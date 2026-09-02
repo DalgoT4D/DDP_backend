@@ -197,7 +197,7 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
         user=authuser,
         org=org_without_workspace,
         new_role=Role.objects.filter(slug=ACCOUNT_MANAGER_ROLE).first(),
-        has_seen_rbac_notice=True,
+        has_seen_resource_sharing_notice=True,
     )
 
     request = mock_request(orguser2)
@@ -213,15 +213,15 @@ def test_get_current_userv2_has_user(authuser, org_with_workspace, org_without_w
     if response[0].org.slug == org_with_workspace.slug:
         assert response[0].new_role_slug == orguser1.new_role.slug
         assert response[1].new_role_slug == orguser2.new_role.slug
-        # the one-time RBAC notice flag is surfaced per-orguser on login
-        assert response[0].has_seen_rbac_notice is False
-        assert response[1].has_seen_rbac_notice is True
+        # the one-time resource-sharing notice flag is surfaced per-orguser on login
+        assert response[0].has_seen_resource_sharing_notice is False
+        assert response[1].has_seen_resource_sharing_notice is True
 
     elif response[1].org.slug == org_with_workspace.slug:
         assert response[1].new_role_slug == orguser1.new_role.slug
         assert response[0].new_role_slug == orguser2.new_role.slug
-        assert response[1].has_seen_rbac_notice is False
-        assert response[0].has_seen_rbac_notice is True
+        assert response[1].has_seen_resource_sharing_notice is False
+        assert response[0].has_seen_resource_sharing_notice is True
 
 
 def test_get_current_userv2_returns_the_plan_window(authuser, org_with_workspace):
@@ -338,7 +338,7 @@ def test_post_organization_user_invalid_email(orguser):
     assert str(excinfo.value) == "that is not a valid email address"
 
 
-@patch.multiple("ddpui.utils.awsses", send_signup_email=Mock(return_value=1))
+@patch.multiple("ddpui.core.notifications.triggers.user", send_signup=Mock(return_value=1))
 def test_post_organization_user_success(orguser):
     """a success test"""
     request = mock_request(orguser)
@@ -363,7 +363,7 @@ def test_post_organization_user_success(orguser):
         the_authuser.delete()
 
 
-@patch.multiple("ddpui.utils.awsses", send_signup_email=Mock(return_value=1))
+@patch.multiple("ddpui.core.notifications.triggers.user", send_signup=Mock(return_value=1))
 def test_post_organization_user_success_lowercase_email(orguser):
     """a success test"""
     request = mock_request(orguser)
@@ -477,7 +477,7 @@ def test_delete_organization_users_success_v1(orguser):
 
 
 def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db, orguser):
-    """deleting an orguser must not delete the dashboards and charts they created"""
+    """deleting an orguser reassigns their dashboards and charts to the requesting admin"""
     request = mock_request(orguser)
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
@@ -514,8 +514,10 @@ def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db,
     assert Chart.objects.filter(id=chart.id).exists()
     assert Dashboard.objects.filter(id=others_dashboard.id).exists()
     dashboard.refresh_from_db()
-    assert dashboard.created_by is None
+    chart.refresh_from_db()
+    assert dashboard.created_by == orguser
     assert dashboard.last_modified_by is None
+    assert chart.created_by == orguser
     others_dashboard.refresh_from_db()
     assert others_dashboard.created_by == orguser
     assert others_dashboard.last_modified_by is None
@@ -523,7 +525,7 @@ def test_delete_organization_users_keeps_their_dashboards_and_charts_v1(seed_db,
 
 
 def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, orguser):
-    """deleting an orguser must not delete the metrics, kpis and alerts they created"""
+    """deleting an orguser reassigns their metrics, kpis, and alerts to the requesting admin"""
     request = mock_request(orguser)
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
@@ -565,7 +567,7 @@ def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, o
     for obj in [metric, kpi, alert]:
         assert type(obj).objects.filter(id=obj.id).exists()
         obj.refresh_from_db()
-        assert obj.created_by is None
+        assert obj.created_by == orguser
 
     # KPI.metric is PROTECT, so clean up in dependency order for fixture teardown
     alert.delete()
@@ -574,8 +576,8 @@ def test_delete_organization_users_keeps_their_metrics_kpis_alerts_v1(seed_db, o
     user.delete()
 
 
-def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1(seed_db, orguser):
-    """after a creator is deleted, their dashboard can be deleted by an admin but not a member"""
+def test_delete_organization_users_reassigns_dashboard_to_requestor_v1(seed_db, orguser):
+    """after a creator is deleted, their dashboard is reassigned to the requesting admin"""
     request = mock_request(orguser)
     payload = DeleteOrgUserPayload(email="useremail")
     user = User.objects.create(email=payload.email, username=payload.email)
@@ -587,15 +589,15 @@ def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1
     dashboard = Dashboard.objects.create(
         title="orphaned-dashboard", org=orguser.org, created_by=creator
     )
-    # a second dashboard so the orphaned one isn't the org's last (deleting
+    # a second dashboard so the reassigned one isn't the org's last (deleting
     # the last dashboard is blocked by a separate rule)
     Dashboard.objects.create(title="other-dashboard", org=orguser.org, created_by=orguser)
 
     delete_organization_users_v1(request, payload)
     dashboard.refresh_from_db()
-    assert dashboard.created_by is None
+    assert dashboard.created_by == orguser
 
-    # a non-admin member of the org cannot delete the orphaned dashboard
+    # a non-admin member of the org cannot delete the reassigned dashboard
     member_user = User.objects.create(email="member-email", username="member-email")
     member = OrgUser.objects.create(
         org=orguser.org,
@@ -606,7 +608,7 @@ def test_delete_organization_users_orphaned_dashboard_deletable_by_admin_only_v1
         DashboardService.delete_dashboard(dashboard.id, orguser.org, member)
     assert Dashboard.objects.filter(id=dashboard.id).exists()
 
-    # an admin can delete it (the requestor orguser fixture holds the admin role)
+    # the requesting admin, who is now the owner, can delete it
     assert (
         DashboardService.delete_dashboard(dashboard.id, orguser.org, orguser)
         == "orphaned-dashboard"
@@ -639,18 +641,18 @@ def test_put_organization_user_self_v1(orguser):
 def test_put_organization_user_self_v1_marks_rbac_notice_seen(orguser):
     """the requestor can flip the one-time RBAC notice flag on their own OrgUser"""
     request = mock_request(orguser)
-    assert orguser.has_seen_rbac_notice is False
+    assert orguser.has_seen_resource_sharing_notice is False
 
     payload = OrgUserUpdatev1(
         toupdate_email="unused-param",
-        has_seen_rbac_notice=True,
+        has_seen_resource_sharing_notice=True,
     )
 
     response = put_organization_user_self_v1(request, payload)
 
-    assert response.has_seen_rbac_notice is True
+    assert response.has_seen_resource_sharing_notice is True
     orguser.refresh_from_db()
-    assert orguser.has_seen_rbac_notice is True
+    assert orguser.has_seen_resource_sharing_notice is True
 
 
 # ================================================================================
@@ -834,7 +836,7 @@ def test_get_organizations_warehouses(orguser):
 # ================================================================================
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_post_organization_user_invite_v1_no_org(orguser):
     """failing test, no org"""
     orguser.org = None
@@ -848,7 +850,7 @@ def test_post_organization_user_invite_v1_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_post_organization_user_invite_v1_nosuchrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -858,7 +860,7 @@ def test_post_organization_user_invite_v1_nosuchrole(orguser):
     assert str(excinfo.value) == "Invalid role"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", Mock())
 def test_post_organization_user_invite_v1_insufficientrole(orguser):
     """failing test, no such role"""
     request = mock_request(orguser)
@@ -871,7 +873,7 @@ def test_post_organization_user_invite_v1_insufficientrole(orguser):
     assert str(excinfo.value) == "Insufficient permissions for this operation"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_organization_user_invite_v1(mock_awsses, orguser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
@@ -899,7 +901,7 @@ def test_post_organization_user_invite_v1(mock_awsses, orguser):
     mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, orguser):
     """success test, inviting a new user"""
     another_org = Org.objects.create(name="anotherorg", slug="anotherorg")
@@ -939,7 +941,7 @@ def test_post_organization_user_invite_v1_multiple_open_invites(mock_awsses, org
     mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: OrgUser):
     """success test, inviting a new user"""
     payload = NewInvitationSchema(
@@ -969,7 +971,7 @@ def test_post_organization_user_invite_v1_lowercase_email(mock_awsses, orguser: 
     mock_awsses.assert_called_once()
 
 
-@patch("ddpui.utils.awsses.send_youve_been_added_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_added_to_org", mock_awsses=Mock())
 def test_post_organization_user_invite_v1_user_exists(mock_awsses, orguser: OrgUser):
     """success test, inviting an existing user"""
     user = User.objects.create(email="existinguser", username="existinguser")
@@ -1241,7 +1243,7 @@ def test_post_resend_invitation_no_org(orguser):
     assert str(excinfo.value) == "create an organization first"
 
 
-@patch("ddpui.utils.awsses.send_invite_user_email", mock_awsses=Mock())
+@patch("ddpui.core.notifications.triggers.user.send_invite_user", mock_awsses=Mock())
 def test_post_resend_invitation(mock_awsses: Mock, orguser):
     """success test"""
     original_invited_on = timezone.as_ist(datetime(2023, 1, 1, 10, 0, 0))

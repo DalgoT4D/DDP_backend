@@ -51,6 +51,8 @@ class ReportSnapshot(models.Model):
         help_text="Executive summary or notes displayed above the dashboard",
     )
 
+    is_private = models.BooleanField(default=False)
+
     # Public sharing (same pattern as Dashboard)
     is_public = models.BooleanField(default=False)
     public_share_token = models.CharField(

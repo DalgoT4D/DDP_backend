@@ -51,10 +51,10 @@ class PdfExportService:
             )
 
         frontend_url = getattr(settings, "FRONTEND_URL_V2", None) or getattr(
-            settings, "FRONTEND_URL", "http://localhost:3001"
+            settings, "FRONTEND_URL", "http://localhost:3000"
         )
         if not frontend_url or str(frontend_url).startswith("/"):
-            frontend_url = "http://localhost:3001"
+            frontend_url = "http://localhost:3000"
         url = f"{frontend_url.rstrip('/')}/share/report/{share_token}?print=true"
 
         logger.info(f"Generating PDF for snapshot {snapshot_id} from {url}")

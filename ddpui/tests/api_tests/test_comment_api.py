@@ -190,7 +190,7 @@ class TestGetCommentStates:
 
     def test_empty_for_no_comments(self, orguser, snapshot):
         request = mock_request(orguser)
-        response = get_comment_states(request, snapshot.id)
+        response = get_comment_states(request, snapshot_id=snapshot.id)
         assert response["success"] is True
         assert response["data"]["states"] == []
 
@@ -203,7 +203,7 @@ class TestGetCommentStates:
             org=org,
         )
         request = mock_request(orguser)
-        response = get_comment_states(request, snapshot.id)
+        response = get_comment_states(request, snapshot_id=snapshot.id)
         states = response["data"]["states"]
         summary = next(s for s in states if s["target_type"] == "summary")
         assert summary["state"] == "unread"
@@ -224,7 +224,7 @@ class TestGetCommentStates:
             target_type=CommentTargetType.SUMMARY,
         )
         request = mock_request(orguser)
-        response = get_comment_states(request, snapshot.id)
+        response = get_comment_states(request, snapshot_id=snapshot.id)
         states = response["data"]["states"]
         summary = next(s for s in states if s["target_type"] == "summary")
         assert summary["state"] == "read"
@@ -239,16 +239,19 @@ class TestGetCommentStates:
             org=org,
         )
         request = mock_request(orguser)
-        response = get_comment_states(request, snapshot.id)
+        response = get_comment_states(request, snapshot_id=snapshot.id)
         states = response["data"]["states"]
         summary = next(s for s in states if s["target_type"] == "summary")
         assert summary["state"] == "mentioned"
 
     def test_snapshot_not_found(self, orguser):
+        """Missing report → 404 (has_access decorator gates before endpoint body).
+        Was previously 400 from the endpoint's own not-found path; the decorator
+        now short-circuits earlier. Spec §"has_access decorator HTTP status semantics"."""
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc:
-            get_comment_states(request, 99999)
-        assert exc.value.status_code == 400
+            get_comment_states(request, snapshot_id=99999)
+        assert exc.value.status_code == 404
 
 
 # ================================================================================
@@ -262,7 +265,7 @@ class TestMarkAsRead:
     def test_mark_summary(self, orguser, snapshot):
         request = mock_request(orguser)
         payload = MarkReadRequest(target_type="summary")
-        response = mark_as_read(request, snapshot.id, payload)
+        response = mark_as_read(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         assert CommentReadStatus.objects.filter(
             user=orguser, snapshot=snapshot, target_type="summary"
@@ -271,7 +274,7 @@ class TestMarkAsRead:
     def test_mark_chart(self, orguser, snapshot):
         request = mock_request(orguser)
         payload = MarkReadRequest(target_type="chart", target_id=10)
-        response = mark_as_read(request, snapshot.id, payload)
+        response = mark_as_read(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         assert CommentReadStatus.objects.filter(
             user=orguser, snapshot=snapshot, target_type="chart", target_id=10
@@ -280,14 +283,14 @@ class TestMarkAsRead:
     def test_updates_existing(self, orguser, snapshot):
         request = mock_request(orguser)
         payload = MarkReadRequest(target_type="summary")
-        mark_as_read(request, snapshot.id, payload)
+        mark_as_read(request, snapshot_id=snapshot.id, payload=payload)
         first_read = CommentReadStatus.objects.get(
             user=orguser, snapshot=snapshot, target_type="summary"
         )
         first_time = first_read.last_read_at
 
         # Mark again — should update, not duplicate
-        mark_as_read(request, snapshot.id, payload)
+        mark_as_read(request, snapshot_id=snapshot.id, payload=payload)
         assert (
             CommentReadStatus.objects.filter(
                 user=orguser, snapshot=snapshot, target_type="summary"
@@ -306,7 +309,7 @@ class TestMarkAsRead:
 class TestListComments:
     """Tests for list_comments endpoint"""
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_list_summary(self, mock_send, orguser, snapshot, org):
         Comment.objects.create(
             target_type=CommentTargetType.SUMMARY,
@@ -316,12 +319,12 @@ class TestListComments:
             org=org,
         )
         request = mock_request(orguser)
-        response = list_comments(request, snapshot.id, target_type="summary")
+        response = list_comments(request, snapshot_id=snapshot.id, target_type="summary")
         assert response["success"] is True
         assert len(response["data"]) == 1
         assert response["data"][0].content == "Summary note"
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_list_chart(self, mock_send, orguser, snapshot, org):
         Comment.objects.create(
             target_type=CommentTargetType.CHART,
@@ -332,14 +335,16 @@ class TestListComments:
             org=org,
         )
         request = mock_request(orguser)
-        response = list_comments(request, snapshot.id, target_type="chart", target_id=10)
+        response = list_comments(
+            request, snapshot_id=snapshot.id, target_type="chart", target_id=10
+        )
         assert response["success"] is True
         assert len(response["data"]) == 1
         assert response["data"][0].target_id == 10
 
     def test_empty_list(self, orguser, snapshot):
         request = mock_request(orguser)
-        response = list_comments(request, snapshot.id, target_type="summary")
+        response = list_comments(request, snapshot_id=snapshot.id, target_type="summary")
         assert response["success"] is True
         assert len(response["data"]) == 0
 
@@ -352,13 +357,13 @@ class TestListComments:
             org=org,
         )
         request = mock_request(orguser)
-        response = list_comments(request, snapshot.id, target_type="summary")
+        response = list_comments(request, snapshot_id=snapshot.id, target_type="summary")
         assert response["data"][0].is_new is True
 
     def test_chart_requires_chart_id(self, orguser, snapshot):
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc:
-            list_comments(request, snapshot.id, target_type="chart")
+            list_comments(request, snapshot_id=snapshot.id, target_type="chart")
         assert exc.value.status_code == 400
 
 
@@ -374,7 +379,7 @@ class TestCreateComment:
     def test_create_summary(self, mock_mentions, orguser, snapshot):
         request = mock_request(orguser)
         payload = CommentCreate(target_type="summary", content="My summary comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         assert response["data"]["target_type"] == "summary"
         assert response["data"]["content"] == "My summary comment"
@@ -385,7 +390,7 @@ class TestCreateComment:
     def test_create_chart(self, mock_mentions, orguser, snapshot):
         request = mock_request(orguser)
         payload = CommentCreate(target_type="chart", target_id=10, content="Chart comment")
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         assert response["data"]["target_id"] == 10
         Comment.objects.filter(id=response["data"]["id"]).delete()
@@ -395,7 +400,7 @@ class TestCreateComment:
         request = mock_request(orguser)
         payload = CommentCreate(target_type="invalid", content="Bad type")
         with pytest.raises(HttpError) as exc:
-            create_comment(request, snapshot.id, payload)
+            create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert exc.value.status_code == 400
 
     @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
@@ -403,7 +408,7 @@ class TestCreateComment:
         request = mock_request(orguser)
         payload = CommentCreate(target_type="chart", content="No chart id")
         with pytest.raises(HttpError) as exc:
-            create_comment(request, snapshot.id, payload)
+            create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert exc.value.status_code == 400
 
     @patch("ddpui.core.reports.mention_service.MentionService.process_mentions")
@@ -411,10 +416,10 @@ class TestCreateComment:
         request = mock_request(orguser)
         payload = CommentCreate(target_type="chart", target_id=999, content="Ghost chart")
         with pytest.raises(HttpError) as exc:
-            create_comment(request, snapshot.id, payload)
+            create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert exc.value.status_code == 400
 
-    @patch("ddpui.core.reports.mention_service.send_html_message")
+    @patch("ddpui.core.notifications.triggers.mention.send_html_message")
     def test_with_mentions(self, mock_send, orguser, other_orguser, snapshot):
         request = mock_request(orguser)
         payload = CommentCreate(
@@ -422,7 +427,7 @@ class TestCreateComment:
             content=f"Hey @{other_orguser.user.email}",
             mentioned_emails=[other_orguser.user.email],
         )
-        response = create_comment(request, snapshot.id, payload)
+        response = create_comment(request, snapshot_id=snapshot.id, payload=payload)
         assert response["success"] is True
         comment = Comment.objects.get(id=response["data"]["id"])
         assert other_orguser.user.email in comment.mentioned_emails
@@ -448,7 +453,9 @@ class TestUpdateComment:
         )
         request = mock_request(orguser)
         payload = CommentUpdate(content="Updated text")
-        response = update_comment(request, snapshot.id, comment.id, payload)
+        response = update_comment(
+            request, snapshot_id=snapshot.id, comment_id=comment.id, payload=payload
+        )
         assert response["success"] is True
         assert response["data"]["content"] == "Updated text"
         comment.delete()
@@ -465,7 +472,7 @@ class TestUpdateComment:
         request = mock_request(other_orguser)
         payload = CommentUpdate(content="Trying to edit")
         with pytest.raises(HttpError) as exc:
-            update_comment(request, snapshot.id, comment.id, payload)
+            update_comment(request, snapshot_id=snapshot.id, comment_id=comment.id, payload=payload)
         assert exc.value.status_code == 403
         comment.delete()
 
@@ -473,7 +480,7 @@ class TestUpdateComment:
         request = mock_request(orguser)
         payload = CommentUpdate(content="Ghost")
         with pytest.raises(HttpError) as exc:
-            update_comment(request, snapshot.id, 99999, payload)
+            update_comment(request, snapshot_id=snapshot.id, comment_id=99999, payload=payload)
         assert exc.value.status_code == 404
 
 
@@ -496,27 +503,50 @@ class TestDeleteComment:
         )
         comment_id = comment.id
         request = mock_request(orguser)
-        response = delete_comment(request, snapshot.id, comment_id)
+        response = delete_comment(request, snapshot_id=snapshot.id, comment_id=comment_id)
         assert response["success"] is True
         # sole author in thread => hard-delete
         assert not Comment.objects.filter(id=comment_id).exists()
 
-    def test_delete_other_forbidden(self, orguser, other_orguser, snapshot, org):
-        comment = Comment.objects.create(
-            target_type=CommentTargetType.SUMMARY,
-            snapshot=snapshot,
-            content="Not yours to delete",
-            author=orguser,
+    def test_delete_other_forbidden(self, orguser, snapshot, org):
+        """View-holder cannot delete another user's comment (spec §Story 15 P04).
+        Setup: Analyst role (has can_edit_dashboards perm) + View-only floor →
+        passes @has_permission + @has_access(VIEW), fails in service layer
+        because they're not the author and not an Edit-holder (moderator)."""
+        from ddpui.auth import ANALYST_ROLE
+        from ddpui.models.org_preferences import OrgPreferences
+        from ddpui.models.resource_share import AccessLevel
+
+        OrgPreferences.objects.filter(org=org).delete()
+        OrgPreferences.objects.create(
             org=org,
+            default_analyst_level=AccessLevel.VIEW,
+            default_member_level=AccessLevel.VIEW,
         )
-        request = mock_request(other_orguser)
-        with pytest.raises(HttpError) as exc:
-            delete_comment(request, snapshot.id, comment.id)
-        assert exc.value.status_code == 403
-        comment.delete()
+        view_user = User.objects.create(username="view_only_del", email="view_only_del@t.com")
+        view_orguser = OrgUser.objects.create(
+            user=view_user,
+            org=org,
+            new_role=Role.objects.filter(slug=ANALYST_ROLE).first(),
+        )
+        try:
+            comment = Comment.objects.create(
+                target_type=CommentTargetType.SUMMARY,
+                snapshot=snapshot,
+                content="Not yours to delete",
+                author=orguser,
+                org=org,
+            )
+            request = mock_request(view_orguser)
+            with pytest.raises(HttpError) as exc:
+                delete_comment(request, snapshot_id=snapshot.id, comment_id=comment.id)
+            assert exc.value.status_code == 403
+            comment.delete()
+        finally:
+            view_user.delete()
 
     def test_comment_not_found(self, orguser, snapshot):
         request = mock_request(orguser)
         with pytest.raises(HttpError) as exc:
-            delete_comment(request, snapshot.id, 99999)
+            delete_comment(request, snapshot_id=snapshot.id, comment_id=99999)
         assert exc.value.status_code == 404

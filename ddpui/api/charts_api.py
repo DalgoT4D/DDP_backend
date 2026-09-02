@@ -12,10 +12,12 @@ from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
 
-from ddpui.auth import has_permission
+from ddpui.auth import has_permission, has_access
+from ddpui.core.access.access_control import get_user_access, get_user_access_map
 from ddpui.models.org_user import OrgUser
 from ddpui.models.org import OrgWarehouse
 from ddpui.models.dashboard import DashboardFilter
+from ddpui.models.resource_share import AccessLevel, AccessRequest, ResourceShare, ResourceType
 from ddpui.models.visualization import Chart
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.echarts_config_generator import EChartsConfigGenerator
@@ -291,6 +293,7 @@ def list_charts(
 
     charts, total = ChartService.list_charts(
         org=orguser.org,
+        orguser=orguser,
         page=page,
         page_size=page_size,
         search=search,
@@ -302,6 +305,7 @@ def list_charts(
     favorited_chart_ids = ChartService.get_favorited_chart_ids(
         [chart.id for chart in charts], orguser
     )
+    access_map = get_user_access_map(orguser, ResourceType.CHART, charts)
 
     # Build response for each chart
     chart_responses = [
@@ -317,6 +321,8 @@ def list_charts(
             created_at=chart.created_at,
             updated_at=chart.updated_at,
             is_favorite=chart.id in favorited_chart_ids,
+            access_level=access_map.get(chart.id),
+            is_private=chart.is_private,
         )
         for chart in charts
     ]
@@ -388,7 +394,7 @@ class MapDataOverlayPayload(Schema):
 
 
 @charts_router.post("/map-data-overlay/", response=dict)
-@has_permission(["can_view_warehouse_data"])
+@has_permission(["can_view_dashboards"])
 def get_map_data_overlay(request, payload: MapDataOverlayPayload):
     """Get map data overlay (separate from GeoJSON) for data visualization"""
     orguser = request.orguser
@@ -1024,6 +1030,9 @@ def download_chart_data_csv(
 
 @charts_router.get("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def get_chart(request, chart_id: int):
     """Get a specific chart"""
     orguser: OrgUser = request.orguser
@@ -1044,6 +1053,8 @@ def get_chart(request, chart_id: int):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=request.access_level,
+        is_private=chart.is_private,
     )
 
 
@@ -1179,11 +1190,16 @@ def create_chart(request, payload: ChartCreate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=AccessLevel.EDIT,
+        is_private=chart.is_private,
     )
 
 
 @charts_router.put("/{chart_id}/", response=ChartResponse)
 @has_permission(["can_edit_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def update_chart(request, chart_id: int, payload: ChartUpdate):
     """Update a chart"""
     orguser: OrgUser = request.orguser
@@ -1248,11 +1264,16 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         extra_config=chart.extra_config,
         created_at=chart.created_at,
         updated_at=chart.updated_at,
+        access_level=request.access_level,
+        is_private=chart.is_private,
     )
 
 
 @charts_router.delete("/{chart_id}/")
 @has_permission(["can_delete_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.EDIT, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def delete_chart(request, chart_id: int):
     """Delete a chart"""
     orguser: OrgUser = request.orguser
@@ -1264,6 +1285,13 @@ def delete_chart(request, chart_id: int):
         raise HttpError(404, "Chart not found") from None
     except ChartPermissionError as e:
         raise HttpError(403, e.message) from None
+
+    ResourceShare.objects.filter(
+        org=org, resource_type=ResourceType.CHART, resource_id=str(chart_id)
+    ).delete()
+    AccessRequest.objects.filter(
+        org=org, resource_type=ResourceType.CHART, resource_id=str(chart_id)
+    ).delete()
 
     create_audit_log(
         org=org,
@@ -1314,6 +1342,9 @@ def bulk_delete_charts(request, payload: BulkDeleteRequest):
 
 @charts_router.get("/{chart_id}/dashboards/", response=List[dict])
 @has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
 def get_chart_dashboards(request, chart_id: int):
     """Get list of dashboards that use this chart"""
     orguser: OrgUser = request.orguser
