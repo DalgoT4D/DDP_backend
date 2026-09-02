@@ -320,8 +320,14 @@ def _execute_filter_preview(
     """Shared logic for executing a filter preview query against the warehouse.
 
     Returns a PublicFilterPreviewResponse on success, or raises an Exception.
+    Raises ValueError if the column does not exist in the target table.
     """
     warehouse_client = get_warehouse_client(org_warehouse)
+
+    if not warehouse_client.column_exists(schema_name, table_name, column_name):
+        raise ValueError(
+            f"Column '{column_name}' not found in {schema_name}.{table_name}"
+        )
 
     if filter_type == "value":
         query_builder = AggQueryBuilder()

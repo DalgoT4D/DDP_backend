@@ -713,6 +713,59 @@ class TestGetPublicFilterPreview:
             assert status == 404
             assert response.is_valid is False
 
+    def test_nonexistent_column_returns_404(self, public_dashboard, seed_db):
+        """Column that does not exist in the table returns 404 without error-level logging"""
+        mock_wh = MagicMock(wtype="postgres")
+        mock_wh.column_exists.return_value = False
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.get_warehouse_client"
+        ) as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = mock_wh
+
+            request = _make_public_request()
+            status, response = get_public_filter_preview(
+                request,
+                token=public_dashboard.public_share_token,
+                schema_name="dev_gold_analytics",
+                table_name="prod_sric_dashboard_data",
+                column_name="chapter",
+                filter_type="value",
+            )
+
+            assert status == 404
+            assert response.is_valid is False
+            assert "chapter" in response.error
+            mock_wh.column_exists.assert_called_once_with(
+                "dev_gold_analytics", "prod_sric_dashboard_data", "chapter"
+            )
+
+    def test_report_nonexistent_column_returns_404(self, public_snapshot, seed_db):
+        """Column that does not exist returns 404 via report filter preview too"""
+        mock_wh = MagicMock(wtype="postgres")
+        mock_wh.column_exists.return_value = False
+
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.get_warehouse_client"
+        ) as mock_wc:
+            mock_ow.filter.return_value.first.return_value = MagicMock(wtype="postgres")
+            mock_wc.return_value = mock_wh
+
+            request = _make_public_request()
+            status, response = get_public_report_filter_preview(
+                request,
+                token=public_snapshot.public_share_token,
+                schema_name="public",
+                table_name="orders",
+                column_name="nonexistent_col",
+                filter_type="value",
+            )
+
+            assert status == 404
+            assert response.is_valid is False
+            assert "nonexistent_col" in response.error
+
 
 # ================================================================================
 # allow_public_sharing runtime gate — spec: admin can revoke without touching
