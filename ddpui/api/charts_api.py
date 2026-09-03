@@ -303,8 +303,12 @@ def list_charts(
 
     total_pages = (total + page_size - 1) // page_size  # Ceiling division
 
+    favorited_chart_ids = ChartService.get_favorited_chart_ids(
+        [chart.id for chart in charts], orguser
+    )
     access_map = get_user_access_map(orguser, ResourceType.CHART, charts)
 
+    # Build response for each chart
     chart_responses = [
         ChartResponse(
             id=chart.id,
@@ -317,6 +321,7 @@ def list_charts(
             extra_config=chart.extra_config,
             created_at=chart.created_at,
             updated_at=chart.updated_at,
+            is_favorite=chart.id in favorited_chart_ids,
             access_level=access_map.get(chart.id),
             is_private=chart.is_private,
         )
@@ -394,19 +399,22 @@ def get_map_data_overlay(request, payload: MapDataOverlayPayload):
         schema_name = payload.schema_name
         table_name = payload.table_name
         geographic_column = payload.geographic_column
-        value_column = payload.value_column
         dashboard_filters = payload.dashboard_filters
 
         # Validate required fields
-        if not all([schema_name, table_name, geographic_column, value_column]):
+        if not all([schema_name, table_name, geographic_column]):
             raise HttpError(
                 400,
-                "Missing required fields: schema_name, table_name, geographic_column, value_column",
+                "Missing required fields: schema_name, table_name, geographic_column",
             )
 
         # Validate metrics exist and are non-empty
         if not payload.metrics:
             raise HttpError(400, "Missing metrics - at least one metric is required")
+
+        # value_column is a legacy simple-metric field, not populated for calculated metrics
+        if not payload.value_column and not payload.metrics[0].column_expression:
+            raise HttpError(400, "Missing required field: value_column")
 
         # Resolve dashboard filters if provided (same logic as regular charts)
         resolved_dashboard_filters = None
@@ -979,6 +987,7 @@ def get_chart(request, chart_id: int):
         updated_at=chart.updated_at,
         access_level=request.access_level,
         is_private=chart.is_private,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 
@@ -1190,6 +1199,7 @@ def update_chart(request, chart_id: int, payload: ChartUpdate):
         updated_at=chart.updated_at,
         access_level=request.access_level,
         is_private=chart.is_private,
+        is_favorite=ChartService.is_chart_favorited(chart.id, orguser),
     )
 
 
@@ -1279,3 +1289,37 @@ def get_chart_dashboards(request, chart_id: int):
         raise HttpError(404, "Chart not found") from None
 
     return dashboards
+
+
+@charts_router.post("/{chart_id}/favorite/", response=dict)
+@has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
+def favorite_chart(request, chart_id: int):
+    """Mark a chart as favorited by the current user"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        ChartService.favorite_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+
+    return {"is_favorite": True}
+
+
+@charts_router.delete("/{chart_id}/favorite/", response=dict)
+@has_permission(["can_view_charts"])
+@has_access(
+    ResourceType.CHART, AccessLevel.VIEW, get_resource_id=lambda kwargs: kwargs.get("chart_id")
+)
+def unfavorite_chart(request, chart_id: int):
+    """Remove the current user's favorite on a chart"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        ChartService.unfavorite_chart(chart_id, orguser.org, orguser)
+    except ChartNotFoundError:
+        raise HttpError(404, "Chart not found") from None
+
+    return {"is_favorite": False}

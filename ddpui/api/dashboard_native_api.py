@@ -75,9 +75,18 @@ def list_dashboards(
         orguser=orguser,
     )
 
+    favorited_dashboard_ids = DashboardService.get_favorited_dashboard_ids(
+        [d.id for d in dashboards], orguser
+    )
     levels = access_control.get_user_access_map(orguser, ResourceType.DASHBOARD, dashboards)
+
     return [
-        DashboardResponse(**DashboardService.get_dashboard_response(d), access_level=levels[d.pk])
+        DashboardResponse(
+            **DashboardService.get_dashboard_response(
+                d, is_favorite=d.id in favorited_dashboard_ids
+            ),
+            access_level=levels[d.pk],
+        )
         for d in dashboards
     ]
 
@@ -99,7 +108,11 @@ def get_dashboard(request, dashboard_id: int):
         raise HttpError(404, "Dashboard not found") from err
 
     return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard), access_level=request.access_level
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        ),
+        access_level=request.access_level,
     )
 
 
@@ -230,7 +243,11 @@ def update_dashboard(request, dashboard_id: int, payload: DashboardUpdate):
         )
 
     return DashboardResponse(
-        **DashboardService.get_dashboard_response(dashboard), access_level=request.access_level
+        **DashboardService.get_dashboard_response(
+            dashboard,
+            is_favorite=DashboardService.is_dashboard_favorited(dashboard.id, orguser),
+        ),
+        access_level=request.access_level,
     )
 
 
@@ -721,3 +738,41 @@ def resolve_user_landing_page(request):
 
     # 3. No landing page set
     return {"dashboard_id": None, "dashboard_title": None, "dashboard_type": None, "source": "none"}
+
+
+@dashboard_native_router.post("/{dashboard_id}/favorite/", response=dict)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
+def favorite_dashboard(request, dashboard_id: int):
+    """Mark a dashboard as favorited by the current user"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        DashboardService.favorite_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return {"is_favorite": True}
+
+
+@dashboard_native_router.delete("/{dashboard_id}/favorite/", response=dict)
+@has_permission(["can_view_dashboards"])
+@has_access(
+    ResourceType.DASHBOARD,
+    AccessLevel.VIEW,
+    get_resource_id=lambda kwargs: kwargs.get("dashboard_id"),
+)
+def unfavorite_dashboard(request, dashboard_id: int):
+    """Remove the current user's favorite on a dashboard"""
+    orguser: OrgUser = request.orguser
+
+    try:
+        DashboardService.unfavorite_dashboard(dashboard_id, orguser.org, orguser)
+    except DashboardNotFoundError as err:
+        raise HttpError(404, "Dashboard not found") from err
+
+    return {"is_favorite": False}

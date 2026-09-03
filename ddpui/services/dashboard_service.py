@@ -4,7 +4,7 @@ This module encapsulates all dashboard-related business logic,
 separating it from the API layer for better testability and maintainability.
 """
 
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Dict, List, Optional, Any, Set, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
@@ -12,6 +12,7 @@ import time
 import uuid
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from sqlalchemy import text, distinct, column
@@ -30,6 +31,7 @@ from ddpui.models.dashboard import (
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.visualization import Chart
+from ddpui.services.favorite_service import FavoriteService
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.utils.warehouse.client.warehouse_interface import Warehouse
 from ddpui.core.charts.charts_service import (
@@ -240,11 +242,12 @@ class DashboardService:
             raise DashboardNotFoundError(dashboard_id)
 
     @staticmethod
-    def get_dashboard_response(dashboard: Dashboard) -> Dict[str, Any]:
+    def get_dashboard_response(dashboard: Dashboard, is_favorite: bool = False) -> Dict[str, Any]:
         """Convert dashboard model to response dict.
 
         Args:
             dashboard: The dashboard instance
+            is_favorite: Whether the requesting user has favorited this dashboard
 
         Returns:
             Dictionary containing dashboard response data
@@ -256,6 +259,7 @@ class DashboardService:
         response_data["locked_by"] = (
             lock.locked_by.user.email if lock and not lock.is_expired() else None
         )
+        response_data["is_favorite"] = is_favorite
 
         # Add filters without position data in settings
         filters_data = []
@@ -308,6 +312,24 @@ class DashboardService:
             query &= Q(is_published=is_published)
 
         return list(Dashboard.objects.filter(query).order_by("-updated_at"))
+
+    @staticmethod
+    def favorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
+        DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
+        FavoriteService.add_favorite(ResourceType.DASHBOARD, dashboard_id, orguser)
+
+    @staticmethod
+    def unfavorite_dashboard(dashboard_id: int, org: Org, orguser: OrgUser) -> None:
+        DashboardService.get_dashboard(dashboard_id, org)  # raises if not in org
+        FavoriteService.remove_favorite(ResourceType.DASHBOARD, dashboard_id, orguser)
+
+    @staticmethod
+    def get_favorited_dashboard_ids(dashboard_ids: List[int], orguser: OrgUser) -> Set[int]:
+        return FavoriteService.get_favorited_ids(ResourceType.DASHBOARD, dashboard_ids, orguser)
+
+    @staticmethod
+    def is_dashboard_favorited(dashboard_id: int, orguser: OrgUser) -> bool:
+        return FavoriteService.is_favorited(ResourceType.DASHBOARD, dashboard_id, orguser)
 
     @staticmethod
     def create_dashboard(data: DashboardData, orguser: OrgUser) -> Dashboard:
@@ -1120,7 +1142,9 @@ def delete_dashboard_safely(dashboard_id: int, orguser: OrgUser) -> tuple[bool, 
 
     # Delete the dashboard
     dashboard_title = dashboard.title
-    dashboard.delete()
+    with transaction.atomic():
+        dashboard.delete()
+        FavoriteService.remove_favorites_for_resource(ResourceType.DASHBOARD, dashboard_id)
 
     logger.info(f"Dashboard '{dashboard_title}' deleted by {orguser.user.email}")
     return True, ""

@@ -46,7 +46,7 @@ pytestmark = pytest.mark.django_db
 rf = RequestFactory()
 
 
-def _make_public_request(body=None):
+def _make_public_request(body=None, query_params=None):
     """Create a simple mock request for public endpoints (no auth needed)"""
     if body:
         request = rf.post(
@@ -55,7 +55,7 @@ def _make_public_request(body=None):
             content_type="application/json",
         )
     else:
-        request = rf.get("/api/v1/public/reports/")
+        request = rf.get("/api/v1/public/reports/", data=query_params or {})
     request.META["REMOTE_ADDR"] = "127.0.0.1"
     request.META["HTTP_USER_AGENT"] = "TestAgent"
     return request
