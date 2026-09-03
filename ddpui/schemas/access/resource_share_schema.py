@@ -157,6 +157,7 @@ class TransferOwnershipPayload(Schema):
     """Body for ``POST /api/access/{rtype}/{id}/transfer-ownership``."""
 
     to_orguser_id: int
+    strip_previous_owner_access: bool = False
 
 
 class TransferCandidateSchema(Schema):

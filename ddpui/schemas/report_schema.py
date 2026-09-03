@@ -99,6 +99,13 @@ class SnapshotUpdate(Schema):
     summary: Optional[str] = Field(None, max_length=10000)
 
 
+class ExportPdfRequest(Schema):
+    """Currently-applied dashboard filter values, so the exported PDF reflects
+    what the viewer is looking at rather than always the configured defaults."""
+
+    dashboard_filters: Optional[Dict[str, Any]] = None
+
+
 # Response schemas
 
 

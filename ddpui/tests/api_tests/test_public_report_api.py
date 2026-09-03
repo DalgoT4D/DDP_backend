@@ -22,7 +22,7 @@ django.setup()
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory
-from ddpui.models.org import Org
+from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
 from ddpui.models.role_based_access import Role
 from ddpui.models.dashboard import Dashboard, DashboardFilter
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.django_db
 rf = RequestFactory()
 
 
-def _make_public_request(body=None):
+def _make_public_request(body=None, query_params=None):
     """Create a simple mock request for public endpoints (no auth needed)"""
     if body:
         request = rf.post(
@@ -55,7 +55,7 @@ def _make_public_request(body=None):
             content_type="application/json",
         )
     else:
-        request = rf.get("/api/v1/public/reports/")
+        request = rf.get("/api/v1/public/reports/", data=query_params or {})
     request.META["REMOTE_ADDR"] = "127.0.0.1"
     request.META["HTTP_USER_AGENT"] = "TestAgent"
     return request
@@ -406,6 +406,63 @@ class TestGetPublicReportTableData:
             assert response["columns"] == ["id", "name"]
             assert len(response["data"]) == 1
 
+    def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
+        """A valid {filter_id: value} dashboard_filters query param is parsed
+        and resolved against the frozen dashboard config."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_preview_fn.return_value = {
+                "columns": [],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters='{"5": "2025-01-15"}',
+            )
+
+            mock_resolve.assert_called_once()
+
+    def test_non_dict_json_dashboard_filters_skips_resolution(self, public_snapshot, seed_db):
+        """dashboard_filters='[1,2,3]' is valid JSON but not a dict — treated
+        as no filters, same as the private report endpoints."""
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_table_preview"
+        ) as mock_preview_fn:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_preview_fn.return_value = {
+                "columns": [],
+                "column_types": {},
+                "data": [],
+                "page": 0,
+                "limit": 100,
+            }
+
+            request = _make_public_request()
+            get_public_report_table_data(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters="[1,2,3]",
+            )
+
+            mock_resolve.assert_not_called()
+
 
 # ================================================================================
 # Test get_public_report_table_total_rows
@@ -441,6 +498,47 @@ class TestGetPublicReportTableTotalRows:
             assert response["is_valid"] is True
             assert response["total_rows"] == 42
 
+    def test_dashboard_filters_resolved_and_passed(self, public_snapshot, seed_db):
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ), patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_resolve.return_value = [{"filter_id": "5", "value": "2025-01-15"}]
+            mock_total.return_value = 3
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters='{"5": "2025-01-15"}',
+            )
+
+            mock_resolve.assert_called_once()
+
+    def test_non_dict_json_dashboard_filters_skips_resolution(self, public_snapshot, seed_db):
+        with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow, patch(
+            "ddpui.api.public_api.DashboardService.resolve_dashboard_filters_for_chart"
+        ) as mock_resolve, patch(
+            "ddpui.api.public_api.charts_service.get_chart_data_total_rows"
+        ) as mock_total:
+            mock_ow.filter.return_value.first.return_value = MagicMock()
+            mock_total.return_value = 0
+
+            request = _make_public_request()
+            get_public_report_table_total_rows(
+                request,
+                public_snapshot.public_share_token,
+                chart_id=1,
+                dashboard_filters="[1,2,3]",
+            )
+
+            mock_resolve.assert_not_called()
+
 
 # ================================================================================
 # Test get_public_report_map_data
@@ -453,12 +551,12 @@ class TestGetPublicReportMapData:
     def test_invalid_token(self, seed_db):
         """Invalid token returns 404"""
         request = _make_public_request(body={"schema_name": "public", "table_name": "orders"})
-        status, response = get_public_report_map_data(request, "bad-token")
+        status, response = get_public_report_map_data(request, "bad-token", chart_id=1)
 
         assert status == 404
         assert response.is_valid is False
 
-    def test_no_warehouse(self, public_snapshot, seed_db):
+    def test_no_warehouse(self, public_snapshot, sample_chart, seed_db):
         """No warehouse configured returns 404"""
         with patch("ddpui.api.public_api.OrgWarehouse.objects") as mock_ow:
             mock_ow.filter.return_value.first.return_value = None
@@ -472,11 +570,96 @@ class TestGetPublicReportMapData:
                 }
             )
             status, response = get_public_report_map_data(
-                request, public_snapshot.public_share_token
+                request, public_snapshot.public_share_token, chart_id=sample_chart.id
             )
 
             assert status == 404
             assert response.is_valid is False
+
+    def test_geographic_column_and_metrics_from_frozen_config_not_request(
+        self, orguser, org, seed_db
+    ):
+        """schema_name/table_name/geographic_column/value_column in the request
+        body are ignored — the frozen chart config always wins, including for
+        a count-only chart whose saved value_column is None."""
+        from ddpui.api.access_api import update_general_access
+        from ddpui.schemas.access.resource_share_schema import GeneralAccessPayload
+        from ddpui.tests.api_tests.test_user_org_api import mock_request
+
+        map_chart = Chart.objects.create(
+            title="Count Only Map",
+            chart_type="map",
+            schema_name="public",
+            table_name="orders",
+            extra_config={
+                "geographic_column": "region",
+                "value_column": None,
+                "aggregate_function": "count",
+            },
+            created_by=orguser,
+            org=org,
+        )
+        dashboard = Dashboard.objects.create(
+            title="Map Dashboard",
+            dashboard_type="native",
+            grid_columns=12,
+            tabs=[
+                {
+                    "id": "tab-1",
+                    "title": "Tab 1",
+                    "layout_config": [],
+                    "components": {
+                        "chart-map": {
+                            "id": "chart-map",
+                            "type": "chart",
+                            "config": {"chartId": map_chart.id, "chartType": "map"},
+                        }
+                    },
+                }
+            ],
+            created_by=orguser,
+            org=org,
+        )
+        OrgWarehouse.objects.create(wtype="postgres", credentials="{}", org=org)
+        snapshot = ReportService.create_snapshot(
+            title="Map Report",
+            dashboard_id=dashboard.id,
+            date_column={},  # no period-locking needed for this test
+            orguser=orguser,
+        )
+        request = mock_request(orguser)
+        update_general_access(
+            request, "report", str(snapshot.id), GeneralAccessPayload(mode="public")
+        )
+        snapshot.refresh_from_db()
+
+        request = _make_public_request(
+            body={
+                "schema_name": "someone_elses_schema",
+                "table_name": "someone_elses_table",
+                "geographic_column": "someone_elses_column",
+                "value_column": "someone_elses_secret_column",
+            }
+        )
+        with patch(
+            "ddpui.api.public_api.WarehouseFactory.get_warehouse_client"
+        ) as mock_get_client, patch(
+            "ddpui.api.public_api.charts_service.execute_map_data_overlay"
+        ) as mock_execute:
+            mock_get_client.return_value = MagicMock()
+            mock_execute.return_value = {"data": [], "count": 0}
+            response = get_public_report_map_data(
+                request, snapshot.public_share_token, chart_id=map_chart.id
+            )
+
+        assert response.get("is_valid") is True
+        sent_map_payload = mock_execute.call_args[0][0]
+        assert sent_map_payload.schema_name == "public"
+        assert sent_map_payload.table_name == "orders"
+        assert sent_map_payload.geographic_column == "region"
+        assert sent_map_payload.value_column == "region"  # fallback placeholder
+        assert sent_map_payload.metrics[0].column is None  # true COUNT(*)
+        assert sent_map_payload.metrics[0].aggregation == "count"
 
 
 # ================================================================================
