@@ -9,9 +9,11 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from ddpui.core.ownership import can_delete_resource, is_creator_or_admin
+from ddpui.core.access.access_control import accessible_filter
+from ddpui.core.access.ownership import is_creator_or_admin
 from ddpui.models.org import Org, OrgWarehouse
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import ResourceType
 from ddpui.models.metric import KPI
 from ddpui.models.dashboard import Dashboard
 from ddpui.models.report import ReportSnapshot
@@ -19,7 +21,7 @@ from ddpui.models.visualization import Chart
 from ddpui.utils.custom_logger import CustomLogger
 from ddpui.utils.warehouse.client.warehouse_factory import WarehouseFactory
 from ddpui.core.datainsights.insights.insight_interface import TranslateColDataType
-from ddpui.schemas.chart_schemas import ChartConfig
+from ddpui.schemas.chart_schemas import ChartConfig, ChartDataPayload, MapDataOverlayPayload
 from ddpui.schemas.kpi_schema import KPIResponse, KPIExtraConfig
 from ddpui.schemas.metric_schema import MetricResponse
 from ddpui.schemas.report_schema import (
@@ -30,6 +32,7 @@ from ddpui.schemas.report_schema import (
     FrozenDashboardConfig,
     SnapshotUpdate,
 )
+from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import build_chart_data_payload
 from ddpui.services.dashboard_service import DashboardService
 from ddpui.core.kpi.kpi_service import KPIService, compute_rag_status
@@ -319,24 +322,79 @@ class ReportService:
     # =========================================================================
 
     @staticmethod
-    def resolve_snapshot_filters_for_chart(
+    def _get_frozen_report_chart(
+        snapshot: ReportSnapshot, chart_id: int, expected_chart_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Look up chart_id's frozen config on the snapshot, validate its chart
+        type, and inject the snapshot's period filter into it.
+
+        Returns a deep copy so the persisted frozen config is never mutated.
+        Shared by every report data endpoint (chart/map/table), so the chart's
+        definition and the period lock always come from the snapshot, never
+        from the caller's request.
+        """
+        frozen_charts = snapshot.frozen_chart_configs or {}
+        chart_config = frozen_charts.get(str(chart_id))
+        if not chart_config:
+            raise SnapshotValidationError(f"Chart {chart_id} not found in snapshot {snapshot.id}")
+        if expected_chart_type and chart_config.get("chart_type") != expected_chart_type:
+            raise SnapshotValidationError(f"Chart {chart_id} is not a {expected_chart_type} chart")
+
+        chart_config = copy.deepcopy(chart_config)
+        ReportService._inject_period_into_chart_configs({str(chart_id): chart_config}, snapshot)
+        return chart_config
+
+    @staticmethod
+    def _resolve_report_dashboard_filters(
         snapshot: ReportSnapshot,
         chart_config: Dict[str, Any],
-        filter_values: Optional[Dict[str, Any]],
         org_warehouse: OrgWarehouse,
+        dashboard_filters: Optional[Dict[str, Any]],
+        warehouse_client=None,
     ) -> Optional[List[Dict[str, Any]]]:
-        """Resolve filter values against a snapshot's frozen filter defs, not the live dashboard."""
-        if not filter_values:
+        """Resolve live dashboard_filters against the snapshot's frozen filter
+        defs, scoped to chart_config's own table. Shared by every report data
+        endpoint (chart/map/table). Pass warehouse_client if the caller already
+        built one, so this doesn't open a second connection for it."""
+        if not dashboard_filters:
             return None
-
-        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+        if warehouse_client is None:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+        frozen_filters = snapshot.frozen_dashboard.get("filters", [])
         return DashboardService.resolve_dashboard_filters_for_chart(
-            filter_values,
-            snapshot.frozen_dashboard.get("filters", []),
+            dashboard_filters,
+            frozen_filters,
             chart_config["schema_name"],
             chart_config["table_name"],
             warehouse_client,
         )
+
+    @staticmethod
+    def _build_report_chart_data_payload(
+        snapshot: ReportSnapshot,
+        chart_id: int,
+        org_warehouse: OrgWarehouse,
+        dashboard_filters: Optional[Dict[str, Any]],
+        expected_chart_type: Optional[str] = None,
+    ) -> ChartDataPayload:
+        """Look up chart_id's frozen config, inject period, resolve dashboard
+        filters, and build the ChartDataPayload. Shared by get_report_chart_data,
+        get_report_table_data and get_report_table_total_rows — map uses
+        MapDataOverlayPayload instead (see get_report_map_data)."""
+        chart_config = ReportService._get_frozen_report_chart(
+            snapshot, chart_id, expected_chart_type
+        )
+        resolved_filters = ReportService._resolve_report_dashboard_filters(
+            snapshot, chart_config, org_warehouse, dashboard_filters
+        )
+        config = ChartConfig(
+            chart_type=chart_config["chart_type"],
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            title=chart_config.get("title"),
+            extra_config=chart_config.get("extra_config"),
+        )
+        return build_chart_data_payload(config, resolved_filters)
 
     @staticmethod
     def get_report_chart_data(
@@ -345,47 +403,16 @@ class ReportService:
         org: Org,
         dashboard_filters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Get chart data for a specific chart in a report snapshot.
-
-        Uses the same flow as dashboard chart rendering:
-        1. Look up chart config from frozen configs
-        2. Inject period date filters
-        3. Resolve dashboard filters from frozen config
-        4. Build ChartDataPayload via shared helper
-        5. Generate chart data and config
-        """
+        """Get chart data for a specific chart in a report snapshot."""
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        frozen_charts = snapshot.frozen_chart_configs or {}
-        chart_config = frozen_charts.get(str(chart_id))
-        if not chart_config:
-            raise SnapshotValidationError(f"Chart {chart_id} not found in snapshot {snapshot_id}")
-
-        chart_config = copy.deepcopy(chart_config)
-
-        # Inject period date filters into this chart's extra_config
-        temp_configs = {str(chart_id): chart_config}
-        ReportService._inject_period_into_chart_configs(temp_configs, snapshot)
-
-        # Get warehouse
         org_warehouse = OrgWarehouse.objects.filter(org=org).first()
         if not org_warehouse:
             raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
 
-        # Resolve dashboard filters from frozen config
-        resolved_filters = ReportService.resolve_snapshot_filters_for_chart(
-            snapshot, chart_config, dashboard_filters, org_warehouse
+        payload = ReportService._build_report_chart_data_payload(
+            snapshot, chart_id, org_warehouse, dashboard_filters
         )
-
-        # Build payload using shared helper
-        config = ChartConfig(
-            chart_type=chart_config["chart_type"],
-            schema_name=chart_config["schema_name"],
-            table_name=chart_config["table_name"],
-            title=chart_config.get("title"),
-            extra_config=chart_config.get("extra_config"),
-        )
-        payload = build_chart_data_payload(config, resolved_filters)
 
         # Generate chart data using same function as dashboards
         return generate_chart_data_and_config(payload, org_warehouse, chart_id=chart_id)
@@ -490,6 +517,97 @@ class ReportService:
         return KPIService.compute_kpi_data(
             kpi_response, org, date_filter=date_filter, dashboard_filters=resolved_dashboard_filters
         )
+
+    @staticmethod
+    def get_report_map_data(
+        snapshot_id: int,
+        chart_id: int,
+        org: Org,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Get map data overlay for a map chart in a report snapshot.
+
+        Same flow as get_report_chart_data: the chart's definition and the
+        snapshot's period lock come from the frozen config (via chart_id),
+        never from the request.
+        """
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+        chart_config = ReportService._get_frozen_report_chart(snapshot, chart_id, "map")
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
+        resolved_dashboard_filters = ReportService._resolve_report_dashboard_filters(
+            snapshot, chart_config, org_warehouse, dashboard_filters, warehouse_client
+        )
+
+        ec = chart_config.get("extra_config") or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise SnapshotValidationError(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
+        map_payload = MapDataOverlayPayload(
+            schema_name=chart_config["schema_name"],
+            table_name=chart_config["table_name"],
+            geographic_column=geographic_column,
+            # value_column is required on this schema but None for count-only charts.
+            value_column=value_column or geographic_column,
+            metrics=metrics,
+            extra_config=ec,
+        )
+
+        return charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
+        )
+
+    @staticmethod
+    def get_report_table_data(
+        snapshot_id: int,
+        chart_id: int,
+        org: Org,
+        page: int,
+        limit: int,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated table data preview for a table chart in a report snapshot."""
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        payload = ReportService._build_report_chart_data_payload(
+            snapshot, chart_id, org_warehouse, dashboard_filters, "table"
+        )
+        return charts_service.get_chart_data_table_preview(org_warehouse, payload, page, limit)
+
+    @staticmethod
+    def get_report_table_total_rows(
+        snapshot_id: int,
+        chart_id: int,
+        org: Org,
+        dashboard_filters: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Get total row count for a table chart in a report snapshot."""
+        snapshot = ReportService.get_snapshot(snapshot_id, org)
+
+        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+        if not org_warehouse:
+            raise SnapshotExternalServiceError("Warehouse", "not configured for this organization")
+
+        payload = ReportService._build_report_chart_data_payload(
+            snapshot, chart_id, org_warehouse, dashboard_filters, "table"
+        )
+        return charts_service.get_chart_data_total_rows(org_warehouse, payload)
 
     # =========================================================================
     # Snapshot CRUD
@@ -608,22 +726,13 @@ class ReportService:
     @staticmethod
     def list_snapshots(
         org: Org,
+        orguser: OrgUser,
         search: Optional[str] = None,
         dashboard_title: Optional[str] = None,
         created_by_email: Optional[str] = None,
     ) -> List[ReportSnapshot]:
-        """List all snapshots for an organization with optional filtering.
-
-        Args:
-            org: The organization to list snapshots for
-            search: Optional search term to filter snapshots by title (case-insensitive)
-            dashboard_title: Optional filter for snapshots from dashboards with matching title
-            created_by_email: Optional filter for snapshots created by user with matching email
-
-        Returns:
-            List[ReportSnapshot]: List of matching snapshots ordered by creation date (newest first)
-        """
-        query = Q(org=org)
+        """List snapshots for an org that the orguser is allowed to see."""
+        query = Q(org=org) & accessible_filter(orguser, ResourceType.REPORT)
         if search:
             query &= Q(title__icontains=search)
         if dashboard_title:
@@ -723,6 +832,7 @@ class ReportService:
             ),
             "dashboard_title": snapshot.frozen_dashboard.get("title", ""),
             "dashboard_id": snapshot.frozen_dashboard.get("dashboard_id"),
+            "is_private": snapshot.is_private,
         }
 
         return {
@@ -772,7 +882,7 @@ class ReportService:
         """
         snapshot = ReportService.get_snapshot(snapshot_id, org)
 
-        if not can_delete_resource(orguser, snapshot):
+        if not is_creator_or_admin(orguser, snapshot):
             raise SnapshotPermissionError("Only the owner or an admin can delete this report.")
 
         snapshot_title = snapshot.title
@@ -892,7 +1002,7 @@ class ReportService:
             settings, "FRONTEND_URL", None
         )
         if not frontend_url:
-            frontend_url = "http://localhost:3001"
+            frontend_url = "http://localhost:3000"
         return frontend_url
 
     @staticmethod
@@ -904,50 +1014,6 @@ class ReportService:
     def _build_private_url(snapshot_id: int) -> str:
         """Build the authenticated URL for a report snapshot."""
         return f"{ReportService._get_frontend_url()}/reports/{snapshot_id}"
-
-    @staticmethod
-    def toggle_sharing(
-        snapshot_id: int, org: Org, orguser: OrgUser, is_public: bool
-    ) -> ReportSnapshot:
-        """Toggle public sharing for a report snapshot.
-
-        Args:
-            snapshot_id: The snapshot ID
-            org: The organization
-            orguser: The user toggling sharing
-            is_public: Whether to make the snapshot public
-
-        Returns:
-            Updated ReportSnapshot instance
-
-        Raises:
-            SnapshotNotFoundError: If snapshot not found
-            SnapshotPermissionError: If user is not the creator
-        """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        if not is_creator_or_admin(orguser, snapshot):
-            raise SnapshotPermissionError(
-                "Only the report creator or an org admin can modify sharing settings"
-            )
-
-        if is_public:
-            if not snapshot.public_share_token:
-                snapshot.public_share_token = secrets.token_urlsafe(48)
-            snapshot.public_shared_at = timezone.now()
-            snapshot.public_disabled_at = None
-        else:
-            snapshot.public_disabled_at = timezone.now()
-
-        snapshot.is_public = is_public
-        snapshot.save()
-
-        logger.info(
-            f"Report {snapshot_id} sharing {'enabled' if is_public else 'disabled'} "
-            f"by user {orguser.user.email}, token: {snapshot.public_share_token}"
-        )
-
-        return snapshot
 
     @staticmethod
     def ensure_share_token(snapshot: ReportSnapshot) -> str:
@@ -963,63 +1029,3 @@ class ReportService:
             snapshot.public_share_token = secrets.token_urlsafe(48)
             snapshot.save(update_fields=["public_share_token"])
         return snapshot.public_share_token
-
-    @staticmethod
-    def build_share_response(snapshot: ReportSnapshot) -> dict:
-        """Build a share response dict from a snapshot.
-
-        Args:
-            snapshot: The snapshot instance
-
-        Returns:
-            Dict compatible with ShareResponse schema
-        """
-        response_data = {
-            "is_public": snapshot.is_public,
-            "message": f'Report {"made public" if snapshot.is_public else "made private"}',
-        }
-
-        if snapshot.is_public and snapshot.public_share_token:
-            response_data["public_url"] = ReportService._build_public_url(
-                snapshot.public_share_token
-            )
-            response_data["public_share_token"] = snapshot.public_share_token
-
-        return response_data
-
-    @staticmethod
-    def get_sharing_status(snapshot_id: int, org: Org, orguser: OrgUser) -> dict:
-        """Get sharing status for a report snapshot.
-
-        Args:
-            snapshot_id: The snapshot ID
-            org: The organization
-            orguser: The user requesting the status
-
-        Returns:
-            Dict compatible with ShareStatus schema
-
-        Raises:
-            SnapshotNotFoundError: If snapshot not found
-            SnapshotPermissionError: If user is not the creator
-        """
-        snapshot = ReportService.get_snapshot(snapshot_id, org)
-
-        if not is_creator_or_admin(orguser, snapshot):
-            raise SnapshotPermissionError(
-                "Only the report creator or an org admin can view sharing settings"
-            )
-
-        response_data = {
-            "is_public": snapshot.is_public,
-            "public_access_count": snapshot.public_access_count,
-            "last_public_accessed": snapshot.last_public_accessed,
-            "public_shared_at": snapshot.public_shared_at,
-        }
-
-        if snapshot.is_public and snapshot.public_share_token:
-            response_data["public_url"] = ReportService._build_public_url(
-                snapshot.public_share_token
-            )
-
-        return response_data

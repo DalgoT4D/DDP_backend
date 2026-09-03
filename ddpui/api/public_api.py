@@ -20,7 +20,6 @@ from ddpui.utils.custom_logger import CustomLogger
 
 from ddpui.models.visualization import Chart
 from ddpui.models.org import OrgWarehouse
-from ddpui.api.charts_api import MapDataOverlayPayload
 from ddpui.core.charts import charts_service
 
 from ddpui.api.dashboard_native_api import (
@@ -32,13 +31,19 @@ from ddpui.api.filter_api import (
     FilterPreviewResponse,
     FilterOptionResponse as AuthFilterOptionResponse,
 )
-from ddpui.schemas.chart_schemas import ChartConfig, ChartDataResponse, ChartDataPayload
+from ddpui.schemas.chart_schemas import (
+    ChartConfig,
+    ChartDataResponse,
+    ChartDataPayload,
+    MapDataOverlayPayload,
+)
 from ddpui.core.charts import charts_service
 from ddpui.core.charts.charts_service import get_warehouse_client, execute_query
 from ddpui.core.datainsights.query_builder import AggQueryBuilder
 from ddpui.core.reports.report_service import ReportService
 from ddpui.core.kpi.kpi_service import KPIService
 from ddpui.core.kpi.exceptions import KPINotFoundError
+from django.db.models import Q
 from sqlalchemy import func, column, distinct, cast, Float, Date
 
 logger = CustomLogger("ddpui")
@@ -93,17 +98,49 @@ class PublicErrorResponse(Schema):
     is_valid: bool = False
 
 
+# Filter clause used everywhere we look up a public resource by token:
+# - resource is flagged public
+# - the resource's org has public sharing enabled at the org level (or has no
+#   preferences row yet — the model default is True, so we don't want a
+#   missing preferences row to lock everyone out).
+#
+# One place to enforce the admin toggle for every public dashboard/report
+# endpoint below.
+_PUBLIC_ORG_FILTER = Q(org__preferences__allow_public_sharing=True) | Q(
+    org__preferences__isnull=True
+)
+
+
+def _resolve_public_dashboard(token: str) -> Optional[Dashboard]:
+    """Fetch a public-shared dashboard by token, or None if the token is bad,
+    the dashboard isn't public, or the org has disabled public sharing.
+
+    Callers convert None → their local 404 error response shape.
+    """
+    return (
+        Dashboard.objects.filter(
+            _PUBLIC_ORG_FILTER,
+            public_share_token=token,
+            is_public=True,
+        )
+        .select_related("org", "created_by__user")
+        .first()
+    )
+
+
 @public_router.get(
     "/dashboards/{token}/", response={200: PublicDashboardResponse, 404: PublicErrorResponse}
 )
 def get_public_dashboard(request, token: str):
     """Get public dashboard by token - reuses authenticated dashboard logic"""
-    try:
-        # Find dashboard by token and ensure it's public
-        dashboard = Dashboard.objects.select_related("org", "created_by__user").get(
-            public_share_token=token, is_public=True
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public dashboard access failed - token not found: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
         )
 
+    try:
         # Update access analytics
         Dashboard.objects.filter(id=dashboard.id).update(
             public_access_count=F("public_access_count") + 1, last_public_accessed=timezone.now()
@@ -134,11 +171,6 @@ def get_public_dashboard(request, token: str):
 
         return PublicDashboardResponse(**public_response_data)
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public dashboard access failed - token not found: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public dashboard access error: {str(e)}")
         return 404, PublicErrorResponse(error="Dashboard not accessible", is_valid=False)
@@ -162,17 +194,21 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
     WITHOUT THIS: Public dashboards cannot determine chart types or configurations,
     breaking all specialized chart rendering (maps, tables, etc.)
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(
+            f"Public chart metadata access failed - dashboard not found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        # Import required modules
+    try:
         from ddpui.models.visualization import Chart
 
-        # Get the chart and ensure it belongs to the dashboard's org
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
-            raise Exception("Chart not found in dashboard's organization")
+            return 404, PublicErrorResponse(error="Chart metadata unavailable", is_valid=False)
 
         return {
             "id": chart.id,
@@ -184,14 +220,6 @@ def get_public_chart_metadata(request, token: str, chart_id: int):
             "description": chart.description,
             "is_valid": True,
         }
-
-    except Dashboard.DoesNotExist:
-        logger.warning(
-            f"Public chart metadata access failed - dashboard not found for token: {token}"
-        )
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public chart metadata error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Chart metadata unavailable", is_valid=False)
@@ -213,10 +241,14 @@ def get_public_chart_data(request, token: str, chart_id: int):
     KEEP IT: Doesn't hurt to have it, provides a consistent API pattern.
     It handles edge cases where the existing infrastructure might not work.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public chart access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
+    try:
         # Get dashboard filters from query params
         filters = {}
         filters_param = request.GET.get("dashboard_filters")
@@ -246,15 +278,16 @@ def get_public_chart_data(request, token: str, chart_id: int):
         extra_config = chart.extra_config.copy() if chart.extra_config else {}
 
         # Parse and resolve dashboard filters if provided
-        # Uses schema/table match (no warehouse_client) to check filter applicability
         resolved_dashboard_filters = None
         if filters:
+            warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
             filter_defs = DashboardFilter.objects.filter(id__in=filters.keys(), dashboard=dashboard)
             resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
                 filters,
                 [f.to_json() for f in filter_defs],
                 chart.schema_name,
                 chart.table_name,
+                warehouse_client,
             )
 
         config = ChartConfig(
@@ -277,11 +310,6 @@ def get_public_chart_data(request, token: str, chart_id: int):
 
         return PublicChartDataResponse(**response_data)
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public chart access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public chart data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Chart data unavailable", is_valid=False)
@@ -395,20 +423,17 @@ def get_public_filter_preview(
     limit: int = 100,
 ):
     """Get public filter preview for a dashboard token"""
-    try:
-        # Verify token belongs to a public dashboard
-        try:
-            dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
-            org = dashboard.org
-        except Dashboard.DoesNotExist:
-            logger.warning(
-                f"Public filter preview access failed - no public dashboard found for token: {token}"
-            )
-            return 404, PublicErrorResponse(
-                error="Dashboard not found or no longer public", is_valid=False
-            )
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(
+            f"Public filter preview access failed - no public dashboard found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        org_warehouse = OrgWarehouse.objects.filter(org=org).first()
+    try:
+        org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
 
@@ -438,16 +463,16 @@ def get_public_report_filter_preview(
 ):
     """Get public filter preview for a report snapshot token"""
     try:
-        try:
-            snapshot = ReportSnapshot.objects.get(public_share_token=token, is_public=True)
-        except ReportSnapshot.DoesNotExist:
-            logger.warning(
-                f"Public report filter preview failed - no public report found for token: {token}"
-            )
-            return 404, PublicErrorResponse(
-                error="Report not found or no longer public", is_valid=False
-            )
+        snapshot = _get_public_report_snapshot(token, request=request)
+    except ReportSnapshot.DoesNotExist:
+        logger.warning(
+            f"Public report filter preview failed - no public report found for token: {token}"
+        )
+        return 404, PublicErrorResponse(
+            error="Report not found or no longer public", is_valid=False
+        )
 
+    try:
         org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
         if not org_warehouse:
             raise Exception("No warehouse configured for organization")
@@ -469,11 +494,10 @@ def get_public_report_filter_preview(
 )
 def validate_public_dashboard(request, token: str):
     """Lightweight validation - check if token is valid"""
-    try:
-        dashboard = Dashboard.objects.only("title").get(public_share_token=token, is_public=True)
-        return PublicValidationResponse(is_valid=True, title=dashboard.title)
-    except Dashboard.DoesNotExist:
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
         return 404, PublicValidationResponse(is_valid=False, title=None)
+    return PublicValidationResponse(is_valid=True, title=dashboard.title)
 
 
 @public_router.post(
@@ -504,10 +528,14 @@ def get_public_chart_data_preview(
     WITHOUT THIS: Table charts in public dashboards cannot display data
     or handle pagination/sorting functionality.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public table data access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
+    try:
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
@@ -558,11 +586,6 @@ def get_public_chart_data_preview(
             "is_valid": True,
         }
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public table data access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public table data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Table data unavailable", is_valid=False)
@@ -587,18 +610,19 @@ def get_public_geojson_data(request, token: str, geojson_id: int):
     WITHOUT THIS: Map charts in public dashboards show no geographic boundaries,
     appearing as blank/empty maps with no visual regions to display data on.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public geojson access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        # Import required modules
+    try:
         from ddpui.models.geojson import GeoJSON
         from django.shortcuts import get_object_or_404
 
-        # Get geojson with same logic as authenticated API
         geojson = get_object_or_404(GeoJSON, id=geojson_id)
 
-        # Check access permissions (allow default geojsons or org-specific ones)
         if not geojson.is_default and geojson.org_id != dashboard.org.id:
             raise Exception("Access denied to GeoJSON")
 
@@ -611,11 +635,6 @@ def get_public_geojson_data(request, token: str, geojson_id: int):
             "is_valid": True,
         }
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public geojson access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public geojson error for geojson {geojson_id}: {str(e)}")
         return 404, PublicErrorResponse(error="GeoJSON data unavailable", is_valid=False)
@@ -645,14 +664,20 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
     WITHOUT THIS: Map charts show geographic boundaries but no data overlay,
     appearing as blank maps with no population/value visualization.
     """
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
+    try:
         # Get the chart and org warehouse
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise Exception("Chart not found in dashboard's organization")
+        if chart.chart_type != "map":
+            raise Exception(f"Chart {chart_id} is not a map chart")
 
         org_warehouse = OrgWarehouse.objects.filter(org=dashboard.org).first()
         if not org_warehouse:
@@ -662,58 +687,34 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Add metrics from chart configuration if not provided
-        # IMPORTANT: Always use 'value' as alias to match private API behavior
-        if "metrics" not in payload and chart.extra_config.get("metrics"):
-            # Transform metrics to use 'value' alias (same as private API)
-            original_metrics = chart.extra_config["metrics"]
-            if original_metrics[0].get("column_expression"):
-                payload["metrics"] = [
-                    {
-                        "column_expression": original_metrics[0]["column_expression"],
-                        "alias": "value",  # Force alias to 'value' like private API
-                    }
-                ]
-            else:
-                payload["metrics"] = [
-                    {
-                        "column": original_metrics[0]["column"],
-                        "aggregation": original_metrics[0]["aggregation"],
-                        "alias": "value",  # Force alias to 'value' like private API
-                    }
-                ]
-        elif "metrics" not in payload:
-            # Fallback: create a metric from value_column and aggregate_function
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",  # Force alias to 'value' like private API
-                }
-            ]
+        ec = chart.extra_config or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise Exception(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
+
+        # schema_name/table_name/geographic_column/value_column/metrics always
+        # come from the chart's own saved config, never from the request, so
+        # a caller can't read an arbitrary column via this endpoint.
+        payload["schema_name"] = chart.schema_name
+        payload["table_name"] = chart.table_name
+        payload["geographic_column"] = geographic_column
+        # value_column is required on this schema but None for count-only charts.
+        payload["value_column"] = value_column or geographic_column
+        payload["metrics"] = metrics
 
         # Convert payload to MapDataOverlayPayload
         map_payload = MapDataOverlayPayload(**payload)
 
-        # Validate required fields
-        if not all(
-            [
-                map_payload.schema_name,
-                map_payload.table_name,
-                map_payload.geographic_column,
-            ]
-        ):
-            raise Exception("Missing required fields for map data")
-
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
-
-        # value_column is a legacy simple-metric field, not populated for calculated metrics
-        if not map_payload.value_column and not map_payload.metrics[0].column_expression:
-            raise Exception("Missing required field: value_column")
-
-        # Use same logic as authenticated API
-        extra_config = copy.deepcopy(map_payload.extra_config or {})
 
         # Handle dashboard filters (same logic as private API)
         resolved_dashboard_filters = None
@@ -730,66 +731,14 @@ def get_public_map_data_overlay(request, token: str, chart_id: int):
                 warehouse_client,
             )
 
-        # Build chart payload for map data query (same logic as private API)
-        from ddpui.schemas.chart_schemas import ChartDataPayload, ExecuteChartQuery
-
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            dashboard_filters=resolved_dashboard_filters,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
-        # Get warehouse client and build query using standard chart service
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
+        logger.info(f"Public map data overlay query returned {result['count']} rows")
 
-        # Add filters if provided (drill-down filters) with case-insensitive matching
-        if map_payload.filters:
-            from sqlalchemy import column, func
+        return {**result, "is_valid": True}
 
-            for filter_column, filter_value in map_payload.filters.items():
-                # Use case-insensitive matching for string filters (same as private API)
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        # Execute query using standard chart service
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        logger.info(f"Public map data overlay query returned {len(dict_results)} rows")
-
-        # Transform results for map visualization (same logic as private API)
-        map_data = []
-        for row in dict_results:
-            # Get the dimension value (geographic region name)
-            region_name = row.get(map_payload.geographic_column)
-            # Get the aggregated value using 'value' alias (same as private API)
-            value = row.get("value")
-
-            if region_name and value is not None:
-                # Normalize region name to proper case for frontend compatibility (same as private API)
-                # Convert "MAHARASHTRA" -> "Maharashtra", "gujarat" -> "Gujarat"
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"data": map_data, "is_valid": True, "count": len(map_data)}
-
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public map data access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public map data error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Map data unavailable", is_valid=False)
@@ -931,11 +880,12 @@ def download_public_chart_data_csv(
     Returns:
         StreamingHttpResponse with CSV data
     """
-    try:
-        # Verify dashboard is public and get organization
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public CSV download failed - dashboard not found for token: {token}")
+        raise HttpError(404, "Dashboard not found or no longer public")
 
-        # Get the chart and verify it belongs to the dashboard's organization
+    try:
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise HttpError(404, "Chart not found in dashboard's organization")
@@ -988,9 +938,6 @@ def download_public_chart_data_csv(
 
         return response
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public CSV download failed - dashboard not found for token: {token}")
-        raise HttpError(404, "Dashboard not found or no longer public")
     except Exception as e:
         logger.error(f"Public CSV download error for chart {chart_id}: {str(e)}")
         raise HttpError(500, f"CSV download failed: {str(e)}")
@@ -1007,11 +954,14 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
     """
     import json
 
-    try:
-        # Verify dashboard is public
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
+        logger.warning(f"Public total rows access failed - dashboard not found for token: {token}")
+        return 404, PublicErrorResponse(
+            error="Dashboard not found or no longer public", is_valid=False
+        )
 
-        # Get the chart and org warehouse
+    try:
         chart = Chart.objects.filter(id=chart_id, org=dashboard.org).first()
         if not chart:
             raise Exception("Chart not found in dashboard's organization")
@@ -1076,11 +1026,6 @@ def get_public_chart_data_preview_total_rows(request, token: str, chart_id: int)
 
         return {"total_rows": total_rows, "is_valid": True}
 
-    except Dashboard.DoesNotExist:
-        logger.warning(f"Public total rows access failed - dashboard not found for token: {token}")
-        return 404, PublicErrorResponse(
-            error="Dashboard not found or no longer public", is_valid=False
-        )
     except Exception as e:
         logger.error(f"Public total rows error for chart {chart_id}: {str(e)}")
         return 404, PublicErrorResponse(error="Total rows unavailable", is_valid=False)
@@ -1100,9 +1045,8 @@ def get_public_kpi_data(
     dashboard_filters: Optional[str] = None,
 ):
     """Get KPI chart data for a public dashboard — no authentication required."""
-    try:
-        dashboard = Dashboard.objects.get(public_share_token=token, is_public=True)
-    except Dashboard.DoesNotExist:
+    dashboard = _resolve_public_dashboard(token)
+    if dashboard is None:
         return 404, PublicErrorResponse(
             error="Dashboard not found or no longer public", is_valid=False
         )
@@ -1154,9 +1098,14 @@ def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
     """Helper to lookup a report snapshot by token.
 
     If the request carries a valid X-Render-Secret header (matching
-    settings.RENDER_SECRET), the is_public check is skipped. This
-    allows server-side Playwright PDF rendering without toggling
-    the snapshot's public state.
+    settings.RENDER_SECRET), the is_public check is skipped and the
+    org's ``allow_public_sharing`` toggle is bypassed. This allows
+    server-side Playwright PDF rendering to work regardless of the
+    anonymous-viewer toggle (rendering is internal traffic, not a
+    public consumer).
+
+    On the anonymous path we additionally require the org to have
+    public sharing enabled — matches the dashboard helper.
 
     Raises ReportSnapshot.DoesNotExist if not found.
     """
@@ -1169,7 +1118,9 @@ def _get_public_report_snapshot(token: str, request=None) -> ReportSnapshot:
             )
 
     return ReportSnapshot.objects.select_related("org", "created_by__user").get(
-        public_share_token=token, is_public=True
+        _PUBLIC_ORG_FILTER,
+        public_share_token=token,
+        is_public=True,
     )
 
 
@@ -1244,9 +1195,9 @@ def _get_frozen_chart_for_public_report(token, chart_id, request):
     return snapshot, chart_config, org_warehouse
 
 
-def _resolve_report_dashboard_filters(request, snapshot, chart_config, org_warehouse):
-    """Resolve `dashboard_filters` query values against a report's frozen filter definitions."""
-    filters_param = request.GET.get("dashboard_filters")
+def _resolve_report_dashboard_filters(filters_param, snapshot, chart_config, org_warehouse):
+    """Parse a `dashboard_filters` JSON query value and resolve it against a
+    report's frozen filter definitions."""
     if not filters_param:
         return None
 
@@ -1256,8 +1207,12 @@ def _resolve_report_dashboard_filters(request, snapshot, chart_config, org_wareh
         logger.warning(f"Invalid dashboard_filters JSON for public report: {filters_param}")
         return None
 
-    return ReportService.resolve_snapshot_filters_for_chart(
-        snapshot, chart_config, filter_values, org_warehouse
+    if not isinstance(filter_values, dict):
+        logger.warning(f"dashboard_filters is not a dict for public report: {filters_param}")
+        return None
+
+    return ReportService._resolve_report_dashboard_filters(
+        snapshot, chart_config, org_warehouse, filter_values
     )
 
 
@@ -1274,7 +1229,7 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
 
         # Resolve dashboard filters from frozen config (same pattern as public dashboard)
         resolved_filters = _resolve_report_dashboard_filters(
-            request, snapshot, chart_config, org_warehouse
+            request.GET.get("dashboard_filters"), snapshot, chart_config, org_warehouse
         )
 
         config = ChartConfig(
@@ -1307,16 +1262,17 @@ def get_public_report_chart_data(request, token: str, chart_id: int):
     response={200: dict, 404: PublicErrorResponse},
 )
 def get_public_report_table_data(
-    request, token: str, chart_id: int, page: int = 0, limit: int = 100
+    request,
+    token: str,
+    chart_id: int,
+    page: int = 0,
+    limit: int = 100,
+    dashboard_filters: Optional[str] = None,
 ):
     """Get table chart data for a public report"""
     try:
         snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
             token, chart_id, request
-        )
-
-        resolved_filters = _resolve_report_dashboard_filters(
-            request, snapshot, chart_config, org_warehouse
         )
 
         config = ChartConfig(
@@ -1326,6 +1282,12 @@ def get_public_report_table_data(
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
+
+        # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
+        resolved_filters = _resolve_report_dashboard_filters(
+            dashboard_filters, snapshot, chart_config, org_warehouse
+        )
+
         chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         preview_data = charts_service.get_chart_data_table_preview(
@@ -1355,15 +1317,13 @@ def get_public_report_table_data(
     "/reports/{token}/charts/{chart_id}/total-rows/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_table_total_rows(request, token: str, chart_id: int):
+def get_public_report_table_total_rows(
+    request, token: str, chart_id: int, dashboard_filters: Optional[str] = None
+):
     """Get total row count for table chart in a public report"""
     try:
         snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
             token, chart_id, request
-        )
-
-        resolved_filters = _resolve_report_dashboard_filters(
-            request, snapshot, chart_config, org_warehouse
         )
 
         config = ChartConfig(
@@ -1373,6 +1333,12 @@ def get_public_report_table_total_rows(request, token: str, chart_id: int):
             title=chart_config.get("title"),
             extra_config=chart_config.get("extra_config"),
         )
+
+        # Resolve dashboard filters from the report's frozen config (same pattern as get_public_report_chart_data)
+        resolved_filters = _resolve_report_dashboard_filters(
+            dashboard_filters, snapshot, chart_config, org_warehouse
+        )
+
         chart_payload = charts_service.build_chart_data_payload(config, resolved_filters)
 
         total_rows = charts_service.get_chart_data_total_rows(org_warehouse, chart_payload)
@@ -1390,90 +1356,75 @@ def get_public_report_table_total_rows(request, token: str, chart_id: int):
 
 
 @public_router.post(
-    "/reports/{token}/map-data/",
+    "/reports/{token}/charts/{chart_id}/map-data/",
     response={200: dict, 404: PublicErrorResponse},
 )
-def get_public_report_map_data(request, token: str):
-    """Get map data overlay for a public report"""
-    try:
-        snapshot = _get_public_report_snapshot(token, request=request)
+def get_public_report_map_data(request, token: str, chart_id: int):
+    """Get map data overlay for a public report.
 
-        org_warehouse = OrgWarehouse.objects.filter(org=snapshot.org).first()
-        if not org_warehouse:
-            raise Exception("No warehouse configured for organization")
+    chart_id identifies the frozen chart config this request must match —
+    schema_name/table_name are taken from that frozen config, not from the
+    request body, so a caller can't point the query at an arbitrary table
+    outside this report just by editing the POST body.
+    """
+    try:
+        snapshot, chart_config, org_warehouse = _get_frozen_chart_for_public_report(
+            token, chart_id, request
+        )
+        if chart_config.get("chart_type") != "map":
+            raise Exception(f"Chart {chart_id} is not a map chart")
 
         warehouse_client = WarehouseFactory.get_warehouse_client(org_warehouse)
 
         payload = json.loads(request.body) if request.body else {}
 
-        # Add metrics from payload if not provided (same logic as dashboard map endpoint)
-        if "metrics" not in payload and payload.get("value_column"):
-            payload["metrics"] = [
-                {
-                    "column": payload.get("value_column"),
-                    "aggregation": payload.get("aggregate_function", "sum"),
-                    "alias": "value",
-                }
-            ]
+        ec = chart_config.get("extra_config") or {}
+        geographic_column = ec.get("geographic_column")
+        if not geographic_column:
+            raise Exception(f"Chart {chart_id} is missing a geographic column")
+        value_column = ec.get("value_column")
+        metrics = ec.get("metrics") or [
+            {
+                "column": value_column,
+                "aggregation": ec.get("aggregate_function", "sum"),
+                "alias": "value",
+            }
+        ]
+
+        # schema_name/table_name/geographic_column/value_column/metrics always
+        # come from the chart's own frozen config, never from the request, so
+        # a caller can't read an arbitrary column via this endpoint.
+        payload["schema_name"] = chart_config["schema_name"]
+        payload["table_name"] = chart_config["table_name"]
+        payload["geographic_column"] = geographic_column
+        # value_column is required on this schema but None for count-only charts.
+        payload["value_column"] = value_column or geographic_column
+        payload["metrics"] = metrics
 
         map_payload = MapDataOverlayPayload(**payload)
-
-        if not all(
-            [
-                map_payload.schema_name,
-                map_payload.table_name,
-                map_payload.geographic_column,
-            ]
-        ):
-            raise Exception("Missing required fields for map data")
 
         if not map_payload.metrics:
             raise Exception("Missing metrics - at least one metric is required")
 
-        # value_column is a legacy simple-metric field, not populated for calculated metrics
-        if not map_payload.value_column and not map_payload.metrics[0].column_expression:
-            raise Exception("Missing required field: value_column")
+        # Resolve dashboard filters from the report's frozen config (same pattern
+        # as get_public_report_table_data), so filtering survives the source
+        # dashboard/filter being deleted after the snapshot was created.
+        resolved_dashboard_filters = None
+        if map_payload.dashboard_filters:
+            frozen_filters = snapshot.frozen_dashboard.get("filters", [])
+            resolved_dashboard_filters = DashboardService.resolve_dashboard_filters_for_chart(
+                map_payload.dashboard_filters,
+                frozen_filters,
+                map_payload.schema_name,
+                map_payload.table_name,
+                warehouse_client,
+            )
 
-        extra_config = copy.deepcopy(map_payload.extra_config or {})
-
-        from ddpui.schemas.chart_schemas import ExecuteChartQuery
-
-        chart_payload = ChartDataPayload(
-            chart_type="map",
-            schema_name=map_payload.schema_name,
-            table_name=map_payload.table_name,
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-            extra_config=extra_config,
+        result = charts_service.execute_map_data_overlay(
+            map_payload, org_warehouse, warehouse_client, resolved_dashboard_filters
         )
 
-        query_builder = charts_service.build_chart_query(chart_payload, org_warehouse)
-
-        if map_payload.filters:
-            for filter_column, filter_value in map_payload.filters.items():
-                query_builder.where_clause(
-                    func.upper(column(filter_column)) == str(filter_value).upper()
-                )
-
-        execute_payload = ExecuteChartQuery(
-            chart_type="map",
-            dimension_col=map_payload.geographic_column,
-            metrics=map_payload.metrics,
-        )
-
-        dict_results = charts_service.execute_chart_query(
-            warehouse_client, query_builder, execute_payload
-        )
-
-        map_data = []
-        for row in dict_results:
-            region_name = row.get(map_payload.geographic_column)
-            value = row.get("value")
-            if region_name and value is not None:
-                normalized_name = str(region_name).strip().title()
-                map_data.append({"name": normalized_name, "value": float(value)})
-
-        return {"data": map_data, "is_valid": True, "count": len(map_data)}
+        return {**result, "is_valid": True}
 
     except ReportSnapshot.DoesNotExist:
         logger.warning(f"Public report map data access failed - token not found: {token}")

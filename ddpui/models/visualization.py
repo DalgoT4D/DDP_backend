@@ -58,6 +58,8 @@ class Chart(models.Model):
         default=dict, help_text="Create chart form config including customizations"
     )
 
+    is_private = models.BooleanField(default=False)
+
     # Metadata
     created_by = models.ForeignKey(
         OrgUser, on_delete=models.SET_NULL, null=True, db_column="created_by"

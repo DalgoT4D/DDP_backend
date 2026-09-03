@@ -45,6 +45,10 @@ def update_user_preferences(request, payload: UpdateUserPreferencesSchema):
 
     if payload.enable_email_notifications is not None:
         user_preferences.enable_email_notifications = payload.enable_email_notifications
+    if payload.enable_schema_change_notifications is not None:
+        user_preferences.enable_schema_change_notifications = (
+            payload.enable_schema_change_notifications
+        )
     if payload.disclaimer_shown is not None:
         user_preferences.disclaimer_shown = payload.disclaimer_shown
     if payload.last_visited_transform_tab is not None:
@@ -63,6 +67,7 @@ def get_user_preferences(request):
 
     res = {
         "enable_email_notifications": user_preferences.enable_email_notifications,
+        "enable_schema_change_notifications": user_preferences.enable_schema_change_notifications,
         "disclaimer_shown": user_preferences.disclaimer_shown,
         "last_visited_transform_tab": user_preferences.last_visited_transform_tab,
         "is_llm_active": org_preferences.llm_optin,

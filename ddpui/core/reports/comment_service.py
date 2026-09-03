@@ -6,10 +6,12 @@ from django.db import connection
 from django.db.models import Q
 from django.utils import timezone
 
+from ddpui.core.access.access_control import get_user_access
 from ddpui.models.comment import Comment, CommentReadStatus, CommentTargetType
 from ddpui.models.report import ReportSnapshot
 from ddpui.models.org import Org
 from ddpui.models.org_user import OrgUser
+from ddpui.models.resource_share import AccessLevel, ResourceType
 from ddpui.utils.custom_logger import CustomLogger
 
 from .exceptions import (
@@ -162,7 +164,11 @@ class CommentService:
         org: Org,
         orguser: OrgUser,
     ) -> dict:
-        """Delete a comment. Author-only.
+        """Delete a comment.
+
+        Two allowed callers:
+        - The comment's author (own comment)
+        - Any user with Edit access on the parent report (moderation, per Story 15)
 
         Hard-deletes if no other user has commented in the thread (same
         snapshot + target_type + target_id). Soft-deletes otherwise.
@@ -174,7 +180,13 @@ class CommentService:
         """
         comment = CommentService._get_comment(comment_id, org)
 
-        if comment.author != orguser:
+        is_author = comment.author_id == orguser.id
+        is_moderator = (
+            comment.snapshot is not None
+            and get_user_access(orguser, ResourceType.REPORT, comment.snapshot.pk)
+            == AccessLevel.EDIT
+        )
+        if not (is_author or is_moderator):
             raise CommentPermissionError("You can only delete your own comments")
 
         deleted_info = {
