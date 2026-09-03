@@ -90,6 +90,19 @@ def _hide_no_access(level: str) -> Optional[str]:
     return None if level == AccessLevel.NO_ACCESS else level
 
 
+def caller_has_direct_edit(orguser: OrgUser, rtype: str, resource) -> bool:
+    """True when the caller's Edit access comes from ownership, admin role, or a
+    direct user/group share — NOT solely from the org floor.
+
+    Used by the General Access visibility gate: floor-only editors see the
+    General Access section as read-only and cannot change the mode.
+    """
+    if is_creator_or_admin(orguser, resource):
+        return True
+    grants = _grants_map(orguser, rtype, [resource.pk])
+    return grants.get(str(resource.pk)) == AccessLevel.EDIT
+
+
 def get_user_access(orguser: OrgUser, rtype: str, resource_id) -> Optional[str]:
     """What can this orguser do with this resource?
 

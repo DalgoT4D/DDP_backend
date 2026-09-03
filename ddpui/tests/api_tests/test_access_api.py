@@ -2748,6 +2748,224 @@ def test_pending_invite_appears_in_grants_list_with_pending_status(org, owner_an
     invite.delete()
 
 
+# ---------------------------------------------------------------------------
+# Rule 1 — floor-only callers cannot change General Access visibility
+# ---------------------------------------------------------------------------
+
+
+def _make_chart(org, owner):
+    return Chart.objects.create(
+        title="test-chart",
+        org=org,
+        created_by=owner,
+        chart_type="bar",
+        schema_name="s",
+        table_name="t",
+        computation_type="raw",
+        extra_config={},
+    )
+
+
+def test_general_access_state_floor_only_is_flagged(org, dashboard, other_analyst):
+    """Analyst with floor=Edit but no direct share → caller_access_via_floor=True."""
+    request = mock_request(other_analyst)
+    result = list_resource_grants(request, "dashboard", str(dashboard.id))
+    assert result.general_access.caller_access_via_floor is True
+
+
+def test_general_access_state_direct_share_not_flagged(org, dashboard, other_analyst):
+    """Analyst with a direct Edit share → caller_access_via_floor=False."""
+    _grant(org, dashboard, other_analyst, AccessLevel.EDIT)
+    request = mock_request(other_analyst)
+    result = list_resource_grants(request, "dashboard", str(dashboard.id))
+    assert result.general_access.caller_access_via_floor is False
+
+
+def test_general_access_state_owner_not_flagged(dashboard, owner_analyst):
+    """Owner → caller_access_via_floor=False."""
+    request = mock_request(owner_analyst)
+    result = list_resource_grants(request, "dashboard", str(dashboard.id))
+    assert result.general_access.caller_access_via_floor is False
+
+
+def test_general_access_state_admin_not_flagged(dashboard, admin):
+    """Admin → caller_access_via_floor=False."""
+    request = mock_request(admin)
+    result = list_resource_grants(request, "dashboard", str(dashboard.id))
+    assert result.general_access.caller_access_via_floor is False
+
+
+def test_update_general_access_blocked_for_floor_only(org, dashboard, other_analyst):
+    """Floor-only analyst cannot change visibility → 403."""
+    with pytest.raises(HttpError) as exc:
+        _set_mode(other_analyst, "dashboard", dashboard.id, "private")
+    assert exc.value.status_code == 403
+    assert "direct share" in str(exc.value).lower() or "floor" in str(exc.value).lower()
+
+
+def test_update_general_access_allowed_for_direct_share(org, dashboard, other_analyst):
+    """Analyst with a direct Edit share CAN change visibility."""
+    _grant(org, dashboard, other_analyst, AccessLevel.EDIT)
+    _set_mode(other_analyst, "dashboard", dashboard.id, "private")
+    dashboard.refresh_from_db()
+    assert dashboard.is_private is True
+
+
+# ---------------------------------------------------------------------------
+# Rule 2 — nested resource downgrade blocked by parent visibility
+# ---------------------------------------------------------------------------
+
+
+def _dashboard_with_chart(org, owner, chart):
+    """Create a dashboard whose tabs reference chart."""
+    tabs = [{"components": [{"type": "chart", "config": {"chartId": chart.id}}]}]
+    return Dashboard.objects.create(title="Parent Dashboard", org=org, created_by=owner, tabs=tabs)
+
+
+def test_parent_blocks_empty_for_chart_with_no_parent(org, owner_analyst):
+    """Chart in no dashboard → parent_blocks=[]."""
+    chart = _make_chart(org, owner_analyst)
+    try:
+        request = mock_request(owner_analyst)
+        result = list_resource_grants(request, "chart", str(chart.id))
+        assert result.general_access.parent_blocks == []
+    finally:
+        chart.delete()
+
+
+def test_parent_blocks_returned_when_internal_parent(org, owner_analyst):
+    """Chart inside an Internal dashboard → parent_blocks has one entry with mode=internal."""
+    chart = _make_chart(org, owner_analyst)
+    parent = _dashboard_with_chart(org, owner_analyst, chart)
+    try:
+        request = mock_request(owner_analyst)
+        result = list_resource_grants(request, "chart", str(chart.id))
+        assert len(result.general_access.parent_blocks) == 1
+        assert result.general_access.parent_blocks[0].dashboard_id == parent.id
+        assert result.general_access.parent_blocks[0].mode == "internal"
+    finally:
+        chart.delete()
+        parent.delete()
+
+
+def test_update_general_access_chart_private_blocked_by_internal_parent(org, owner_analyst):
+    """Chart in internal dashboard → going private → 400."""
+    chart = _make_chart(org, owner_analyst)
+    parent = _dashboard_with_chart(org, owner_analyst, chart)
+    try:
+        with pytest.raises(HttpError) as exc:
+            _set_mode(owner_analyst, "chart", chart.id, "private")
+        assert exc.value.status_code == 400
+        assert "Parent Dashboard" in str(exc.value)
+    finally:
+        chart.delete()
+        parent.delete()
+
+
+def test_update_general_access_chart_private_blocked_by_public_parent(org, owner_analyst):
+    """Chart in public dashboard → going private → 400."""
+    chart = _make_chart(org, owner_analyst)
+    parent = _dashboard_with_chart(org, owner_analyst, chart)
+    parent.is_public = True
+    parent.save(update_fields=["is_public"])
+    try:
+        with pytest.raises(HttpError) as exc:
+            _set_mode(owner_analyst, "chart", chart.id, "private")
+        assert exc.value.status_code == 400
+    finally:
+        chart.delete()
+        parent.delete()
+
+
+def test_update_general_access_chart_private_allowed_when_parent_private(org, owner_analyst):
+    """Chart in private dashboard → going private → allowed (no downgrade)."""
+    chart = _make_chart(org, owner_analyst)
+    parent = _dashboard_with_chart(org, owner_analyst, chart)
+    parent.is_private = True
+    parent.save(update_fields=["is_private"])
+    try:
+        _set_mode(owner_analyst, "chart", chart.id, "private")
+        chart.refresh_from_db()
+        assert chart.is_private is True
+    finally:
+        chart.delete()
+        parent.delete()
+
+
+def test_update_general_access_chart_private_allowed_when_no_parent(org, owner_analyst):
+    """Chart with no parent dashboard → going private → allowed."""
+    chart = _make_chart(org, owner_analyst)
+    try:
+        _set_mode(owner_analyst, "chart", chart.id, "private")
+        chart.refresh_from_db()
+        assert chart.is_private is True
+    finally:
+        chart.delete()
+
+
+def test_update_general_access_dashboard_not_affected_by_rule2(org, dashboard, owner_analyst):
+    """Dashboards are not nested — Rule 2 never applies to them."""
+    _set_mode(owner_analyst, "dashboard", dashboard.id, "private")
+    dashboard.refresh_from_db()
+    assert dashboard.is_private is True
+
+
+def test_update_general_access_chart_internal_blocked_by_public_parent(org, owner_analyst):
+    """Chart in public dashboard → going internal → 400 (rank 1 < parent rank 2)."""
+    chart = _make_chart(org, owner_analyst)
+    parent = _dashboard_with_chart(org, owner_analyst, chart)
+    parent.is_public = True
+    parent.save(update_fields=["is_public"])
+    try:
+        with pytest.raises(HttpError) as exc:
+            _set_mode(owner_analyst, "chart", chart.id, "internal")
+        assert exc.value.status_code == 400
+        assert "Parent Dashboard" in str(exc.value)
+    finally:
+        chart.delete()
+        parent.delete()
+
+
+def test_update_general_access_kpi_private_blocked_by_internal_parent(org, owner_analyst):
+    """KPI in internal dashboard → going private → 400."""
+    kpi = _kpi(org, owner_analyst)
+    metric = kpi.metric
+    tabs = [{"components": [{"type": "kpi", "config": {"kpiId": kpi.id}}]}]
+    parent = Dashboard.objects.create(
+        title="KPI Parent Dashboard", org=org, created_by=owner_analyst, tabs=tabs
+    )
+    try:
+        with pytest.raises(HttpError) as exc:
+            _set_mode(owner_analyst, "kpi", kpi.id, "private")
+        assert exc.value.status_code == 400
+        assert "KPI Parent Dashboard" in str(exc.value)
+    finally:
+        kpi.delete()
+        metric.delete()
+        parent.delete()
+
+
+def test_update_general_access_kpi_private_allowed_when_parent_private(org, owner_analyst):
+    """KPI in private dashboard → going private → allowed."""
+    kpi = _kpi(org, owner_analyst)
+    metric = kpi.metric
+    tabs = [{"components": [{"type": "kpi", "config": {"kpiId": kpi.id}}]}]
+    parent = Dashboard.objects.create(
+        title="KPI Parent Dashboard", org=org, created_by=owner_analyst, tabs=tabs, is_private=True
+    )
+    try:
+        _set_mode(owner_analyst, "kpi", kpi.id, "private")
+        kpi.refresh_from_db()
+        assert kpi.is_private is True
+    finally:
+        kpi.delete()
+        metric.delete()
+        parent.delete()
+
+
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.xfail(
     reason=(
         "BUG: list_user_groups is gated on can_view_user_groups (Members lack it) "
