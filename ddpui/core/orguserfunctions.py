@@ -269,6 +269,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: s
             invitation.invited_email,
             invitation.invited_by.user.email,
             invite_url,
+            org_name=orguser.org.name,
             group_name=group_name,
         )
         logger.info(
@@ -295,6 +296,7 @@ def invite_user_v1(orguser: OrgUser, payload: NewInvitationSchema, group_name: s
         invitation.invited_email,
         invitation.invited_by.user.email,
         invite_url,
+        org_name=orguser.org.name,
         group_name=group_name,
     )
 
@@ -348,7 +350,7 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
     # invitation-linked row to avoid duplicates. After this, invitation.delete()
     # nulls out any remaining invitation_id via SET_NULL.
     from ddpui.models.org_user import OrgUserGroupMember  # local import to avoid cycles
-    from ddpui.models.resource_share import ResourceShare, ResourceSharePrincipalType
+    from ddpui.models.resource_share import ResourceShare, ResourceSharePrincipalType, ResourceType
 
     invitation_member_rows = OrgUserGroupMember.objects.filter(invitation=invitation)
     existing_group_ids = set(
@@ -373,6 +375,7 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             principal_id=orguser.id,
         ).values_list("resource_type", "resource_id")
     )
+    promoted_dashboard_ids: set[int] = set()
     for share_row in invitation_share_rows:
         key = (share_row.resource_type, share_row.resource_id)
         if key in existing_direct_keys:
@@ -382,8 +385,21 @@ def accept_invitation_v1(payload: AcceptInvitationSchema):
             share_row.principal_id = orguser.id
             share_row.save(update_fields=["principal_type", "principal_id"])
             existing_direct_keys.add(key)
+            if share_row.resource_type == ResourceType.DASHBOARD:
+                promoted_dashboard_ids.add(int(share_row.resource_id))
 
     invitation.delete()
+
+    # Cascade the promoted dashboard shares to inner charts/KPIs now that the
+    # shares are real user grants (sync_dashboard_cascade skips invitation-backed rows).
+    if promoted_dashboard_ids:
+        from ddpui.core.access.resource_share import sync_dashboard_cascade
+
+        for dashboard_id in promoted_dashboard_ids:
+            dashboard = Dashboard.objects.filter(id=dashboard_id).first()
+            if dashboard:
+                sync_dashboard_cascade(dashboard)
+
     return from_orguser(orguser), None
 
 
@@ -444,7 +460,10 @@ def resend_invitation(invitation_id: str):
     frontend_url = os.getenv("FRONTEND_URL")
     invite_url = f"{frontend_url}/invitations/?invite_code={invitation.invite_code}"
     user_notifications.send_invite_user(
-        invitation.invited_email, invitation.invited_by.user.email, invite_url
+        invitation.invited_email,
+        invitation.invited_by.user.email,
+        invite_url,
+        org_name=invitation.invited_by.org.name,
     )
 
     return None, None
